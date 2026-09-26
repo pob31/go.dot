@@ -4147,7 +4147,7 @@ namespace wfg::client::ui
                 area = area.withTrimmedBottom (4);
 
                 /*  The state is a WORD and the sentence follows it, as on the
-                    Plugins tab: what somebody reads when a voice has gone dry. */
+                    Plugins tab: what somebody reads when a voice has gone silent. */
                 juce::String words = entry.state;
 
                 if (! entry.layout.empty())

@@ -16,7 +16,7 @@
 
 /*
     THE PROXY TRANSPORT (Phase 9a, PR 9a.6, §17.6): the region, a lane's spin
-    and passthrough with no child at all, the test child answering through a
+    and its silence with no child at all, the test child answering through a
     real region and a real second process, a child killed mid-flight and the
     entry marked failed within a poll, the restart, the commands, and the
     whole thing inside a Tracktion graph with three plugins on sixteen voices.
@@ -214,38 +214,42 @@ TEST_CASE ("proxy: the region's layout is what both sides compute, and every lan
     CHECK (reinterpret_cast<char*> (audioOf (region.lane (0))) - reinterpret_cast<char*> (region.lane (0)) == static_cast<std::ptrdiff_t> (sizeof (Lane)));
 }
 
-TEST_CASE ("proxy: a lane that is off, unbound or not to be called leaves the block untouched and signals nothing")
+TEST_CASE ("proxy: a lane that is off leaves the block untouched; unbound or not to be called it is silent; none of them signals")
 {
     plugin::ProxyLane lane;
-    Block block (2, 64, 0.25f);
 
-    /*  Unbound: nothing to talk to. */
+    /*  Unbound - a plugin this machine does not have: nothing to talk to, and
+        the cue that has it switched in is silent, never dry (the author's
+        decision of 2026-09-26, CU). */
+    Block missing (2, 64, 0.25f);
     lane.setEnabled (true);
-    lane.process (block.data(), 2, 64);
-    CHECK (block.allEqual (0.25f));
+    lane.process (missing.data(), 2, 64);
+    CHECK (missing.allEqual (0.0f));
     CHECK (lane.blocks() == 0);
 
     VectorRegion region (2, 64, 1);
     region.bind (lane, 0);
     CHECK (lane.isBound());
 
-    /*  Off: bound, but the cue does not switch it in. */
+    /*  Off: bound, but the cue does not switch it in - the block as it came. */
+    Block off (2, 64, 0.25f);
     lane.setEnabled (false);
-    lane.process (block.data(), 2, 64);
-    CHECK (block.allEqual (0.25f));
+    lane.process (off.data(), 2, 64);
+    CHECK (off.allEqual (0.25f));
     CHECK (lane.blocks() == 0);
     CHECK (region.lane (0)->requestSeq.load() == 0);
 
-    /*  Failed: the host cleared the call. */
+    /*  Failed: the host cleared the call - silent, and not called. */
+    Block failed (2, 64, 0.25f);
     lane.setEnabled (true);
     lane.setCallEnabled (false);
-    lane.process (block.data(), 2, 64);
-    CHECK (block.allEqual (0.25f));
+    lane.process (failed.data(), 2, 64);
+    CHECK (failed.allEqual (0.0f));
     CHECK (lane.blocks() == 0);
     CHECK (region.lane (0)->requestSeq.load() == 0);
 }
 
-TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, passes the block through, and counts")
+TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, is silent for it, and counts")
 {
     plugin::ProxyLane lane;
     VectorRegion region (2, 64, 1);
@@ -267,7 +271,7 @@ TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, passes 
 
     const auto took = std::chrono::steady_clock::now() - started;
 
-    CHECK (block.allEqual (0.5f));
+    CHECK (block.allEqual (0.0f));      // never the dry block (CV)
     CHECK (lane.blocks() == 10);
     CHECK (lane.misses() == 10);
     CHECK (lane.consecutiveMisses() == 10);
@@ -286,6 +290,84 @@ TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, passes 
     region.lane (0)->responseSeq.store (region.lane (0)->requestSeq.load());
     lane.clearMisses();
     CHECK (lane.consecutiveMisses() == 0);
+}
+
+TEST_CASE ("proxy: a late block fades to silence from where the last answer left it, and the next answer fades back in")
+{
+    /*  The author's decision of 2026-09-26 (CV): a late block is never the
+        dry block and never a click. The rest of it falls from the last sample
+        the plugin gave back to nothing over the quick fade, and the first
+        block answered after silence rises over the same. A child is stood in
+        for by the response count: set ahead, every request is answered at
+        once with what was sent; left behind, every one is late. */
+    constexpr auto fade = plugin::ProxyLane::fadeSamples;
+    static_assert (fade < 64);
+
+    plugin::ProxyLane lane;
+    VectorRegion region (1, 64, 1);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    lane.setDeadlineMicroseconds (200);
+
+    auto* shared = region.lane (0);
+    const auto answering = [shared] (bool yes) { shared->responseSeq.store (yes ? (1u << 30) : 0u); };
+
+    rt::resetCounts();
+
+    const auto play = [&lane] (Block& block)
+    {
+        const rt::ScopedRealtimeCheck ours { rt::Region::ours };
+        lane.process (block.data(), 1, 64);
+    };
+
+    //  Answered: what was sent comes back, and the lane knows where it left off.
+    answering (true);
+    Block first (1, 64, 0.5f);
+    play (first);
+    CHECK (first.allEqual (0.5f));
+    CHECK (lane.misses() == 0);
+
+    //  Late: down from 0.5 to nothing over the fade, never rising, then nothing.
+    answering (false);
+    Block late (1, 64, 0.5f);
+    play (late);
+    CHECK (lane.misses() == 1);
+    CHECK (late.storage[0] == doctest::Approx (0.5f * (1.0f - 1.0f / static_cast<float> (fade))));
+    CHECK (late.storage[static_cast<std::size_t> (fade / 2 - 1)] == doctest::Approx (0.25f));
+
+    for (int n = 1; n < 64; ++n)
+        CHECK (late.storage[static_cast<std::size_t> (n)] <= late.storage[static_cast<std::size_t> (n - 1)]);
+
+    for (int n = fade - 1; n < 64; ++n)
+        CHECK (late.storage[static_cast<std::size_t> (n)] == doctest::Approx (0.0f));
+
+    //  Late again: silence throughout, with nothing left to fall from.
+    Block still (1, 64, 0.5f);
+    play (still);
+    CHECK (still.allEqual (0.0f));
+
+    //  Answered again: up from nothing over the fade, then the answer as it came.
+    answering (true);
+    Block back (1, 64, 0.5f);
+    play (back);
+    CHECK (back.storage[0] == doctest::Approx (0.5f / static_cast<float> (fade)));
+    CHECK (back.storage[static_cast<std::size_t> (fade - 1)] == doctest::Approx (0.5f));
+
+    for (int n = 1; n < fade; ++n)
+        CHECK (back.storage[static_cast<std::size_t> (n)] >= back.storage[static_cast<std::size_t> (n - 1)]);
+
+    for (int n = fade; n < 64; ++n)
+        CHECK (back.storage[static_cast<std::size_t> (n)] == doctest::Approx (0.5f));
+
+    //  And a new cue on the voice falls from nothing of the last one's.
+    lane.requestReset();
+    answering (false);
+    Block fresh (1, 64, 0.5f);
+    play (fresh);
+    CHECK (fresh.allEqual (0.0f));
+
+    if (rt::isCounting())
+        CHECK (rt::violations() == 0);
 }
 
 TEST_CASE ("proxy: a value written before the child is up is in the region once the lane is bound")
@@ -457,7 +539,7 @@ TEST_CASE ("chain: how wide a cue is after its inserts, and why one passes it dr
     CHECK (chain.steps[1].feed == 2);
 }
 
-TEST_CASE ("proxy: a lane sends the cue's width, takes the widened sides back, and widens a dry block it could not send")
+TEST_CASE ("proxy: a lane sends the cue's width, takes the widened sides back, and silences both sides when it could not send")
 {
     plugin::ProxyLane lane;
     VectorRegion region (2, 64, 1);
@@ -468,13 +550,13 @@ TEST_CASE ("proxy: a lane sends the cue's width, takes the widened sides back, a
     //  A mono cue into a widening insert: one channel sent, two taken back.
     lane.setShape (1, 2);
 
-    SUBCASE ("with nobody answering, the dry block is the mono side on both")
+    SUBCASE ("with nobody answering, both sides are silent - never the mono side dry")
     {
         Block block (2, 64, 0.0f);
         std::fill (block.storage.begin(), block.storage.begin() + 64, 0.5f);
         lane.process (block.data(), 2, 64);
         CHECK (region.lane (0)->numChannels.load() == 1u);
-        CHECK (block.allEqual (0.5f));
+        CHECK (block.allEqual (0.0f));
     }
 
     SUBCASE ("switched out of the chain for this cue, the block is left whole")
@@ -492,8 +574,9 @@ TEST_CASE ("proxy: a lane sends the cue's width, takes the widened sides back, a
         lane.setShape (-1, -1);
         Block block (2, 150, 0.25f);
         lane.process (block.data(), 2, 150);
-        CHECK (lane.blocks() == 1);   // late on the first piece: the rest stays dry
+        CHECK (lane.blocks() == 1);   // late on the first piece: the rest is silent
         CHECK (lane.misses() == 1);
+        CHECK (block.allEqual (0.0f));
     }
 }
 
@@ -742,14 +825,15 @@ TEST_CASE ("proxy: the mono and widening test children say their buses, take a m
     }
 }
 
-TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may launch, the lane answering dry meanwhile")
+TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may launch, the lane silent meanwhile")
 {
     /*  The author's decision of 2026-09-25: a plugin's whole state kept per
         cue and loaded onto the voice at the arm. The test gain's Pad - no
         parameter, only state - is what makes it audible: a quarter of the
         gain. What is pinned: the arm waits (`stateSettled`) until the child
-        has loaded it; the lane answers DRY while it loads and misses nothing;
-        the other voice plays on; the cue's values sit on top; the same state
+        has loaded it; the lane is SILENT and not called while it loads (CU,
+        2026-09-26) and misses nothing; the other voice plays on; the cue's
+        values sit on top; the same state
         twice loads nothing; no state after one is the preset's again; a file
         that is not there is the preset with a sentence. */
     Folder folder;
@@ -841,23 +925,19 @@ TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may la
         }
     }
 
-    SUBCASE ("a slow state: the voice waits, answers dry and misses nothing, and the other voice plays on")
+    SUBCASE ("a slow state: the voice waits, silent and not called, misses nothing, and the other voice plays on")
     {
-        /*  A LOAD LONG ENOUGH TO CATCH IN THE ACT on a loaded runner: the
-            child's loader picks the request up on its own timer, so the lane
-            is waited for until it is parked rather than assumed parked after
-            a fixed pause (macOS CI took longer than 80 ms to get there). */
+        /*  NEVER DRY WHILE IT LOADS (CU): from the moment the state is asked
+            for until the parent has read that the child holds it, the lane is
+            not called and gives silence. The child's loader parks the lane on
+            its own timer all the same; it is never asked to answer it. */
         const auto slow = stateFile ("slow.state", "gain=0.5\ndie=0\npad=1\nloadDelayMs=1500\n");
         lanes[0].wantState (slow);
         host.poll();
 
-        const auto parkedBy = std::chrono::steady_clock::now() + std::chrono::milliseconds (1200);
-        auto parked = false;
-
-        while (! parked && std::chrono::steady_clock::now() < parkedBy)
-            parked = std::abs (play (lanes[0]) - 0.8f) < 1.0e-4f;       // parked: dry
-
-        REQUIRE (parked);
+        const auto sent = lanes[0].blocks();
+        CHECK (play (lanes[0]) == doctest::Approx (0.0f));
+        CHECK (lanes[0].blocks() == sent);
         CHECK_FALSE (lanes[0].stateSettled());
         CHECK (play (lanes[1]) == doctest::Approx (0.4f));
 
@@ -897,7 +977,7 @@ TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may la
     host.stop();
 }
 
-TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked failed with a sentence, stops being called, and comes back")
+TEST_CASE ("proxy: a child killed mid-flight leaves the block silent, is marked failed with a sentence, stops being called, and comes back")
 {
     Folder folder;
     plugin::PluginTable table;
@@ -933,8 +1013,9 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked fai
 
     REQUIRE_FALSE (host.childIsRunning());
 
-    /*  Every block from here passes dry and counts a miss, until the host
-        looks: eight misses, or the dead child, trip it within one poll. */
+    /*  Every block from here is silent and counts a miss, until the host
+        looks: eight misses, or the dead child, trip it within one poll. The
+        first falls from the last answer; never the dry block (CV). */
     lane.setDeadlineMicroseconds (500);
     const auto sentBefore = lane.blocks();
 
@@ -942,14 +1023,18 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked fai
     {
         std::fill (block.storage.begin(), block.storage.end(), 0.8f);
         lane.process (block.data(), 2, 64);
-        CHECK (block.allEqual (0.8f));
+        CHECK (block.storage.front() <= 0.4f);
+        CHECK (block.storage.back() == doctest::Approx (0.0f));
+
+        if (i > 0)
+            CHECK (block.allEqual (0.0f));
     }
 
     CHECK (lane.consecutiveMisses() == static_cast<std::uint32_t> (plugin::ProxyLane::missesBeforeFailure));
 
     host.poll();
     CHECK (host.status().state == "failed");
-    CHECK_FALSE (host.status().problem.empty());
+    CHECK (host.status().problem.find ("every voice using it is silent until it is back") != std::string::npos);
     CHECK (table.statusOf ("PG7N0001").state == "failed");
     REQUIRE (failures.size() == 1);
     CHECK (failures[0].rfind ("PG7N0001: ", 0) == 0);
@@ -957,8 +1042,10 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked fai
     /*  Not called any more: the request sequence stops moving. */
     const auto sentAfter = lane.blocks();
     CHECK (sentAfter == sentBefore + static_cast<std::uint64_t> (plugin::ProxyLane::missesBeforeFailure));
+    std::fill (block.storage.begin(), block.storage.end(), 0.8f);
     lane.process (block.data(), 2, 64);
     CHECK (lane.blocks() == sentAfter);
+    CHECK (block.allEqual (0.0f));
     CHECK_FALSE (lane.isCallEnabled());
 
     /*  The one automatic restart, two seconds on. */
@@ -996,6 +1083,132 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked fai
     REQUIRE (host.restart (problem));
     REQUIRE (waitForState (host, "loaded", 5000));
     CHECK (host.childIsRunning());
+
+    host.stop();
+}
+
+TEST_CASE ("proxy: a relaunched child is given the state its voice held, and the voice is silent until it holds it")
+{
+    /*  The author's decisions of 2026-09-26 (CU): a failed plugin's voices
+        are silent, never dry; the relaunch gives each lane back the whole
+        state it held, and a voice that was sounding comes back where its cue
+        has got to, faded in, once the new child holds it. Not the state that
+        was loading when the child died - that may be what killed it - and not
+        the old one over a newer one asked for while the plugin was down. */
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lane;
+    plugin::ProxyHost host (testGainSpec (folder, 1), { &lane }, &table);
+
+    std::string problem;
+    INFO ("start: " << problem);
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    lane.setDeadlineMicroseconds (200000);
+    lane.setEnabled (true);
+    host.poll();
+
+    const auto stateFile = [&folder] (const char* name, const char* text)
+    {
+        const auto file = folder.path.getChildFile (name);
+        REQUIRE (file.replaceWithText (text));
+        return file.getFullPathName().toStdString();
+    };
+
+    const auto settled = [&host, &lane] (int milliseconds)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            host.poll();
+
+            if (lane.stateSettled())
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        }
+
+        return lane.stateSettled();
+    };
+
+    //  What a block of 0.8 comes back as, a few blocks in so any fade is past.
+    const auto play = [&lane]
+    {
+        Block block (2, 64, 0.8f);
+
+        for (int i = 0; i < 3; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.8f);
+            lane.process (block.data(), 2, 64);
+        }
+
+        return block.storage.front();
+    };
+
+    const auto kill = [&host]
+    {
+        host.killChild();
+
+        for (int waited = 0; waited < 200 && host.childIsRunning(); ++waited)
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+
+        host.poll();
+    };
+
+    //  The cue's state held: the Pad, a quarter of the half.
+    lane.wantState (stateFile ("padded.state", "gain=0.5\ndie=0\npad=1\n"));
+    REQUIRE (settled (3000));
+    REQUIRE (play() == doctest::Approx (0.1f));
+
+    kill();
+    REQUIRE (host.status().state == "failed");
+    CHECK (play() == doctest::Approx (0.0f));       // down: silent, never the 0.8 it was sent
+
+    SUBCASE ("relaunched, silent until the new child holds the state, then heard with it")
+    {
+        REQUIRE (waitForState (host, "loaded", plugin::ProxyHost::restartDelayMs + 5000));
+
+        //  Counted before the lane is called: not settled, not called, silent.
+        CHECK_FALSE (lane.stateSettled());
+        const auto sent = lane.blocks();
+        CHECK (play() == doctest::Approx (0.0f));
+        CHECK (lane.blocks() == sent);
+
+        REQUIRE (settled (3000));
+        CHECK (play() == doctest::Approx (0.1f));   // the Pad is back
+        CHECK (table.statusOf ("PG7N0001").stateProblem.empty());
+    }
+
+    SUBCASE ("a state asked for while it was down is the one the new child is given")
+    {
+        //  An arm on the voice while the plugin is down.
+        const auto quieter = stateFile ("quieter.state", "gain=0.25\ndie=0\npad=0\n");
+        lane.wantState (quieter);
+
+        REQUIRE (waitForState (host, "loaded", plugin::ProxyHost::restartDelayMs + 5000));
+        REQUIRE (settled (3000));
+        CHECK (lane.wantedState() == quieter);
+        CHECK (play() == doctest::Approx (0.2f));   // 0.8 x 0.25: the newer state, not the Pad
+    }
+
+    SUBCASE ("the state that was loading when the child died is not given again")
+    {
+        REQUIRE (waitForState (host, "loaded", plugin::ProxyHost::restartDelayMs + 5000));
+        REQUIRE (settled (3000));
+
+        lane.wantState (stateFile ("slow.state", "gain=0.5\ndie=0\npad=0\nloadDelayMs=1500\n"));
+        host.poll();                                // sent: the child is loading it
+        kill();                                     // the second death inside the minute
+        CHECK (host.status().problem.find ("plugin.restart") != std::string::npos);
+        CHECK (play() == doctest::Approx (0.0f));
+
+        REQUIRE (host.restart (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        REQUIRE (settled (3000));
+        CHECK (play() == doctest::Approx (0.4f));   // the preset's own: neither the slow one nor the Pad
+    }
 
     host.stop();
 }
@@ -1665,7 +1878,7 @@ TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, an
         plugin's whole state kept per cue and loaded onto the voice before the
         cue launches. Two questions. How long a load takes - a cue fired cold
         is late by that much, and `run.late` says so. And whether a load makes
-        the OTHER voices miss: the loading lane is parked and answers dry, but
+        the OTHER voices miss: the loading lane is silent and not called, but
         a plugin whose setState takes a lock its process() also takes on other
         instances would stall them - which only a real plugin can answer.
 
@@ -1955,7 +2168,8 @@ TEST_CASE ("rack: each channel is a track after the voices, its chain one child 
         after the one voice, which is still the polyphony; ONE child for the
         two entries, a lane each, both entries loaded; and each channel's input
         heard at its own output once its gate opens - through its plugin where
-        that is switched in, dry where it is not - and gone again on a shut. */
+        that is switched in, dry where it is not - SILENT, never dry, where it
+        is switched in and the child is killed (CU), and gone again on a shut. */
     ScopedStorage storage;
     audio::AudioHost host { storage.path() };
 
@@ -2064,6 +2278,26 @@ TEST_CASE ("rack: each channel is a track after the voices, its chain one child 
     CHECK (sink.last[1].load() == doctest::Approx (0.6f).epsilon (0.001));
     CHECK (host.isRackPassing (1));
 
+    /*  THE CHILD KILLED, through the graph (the author's decision of
+        2026-09-26, CU): the channel that has the plugin in is silent - never
+        its dry 0.8 - and the one that has it switched out plays on. The graph
+        is where it matters: the Tracktion plugin around the lane once returned
+        before the lane was asked, and a failed plugin's block went out dry. */
+    host.proxy (0)->killChild();
+
+    for (int waited = 0; waited < 200 && host.proxy (0)->childIsRunning(); ++waited)
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+
+    host.pollProxies();
+    REQUIRE (table.statusOf ("PG7N0011").state == "failed");
+    CHECK (table.statusOf ("PG7N0011").problem.find ("Vox 1 and Vox 2 are silent until it is back") != std::string::npos);
+
+    for (int i = 0; i < 20; ++i)
+        host.processBlock (inputs, 2);
+
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK (sink.last[1].load() == doctest::Approx (0.6f).epsilon (0.001));
+
     /*  A fast shut on the first: silent inside a block or two, the second
         untouched. */
     host.killRack (1);
@@ -2078,7 +2312,7 @@ TEST_CASE ("rack: each channel is a track after the voices, its chain one child 
 
     host.setBlockSink (nullptr);
     host.stop();
-    CHECK (failures == 0);
+    CHECK (failures == 2);      // the one child, heard of by both entries it stands for
 }
 
 TEST_CASE ("rack: a gate opens over its fade-in, a stop rings until the output is quiet, and a kill leaves nothing")

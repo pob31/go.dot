@@ -873,8 +873,8 @@ namespace wfg::audio
                     names += (at == 0 ? "" : at + 1 == group.channelNames.size() ? " and " : ", ")
                              + group.channelNames[at];
 
-                proxySpec.dryWords = names + (group.channelNames.size() == 1 ? " plays" : " play")
-                                   + " without it";
+                proxySpec.silentWords = names + (group.channelNames.size() == 1 ? " is" : " are")
+                                      + " silent until it is back";
 
                 auto host = std::make_unique<plugin::ProxyHost> (std::move (proxySpec),
                                                                  std::move (group.groupLanes),

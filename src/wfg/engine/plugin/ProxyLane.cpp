@@ -94,7 +94,9 @@ namespace wfg::plugin
 
     void ProxyLane::setCallEnabled (bool shouldBeCalled) noexcept
     {
-        callEnabled.store (shouldBeCalled ? 1 : 0, std::memory_order_relaxed);
+        /*  Release: a lane given back to the call has the state it is to be
+            given back counted already, and the audio thread reads this first. */
+        callEnabled.store (shouldBeCalled ? 1 : 0, std::memory_order_release);
     }
 
     bool ProxyLane::isCallEnabled() const noexcept
@@ -148,6 +150,9 @@ namespace wfg::plugin
     {
         if (auto* bound = lane.load (std::memory_order_acquire))
             bound->resetSeq.fetch_add (1, std::memory_order_release);
+
+        //  And the fades start over: nothing of the last cue's is faded from.
+        clearRequests.fetch_add (1, std::memory_order_relaxed);
     }
 
     //==============================================================================
@@ -240,6 +245,16 @@ namespace wfg::plugin
 
     void ProxyLane::forgetState()
     {
+        /*  WHAT THE NEW CHILD IS TO BE GIVEN BACK (CU): the state this lane
+            held when its child went down. Not when one was loading - that may
+            be what took the child down, and the cue it was for plays on the
+            preset's own - and not when a newer one is still to be sent: that
+            goes to the new child as it would have gone to the old. */
+        const auto pending = stateInFlight
+                               || settledStateSeq.load (std::memory_order_acquire)
+                                    < wantedStateSeq.load (std::memory_order_acquire);
+        restoreStatePath = pending ? std::string() : heldStatePath;
+
         if (stateInFlight)
         {
             stateInFlight = false;
@@ -253,6 +268,21 @@ namespace wfg::plugin
                                        std::memory_order_release);
     }
 
+    void ProxyLane::restoreState()
+    {
+        /*  Unless something was asked for since - an arm on the voice while
+            the plugin was down: the last word on what a lane holds is the last
+            one said. The preset's own state is what a new child holds already,
+            so an empty path asks for nothing. */
+        const auto newer = settledStateSeq.load (std::memory_order_acquire)
+                             < wantedStateSeq.load (std::memory_order_acquire);
+
+        if (! restoreStatePath.empty() && ! newer)
+            wantState (restoreStatePath);
+
+        restoreStatePath.clear();
+    }
+
     //==============================================================================
     void ProxyLane::setShape (int feed, int back) noexcept
     {
@@ -260,48 +290,84 @@ namespace wfg::plugin
         shapeBack.store (back, std::memory_order_relaxed);
     }
 
-    namespace
+    void ProxyLane::silenceFrom (float* const* channelData, int channels, int from, int numSamples) noexcept
     {
-        /*  A WIDENING INSERT THAT DID NOT ANSWER (2026-09-26): the block is
-            dry, the cue's mono side in its first channel and silence beside
-            it - and the routing, told the cue is stereo here, would send that
-            silence to the right. So the dry block is widened the way the
-            plugin would have been fed: the sent channels repeated across the
-            ones that would have come back. A mono cue then plays on both
-            sides, exactly as it would with the insert switched out. */
-        void widenDry (float* const* channelData, int sent, int back, int samples) noexcept
+        /*  DOWN TO SILENCE OVER A MILLISECOND (CV), from where the last answer
+            left each channel, then nothing: a dip and not a click, and never
+            the dry block the caller's buffer still holds. Already silent, it is
+            silence throughout. Every channel the plugin would have given back
+            is silenced, a widening insert's added side with the rest. */
+        const auto fade = std::min (numSamples - from, fadeSamples);
+
+        for (int channel = 0; channel < channels; ++channel)
         {
-            for (int channel = sent; channel < back; ++channel)
-                std::copy_n (channelData[channel % sent], samples, channelData[channel]);
+            auto* out = channelData[channel] + from;
+            const auto kept = channel < maxFadedChannels;
+            const auto index = static_cast<std::size_t> (kept ? channel : 0);
+            const auto startAt = silenced || ! kept ? 0.0f : lastSample[index];
+
+            for (int n = 0; n < fade; ++n)
+                out[n] = startAt * (1.0f - static_cast<float> (n + 1) / static_cast<float> (fade));
+
+            std::fill (out + fade, out + (numSamples - from), 0.0f);
+
+            if (kept)
+                lastSample[index] = 0.0f;
         }
+
+        silenced = true;
     }
 
     void ProxyLane::process (float* const* channelData, int numChannels, int numSamples) noexcept
     {
-        if (enabled.load (std::memory_order_relaxed) == 0 || channelData == nullptr)
+        if (enabled.load (std::memory_order_relaxed) == 0 || channelData == nullptr || numSamples <= 0)
             return;
 
         /*  THE CUE'S WIDTH HERE (setShape): what is sent, and what is taken
             back - never more than the voice or the region carries. Nought
-            sent is an insert this cue passes dry, whole. */
-        const auto width = std::min (numChannels, regionChannels);
+            sent is an insert this cue passes dry, whole: a configuration, said
+            on the insert, and not a failure. */
         const auto feedSaid = shapeFeed.load (std::memory_order_relaxed);
         const auto backSaid = shapeBack.load (std::memory_order_relaxed);
 
         if (feedSaid == 0)
             return;
 
-        const auto channels = feedSaid > 0 ? std::min (feedSaid, width) : width;
-        const auto back = backSaid > 0 ? std::max (channels, std::min (backSaid, width)) : channels;
-
-        if (channels <= 0 || numSamples <= 0)
-            return;
+        //  A NEW CUE ON THE VOICE: nothing of the last one's to fade from.
+        if (const auto asked = clearRequests.load (std::memory_order_relaxed); asked != clearsSeen)
+        {
+            clearsSeen = asked;
+            lastSample.fill (0.0f);
+            silenced = false;
+        }
 
         auto* bound = lane.load (std::memory_order_acquire);
 
-        if (callEnabled.load (std::memory_order_relaxed) == 0 || bound == nullptr)
+        /*  A PLUGIN THIS MACHINE DOES NOT HAVE is never bound: the cue has it
+            switched in and nothing can play it as the cue says, so the voice
+            is silent (CU) - all of it, the plugin's shape being unknown. */
+        if (bound == nullptr)
         {
-            widenDry (channelData, channels, back, numSamples);
+            silenceFrom (channelData, numChannels, 0, numSamples);
+            return;
+        }
+
+        const auto width = std::min (numChannels, regionChannels);
+        const auto channels = feedSaid > 0 ? std::min (feedSaid, width) : width;
+        const auto back = backSaid > 0 ? std::max (channels, std::min (backSaid, width)) : channels;
+
+        if (channels <= 0)
+            return;
+
+        /*  FAILED, OR STILL TAKING A WHOLE STATE (CU): not called, and silent
+            until the plugin holds the cue's state again - after a relaunch,
+            the state it held when it went down. The host's switch is read
+            first, with acquire: a lane given back to the call has that state
+            counted already, so no block slips through on the preset's own. */
+        if (callEnabled.load (std::memory_order_acquire) == 0
+             || settledStateSeq.load (std::memory_order_acquire) < wantedStateSeq.load (std::memory_order_acquire))
+        {
+            silenceFrom (channelData, back, 0, numSamples);
             return;
         }
 
@@ -346,23 +412,35 @@ namespace wfg::plugin
 
             if (late)
             {
-                /*  The dry block is still in the caller's buffer, from here on:
-                    degradation, not a dropout (§3.18). Counted for the host. */
+                /*  LATE: the rest of the block silent over the quick fade (CV),
+                    never the dry block still in the caller's buffer - on a
+                    wet-only reverb that is the original signal, loud and out of
+                    place. Counted for the host, which fails a plugin eight
+                    blocks late in a row. */
                 missCount.fetch_add (1, std::memory_order_relaxed);
                 consecutive.fetch_add (1, std::memory_order_relaxed);
 
-                float* rest[64] {};
-
-                for (int channel = 0; channel < std::min (back, 64); ++channel)
-                    rest[channel] = channelData[channel] + offset;
-
-                widenDry (rest, channels, std::min (back, 64), numSamples - offset);
+                silenceFrom (channelData, back, offset, numSamples);
                 return;
             }
 
-            for (int channel = 0; channel < back; ++channel)
-                std::copy_n (audio + channel * regionMaxSamples, samples, channelData[channel] + offset);
+            /*  ANSWERED, and taken in place - the first answer after silence
+                rising over the same quick fade, so a return is no click either. */
+            const auto rise = silenced ? std::min (samples, fadeSamples) : 0;
 
+            for (int channel = 0; channel < back; ++channel)
+            {
+                auto* out = channelData[channel] + offset;
+                std::copy_n (audio + channel * regionMaxSamples, samples, out);
+
+                for (int n = 0; n < rise; ++n)
+                    out[n] *= static_cast<float> (n + 1) / static_cast<float> (rise);
+
+                if (channel < maxFadedChannels)
+                    lastSample[static_cast<std::size_t> (channel)] = out[samples - 1];
+            }
+
+            silenced = false;
             offset += samples;
         }
 

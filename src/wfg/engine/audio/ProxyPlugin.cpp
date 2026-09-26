@@ -101,8 +101,12 @@ namespace wfg::audio
             return;
 
         /*  The cheap test first, before a single pointer is gathered: a lane
-            that is off or unbound costs the voice nothing. */
-        if (! proxyLane.isEnabled() || ! proxyLane.isBound() || ! proxyLane.isCallEnabled())
+            the cue has switched out costs the voice nothing. One switched in
+            goes to the lane whatever became of its plugin - unbound, failed or
+            taking a state, it is the lane that silences the block, never dry
+            (the author's decision of 2026-09-26, CU), which a return here
+            would have left dry. */
+        if (! proxyLane.isEnabled())
             return;
 
         const juce::ScopedNoDenormals noDenormals;

@@ -536,7 +536,7 @@ and insert parameter is a `node.set`-able node with its name, range, default,
 bipolar flag and value text published beside it, and the insert order is
 readable (the pages draft's §8, all four items); a third-party VST3 plays on a
 cue through the sandbox with its parameters ridden live; a plugin killed
-mid-show leaves the cue dry, the strip marked failed in words and the block
+mid-show leaves the cue dry (silent since 2026-09-26, decision CU), the strip marked failed in words and the block
 cost bounded; M30–M34 recorded; CI green on all six jobs.
 
 **Needs from the author:** what he sees on the desktop once 9a.3 and 9a.9 land
@@ -574,8 +574,14 @@ drawing. Of the list below, what the code can show is shown (`blackbox/phase9b_i
 `phase9b_mic.py`, `logs/mic.wfglog`); what waits for the bench is hearing a mic cue through a real
 plugin on the MADIface and M39's loopback against the words.
 
+*Amended after close-out, 2026-09-26 (decisions CU and CV, the implementer's call CW; namespace
+§18.13):* a plugin that cannot play a cue leaves it silent, never dry - failed, late, missing or still
+loading - and a relaunched child is given back the state its voice held, the voice fading back in
+where the cue has got to. The same for the set's voices and the rack's channels.
+
 **Done when:** a named input's meter moves; a mic cue through a real plugin on a rack channel is
-heard on the MADIface; the plugin's child killed mid-cue leaves it dry and saying so, the show going
+heard on the MADIface; the plugin's child killed mid-cue leaves it silent and saying so (dry as first
+written; §18.13), the show going
 on; Esc lets its tail ring out and frees the channel for a waiting cue; a double Esc is silence at
 once and GO restores a persistent mic; the words match M39's loopback; CI green on all six jobs.
 

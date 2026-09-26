@@ -342,7 +342,7 @@ TEST_CASE ("show settings UI: the Rack tab makes channels, and says each chain's
 
     plugin::PluginTable::Status failed;
     failed.state = "failed";
-    failed.problem = "its child process stopped answering; Band plays without it";
+    failed.problem = "its child process stopped answering; Band is silent until it is back";
     table.set (eq.id, failed);
 
     client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),

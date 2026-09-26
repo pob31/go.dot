@@ -2906,7 +2906,7 @@ namespace wfg::doc::generated
           enum_plugin_state, 5,
           "", 5.0, false, "park",
           "",
-          "What became of it tonight: unloaded before the graph of the show is built and on a machine with no audio; loading while the child brings its instances up; loaded when every voice has one; missing when the scan does not know the identifier; failed when the child died or stopped answering - and then every voice plays dry through it and nothing calls it until it is restarted." },
+          "What became of it tonight: unloaded before the graph of the show is built and on a machine with no audio; loading while the child brings its instances up; loaded when every voice has one; missing when the scan does not know the identifier; failed when the child died or stopped answering - and then every voice that has it switched in is silent, never dry, and nothing calls it until it is back." },
         { "plugin", "problem",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

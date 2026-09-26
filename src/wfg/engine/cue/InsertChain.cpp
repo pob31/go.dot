@@ -41,7 +41,8 @@ namespace wfg::cue
                 if (! shape.known)
                 {
                     /*  Nothing said yet: counted as taking the cue at its width,
-                        which is how the voice plays it - dry, the lane not called. */
+                        which is how wide the voice stays - silent, the lane not
+                        called (CU), until the plugin is up and says. */
                     step.feed = width;
                     step.back = width;
                 }

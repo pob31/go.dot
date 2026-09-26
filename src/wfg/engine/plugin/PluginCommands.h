@@ -22,7 +22,8 @@
     an event, logged and replayable.
 
     `plugin.failed <id:s> <problem:s>` - the child died or stopped answering,
-    and every voice plays dry through it. Submitted ONCE per failure by the
+    and every voice that has it switched in is silent (never dry, CU) until it
+    is back. Submitted ONCE per failure by the
     proxy host (never per miss - the queue is finite), applied on the tick it
     was observed; a replay re-injects it and the table reads `failed` with the
     same sentence on a machine with no plugin and no child. Idempotent.

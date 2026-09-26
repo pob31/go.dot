@@ -1466,8 +1466,8 @@ before it is built (devplan Phase 9b):
   nothing adds a block. Tracktion's own input devices are not used — they take locks and allocate
   on the audio thread (§4.2).
 - **The rack's plugins are hosted as the set's are**, out of process, one child per distinct plugin
-  and preset across the rack; a plugin that dies leaves every channel that has it dry, and says
-  which.
+  and preset across the rack; a plugin that dies leaves every channel that has it silent until it is
+  back, and says which (the amendment below; *dry* as first drawn).
 - **The latency budget is five milliseconds of plugins**, a setting of the show. The whole delay from
   the microphone to the output — the interface's own, both ways, and what the switched-in plugins
   declare — is always said in words, and going over is said on the cue, the channel and the plugin
@@ -1480,6 +1480,30 @@ before it is built (devplan Phase 9b):
   silent, never dry (§4.4).
 - **Live sampling** — a recorder on a rack channel, between plugins before it and after it — is
   §3.31.
+
+*Amended in 0.8, at the author's direction (2026-09-26) — decisions CU and CV, and the implementer's
+call CW, `docs/godot-namespace-draft-0.1.md` §18.13.* **A plugin that cannot play a cue leaves it
+silent, never dry.** This section's first answer was "last buffer or silence"; spike 07 and Phase 9a
+built a passthrough instead, and the author withdrew it: a plugin's dry side can be much louder than
+its output and in the wrong place — a wet-only reverb's dry side is the original signal, a second out
+of step — where a hole is only a hole.
+
+- **A failed plugin** — its child dead, or eight blocks late in a row — leaves every voice and
+  channel that has it switched in silent, and says so: *"… Vox 1 is silent until it is back"*. The
+  cue runs on silently. The relaunch two seconds later gives each voice back the whole state it held,
+  and once the new child holds it the voice fades back in **where the cue has got to**, not from its
+  start. The state that was loading when the child died is not sent again — it may be what killed
+  it — and one asked for while the plugin was down is sent instead of the one held. A relaunch that
+  fails again stays silent until `plugin.restart`, and says so.
+- **A single late block** is silent from where it failed, over a one-millisecond fade from the last
+  sample the plugin gave back, and the next block answered fades in over the same: a dip, never a
+  click, never dry.
+- **A plugin this machine does not have, or one still loading**, is silent the same way for a cue
+  that switches it in, and the cue's foot says *"this cue is silent while it has it switched in"* —
+  found at the soundcheck, and the insert switched out to hear the cue plain *(implementer's call
+  CW: the same rule; overrule at review)*.
+- **A cue wider than a plugin takes still passes it dry, whole**: that is a configuration, said on
+  the insert when it is made, and not a failure.
 
 ### 3.19 Video
 
@@ -2054,7 +2078,8 @@ answer and is published as `plugin/latencySamples`.
 The proxy plugin itself is **feasible and cheap**: a custom TE plugin type
 wrapping a shared-memory round trip to a second process measured **0.9 µs** at
 p50, held a hard deadline inside the audio callback, and survived the child being
-killed mid-playback — degrading to passthrough exactly as §3.18 describes. It
+killed mid-playback — degrading to passthrough exactly as §3.18 then described
+(silence since 2026-09-26, §3.18's last amendment). It
 declares **zero** latency deliberately, since by the paragraph above any latency
 it declared would delay the whole show.
 

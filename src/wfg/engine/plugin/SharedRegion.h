@@ -155,7 +155,8 @@ namespace wfg::plugin::region
             the parent writes `statePath` - absolute, empty for the preset's
             own state - only while `stateDoneSeq` has caught up, then stores
             `stateRequestSeq` with release. The child loads it on its message
-            thread with the lane parked (answered dry, never missed), puts the
+            thread with the lane parked (answered dry, never missed - though
+            the parent, silent while a state loads, does not call it), puts the
             lane's values back on top, and answers with the sequence in
             `stateDoneSeq`, having written first whether it failed, why, and
             how long it took. */

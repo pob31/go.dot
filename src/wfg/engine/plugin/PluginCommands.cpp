@@ -54,8 +54,8 @@ namespace wfg::plugin
         };
 
         registry.add ({ "plugin.failed",
-                        "The plugin's child died or stopped answering; every voice plays dry"
-                        " through it until it is restarted.",
+                        "The plugin's child died or stopped answering; every voice and channel"
+                        " that has it switched in is silent until it is back.",
                         { { "id", 's', false }, { "problem", 's', false } },
                         true,
                         [&table, known] (CommandContext&, const std::vector<osc::Value>& args)

@@ -638,6 +638,7 @@ class Report:
     def __init__(self, title: str):
         self.title = title
         self.failures: "list[str]" = []
+        self.voided: "list[str]" = []
         self.checks = 0
         print(f"=== {title} ===")
 
@@ -652,6 +653,15 @@ class Report:
         print(f"  FAIL {line}")
         self.failures.append(line)
         return False
+
+    def void(self, description: str, reason: str) -> None:
+        """A CHECK THIS RUN COULD NOT MAKE, and why - never a pass, never a
+        failure. For a level the runner's own starvation took away while the
+        engine did what it promises then (a plugin that cannot keep up is
+        silent, and says so): the proof is left to a run on a machine that
+        keeps up, and every other platform's job makes it."""
+        self.voided.append(description)
+        print(f"  void {description}\n         {reason}")
 
     def equal(self, actual, expected, description: str, detail: str = "") -> bool:
         note = f"expected {expected!r}, got {actual!r}"
@@ -669,8 +679,26 @@ class Report:
                   f"{len(self.failures)} of {self.checks} checks")
             return 1
 
-        print(f"{self.title}: ok — {self.checks} checks")
+        voided = f", {len(self.voided)} void" if self.voided else ""
+        print(f"{self.title}: ok — {self.checks} checks{voided}")
         return 0
+
+
+def logged_before(log: Path, verb: str, until: "str | None" = None) -> int:
+    """How many `verb` records a session's log holds before the first line with
+    `until` in it - every one, with no `until`. How a driver tells the engine
+    failing a plugin on its own (a starved runner) from the kill it asked for."""
+    try:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return 0
+    count = 0
+    for line in lines:
+        if until is not None and until in line:
+            break
+        if f" {verb} " in line:
+            count += 1
+    return count
 
 
 def copy_bundle(source: Path, destination: Path) -> Path:

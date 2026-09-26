@@ -119,8 +119,12 @@ namespace wfg::client::model
         if (! strip.problem.empty())
             out += ": " + strip.problem;
 
-        if (strip.present() && strip.enabled && (word == "failed" || word == "missing"))
-            out += " - this cue plays it dry";
+        /*  NEVER DRY (CU): a plugin that is not there leaves a cue that has it
+            switched in silent - said, so it is found before GO. */
+        if (strip.present() && strip.enabled && word == "failed")
+            out += " - this cue is silent until it is back";
+        else if (strip.present() && strip.enabled && word == "missing")
+            out += " - this cue is silent while it has it switched in";
         else if (strip.present() && strip.enabled && ! strip.dryWhy.empty())
             out += " - " + strip.dryWhy;
 

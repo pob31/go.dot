@@ -44,7 +44,8 @@
 
     COLOUR IS NEVER THE ONLY CARRIER (§4.8): in or out is the switch's tick
     and the box's frame, and what became of a plugin is a word and a sentence
-    - "missing: ... - this cue plays it dry" - before it is a colour.
+    - "missing: ... - this cue is silent while it has it switched in" -
+    before it is a colour.
 
     AND NOTHING HERE TAKES THE KEYBOARD, so the space bar still GOes while a
     hand is in the chain.

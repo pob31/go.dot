@@ -5148,9 +5148,10 @@ TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and
 TEST_CASE ("client: a box in the chain says what became of its plugin, and what that does to this cue")
 {
     /*  §4.8 in words: the state word the engine publishes, its sentence, and
-        "this cue plays it dry" only where this cue has the insert in - a
-        plugin that is not there is not a problem for a cue that does not use
-        it. And a latency is said in samples, or not at all. */
+        "this cue is silent" only where this cue has the insert in - a plugin
+        that is not there is not a problem for a cue that does not use it
+        (and it is silence, never dry: the author's decision of 2026-09-26,
+        CU). And a latency is said in samples, or not at all. */
     model::FxStrip strip;
     strip.state = "loaded";
     CHECK (model::stateSentence (strip) == "loaded");
@@ -5169,10 +5170,17 @@ TEST_CASE ("client: a box in the chain says what became of its plugin, and what 
 
     strip.fxId = "FX7N0001";
     strip.enabled = true;
-    CHECK (model::stateSentence (strip) == "missing: not on this machine - this cue plays it dry");
+    CHECK (model::stateSentence (strip) == "missing: not on this machine - this cue is silent while it has it switched in");
 
     strip.enabled = false;
     CHECK (model::stateSentence (strip) == "missing: not on this machine");
+
+    strip.enabled = true;
+    strip.state = "failed";
+    strip.problem = "the plugin host process died; every voice using it is silent until it is back";
+    CHECK (model::stateSentence (strip) == "failed: the plugin host process died; every voice using it is silent"
+                                           " until it is back - this cue is silent until it is back");
+    strip.enabled = false;
 
     strip.state.clear();
     strip.problem.clear();

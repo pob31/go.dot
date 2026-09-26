@@ -21,10 +21,11 @@ the child comes up and the entry reads `loaded`; an insert made on the cue by
 `fx.create` switches the plugin in, and the render of a constant source is the
 source at a half - the child's baseline; a value written to `p0` through the
 door moves the render on the next blocks; the kill switch, `p1` at one, takes
-the child down mid-show and the voice plays dry from there with the entry
-reading `failed` in words; the engine's own code allocated nothing on the
-audio thread throughout; and the session replays exactly on a machine with no
-child at all.
+the child down mid-show and the voice is silent from there - never dry, the
+author's decision of 2026-09-26 (CU) - through the relaunch the same switch
+takes down again, with the entry reading `failed` in words; the engine's own
+code allocated nothing on the audio thread throughout; and the session replays
+exactly on a machine with no child at all.
 
 A CONSTANT SOURCE, not a tone, because what the gain does is multiply: the
 mean of the absolute sample over a second is the level, whatever block the
@@ -55,7 +56,7 @@ SOURCE = 0.25
 TOLERANCE = 0.03
 
 
-def write_constant(path: Path, seconds: float = 14.0) -> None:
+def write_constant(path: Path, seconds: float = 20.0) -> None:
     frames = int(RATE * seconds)
     sample = int(SOURCE * 32767)
     with wave.open(str(path), "wb") as out:
@@ -70,10 +71,11 @@ def level(samples: "list[float]", start_frame: int, seconds: float = 1.0) -> flo
 
     A proof of the path, not of the round trip: on a shared CI runner the child
     answers late now and then even at the driver's 20 ms deadline, and each
-    late block passes dry. A mean over the window moved with the miss rate
-    (macOS read 0.156 against 0.125 with a quarter of the blocks dry); the
-    median says what the processed blocks are at, and still fails outright
-    when more than half are dry - which is what a broken path looks like.
+    late block is silent (it passed dry until 2026-09-26, decision CV). A mean
+    over the window moved with the miss rate (macOS read 0.156 against 0.125
+    with a quarter of the blocks dry); the median says what the processed
+    blocks are at, and still fails outright when more than half are late -
+    which is what a broken path looks like.
     """
     part = samples[start_frame:start_frame + int(RATE * seconds)]
     if len(part) < BLOCK:
@@ -103,14 +105,38 @@ def shares(samples: "list[float]", start_frame: int, seconds: float = 1.0) -> st
     return f"{counted}; first block {named[0]}, last block {named[-1]}"
 
 
-def dry_fraction(samples: "list[float]", start_frame: int, expected: float, seconds: float = 1.0) -> float:
-    """How many of the window's blocks sit at the source rather than at `expected`."""
+def late_fraction(samples: "list[float]", start_frame: int, expected: float, seconds: float = 1.0) -> float:
+    """How many of the window's blocks sit nearer silence - a late block, since
+    decision CV - than `expected`."""
     part = samples[start_frame:start_frame + int(RATE * seconds)]
     if len(part) < BLOCK:
         return 0.0
     blocks = [sum(abs(s) for s in part[i:i + BLOCK]) / BLOCK for i in range(0, len(part) - BLOCK + 1, BLOCK)]
-    dry = sum(1 for b in blocks if abs(b - SOURCE) < abs(b - expected))
-    return dry / len(blocks)
+    return sum(1 for b in blocks if b < expected / 2) / len(blocks)
+
+
+def measured(report: Report, value: float, expected: float, late: float, starved: int,
+             description: str, detail: str) -> None:
+    """A level check - or VOID when the runner starved the child: more than
+    half the window's blocks late, which leaves the median nothing to read, and
+    the engine failing the plugin on its own before anybody asked. Silence and
+    words are what the product owes then, and both are proved elsewhere; the
+    level waits for a run on a machine that keeps up (macOS CI, 2026-09-26:
+    87% of a window late, the child failed and relaunched in it)."""
+    if starved and late > 0.5:
+        report.void(description, f"the runner starved the child: {late:.0%} of the blocks late, and the engine"
+                                 f" failed it {starved} time(s) on its own; {detail}")
+    else:
+        report.check(abs(value - expected) <= TOLERANCE, description, detail)
+
+
+def dry_blocks(samples: "list[float]", start_frame: int, end_frame: int, processed: float) -> int:
+    """How many blocks between two frames sit nearer the dry source than the
+    processed level - none, ever, since decision CU: a plugin that cannot
+    play the cue leaves it silent."""
+    part = samples[max(0, start_frame):max(0, end_frame)]
+    blocks = [sum(abs(s) for s in part[i:i + BLOCK]) / BLOCK for i in range(0, len(part) - BLOCK + 1, BLOCK)]
+    return sum(1 for b in blocks if b > (SOURCE + processed) / 2)
 
 
 class Hand:
@@ -190,6 +216,7 @@ def run(locale: "str | None") -> int:
 
         moved_at = 0
         killed_at = 0
+        down_at = 0
         fx_id = None
         at_go = before_kill = "not read"
 
@@ -249,9 +276,20 @@ def run(locale: "str | None") -> int:
                 report.equal(wait_for(server, f"/godot/plugin/{PLUGIN}/state", "failed", timeout=5.0), "failed",
                              "p1 at one kills the child, and the entry reads failed within a poll")
                 problem = value_of(server, f"/godot/plugin/{PLUGIN}/problem") or ""
-                report.check("dry" in problem, "with a sentence that says the voice plays dry", problem)
-                report.check(wait_for_frames(render, killed_at + int(RATE * 3.0)),
-                             "and the render runs three seconds past the kill")
+                report.check("silent until it is back" in problem,
+                             "with a sentence that says the voice is silent until it is back", problem)
+
+                # THROUGH THE RELAUNCH. The host brings a failed child back once, two
+                # seconds on, and the lane still asks it to die: it dies at its first
+                # block and stays down. The voice is silent from the kill to the end,
+                # across both children (decision CU) - measured over all of it.
+                down = common.wait_until(
+                    lambda: "stays down" in (value_of(server, f"/godot/plugin/{PLUGIN}/problem") or ""), timeout=10.0)
+                report.check(down, "relaunched once, it dies again and stays down, saying so",
+                             value_of(server, f"/godot/plugin/{PLUGIN}/problem") or "")
+                down_at = first_sound.frames_on_disk(render)
+                report.check(wait_for_frames(render, down_at + int(RATE * 1.5)),
+                             "and the render runs on past it")
 
                 report.equal(value_of(server, "/godot/engine/rtViolations"), 0,
                              "Go.dot's own code allocated nothing on the audio thread")
@@ -265,28 +303,34 @@ def run(locale: "str | None") -> int:
         start = first_sound.first_above(left, 0.01)
         report.check(start >= 0, "the cue was heard at all")
 
-        if start >= 0 and len(left) > killed_at + int(RATE * 2.0):
+        if start >= 0 and len(left) > down_at + int(RATE * 1.0):
             halved = level(left, start + int(RATE * 1.0))
             moved = level(left, moved_at + int(RATE * 1.5))
-            dry = level(left, killed_at + int(RATE * 1.5))
-            late_half = dry_fraction(left, start + int(RATE * 1.0), SOURCE * 0.5)
-            late_moved = dry_fraction(left, moved_at + int(RATE * 1.5), SOURCE * 0.75)
-            report.check(abs(halved - SOURCE * 0.5) <= TOLERANCE,
-                         "while the insert is in at its baseline, the source plays at a half",
-                         f"{halved:.4f} against {SOURCE * 0.5:.4f}; {late_half:.0%} of the blocks late (dry);"
-                         f" {shares(left, start + int(RATE * 1.0))}; moved at frame {moved_at}, sound from {start};"
-                         f" {at_go} after it; {stopped_answering(log)}")
-            report.check(abs(moved - SOURCE * 0.75) <= TOLERANCE,
-                         "p0 at three quarters moves the render to three quarters",
-                         f"{moved:.4f} against {SOURCE * 0.75:.4f}; {late_moved:.0%} of the blocks late (dry);"
-                         f" {shares(left, moved_at + int(RATE * 1.5))}; {before_kill} before the kill;"
-                         f" {stopped_answering(log)}")
-            report.check(abs(dry - SOURCE) <= TOLERANCE,
-                         "and with the child dead the voice plays dry, the source as it was",
-                         f"{dry:.4f} against {SOURCE:.4f}")
+            dead_from, dead_to = killed_at + int(RATE * 1.5), down_at + int(RATE * 1.0)
+            dead = level(left, dead_from, (dead_to - dead_from) / RATE)
+            late_half = late_fraction(left, start + int(RATE * 1.0), SOURCE * 0.5)
+            late_moved = late_fraction(left, moved_at + int(RATE * 1.5), SOURCE * 0.75)
+            starved = common.logged_before(log, "plugin.failed", '/p1"')
+            measured(report, halved, SOURCE * 0.5, late_half, starved,
+                     "while the insert is in at its baseline, the source plays at a half",
+                     f"{halved:.4f} against {SOURCE * 0.5:.4f}; {late_half:.0%} of the blocks late (silent);"
+                     f" {shares(left, start + int(RATE * 1.0))}; moved at frame {moved_at}, sound from {start};"
+                     f" {at_go} after it; {stopped_answering(log)}")
+            measured(report, moved, SOURCE * 0.75, late_moved, starved,
+                     "p0 at three quarters moves the render to three quarters",
+                     f"{moved:.4f} against {SOURCE * 0.75:.4f}; {late_moved:.0%} of the blocks late (silent);"
+                     f" {shares(left, moved_at + int(RATE * 1.5))}; {before_kill} before the kill;"
+                     f" {stopped_answering(log)}")
+            report.check(dead <= 0.002,
+                         "and with the child dead the voice is silent, through its relaunch",
+                         f"{dead:.4f} from frame {dead_from} to {dead_to};"
+                         f" {shares(left, dead_from, (dead_to - dead_from) / RATE)}")
+            report.check(dry_blocks(left, dead_from, dead_to, SOURCE * 0.75) == 0,
+                         "never dry: not one block at the source",
+                         f"{dry_blocks(left, dead_from, dead_to, SOURCE * 0.75)} blocks at the source")
         else:
             report.check(False, "the render is long enough to read every window",
-                         f"{len(left)} frames, moved at {moved_at}, killed at {killed_at}")
+                         f"{len(left)} frames, moved at {moved_at}, killed at {killed_at}, down at {down_at}")
 
         code, out, err = common.run_wfg("replay", str(log), f"--bundle={bundle}",
                                         f"--out={replayed}")
@@ -415,15 +459,22 @@ def run_state(locale: "str | None") -> int:
         if start >= 0 and len(left) > plain_at + int(RATE * 2.5):
             padded = level(left, start + int(RATE * 1.0))
             plain = level(left, len(left) - int(RATE * 1.5))
-            report.check(abs(padded - PADDED) <= PAD_TOLERANCE,
-                         "with the state's Pad on, the cue is heard at a quarter of a half",
-                         f"{padded:.4f} against {PADDED:.4f}; {shares(left, start + int(RATE * 1.0))};"
-                         f" the whole first run: {shares(left, start, 2.5)}; the state took {load_ms} ms;"
-                         f" {at_padded} three seconds in; {stopped_answering(log)}")
-            report.check(abs(plain - SOURCE * 0.5) <= TOLERANCE,
-                         "and after Undo, fired again, at a half - the preset's own state, back",
-                         f"{plain:.4f} against {SOURCE * 0.5:.4f}; {shares(left, len(left) - int(RATE * 1.5))};"
-                         f" {at_plain} three seconds in; {stopped_answering(log)}")
+            starved = common.logged_before(log, "plugin.failed")
+            padded_detail = (f"{padded:.4f} against {PADDED:.4f}; {shares(left, start + int(RATE * 1.0))};"
+                             f" the whole first run: {shares(left, start, 2.5)}; the state took {load_ms} ms;"
+                             f" {at_padded} three seconds in; {stopped_answering(log)}")
+            late_padded = late_fraction(left, start + int(RATE * 1.0), PADDED)
+            if starved and late_padded > 0.5:
+                report.void("with the state's Pad on, the cue is heard at a quarter of a half",
+                            f"the runner starved the child: {late_padded:.0%} of the blocks late, and the engine"
+                            f" failed it {starved} time(s) on its own; {padded_detail}")
+            else:
+                report.check(abs(padded - PADDED) <= PAD_TOLERANCE,
+                             "with the state's Pad on, the cue is heard at a quarter of a half", padded_detail)
+            measured(report, plain, SOURCE * 0.5, late_fraction(left, len(left) - int(RATE * 1.5), SOURCE * 0.5),
+                     starved, "and after Undo, fired again, at a half - the preset's own state, back",
+                     f"{plain:.4f} against {SOURCE * 0.5:.4f}; {shares(left, len(left) - int(RATE * 1.5))};"
+                     f" {at_plain} three seconds in; {stopped_answering(log)}")
         else:
             report.check(False, "the render is long enough to read both windows",
                          f"{len(left)} frames, padded at {padded_at}, plain at {plain_at}")

@@ -954,7 +954,8 @@ back on if nobody feels strongly by then.
 - **AF — The out-of-process proxy is built first** (settled 2026-09-23, AGAINST the
   recommendation of in-process hosting now): §3.18's sandbox pulled forward from Phase 9 — a custom
   Tracktion plugin type on every voice handing each block to a child process through shared
-  memory on a bounded spin with a hard deadline, a miss passing the dry block through, a strip that
+  memory on a bounded spin with a hard deadline, a miss passing the dry block through (silence since
+  §18.13), a strip that
   keeps missing marked failed and no longer called, the child hosting the real plugin one instance
   per voice, and scanning out of process always. The author's reason is §3.18's: when a plugin
   dies, the show survives. The cost is that every VST insert waits on the proxy, which is weeks;
@@ -9446,7 +9447,8 @@ a plugin that is not Go.dot's is the one thing in the process whose failure nobo
 prevent. So the shape spike 07 proved is built: a **proxy** — a custom Tracktion plugin type on
 every voice, one per plugin of the set — that hands each block to a **child process** through
 shared memory and waits for it with a hard deadline, on a bounded spin; a miss passes the dry
-block through; a strip that keeps missing is **marked failed and stops being called**, which is
+block through (silence since 2026-09-26, §18.13); a strip that keeps missing is **marked failed and
+stops being called**, which is
 the requirement spike 07 found; and the child hosts the real plugin, one instance per voice. The
 cost is order and time: every VST insert waits on the proxy, the proxy is most of what devplan
 Phase 9 drew, and it is weeks. The EQ, being Go.dot's own, waits on none of it. One consequence
@@ -9573,7 +9575,7 @@ exists, and three verbs of the binary.
 | `fx.create` | `<cue s> <plugin s> [id s]` | an `<Fx>` under a media cue naming one plugin of the set, switched in, with no values | a cue that is not media; a second `Fx` naming the same plugin — `bad-value`, `createSend`'s word for a second send into one bus; `locked` |
 | `eq.reset` | `<cue s>` | the nineteen EQ rows back to their defaults in one transaction, so Undo takes the whole reset back as one step — the pages draft's double-click | a cue that is not media; `locked` |
 | `plugin.restart` | `<plugin s>` | brings a failed entry's child back: relaunched, preset re-applied, every sounding run's values re-armed | an entry that is not failed: applied, nothing |
-| `plugin.failed` | `<plugin s> <problem s>` | engine origin, submitted by the proxy host once per failure: the record that a child died or stopped answering, so a replay knows the cue went dry there. A no-op on replay, as `run.failed` is | — |
+| `plugin.failed` | `<plugin s> <problem s>` | engine origin, submitted by the proxy host once per failure: the record that a child died or stopped answering, so a replay knows the cue went silent there (dry before §18.13). A no-op on replay, as `run.failed` is | — |
 | `object.delete` | `<id>` | already generic: a `Plugin` entry or an `Fx` | as today |
 | `node.set` | `<address s> <value>` — one new door | `/godot/fx/<id>/p<n>`, answered in front of the document (§17.4): the value is put into that `Fx`'s `values` inside the ordinary transaction, so it is undone like any edit and coalesced on the `p<n>` address | not a number or outside 0..1, `type-mismatch`; no such `Fx`, `unknown-id`; `n` beyond what the catalogue knows, `bad-address` — and when the catalogue does not know the plugin, any `n` is accepted (plan decision 8) |
 
@@ -9618,7 +9620,8 @@ restart` and the engine's `plugin.failed` are the show being run, and keep worki
    moved since the last block, and runs the filters in place. The proxy, if its lane is switched
    off or its entry has failed, returns before touching the region; else it copies the block in,
    bumps the lane's parameter revision if a value moved, publishes the request, spins under the
-   deadline, and copies the answer back — or passes the dry block through.
+   deadline, and copies the answer back — or silences the block (§18.13; it passed the dry block
+   through before).
 6. **The child** sees the request, applies the lane's changed values to its instance between
    blocks, processes, and publishes the answer.
 7. **At arm**, the same values ride the `ArmRequest` as plain values — `request.eq`, `request.fx`
@@ -9706,7 +9709,8 @@ overrides it (plan decision 12). **A switched-off proxy costs nothing**: with th
 message-thread only, and leaving it alone means the node never bypasses the proxy and never builds
 a latency processor for it.
 
-**Misses, and the failed state.** A miss passes the dry block through and bumps the lane's miss
+**Misses, and the failed state.** A miss silences the rest of the block over a quick fade (§18.13;
+it passed the dry block through before) and bumps the lane's miss
 count. The **proxy host**, on the message thread on a 10 ms timer as `HostPlayer` is, reads the
 counts and asks the child process whether it is running: **eight consecutive misses on any lane,
 or a dead child, marks the whole entry failed** — every lane's call switched off so the proxy
@@ -9899,8 +9903,9 @@ width routes exactly as before. At the arm each insert is told the cue's width t
 what is taken back (`FxSetting` feed/back, `Player::setFxShape`, `ProxyLane::setShape`) — and a sounding
 cue follows when an insert is switched in or out or a plugin comes up (the routing and the inserts are
 re-run on the plugin table's revision as well as the show's). **A widening insert that does not answer**
-— late, failed — leaves a dry block whose mono side is repeated across the channels it would have
-given back, so the cue plays on both sides exactly as it would with the insert out. `media,insertLatency`
+— late, failed — ~~leaves a dry block whose mono side is repeated across the channels it would have
+given back, so the cue plays on both sides exactly as it would with the insert out~~ is silent on
+every channel it would have given back (§18.13). `media,insertLatency`
 sums what the inserts that take the cue declare, uncompensated; the FX panel says *"Plays as stereo
 through its inserts, 21 ms late through its inserts."* and a box whose insert plays the cue dry says
 why. A block longer than the region is sent in pieces under one deadline, no longer cut short. Found
@@ -9973,7 +9978,8 @@ each tone with a Goertzel filter (standard library only): the shaped tone down t
 the other within half a decibel of flat, and a `node.set` mid-play heard in the tail.
 `phase9a_fx.py` renders a constant through the test gain — half while the cue plays, unity after
 `p0` is written to one, and then `p1` written to one: the child dies, `plugin/state` reads `failed`
-within a second with a sentence, the render is dry from there, and the session replays.
+within a second with a sentence, the render is silent from there (dry before §18.13), and the
+session replays.
 
 **Measurements.** Phase 6's numbering ended at M29. Instruments that print, none a gate (§14.14's
 reason); the figures go here and into PRD §6.11, with the machine named, and spike 07's caveat
@@ -10177,7 +10183,8 @@ the sandbox, fifteen parameters catalogued, twenty blocks answered without a mis
   transport it wraps (`ProxyLane`, `SharedRegion.h`, `ProxyHost`) is under `plugin/` and names no
   JUCE type in its headers.
 - **A state `missing` is published** for an entry this machine's scan does not know: no child is
-  launched, the sentence says what to do, and every voice plays dry through the slot.
+  launched, the sentence says what to do, and a cue that switches it in is silent (§18.13; dry
+  before).
 - **A `.vstpreset` goes through JUCE's VST3 client (`setPreset`)**, anything else through
   `setStateInformation`; the SDK's own loader either way.
 - **The catalogue store and the plugin table carry a revision the tree compares at every
@@ -10241,7 +10248,8 @@ FX panel, and §17.10's "any plugin editor window" as a thing not built.*
 path every voice carries, box by box: Go.dot's EQ with its switch (`eqOn`) and *Open*, which shows
 the EQ panel in the same foot; then each entry of the set in `plugins/order` with its switch - the
 first press on an entry the cue has no `Fx` for is `fx.create`, every press after is `enabled` -
-its state word and sentence (`missing: … - this cue plays it dry` only when the cue has it in), its
+its state word and sentence (`missing: … - this cue is silent while it has it switched in` only
+when the cue has it in — *plays it dry* before §18.13), its
 latency in words, and *Edit…*. No sliders: the plugin draws its own controls better than a generic
 list could. *Edit…* opens the plugin's **own** window in a helper process, `wfg plugin-editor`,
 which loads its own copy of the plugin through the same making as the voice child (`PluginLoad`),
@@ -10302,7 +10310,8 @@ impulse response, a sample, a mode - is kept with the cue as a file:
   state path (`ProxyLane::wantState`, the shared region's lane at version 2: `stateRequestSeq`,
   `stateDoneSeq`, `stateFailed`, `stateLoadMicros`, `statePath`, `stateProblem`). The voice child
   loads it on its message thread - where a VST3 takes its state - with the lane **parked**: its
-  real-time worker lets go of that instance and answers its blocks **dry**, so no block is ever
+  real-time worker lets go of that instance and answers its blocks **dry** (a guard since §18.13:
+  the parent no longer calls a lane while its state loads, and is silent), so no block is ever
   missed, while the other voices play on; then every value is set again on top, and the parent is
   answered with how long it took and why it could not. **No state is a state:** a cue with none,
   arming on a voice that last held another cue's, is given the preset's own state back, or that
@@ -10457,7 +10466,7 @@ Plugins tab's Scan, folder, Retry and Load now (5); AU on macOS (6); the layout 
 region version 3, `plugin,inputs|outputs|layout`, and the test children `godot:test-mono` and
 `godot:test-widen` (7); the chain's width (`cue/InsertChain`), the routing reading it,
 `media,chainChannels|insertLatency`, `fx,problem`, the FX panel's words, a widening insert's dry block
-widened, blocks sent in pieces (8).
+widened (silenced since §18.13), blocks sent in pieces (8).
 
 **What the code turned up on the way**, each put right where it was found and said in its stage's
 amendment above: a device session handed the proxies before the catalogue store was set, so children on
@@ -10962,9 +10971,10 @@ spinning children is the number of distinct plugins in use, not the number of ch
 lane count is fixed when a child starts (`SharedRegion.h:208-251`), which is one more reason a plugin
 added to a channel waits for Load now.
 
-**A failure** fails the child, and so the plugin on every channel that has it: each passes it dry,
-and the words name them — *Comp stopped answering; Vox 1 and Vox 2 play without it*. One automatic
-relaunch, then `plugin.restart`, as for the set.
+**A failure** fails the child, and so the plugin on every channel that has it: each is silent until
+it is back (§18.13; *passes it dry* as drawn), and the words name them — *Comp stopped answering;
+Vox 1 and Vox 2 are silent until it is back*. One automatic relaunch, then `plugin.restart`, as for
+the set.
 
 **The window.** *Edit…* opens the plugin's own window in the editing helper, one per plugin, which
 follows the pick onto any mic cue whose channel has that plugin and greys otherwise (§17.13). The
@@ -11067,7 +11077,8 @@ cases, the replay fixture and the drivers hear a live input on CI, which has no 
   --input-wav`; `logs/persistent.wfglog` (§18.8).
 - **Drivers.** `blackbox/phase9b_inputs.py` (a named input's meter moving on a tone);
   `blackbox/phase9b_mic.py` — a tone in and at the output, the level, the test-gain insert at half,
-  a child killed mid-cue leaving it dry with words, Esc ringing out then freeing the channel for a
+  a child killed mid-cue leaving it silent with words (dry as drawn; §18.13), Esc ringing out then
+  freeing the channel for a
   waiting cue, double Esc silent at once, a persistent mic kept across a jump and restored by GO
   after a double Esc. Both locales.
 - **Measurements.** **M38** — the callback's cost with 0, 4 and 8 rack channels open: the tap's copy,
@@ -11132,6 +11143,71 @@ bus (9b.2). The Plugins tab's picked row was an undeclared theme colour (9b.3). 
 cue could switch in a rack channel's plugin, closed by `fx.create`'s list check (9b.4). And, from
 the plugin-voice handoff, `HostPlayer::serviceArms` applied every queued state before every queued
 arm, so an arm and a newer state in one batch ended on the older (`723d117`).
+
+### 18.13 A plugin that cannot play a cue leaves it silent, never dry
+
+*Added after close-out, 2026-09-26, at the author's direction.* Two CI flakes - the mic driver on
+Windows, the plugin driver on macOS - were read as runner starvation, and the reading turned into a
+question about the product: what the audience hears while a plugin is down. Until now, the dry block:
+the passthrough spike 07 built (§17.6), which PRD §3.18's amendment called degradation. The author:
+*"the dry level may be much louder depending on the process. Imagine this is only reverb and you get
+a second out of sync dry sound… silence out and start the cue is much safer."*
+
+| | Decision | Whose |
+|---|---|---|
+| **CU** | **A failed plugin leaves every voice and channel that has it switched in silent**, never dry. The cue runs on silently; the relaunch gives each lane back the whole state it held, and once the new child holds it the voice fades back in **where the cue has got to**. A relaunch that fails again stays silent until `plugin.restart`, and says so | the author's, as recommended |
+| **CV** | **A single late block is silent too**, over a quick fade from the last sample the plugin gave back; the next block answered fades back in over the same | the author's, as recommended |
+| **CW** | A plugin this machine does not have (`missing`), and one still loading, are silent the same way for a cue that switches it in, and the cue's foot says so | implementer's call: the same rule, since a missing reverb's dry side is as wrong as a failed one's |
+
+**As built.** `ProxyLane::process` hands back the dry block in two cases only, both configurations
+said on the insert: the cue has it switched out, or the cue is wider than the plugin takes
+(`dryWhy`, §17.15). Otherwise:
+
+- **Not callable** - unbound (missing), the host's switch off (loading, failed), or the lane still
+  taking a whole state (`settledStateSeq` behind `wantedStateSeq`) - the block is silenced and
+  nothing is sent. The host's switch is stored with release after the state to give back is counted,
+  and read with acquire before the counts, so a relaunched lane cannot slip one block through on the
+  preset's own state.
+- **Late** - the rest of the block falls from the last sample the plugin gave back to nothing over
+  `ProxyLane::fadeSamples` (48, a millisecond at 48 kHz), then zeros; the miss is counted as before.
+- **Answered after silence** - the first piece rises over the same 48 samples.
+- **A new cue on the voice** (`requestReset`, at every arm and a rack kill) starts the fades over, so
+  nothing of the last cue's is faded from.
+- **The Tracktion plugin around the lane** (`ProxyPlugin::applyToBuffer`) returned before calling the
+  lane when it was unbound or its switch was off - so in the graph, and only there, a failed plugin's
+  block went out dry whatever the lane said. It now returns only for an insert the cue has switched
+  out; the drivers found it, and a render through a rack channel pins it.
+- **The relaunch.** `ProxyHost::launch` calls `ProxyLane::forgetState`, which keeps aside the state
+  the lane held - none when one was in flight (the old rule: it may be what killed the child) or when
+  a newer one was still to be sent (an arm while the plugin was down, which goes instead).
+  `becomeLoaded` calls `restoreState` before `setCallEnabled (true)`, and the lane is silent until the
+  child holds it; a cue waiting to launch waits on it as on any load (`stateSettled`).
+- **The words.** `plugin/problem` reads *"the plugin host process died; every voice using it is
+  silent until it is back; restarting in two seconds"*, a rack child's *"… Vox 1 is silent until it is
+  back"* (`ProxySpec::silentWords`, which was `dryWords`); the FX panel adds *"this cue is silent until
+  it is back"* for a failed plugin and *"this cue is silent while it has it switched in"* for a
+  missing one; `plugin.failed`'s help and the `plugin,state` row say the same.
+
+**What it costs.** A cue whose plugin fails is not heard until the plugin is back, or at all when it
+stays down: the author's choice, since what it replaces can be louder and more wrong than nothing. A
+show opened on a machine without one of its plugins is silent there wherever a cue has it switched
+in - switch the insert out to hear the cue plain. The child still parks a lane while it loads a state
+and answers it dry (`SharedRegion.h`); the parent no longer calls a lane then, so that is a guard,
+never heard.
+
+**Tests.** ProxyTests: a lane switched out, unbound and not called; a late block's fall and the next
+answer's rise, sample by sample, under the real-time check; a widening insert silent on both sides;
+a slow state silent and not called; a killed child silent and said; a relaunch given back the Pad it
+held and silent until then; a state asked for while the plugin was down sent instead; one in flight
+at the death not sent again; and through the graph, a rack channel whose child is killed silent while
+the one that has the plugin switched out plays on (it read the dry 0.8 before the wrapper's fix). ClientTests: the two sentences. `phase9a_fx.py` and `phase9b_mic.py`
+read the render from the kill across the relaunch - which the same parameter kills again - as silent,
+and count the blocks at the dry level: none. Neither window depends any more on where a relaunch
+lands. And a processed-level window is **void**, not failed, when the runner starved the child -
+more than half its blocks late and the engine failing the plugin on its own before the kill the
+driver asked for (`Report.void`, `common.logged_before`): silence and words are what the product owes
+then, and the level waits for a run on a machine that keeps up (macOS CI read 87% of a window late at
+`c902356`). `logs/mic.wfglog` was recorded again for the new words.
 
 ## 19. Phase 9c — live sampling channels: a take, its layers and its loop: what the tree, the commands and the log gain
 

@@ -1,35 +1,37 @@
 # wfg-log 1
 # fixture mic - a mic cue through its rack channel: heard, stopped, fired again, its
-# plugin's child killed, and a double Esc (namespace draft 18.5, stage 9b.5, 2026-09-26).
+# plugin's child killed, and a double Esc (namespace draft 18.5 and 18.13, 2026-09-26).
 #
 # WHAT IT IS FOR: that a mic cue's life replays from the document and the log alone,
-# with no interface and no child. GO claims Vox 1 and arms on its track - audio.armed is
-# the audio side's word, re-injected - and the run starts; Esc ends it only when its
-# tail has rung out, run.ended fourteen ticks after run.stopAll: the five-millisecond
-# shut, then a quarter of a second of quiet at the channel's output stage. Fired again,
-# the cue takes the channel again; its plugin's child dies from its own parameter and
-# the failure says which channel plays without it; and a double Esc ends the run at
-# once. Recorded from a real `wfg serve --hosted --input-wav` of a copy of
-# tests/fixtures/bundles/mic fed a steady level at its first input, driven over OSC by
+# with no interface and no child. The standby arm claims Vox 1 and arms on its track
+# before GO - audio.armed is the audio side's word, re-injected - so GO starts the run
+# at once; Esc ends it only when its tail has rung out, run.ended fourteen ticks after
+# run.stopAll: the five-millisecond shut, then a quarter of a second of quiet at the
+# channel's output stage. Fired again, the cue takes the channel again; its plugin's
+# child dies from its own parameter and the failure says the channel is silent until
+# it is back (decision CU); the relaunch two seconds on dies from the same parameter
+# and stays down, saying so; and a double Esc ends the run at once. Recorded from a
+# real `wfg serve --hosted --input-wav` of a copy of tests/fixtures/bundles/mic fed a
+# steady level at its first input, driven over OSC by
 # tests/blackbox/phase9b_mic.py --keep-log.
 #
 # bundle mic sha256:302b8a997a4df022ebf7df01b8d14ee86b55e40406dd34282adb042c29043e57
 # clock sampleRate=48000 blockSize=128 samplesPerTick=960
 A 0 0 engine audio.editBuilt s:"hosted" i:2 i:2 i:66
-A 5 1 udp:127.0.0.1:56989 go s:"GKC0SAJ1"
-A 6 2 engine audio.armed s:"GKC0SAJ1" i:2
-A 7 3 engine run.started s:"GKC0SAJ1"
-A 7 4 engine node.set s:"/godot/audio/patchSettled" T
-A 7 5 engine run.late s:"GKC0SAJ1" i:7
-A 102 6 udp:127.0.0.1:56990 run.stopAll
-A 116 7 engine run.ended s:"GKC0SAJ1"
-A 202 8 udp:127.0.0.1:56991 cue.fire s:"MC000002" s:"5PQPDKY6"
-A 203 9 engine audio.armed s:"5PQPDKY6" i:2
-A 204 10 engine run.started s:"5PQPDKY6"
-A 204 11 engine run.late s:"5PQPDKY6" i:7
-A 303 12 udp:127.0.0.1:56993 node.set s:"/godot/fx/MC000005/p1" f:1
-A 307 13 engine plugin.failed s:"MC000012" s:"the plugin stopped answering: 8 blocks late in a row on channel Vox 1; Vox 1 plays without it; restarting in two seconds"
-A 403 14 udp:127.0.0.1:58719 run.killAll
-A 403 15 engine document.autosave
-A 405 16 engine run.ended s:"5PQPDKY6"
-A 420 17 engine plugin.failed s:"MC000012" s:"the plugin stopped answering: 8 blocks late in a row on channel Vox 1; Vox 1 plays without it; failed again inside a minute, so it stays down until plugin.restart"
+A 0 1 engine audio.arm s:"MC000002" s:"HX2ZFQRG"
+A 1 2 engine audio.armed s:"HX2ZFQRG" i:2
+A 6 3 udp:127.0.0.1:55567 go s:"HX2ZFQRG"
+A 7 4 engine run.started s:"HX2ZFQRG"
+A 7 5 engine node.set s:"/godot/audio/patchSettled" T
+A 102 6 udp:127.0.0.1:55568 run.stopAll
+A 116 7 engine run.ended s:"HX2ZFQRG"
+A 202 8 udp:127.0.0.1:55570 cue.fire s:"MC000002" s:"ZX2KC9X0"
+A 203 9 engine audio.armed s:"ZX2KC9X0" i:2
+A 204 10 engine run.started s:"ZX2KC9X0"
+A 204 11 engine run.late s:"ZX2KC9X0" i:7
+A 302 12 udp:127.0.0.1:55571 node.set s:"/godot/fx/MC000005/p1" f:1
+A 306 13 engine plugin.failed s:"MC000012" s:"the plugin stopped answering: 8 blocks late in a row on channel Vox 1; Vox 1 is silent until it is back; restarting in two seconds"
+A 402 14 engine document.autosave
+A 424 15 engine plugin.failed s:"MC000012" s:"the plugin stopped answering: 8 blocks late in a row on channel Vox 1; Vox 1 is silent until it is back; failed again inside a minute, so it stays down until plugin.restart"
+A 503 16 udp:127.0.0.1:64920 run.killAll
+A 505 17 engine run.ended s:"ZX2KC9X0"

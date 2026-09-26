@@ -43,7 +43,8 @@
     calling, the table told, and one `plugin.failed` handed to whoever asked
     to hear of it. So the cost of a failure is bounded: eight deadlines once,
     and nothing after. Then ONE RESTART ON ITS OWN, two seconds later, with a
-    fresh child on the same region and the lanes' shadowed values re-sent; a
+    fresh child on the same region, the lanes' shadowed values re-sent and each
+    lane given back the whole state it held (CU), silent until it holds it; a
     second failure inside a minute stays failed until restart() is asked for.
 
     THE REGION OUTLIVES THE CHILD. A relaunch maps nothing anew: the lanes stay
@@ -77,11 +78,11 @@ namespace wfg::plugin
         std::vector<std::string> alsoIds;
 
         /*  WHAT A LANE IS CALLED in a sentence - "channel Vox 1" - and what
-            failing costs, said the same way: "Vox 1 and Vox 2 play without it".
-            Empty for the set's, which are voices by number and "every voice
-            plays dry through it". */
+            failing costs, said the same way: "Vox 1 and Vox 2 are silent until
+            it is back". Empty for the set's, which are voices by number and
+            "every voice using it is silent until it is back" (CU). */
         std::vector<std::string> laneWords;
-        std::string dryWords;
+        std::string silentWords;
 
         /** JUCE's identifier, or `godot:test-gain`. */
         std::string identifier;

@@ -306,15 +306,15 @@ namespace wfg::plugin
             if (failures.size() == 1)
             {
                 restartDueAt = std::max<std::uint32_t> (1, now + static_cast<std::uint32_t> (restartDelayMs));
-                problem += "; " + (spec.dryWords.empty() ? std::string ("every voice plays dry through it")
-                                                         : spec.dryWords)
+                problem += "; " + (spec.silentWords.empty() ? std::string ("every voice using it is silent until it is back")
+                                                            : spec.silentWords)
                          + "; restarting in two seconds";
             }
             else
             {
                 restartDueAt = 0;
-                problem += "; " + (spec.dryWords.empty() ? std::string ("every voice plays dry through it")
-                                                         : spec.dryWords)
+                problem += "; " + (spec.silentWords.empty() ? std::string ("every voice using it is silent until it is back")
+                                                            : spec.silentWords)
                          + "; failed again inside a minute, so it stays down until plugin.restart";
             }
 
@@ -341,10 +341,15 @@ namespace wfg::plugin
             paramCount = static_cast<int> (std::min<std::uint32_t> (header->paramCount.load (std::memory_order_relaxed),
                                                                     static_cast<std::uint32_t> (region::maxParams)));
 
+            /*  EACH LANE GIVEN BACK THE STATE IT HELD (CU), counted before it
+                is called again: a voice that was sounding stays silent until
+                the new child holds its cue's state, then fades back in where
+                the cue has got to. */
             for (auto* lane : lanes)
                 if (lane != nullptr)
                 {
                     lane->clearMisses();
+                    lane->restoreState();
                     lane->setCallEnabled (true);
                 }
 
@@ -581,7 +586,7 @@ namespace wfg::plugin
 
         /*  MISSING IS ITS OWN WORD (§17.2): the show names a plugin this
             machine's scan does not know. No child is launched for it; the
-            entry says so, and every voice plays dry through the slot. Asked
+            entry says so, and a cue that switches it in is silent (CU). Asked
             once more first, since a scan may have found it since. */
         if (impl->spec.descriptionXml.empty() && impl->spec.describe
               && ! Catalogue::isTestIdentifier (impl->spec.identifier))

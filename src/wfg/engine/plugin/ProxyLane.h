@@ -19,6 +19,7 @@
 #include <wfg/engine/plugin/SharedRegion.h>
 #include <wfg/engine/rt/RtCheck.h>
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -41,15 +42,19 @@
     with a release store, and spins on the response with acquire loads, reading
     the clock once every sixty-four turns - spike 07's cadence; the clock is not
     free and reading it every pass would measure the clock rather than the
-    round trip. Past the deadline the block is left as it was: a momentarily
-    dry strip is better than a hole, and the miss is counted for the host to
-    judge. A SWITCHED-OFF LANE COSTS NOTHING: with `enabled` nought process()
+    round trip. Past the deadline the rest of the block is SILENT, faded down
+    from where the last answer left it, and the miss is counted for the host to
+    judge - never the dry block (the author's decisions of 2026-09-26, CU and
+    CV, overruling the passthrough spike 07 built: a wet-only reverb's dry side
+    is the original signal, louder and in the wrong place, where a hole is only
+    a hole). A SWITCHED-OFF LANE COSTS NOTHING: with `enabled` nought process()
     returns before it reads the region - no copy, no signal, no spin.
 
     THE HOST'S SWITCH is separate from the cue's. `callEnabled` is the proxy
     host's: cleared when the entry has failed, so a failed strip is not called
-    at all (§3.18: the cost of a failure is bounded), and set again on a
-    restart. `enabled` is the cue's: which of the set this cue switches in.
+    at all (§3.18: the cost of a failure is bounded) and is silent, and set
+    again on a restart. `enabled` is the cue's: which of the set this cue
+    switches in.
 
     PARAMETERS ARE SHADOWED. A cue's values may be written before the child is
     up - an arm on a show that is still loading - so every store lands in a
@@ -70,6 +75,11 @@ namespace wfg::plugin
 
         /** The deadline a lane starts with; the host sets the real one. */
         static constexpr std::int64_t defaultDeadlineMicroseconds = 250;
+
+        /*  THE QUICK FADE (CV): down to silence when the plugin cannot answer,
+            and up again when it does - a millisecond at 48 kHz, a dip and
+            never a click. */
+        static constexpr int fadeSamples = 48;
 
         //======================================================================
         /*  Points the lane at its part of a region. Message thread, and the
@@ -160,8 +170,16 @@ namespace wfg::plugin
 
         /*  A new child holds the preset's own state and nothing in flight:
             the one that was loading when the last child died is not sent
-            again - it may be what killed it. */
+            again - it may be what killed it. What the lane HELD is kept aside
+            for `restoreState`. */
         void forgetState();
+
+        /*  THE CUE COMES BACK AS IT WAS (the author's decision of 2026-09-26,
+            CU): the relaunched child is asked for the state this lane held
+            when the last one went down - unless a newer one was asked for
+            meanwhile, which goes instead - and the lane is silent until the
+            child holds it. Message thread, before the lane is called again. */
+        void restoreState();
 
         /** How long a state may load before the host calls the child hung. */
         static constexpr std::uint32_t stateLoadLimitMs = 5000;
@@ -169,8 +187,13 @@ namespace wfg::plugin
         //======================================================================
         /*  The audio thread. Sends `numChannels` channels of `numSamples`
             frames, up to the region's shape, and takes the answer in place;
-            leaves the block untouched when the lane is off, unbound, not to
-            be called, or the child is late. */
+            leaves the block untouched when the cue has the insert switched
+            out, or passes it dry by the insert's shape (said on the insert).
+
+            NEVER THE DRY BLOCK OTHERWISE (CU, CV): a plugin that is not there,
+            not to be called, still taking a whole state, or late, leaves the
+            block SILENT over a quick fade from where the last answer left each
+            channel, and the first block it answers again fades back in. */
         void process (float* const* channelData, int numChannels, int numSamples) noexcept WFG_AUDIO_THREAD;
 
         //======================================================================
@@ -200,6 +223,21 @@ namespace wfg::plugin
 
         std::atomic<int> enabled { 0 };
         std::atomic<int> callEnabled { 1 };
+
+        /*  THE FADES (CV): where the last answer left each channel, and
+            whether the lane is silent now - the audio thread's own. A new cue
+            on the voice starts them over through `clearRequests`, since the
+            message thread asks it and the audio thread owns the rest. */
+        static constexpr int maxFadedChannels = 64;
+        std::array<float, maxFadedChannels> lastSample {};
+        bool silenced = false;
+        std::atomic<std::uint32_t> clearRequests { 0 };
+        std::uint32_t clearsSeen = 0;
+
+        void silenceFrom (float* const* channelData, int channels, int from, int numSamples) noexcept;
+
+        /** What a relaunched child is to be given back (`restoreState`); the message thread's. */
+        std::string restoreStatePath;
         std::atomic<std::int64_t> deadlineUs { defaultDeadlineMicroseconds };
 
         std::atomic<float> shadow[region::maxParams];

@@ -1122,8 +1122,9 @@ set_tests_properties(blackbox.phase9a-eq.fr_FR PROPERTIES
 
 # A cue's insert, heard (Phase 9a, PR 9a.8): the test-gain child on a voice through
 # the sandbox - the render at a half, a value written through the p<n> door moving it,
-# the kill switch taking the child down and the voice playing dry with the entry
-# reading failed in words, and the session replaying with no child at all.
+# the kill switch taking the child down and the voice silent, never dry, through the
+# relaunch it kills again (namespace draft 18.13), the entry reading failed in words,
+# and the session replaying with no child at all.
 add_test(NAME blackbox.phase9a-fx.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9a_fx.py"
                  --wfg-locale=C)
@@ -1182,8 +1183,9 @@ set_tests_properties(blackbox.phase9b-inputs.fr_FR PROPERTIES
 # The live rack, stage 9b.5 (namespace draft 18.5 and 18.10): the `mic` fixture on
 # a hosted interface fed a steady input, its mic cue heard through Vox 1's own
 # test-gain child after rising over its fade-in, Esc ringing out and freeing the
-# channel, the child killed mid-cue and the voice going on dry with the failure in
-# words, a double Esc ending it at once, and the session replayed with no child.
+# channel, the child killed mid-cue and the voice silent through its relaunch, never
+# dry (namespace draft 18.13), with the failure in words, a double Esc ending it at
+# once, and the session replayed with no child.
 add_test(NAME blackbox.phase9b-mic.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_mic.py" --wfg-locale=C)
 set_tests_properties(blackbox.phase9b-mic.C PROPERTIES
