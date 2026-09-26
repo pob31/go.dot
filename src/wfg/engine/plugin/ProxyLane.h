@@ -127,6 +127,9 @@ namespace wfg::plugin
             file, absolute, or empty for the preset's own. */
         void wantState (const std::string& path);
 
+        /** What this lane was last asked to hold - message thread, as `wantState`. */
+        const std::string& wantedState() const noexcept { return wantedStatePath; }
+
         /*  The tick thread, when a cue's state changes after its arm and
             before its launch: the path follows from the message thread, but
             the launch must wait from NOW, so the count moves here. */

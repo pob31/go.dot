@@ -62,88 +62,97 @@ namespace wfg::audio
             operator is reading the next line, and the lock is held for a
             push_back. */
         const std::lock_guard<std::mutex> lock { queueMutex };
-        queued.push_back (request);
+        queued.emplace_back (request);
     }
 
     void HostPlayer::serviceArms()
     {
-        std::vector<cue::ArmRequest> work;
-        std::vector<StateWanted> states;
+        std::vector<std::variant<cue::ArmRequest, StateWanted>> work;
 
         {
             const std::lock_guard<std::mutex> lock { queueMutex };
             work.swap (queued);
-            states.swap (statesQueued);
         }
 
-        for (const auto& wanted : states)
-            if (auto* lane = audioHost.proxyLane (wanted.track, wanted.slot))
-                lane->wantState (wanted.path);
-
-        for (const auto& request : work)
+        /*  IN THE ORDER IT WAS ASKED FOR, arms and states alike: the last word
+            on what a lane holds is the last one the tick thread said. */
+        for (const auto& item : work)
         {
-            /*  THE VALUETREE WRITE, on the thread Tracktion asserts. Pointing
-                the clip at the file rebuilds the playback graph, which is why
-                this is not on the GO path. */
-            /*  RANGES AND NO RANGES ARE THE SAME CALL, and the empty list is
-                the Phase 2 shape: the whole file into slot nought. With ranges
-                it is a clip per range, each armed LOOPING so the launcher
-                builds no stop duration for it - see setTrackRanges, where the
-                reason that is the mechanism rather than a setting is written
-                down. */
-            std::vector<audio::AudioHost::RangeSpec> ranges;
-            ranges.reserve (request.ranges.size());
-
-            for (const auto& range : request.ranges)
-                ranges.push_back ({ range.in, range.out, range.loops });
-
-            if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges,
-                                            request.startOffset))
+            if (const auto* wanted = std::get_if<StateWanted> (&item))
             {
-                /*  MEDIA-MISSING COVERS ALL THREE, for now: a file that is not
-                    there, one that is there and is not audio, and a range that
-                    is not inside it are all "this cue cannot be made ready",
-                    and `lastError` carries which. A `no-slot`
-                    of its own arrives with the run-level range reporting in
-                    PR 3.9, where there is something to report it against. */
-                engine.submit (origin::engine, "run.failed",
-                               { osc::Value::string (request.runId),
-                                 osc::Value::string (cue::runError::mediaMissing) });
-                continue;
+                if (auto* lane = audioHost.proxyLane (wanted->track, wanted->slot))
+                    lane->wantState (wanted->path);
             }
-
-            std::vector<std::array<double, 3>> coefficients;
-            coefficients.reserve (request.routing.size());
-
-            for (const auto& c : request.routing)
-                coefficients.push_back ({ static_cast<double> (c.input),
-                                          static_cast<double> (c.output),
-                                          static_cast<double> (c.gain) });
-
-            audioHost.setTrackRouting (request.track, request.levelDb, coefficients);
-
-            /*  And the cue's EQ, snapped with the routing while the voice is
-                silent, its delay lines cleared at the next block so the
-                previous cue's tail is not in them (Phase 9a). */
-            audioHost.snapTrackEq (request.track, request.eq);
-
-            /*  And its inserts: each entry switched in or out with the values
-                the cue sets, the instance reset before its next block (Phase
-                9a, PR 9a.8). */
-            for (const auto& fx : request.fx)
+            else
             {
-                audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values, fx.statePath);
-                audioHost.setTrackFxShape (request.track, fx.slot, fx.feed, fx.back);
+                serviceArm (std::get<cue::ArmRequest> (item));
             }
-
-            /*  The voice is yours. Whether the sound would come out YET is a
-                different question, asked separately through isArmReady - the
-                graph is ready long before the disk is, and a launch in that gap
-                plays silence with the run reporting itself as playing. */
-            engine.submit (origin::engine, "audio.armed",
-                           { osc::Value::string (request.runId),
-                             osc::Value::int32 (request.track) });
         }
+    }
+
+    void HostPlayer::serviceArm (const cue::ArmRequest& request)
+    {
+        /*  THE VALUETREE WRITE, on the thread Tracktion asserts. Pointing
+            the clip at the file rebuilds the playback graph, which is why
+            this is not on the GO path. */
+        /*  RANGES AND NO RANGES ARE THE SAME CALL, and the empty list is
+            the Phase 2 shape: the whole file into slot nought. With ranges
+            it is a clip per range, each armed LOOPING so the launcher
+            builds no stop duration for it - see setTrackRanges, where the
+            reason that is the mechanism rather than a setting is written
+            down. */
+        std::vector<audio::AudioHost::RangeSpec> ranges;
+        ranges.reserve (request.ranges.size());
+
+        for (const auto& range : request.ranges)
+            ranges.push_back ({ range.in, range.out, range.loops });
+
+        if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges,
+                                        request.startOffset))
+        {
+            /*  MEDIA-MISSING COVERS ALL THREE, for now: a file that is not
+                there, one that is there and is not audio, and a range that
+                is not inside it are all "this cue cannot be made ready",
+                and `lastError` carries which. A `no-slot`
+                of its own arrives with the run-level range reporting in
+                PR 3.9, where there is something to report it against. */
+            engine.submit (origin::engine, "run.failed",
+                           { osc::Value::string (request.runId),
+                             osc::Value::string (cue::runError::mediaMissing) });
+            return;
+        }
+
+        std::vector<std::array<double, 3>> coefficients;
+        coefficients.reserve (request.routing.size());
+
+        for (const auto& c : request.routing)
+            coefficients.push_back ({ static_cast<double> (c.input),
+                                      static_cast<double> (c.output),
+                                      static_cast<double> (c.gain) });
+
+        audioHost.setTrackRouting (request.track, request.levelDb, coefficients);
+
+        /*  And the cue's EQ, snapped with the routing while the voice is
+            silent, its delay lines cleared at the next block so the
+            previous cue's tail is not in them (Phase 9a). */
+        audioHost.snapTrackEq (request.track, request.eq);
+
+        /*  And its inserts: each entry switched in or out with the values
+            the cue sets, the instance reset before its next block (Phase
+            9a, PR 9a.8). */
+        for (const auto& fx : request.fx)
+        {
+            audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values, fx.statePath);
+            audioHost.setTrackFxShape (request.track, fx.slot, fx.feed, fx.back);
+        }
+
+        /*  The voice is yours. Whether the sound would come out YET is a
+            different question, asked separately through isArmReady - the
+            graph is ready long before the disk is, and a launch in that gap
+            plays silence with the run reporting itself as playing. */
+        engine.submit (origin::engine, "audio.armed",
+                       { osc::Value::string (request.runId),
+                         osc::Value::int32 (request.track) });
     }
 
     void HostPlayer::timerCallback()
@@ -282,6 +291,6 @@ namespace wfg::audio
             lane->expectState();
 
         const std::lock_guard<std::mutex> lock { queueMutex };
-        statesQueued.push_back ({ track, slot, path });
+        queued.emplace_back (StateWanted { track, slot, path });
     }
 }

@@ -49,6 +49,7 @@
 #include <juce_events/juce_events.h>
 
 #include <mutex>
+#include <variant>
 #include <vector>
 
 namespace wfg
@@ -116,12 +117,20 @@ namespace wfg::audio
             what this class exists to prevent. */
         int trackChannels = 2;
 
-        std::mutex queueMutex;
-        std::vector<cue::ArmRequest> queued;
-
         /*  States asked for between an arm and its launch, for the message
             thread: the lane was already told one is coming. */
         struct StateWanted { int track = 0, slot = 0; std::string path; };
-        std::vector<StateWanted> statesQueued;
+
+        /*  EVERYTHING THE MESSAGE THREAD IS ASKED FOR, IN ONE QUEUE, in the
+            order the tick thread asked it. An arm snaps its cue's whole states
+            onto the voice, and a state asked for after it - an undo in
+            standby - has to land after it. Two queues, the states applied
+            first, let an arm and a newer state in one ten-millisecond batch end
+            on the arm's older state (handoff 2026-09-26, finding 3). */
+        std::mutex queueMutex;
+        std::vector<std::variant<cue::ArmRequest, StateWanted>> queued;
+
+        /** One arm, on the message thread: the file, the routing, the EQ, the inserts. */
+        void serviceArm (const cue::ArmRequest& request);
     };
 }

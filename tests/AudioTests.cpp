@@ -48,6 +48,7 @@
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -4960,4 +4961,77 @@ TEST_CASE ("M10: rack channels beside the voices keep every node's identity uniq
                 CHECK (report.typedDuplicates == 0);
                 CHECK (report.nodes > tracks + channels);
             }
+}
+
+//==============================================================================
+TEST_CASE ("host player: an arm and a state asked for the same insert land in the order they were asked")
+{
+    /*  THE PLUGIN-VOICE HANDOFF'S THIRD FINDING (docs/handoffs/2026-09-26-
+        plugin-voice-flakes.md). An arm snaps its cue's whole state onto the
+        voice, and a state asked for after it - an undo in standby - reaches
+        the message thread in the same ten-millisecond batch when the two are
+        close. serviceArms kept two queues and applied every state before
+        every arm, so the arm's OLDER state was the one the lane held: the
+        "processed without the state" shape one of the CI sightings had. One
+        queue now, in the order it was filled - and each way round, the one
+        asked for last is the one held. */
+    constexpr int rate = 48000;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::PluginSpec gain;
+    gain.id = "PG000001";
+    gain.identifier = "godot:test-gain";
+    gain.name = "Test gain";
+    spec.plugins.push_back (gain);
+
+    REQUIRE (rig.host.buildEdit (spec));
+
+    auto* lane = rig.host.proxyLane (0, 0);
+    REQUIRE (lane != nullptr);
+
+    Engine engine;
+    audio::HostPlayer player { rig.host, engine };
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 2, rate);
+
+    cue::ArmRequest arm;
+    arm.runId = "RN000001";
+    arm.track = 0;
+    arm.mediaFile = tone.getFullPathName().toStdString();
+
+    cue::FxSetting insert;
+    insert.slot = 0;
+    insert.fxId = "FX000001";
+    insert.enabled = true;
+    insert.statePath = "older.state";
+    arm.fx.push_back (insert);
+
+    SUBCASE ("an arm, then a newer state: the state")
+    {
+        player.requestArm (arm);
+        player.requestFxState (0, 0, "newer.state");
+        player.serviceArms();
+
+        CHECK (lane->wantedState() == "newer.state");
+    }
+
+    SUBCASE ("a state, then an arm: the arm's")
+    {
+        player.requestFxState (0, 0, "newer.state");
+        player.requestArm (arm);
+        player.serviceArms();
+
+        CHECK (lane->wantedState() == "older.state");
+    }
 }
