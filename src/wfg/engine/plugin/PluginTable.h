@@ -46,6 +46,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace wfg::plugin
 {
@@ -126,9 +127,64 @@ namespace wfg::plugin
             return revisionCount;
         }
 
+        /*  THE ENTRIES THE AUDIO GRAPH WAS BUILT WITH, in slot order
+            (2026-09-26). The graph is fixed when it is built (PRD §3.25) and
+            the set can change after: an entry added since has no slot, and
+            one taken out or moved ahead of another has moved every slot after
+            it. A cue's inserts are sent by slot, so the slots are read from
+            here - never counted off the document as it stands now, which is
+            how a set edited mid-session came to send one plugin's settings to
+            another. Written by the audio host when it builds and cleared when
+            it stops; no graph at all is `hasGraph` false. */
+        void setBuilt (std::vector<std::string> ids)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            builtIds = std::move (ids);
+            graphBuilt = true;
+            ++revisionCount;
+        }
+
+        void clearBuilt()
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+
+            if (! graphBuilt && builtIds.empty())
+                return;
+
+            builtIds.clear();
+            graphBuilt = false;
+            ++revisionCount;
+        }
+
+        bool hasGraph() const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return graphBuilt;
+        }
+
+        /** The entry's slot in the graph, or -1 for one the graph was built without. */
+        int builtSlotOf (const std::string& pluginId) const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+
+            for (std::size_t slot = 0; slot < builtIds.size(); ++slot)
+                if (builtIds[slot] == pluginId)
+                    return static_cast<int> (slot);
+
+            return -1;
+        }
+
+        std::vector<std::string> built() const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return builtIds;
+        }
+
     private:
         mutable std::mutex mutex;
         std::map<std::string, Status> table;
         std::uint64_t revisionCount = 0;
+        std::vector<std::string> builtIds;
+        bool graphBuilt = false;
     };
 }

@@ -107,6 +107,11 @@ namespace wfg::audio
         /** Why open() or start() failed, empty if neither did. */
         const std::string& lastError() const noexcept { return error; }
 
+        /*  What it was last opened with - for a rebuild (2026-09-26, Load
+            now), which stops it, opens it again the same way and builds the
+            graph afresh. The render, if one was asked for, starts again. */
+        const Settings& openedWith() const noexcept { return current; }
+
         //======================================================================
         /** The counter the blocks advance. Hand it to TickThread. */
         const SampleClock& clock() const noexcept { return audioHost.clock(); }

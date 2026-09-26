@@ -569,6 +569,19 @@ namespace wfg::audio
         {
             proxies.clear();
 
+            /*  WHICH ENTRY IS WHICH SLOT, for as long as this graph stands
+                (2026-09-26): the runner sends a cue's inserts by it, and the
+                tree says which entries of the set the graph does not hold. */
+            if (services.table != nullptr)
+            {
+                std::vector<std::string> ids;
+
+                for (const auto& entry : spec.plugins)
+                    ids.push_back (entry.id);
+
+                services.table->setBuilt (std::move (ids));
+            }
+
             /*  No voices, nothing to host: the entries stay `unloaded`, which
                 is the truth about a show with plugins and no tracks. */
             if (matrices.empty())
@@ -642,6 +655,9 @@ namespace wfg::audio
             proxies.clear();
             lanes.clear();
             proxySlots = 0;
+
+            if (services.table != nullptr)
+                services.table->clearBuilt();
 
             edit.reset();
             matrices.clear();

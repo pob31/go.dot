@@ -1701,11 +1701,30 @@ namespace wfg::tree
                 {
                     const auto plugins = container.getChildWithName ("Plugins");
 
+                    /*  WHETHER THE SET DIFFERS FROM THE GRAPH (2026-09-26): an
+                        entry added, taken out or moved since the graph was
+                        built. The graph is fixed when it is built, so this is
+                        what Load now is for; with no graph there is nothing to
+                        differ from. */
+                    const auto order = plugins.isValid() ? orderOf (plugins, "Plugin") : std::string {};
+                    auto setChanged = false;
+
+                    if (pluginTable != nullptr && pluginTable->hasGraph())
+                    {
+                        std::string builtOrder;
+
+                        for (const auto& id : pluginTable->built())
+                            builtOrder += (builtOrder.empty() ? "" : " ") + id;
+
+                        setChanged = builtOrder != order;
+                    }
+
                     for (const auto* row : doc::Schema::rowsForOwner ("plugins"))
                     {
                         const auto name = std::string (row->name);
-                        const auto text = name == "order" && plugins.isValid()
-                                            ? orderOf (plugins, "Plugin") : std::string {};
+                        const auto text = name == "order"   ? order
+                                        : name == "changed" ? std::string (setChanged ? "true" : "false")
+                                                            : std::string {};
 
                         nodes.push_back (makeLeaf (std::string (godot) + "/plugin/" + name, *row, text));
                     }
@@ -1723,8 +1742,17 @@ namespace wfg::tree
                                 continue;
 
                             const auto base = std::string (godot) + "/plugin/" + id;
-                            const auto status = pluginTable != nullptr ? pluginTable->statusOf (id)
-                                                                       : plugin::PluginTable::Status {};
+                            auto status = pluginTable != nullptr ? pluginTable->statusOf (id)
+                                                                 : plugin::PluginTable::Status {};
+
+                            /*  AN ENTRY THE GRAPH WAS BUILT WITHOUT (2026-09-26):
+                                added since it was built, it has no slot and no
+                                child, and says what brings it in. */
+                            if (pluginTable != nullptr && pluginTable->hasGraph() && pluginTable->builtSlotOf (id) < 0)
+                            {
+                                status.state = "unloaded";
+                                status.problem = "added since the audio graph was built; Load now rebuilds it";
+                            }
 
                             /*  THE CATALOGUE, by the entry's identifier: what this
                                 machine knows of the plugin's parameters without an

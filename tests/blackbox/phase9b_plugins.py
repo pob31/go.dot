@@ -24,6 +24,12 @@ known.xml - offers the in-tree test bundle's two LV2 plugins, as LV2; a locked
 show refuses the scan in the log; and `wfg replay` reproduces the session,
 refusals and all, with no scan launched.
 
+AND LOAD NOW (stage 4), served hosted: the fx show's test gain comes up; a
+second entry added mid-session reads `unloaded`, saying Load now brings it in,
+and the set reads changed; a locked show refuses `plugin.load`; unlocked, it
+rebuilds the graph on the same hosted driver, the new entry comes up loaded,
+the set no longer reads changed - and the session replays.
+
 THE PLUGINS ARE FOUND IN A FOLDER NAMED TO THE SCAN, `plugin.scan lv2 <folder>`:
 the test bundle is built beside the tests, never on a user's LV2 path. Not
 through LV2_PATH, which on Windows JUCE cannot read (it splits it at every ':',
@@ -82,7 +88,7 @@ def wait_for(server: Server, address: str, expected, timeout: float = 20.0):
 
 
 def run(locale: "str | None", lv2_folder: Path) -> int:
-    report = Report(f"stage 3: the app scans this machine for plugins ({locale or 'C'})")
+    report = Report(f"stages 3-4: the app scans for plugins, and loads a changed set ({locale or 'C'})")
 
     if not (lv2_folder / "godot-test.lv2" / "manifest.ttl").is_file():
         report.check(False, "the in-tree test LV2 bundle is built", str(lv2_folder))
@@ -146,7 +152,63 @@ def run(locale: "str | None", lv2_folder: Path) -> int:
         code, out, err = common.run_wfg("replay", str(log), f"--bundle={bundle}", f"--out={replayed}")
         report.equal(code, 0, "and `wfg replay` reproduces the session with no scan launched", out + err)
 
+    run_load_now(report, locale)
     return report.finish()
+
+
+FIRST = "FX000006"
+
+
+def run_load_now(report: Report, locale: "str | None") -> None:
+    with tempfile.TemporaryDirectory(prefix="wfg-phase9b-load-") as scratch:
+        room = Path(scratch)
+        bundle = common.copy_bundle(FIXTURE, room / "fx")
+        log = room / "session.wfglog"
+        replayed = room / "replayed"
+
+        with Server(bundle, log=log, locale=locale, sample_rate=48000, buffer_size=64, hosted=True,
+                    engine_folder=room / "engine", proxy_deadline_us=20000) as server:
+            hand = Hand(server)
+            try:
+                report.equal(wait_for(server, f"/godot/plugin/{FIRST}/state", "loaded"), "loaded",
+                             "Load now: the show's test gain comes up on the hosted graph")
+                report.equal(value_of(server, "/godot/plugin/changed"), False,
+                             "and the set is what the graph holds")
+
+                hand.send("/godot/cmd/plugin/create", ["Second gain", "godot:test-gain", "", "", "PG7N0002"])
+                report.equal(wait_for(server, "/godot/plugin/changed", True), True,
+                             "an entry added mid-session makes the set read changed")
+                report.equal(value_of(server, "/godot/plugin/PG7N0002/state"), "unloaded",
+                             "the new entry reads unloaded")
+                report.check("Load now" in str(value_of(server, "/godot/plugin/PG7N0002/problem")),
+                             "and says what brings it in", str(value_of(server, "/godot/plugin/PG7N0002/problem")))
+
+                hand.send("/godot/cmd/node/set", ["/godot/document/locked", True])
+                report.equal(wait_for(server, "/godot/document/locked", True), True, "the show is locked")
+                hand.send("/godot/cmd/plugin/load", [])
+                hand.send("/godot/cmd/node/set", ["/godot/document/locked", False])
+                report.equal(wait_for(server, "/godot/document/locked", False), False, "and unlocked again")
+
+                hand.send("/godot/cmd/plugin/load", [])
+                report.equal(wait_for(server, "/godot/plugin/PG7N0002/state", "loaded", timeout=30.0), "loaded",
+                             "plugin.load rebuilds the graph and the new entry comes up loaded",
+                             str(value_of(server, "/godot/plugin/PG7N0002/problem")))
+                report.equal(value_of(server, f"/godot/plugin/{FIRST}/state"), "loaded",
+                             "and so does the first, again")
+                report.equal(value_of(server, "/godot/plugin/changed"), False,
+                             "the set no longer reads changed")
+                report.equal(value_of(server, "/godot/audio/settingsStatus"), "ready",
+                             "and the audio side says it is ready", str(value_of(server, "/godot/audio/settingsError")))
+            finally:
+                hand.close()
+
+        text = log.read_text(encoding="utf-8")
+        report.check(any(line.startswith("R ") and "locked plugin.load" in line for line in text.splitlines()),
+                     "Load now: the locked show's refusal is in the log",
+                     "\n".join(line for line in text.splitlines() if "plugin.load" in line))
+
+        code, out, err = common.run_wfg("replay", str(log), f"--bundle={bundle}", f"--out={replayed}")
+        report.equal(code, 0, "and `wfg replay` reproduces the Load now session", out + err)
 
 
 def main() -> int:

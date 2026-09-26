@@ -7324,6 +7324,71 @@ TEST_CASE ("fx: the arm carries the cue's inserts against the set, an edit pushe
     }
 }
 
+TEST_CASE ("fx: the slots are the graph's - an entry added since has none, one moved ahead keeps its own, one taken out is switched out")
+{
+    /*  2026-09-26: a set edited after the graph was built used to send a
+        cue's settings by the set's order as it stood NOW, so an entry put
+        ahead of another sent that other's switch and values to the wrong
+        plugin. The graph's own slots come from the plugin table. */
+    RoutedRig rig;
+    rig.setMedia (rig.mediaId, 2);
+    rig.aimAt (rig.mediaId, rig.main);
+
+    const auto gain = rig.document.createPlugin ("Test gain", "godot:test-gain", "VST3", "", "");
+    REQUIRE (gain.ok);
+    const auto verb = rig.document.createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "", "");
+    REQUIRE (verb.ok);
+
+    //  The graph was built with the two, in that order.
+    plugin::PluginTable table;
+    table.setBuilt ({ gain.id, verb.id });
+    rig.runner.setPlugins (&table);
+
+    const auto verbFx = rig.document.createFx (rig.mediaId, verb.id, "");
+    REQUIRE (verbFx.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/fx/" + verbFx.id + "/values", "0:0.5").ok);
+
+    SUBCASE ("an entry added since the graph was built is not sent, and the built ones keep their slots")
+    {
+        const auto late = rig.document.createPlugin ("Late", "VST3-00000000-late", "VST3", "", "");
+        REQUIRE (late.ok);
+
+        //  Put at the head of the set, where the document would number it slot 0.
+        auto plugins = rig.document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+        const auto lateNode = rig.document.findById (late.id);
+        plugins.moveChild (plugins.indexOf (lateNode), 0, nullptr);
+
+        const auto lateFx = rig.document.createFx (rig.mediaId, late.id, "");
+        REQUIRE (lateFx.ok);
+
+        rig.play();
+        const auto& armed = rig.audio.lastArmFx;
+        REQUIRE (armed.size() == 2u);
+        CHECK (armed[0].slot == 0);
+        CHECK_FALSE (armed[0].enabled);          // the gain: no Fx on the cue
+        CHECK (armed[1].slot == 1);
+        CHECK (armed[1].enabled);                // the verb, still slot 1
+        CHECK (armed[1].fxId == verbFx.id);
+    }
+
+    SUBCASE ("an entry taken out since keeps its slot, switched out")
+    {
+        const auto gainFx = rig.document.createFx (rig.mediaId, gain.id, "");
+        REQUIRE (gainFx.ok);
+
+        auto plugins = rig.document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+        plugins.removeChild (rig.document.findById (gain.id), nullptr);
+
+        rig.play();
+        const auto& armed = rig.audio.lastArmFx;
+        REQUIRE (armed.size() == 2u);
+        CHECK (armed[0].slot == 0);
+        CHECK_FALSE (armed[0].enabled);          // its Fx is on the cue, its entry is not in the set
+        CHECK (armed[1].slot == 1);
+        CHECK (armed[1].enabled);
+    }
+}
+
 TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a quiet tick not at all")
 {
     /*  PHASE 9a's parameter path, on the tick thread's side: the twenty-three rows

@@ -6837,20 +6837,32 @@ namespace wfg::cue
         static const Reader schema;
         std::vector<FxSetting> out;
 
-        const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
-        auto slot = 0;
+        /*  THE SLOTS ARE THE GRAPH'S (2026-09-26): one setting for every slot
+            it was built with, in slot order, whatever the set says now. An
+            entry added since has no slot and is not sent; one taken out since
+            keeps its slot, switched out, so the last cue's setting on that
+            voice is not left playing. With no graph to ask, the set's own
+            order is the slots. */
+        std::vector<std::string> inSet;
 
-        for (const auto entry : plugins)
+        for (const auto entry : document.root().getChildWithName ("Audio").getChildWithName ("Plugins"))
+            if (entry.hasType ("Plugin"))
+                inSet.push_back (entry.getProperty ("id").toString().toStdString());
+
+        const auto slots = pluginTable != nullptr && pluginTable->hasGraph() ? pluginTable->built() : inSet;
+
+        for (std::size_t slot = 0; slot < slots.size(); ++slot)
         {
-            if (! entry.hasType ("Plugin"))
-                continue;
-
             FxSetting setting;
-            setting.slot = slot++;
-            const auto entryId = entry.getProperty ("id").toString().toStdString();
+            setting.slot = static_cast<int> (slot);
+            const auto& entryId = slots[slot];
+            const auto stillInSet = std::find (inSet.begin(), inSet.end(), entryId) != inSet.end();
 
             for (const auto child : cue)
             {
+                if (! stillInSet)
+                    break;
+
                 if (! child.hasType ("Fx") || child.getProperty ("plugin").toString().toStdString() != entryId)
                     continue;
 

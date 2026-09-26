@@ -161,7 +161,7 @@ namespace wfg::audio
                 ? std::string ("audio-restarting") : std::string {};
         });
         const auto apply = [&] (CommandContext& context, const std::vector<osc::Value>& args,
-                               const AudioSettings* changed)
+                               const AudioSettings* changed, bool rebuildOnly)
             {
                 if (document.isLocked()) return Outcome::rejected (reason::locked);
                 for (const auto& run : runner.runTable().all())
@@ -178,12 +178,26 @@ namespace wfg::audio
                 state.settingsStatus = "applying";
                 stopOutputTest (state);
                 state.settingsError.clear();
-                if (state.requestSettings) state.requestSettings (audioSettingsOf (document), false);
+                if (rebuildOnly)
+                {
+                    if (state.requestRebuild) state.requestRebuild();
+                }
+                else if (state.requestSettings) state.requestSettings (audioSettingsOf (document), false);
                 return Outcome::ok (args);
             };
         engine.commands().add ({ "audio.apply", "Apply this show's audio settings while stopped.", {}, false,
             [apply] (CommandContext& context, const std::vector<osc::Value>& args)
-            { return apply (context, args, nullptr); } });
+            { return apply (context, args, nullptr, false); } });
+
+        /*  LOAD NOW (2026-09-26): the plugin set as it stands put into the
+            audio graph, which is fixed when it is built (PRD §3.25). The same
+            door as audio.apply - refused locked, refused while anything sounds,
+            prepared runs revoked, the clock gapped until audio.settingsReady -
+            with the interface, rate and block left exactly as they are. */
+        engine.commands().add ({ "plugin.load",
+            "Rebuild the audio graph with the show's plugin set as it stands, while stopped.", {}, false,
+            [apply] (CommandContext& context, const std::vector<osc::Value>& args)
+            { return apply (context, args, nullptr, true); } });
         engine.commands().add ({ "audio.setup", "Edit and apply audio settings while stopped.",
             { { "enabled", 'T', false }, { "deviceType", 's', false }, { "outputDevice", 's', false },
               { "inputDevice", 's', false }, { "bufferSize", 'i', false },
@@ -195,7 +209,7 @@ namespace wfg::audio
                 changed.deviceType = args[1].getString(); changed.outputDevice = args[2].getString();
                 changed.inputDevice = args[3].getString(); changed.bufferSize = args[4].getInt32();
                 changed.inputPatch = args[5].getString(); changed.outputPatch = args[6].getString();
-                return apply (context, args, &changed);
+                return apply (context, args, &changed, false);
             } });
         state.requestSettings = std::move (request);
         engine.commands().add ({ "audio.defaultsReady", "The audio defaults write finished.",

@@ -288,6 +288,41 @@ TEST_CASE ("plugin set: the four rows the machine fills read off the table, and 
     CHECK (table.statusOf ("NOPE0001").state == "unloaded");
 }
 
+TEST_CASE ("plugin set: an entry the graph was built without says what brings it in, and the set reads changed")
+{
+    Rig rig;
+    plugin::PluginTable table;
+    rig.parameters.setPlugins (&table);
+
+    REQUIRE (rig.apply ("plugin.create", entry ("Test gain", "godot:test-gain", "VST3", "")).applied == 1);
+    const auto first = rig.lastApplied().at (4);
+
+    //  No graph: nothing to differ from, and nothing said.
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+    CHECK (rig.at ("/godot/plugin/" + first + "/problem") == "");
+
+    //  The graph built with the one entry.
+    table.setBuilt ({ first });
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+
+    REQUIRE (rig.apply ("plugin.create", entry ("Verb", "VST3-abcd1234-verb", "VST3", "")).applied == 1);
+    const auto second = rig.lastApplied().at (4);
+
+    CHECK (rig.at ("/godot/plugin/changed") == "true");
+    CHECK (rig.at ("/godot/plugin/" + second + "/state") == "unloaded");
+    CHECK (rig.at ("/godot/plugin/" + second + "/problem").find ("Load now") != std::string::npos);
+    CHECK (rig.at ("/godot/plugin/" + first + "/problem") == "");
+
+    //  Rebuilt with both: the same again.
+    table.setBuilt ({ first, second });
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+    CHECK (rig.at ("/godot/plugin/" + second + "/problem") == "");
+
+    //  And no graph at all again - the host stopped - is no change either.
+    table.clearBuilt();
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+}
+
 TEST_CASE ("plugin set: a format word the show cannot store is refused bad-value, and makes nothing")
 {
     Rig rig;

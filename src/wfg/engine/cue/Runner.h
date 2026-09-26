@@ -59,6 +59,7 @@
 #include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/plugin/PluginTable.h>
 
 #include <cstdint>
 #include <functional>
@@ -405,6 +406,13 @@ namespace wfg::cue
             where nothing was handed in, which is every tool but serve and
             replay. */
         void setLiveEdits (const LiveEdits* layer) noexcept { liveLayer = layer; }
+
+        /*  WHICH SET ENTRY IS WHICH SLOT OF THE GRAPH (2026-09-26): a cue's
+            inserts are sent by slot, and the slots are the graph's, fixed when
+            it was built - never counted off the set as it stands now. Null, or
+            a table with no graph, and the set's own order is the slots, which
+            is what a replay and a test rig have. */
+        void setPlugins (const plugin::PluginTable* table) noexcept { pluginTable = table; }
 
         /*  WHO IS HOLDING WHICH NODE, for the fader edges (PRD §3.9a): a
             fader-start counts only from a fader released at the bottom, and a
@@ -1229,6 +1237,7 @@ namespace wfg::cue
         midi::MidiSink* midiOut = nullptr;
         DcaTable* dcas = nullptr;
         const LiveEdits* liveLayer = nullptr;
+        const plugin::PluginTable* pluginTable = nullptr;
         const tree::TouchTable* touches = nullptr;
 
         /*  THE SAMPLER ROSTER, read once per show revision: every sampler

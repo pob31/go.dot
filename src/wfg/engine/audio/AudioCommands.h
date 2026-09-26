@@ -69,6 +69,11 @@ namespace wfg::audio
         int sampleRate = 0, bufferSize = 0, inputs = 0, hardwareOutputs = 0;
         int settingsRevision = 0;
         SettingsRequest requestSettings;
+
+        /*  `plugin.load` applied (2026-09-26): the audio graph built again
+            from the show as it stands, on whatever it plays through now - the
+            same interface, the same rate, the same block. Absent in a replay. */
+        std::function<void()> requestRebuild;
         /** The device in use, or empty when none is open. `hosted` has no card. */
         std::string device;
 

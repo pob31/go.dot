@@ -2083,18 +2083,42 @@ namespace
         return shape;
     }
 
+    /*  THE GRAPH A SHOW ASKS FOR, the same for every path that builds one
+        (2026-09-26). It had been assembled twice, and the two had drifted: the
+        device path left a set entry's preset as the bare name the show stores
+        (so no preset loaded on a real interface) and dropped
+        --proxy-deadline-us; the hosted path left the show's channels per
+        track at two. A preset is a file under the bundle's plugins/ folder,
+        by name (§17.7); the child gets the whole path. */
+    wfg::audio::EditSpec editSpecOf (const AudioShape& shape, const juce::File& bundle,
+                                     std::int64_t proxyDeadlineMicroseconds)
+    {
+        wfg::audio::EditSpec spec;
+        spec.tracks = shape.tracks;
+        spec.channelsPerTrack = shape.channelsPerTrack;
+        spec.slots = shape.slots;
+        spec.plugins = shape.plugins;
+        spec.proxyDeadlineMicroseconds = proxyDeadlineMicroseconds;
+
+        for (auto& plugin : spec.plugins)
+            if (! plugin.presetPath.empty())
+                plugin.presetPath = bundle.getChildFile ("plugins")
+                                        .getChildFile (juce::String (plugin.presetPath))
+                                        .getFullPathName().toStdString();
+
+        return spec;
+    }
+
     wfg::audio::DeviceAudioDriver::Request deviceRequestFor (
-        const wfg::audio::AudioSettings& settings, const AudioShape& shape)
+        const wfg::audio::AudioSettings& settings, const AudioShape& shape,
+        const juce::File& bundle, std::int64_t proxyDeadlineMicroseconds)
     {
         wfg::audio::DeviceAudioDriver::Request request;
         request.deviceName = settings.outputDevice;
         request.deviceType = settings.deviceType;
         request.inputDeviceName = settings.inputDevice;
         request.blockSize = settings.bufferSize;
-        request.edit.tracks = shape.tracks;
-        request.edit.channelsPerTrack = shape.channelsPerTrack;
-        request.edit.slots = shape.slots;
-        request.edit.plugins = shape.plugins;
+        request.edit = editSpecOf (shape, bundle, proxyDeadlineMicroseconds);
         wfg::audio::readPatch (settings.inputPatch, request.inputPatch);
         wfg::audio::readPatch (settings.outputPatch, request.outputPatch);
         request.logicalOutputs = std::max (shape.outputs, static_cast<int> (request.outputPatch.size()));
@@ -2623,6 +2647,10 @@ namespace
         wfg::plugin::PluginTable pluginTable;
         std::function<bool (const std::string&, std::string&)> restartPlugin;
 
+        /*  And the runner sends a cue's inserts by the graph's slots, which
+            the audio host writes into this table when it builds (2026-09-26). */
+        runner.setPlugins (&pluginTable);
+
         /*  THE APP'S PLUGIN SCAN (2026-09-26, the author's decision): the
             command line's own scan run as a child (plugin/ScanJob.h), on the
             message thread, reporting into a table the tree publishes. When it
@@ -2826,7 +2854,8 @@ namespace
         {
             const auto shape = audioShapeOf (document);
             if (! shape.problem.empty()) { std::cerr << shape.problem << std::endl; return 2; }
-            activeDeviceRequest = deviceRequestFor (selectedAudio, shape);
+            activeDeviceRequest = deviceRequestFor (selectedAudio, shape, target,
+                                                    static_cast<std::int64_t> (proxyDeadlineUs));
             if (args.containsOption ("--device"))
             {
                 activeDeviceRequest.deviceName = args.getValueForOption ("--device").toStdString();
@@ -3541,19 +3570,7 @@ namespace
                 fixed at show load, and this is show load. It happens before a
                 single block goes through, because building it while the pump
                 ran would be a structural edit racing the graph that reads it. */
-            wfg::audio::EditSpec spec;
-            spec.tracks = shape.tracks;
-            spec.slots = shape.slots;
-            spec.plugins = shape.plugins;
-            spec.proxyDeadlineMicroseconds = static_cast<std::int64_t> (proxyDeadlineUs);
-
-            /*  A preset is a file under the bundle's plugins/ folder, by name
-                (§17.7); the child gets the path. */
-            for (auto& plugin : spec.plugins)
-                if (! plugin.presetPath.empty())
-                    plugin.presetPath = target.getChildFile ("plugins")
-                                            .getChildFile (juce::String (plugin.presetPath))
-                                            .getFullPathName().toStdString();
+            const auto spec = editSpecOf (shape, target, static_cast<std::int64_t> (proxyDeadlineUs));
 
             driver->host().setProxyServices (proxyServices);
 
@@ -4125,7 +4142,7 @@ namespace
             runner.setPlayer (nullptr);
             std::string error;
             const auto shape = audioShapeOf (document);
-            auto wanted = deviceRequestFor (settings, shape);
+            auto wanted = deviceRequestFor (settings, shape, target, static_cast<std::int64_t> (proxyDeadlineUs));
             if (settings.enabled)
             {
                 if (! deviceDriver)
@@ -4195,6 +4212,112 @@ namespace
         });
         audioState.requestSettings = [&settingsPump] (const wfg::audio::AudioSettings& settings, bool defaultsOnly)
         { settingsPump.post (settings, defaultsOnly); };
+
+        /*  LOAD NOW (2026-09-26): the graph built again from the show as it
+            stands - a plugin added to the set, taken out or moved - on exactly
+            what plays now: the same interface, rate, block and patches, or the
+            same hosted driver. The clock is gapped as for audio.apply, and the
+            same two records say what came of it. A failed rebuild on an
+            interface falls back to the graph it had. With no graph at all
+            there is nothing to rebuild, and it says so as ready. */
+        settingsPump.rebuild = [&]
+        {
+            ticks.stop();
+            player.reset();
+            runner.setPlayer (nullptr);
+
+            std::string error;
+            const auto shape = audioShapeOf (document);
+            const auto edit = editSpecOf (shape, target, static_cast<std::int64_t> (proxyDeadlineUs));
+
+            if (! shape.problem.empty())
+            {
+                error = shape.problem;
+            }
+            else if (deviceDriver)
+            {
+                auto wanted = activeDeviceRequest;
+                wanted.edit = edit;
+                wanted.logicalOutputs = std::max (shape.outputs, static_cast<int> (wanted.outputPatch.size()));
+                deviceDriver->close();
+
+                if (deviceDriver->open (wanted))
+                {
+                    activeDeviceRequest = wanted;
+                }
+                else
+                {
+                    error = deviceDriver->lastError();
+                    deviceDriver->close();
+
+                    if (deviceDriver->open (activeDeviceRequest))
+                        error += "; the graph it had was put back";
+                    else
+                    {
+                        error += "; the graph it had could not be put back";
+                        deviceDriver.reset();
+                    }
+                }
+            }
+            else if (driver)
+            {
+                /*  Stopping the hosted driver takes its engine down with it,
+                    so it is opened again the way it was - with the show's
+                    output count as it stands - and the graph built on that. */
+                auto reopen = driver->openedWith();
+                reopen.outputChannels = shape.outputs;
+                driver->stop();
+
+                if (! driver->open (reopen))
+                    error = driver->lastError();
+                else
+                {
+                    driver->host().setProxyServices (proxyServices);
+
+                    if (! driver->host().buildEdit (edit))
+                        error = driver->host().lastError();
+                }
+            }
+
+            int rate = ticks.sampleRate(), buffer = blockSize, inputs = 0, outputs = 0;
+
+            if (deviceDriver)
+            {
+                const auto granted = deviceDriver->settings();
+                rate = granted.sampleRate;
+                buffer = granted.blockSize;
+                inputs = deviceDriver->inputChannels();
+                outputs = deviceDriver->outputChannels();
+                player = std::make_unique<wfg::audio::HostPlayer> (deviceDriver->host(), engine);
+                blockSource = &deviceDriver->host().clock();
+            }
+            else if (driver && driver->start())
+            {
+                player = std::make_unique<wfg::audio::HostPlayer> (driver->host(), engine);
+                blockSource = &driver->clock();
+                rate = driver->host().settings().sampleRate;
+                buffer = driver->host().settings().blockSize;
+                outputs = driver->host().settings().outputChannels;
+            }
+
+            runner.setPlayer (player.get());
+            sessionClock.use (*blockSource, ticks.rebaseAudio (rate));
+            engine.submit ("engine", "audio.settingsReady",
+                { wfg::osc::Value::string (error), wfg::osc::Value::int32 (rate),
+                  wfg::osc::Value::int32 (buffer), wfg::osc::Value::int32 (inputs),
+                  wfg::osc::Value::int32 (outputs), wfg::osc::Value::string (
+                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}) });
+
+            if (deviceDriver)
+                engine.submit ("engine", "audio.editBuilt",
+                    { wfg::osc::Value::string (deviceDriver->deviceName()),
+                      wfg::osc::Value::int32 (activeDeviceRequest.edit.tracks),
+                      wfg::osc::Value::int32 (deviceDriver->settings().outputChannels),
+                      wfg::osc::Value::int32 (deviceDriver->host().inspectNodeIds().nodes) });
+
+            ticks.start();
+        };
+        audioState.requestRebuild = [&settingsPump] { settingsPump.postRebuild(); };
 
         bool connectionLost = false;
         std::atomic<bool> reconnectRequested { false };

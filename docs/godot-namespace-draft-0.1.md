@@ -9830,6 +9830,27 @@ crashes the LV2 host outright — in the scan and in every engine start. The pro
 anything reads it, says so once on stderr, and an LV2 folder that is not a default one is scanned by
 name instead.
 
+**Amended 2026-09-26 — Load now, and the graph's own slots.** The graph is fixed when it is built
+(§3.25) and the set can change after it: an entry added since has no slot and no child, one taken out
+or moved ahead of another has moved every slot after it. Plan decision 20 promised a sentence and
+there was none; and `Runner::fxOf` numbered a cue's inserts by the set's order **as it stood now**, so
+a set edited mid-session sent one plugin's switch and values to another. The plugin table now keeps
+**the entries the graph was built with, in slot order** (the audio host writes it when it builds and
+clears it when it stops); a cue's inserts are sent by those slots — one setting for every slot, an
+entry taken out since switched out, one added since not sent — and with no graph to ask the set's own
+order is the slots, as a replay has. An entry the graph was built without reads `unloaded` with
+*"added since the audio graph was built; Load now rebuilds it"*, and a new row `plugins,changed`
+(`/godot/plugin/changed`, T, r) says whether the set differs from the graph. **`plugin.load`** rebuilds
+the graph with the set as it stands, through `audio.apply`'s door — refused `locked`, `audio-busy`
+while anything sounds, prepared runs revoked, the clock gapped until `audio.settingsReady` — on
+exactly what plays now: the same interface, rate, block and patches (a failed rebuild puts the graph
+it had back), or the same hosted driver opened again the same way (whose render starts again). Found
+while building it and put right in the same place: the graph a show asks for was assembled twice and
+the two had drifted — **on a real interface a set entry's preset reached the child as the bare name
+the show stores, so no preset loaded**, and `--proxy-deadline-us` was dropped; the hosted path left
+the show's channels per track at two. One function (`editSpecOf`) now describes the graph for every
+path.
+
 ### 17.8 The client
 
 The desktop client keeps its rules: one snapshot a pass, `model/` std-only, one call site per
