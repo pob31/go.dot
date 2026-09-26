@@ -131,7 +131,10 @@ namespace wfg::audio
                 the cue sets, the instance reset before its next block (Phase
                 9a, PR 9a.8). */
             for (const auto& fx : request.fx)
+            {
                 audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values, fx.statePath);
+                audioHost.setTrackFxShape (request.track, fx.slot, fx.feed, fx.back);
+            }
 
             /*  The voice is yours. Whether the sound would come out YET is a
                 different question, asked separately through isArmReady - the
@@ -228,6 +231,11 @@ namespace wfg::audio
     void HostPlayer::setFxParameter (int track, int slot, int parameter, float normalised)
     {
         audioHost.setTrackFxParameter (track, slot, parameter, normalised);
+    }
+
+    void HostPlayer::setFxShape (int track, int slot, int feed, int back)
+    {
+        audioHost.setTrackFxShape (track, slot, feed, back);
     }
 
     bool HostPlayer::isPlaying (int track) const

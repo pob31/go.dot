@@ -298,6 +298,11 @@ namespace wfg::cue
         virtual void setFxEnabled (int, int, bool) {}
         virtual void setFxParameter (int, int, int, float) {}
 
+        /*  How wide the cue is at one insert, changed under it (2026-09-26):
+            the channels it sends and how many come back (FxSetting). Tick
+            thread; atomics on the audio side. A no-op by default. */
+        virtual void setFxShape (int, int, int, int) {}
+
         /*  A cue's whole state for one entry changed after its arm and before
             its launch (the author's decision of 2026-09-25): load that one
             instead, and hold the launch until it is in. The tick thread; a
@@ -738,9 +743,14 @@ namespace wfg::cue
             thrown because a cue that cannot be routed fails its RUN - the
             request was legal and the show cannot honour it - and never the
             load. */
+        /*  How wide a media cue is after the inserts it switches in
+            (cue/InsertChain.h): what its routing reads (2026-09-26). */
+        int chainChannelsOf (const juce::ValueTree& cue) const;
+
         std::vector<Coefficient> resolveRouting (const juce::ValueTree& cue,
                                                  int trackChannels,
-                                                 std::string& problem) const;
+                                                 std::string& problem,
+                                                 int chainChannels = 0) const;
 
         /** Every fade in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<FadeJob>& fades() const noexcept { return running; }
@@ -1315,6 +1325,11 @@ namespace wfg::cue
         std::uint64_t routingLiveRevision = 0;
         std::uint64_t eqLiveRevision = 0;
         std::uint64_t fxRevision = 0;
+
+        /*  And the plugin table's (2026-09-26): a plugin coming up says what
+            it takes, which can change how wide a sounding cue is. */
+        std::uint64_t routingPluginRevision = 0;
+        std::uint64_t fxPluginRevision = 0;
 
         /*  THE PERSISTENT ASSERTION (§3.29, §13.11): after every applied
             trigger, what the section declares is checked against what is

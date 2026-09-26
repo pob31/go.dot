@@ -280,11 +280,20 @@ namespace wfg::cue
         std::string stateFile;
         std::string statePath;
 
+        /*  HOW WIDE THE CUE IS AT THIS INSERT (2026-09-26, cue/InsertChain.h):
+            the channels it sends - nought when the insert passes it dry - and
+            how many come back, wider when the plugin makes a mono cue stereo.
+            -1 when nobody worked it out, which the voice reads as its own
+            width both ways. */
+        int feed = -1;
+        int back = -1;
+
         /** Field-wise, the floats by bit pattern (-Wfloat-equal). */
         bool sameAs (const FxSetting& other) const noexcept
         {
             if (slot != other.slot || enabled != other.enabled || fxId != other.fxId
-                 || stateFile != other.stateFile || values.size() != other.values.size())
+                 || stateFile != other.stateFile || values.size() != other.values.size()
+                 || feed != other.feed || back != other.back)
                 return false;
 
             for (std::size_t i = 0; i < values.size(); ++i)

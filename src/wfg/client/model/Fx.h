@@ -83,6 +83,14 @@ namespace wfg::client::model
         std::string fxId;
         bool enabled = false;
 
+        /*  Why it plays THIS cue dry, switched in (2026-09-26): the cue wider
+            than it takes, or it would give the cue back narrower. The Fx's own
+            `problem` row; empty when it takes the cue. */
+        std::string dryWhy;
+
+        /** What it takes, in words - "mono in, stereo out" (2026-09-26). */
+        std::string layout;
+
         std::vector<FxParameter> params;
 
         bool present() const noexcept { return ! fxId.empty(); }
@@ -93,7 +101,19 @@ namespace wfg::client::model
         bool present = false;
         std::vector<FxStrip> strips;
         std::string notice;
+
+        /*  THE CUE THROUGH ITS INSERTS (2026-09-26): its file's width, how
+            wide it comes out, and how many samples late - read off the cue's
+            `channels`, `chainChannels` and `insertLatency` rows. */
+        int fileChannels = 0;
+        int chainChannels = 0;
+        int insertLatency = 0;
+        int sampleRate = 0;
     };
+
+    /*  "Plays as stereo through its inserts, 21 ms late." - or nothing, for a
+        cue its inserts neither widen nor delay. */
+    std::string chainWords (const FxReading&);
 
     /*  The cue's strips against the set. `present` is false, with a sentence,
         for a cue that is not media; strips are empty, with a sentence, for a
@@ -139,6 +159,9 @@ namespace wfg::client::model
         std::string problem;
         int latencySamples = 0;
         int paramCount = 0;
+
+        /** What it takes, in words - "stereo in, stereo out" (2026-09-26). */
+        std::string layout;
     };
 
     /** The set, in chain order. */

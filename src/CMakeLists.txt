@@ -99,6 +99,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/RunCommands.cpp
     wfg/engine/cue/Runner.h
     wfg/engine/cue/Runner.cpp
+    wfg/engine/cue/InsertChain.h
+    wfg/engine/cue/InsertChain.cpp
     wfg/engine/cue/CueList.h
     wfg/engine/cue/TriggerIndex.h
     wfg/engine/cue/TriggerIndex.cpp

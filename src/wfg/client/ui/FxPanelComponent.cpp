@@ -303,11 +303,16 @@ namespace wfg::client::ui
             /*  A SHOW WITH NO PLUGINS STILL HAS A CHAIN - the EQ is on every
                 voice - so the boxes are drawn and the sentence that says how
                 to add a plugin goes after them rather than instead of them. */
-            if (! owner.reading.fx.notice.empty())
+            /*  AND WHAT THE INSERTS DO TO THE CUE (2026-09-26): how wide it
+                comes out, how late - where no sentence about the set is due. */
+            const auto said = owner.reading.fx.notice.empty() ? model::chainWords (owner.reading.fx)
+                                                               : owner.reading.fx.notice;
+
+            if (! said.empty())
             {
                 g.setColour (Look::colour (owner.theme, "ink-dim"));
                 g.setFont (Look::font (owner.theme, 13.0f));
-                g.drawFittedText (juce::String (owner.reading.fx.notice),
+                g.drawFittedText (juce::String (said),
                                   juce::Rectangle<int> (outArea.getRight() + owner.scaled (16), 0,
                                                         juce::jmax (0, getWidth() - outArea.getRight()
                                                                          - owner.scaled (24)),

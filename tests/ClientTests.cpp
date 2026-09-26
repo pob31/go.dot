@@ -5154,6 +5154,30 @@ TEST_CASE ("client: a box in the chain says what became of its plugin, and what 
     CHECK (model::latencyWords (strip) == "1 sample late while it is in");
     strip.latencySamples = 64;
     CHECK (model::latencyWords (strip) == "64 samples late while it is in");
+
+    /*  AND WHY IT PLAYS THIS CUE DRY (2026-09-26), switched in and loaded. */
+    strip.state = "loaded";
+    strip.enabled = true;
+    strip.dryWhy = "this cue is 2 channels wide here and the plugin takes 1: it plays dry";
+    CHECK (model::stateSentence (strip) == "loaded - this cue is 2 channels wide here and the plugin takes 1: it plays dry");
+}
+
+TEST_CASE ("client: the chain says how wide the cue comes out through its inserts, and how late")
+{
+    model::FxReading reading;
+    reading.fileChannels = 1;
+    reading.chainChannels = 1;
+    CHECK (model::chainWords (reading).empty());
+
+    reading.chainChannels = 2;
+    CHECK (model::chainWords (reading) == "Plays as stereo through its inserts.");
+
+    reading.insertLatency = 1024;
+    reading.sampleRate = 48000;
+    CHECK (model::chainWords (reading) == "Plays as stereo through its inserts, 21 ms late through its inserts.");
+
+    reading.chainChannels = 1;
+    CHECK (model::chainWords (reading) == "Sounds 21 ms late through its inserts.");
 }
 
 TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, and drawn from the same maths")

@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/ShowWalk.h>
 
@@ -369,6 +370,23 @@ namespace wfg::tree
             one cue, which the document says by containment, and it has no
             position anybody can act on. What it needs is a bus and a run of
             coefficients. */
+        /*  WHAT THE WALK NEEDS TO SAY HOW WIDE A CUE IS AFTER ITS INSERTS
+            (2026-09-26, cue/InsertChain.h): the plugin table and the voice's
+            width. Set around a rebuild of the document half, on the one thread
+            that rebuilds it - held here rather than passed down every call of
+            the walk, which knows nothing else about the machine. */
+        struct WalkPlugins
+        {
+            const plugin::PluginTable* table = nullptr;
+            int trackChannels = 2;
+        };
+
+        WalkPlugins& walkPlugins()
+        {
+            static thread_local WalkPlugins held;
+            return held;
+        }
+
         /*  The set entry a cue's Fx names, and where it sits in the chain: read
             off the document root, which every node can reach. */
         struct SetEntry
@@ -456,6 +474,18 @@ namespace wfg::tree
                 if (name == "cue")        text = cueId;
                 else if (name == "name")  text = entry.element.isValid() ? entry.element["name"].toString().toStdString() : std::string {};
                 else if (name == "index") text = std::to_string (std::max (0, entry.index));
+                else if (name == "problem")
+                {
+                    /*  Why this insert plays its cue dry, off the chain. */
+                    const auto cue = fx.getParent();
+                    const auto slots = cue::slotIdsOf (cue.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins"),
+                                                       walkPlugins().table);
+                    const auto chain = cue::chainOfCue (cue, walkPlugins().table, walkPlugins().trackChannels);
+                    const auto at = std::find (slots.begin(), slots.end(), fx["plugin"].toString().toStdString());
+
+                    if (at != slots.end())
+                        text = chain.steps[static_cast<std::size_t> (at - slots.begin())].dryWhy;
+                }
                 else                      text = storedText (attribute, fx);
 
                 out.push_back (makeLeaf (base + "/" + name, *row, text));
@@ -856,6 +886,10 @@ namespace wfg::tree
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "role")   text = role;
                 else if (name == "fx" && isMedia) text = enabledFxInChainOrder (node);
+                else if (name == "chainChannels" && isMedia)
+                    text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).channels);
+                else if (name == "insertLatency" && isMedia)
+                    text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).latencySamples);
                 else if (name == "duration" && isMedia)
                 {
                     /*  READ ONCE WHEN THE SHOW WAS OPENED, and nought when
@@ -1175,6 +1209,9 @@ namespace wfg::tree
         std::vector<Node> nodes;
 
         const auto showNode = document.root();
+
+        walkPlugins() = { pluginTable,
+                          std::max (1, static_cast<int> (showNode.getChildWithName ("Audio").getProperty ("channelsPerTrack", 2))) };
 
         //----------------------------------------------------------------------
         // /godot/document — the rows that persist, read off the root: the

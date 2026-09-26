@@ -1,0 +1,22 @@
+<Show>
+  <Lists>
+    <List id="WD000001" name="Sound">
+      <Media id="WD000002" channels="1" directOut="WD000004" file="tone.wav" name="Mono" number="1">
+        <Fx id="WD000007" plugin="WD000006"/>
+      </Media>
+      <Cue id="WD000005" name="Clear" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="1">
+    <Bus id="WD000004" name="Main L/R" width="2"/>
+    <Bus id="WD000008" firstChannel="2" name="Centre"/>
+    <Plugins>
+      <Plugin id="WD000006" identifier="godot:test-widen" name="Test widen"/>
+    </Plugins>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

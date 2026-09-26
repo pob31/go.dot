@@ -339,6 +339,12 @@ namespace wfg::plugin
                                 for (int n = 0; n < numSamples; ++n)
                                     samples[n] *= factor;
                             }
+
+                            /*  A mono cue goes into every input (LaneMapping.h),
+                                so every output is it at the gain. */
+                            if (numChannels == 1)
+                                for (int channel = 1; channel < lanes.channels; ++channel)
+                                    std::copy_n (audio, numSamples, audio + channel * lanes.maxSamples);
                         }
                         else if (lanemap::takes (shape))
                         {

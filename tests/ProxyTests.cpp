@@ -36,6 +36,7 @@
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/EditorHost.h>
+#include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/plugin/LaneMapping.h>
 #include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProxyHost.h>
@@ -398,6 +399,101 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
 }
 
 //==============================================================================
+TEST_CASE ("chain: how wide a cue is after its inserts, and why one passes it dry")
+{
+    using cue::InsertShape;
+
+    const InsertShape stereo { true, 2, 2, 64 };
+    const InsertShape mono { true, 1, 1, 0 };
+    const InsertShape widen { true, 1, 2, 0 };
+    const InsertShape narrow { true, 2, 1, 0 };
+    const InsertShape eight { true, 8, 8, 0 };
+
+    //  No insert: the file's width.
+    CHECK (cue::chainOf (1, 2, {}, {}).channels == 1);
+
+    //  A mono cue through a stereo plugin comes out stereo; the latency is counted.
+    auto chain = cue::chainOf (1, 2, { true }, { stereo });
+    CHECK (chain.channels == 2);
+    CHECK (chain.steps[0].feed == 1);
+    CHECK (chain.steps[0].back == 2);
+    CHECK (chain.latencySamples == 64);
+
+    //  Through a widener too.
+    CHECK (cue::chainOf (1, 2, { true }, { widen }).channels == 2);
+
+    //  Switched out changes nothing.
+    chain = cue::chainOf (1, 2, { false }, { stereo });
+    CHECK (chain.channels == 1);
+    CHECK (chain.steps[0].feed == 0);
+    CHECK (chain.latencySamples == 0);
+
+    //  A stereo cue on a mono plugin, or one that would come out narrower: dry, and said.
+    chain = cue::chainOf (2, 2, { true }, { mono });
+    CHECK (chain.channels == 2);
+    CHECK (chain.steps[0].feed == 0);
+    CHECK_FALSE (chain.steps[0].dryWhy.empty());
+    CHECK (cue::chainOf (2, 2, { true }, { narrow }).steps[0].feed == 0);
+
+    //  A stereo cue in the first two inputs of a plugin as wide as an eight-channel voice stays stereo;
+    //  a mono cue fed into all eight comes out eight.
+    CHECK (cue::chainOf (2, 8, { true }, { eight }).channels == 2);
+    CHECK (cue::chainOf (1, 8, { true }, { eight }).channels == 8);
+
+    //  Never wider than the voice: a widener on a mono voice leaves it mono.
+    CHECK (cue::chainOf (1, 1, { true }, { widen }).channels == 1);
+
+    //  A plugin that has not said what it takes is counted as taking the cue at its width.
+    chain = cue::chainOf (1, 2, { true }, { InsertShape {} });
+    CHECK (chain.channels == 1);
+    CHECK (chain.steps[0].feed == 1);
+
+    //  In the set's order: mono through a widener, then the stereo cue through a stereo plugin.
+    chain = cue::chainOf (1, 2, { true, true }, { widen, stereo });
+    CHECK (chain.channels == 2);
+    CHECK (chain.steps[1].feed == 2);
+}
+
+TEST_CASE ("proxy: a lane sends the cue's width, takes the widened sides back, and widens a dry block it could not send")
+{
+    plugin::ProxyLane lane;
+    VectorRegion region (2, 64, 1);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    lane.setDeadlineMicroseconds (200);
+
+    //  A mono cue into a widening insert: one channel sent, two taken back.
+    lane.setShape (1, 2);
+
+    SUBCASE ("with nobody answering, the dry block is the mono side on both")
+    {
+        Block block (2, 64, 0.0f);
+        std::fill (block.storage.begin(), block.storage.begin() + 64, 0.5f);
+        lane.process (block.data(), 2, 64);
+        CHECK (region.lane (0)->numChannels.load() == 1u);
+        CHECK (block.allEqual (0.5f));
+    }
+
+    SUBCASE ("switched out of the chain for this cue, the block is left whole")
+    {
+        lane.setShape (0, 0);
+        Block block (2, 64, 0.0f);
+        std::fill (block.storage.begin(), block.storage.begin() + 64, 0.5f);
+        lane.process (block.data(), 2, 64);
+        CHECK (lane.blocks() == 0);
+        CHECK (block.storage[64] == doctest::Approx (0.0f));
+    }
+
+    SUBCASE ("a block longer than the region is sent in pieces")
+    {
+        lane.setShape (-1, -1);
+        Block block (2, 150, 0.25f);
+        lane.process (block.data(), 2, 150);
+        CHECK (lane.blocks() == 1);   // late on the first piece: the rest stays dry
+        CHECK (lane.misses() == 1);
+    }
+}
+
 TEST_CASE ("lanes: a voice's channels meet a plugin's by the rules - mono into every input, dry when it will not fit, folded when it gives more")
 {
     using plugin::lanemap::Shape;

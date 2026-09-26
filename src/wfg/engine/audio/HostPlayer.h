@@ -86,6 +86,7 @@ namespace wfg::audio
         void setEq (int track, const EqSettings&) override;
         void setFxEnabled (int track, int slot, bool enabled) override;
         void setFxParameter (int track, int slot, int parameter, float normalised) override;
+        void setFxShape (int track, int slot, int feed, int back) override;
         void requestFxState (int track, int slot, const std::string& path) override;
         bool isPlaying (int track) const override;
         bool isArmReady (int track) const override;

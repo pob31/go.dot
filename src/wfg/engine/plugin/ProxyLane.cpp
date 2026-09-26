@@ -254,65 +254,117 @@ namespace wfg::plugin
     }
 
     //==============================================================================
+    void ProxyLane::setShape (int feed, int back) noexcept
+    {
+        shapeFeed.store (feed, std::memory_order_relaxed);
+        shapeBack.store (back, std::memory_order_relaxed);
+    }
+
+    namespace
+    {
+        /*  A WIDENING INSERT THAT DID NOT ANSWER (2026-09-26): the block is
+            dry, the cue's mono side in its first channel and silence beside
+            it - and the routing, told the cue is stereo here, would send that
+            silence to the right. So the dry block is widened the way the
+            plugin would have been fed: the sent channels repeated across the
+            ones that would have come back. A mono cue then plays on both
+            sides, exactly as it would with the insert switched out. */
+        void widenDry (float* const* channelData, int sent, int back, int samples) noexcept
+        {
+            for (int channel = sent; channel < back; ++channel)
+                std::copy_n (channelData[channel % sent], samples, channelData[channel]);
+        }
+    }
+
     void ProxyLane::process (float* const* channelData, int numChannels, int numSamples) noexcept
     {
-        if (enabled.load (std::memory_order_relaxed) == 0
-             || callEnabled.load (std::memory_order_relaxed) == 0)
+        if (enabled.load (std::memory_order_relaxed) == 0 || channelData == nullptr)
+            return;
+
+        /*  THE CUE'S WIDTH HERE (setShape): what is sent, and what is taken
+            back - never more than the voice or the region carries. Nought
+            sent is an insert this cue passes dry, whole. */
+        const auto width = std::min (numChannels, regionChannels);
+        const auto feedSaid = shapeFeed.load (std::memory_order_relaxed);
+        const auto backSaid = shapeBack.load (std::memory_order_relaxed);
+
+        if (feedSaid == 0)
+            return;
+
+        const auto channels = feedSaid > 0 ? std::min (feedSaid, width) : width;
+        const auto back = backSaid > 0 ? std::max (channels, std::min (backSaid, width)) : channels;
+
+        if (channels <= 0 || numSamples <= 0)
             return;
 
         auto* bound = lane.load (std::memory_order_acquire);
 
-        if (bound == nullptr || channelData == nullptr)
+        if (callEnabled.load (std::memory_order_relaxed) == 0 || bound == nullptr)
+        {
+            widenDry (channelData, channels, back, numSamples);
             return;
-
-        const auto channels = std::min (numChannels, regionChannels);
-        const auto samples = std::min (numSamples, regionMaxSamples);
-
-        if (channels <= 0 || samples <= 0)
-            return;
+        }
 
         const auto started = std::chrono::steady_clock::now();
         const auto limit = std::chrono::microseconds (deadlineUs.load (std::memory_order_relaxed));
 
-        for (int channel = 0; channel < channels; ++channel)
-            std::copy_n (channelData[channel], samples, audio + channel * regionMaxSamples);
-
-        bound->numChannels.store (static_cast<std::uint32_t> (channels), std::memory_order_relaxed);
-        bound->numSamples.store (static_cast<std::uint32_t> (samples), std::memory_order_relaxed);
-
-        const auto seq = bound->requestSeq.load (std::memory_order_relaxed) + 1;
-        bound->requestSeq.store (seq, std::memory_order_release);
-        blockCount.fetch_add (1, std::memory_order_relaxed);
-
-        /*  THE BOUNDED SPIN (§17.6). No condition variable, no semaphore, no
-            sleep: those enter the kernel and PRD §4.2 forbids that here. */
-        auto late = false;
-
-        for (int turns = 0; bound->responseSeq.load (std::memory_order_acquire) < seq;)
+        /*  A BLOCK LONGER THAN THE REGION CARRIES is sent in pieces under the
+            one deadline (2026-09-26), where it used to be cut short with its
+            tail left dry. The pieces follow one another, so the plugin hears
+            the block in order. */
+        for (int offset = 0; offset < numSamples;)
         {
-            if (++turns >= 64)
-            {
-                turns = 0;
+            const auto samples = std::min (numSamples - offset, regionMaxSamples);
 
-                if (std::chrono::steady_clock::now() - started > limit)
+            for (int channel = 0; channel < channels; ++channel)
+                std::copy_n (channelData[channel] + offset, samples, audio + channel * regionMaxSamples);
+
+            bound->numChannels.store (static_cast<std::uint32_t> (channels), std::memory_order_relaxed);
+            bound->numSamples.store (static_cast<std::uint32_t> (samples), std::memory_order_relaxed);
+
+            const auto seq = bound->requestSeq.load (std::memory_order_relaxed) + 1;
+            bound->requestSeq.store (seq, std::memory_order_release);
+            blockCount.fetch_add (1, std::memory_order_relaxed);
+
+            /*  THE BOUNDED SPIN (§17.6). No condition variable, no semaphore, no
+                sleep: those enter the kernel and PRD §4.2 forbids that here. */
+            auto late = false;
+
+            for (int turns = 0; bound->responseSeq.load (std::memory_order_acquire) < seq;)
+            {
+                if (++turns >= 64)
                 {
-                    late = true;
-                    break;
+                    turns = 0;
+
+                    if (std::chrono::steady_clock::now() - started > limit)
+                    {
+                        late = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        if (late)
-        {
-            /*  The dry block is still in the caller's buffer: degradation,
-                not a dropout (§3.18). Counted for the host. */
-            missCount.fetch_add (1, std::memory_order_relaxed);
-            consecutive.fetch_add (1, std::memory_order_relaxed);
-            return;
-        }
+            if (late)
+            {
+                /*  The dry block is still in the caller's buffer, from here on:
+                    degradation, not a dropout (§3.18). Counted for the host. */
+                missCount.fetch_add (1, std::memory_order_relaxed);
+                consecutive.fetch_add (1, std::memory_order_relaxed);
 
-        for (int channel = 0; channel < channels; ++channel)
-            std::copy_n (audio + channel * regionMaxSamples, samples, channelData[channel]);
+                float* rest[64] {};
+
+                for (int channel = 0; channel < std::min (back, 64); ++channel)
+                    rest[channel] = channelData[channel] + offset;
+
+                widenDry (rest, channels, std::min (back, 64), numSamples - offset);
+                return;
+            }
+
+            for (int channel = 0; channel < back; ++channel)
+                std::copy_n (audio + channel * regionMaxSamples, samples, channelData[channel] + offset);
+
+            offset += samples;
+        }
 
         answeredCount.fetch_add (1, std::memory_order_relaxed);
         consecutive.store (0, std::memory_order_relaxed);

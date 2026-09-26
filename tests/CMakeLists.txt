@@ -1123,6 +1123,20 @@ add_test(NAME blackbox.phase9b-plugins.fr_FR
 set_tests_properties(blackbox.phase9b-plugins.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# Stage 8 (the author's decision of 2026-09-26: a plugin can make a mono cue
+# stereo), heard: a mono cue through the widening test child on a stereo direct
+# out comes out as two different sides; switched out, the mono cue on both at
+# full as ever; on a mono bus, the two sides summed at a half each; and the
+# session replays with no child.
+add_test(NAME blackbox.phase9b-width.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_width.py" --wfg-locale=C)
+set_tests_properties(blackbox.phase9b-width.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9b-width.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_width.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9b-width.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The client the engine serves at /ui: the page, its files as bytes, and since
 # PR 5.10 its modules - the graph walked from app.js the way a browser loads it,
 # every file answering as JavaScript and none left that nothing imports - and

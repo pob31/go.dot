@@ -1718,6 +1718,12 @@ namespace wfg::audio
         return index < impl->lanes.size() ? impl->lanes[index] : nullptr;
     }
 
+    void AudioHost::setTrackFxShape (int trackIndex, int slot, int feed, int back) noexcept
+    {
+        if (auto* lane = proxyLane (trackIndex, slot))
+            lane->setShape (feed, back);
+    }
+
     void AudioHost::setTrackFxEnabled (int trackIndex, int slot, bool enabled) noexcept
     {
         if (auto* lane = proxyLane (trackIndex, slot))

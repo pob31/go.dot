@@ -527,6 +527,10 @@ namespace wfg::audio
         void setTrackFxEnabled (int trackIndex, int slot, bool enabled) noexcept;
         void setTrackFxParameter (int trackIndex, int slot, int parameter, float normalised) noexcept;
 
+        /*  How wide the cue is at one insert (2026-09-26): the channels it
+            sends and how many come back. Any thread; atomics on the lane. */
+        void setTrackFxShape (int trackIndex, int slot, int feed, int back) noexcept;
+
         /*  An arm: the cue's switch and every value for one entry, and the
             instance reset before its next block. Message thread, beside
             snapTrackEq. */

@@ -86,6 +86,15 @@ namespace
         audio::EqSettings lastArmEq;
         std::vector<cue::FxSetting> lastArmFx;
 
+        /*  A sounding cue's width at one insert, changed under it (2026-09-26). */
+        struct FxShape { int track, slot, feed, back; };
+        std::vector<FxShape> fxShapes;
+
+        void setFxShape (int track, int slot, int feed, int back) override
+        {
+            fxShapes.push_back ({ track, slot, feed, back });
+        }
+
         int slotCount() const override             { return slots; }
         int sampleRate() const override            { return rate; }
 
@@ -849,9 +858,24 @@ namespace
         }
 
         std::vector<cue::Coefficient> routingOf (const std::string& cueId,
-                                                 std::string& problem)
+                                                 std::string& problem, int chainChannels = 0)
         {
-            return runner.resolveRouting (document.findById (cueId), 2, problem);
+            return runner.resolveRouting (document.findById (cueId), 2, problem, chainChannels);
+        }
+
+        /** The spelling above, for a cue its inserts made `chainChannels` wide. */
+        std::string widenedSpreadOf (const std::string& cueId, int chainChannels, std::string& problem)
+        {
+            std::string out;
+
+            for (const auto& one : routingOf (cueId, problem, chainChannels))
+            {
+                if (! out.empty()) out += ' ';
+                out += std::to_string (one.input) + ">" + std::to_string (one.output) + "@"
+                         + juce::String (one.gain, 3).toStdString();
+            }
+
+            return out;
         }
 
         std::string main, foldback;
@@ -7387,6 +7411,91 @@ TEST_CASE ("fx: the slots are the graph's - an entry added since has none, one m
         CHECK (armed[1].slot == 1);
         CHECK (armed[1].enabled);
     }
+}
+
+TEST_CASE ("width: a cue its inserts made stereo plays its sides apart where there is room, summed where there is not")
+{
+    /*  The author's decision of 2026-09-26: a mono cue with a stereo insert
+        switched in comes out stereo; where the routing has room for two sides
+        it plays them apart, where it has room for one they are summed at a
+        half each, and a cue is never made narrower than its file. */
+    RoutedRig rig;
+    rig.setMedia (rig.mediaId, 1);
+    std::string problem;
+
+    SUBCASE ("onto a stereo direct out: side to channel")
+    {
+        rig.aimAt (rig.mediaId, rig.main);
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == "0>0@1.000 1>1@1.000");
+        CHECK (problem.empty());
+
+        //  And with no insert widening it, the mono cue onto everything, as ever.
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>0@1.000 0>1@1.000");
+    }
+
+    SUBCASE ("onto a mono direct out: the two sides summed at a half")
+    {
+        const auto mono = rig.addBus ("Centre", 6, 1);
+        rig.aimAt (rig.mediaId, mono);
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == "0>6@0.500 1>6@0.500");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("through a written one-row route: summed into its row")
+    {
+        rig.addRoute (rig.mediaId, rig.main, "1 0.5");
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == "0>0@0.500 0>1@0.250 1>0@0.500 1>1@0.250");
+    }
+
+    SUBCASE ("through a written two-row route: as written")
+    {
+        rig.addRoute (rig.mediaId, rig.main, "1 0 0 1");
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == "0>0@1.000 1>1@1.000");
+    }
+
+    SUBCASE ("a stereo file its inserts leave stereo routes exactly as it did")
+    {
+        rig.setMedia (rig.mediaId, 2);
+        rig.aimAt (rig.mediaId, rig.main);
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == rig.spreadOf (rig.mediaId, problem));
+    }
+}
+
+TEST_CASE ("width: the arm sends each insert the cue's width there, and a plugin coming up widens a sounding cue")
+{
+    RoutedRig rig;
+    rig.setMedia (rig.mediaId, 1);
+    rig.aimAt (rig.mediaId, rig.main);
+
+    const auto verb = rig.document.createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "", "");
+    REQUIRE (verb.ok);
+    REQUIRE (rig.document.createFx (rig.mediaId, verb.id, "").ok);
+
+    plugin::PluginTable table;
+    table.setBuilt ({ verb.id });
+    rig.runner.setPlugins (&table);
+
+    //  Not up yet: counted as taking the cue at its width, which is mono.
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+
+    REQUIRE (rig.audio.lastArmFx.size() == 1u);
+    CHECK (rig.audio.lastArmFx[0].feed == 1);
+    CHECK (rig.audio.lastArmFx[0].back == 1);
+
+    //  The plugin comes up, stereo in and out: the cue is stereo from the next tick.
+    plugin::PluginTable::Status loaded;
+    loaded.state = "loaded";
+    loaded.inputs = 2;
+    loaded.outputs = 2;
+    table.set (verb.id, loaded);
+    rig.tickOnce();
+
+    REQUIRE_FALSE (rig.audio.fxShapes.empty());
+    CHECK (rig.audio.fxShapes.back().track == track);
+    CHECK (rig.audio.fxShapes.back().feed == 1);
+    CHECK (rig.audio.fxShapes.back().back == 2);
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000");
 }
 
 TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a quiet tick not at all")

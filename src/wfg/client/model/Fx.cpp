@@ -120,8 +120,35 @@ namespace wfg::client::model
 
         if (strip.present() && strip.enabled && (word == "failed" || word == "missing"))
             out += " - this cue plays it dry";
+        else if (strip.present() && strip.enabled && ! strip.dryWhy.empty())
+            out += " - " + strip.dryWhy;
 
         return out;
+    }
+
+    std::string chainWords (const FxReading& reading)
+    {
+        std::string out;
+
+        const auto widthWord = [] (int channels)
+        {
+            return channels == 1 ? std::string ("mono") : channels == 2 ? std::string ("stereo")
+                                                        : std::to_string (channels) + " channels";
+        };
+
+        if (reading.chainChannels > reading.fileChannels && reading.fileChannels > 0)
+            out = "Plays as " + widthWord (reading.chainChannels) + " through its inserts";
+
+        if (reading.insertLatency > 0)
+        {
+            const auto late = reading.sampleRate > 0
+                                ? std::to_string (static_cast<int> (1000.0 * reading.insertLatency / reading.sampleRate + 0.5)) + " ms"
+                                : std::to_string (reading.insertLatency) + " samples";
+
+            out += (out.empty() ? std::string ("Sounds ") : std::string (", ")) + late + " late through its inserts";
+        }
+
+        return out.empty() ? out : out + ".";
     }
 
     std::string latencyWords (const FxStrip& strip)
@@ -172,6 +199,11 @@ namespace wfg::client::model
         const auto mine = fxOfCue (snapshot, cueId);
         auto index = 0;
 
+        out.fileChannels = integer (snapshot, "/godot/cue/" + cueId + "/channels");
+        out.chainChannels = integer (snapshot, "/godot/cue/" + cueId + "/chainChannels");
+        out.insertLatency = integer (snapshot, "/godot/cue/" + cueId + "/insertLatency");
+        out.sampleRate = integer (snapshot, "/godot/engine/sampleRate");
+
         for (const auto& pluginId : order)
         {
             const auto base = "/godot/plugin/" + pluginId + "/";
@@ -183,6 +215,7 @@ namespace wfg::client::model
             strip.state = text (snapshot, base + "state");
             strip.problem = text (snapshot, base + "problem");
             strip.latencySamples = integer (snapshot, base + "latencySamples");
+            strip.layout = text (snapshot, base + "layout");
 
             if (strip.name.empty())
                 strip.name = pluginId;
@@ -191,6 +224,7 @@ namespace wfg::client::model
             {
                 strip.fxId = found->second.id;
                 strip.enabled = found->second.enabled;
+                strip.dryWhy = text (snapshot, fxAddress (strip.fxId, "problem"));
             }
 
             const auto count = integer (snapshot, base + "paramCount");
@@ -255,6 +289,7 @@ namespace wfg::client::model
             row.problem = text (snapshot, base + "problem");
             row.latencySamples = integer (snapshot, base + "latencySamples");
             row.paramCount = integer (snapshot, base + "paramCount");
+            row.layout = text (snapshot, base + "layout");
             out.push_back (std::move (row));
         }
 

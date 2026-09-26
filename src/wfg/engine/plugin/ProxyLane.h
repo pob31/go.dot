@@ -110,6 +110,12 @@ namespace wfg::plugin
         /** Asks the child to reset the instance before its next block. */
         void requestReset() noexcept;
 
+        /*  HOW WIDE THE CUE IS HERE (2026-09-26, cue/InsertChain.h): the
+            channels sent - nought, and the block passes dry - and how many are
+            taken back, wider when the plugin makes a mono cue stereo. -1 for
+            either is the voice's own width, as before any of this. Any thread. */
+        void setShape (int feed, int back) noexcept;
+
         //======================================================================
         /*  A CUE'S WHOLE STATE (the author's decision of 2026-09-25): what the
             plugin's own window changed that is not a parameter, kept per cue
@@ -182,6 +188,8 @@ namespace wfg::plugin
 
     private:
         std::atomic<region::Lane*> lane { nullptr };
+        std::atomic<int> shapeFeed { -1 };
+        std::atomic<int> shapeBack { -1 };
         region::Header* header = nullptr;
         float* audio = nullptr;
         int regionChannels = 0;

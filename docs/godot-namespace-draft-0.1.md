@@ -9881,6 +9881,32 @@ children beside the gain, `godot:test-mono` and `godot:test-widen` (one in, two 
 times the gain, right that at a half). Until the cue's own width reaches the lane (the next
 amendment), every cue is sent at the voice's width, so a mono-only plugin on stereo voices plays dry.
 
+**Amended 2026-09-26 — a plugin can make a mono cue stereo (the author's decision).** A cue enters its
+voice as wide as its file; every insert it switches in, in the set's order, either **takes it** — the
+cue no wider than the plugin's main inputs, its outputs at least as wide as the cue — or passes it dry,
+whole, with a sentence (`fx,problem`). A cue that takes an insert comes out as wide as the plugin's
+outputs (never wider than the voice) **when it filled the plugin's inputs** — all of them, or, mono, fed
+into every one; otherwise as wide as it went in, so a stereo cue in the first two inputs of a plugin as
+wide as an eight-channel voice stays stereo rather than being folded at a quarter wherever it is sent.
+An insert whose plugin has not said what it takes counts as taking the cue at its width, which is what
+a replay and a voice with no child play. The rule is `cue/InsertChain.h` (`chainOf`, std-only), read the
+same way by the runner and the tree. **The routing reads the width after the inserts**
+(`media,chainChannels`): a direct out or a send to a destination with room for every side takes them
+side to channel; to a narrower one, side `i` onto channel `i mod width` at width/sides — two sides onto a
+mono speaker at a half each; a written Route or Feed with fewer rows than sides has side `i` take row
+`i mod rows` at rows/sides; as many rows as sides, as written; a cue its inserts leave at its file's
+width routes exactly as before. At the arm each insert is told the cue's width there — what is sent and
+what is taken back (`FxSetting` feed/back, `Player::setFxShape`, `ProxyLane::setShape`) — and a sounding
+cue follows when an insert is switched in or out or a plugin comes up (the routing and the inserts are
+re-run on the plugin table's revision as well as the show's). **A widening insert that does not answer**
+— late, failed — leaves a dry block whose mono side is repeated across the channels it would have
+given back, so the cue plays on both sides exactly as it would with the insert out. `media,insertLatency`
+sums what the inserts that take the cue declare, uncompensated; the FX panel says *"Plays as stereo
+through its inserts, 21 ms late through its inserts."* and a box whose insert plays the cue dry says
+why. A block longer than the region is sent in pieces under one deadline, no longer cut short. Found
+beside it: a mono bus last in a saved show was built no output (its width, one, is left out by the
+canonical writer and was read raw as nought).
+
 ### 17.8 The client
 
 The desktop client keeps its rules: one snapshot a pass, `model/` std-only, one call site per
@@ -10403,3 +10429,4 @@ the Keep / Discard bar under the transport (`ui/LiveBarComponent`); and the page
 two buttons, a media cue's sends listed and inspected like its triggers, and `+` for a mix channel
 it does not reach. **Owed to the bench:** the port the master section's lights answer on, the
 detent laws, the colours at a glance - `tests/blackbox/make_d700_bench.py` walks them.
+

@@ -3236,7 +3236,7 @@ namespace wfg::client::ui
                 std::string out;
                 for (const auto& row : rows)
                     out += row.id + '|' + row.name + '|' + row.state + '|' + row.problem + '|' + row.preset + '|'
-                             + std::to_string (row.latencySamples) + '\n';
+                             + std::to_string (row.latencySamples) + '|' + row.layout + '\n';
                 return out;
             }
 
@@ -3297,6 +3297,9 @@ namespace wfg::client::ui
                 /*  The state is a WORD, and the sentence follows it: what a
                     person reads at 04:12 when a strip has gone quiet. */
                 juce::String said = entry.state;
+
+                if (! entry.layout.empty())
+                    said += ", " + juce::String (entry.layout);
 
                 if (entry.latencySamples > 0)
                     said += ", " + juce::String (entry.latencySamples) + " samples late";

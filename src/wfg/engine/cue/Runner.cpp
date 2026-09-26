@@ -41,6 +41,8 @@
     the kind of thing that does not there. */
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include <wfg/engine/cue/InsertChain.h>
+
 #include <algorithm>
 #include <bit>
 #include <cctype>
@@ -1742,7 +1744,7 @@ namespace wfg::cue
         /*  Where it goes, resolved through the buses the show declares, so the
             audio side never has to know what a bus is. */
         std::string problem;
-        const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem);
+        const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem, chainChannelsOf (cue));
 
         if (! problem.empty())
         {
@@ -2628,7 +2630,8 @@ namespace wfg::cue
     //==============================================================================
     std::vector<Coefficient> Runner::resolveRouting (const juce::ValueTree& cue,
                                                      int trackChannels,
-                                                     std::string& problem) const
+                                                     std::string& problem,
+                                                     int chainChannels) const
     {
         std::vector<Coefficient> out;
         problem.clear();
@@ -2685,18 +2688,27 @@ namespace wfg::cue
                 return false;
             }
 
-            const auto inputs = static_cast<int> (gains.size()) / width;
+            const auto written = static_cast<int> (gains.size()) / width;
 
-            if (inputs > trackChannels)
+            if (written > trackChannels)
             {
                 problem = "the cue is wider than a track";
                 return false;
             }
 
+            /*  A CUE ITS INSERTS MADE WIDER THAN THE ROWS WRITTEN FOR IT
+                (2026-09-26): a mono cue through a stereo reverb, routed by a
+                one-row matrix. The route has room for one side, so the two
+                are summed into it - side `i` takes row `i mod rows`, at
+                rows / sides - and the cue is never narrower than it was
+                written for. As many rows as sides, and it is as written. */
+            const auto inputs = chainChannels > written && written > 0 ? std::min (chainChannels, trackChannels) : written;
+            const auto share = inputs > written ? static_cast<double> (written) / static_cast<double> (inputs) : 1.0;
+
             for (int input = 0; input < inputs; ++input)
                 for (int channel = 0; channel < width; ++channel)
                 {
-                    const auto gain = gains[static_cast<std::size_t> (input * width + channel)];
+                    const auto gain = gains[static_cast<std::size_t> ((input % written) * width + channel)] * share;
 
                     /*  Zero coefficients are dropped rather than written. The
                         matrix starts silent, so a zero says nothing new - and a
@@ -2759,13 +2771,40 @@ namespace wfg::cue
                                    double gain, const char* what,
                                    std::string& why) -> std::vector<double>
         {
-            const auto channels = schema.integer (mediaCue, "media", "channels");
+            const auto fileChannels = static_cast<int> (schema.integer (mediaCue, "media", "channels"));
 
-            if (channels <= 0)
+            if (fileChannels <= 0)
             {
                 why = "the cue's channel count is not known";
                 return { 0.0 };   // a non-empty list, so `emit` reports rather than passes
             }
+
+            /*  A CUE ITS INSERTS MADE WIDER (2026-09-26, the author's decision:
+                a plugin can make a mono cue stereo). Where the destination has
+                room for every side, side to channel; where it has fewer, side
+                `i` onto channel `i mod width` at width / sides - two sides onto
+                a mono speaker at a half each. Never refused for its width: the
+                cue is no wider than it was, only than its file. */
+            const auto widened = chainChannels > fileChannels;
+
+            if (widened)
+            {
+                const auto sides = chainChannels;
+                std::vector<double> gains (static_cast<std::size_t> (sides) * static_cast<std::size_t> (width), 0.0);
+                const auto share = sides > width ? static_cast<double> (width) / static_cast<double> (sides) : 1.0;
+
+                for (auto input = 0; input < sides; ++input)
+                {
+                    if (sides <= width)
+                        gains[static_cast<std::size_t> (input * width + input)] = gain;
+                    else
+                        gains[static_cast<std::size_t> (input * width + input % width)] = gain * share;
+                }
+
+                return gains;
+            }
+
+            const auto channels = fileChannels;
 
             /*  `flag` and not `text(...) == "true"`: a stored `T` reads back
                 as "1" through `var::toString`, so the text comparison is
@@ -6806,11 +6845,16 @@ namespace wfg::cue
         const auto revision = document.showRevision();
         const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
 
-        if (revision == routingRevision && layer == routingLiveRevision)
+        /*  AND THE PLUGIN TABLE (2026-09-26): a plugin coming up says what it
+            takes, which can make a sounding cue wider - its routing follows. */
+        const auto plugins = pluginTable != nullptr ? pluginTable->revision() : 0;
+
+        if (revision == routingRevision && layer == routingLiveRevision && plugins == routingPluginRevision)
             return;
 
         routingRevision = revision;
         routingLiveRevision = layer;
+        routingPluginRevision = plugins;
 
         for (const auto& snapshot : runs.all())
         {
@@ -6825,7 +6869,7 @@ namespace wfg::cue
                 continue;
 
             std::string problem;
-            const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem);
+            const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem, chainChannelsOf (cue));
 
             if (problem.empty())
                 audio->setRouting (run->track, routing);
@@ -6880,7 +6924,24 @@ namespace wfg::cue
             out.push_back (std::move (setting));
         }
 
+        /*  AND HOW WIDE THE CUE IS AT EACH (2026-09-26, cue/InsertChain.h):
+            what the voice sends each insert and takes back. */
+        const auto chain = chainOfCue (cue, pluginTable, audio != nullptr ? audio->channelsPerTrack() : 2);
+
+        for (auto& setting : out)
+            if (setting.slot >= 0 && setting.slot < static_cast<int> (chain.steps.size()))
+            {
+                const auto& step = chain.steps[static_cast<std::size_t> (setting.slot)];
+                setting.feed = step.switchedIn ? step.feed : 0;
+                setting.back = step.switchedIn ? step.back : 0;
+            }
+
         return out;
+    }
+
+    int Runner::chainChannelsOf (const juce::ValueTree& cue) const
+    {
+        return chainOfCue (cue, pluginTable, audio != nullptr ? audio->channelsPerTrack() : 2).channels;
     }
 
     void Runner::applyFx()
@@ -6894,11 +6955,13 @@ namespace wfg::cue
             return;
 
         const auto revision = document.showRevision();
+        const auto plugins = pluginTable != nullptr ? pluginTable->revision() : 0;
 
-        if (revision == fxRevision)
+        if (revision == fxRevision && plugins == fxPluginRevision)
             return;
 
         fxRevision = revision;
+        fxPluginRevision = plugins;
 
         for (const auto& snapshot : runs.all())
         {
@@ -6925,6 +6988,11 @@ namespace wfg::cue
 
                 if (next.enabled != last.enabled)
                     audio->setFxEnabled (run->track, next.slot, next.enabled);
+
+                /*  THE CUE'S WIDTH AT THIS INSERT, when it moved - switched in
+                    or out, or a plugin that came up with its buses (2026-09-26). */
+                if (next.feed != last.feed || next.back != last.back)
+                    audio->setFxShape (run->track, next.slot, next.feed, next.back);
 
                 /*  A NEW STATE ON A CUE THAT HAS NOT LAUNCHED is loaded before
                     it may (an undo in standby, a capture while it waits); on
