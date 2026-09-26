@@ -10617,3 +10617,606 @@ the first port, at a strip's pace (`colourIntervalTicks`, re-asserted every
 (85f16db); the window's clicks, marks and the transport's line. **Owed to the bench:** the jog's
 CC and the sign of its turn, the double click's note with the Configurator ticked, whether a tenth
 of a second a detent is the right grain for a pre-wait, and the dial's colour.
+
+## 18. Phase 9b — the live rack: mic cues, rack channels and named inputs: what the tree, the commands and the log gain
+
+Written on 2026-09-26, before the code, as §11 to §17 were: the approved plan drawn as a text the
+stages 9b.1–9b.7 can be reviewed against rather than against memory. It is drawn against `main` at
+`b284a4e`. Rows reach `docs/parameters/godot-parameters.csv` with the stage that implements each of
+them, never before. Where this section and the code come to disagree, §18.12 at close-out says
+which won. §19, written the same day, draws the live sampling channels built on top of it.
+
+The request was the author's, on 2026-09-26: *"At this point could we add the effects rack for live
+inputs? And with a follow up, not yet in the PRD for live sampling channels that can take in an
+input, loop with continuously variable in and out points with pre-recording and
+post-looping/playback effects."* The first half is this section; the second is §19.
+
+**What the phase is, before any of its names.** Until now every sound Go.dot made came from a file.
+A live input — a microphone, a keyboard's line, the output of another machine — becomes a cue like
+any other: the **mic cue**, QLab's word for it, whatever is plugged in. The show **names its
+inputs** as it names its outputs, each with a meter, so a dead microphone is seen before GO. It
+declares **rack channels** by name — Vox 1, Vox 2, Band — each a track of its own beside the voices,
+with a width and **its own chain of plugins**, loaded switched off when the show opens. A mic cue
+names an input and a channel; GO opens that input through that channel with the cue's level, its
+EQ, the plugins it switches in, its outputs and its sends — everything a media cue has, with an
+input where the file was. It runs until something stops it; one that must run all show sits in the
+persistent section (PRD §3.29: *"a sampler bank, a rack chain and a state machine differ only in
+what starts them"*). The plugins run out of process as the voices' do. Nothing is compensated: the
+delay from the microphone to the output is said in words, against a budget the show sets.
+
+Five decisions the author took and nine calls of the implementer's shape it — §18.1; the six
+sampling decisions of the same day are §19.1's.
+
+**Where it starts, in the code rather than in the plan.** The inputs already arrive. The show picks
+an input interface (`audio/@inputDevice`) and a patch from logical inputs to hardware
+(`audio/@inputPatch`, `src/wfg/engine/audio/AudioSettings.cpp:59-72`); `DeviceLayer` opens them
+(`DeviceLayer.cpp:339-467`) and hands every block to `AudioHost::processBlock` patched
+(`:201-203`), which copies them into the buffer it gives Tracktion (`AudioHost.cpp:712-715`) and
+tells Tracktion's hosted interface how many there are (`:226`). And there they stop: Tracktion is
+told of no input device (`describeWaveDevices`, `:89-92`), so it builds none and the samples are
+overwritten by the outputs. Tracktion's own input path is not the way in: its `WaveInputDevice`
+takes two `juce::CriticalSection` locks a block and sizes a thirty-second retrospective buffer on
+the audio thread (`tracktion_WaveInputDevice.cpp:137-222, 1226, 1432-1433, 1784`), which PRD §4.2
+forbids and the rtsan job would refuse. Every voice track is `EqPlugin` → a `ProxyPlugin` per
+entry of the set → `CueOutputPlugin` (`AudioHost.cpp:394, 415-433, 435-451`), delay compensation
+off (`:320`), and `trackCount()` — the size of that list (`:1666-1669`) — is the Runner's
+polyphony (`Runner.cpp:2568, 3742`). Phase 4 left `Audio/Rack/Channel` (a name, a class, an access;
+`ShowDocument.cpp:1392-1429`) and a media cue's `Insert` as bookkeeping: `claimSlotsFor`
+(`Runner.cpp:2417-2494`) claims the channel and nothing sounds through it. Tracktion builds no node
+for a track with no clip and no input unless one of its plugins produces sound without input
+(`tracktion_EditNodeBuilder.cpp:1600-1614`); `CueOutputPlugin` already says it does
+(`CueOutputPlugin.h:117`), so a track with none of either is fed a two-channel silence.
+
+Three rules hold over all of it. **GO never blocks** — a mic cue waiting for its channel shows
+*pending* in words and GO has already returned; no plugin is made after the show opens; a channel or
+a plugin added mid-session waits for Load now. **The audio thread is a lipogram** — the inputs are
+copied into a buffer Go.dot set aside at start, inside Go.dot's own measured region and before
+Tracktion is called, and the stage that reads them allocates nothing and locks nothing. **The
+document holds what somebody decided** (§4.10) — an input's meter, a channel's holder and a path's
+delay are readings, persisted nowhere; the input a cue takes and the channel it goes through are
+decisions, saved.
+
+### 18.1 The decisions (2026-09-26)
+
+Asked directly (AskUserQuestion), each with a recommendation beside it, all taken. The letters go on
+from §17.18's BV. The sampling decisions asked the same day — BZ, CA, CB, CC, CD, CF — are §19's and
+listed there.
+
+| | Decision | Whose |
+|---|---|---|
+| **BW** | **A live input is a cue** — it names an input; GO opens it with its level, fade-in, outputs, sends, EQ and inserts; it runs until a stop cue, Esc, a fade that stops or its group's footer ends it; one that must run all show sits in the persistent section | the author's |
+| **BX** | **Named rack channels, each with its own chain** — declared by name with a width class and its own plugins, all carried switched off; a mic cue names its channel and switches in what it wants; **a cue wanting a channel another holds waits and says so** | the author's |
+| **BY** | **The latency budget is five milliseconds of plugins**, a setting of the show; the whole delay from the microphone to the output is always said in words; going over is said loudly — on the channel, the cue and the plugin that did it — and never refused, never compensated | the author's |
+| **CE** | **The kind is called Mic**, QLab's word for any live-input cue. *Live* is the lock's own row on every cue (`/godot/cue/<id>/live`, §17.14) and *Input* names the inputs | the author's |
+| **CG** | **A stopped mic cue's tail rings out**: the input shut, the plugins ringing until the channel is quiet — ten seconds at most — and then the channel is free. A cue waiting for it waits for the tail too; double Esc cuts everything | the author's |
+| **CH** | **Go.dot's own input stage**, never Tracktion's input devices: the block's inputs copied into a tap before Tracktion runs, read by `LiveInputPlugin` at the head of each rack track in the same block. No delay added, the input a number, never a rebuild | implementer's call |
+| **CI** | **Named inputs are show objects mirroring buses**: `Audio/Input`, a name and a width, packed onto the logical inputs by the buses' arithmetic; the input patch follows the list until the rig settles it | implementer's call |
+| **CJ** | **`Mic` is an element of its own** carrying owners `{ cue, sound, mic }`: the thirty-five rows a media cue and a mic cue share move from owner `media` to a new owner `sound`, addresses and show files unchanged | implementer's call |
+| **CK** | **Rack channels are tracks after the voices**: `trackCount()` stays the voices; the lists of matrices, EQs and output stages span both; a rack track is built two channels wide | implementer's call |
+| **CL** | **One child process per distinct plugin and preset across the rack**, a lane per channel that uses it — a child spins a core while any of its lanes is switched in, so a child per channel slot would spend a core per slot | implementer's call |
+| **CM** | **A waiting mic run holds no track** until its channel is granted, then a hook arms it; a shared channel, an input too wide for the channel's class and a missing input are refused in words | implementer's call |
+| **CN** | **Double Esc silences a mic cue**, never leaves it dry — §4.4's *"kills all internal processing including live effects"* | implementer's call |
+| **CO** | **A channel's delay is what is switched in.** The proxy keeps no delay line for a plugin that is out, unlike the Tracktion bypass PRD §3.18 describes; over the budget is a reading, published and never logged | implementer's call |
+| **CP** | **A media cue's `Insert` stays bookkeeping** and no longer claims a channel that now sounds; `wfg validate` says it does nothing | implementer's call |
+
+**BW — a cue, not a panel.** The alternative offered was LiveProfessor's own shape: a list of
+standing channels in the show settings, each passing sound whenever the show is open, cues only
+adjusting them. It was declined because of §3.29's sentence — everything that runs has a row, a run,
+a lifetime a footer ends, the three stops and the solver. A standing channel is what the persistent
+section already gives a mic cue for nothing, so both behaviours are one mechanism.
+
+**BX — named channels, not voices and not a pool.** Two alternatives were offered. On the playback
+voices, with the show's plugin set: nothing new to declare, but every plugin the rack needs carried
+on every voice (the N × P of §17.9's M34) and a mic cue waiting behind playback for a voice. A pool
+of identical rack channels carrying one rack set: cheaper, but no channel with a name or a purpose.
+The author chose PRD §3.18 as it was written on 2026-09-07: a channel is somebody's decision about
+the rig — *Vox 1 is a compressor and a reverb* — and a live input never competes with playback.
+The cost is a claim that can find its channel held, and that is answered by waiting: a mic cue that
+wants to change a sounding microphone's processing without a gap uses a second channel on the same
+input and crossfades, since an input is not a slot and two channels may read one.
+
+**BY — five milliseconds.** What the plugins add, on top of the interface's own delay: room for a
+look-ahead compressor or limiter on a voice, while a linear-phase EQ or a pitch corrector goes over
+and says so. Three and ten were offered.
+
+**CG — tails.** *Cut at the stop* was offered and declined: a reverb or a delay cut off at the stop
+is the sound of a mistake. The price is a channel held a little longer after a stop.
+
+### 18.2 The objects and their rows
+
+**A named input is `<Input>` under `<Audio>`**, beside the buses and after them, owner `input`,
+published at `/godot/input/<id>`. It is the `Bus` shape exactly, for PRD §3.9b's reason — *"Voix
+solo"* is what somebody wrote down and *input 3* is a fact about a patch that will change — so a
+name, a width, and a first channel that nobody types: the running sum of the widths before it, kept
+so by `input.create|delete|move|width` through `document/OutputLayout.h`'s arithmetic, which never
+knew it was drawing outputs. The first channel is a **logical** input; `audio/@inputPatch` maps
+logical to hardware as it always did, and follows the list while the show is fresh exactly as the
+output patch follows the buses (`audio/@inputPatchSettled`, the twin of `patchSettled`). Inputs are
+not slots: two channels may read one, which is how a mic changes processing without a gap.
+
+**A rack channel is `<Channel>` under `<Rack>`, as Phase 4 left it, with `<Plugin>` children** — the
+same element, and so the same `plugin` rows, as an entry of the show's set: a name, the scan's
+identifier, a format, a path and a preset. The children are the channel's chain in order. A channel
+is published where Phase 4 put it, `/godot/slot/<id>`, and its plugins at `/godot/plugin/<id>` beside
+the set's, with their states, their problems, their declared delays and their catalogues;
+`/godot/plugin/order` stays the set's, so the voices' panels never show a rack plugin.
+
+**A mic cue is `<Mic>`**, `{ cue, sound, mic }`, with the children a media cue's sound is made of —
+`Route`, `Send`, `Feed`, `Fx`, `Trigger` — and without the ones that name a file: no `Range`, no
+`Insert`. Its `Fx` entries name plugins of **its channel**, never of the set, and carry what a media
+cue's carry: whether each is switched in, its values, its whole state (§17.13).
+
+**The owner split.** Thirty-five rows move from `media` to `sound`, the owner of what a cue that
+sounds carries whatever its source: `level`, `stereoToMono`, `directOut`, `sharedOut`, `dca`, the
+twenty-three `eq…` rows, `fx`, `live`, `sends`, `outsBusy`, `outsMaybe`, `chainChannels`,
+`insertLatency`. `media` keeps `file`, `startOffset`, `channels`, `duration`, `hash`,
+`initialLevel` and the nine sampler rows. The addresses do not move — every row is still
+`/godot/cue/<id>/<row>` — and a show file does not change by a byte, the canonical writer sorting
+attributes by name (`document/CanonicalXml.cpp:158-190`). The trap is the reader:
+`Reader::text` falls back to a default keyed `owner/row` (`cue/ShowWalk.h:111-129`), so a read left
+asking `media` for a row that moved returns an empty string rather than an error. The split is
+therefore its own commit, proven by byte-identical tree dumps and replays of every fixture before
+`Mic` exists.
+
+**The containment**, in `Schema.cpp`'s table:
+
+```
+{ "Audio",   false, { "Bus", "Input", "Rack", "Plugins" },            { "audio" } },
+{ "Input",   true,  {},                                                { "input" } },
+{ "Channel", true,  { "Plugin" },                                      { "slot", "rackChannel" } },
+{ "Media",   true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" }, { "cue", "sound", "media" } },
+{ "Mic",     true,  { "Route", "Send", "Feed", "Fx", "Trigger" },      { "cue", "sound", "mic" } },
+```
+
+and `Mic` joins the children of `List`, `Group`, `Header`, `Footer` and `Persistent`.
+
+The rows, by where they are published. Every one carries the panic policy `park`, and rests at its
+default.
+
+| Node | Type, default | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/input/<id>/name` | `s` | rw | show | what the input is called — *Voix solo* — in every menu |
+| `…/width` | `i`, 1 (1..8) | r | show | how many consecutive logical inputs it takes; changed by `input.width` |
+| `…/firstChannel` | `i`, 0 | r | show | its first logical input, the running sum of the widths before it |
+| `…/meter` | `d`, −120 dB | r | none | the loudest sample on any of its channels over the last tick, whether or not a cue listens — the soundcheck's question, *is the mic alive?* |
+| `…/problem` | `s` | r | none | why it is not reaching Go.dot, in one sentence: *input 9 is not on this interface* |
+| `/godot/audio/inputLatency`, `outputLatency` | `i`, 0 samples | r | none | the interface's own delays as its driver reports them, read when the device opens |
+| `/godot/audio/rackBudget` | `d`, 5 ms (0..100) | rw | show | what a mic cue's plugins may add before they say so (BY) |
+| `/godot/audio/inputPatchSettled` | `T`, false | rw | state | the input patch no longer follows the list of inputs (the `patchSettled` rule) |
+| `/godot/slot/<id>/plugins` | `s` | r | none | a rack channel's plugins, in the order of its chain |
+| `…/latency` | `d`, 0 ms | r | none | what its chain declares with every plugin in — the worst case, shown when somebody adds a plugin rather than discovered on the night |
+| `/godot/cue/<id>/input` | `s`, `refers=input` | rw | show | on a mic cue: the input it takes |
+| `…/channel` | `s`, `refers=rackChannel` | rw | show | on a mic cue: the rack channel it goes through |
+| `…/fadeIn` | `d`, 0 s (0..) | rw | show | on a mic cue: how long GO takes to bring it from silence to its level; nought opens it at once, behind a click-free ramp |
+| `…/latency` | `d`, 0 ms | r | none | on a mic cue: the whole path — the interface's input and output delays and what the plugins it switches in declare |
+| `…/overBudget` | `T`, false | r | none | on a mic cue: its plugins add more than `rackBudget` |
+
+`cue/kind` and `run/kind` gain `mic`. `run/state` gains nothing: a mic run waiting for its channel
+is `armed` with no track and the channel in `run/pending`, as a sampler member waiting for a voice
+already is with `voice` there (`Runner.cpp:2576-2582`); one ringing out after its stop is
+`stopping`.
+
+### 18.3 The commands
+
+| Command | Arguments | What it does, and what it records | What it refuses |
+|---|---|---|---|
+| `input.create` | `<width i> <index i> [id s]` | a named input at a place in the list, repacked; the patch follows while the show is fresh | a width outside 1..8; `locked` |
+| `input.delete`, `input.move`, `input.width` | `<input s>`, `<input s> <index i>`, `<input s> <width i>` | as the buses' three | an input the show does not have; `locked` |
+| `channel.plugin` | `<channel s> <name s> <identifier s> <format s> <path s> [id s]` | a `<Plugin>` at the end of a rack channel's chain. `plugin.create` could not grow the argument: its identifier is its trailing optional one, and a log written before would read the channel as the identifier | a channel the show does not have; `locked` |
+| `cue.create` | as today | gains the kind `mic` | as today |
+| `fx.create` | `<cue s> <plugin s> [id s]` | on a mic cue the plugin must be one of its channel's; on a media cue, of the set, as before | a plugin of the wrong list — `bad-value`; as today otherwise |
+| `eq.reset` | `<cue s>` | accepts a mic cue | as today |
+| `plugin.load` | — | Load now rebuilds the rack as it stands with the set | while anything plays — a sounding mic counts, and the refusal names it |
+
+Moving a channel's plugin is `object.move`; removing one, `object.delete`.
+
+### 18.4 The input, end to end
+
+1. **The interface.** `DeviceLayer` patches the hardware inputs into logical ones as today.
+2. **The tap.** `AudioHost::processBlock` copies the block's logical inputs into a buffer set aside
+   at `start` — every input it was told of, zeros where a block brings none (the hosted pump, the
+   arm's own readiness wait) — and keeps each channel's peak for the tick. Inside Go.dot's region
+   of the lipogram check, before Tracktion's call; the buffer Tracktion is handed cannot be read
+   instead, because the hosted device uses one buffer for its inputs and its outputs and clears
+   the outputs before it renders (`tracktion_HostedAudioDevice.cpp:83-86`,
+   `tracktion_DeviceManager.cpp:1399-1401`).
+3. **The input stage.** At the head of every rack track, `LiveInputPlugin` copies from the tap the
+   channels its cue says — a first logical input and a width, two atomics the tick thread writes —
+   behind a **gate** that opens and shuts on a click-free ramp at a sample Go.dot places. It reads
+   the block's own start and length, never an assumed whole block, and ramps in after a gap in the
+   blocks, so a device that went away and came back (§6.2) does not open with a step.
+4. **The chain.** `EqPlugin`, then a `ProxyPlugin` for each of the channel's plugins in order, then
+   `CueOutputPlugin` — the voice's own three, unchanged: level, matrix and peak.
+5. **The outputs.** The matrix sends the channel where the cue's direct out, routes, sends and
+   feeds say, the coefficient trick of every voice.
+
+The input of block *n* is heard in block *n*: nothing here adds a block. What remains is the
+interface's own delay and what the plugins declare (§18.7).
+
+**Widths.** A rack track is two channels wide whatever its class. **Mono** takes one input and puts
+out one; **mono → stereo** takes one and may put out two, when a plugin in its chain widens it as a
+voice's insert does (§17.15, decision AT); **stereo** takes two and puts out two. A mic cue's input
+must fit: a mono input goes through a mono or a mono → stereo channel, a stereo input through a
+stereo one. The routing reads the width after the chain, as for a media cue.
+
+### 18.5 A mic cue's life
+
+**Arm.** The cue claims its channel through `claimSlotsFor`, above the no-audio return, as every
+claim is made, so a replay makes the same one. A channel held by another run: the claim waits in
+the queue, and the run **holds no track** (CM) — a run with a track would receive every live push
+the Runner makes, and would move the sounding cue's matrix, EQ and plugin values. It is `armed`
+with no track, the channel in `run/pending`, and the running pane says *waiting for Vox 1*. When the holder's run
+ends, `releaseSlotsOf` grants the claim in the order runs were made, and a hook submits `run.arm`,
+the sampler's voice wait exactly (`Runner.cpp:3738-3761`). A channel the graph was built without —
+declared since the show opened — fails the run `not-built` with *Load now to build Vox 3*. A shared
+channel, an input the channel's class cannot take and an input the show does not have fail it
+`bad-channel`, `bad-width` and `no-input`, each with its sentence; `wfg validate` says all four
+before the show. Holding its channel, the run takes that channel's track and the arm snaps the
+routing, the EQ and the channel's plugins as the cue sets them — values, switches and whole state
+(§17.13), the launch waiting until they have settled — and resets the plugins, which on a quiet
+channel cuts nothing. The gate stays shut.
+
+**Launch.** The gate opens at the launch's sample. The level goes from silence to the cue's over
+`fadeIn`, a fade like any other; nought opens it at once behind the gate's ramp.
+
+**While it sounds.** A mic run is a run holding a track: the Runner's live pushes of level, routing,
+EQ and plugin values reach it as they reach a media run, the lock's live layer with them (§17.14,
+§17.16), the rotaries' pages with it.
+
+**Stop.** A stop cue, Esc, a group's footer or the end of a fade that stops: the input is shut — over
+the stop's fade when the verb is `fade`, the fade moving the level *into* the chain rather than out
+of it — and the channel's plugins ring out at the cue's level until the channel has been quiet for
+a quarter of a second, or ten seconds have passed (CG). Then the run ends and the channel is free.
+A fade cue that does not stop moves the cue's own level, the output, as for a media cue.
+
+**Kill.** Double Esc, or a kill from the running pane: the input shut, the level to silence at once
+behind the matrix's own ramp, the channel's plugins reset so that the next cue on the channel does
+not open onto a tail left inside them, and the channel free at once (CN).
+
+**Persistent.** A mic cue in the persistent section is asserted as a media cue is; its resume is a
+relaunch, having no position to remember. §18.8 is what that needed.
+
+**Load now and a change of interface** are refused while a mic cue sounds, as while anything plays,
+and the refusal names the cue — a persistent mic would otherwise refuse them all show with no clue
+why. A double Esc clears the way and the next GO restores the section.
+
+### 18.6 The rack's plugins and their children
+
+Hosted as the set's are (§17.6): out of process, behind the proxy, with the same region, lanes,
+deadline and failure rules. **One child per distinct plugin and preset** across every channel of
+the rack, a lane for each channel that has it (CL) — the child's worker spins a core at the audio
+thread's priority while any lane is switched in (`PluginHostChild.cpp:176-182`), so the number of
+spinning children is the number of distinct plugins in use, not the number of channel slots. A
+lane count is fixed when a child starts (`SharedRegion.h:208-251`), which is one more reason a plugin
+added to a channel waits for Load now.
+
+**A failure** fails the child, and so the plugin on every channel that has it: each passes it dry,
+and the words name them — *Comp stopped answering; Vox 1 and Vox 2 play without it*. One automatic
+relaunch, then `plugin.restart`, as for the set.
+
+**The window.** *Edit…* opens the plugin's own window in the editing helper, one per plugin, which
+follows the pick onto any mic cue whose channel has that plugin and greys otherwise (§17.13). The
+FX page (§17.16, decision BF) was built on one plugin's parameter list for this: a mic cue's inserts
+take the rotaries as a media cue's do.
+
+**The cost, said as it was chosen.** A mic cue in the persistent section with a plugin switched in
+keeps that plugin's child spinning all show. M40 counts the cores.
+
+### 18.7 Latency, and the budget
+
+A mic cue's **path** is the interface's input delay, its output delay — both as the driver reports
+them when the device opens, carried on the logged `audio.settingsReady` so that a replay reads what
+the session read — and what the plugins it switches in declare. **Not the ones switched out**: the
+proxy does not call a lane that is out and keeps no delay line for it, unlike the Tracktion bypass
+PRD §3.18 describes (CO), so switching a latent plugin in or out moves the channel's timing, and the
+words say so when it happens. Nothing is compensated, the plugin's delay arriving inside the
+proxy's answer as it does on the voices.
+
+**The budget** is `audio/rackBudget`, five milliseconds of plugins (BY). Over it, the cue's row in
+the list and the inspector, the channel in the Rack tab, and the plugin's box at the foot each say
+so — in words and a mark, never colour alone (§4.8): *Vox 1 is 7.3 ms from the microphone to the
+output; its plugins add 5.8 ms, over the 5 ms budget: Pro-L 2 adds 5.0 ms*. The channel's own
+`latency` row is the worst case, every plugin in, shown the moment somebody adds a plugin rather
+than discovered on the night. Over the budget is a reading the tree derives from the plugin table
+and the device, like a plugin's state; it refuses nothing and is logged nowhere.
+
+### 18.8 Two faults in the persistent section, found drawing this, and one in the player
+
+A mic cue that must run all show is the persistent section's first real tenant, and two things
+there did not do what §3.29 says.
+
+- **A double Esc suspended every persistent cue for the session.** `run.killAll` marks every root
+  run `killed` (`RunCommands.cpp:646-647`), and `assertPersistent` reads a killed run as the
+  operator's kill from the running pane, which suspends its cue until a load-to-time lifts it
+  (`Runner.cpp:1111-1127`). PRD §3.29 says a double Esc does not suspend, *"the next GO restoring
+  the declared world is the point of declaring it"*. Now `run.killAll` marks runs as skipping their
+  footers and not as killed; the running pane's kill still suspends.
+- **A jump cut the section's runs.** Load-to-time's sweep ends every run of the list the plan does
+  not name (`Runner.cpp:1241-1263`), and the solver never plans the persistent section, so a jump
+  ended a sounding bed — and a jump is not a step, so nothing asserted it again until the next GO.
+  Now the sweep leaves the section's runs alone.
+- **`HostPlayer::isPlaying` asked slot 0 alone** (`HostPlayer.cpp:241-244`), where the interface
+  promises any slot and `AudioHost::isTrackPlaying` checks every one (`:1378`): a range on another
+  slot read as stopped.
+
+`tests/fixtures/logs/persistent.wfglog`, which §13.11 planned and nobody wrote, is written with the
+fixes.
+
+### 18.9 The client and the hands
+
+- **Show settings.** An **Inputs** list — name, width, channels and a meter a row — takes the place
+  of the typed count of logical channels at the top of the input patch, and the Audio tab's *"live-
+  input monitoring and rack processing are not available yet"* goes. A **Rack** tab lists the
+  channels: name, class, each chain with Add, Remove, order and preset, each plugin's state in
+  words, the worst-case delay against the budget, and Load now.
+- **The cue list and the inspector.** The new-cue bar gains *Mic*. A mic cue's row wears its mark
+  and its input's name where a media cue shows its file. The inspector's input menu lists the
+  named inputs with their widths; its channel menu lists the channels with their class and who
+  holds each now. Fade-in, level, routing and sends as a media cue's, and the EQ and FX openers.
+- **The foot.** `in · Voix solo ▶ [EQ] ▶ [the channel's plugins] ▶ out`, the §17.13 chain with the
+  input where the file was, and the budget's words.
+- **The running pane.** *Waiting for Vox 1*, *ringing out*.
+- **Surfaces.** `surface.aim` accepts a mic cue, so the EQ, Send and FX pages work on it; a DCA strip
+  rides a mic cue's DCA as any.
+- **The page.** `inspector.js` shows and writes the input, the channel and the fade-in.
+
+### 18.10 Fixtures, drivers, and what the phase measures
+
+**An input for the tests.** `serve --hosted` and `--render` take `--input-wav=<file>`: the file,
+loaded whole at open, feeds the logical inputs from its channels, looped. That is how the unit
+cases, the replay fixture and the drivers hear a live input on CI, which has no interface.
+
+- **Fixtures.** `bundles/mic` — two named inputs, a rack of *Vox 1* (mono, the test-gain child) and
+  *Band* (stereo), a mic cue, a persistent mic; `logs/mic.wfglog` recorded from `serve --hosted
+  --input-wav`; `logs/persistent.wfglog` (§18.8).
+- **Drivers.** `blackbox/phase9b_inputs.py` (a named input's meter moving on a tone);
+  `blackbox/phase9b_mic.py` — a tone in and at the output, the level, the test-gain insert at half,
+  a child killed mid-cue leaving it dry with words, Esc ringing out then freeing the channel for a
+  waiting cue, double Esc silent at once, a persistent mic kept across a jump and restored by GO
+  after a double Esc. Both locales.
+- **Measurements.** **M38** — the callback's cost with 0, 4 and 8 rack channels open: the tap's copy,
+  the input stages, the chains. **M39** — microphone to output on the author's MADIface through a
+  loopback cable, against the words: the rack adds nothing but the interface and what the plugins
+  declare. **M40** — the cores spinning with 1, 2 and 4 channels each with a plugin switched in.
+
+### 18.11 What this phase does not build
+
+**Shared rack channels** — a reverb return that media and mic cues send into, §3.9e's *"bus with a
+chain"*: they need a return track and Tracktion's aux sends, and stay Phase 9b's next.
+**`Media/Insert` made real** (CP). **A cue taking over a held channel**, moving it to its own
+settings in its fade time *(proposed)*. **A mic cue as a sampler member**, fader-start for a
+microphone *(proposed)*. **Inline hosting**, **AUv3**, **curated parameter maps**, **macOS audio
+workgroups for the child** — as §17.10 left them. And the **loop recording** of §19, built next on
+this.
+
+### 18.12 What was built, against what §18 drew
+
+*Written at close-out.*
+
+## 19. Phase 9c — live sampling channels: a take, its layers and its loop: what the tree, the commands and the log gain
+
+Written on 2026-09-26 with §18 and before any of it is built; built after §18, on top of it. Rows
+reach the CSV with the stage that implements them, and §19.11 at close-out says what won where the
+text and the code disagree.
+
+The request was the second half of the author's (§18): *"… live sampling channels that can take in
+an input, loop with continuously variable in and out points with pre-recording and
+post-looping/playback effects."* It was not in the PRD; PRD §3.31 now carries it.
+
+**What it is, before any of its names.** A rack channel may carry a **recorder**. A mic cue on such
+a channel records what its input sounds like through the channel's first plugins — the effects
+**before the recorder**, printed into what is recorded — and loops it between an **in** and an
+**out** point that move while it plays, through the channel's other plugins — the effects **after
+the player**, heard as it loops and changeable without recording again. *Rec* records; *Rec* again
+closes the **take** and loops it; *Rec* while it loops lays another pass on top — a **layer** —
+and *Undo* takes the last layer off; *Clear* empties the channel. The take is tonight's: it lives in
+memory for the session, belongs to the channel rather than the cue, and **Keep** turns it into a
+file of the show's media. Cues aimed at it drive it, and so do the hands — the D700's Rec, a Loop
+page on its rotaries, the take's picture in the window, the master dial.
+
+**Where it starts, in the code.** Nothing in Go.dot records audio; the only file written from the
+audio path is the hosted render's output (`HostedAudioDriver.cpp:36-119`). A **range** (§3.24)
+already loops a region of a file, but its points are the clip's loop properties, which are on
+Tracktion's restart list (`tracktion_Edit.cpp:146-174, 381-394`): changing one rebuilds the graph,
+which is why a range's points are fixed at its arm (`Runner.cpp:6481-6486`). A point that moves
+continuously cannot be a clip's, so the looper is a stage of Go.dot's own with its points in
+atomics — the EQ's shape (§17.5), not the range's. What a range gave that is reused: the word *in*
+and *out*, the waveform drawn from peaks (`peaks::Collector::add`, `Peaks.h:111-125`, which takes a
+buffer in memory), and the running pane's way of saying where a loop is.
+
+Four rules hold. **GO never blocks**: a take's memory is set aside when the show opens, never when a
+Rec is pressed. **The audio thread is a lipogram**: the looper allocates nothing and, because its
+memory was not only set aside but **touched** at open, its first write never faults a page in on
+the audio thread. **The document holds what somebody decided** (§4.10): a take is what happened
+tonight, not a decision, so it is in no file until somebody keeps it — Keep is the decision.
+**Not a DAW** (§1): one take a channel with its layers — no editing, no arrangement, no second take
+beside the first.
+
+### 19.1 The decisions (2026-09-26)
+
+Asked with §18's, each with a recommendation; all taken but one.
+
+| | Decision | Whose |
+|---|---|---|
+| **BZ** | **Two chains**: effects **before the recorder**, printed into the take, and effects **after the player**, heard as it loops | the author's |
+| **CA** | **Rec to Rec, with overdub**: Rec again closes the take and loops it; while it loops, Rec lays a new pass on top, **each layer undoable** | the author's — the recommendation was a single take |
+| **CB** | **A take lives in memory for the session; Keep writes it into the show's media as a file** a media cue can play | the author's |
+| **CC** | **Cues and hands drive it**: transport cues aimed at it, with new verbs beside `advance` and `fade`; the D700's Rec; the window | the author's |
+| **CD** | **A Loop page on the D700**: in, out, a rotary sliding both and keeping the length, level; also the take's picture and the master dial. **The loop plays on through every move and every wrap is crossfaded** | the author's |
+| **CF** | **GO on a sampling cue does what the cue says**: `wait` (the take silent until Loop or Rec, the default), `loop` the take it finds, or `clear` it for a fresh one | the author's |
+| **CQ** | **The loop points are the channel's session state**, not rows of the show: live rows answered in front of the document, logged, never a step of the history, allowed under the lock | implementer's call |
+| **CR** | **The recorder is Go.dot's own `Looper`**: memory set aside and touched at open and owned outside the Edit; layers kept apart; wraps and jumps crossfaded inside the take; a loop at least two crossfades long; the EQ after the player | implementer's call |
+| **CS** | **Rec never destroys a take** — only Clear empties, and Undo takes one layer; a full take closes itself; the D700's transport Rec cycles; the Loop page on Pan; `through` off by default | implementer's call |
+| **CT** | **Keep copies the closed layers mixed**, writes a WAV under `media/takes/` off the message thread, and *Keep as cue* adds a media cue looping it | implementer's call |
+
+**CA — overdub, against the recommendation.** One take replaced by the next Rec was recommended as
+less to build and less to explain on the night. The author chose the looper's own instrument: layers
+building up, each one undoable. What it costs: a take's memory is multiplied by the layers kept
+(§19.2), and a channel that has used them all refuses another pass in words until one is undone or
+the take cleared — the alternative, folding the oldest layer into the base while the loop plays,
+would be a copy of the whole take on the audio thread or a race with it.
+
+**CF — GO and a take already there.** A take belongs to the channel, so *scene 5 brings back the loop
+of scene 2* is a second sampling cue on the same channel finding it. And *open the sampler for a
+fresh take* is the same GO wanting the opposite. So the cue says which, and the default is the one
+that makes no sound nobody asked for.
+
+### 19.2 The sampling channel
+
+A rack channel with **`takeSeconds`** above nought carries a recorder; **`layers`** says how many
+passes on top of the first it keeps. Each of its plugins says its **`side`**: `before` the recorder
+or `after` the player, `after` by default, so a plugin added to a channel that had no recorder stays
+where it was heard. The chain:
+
+`LiveInputPlugin` → the plugins before → `LooperPlugin` → `EqPlugin` → the plugins after → `CueOutputPlugin`
+
+The EQ sits after the player: it is the cue's EQ on what is heard, not something printed into the
+take. With the recorder out of circuit — a mic cue on the channel that records nothing — the looper
+passes its input through, and the channel is §18's.
+
+**The memory**: (1 + `layers`) × `takeSeconds` × the rate × two channels × four bytes — sixty seconds
+and four layers at 48 kHz is 115 MB — set aside and every page of it touched when the show opens,
+never on the audio thread, and said in words in the Rack tab. It is **owned by the audio host beside
+the Edit**, one store per channel, and not by the plugin: every media arm rebuilds the graph
+(`AudioHost.cpp:1134`), a plugin may allocate only in `initialise`, and Load now and a change of
+interface throw the Edit away (`AudioHost.cpp:670`). The store keeps its takes across all three while
+the channel's width and the rate are unchanged, and clears them otherwise with a sentence.
+
+### 19.3 The take
+
+| state | Rec | Loop | Undo | Clear |
+|---|---|---|---|---|
+| **empty** | starts recording | — | — | — |
+| **recording** | closes the take and loops it | closes the take and loops it | abandons the recording | empties |
+| **looping** | starts a layer | — | takes the top layer off | empties |
+| **overdubbing** | closes the layer and loops | closes the layer and loops | abandons the layer being laid | empties |
+| **held** — a take, silent | loops it, laying a layer from the in point | loops it | takes the top layer off | empties |
+
+**Rec never destroys a take** (CS): pressed on a channel holding one it adds, it never replaces.
+Only Clear empties, and Undo takes one layer at a time — never the first pass, which is the take.
+A take reaching `takeSeconds` closes itself and loops, with *the take reached its 60 seconds and was
+closed*; a Rec with every layer in use is refused, *Vox 1 holds its 4 layers: Undo one or Clear*.
+A layer is as long as the take: it is laid at the playhead, wrapping with it, and a pass longer than
+the loop adds into its own beginning, as a looper's overdub does.
+
+**The take belongs to the channel for the session** — a later sampling cue on the channel finds it,
+and `onGo` decides what GO does with it (CF). It survives its cue's end, Esc and double Esc: a double
+Esc stops everything that sounds and unmakes nothing that was recorded. Clear, the end of the
+session, and a change of the channel's width or of the rate end it.
+
+**`through`**, a switch on the mic cue, off by default, adds the input to what the channel sounds
+while it records and loops; off, the channel sounds the loop alone, because the voice being sampled
+is usually heard through the desk already and would otherwise double.
+
+### 19.4 The loop points
+
+**`loopIn` and `loopOut`** are seconds into the take, on the channel, answered in front of the
+document by the take's door — the `LiveRows` pattern (`cue/LiveRows.h`): persisted nowhere, logged
+and replayed as the `node.set` they are, never a step of the history, allowed under the lock (CQ).
+The door clamps them to the take and keeps them at least two crossfades apart; each time a take
+closes they are set to its two ends.
+
+They are not rows of the show because they belong to tonight's take. As rows of the show the engine
+would write the document each time a take closed, a night of rides would fill the history, and every
+one would ask Keep or Discard at the unlock. A cue that says *loop the first two seconds* is a
+proposal, not built.
+
+**The loop plays on through every move** (CD). The playhead carries on; a move that leaves it
+outside the loop sends it to the in point, crossfaded. **Every wrap is an equal-power crossfade** of
+ten milliseconds taken inside the take, so a point moved onto a loud sample does not click. There is
+no *slide* row: the page's third rotary writes both points by the same amount.
+
+### 19.5 The rows
+
+| Node | Type, default | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/slot/<id>/takeSeconds` | `d`, 0 s (0..600) | rw | show | the longest take the channel records; nought is no recorder |
+| `…/layers` | `i`, 4 (1..16) | rw | show | how many passes it keeps on top of the take |
+| `…/take` | `s`, `empty` (`empty\|recording\|looping\|overdubbing\|held`) | r | none | what the take is doing, in a word |
+| `…/takeLength` | `d`, 0 s | r | none | how long the take is |
+| `…/takeLayers` | `i`, 0 | r | none | how many layers lie on it |
+| `…/playhead` | `d`, 0 s | r | none | where the loop is playing, in the take |
+| `…/loopIn`, `…/loopOut` | `d`, 0 s | rw | none | the loop, seconds into the take — the take's door (§19.4) |
+| `…/takeProblem` | `s` | r | none | the last thing the take refused or did by itself, in a sentence |
+| `/godot/plugin/<id>/side` | `s`, `after` (`before\|after`) | rw | show | on a sampling channel's plugin: before the recorder or after the player |
+| `/godot/cue/<id>/onGo` | `s`, `wait` (`wait\|loop\|clear`) | rw | show | on a mic cue: what GO does with a take the channel already holds (CF) |
+| `…/through` | `T`, false | rw | show | on a mic cue: hear the input as well as the loop |
+
+`transport/verb` gains `record`, `loop`, `overdub` and `clear`.
+
+### 19.6 The commands
+
+| Command | Arguments | What it does, and what it records | What it refuses |
+|---|---|---|---|
+| `take.record` | `<channel s>` | the Rec press, §19.3's table | no sampling cue holding the channel — `not-running`; every layer in use — `layers-full`; a Keep copying — `busy` |
+| `take.loop` | `<channel s>` | the Loop press | `not-running` |
+| `take.overdub` | `<channel s>` | a layer begun while it loops or is held, or closed while one is laid — what Rec's cycle does, said explicitly for a cue | `not-running`, `layers-full` |
+| `take.undo` | `<channel s>` | the top layer off, or the pass being laid abandoned | `busy` |
+| `take.clear` | `<channel s>` | the channel empty | `busy` |
+| `take.keep` | `<channel s> [asCue T]` | §19.8 | a take being recorded — `not-closed`; `asCue` under the lock — `locked` |
+| `take.closed` | `<channel s> <samples i>` | engine origin: the length the audio thread closed a take at — full or pressed — so that a replay knows it | — |
+| `take.kept` | `<channel s> <file s> <error s>` | engine origin: the file Keep wrote, or why it could not | — |
+
+**Where a press lands in time.** The handler moves the take's state in the model; a hook places the
+start of a recording, the close of a take and the start of a layer at the sample `now + the launch
+latency`, as a launch is placed (`Runner.cpp:6299`), so a press and a cue land on a sample the log
+can name and a replay places the same.
+
+**Transport cues** aimed at a mic cue send `record`, `loop`, `overdub` and `clear` to its channel,
+handled in `fireStop` before the hard stop it falls through to today (`Runner.cpp:3217-3230`). A
+target that is not a sounding sampling cue is applied and does nothing — the transport cue's own
+rule for a target that is not running.
+
+**GO** (`onGo`): `wait` holds the take silent; `loop` loops it from the in point, and with no take
+waits for Rec; `clear` empties the channel and waits for Rec.
+
+### 19.7 The hands
+
+- **The D700.** The transport's **Rec** (`0x5F`, `Button::record` — not a strip's REC, which sets a
+  start level, `SurfaceProfile.cpp:121-122`) is `take.record` on the aimed sampling cue's channel; its
+  double click, if the firmware gives that button one, `take.undo`. A **Loop page on Pan** (`0x2A`,
+  unbound: Go.dot has no pan) puts the aimed sampling cue on the rotaries — in, out, a third sliding
+  both and keeping the length, and the level — with a law fine enough for a loop point, the first
+  thing the bench says. A **Loop** key, if the D700 has one (its protocol note lists Rec, Play and
+  Stop), is `take.loop`. Under the lock the page writes as it always does: the points are not the
+  document.
+- **The window.** A sampling cue's foot shows the take's picture, drawn from peaks the looper keeps a
+  block at a time and the desktop reads in its own process, growing as it records; the in and out as
+  edges to drag; the playhead; the layers; and Rec, Loop, Overdub, Undo, Clear and Keep. The chain
+  above it is §18's with the recorder in its place: `in ▶ [before] ▶ ● take ▶ [EQ] ▶ [after] ▶ out`.
+- **The master dial.** Rule BQ (§17.18) is amended: a live row of a sampling channel is a number a
+  hand may write, and the dial turns it.
+
+### 19.8 Keep
+
+`take.keep <channel> [asCue]`: the closed layers — the take and every layer on it, summed at unity,
+the whole take and not only the loop — copied from what the audio thread has finished writing (a pass
+being laid is not in it), written as a WAV at the session's rate under `media/takes/`, atomically, by
+a job off the message thread, and recorded with `take.kept`. With `asCue`, a media cue after the
+sampling cue plays the file, with a Range at the loop points set to loop; under the lock it is
+refused, as any change of the show. While the copy runs, Undo and Clear wait, refused `busy`, so the
+file is the take that was asked for.
+
+### 19.9 Fixtures, drivers, and what the phase measures
+
+- **Unit.** `tests/LooperTests.cpp`: a take recorded and closed to the sample; Undo bit-exact; the
+  largest sample-to-sample step at a wrap on a sine; points moved mid-loop; a full take closing
+  itself; the whole of it under rtsan.
+- **Replay and driver.** `logs/take.wfglog` and `blackbox/phase9c_take.py`, with `--input-wav`: Rec,
+  Rec and the loop heard; a layer summed; Undo; points moved with no click; Keep, a file, and a media
+  cue looping it.
+- **Measurements.** **M41** — a take's memory and the time to set it aside and touch it at open, at 60
+  seconds and 4 layers, 48 and 96 kHz. **M42** — a block's cost by layers, 1 to 16. **M43** — the
+  wrap: the largest step at the join on a sine, against the same sine unbroken. **M44** — where a take
+  starts against where Rec was pressed, from a recorded click.
+
+### 19.10 What this phase does not build
+
+Overdub feedback, a decay applied to every pass; varispeed and reverse on a loop — the varispeed
+the author asked for on files on 2026-09-21 is the same conversation; more than one take on a
+channel; editing a take; loop points written in the show; a sampling cue on a sampler strip; the
+page's take panel.
+
+### 19.11 What was built, against what §19 drew
+
+*Written at close-out.*

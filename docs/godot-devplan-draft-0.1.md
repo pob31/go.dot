@@ -484,7 +484,8 @@ list; blend-space choice confirmation.
 **Goal:** third-party processing that cannot take the show down.
 
 *Split on 2026-09-23 into 9a, pulled forward and being built, and 9b, what is
-left. No later phase is renumbered.*
+left. No later phase is renumbered. On 2026-09-26 9b was redrawn as the live rack and 9c
+added, the live sampling channels.*
 
 ### Phase 9a — EQ on media cues, the plugin sandbox, and VST inserts · L
 
@@ -544,30 +545,71 @@ deadline and the failed-strip budget once M31 and M32 are taken; and whether
 the pages session should start on the EQ page when 9a.3 lands rather than wait
 for the inserts.
 
-### Phase 9b — The live rack, and what 9a leaves · L
+### Phase 9b — The live rack: mic cues on named rack channels · L
 
-- **Live rack** with a stated latency budget; TE PDC behaviour on live tracks
-  understood and controlled (spike #6). Live input through the sandbox.
-- **Rack channels as slots** (PRD §3.18, 2026-09-07): plain tracks with a plugin
-  list, never Tracktion Racks; sends as coefficients fixed at load; width
-  classes mono→mono, mono→stereo, stereo→stereo — the chains behind Phase 4's
-  `Media/Insert` and `Rack/Channel`, and the shared reverb channel.
-- **Inline hosting** (PRD §3.18's opt-in) with §3.4's message-thread handover;
-  AU presets; AUv3; curated per-plugin parameter maps
-  (the pages draft's §7.2) for the FX page, which is built in each plugin's own
-  order and takes a rack's plugins as it takes a cue's inserts (namespace
-  §17.16); macOS audio workgroups for the child. *(LV2 left
-  this list on 2026-09-26: built on every platform, with AU on macOS, the scan
-  in the app and the mono→stereo widening on the voice inserts - namespace
-  §17.15. The width classes above remain the rack channels' own.)*
+*Redrawn on 2026-09-26 at the author's request* — *"could we add the effects rack for live
+inputs?"* — with **five decisions** of the author's (**BW**, **BX**, **BY**, **CE**, **CG**,
+`godot-namespace-draft-0.1.md` §18.1), all as recommended, and nine of the implementer's (CH–CP)
+written down to be overruled early. A live input is a **mic cue**: it names an input and a rack
+channel and runs until something stops it. The show names its inputs and declares its rack
+channels, each with its own chain of plugins hosted out of process. The latency budget is five
+milliseconds of plugins, always said in words. The phase is drawn before the code as §18 of that
+draft. One commit and push a stage:
 
-**Done when:** live input runs through a sandboxed third-party plugin, the plugin
-is killed mid-show, and the show continues with the strip marked failed; a cue
-claims an exclusive rack channel and enables one plugin of its chain without a
-graph rebuild.
+| Stage | What | Depends on |
+|---|---|---|
+| 9b.0 | Docs first: namespace §18 and §19, the PRD amendments (§3.18, §3.9e, §3.29, §6.2, new §3.31, §6.9, §6.11, §7), this section and 9c's | — |
+| 9b.1 | Two persistent-section faults (a double Esc suspending, a jump cutting) and `isPlaying` on slot 0; `persistent.wfglog` | 9b.0 |
+| 9b.2 | Named inputs, the input tap and its meters, the interface's delays, `--input-wav`, the Inputs list | 9b.0 |
+| 9b.3 | Rack channels become tracks: their plugins, `channel.plugin`, `LiveInputPlugin`, the rack's children, Load now, the Rack tab | 9b.2 |
+| 9b.4 | The owner split (media → sound), then the `Mic` element, its rows, validation, the inspector and the page | 9b.3 |
+| 9b.5 | Mic cues sound: the claim and the wait, arm, launch, stop and its tail, kill, the live pushes, the latency words; `mic.wfglog`, the driver | 9b.4 |
+| 9b.6 | Mic cues in the show's structure: persistent, standby, the horizon, load-to-time, DCAs, the Load now refusal | 9b.5, 9b.1 |
+| 9b.7 | The hands and the window — the EQ, Send and FX pages, the chain at the foot, the running pane — M38–M40, close-out | 9b.6 |
 
-**Needs from the author:** the rest of the built-in plugin list; the rack's
-latency budget.
+**Done when:** a named input's meter moves; a mic cue through a real plugin on a rack channel is
+heard on the MADIface; the plugin's child killed mid-cue leaves it dry and saying so, the show going
+on; Esc lets its tail ring out and frees the channel for a waiting cue; a double Esc is silence at
+once and GO restores a persistent mic; the words match M39's loopback; CI green on all six jobs.
+
+**Still Phase 9b's and not in these stages:** the **shared rack channel** (a reverb return cues send
+into — a return track and Tracktion's aux sends) and a media cue's `Insert` made to sound; **inline
+hosting** (PRD §3.18's opt-in) with §3.4's message-thread handover; AU presets; AUv3; curated
+per-plugin parameter maps (the pages draft's §7.2) for the FX page, which takes a mic cue's inserts
+as it takes a media cue's (namespace §17.16); macOS audio workgroups for the child. *(LV2 left this
+list on 2026-09-26: built on every platform, with AU on macOS, the scan in the app and the
+mono→stereo widening on the voice inserts — namespace §17.15. The width classes are the rack
+channels' own, built in 9b.3.)*
+
+**Needs from the author:** the rest of the built-in plugin list; a loopback cable on the MADIface
+for M39; the D700 on the desk for 9b.7.
+
+### Phase 9c — Live sampling channels · M
+
+*Added on 2026-09-26* — the second half of the same request, *"live sampling channels that can take
+in an input, loop with continuously variable in and out points with pre-recording and
+post-looping/playback effects"*, not in the PRD until then (now §3.31). **Six decisions** of the
+author's (**BZ**, **CA**, **CB**, **CC**, **CD**, **CF**, `godot-namespace-draft-0.1.md` §19.1), one
+against the recommendation — layers with overdub rather than a single take — and four of the
+implementer's (CQ–CT). Built on 9b: a sampling channel is a rack channel with a recorder between its
+plugins.
+
+| Stage | What | Depends on |
+|---|---|---|
+| 9c.1 | The looper, pure: layers, crossfaded wraps and jumps, moving points, peaks; `LooperTests` under rtsan | 9b.0 |
+| 9c.2 | The recorder in the graph: `takeSeconds`, `layers`, a plugin's `side`, `LooperPlugin`, the take store outside the Edit, the memory in words | 9b.7, 9c.1 |
+| 9c.3 | The verbs: `take.*`, the transport verbs, `onGo`, `through`, the loop points' door, the D700's Rec; `take.wfglog`, the driver | 9c.2 |
+| 9c.4 | The take's picture at the foot: edges, playhead, layers, the buttons; the master dial on the points | 9c.3 |
+| 9c.5 | The Loop page on the D700 | 9c.3 |
+| 9c.6 | Keep, and Keep as cue | 9c.3 |
+| 9c.7 | M41–M44 and close-out | 9c.4, 9c.5, 9c.6 |
+
+**Done when:** a take recorded on a mic cue through a plugin before the recorder loops through a
+plugin after it; a layer laid and undone; the in and out points ridden on the D700's Loop page with
+no click; a transport cue records and loops it; Keep leaves a file a media cue loops; CI green.
+
+**Needs from the author:** the D700's Rec (and a Loop key, if it has one) pressed at the bench, and
+the page's law for a loop point.
 
 ---
 
