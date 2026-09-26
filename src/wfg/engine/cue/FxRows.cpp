@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/FxRows.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -72,10 +73,11 @@ namespace wfg::cue
     }
 
     //==============================================================================
-    doc::LiveWrite fxWriteFor (doc::ShowDocument& document, const plugin::CatalogueStore* catalogues)
+    doc::LiveWrite fxWriteFor (doc::ShowDocument& document, const plugin::CatalogueStore* catalogues,
+                               LiveEdits* live)
     {
-        return [&document, catalogues] (const std::string& address, const std::string& text,
-                                        const std::vector<osc::Value>& args) -> std::optional<Outcome>
+        return [&document, catalogues, live] (const std::string& address, const std::string& text,
+                                              const std::vector<osc::Value>& args) -> std::optional<Outcome>
         {
             const auto target = splitFx (address);
 
@@ -105,6 +107,23 @@ namespace wfg::cue
             }
 
             auto values = parseFxValues (fx.getProperty ("values").toString().toStdString());
+
+            if (live != nullptr && document.isLocked())
+            {
+                /*  RIDDEN LIVE: heard, written to nothing. The show's own value
+                    back again is no change. */
+                if (const auto saved = values.find (target->index);
+                    saved != values.end() && std::abs (saved->second - *parsed) < 1.0e-12)
+                    live->dropFxValue (target->id, target->index);
+                else
+                    live->setFxValue (target->id, target->index, *parsed);
+
+                return Outcome::ok (args);
+            }
+
+            if (live != nullptr)
+                live->dropFxValue (target->id, target->index);
+
             values[target->index] = *parsed;
 
             /*  Through the ordinary door: the lock, the transaction and the

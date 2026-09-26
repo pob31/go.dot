@@ -7624,7 +7624,8 @@ namespace
         {
             doc::registerDocumentCommands (engine.commands(), document, {},
                                            cue::eitherOf (cue::liveWriteFor (runs, dcas, document),
-                                                          cue::liveEditFor (live, document)),
+                                                          cue::eitherOf (cue::liveEditFor (live, document),
+                                                                         cue::fxWriteFor (document, nullptr, &live))),
                                            cue::liveSendFor (live, document));
             cue::registerCueCommands (engine.commands(), document, focus, &live);
             cue::registerLiveCommands (engine.commands(), document, live);
@@ -7890,6 +7891,110 @@ TEST_CASE ("live: under the lock a send rides live, a new one is made live, and 
         rig.lock (false);
         CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
                                                    osc::Value::string (rig.reverb) }).rejected == 1);
+    }
+}
+
+TEST_CASE ("live: under the lock a plugin's parameter rides live, heard on the next tick, kept as one step or let go")
+{
+    /*  The FX page's third decision (author, 2026-09-26): a turn on an
+        insert's parameter while the show is locked rides as an EQ turn does -
+        heard, written to nothing, no step of the history, kept or dropped
+        once unlocked. */
+    LiveRig rig;
+    const auto verb = rig.document.createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "", "");
+    REQUIRE (verb.ok);
+    const auto fx = rig.document.createFx (rig.mediaId, verb.id, "");
+    REQUIRE (fx.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/fx/" + fx.id + "/values", "0:0.25").ok);
+
+    const auto row = "/godot/fx/" + fx.id + "/values";
+    const auto p0 = "/godot/fx/" + fx.id + "/p0";
+    const auto p1 = "/godot/fx/" + fx.id + "/p1";
+
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+    rig.tickOnce();
+
+    /*  What the voice was last told a parameter is. */
+    const auto heard = [&rig, track] (int parameter) -> float
+    {
+        for (auto push = rig.audio.fxValues.rbegin(); push != rig.audio.fxValues.rend(); ++push)
+            if (push->track == track && push->slot == 0 && push->parameter == parameter)
+                return push->value;
+
+        return -2.0f;
+    };
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+
+    CHECK (rig.set (p0, osc::Value::float64 (0.75)).applied == 1);
+    CHECK (rig.set (p1, osc::Value::float64 (1.0)).applied == 1);
+    rig.tickOnce();
+
+    //  HEARD.
+    CHECK (heard (0) == doctest::Approx (0.75f));
+    CHECK (heard (1) == doctest::Approx (1.0f));
+
+    //  WRITTEN TO NOTHING, and counted with what else rides.
+    CHECK (rig.saved (row) == "0:0.25");
+    CHECK (rig.steps() == steps);
+    CHECK (rig.live.size() == 2u);
+    CHECK (rig.published ("/godot/document/live") == "2");
+
+    //  A bad value is refused as the show would refuse it.
+    CHECK (rig.set (p0, osc::Value::float64 (1.5)).rejected == 1);
+    CHECK (rig.set ("/godot/fx/FX0NOPE0/p0", osc::Value::float64 (0.5)).rejected == 1);
+
+    SUBCASE ("turned back to what the show says, nothing rides there")
+    {
+        CHECK (rig.set (p0, osc::Value::float64 (0.25)).applied == 1);
+        rig.tickOnce();
+
+        CHECK (heard (0) == doctest::Approx (0.25f));
+        CHECK (rig.live.size() == 1u);
+    }
+
+    SUBCASE ("Keep is refused under the lock; unlocked it is one undo step, and nothing moves in the sound")
+    {
+        CHECK (rig.submitAndTick ("live.keep").rejected == 1);
+
+        rig.lock (false);
+        const auto pushes = rig.audio.fxValues.size();
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.saved (row) == "0:0.75 1:1");
+        CHECK (rig.live.empty());
+        CHECK (rig.steps() == steps + 1);
+        CHECK (rig.audio.fxValues.size() == pushes);
+
+        CHECK (rig.submitAndTick ("undo").applied == 1);
+        CHECK (rig.saved (row) == "0:0.25");
+    }
+
+    SUBCASE ("Discard puts the voice back to the show's value, and one the show never set back to the preset")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.live.empty());
+        CHECK (heard (0) == doctest::Approx (0.25f));
+        CHECK (heard (1) == doctest::Approx (-1.0f));
+        CHECK (rig.saved (row) == "0:0.25");
+        CHECK (rig.steps() == steps);
+    }
+
+    SUBCASE ("a write once unlocked is the show's, and lets go of what rode at that parameter only")
+    {
+        rig.lock (false);
+        CHECK (rig.set (p0, osc::Value::float64 (0.5)).applied == 1);
+
+        CHECK (rig.saved (row) == "0:0.5");
+        CHECK (rig.live.size() == 1u);
+        CHECK (rig.steps() == steps + 1);
     }
 }
 

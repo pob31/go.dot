@@ -17,7 +17,8 @@
 #pragma once
 
 /*
-    A CUE'S EQ AND SENDS, RIDDEN WHILE THE SHOW IS LOCKED (author, 2026-09-25).
+    A CUE'S EQ AND SENDS, RIDDEN WHILE THE SHOW IS LOCKED (author, 2026-09-25) -
+    AND ITS PLUGINS' PARAMETERS (2026-09-26, the FX page: "ride live, like EQ").
 
     The lock refuses every edit to the show, and a cue's EQ and its send levels
     are saved in the cue. The author decided that under the lock they are
@@ -94,10 +95,15 @@ namespace wfg::cue
         /** Whether a send made live already goes from this cue to this bus. */
         bool sendsInto (const std::string& cueId, const std::string& busId) const;
 
+        /*  A CUE'S INSERT'S PARAMETERS RIDING LIVE (2026-09-26): index to value,
+            normalised as the insert's p<n> takes it; null when none rides. */
+        const std::map<int, double>* fxValuesOf (const std::string& fxId) const;
+
         /*  HOW MANY CHANGES ARE RIDING LIVE, as the window's bar counts them:
-            a row, a send's level, a send's switch, a send made live. */
+            a row, a send's level, a send's switch, a send made live, a
+            plugin's parameter. */
         std::size_t size() const noexcept;
-        bool empty() const noexcept { return rows.empty() && sends.empty(); }
+        bool empty() const noexcept { return rows.empty() && sends.empty() && fx.empty(); }
 
         /** Moves on every change, so a reader can tell it has something new. */
         std::uint64_t revision() const noexcept { return rev; }
@@ -109,14 +115,18 @@ namespace wfg::cue
         void dropSendValue (const std::string& sendId, const std::string& row);
         void createSend (const std::string& sendId, const std::string& cueId, const std::string& busId,
                          std::string level);
+        void setFxValue (const std::string& fxId, int index, double value);
+        void dropFxValue (const std::string& fxId, int index);
         void clear();
 
         const std::map<std::string, std::map<std::string, std::string>>& allRows() const noexcept { return rows; }
         const std::map<std::string, Send>& allSends() const noexcept { return sends; }
+        const std::map<std::string, std::map<int, double>>& allFx() const noexcept { return fx; }
 
     private:
         std::map<std::string, std::map<std::string, std::string>> rows;
         std::map<std::string, Send> sends;
+        std::map<std::string, std::map<int, double>> fx;
         std::uint64_t rev = 1;
     };
 

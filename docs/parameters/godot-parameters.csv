@@ -295,6 +295,7 @@ fx,cue,s,r,,,,state,50,no,park,none,,"The cue this insert belongs to, derived. A
 fx,name,s,r,,,,state,50,no,park,none,,"The plugin-s name, read off the set entry, so a page can say which insert it is on without a second lookup."
 fx,index,i,r,0,0..,,state,50,no,park,none,,"Where the plugin sits in the chain, from nought: its position in plugins/order, which is the order every voice processes in, whatever order this cue-s Fx children sit in."
 fx,problem,s,r,,,,state,5,no,park,none,,"Why this insert, switched in, plays its cue dry, in one sentence - the cue wider than the plugin takes, or the plugin would give it back narrower - and empty when it takes the cue (2026-09-26). Never half the cue wet and half dry."
+fx,live,s,r,,,,state,50,no,park,none,,"The parameters a locked show is riding live on this insert, by index, space-separated, empty when none is (2026-09-26, the FX page). As media/live: heard at once, written to nothing, until the show is unlocked and somebody keeps or discards them. The values row and the p<n> nodes publish the values heard."
 insert,channel,s,rw,,,,state,50,no,park,show,rackChannel,"The rack channel this cue processes through. In Phase 4 the claim is bookkeeping and changes no sound: the pool and its claims are this phase-s, and the tracks, the sends and the plugins inside a channel are Phase 9-s (PRD 3.18)."
 insert,shared,T,rw,false,,,state,50,no,park,show,,"As feed/shared, for an exclusive channel two cues are meant to share."
 insert,cue,s,r,,,,state,50,no,park,none,,"The cue this insert belongs to, derived. As feed/cue."

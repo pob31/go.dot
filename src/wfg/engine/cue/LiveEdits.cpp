@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/LiveEdits.h>
+#include <wfg/engine/cue/FxRows.h>
 
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -187,7 +188,35 @@ namespace wfg::cue
         for (const auto& [id, send] : sends)
             count += send.created ? 1u : (send.level.has_value() ? 1u : 0u) + (send.on.has_value() ? 1u : 0u);
 
+        for (const auto& [id, values] : fx)
+            count += values.size();
+
         return count;
+    }
+
+    const std::map<int, double>* LiveEdits::fxValuesOf (const std::string& fxId) const
+    {
+        const auto found = fx.find (fxId);
+        return found != fx.end() ? &found->second : nullptr;
+    }
+
+    void LiveEdits::setFxValue (const std::string& fxId, int index, double value)
+    {
+        fx[fxId][index] = value;
+        ++rev;
+    }
+
+    void LiveEdits::dropFxValue (const std::string& fxId, int index)
+    {
+        const auto insert = fx.find (fxId);
+
+        if (insert == fx.end() || insert->second.erase (index) == 0)
+            return;
+
+        if (insert->second.empty())
+            fx.erase (insert);
+
+        ++rev;
     }
 
     void LiveEdits::setRow (const std::string& cueId, const std::string& row, std::string text)
@@ -258,6 +287,7 @@ namespace wfg::cue
 
         rows.clear();
         sends.clear();
+        fx.clear();
         ++rev;
     }
 
@@ -435,6 +465,10 @@ namespace wfg::cue
         if (commandName != "node.set" || args.empty() || ! args[0].isString())
             return false;
 
+        //  A plugin's parameter rides live under the lock too (2026-09-26).
+        if (isFxParameterAddress (args[0].getString()))
+            return document.isLocked();
+
         const auto parts = partsOf (args[0].getString());
 
         if (! parts.has_value())
@@ -462,7 +496,7 @@ namespace wfg::cue
             since been given a send into that bus, that one takes the values. A
             cue or a bus deleted since is skipped. */
         registry.add ({ "live.keep",
-                        "Writes the EQ and send changes ridden live while the show was locked into"
+                        "Writes the EQ, send and plugin changes ridden live while the show was locked into"
                         " the show, as one undo step. Refused while the show is locked.",
                         {},
                         true,
@@ -521,6 +555,24 @@ namespace wfg::cue
                                     document.setAttribute ("/godot/send/" + target + "/on", *send.on);
                             }
 
+                            /*  A PLUGIN'S PARAMETERS (2026-09-26): merged into
+                                the insert's values row, as the p<n> door writes
+                                them; an insert deleted since is skipped. */
+                            for (const auto& [fxId, riding] : live.allFx())
+                            {
+                                const auto insert = document.findById (fxId);
+
+                                if (! insert.isValid() || ! insert.hasType ("Fx"))
+                                    continue;
+
+                                auto values = parseFxValues (insert.getProperty ("values").toString().toStdString());
+
+                                for (const auto& [index, value] : riding)
+                                    values[index] = value;
+
+                                document.setAttribute ("/godot/fx/" + fxId + "/values", formatFxValues (values));
+                            }
+
                             live.clear();
                             return Outcome::ok (args);
                         } });
@@ -529,7 +581,7 @@ namespace wfg::cue
             says - letting go of a live change is never an edit. The
             identifiers the sends made live had reserved are given back. */
         registry.add ({ "live.drop",
-                        "Lets go of the EQ and send changes ridden live while the show was locked,"
+                        "Lets go of the EQ, send and plugin changes ridden live while the show was locked,"
                         " so every cue sounds as it is saved.",
                         {},
                         true,

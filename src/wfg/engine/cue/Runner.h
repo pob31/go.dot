@@ -1330,6 +1330,7 @@ namespace wfg::cue
             it takes, which can change how wide a sounding cue is. */
         std::uint64_t routingPluginRevision = 0;
         std::uint64_t fxPluginRevision = 0;
+        std::uint64_t fxLiveRevision = 0;
 
         /*  THE PERSISTENT ASSERTION (§3.29, §13.11): after every applied
             trigger, what the section declares is checked against what is

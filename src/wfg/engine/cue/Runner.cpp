@@ -6915,7 +6915,15 @@ namespace wfg::cue
                 setting.stateFile = schema.text (child, "fx", "stateFile");
                 setting.statePath = statePathOf (setting.stateFile);
 
-                for (const auto& [index, value] : parseFxValues (schema.text (child, "fx", "values")))
+                /*  And what rides live over them, under the lock (2026-09-26). */
+                auto values = parseFxValues (schema.text (child, "fx", "values"));
+
+                if (liveLayer != nullptr)
+                    if (const auto* riding = liveLayer->fxValuesOf (setting.fxId))
+                        for (const auto& [index, value] : *riding)
+                            values[index] = value;
+
+                for (const auto& [index, value] : values)
                     setting.values.emplace_back (index, static_cast<float> (value));
 
                 break;
@@ -6956,12 +6964,14 @@ namespace wfg::cue
 
         const auto revision = document.showRevision();
         const auto plugins = pluginTable != nullptr ? pluginTable->revision() : 0;
+        const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
 
-        if (revision == fxRevision && plugins == fxPluginRevision)
+        if (revision == fxRevision && plugins == fxPluginRevision && layer == fxLiveRevision)
             return;
 
         fxRevision = revision;
         fxPluginRevision = plugins;
+        fxLiveRevision = layer;
 
         for (const auto& snapshot : runs.all())
         {

@@ -687,7 +687,7 @@ namespace
                     document that cannot hold it. */
                 wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
                                     wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
-                                                        wfg::cue::fxWriteFor (document, nullptr))),
+                                                        wfg::cue::fxWriteFor (document, nullptr, &liveEdits))),
                 wfg::cue::liveSendFor (liveEdits, document));
 
             wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
@@ -2635,10 +2635,11 @@ namespace
                 as one: a live row is answered first, in front of the
                 document; an FX parameter through it. */
             /*  AND UNDER THE LOCK, A CUE'S EQ AND SENDS, ridden live in front
-                of the document that would refuse them (2026-09-25). */
+                of the document that would refuse them (2026-09-25) - and its
+                plugins' parameters, held by the FX door (2026-09-26). */
             wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
                                 wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
-                                                    wfg::cue::fxWriteFor (document, &catalogues))),
+                                                    wfg::cue::fxWriteFor (document, &catalogues, &liveEdits))),
             wfg::cue::liveSendFor (liveEdits, document));
 
         wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);

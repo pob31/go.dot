@@ -34,6 +34,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/FxRows.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
@@ -74,15 +75,20 @@ namespace
         {
             engine.log().openInMemory ({});
             doc::registerDocumentCommands (engine.commands(), document, {},
-                                           cue::fxWriteFor (document, &store));
+                                           cue::fxWriteFor (document, &store, &live));
+            cue::registerLiveCommands (engine.commands(), document, live);
             engine.setBeforeApply ([this] (const Command& appliedCommand, const Event& submitted,
                                            const std::vector<osc::Value>& coerced,
                                            std::int64_t tickIndex)
                                    {
+                                       if (cue::isLiveEdit (appliedCommand.name, coerced, document, live))
+                                           return;
+
                                        document.beginTransaction (appliedCommand.name, tickIndex,
                                                                   submitted.origin, coerced);
                                    });
             parameters.setCatalogues (&store);
+            parameters.setLiveEdits (&live);
 
             REQUIRE (apply ("list.create", { osc::Value::string ("Main") }).applied == 1);
             listId = lastApplied().back();
@@ -145,6 +151,7 @@ namespace
         plugin::CatalogueStore store { folder.path() };
         Engine engine;
         doc::ShowDocument document;
+        cue::LiveEdits live;
         tree::MountTable mounts;
         cue::RunTable runs;
         tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
@@ -257,6 +264,45 @@ TEST_CASE ("fx door: with no catalogue for the plugin any index is accepted, whi
     /*  No catalogue, no nodes to name it by - and the row still says it. */
     CHECK (rig.at ("/godot/fx/" + verbFx + "/values") == "57:0.75");
     CHECK (rig.at ("/godot/fx/" + verbFx + "/p57") == "");
+}
+
+TEST_CASE ("fx door: under the lock a write rides live - the tree shows it and the plugin's text for it, the row keeps the show's")
+{
+    /*  2026-09-26, the FX page: what a client reads at p<n> is what is
+        heard, and so is the row - as an EQ row is - while the show still
+        says what it said. `live` names what rides. */
+    Rig rig;
+    REQUIRE (rig.set (rig.fxAddress ("p0"), "0.25").applied == 1);
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+
+    CHECK (rig.at (rig.fxAddress ("live")) == "");
+    CHECK (rig.set (rig.fxAddress ("p0"), "0.5", "surface:PORTBNK1").applied == 1);
+    CHECK (rig.values() == "0:0.25");
+    CHECK (rig.at (rig.fxAddress ("values")) == "0:0.5");
+    CHECK (rig.at (rig.fxAddress ("p0")) == "0.5");
+    CHECK (rig.at (rig.fxAddress ("t0")) == "-6.0 dB");
+    CHECK (rig.at (rig.fxAddress ("live")) == "0");
+    CHECK (rig.at ("/godot/document/live") == "1");
+
+    /*  A parameter the catalogue says the plugin does not have is refused
+        under the lock as well. */
+    CHECK (rig.set (rig.fxAddress ("p2"), "0.5").applied == 0);
+
+    /*  Kept once unlocked: the row says it, nothing rides. */
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "false").ok);
+    CHECK (rig.apply ("live.keep").applied == 1);
+    CHECK (rig.values() == "0:0.5");
+    CHECK (rig.at (rig.fxAddress ("p0")) == "0.5");
+    CHECK (rig.at (rig.fxAddress ("live")) == "");
+    CHECK (rig.at ("/godot/document/live") == "0");
+
+    /*  And an insert deleted while its value rode is skipped by Keep. */
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    CHECK (rig.set (rig.fxAddress ("p1"), "1").applied == 1);
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "false").ok);
+    REQUIRE (rig.apply ("object.delete", { osc::Value::string (rig.fxId) }).applied == 1);
+    CHECK (rig.apply ("live.keep").applied == 1);
+    CHECK (rig.live.empty());
 }
 
 TEST_CASE ("fx door: a turn on one parameter is one undo step; two parameters are two; two hands are two")

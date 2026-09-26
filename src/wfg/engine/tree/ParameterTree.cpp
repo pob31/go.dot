@@ -455,7 +455,8 @@ namespace wfg::tree
         }
 
         /*  One insert of one media cue, at an address of its own (Phase 9a). */
-        void collectFx (const juce::ValueTree& fx, const std::string& cueId, std::vector<Node>& out)
+        void collectFx (const juce::ValueTree& fx, const std::string& cueId, std::vector<Node>& out,
+                        const cue::LiveEdits* live)
         {
             const auto fxId = fx[idProperty].toString().toStdString();
 
@@ -464,6 +465,11 @@ namespace wfg::tree
 
             const auto entry = setEntryFor (fx, fx["plugin"].toString().toStdString());
             const auto base = std::string (godot) + "/fx/" + fxId;
+
+            /*  WHAT A LOCKED SHOW IS RIDING on this insert (2026-09-26, the FX
+                page): the row publishes the values heard, as a cue's EQ rows
+                do, so the plugin's own window and the panel follow a turn. */
+            const auto* riding = live != nullptr ? live->fxValuesOf (fxId) : nullptr;
 
             for (const auto* row : doc::Schema::rowsForOwner ("fx"))
             {
@@ -485,6 +491,21 @@ namespace wfg::tree
 
                     if (at != slots.end())
                         text = chain.steps[static_cast<std::size_t> (at - slots.begin())].dryWhy;
+                }
+                else if (name == "live")
+                {
+                    if (riding != nullptr)
+                        for (const auto& [index, value] : *riding)
+                            text += (text.empty() ? "" : " ") + std::to_string (index);
+                }
+                else if (name == "values" && riding != nullptr)
+                {
+                    auto values = cue::parseFxValues (storedText (attribute, fx));
+
+                    for (const auto& [index, value] : *riding)
+                        values[index] = value;
+
+                    text = cue::formatFxValues (values);
                 }
                 else                      text = storedText (attribute, fx);
 
@@ -1042,7 +1063,7 @@ namespace wfg::tree
                     catalogue and this walk has no reach to it. */
                 if (childElement == "Fx")
                 {
-                    collectFx (child, id, out);
+                    collectFx (child, id, out, live);
                     continue;
                 }
 
@@ -2002,8 +2023,16 @@ namespace wfg::tree
                     if (catalogue == nullptr)
                         return;
 
-                    const auto stored = cue::parseFxValues (element["values"].toString().toStdString());
+                    auto stored = cue::parseFxValues (element["values"].toString().toStdString());
                     const auto base = std::string (godot) + "/fx/" + fxId + "/";
+
+                    /*  WHAT RIDES LIVE OVER THEM, under the lock (2026-09-26): at
+                        the address the saved value is published at, as an EQ
+                        row's is. */
+                    if (liveEdits != nullptr)
+                        if (const auto* riding = liveEdits->fxValuesOf (fxId))
+                            for (const auto& [index, value] : *riding)
+                                stored[index] = value;
 
                     for (std::size_t n = 0; n < catalogue->params.size(); ++n)
                     {
