@@ -1,0 +1,46 @@
+# wfg-log 1
+# fixture take - a take on a sampling channel: recorded and looped by transport cues,
+# its points ridden, a layer laid and undone, held by Esc, looped again by a later mic
+# cue, cleared, and a double Esc (namespace draft 19.3 and 19.6, 2026-09-27).
+#
+# WHAT IT IS FOR: that a take's life replays from the document and the log alone, with
+# no interface and no recorder. The standby arm claims Looper for the mic cue "Loop
+# voice", whose GO leaves the take waiting (onGo wait). The transport cues Rec and Loop
+# it press the take through their GOs - no record of their own - and the recorder's
+# close comes back three ticks later as take.closed, in seconds, which is the audio
+# side's word, re-injected. The loop points are the channel's session rows, set through
+# the tree's door; the layer and its undo are take.overdub, take.loop and take.undo.
+# Esc lets go of the channel and the take is held; GO on "Scene 5 loop" (onGo loop)
+# takes the channel and loops the take it found; take.clear empties it and a double Esc
+# ends the run. Recorded from a real `wfg serve --hosted --input-wav` of a copy of
+# tests/fixtures/bundles/take fed a steady level at its first input, driven over OSC by
+# tests/blackbox/phase9c_take.py --keep-log.
+# bundle take sha256:4804455ab4d41acd12321e31733699ce7f89eb5c2269225807171501b172af4e
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+A 0 0 engine audio.editBuilt s:"hosted" i:2 i:2 i:76
+A 0 1 engine audio.arm s:"TK000002" s:"8D337PWG"
+A 1 2 engine audio.armed s:"8D337PWG" i:2
+A 6 3 udp:127.0.0.1:50064 go s:"8D337PWG"
+A 7 4 engine run.started s:"8D337PWG"
+A 7 5 engine node.set s:"/godot/audio/patchSettled" T
+A 52 6 udp:127.0.0.1:60443 go s:"JX1903XX"
+A 53 7 engine run.ended s:"JX1903XX"
+A 152 8 udp:127.0.0.1:60444 go s:"F144Y0DX"
+A 153 9 engine run.ended s:"F144Y0DX"
+A 153 10 engine audio.arm s:"TK000008" s:"T3B50QQ2"
+A 155 11 engine take.closed s:"TK000011" d:2.018666666666667 s:"pressed"
+A 253 12 udp:127.0.0.1:57494 node.set s:"/godot/slot/TK000011/loopIn" f:0.1
+A 253 13 udp:127.0.0.1:57495 node.set s:"/godot/slot/TK000011/loopOut" f:0.4
+A 259 14 udp:127.0.0.1:57496 take.overdub s:"TK000011"
+A 303 15 udp:127.0.0.1:57497 take.loop s:"TK000011"
+A 403 16 udp:127.0.0.1:57498 take.undo s:"TK000011"
+A 504 17 udp:127.0.0.1:60140 run.stopAll
+A 505 18 engine run.ended s:"T3B50QQ2"
+A 519 19 engine run.ended s:"8D337PWG"
+A 553 20 udp:127.0.0.1:60141 go s:"TM7M5W1D"
+A 554 21 engine audio.armed s:"TM7M5W1D" i:2
+A 555 22 engine run.started s:"TM7M5W1D"
+A 555 23 engine run.late s:"TM7M5W1D" i:7
+A 653 24 udp:127.0.0.1:60142 take.clear s:"TK000011"
+A 655 25 udp:127.0.0.1:60143 run.killAll
+A 657 26 engine run.ended s:"TM7M5W1D"

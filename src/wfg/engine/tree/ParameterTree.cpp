@@ -15,6 +15,8 @@
 */
 
 #include <wfg/engine/tree/ParameterTree.h>
+
+#include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/ShowWalk.h>
@@ -683,6 +685,12 @@ namespace wfg::tree
                 if (name == "holder" || name == "pending")
                     continue;
 
+                /*  A TAKE'S PLAYHEAD (Phase 9c), the same way: it moves every
+                    block while the loop plays and nothing about the show
+                    does. The runtime half emits it. */
+                if (name == "playhead")
+                    continue;
+
                 /*  A STRIP'S LIVE ROWS, for the same reason (Phase 6): what it
                     is riding, the word its display shows and the cue on it
                     change with every press and every handover while nothing
@@ -1307,6 +1315,7 @@ namespace wfg::tree
             section, then the rack's channels. Gathered while the containers are
             walked rather than by a second traversal. */
         std::vector<std::string> slotOrder;
+        std::vector<std::string> rackOrder;
 
         /*  And every cue, for the same reason and out of the same walk: the
             runtime half publishes `prepare` against it. See
@@ -1895,12 +1904,31 @@ namespace wfg::tree
                             chain["takeProblem"] = built.problem;
                         }
 
+                        /*  WHAT THE TAKE IS DOING, off the account the take verbs
+                            and the log move (9c.3): a thing it refused or did
+                            by itself tonight says more than what a rebuild did. */
+                        if (takes != nullptr)
+                        {
+                            const auto& take = takes->of (channel[idProperty].toString().toStdString());
+                            chain["take"] = take.state;
+                            chain["takeLength"] = osc::formatDouble (take.length);
+                            chain["takeLayers"] = std::to_string (take.layers);
+                            chain["loopIn"] = osc::formatDouble (take.loopIn);
+                            chain["loopOut"] = osc::formatDouble (take.loopOut);
+
+                            if (! take.problem.empty())
+                                chain["takeProblem"] = take.problem;
+                        }
+
                         collectSlot (channel, "Channel", "rackChannel", "rackChannel",
                                      analysis, nodes, &chain);
 
                         if (const auto channelId = channel[idProperty].toString().toStdString();
                             ! channelId.empty())
+                        {
                             slotOrder.push_back (channelId);
+                            rackOrder.push_back (channelId);
+                        }
                     }
                 }
 
@@ -2181,6 +2209,7 @@ namespace wfg::tree
                 running and not being edited means for ever. Same reason
                 `/godot/audio/status` is not published here either. */
             declaredSlots = slotOrder;
+            declaredRackChannels = rackOrder;
         }
 
         declaredCues = std::move (cueOrder);
@@ -3024,6 +3053,17 @@ namespace wfg::tree
                 runtime.push_back (makeLeaf (base + "/" + name, *row, text));
             }
         }
+
+        /*  WHERE EACH RACK CHANNEL'S LOOP IS PLAYING (Phase 9c): off the
+            account, which the Runner's hook sets from the audio side a tick at
+            a time - so every publish, as `holder` is. A replay has no audio
+            and reads nought. */
+        if (const auto* playheadRow = rowNamed ("rackChannel", "playhead"))
+            for (const auto& channelId : declaredRackChannels)
+                runtime.push_back (makeLeaf (std::string (godot) + "/slot/" + channelId + "/playhead",
+                                             *playheadRow,
+                                             osc::formatDouble (takes != nullptr ? takes->of (channelId).playhead
+                                                                                 : 0.0)));
 
         for (const auto* row : doc::Schema::rowsForOwner ("runs"))
             runtime.push_back (makeLeaf (std::string (godot) + "/run/" + std::string (row->name),

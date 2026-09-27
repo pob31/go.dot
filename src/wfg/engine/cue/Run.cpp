@@ -197,18 +197,19 @@ namespace wfg::cue
                 in the order the log made them and a replay hands it to the same
                 one. */
             const auto waiting = waitersFor (slotId);
+            std::string nextId;
 
-            if (waiting.empty())
-                continue;
+            if (! waiting.empty())
+                if (auto* next = find (waiting.front()->id))
+                {
+                    next->pending.erase (std::remove (next->pending.begin(), next->pending.end(), slotId),
+                                         next->pending.end());
+                    next->claims.push_back (slotId);
+                    nextId = next->id;
+                }
 
-            auto* next = find (waiting.front()->id);
-
-            if (next == nullptr)
-                continue;
-
-            next->pending.erase (std::remove (next->pending.begin(), next->pending.end(), slotId),
-                                 next->pending.end());
-            next->claims.push_back (slotId);
+            if (onRelease)
+                onRelease (slotId, runId, nextId);
         }
     }
 }

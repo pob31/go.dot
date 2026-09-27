@@ -177,6 +177,9 @@ namespace wfg::audio
             Kind kind = Kind::closed;
             std::int64_t at = 0;
             std::int64_t length = 0;
+
+            /** What a closed take went into: looping, or held when its cue let go. */
+            TakeState into = TakeState::looping;
         };
 
         /** The next event, oldest first; one consumer. */
@@ -222,7 +225,8 @@ namespace wfg::audio
         void empty() noexcept;
         void setPoints (std::int64_t in, std::int64_t out) noexcept;
         bool isBusy() const noexcept;
-        void tell (Event::Kind, std::int64_t sample, std::int64_t samples) noexcept;
+        void tell (Event::Kind, std::int64_t sample, std::int64_t samples,
+                   TakeState into = TakeState::looping) noexcept;
         void publish() noexcept;
 
         //======================================================================

@@ -1089,6 +1089,16 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="onGo">
+          <a:documentation>On a sampling channel (Phase 9c, decision CF): what GO does with a take the channel already holds. wait leaves it silent until Rec or Loop - the default, which makes no sound nobody asked for; loop plays it from the in point, and with no take waits for Rec; clear empties the channel for a fresh take. A later cue on the channel finding the take of an earlier one is how scene 5 brings back the loop of scene 2.</a:documentation>
+          <choice>
+            <value>wait</value>
+            <value>loop</value>
+            <value>clear</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="postWait">
           <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
           <data type="double">
@@ -1128,6 +1138,15 @@
       <optional>
         <attribute name="stereoToMono">
           <a:documentation>Fold a two-channel file to one before it is routed, each side at half, so a stereo recording can play out of a mono direct out. Ignored unless channels is 2: a fold is a statement about a stereo file, and applying it to a mono or a six-channel one would mean inventing a rule nobody asked for. PRD 3.18 leaves stereo-to-mono out of the RACK classes deliberately; this is the cue output stage, where the coefficients are the cue-s own and a fold costs nothing.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="through">
+          <a:documentation>On a sampling channel (Phase 9c, namespace draft 19.3): whether the channel sounds its input as well as its loop, while it records and while it loops. Off by default: the voice being sampled is usually heard through the desk already, and would otherwise double.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>
@@ -1523,13 +1542,17 @@
       </optional>
       <optional>
         <attribute name="verb">
-          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary.</a:documentation>
+          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary. record, loop, overdub and clear are not stops at all (Phase 9c, namespace draft 19.6): aimed at a sounding mic cue on a sampling channel they are the press of that name on its take - Rec, Loop, a layer begun or closed, the channel emptied - and against anything else they are applied and do nothing, as a stop aimed at a cue that is not running is.</a:documentation>
           <choice>
             <value>hard</value>
             <value>fade</value>
             <value>afterMember</value>
             <value>afterIteration</value>
             <value>advance</value>
+            <value>record</value>
+            <value>loop</value>
+            <value>overdub</value>
+            <value>clear</value>
           </choice>
         </attribute>
       </optional>

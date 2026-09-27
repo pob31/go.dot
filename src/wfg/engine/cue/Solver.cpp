@@ -522,7 +522,8 @@ namespace wfg::cue
             if (entry.row > target->row)
                 break;
 
-            if (entry.element == "Transport" && read.flag (entry.node, "cue", "enabled"))
+            if (entry.element == "Transport" && read.flag (entry.node, "cue", "enabled")
+                  && ! isTakePress (read, entry.node))
                 stopped.push_back (read.text (entry.node, "transport", "target"));
         }
 
@@ -686,7 +687,7 @@ namespace wfg::cue
             {
                 const auto targetCue = read.text (entry->node, "transport", "target");
 
-                if (! targetCue.empty())
+                if (! targetCue.empty() && ! isTakePress (read, entry->node))
                 {
                     stopped.push_back (targetCue);
                     unplan (targetCue);
@@ -889,7 +890,7 @@ namespace wfg::cue
 
         for (const auto& entry : walk.placed)
             if (entry.row < standbyRow && entry.element == "Transport"
-                 && read.flag (entry.node, "cue", "enabled"))
+                 && read.flag (entry.node, "cue", "enabled") && ! isTakePress (read, entry.node))
                 stopped.push_back (read.text (entry.node, "transport", "target"));
 
         for (const auto& cue : section)

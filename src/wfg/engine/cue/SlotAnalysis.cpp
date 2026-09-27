@@ -165,7 +165,7 @@ namespace wfg::cue
 
             ids[static_cast<std::size_t> (entry.row)] = entry.id;
 
-            if (entry.element == "Transport")
+            if (entry.element == "Transport" && ! isTakePress (read, entry.node))
             {
                 const auto target = read.text (entry.node, "transport", "target");
 

@@ -2463,8 +2463,9 @@ TEST_CASE ("sampling: a take recorded through the plugin before the recorder loo
     REQUIRE (host.buildEdit (spec));
     CHECK (host.inspectNodeIds().ok());
 
-    auto* take = host.takeOf ("SM000001");
+    auto take = host.takeOf ("SM000001");
     REQUIRE (take != nullptr);
+    CHECK (host.takeOfTrack (host.rackTrackOf ("SM000001")) == take);
     CHECK (take->capacity() == 48000);
     CHECK (table.builtTakeOf ("SM000001").bytes == take->bytes());
     CHECK (table.builtTakeOf ("SM000001").layers == 2);
@@ -2565,7 +2566,7 @@ TEST_CASE ("sampling: a take recorded through the plugin before the recorder loo
     spec.rack[0].takeSeconds = 2.0;
     REQUIRE (host.buildEdit (spec));
 
-    auto* longer = host.takeOf ("SM000001");
+    auto longer = host.takeOf ("SM000001");
     REQUIRE (longer != nullptr);
     CHECK (longer->capacity() == 96000);
     CHECK (longer->state() == audio::TakeState::empty);

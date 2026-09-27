@@ -136,7 +136,7 @@ namespace wfg::audio
         return true;
     }
 
-    void Looper::tell (Event::Kind kind, std::int64_t sample, std::int64_t samples) noexcept
+    void Looper::tell (Event::Kind kind, std::int64_t sample, std::int64_t samples, TakeState into) noexcept
     {
         const auto tail = outboxTail.load (std::memory_order_relaxed);
 
@@ -144,7 +144,7 @@ namespace wfg::audio
         if (tail - outboxHead.load (std::memory_order_acquire) >= static_cast<std::uint32_t> (outboxSize))
             return;
 
-        outbox[tail % static_cast<std::uint32_t> (outboxSize)] = Event { kind, sample, samples };
+        outbox[tail % static_cast<std::uint32_t> (outboxSize)] = Event { kind, sample, samples, into };
         outboxTail.store (tail + 1, std::memory_order_release);
     }
 
@@ -395,7 +395,7 @@ namespace wfg::audio
         postRoll = fade;
         postRollAt = takeLength;
 
-        tell (full ? Event::Kind::full : Event::Kind::closed, sample, takeLength);
+        tell (full ? Event::Kind::full : Event::Kind::closed, sample, takeLength, into);
 
         if (into == TakeState::looping)
         {

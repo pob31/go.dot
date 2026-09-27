@@ -266,9 +266,14 @@ namespace wfg::audio
             recorder, which the host keeps beside the Edit so that a rebuilt
             graph - a media arm, Load now, another interface - finds the take it
             had while the channel's shape holds. Null for a channel with no
-            recorder or none by that id. One thread posts to it; the host alone
-            prepares it, in buildEdit. */
-        Looper* takeOf (const std::string& channelId) noexcept;
+            recorder or none by that id; by a rack track's index as well, for a
+            stop that knows only the track. Shared, and under a lock of its own,
+            because the tick thread posts to it while Load now may be setting
+            takes aside on the message thread: a take let go of lives on until
+            the last press aimed at it has gone. One thread posts to it; the
+            host alone prepares it, in buildEdit. */
+        std::shared_ptr<Looper> takeOf (const std::string& channelId);
+        std::shared_ptr<Looper> takeOfTrack (int trackIndex);
 
         /*  THE RACK CHANNEL'S INPUT STAGE (Phase 9b, namespace draft §18.4):
             which logical input it takes and how many, and its gate - opened at

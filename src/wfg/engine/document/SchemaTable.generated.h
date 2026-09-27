@@ -40,10 +40,11 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_media_secondPress[] = { "restart", "noop", "stop" };
     inline constexpr std::string_view enum_sound_eqB1Shape[] = { "peak", "lowShelf" };
     inline constexpr std::string_view enum_sound_eqB4Shape[] = { "peak", "highShelf" };
+    inline constexpr std::string_view enum_mic_onGo[] = { "wait", "loop", "clear" };
     inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock" };
     inline constexpr std::string_view enum_trigger_type[] = { "noteOn", "noteOff", "programChange", "controlChange" };
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
-    inline constexpr std::string_view enum_transport_verb[] = { "hard", "fade", "afterMember", "afterIteration", "advance" };
+    inline constexpr std::string_view enum_transport_verb[] = { "hard", "fade", "afterMember", "afterIteration", "advance", "record", "loop", "overdub", "clear" };
     inline constexpr std::string_view enum_transport_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
     inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
@@ -65,6 +66,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_slot_kind[] = { "processorInput", "rackChannel", "strip" };
     inline constexpr std::string_view enum_rackChannel_class[] = { "mono", "monoToStereo", "stereo" };
     inline constexpr std::string_view enum_rackChannel_access[] = { "exclusive", "shared" };
+    inline constexpr std::string_view enum_rackChannel_take[] = { "empty", "recording", "looping", "overdubbing", "held" };
     inline constexpr std::string_view enum_surface_profile[] = { "virtual", "mcu", "d700", "midiPads" };
     inline constexpr std::string_view enum_surface_page[] = { "show", "eq", "send", "fx" };
     inline constexpr std::string_view enum_strip_role[] = { "sampler", "dca" };
@@ -988,6 +990,22 @@ namespace wfg::doc::generated
           "s", 50.0, false, "park",
           "",
           "How long GO takes to bring it from silence to its level. Nought opens it at once, behind a click-free ramp (namespace draft 18.5)." },
+        { "mic", "onGo",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "wait",
+          false, 0.0, false, 0.0,
+          enum_mic_onGo, 3,
+          "", 50.0, false, "park",
+          "",
+          "On a sampling channel (Phase 9c, decision CF): what GO does with a take the channel already holds. wait leaves it silent until Rec or Loop - the default, which makes no sound nobody asked for; loop plays it from the in point, and with no take waits for Rec; clear empties the channel for a fresh take. A later cue on the channel finding the take of an earlier one is how scene 5 brings back the loop of scene 2." },
+        { "mic", "through",
+          ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show,
+          true, "false",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "On a sampling channel (Phase 9c, namespace draft 19.3): whether the channel sounds its input as well as its loop, while it records and while it loops. Off by default: the voice being sampled is usually heard through the desk already, and would otherwise double." },
         { "route", "bus",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",
@@ -1208,10 +1226,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "hard",
           false, 0.0, false, 0.0,
-          enum_transport_verb, 5,
+          enum_transport_verb, 9,
           "", 50.0, false, "park",
           "",
-          "How it stops. Hard stops now and takes Tracktion's own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary." },
+          "How it stops. Hard stops now and takes Tracktion's own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary. record, loop, overdub and clear are not stops at all (Phase 9c, namespace draft 19.6): aimed at a sounding mic cue on a sampling channel they are the press of that name on its take - Rec, Loop, a layer begun or closed, the channel emptied - and against anything else they are applied and do nothing, as a stop aimed at a cue that is not running is." },
         { "transport", "range",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",
@@ -2460,6 +2478,54 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "The last thing the take did by itself or refused, in a sentence - the take was cleared because the rate or its size changed at Load now. Empty when there is nothing to say." },
+        { "rackChannel", "take",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          true, "empty",
+          false, 0.0, false, 0.0,
+          enum_rackChannel_take, 5,
+          "", 5.0, false, "park",
+          "",
+          "What the take is doing, in a word (Phase 9c, namespace draft 19.3): empty; recording its first pass; looping; overdubbing, a layer being laid while it loops; or held, a take kept silent - its cue ended, or GO said wait. It moves with the take verbs and with what the audio thread reports, never with anything the channel happens to be sounding." },
+        { "rackChannel", "takeLength",
+          ValueType::number, 'd', false, Access::read, Kind::state, Persist::none,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "s", 5.0, false, "park",
+          "",
+          "How long the take is, in seconds, as the audio thread closed it - a Rec pressed, or the take reaching its longest. Nought while it records its first pass and when it is empty." },
+        { "rackChannel", "takeLayers",
+          ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
+          true, "0",
+          true, 0.0, true, 16.0,
+          nullptr, 0,
+          "", 5.0, false, "park",
+          "",
+          "How many layers lie on the take, the one being laid not counted. Undo takes the top one off, never the take." },
+        { "rackChannel", "playhead",
+          ValueType::number, 'd', false, Access::read, Kind::state, Persist::none,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "s", 20.0, false, "park",
+          "",
+          "Where the loop is playing, in seconds into the take - for the picture and the running pane, read off the audio side a tick at a time. Not in the log: a replay has no audio and reads nought." },
+        { "rackChannel", "loopIn",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::none,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "s", 50.0, false, "park",
+          "",
+          "Where the loop starts, in seconds into the take (decision CQ): tonight's, never the show's, answered in front of the document by the take's door, logged as the node.set it is, never a step of the history and allowed under the lock. Kept inside the take and at least two crossfades before the out point; set to the take's start each time a take closes. The loop plays on through every move." },
+        { "rackChannel", "loopOut",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::none,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "s", 50.0, false, "park",
+          "",
+          "Where the loop ends and wraps to the in point, crossfaded, in seconds into the take - the in point's partner, by the same door and the same rules; set to the take's end each time a take closes." },
         { "feed", "slot",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",

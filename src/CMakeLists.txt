@@ -107,6 +107,10 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/DcaTable.h
     wfg/engine/cue/LiveRows.h
     wfg/engine/cue/LiveRows.cpp
+    wfg/engine/cue/TakeTable.h
+    wfg/engine/cue/TakeTable.cpp
+    wfg/engine/cue/TakeCommands.h
+    wfg/engine/cue/TakeCommands.cpp
     wfg/engine/cue/LiveEdits.h
     wfg/engine/cue/LiveEdits.cpp
     wfg/engine/cue/FxValues.h

@@ -164,6 +164,16 @@ namespace wfg::cue
         std::map<std::string, std::string> defaults;
     };
 
+    /*  A TRANSPORT CUE THAT STOPS NOTHING (Phase 9c, namespace draft §19.6):
+        record, loop, overdub and clear press a take on the sampling channel
+        their target sounds through, and the target plays on - so a walk that
+        counts what a transport cue has stopped passes these by. */
+    inline bool isTakePress (const Reader& read, const juce::ValueTree& transport)
+    {
+        const auto verb = read.text (transport, "transport", "verb");
+        return verb == "record" || verb == "loop" || verb == "overdub" || verb == "clear";
+    }
+
     //======================================================================
     /** Where in the list a cue sits, and when - if when is knowable. */
     struct Placed

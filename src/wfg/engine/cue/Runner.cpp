@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/FxRows.h>
 
 #include <wfg/engine/cue/DcaTable.h>
@@ -142,6 +143,17 @@ namespace wfg::cue
                     doc::IdRegistry& runIds, Focus& focusToUse)
         : document (documentToRead), runs (runsToDrive), ids (runIds), focus (focusToUse)
     {
+        /*  A SAMPLING CHANNEL LET GO (Phase 9c): said by the run table's own
+            release, which the handlers that end a run make live and on replay. */
+        runs.onRelease = [this] (const std::string& slotId, const std::string&, const std::string& toRun)
+        {
+            takeReleased (slotId, toRun);
+        };
+    }
+
+    Runner::~Runner()
+    {
+        runs.onRelease = nullptr;
     }
 
     int Runner::latencyTicks() const noexcept
@@ -2462,6 +2474,23 @@ namespace wfg::cue
             if (run->track < 0)
                 armMic (engine, cue, runId);
 
+            /*  ITS TAKE, AS ITS ROW SAYS (decision CF): now if the channel is
+                the cue's already - claimed at GO, or ahead in standby - and when
+                the claim lands otherwise, which the release says. */
+            if (takes != nullptr)
+            {
+                const auto channelId = textOf (cue, "channel");
+
+                if (samplingChannelOf (document, channelId).samples())
+                    if (auto* armed = runs.find (runId))
+                    {
+                        if (std::find (armed->claims.begin(), armed->claims.end(), channelId) != armed->claims.end())
+                            takeOnGo (runId, channelId);
+                        else
+                            armed->takeOnGoPending = true;
+                    }
+            }
+
             return;
         }
 
@@ -2758,9 +2787,9 @@ namespace wfg::cue
         /*  WHAT A CLASS TAKES IN, the first half of its name: mono and
             mono-to-stereo take one channel, stereo two (PRD §3.9e). */
         const auto width = sourceChannelsOf (cue);
-        const auto takes = channel.getProperty ("class", "mono").toString() == "stereo" ? 2 : 1;
+        const auto classTakes = channel.getProperty ("class", "mono").toString() == "stereo" ? 2 : 1;
 
-        if (width != takes)
+        if (width != classTakes)
             return fail (runError::badWidth);
 
         /*  WAITING FOR ITS CHANNEL, armed with no track (decision CM): a run
@@ -2786,6 +2815,94 @@ namespace wfg::cue
         const auto first = static_cast<int> (schema.integer (input, "input", "firstChannel"));
 
         requestArmOn (engine, cue, *run, numberOf (cue, "level"), first, width);
+    }
+
+    void Runner::takeOnGo (const std::string& runId, const std::string& channelId)
+    {
+        const auto* run = runs.find (runId);
+
+        if (run == nullptr || takes == nullptr)
+            return;
+
+        /*  WAIT MAKES NO SOUND NOBODY ASKED FOR; loop plays the take it finds,
+            and with none waits for Rec; clear empties the channel for a fresh
+            one (§19.6). */
+        const auto word = textOf (document.findById (run->cue), "onGo");
+        const auto channel = samplingChannelOf (document, channelId);
+
+        if (word == "loop")
+            takes->press (channelId, TakeVerb::loop, channel.layers);
+        else if (word == "clear")
+            takes->press (channelId, TakeVerb::clear, channel.layers);
+    }
+
+    void Runner::takeReleased (const std::string& slotId, const std::string& toRun)
+    {
+        if (takes == nullptr || ! samplingChannelOf (document, slotId).samples())
+            return;
+
+        /*  THE TAKE OUTLIVES ITS CUE (§19.3): held silent, a first pass or a
+            layer closed as it stood - never lost. The audio side held it at the
+            stop already; this is the account catching up, in a place a replay
+            reaches too. */
+        takes->release (slotId);
+
+        //  AND THE CUE THAT WAS WAITING FOR IT, if its GO has come.
+        if (auto* next = runs.find (toRun); next != nullptr && next->takeOnGoPending)
+        {
+            next->takeOnGoPending = false;
+            takeOnGo (toRun, slotId);
+        }
+    }
+
+    void Runner::serviceTakes (Engine& engine)
+    {
+        if (takes == nullptr)
+            return;
+
+        /*  THE PRESSES, in the order they were asked for, each placed where a
+            launch asked for now would be (§19.6), so a press and a cue land on
+            a sample the log can name. */
+        const auto at = audio->samplesElapsed()
+                          + static_cast<std::int64_t> (latencyTicks()) * static_cast<std::int64_t> (samplesPerTick);
+
+        for (const auto& press : takes->takePresses())
+            audio->postTake (press.channel, press.verb, at, press.in, press.out);
+
+        /*  WHAT THE AUDIO THREAD DID BY ITSELF - a take closed, and at what
+            length - for the log, and every channel the account knows is asked,
+            emptied ones too: a report left unread would reach a take recorded
+            later. */
+        const auto channels = takes->channels();
+
+        for (const auto& report : audio->takeReports (channels))
+            engine.submit (origin::engine, "take.closed",
+                           { osc::Value::string (report.channel), osc::Value::float64 (report.seconds),
+                             osc::Value::string (report.how) });
+
+        //  WHERE EACH LOOP IS PLAYING, for the picture; not in the log.
+        for (const auto& channel : channels)
+            takes->setPlayhead (channel, audio->takePlayhead (channel));
+
+        /*  AND WHETHER EACH CHANNEL SOUNDS ITS INPUT AS WELL (§19.3): as the
+            mic cue holding it says, told when it changes. */
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.kind != "mic" || snapshot.isFinished() || snapshot.claims.empty())
+                continue;
+
+            const auto cue = document.findById (snapshot.cue);
+            const auto channelId = textOf (cue, "channel");
+            const auto through = textOf (cue, "through") == "true" ? 1 : 0;
+
+            if (snapshot.throughSent == through || ! samplingChannelOf (document, channelId).samples())
+                continue;
+
+            audio->setTakeThrough (channelId, through != 0);
+
+            if (auto* run = runs.find (snapshot.id))
+                run->throughSent = through;
+        }
     }
 
     void Runner::armWaitingMics (Engine& engine)
@@ -3380,6 +3497,32 @@ namespace wfg::cue
                         ignored is worse than one honoured plainly. */
                     run->state = runState::stopping;
                 }
+
+            finishing.push_back (runId);
+            return;
+        }
+
+        /*  FOUR ARE NOT STOPS AT ALL (Phase 9c, namespace draft §19.6):
+            record, loop, overdub and clear are the press of that name on the
+            take of the sampling channel the target is sounding through. A
+            target that is not a sounding mic cue on a sampling channel is the
+            transport cue's own rule for a target that is not running: applied,
+            and nothing done - and so is a layer with every one in use. */
+        if (auto press = TakeVerb::record; verb != "undo" && takeVerbOf (verb, press))
+        {
+            const auto* target = runs.liveRunOf (textOf (cue, "target"));
+
+            if (target != nullptr && takes != nullptr && target->kind == "mic"
+                  && target->state == runState::playing)
+            {
+                const auto channelId = textOf (document.findById (target->cue), "channel");
+                const auto channel = samplingChannelOf (document, channelId);
+                const auto full = takes->wouldStartLayer (channelId, press)
+                                    && takes->of (channelId).layers >= channel.layers;
+
+                if (channel.samples() && ! full)
+                    takes->press (channelId, press, channel.layers);
+            }
 
             finishing.push_back (runId);
             return;
@@ -6449,6 +6592,7 @@ namespace wfg::cue
             return;
 
         armWaitingMics (engine);
+        serviceTakes (engine);
         launchIfDue (engine, tick);
         advanceRanges (engine);
 

@@ -86,7 +86,7 @@ capture did not tabulate, to be read at the bench (§10).
 |---|---|---|
 | Play | note `0x5E` | GO |
 | Stop | note `0x5D` | Esc; a second press within 750 ms is double Esc |
-| Rec | note `0x5F` | nothing |
+| Rec | note `0x5F` | `take.record` on the channel of the aimed mic cue - record, loop, a layer, loop (2026-09-27, namespace draft §19.6); nothing with no mic cue aimed |
 | ↖ / ↘ arrows | notes `0x2E` / `0x2F` (MCU bank left / right) | the standby back / forward (2026-09-26, §5.7) |
 | Pan / EQ / Send / FX | notes `0x2A` / `0x2C` / `0x29` / `0x2B` | nothing — the page buttons of §5 |
 | `*` | note `0x36` under the Mackie preset (`0x5A` under Reaper's); `0x37` on a double click if enabled | nothing |

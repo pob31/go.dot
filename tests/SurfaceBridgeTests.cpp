@@ -751,7 +751,8 @@ TEST_CASE ("surface bridge: the profiles say what each surface has and what its 
     CHECK (surface::actionFor (d700, surface::buttonForNote (0x39)) == surface::Action::dialRest);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x38)) == surface::Action::none);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x39)) == surface::Action::none);
-    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5f)) == surface::Action::none);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5f)) == surface::Action::record);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x5f)) == surface::Action::record);
     CHECK (surface::actionFor (surface::Profile::midiPads, surface::buttonForNote (0x5e))
              == surface::Action::none);
 
@@ -984,7 +985,7 @@ TEST_CASE ("surface bridge: STOP is Esc, STOP again inside the window is double 
     CHECK (pressing (0x5b) == "standby.previous");
     CHECK (pressing (0x5c) == "standby.next");
 
-    //  The bank and channel arrows, and REC: nothing (§3.9d; §16.6).
+    //  The bank and channel arrows: nothing (§3.9d; §16.6). REC with no mic cue aimed: nothing.
     CHECK (pressing (0x2e).empty());
     CHECK (pressing (0x2f).empty());
     CHECK (pressing (0x30).empty());
@@ -2882,6 +2883,41 @@ TEST_CASE ("surface bridge: SELECT aims the rotaries at its strip's cue, lights 
     desk.submitted.clear();
     desk.press ("PORTBNK2", 0x18 + 0);
     CHECK (desk.writes() == std::vector<std::string> { "surface.aim CUE00009" });
+}
+
+TEST_CASE ("surface bridge: the transport's REC presses the take on the aimed mic cue's channel, and nothing else")
+{
+    /*  Phase 9c, decision CS: REC is `take.record` on the rack channel the
+        aimed mic cue plays through, each press the next of record, loop, a
+        layer and loop - which the engine's account decides, so the bridge
+        sends the same command every time. A media cue aimed, or none, has no
+        take to press. */
+    PageDesk desk;
+
+    //  Nothing aimed: nothing.
+    desk.press ("PORTBNK1", 0x5f);
+    CHECK (desk.submitted.empty());
+
+    //  A media cue aimed, which has no channel: nothing.
+    desk.aimAt ("CUE00001");
+    desk.press ("PORTBNK1", 0x5f);
+    CHECK (desk.submitted.empty());
+
+    //  A mic cue aimed, on its channel: its take pressed, once a press, and only on the way down.
+    desk.fake.text ("/godot/cue/MIC00001/channel", "CHAN0001");
+    desk.aimAt ("MIC00001");
+    desk.press ("PORTBNK1", 0x5f);
+    desk.press ("PORTBNK1", 0x5f);
+    CHECK (desk.writes() == std::vector<std::string> { "take.record CHAN0001", "take.record CHAN0001" });
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted[0].origin == "surface:SURF0001");
+
+    //  A mic cue that plays through no channel: nothing.
+    desk.submitted.clear();
+    desk.fake.text ("/godot/cue/MIC00002/channel", "");
+    desk.aimAt ("MIC00002");
+    desk.press ("PORTBNK1", 0x5f);
+    CHECK (desk.submitted.empty());
 }
 
 TEST_CASE ("surface bridge: EQ puts the aimed cue's EQ on sixteen rotaries at once, and EQ again leaves")

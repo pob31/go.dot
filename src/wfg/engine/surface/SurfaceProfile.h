@@ -113,7 +113,12 @@ namespace wfg::surface
         the standby. On a Mackie the bank and channel arrows do nothing,
         because banking is §3.9d's decision to take with the hardware in hand;
         on the D700, which has no rewind or forward, its two arrows (the bank
-        notes) are rewind and forward (2026-09-26). The transport's REC does
+        notes) are rewind and forward (2026-09-26).
+
+        THE TRANSPORT'S REC PRESSES A TAKE (Phase 9c, decision CS): `take.record`
+        on the rack channel the aimed mic cue plays through - record, then
+        loop, then a layer on top, then loop again, each press the next, as the
+        engine's account of the take decides. With no mic cue aimed it sends
         nothing.
 
         MUTE ON A STRIP KILLS WHAT IT PLAYS (author, 2026-09-25: "Can the mute
@@ -136,7 +141,7 @@ namespace wfg::surface
         a LED pulse."): the level the fader is at, written as its member's
         `initialLevel` - an edit to the show and one undo step. */
     enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel,
-                        dialLetGo, dialRest,
+                        record, dialLetGo, dialRest,
                         aim, eqPage, sendPage, fxPage, leavePage };
 
     /*  AND IT SAYS SO: the red MUTE light is on for half a second after a

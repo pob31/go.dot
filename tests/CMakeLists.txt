@@ -99,6 +99,7 @@ add_executable(wfg_tests
     SurfaceTests.cpp
     PluginSetTests.cpp
     MicTests.cpp
+    TakeTests.cpp
     PluginCatalogueTests.cpp
     PluginScanTests.cpp
     ProxyTests.cpp
@@ -567,6 +568,20 @@ add_test(NAME wfg.replay.mic.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/mic.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/mic
                  --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/mic-fr_FR
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# A take's life (stage 9c.3, namespace draft 19.6): recorded and looped by transport
+# cues, its points ridden through the tree's door, a layer laid and undone, held by
+# Esc, looped again by a later mic cue whose GO loops what it finds, cleared, and a
+# double Esc - recorded from a hosted session with an input WAV, replayed with no
+# recorder: the take's close is the audio side's take.closed, re-injected.
+add_test(NAME wfg.replay.take.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/take.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/take
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.take.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/take.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/take
                  --wfg-locale=${WFG_LOCALE_FR})
 
 add_test(NAME wfg.replay.persistent.C
@@ -1194,6 +1209,21 @@ set_tests_properties(blackbox.phase9b-mic.C PROPERTIES
 add_test(NAME blackbox.phase9b-mic.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_mic.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase9b-mic.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# Live sampling, stage 9c.3 (namespace draft 19.3 and 19.6): the `take` fixture on a
+# hosted interface fed a steady input - a mic cue whose take waits, Rec and Loop it
+# from transport cues, silent while it records, the take looping at a half through
+# the plugin before the recorder, the points ridden, a layer laid a pass at a time and
+# undone, the take held by Esc and looped again by a later mic cue with its input
+# heard through, cleared, a double Esc, and the session replayed with no audio.
+add_test(NAME blackbox.phase9c-take.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9c_take.py" --wfg-locale=C)
+set_tests_properties(blackbox.phase9c-take.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9c-take.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9c_take.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9c-take.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # The client the engine serves at /ui: the page, its files as bytes, and since

@@ -151,7 +151,7 @@ namespace wfg::audio
             if (state.status == "noClock" && command != "audio.connection" && command != "audio.reconnect"
                 && command != "run.killAll" && command != "run.kill" && command != "run.stopAll"
                 && command != "run.stop" && command != "audio.testStop"
-                && command != "audio.armed" && command != "run.failed"
+                && command != "audio.armed" && command != "run.failed" && command != "take.closed"
                 && command != "document.save" && command != "document.autosave"
                 && command != "document.saved" && command != "document.writeFailed")
                 return std::string ("audio-reconnecting");

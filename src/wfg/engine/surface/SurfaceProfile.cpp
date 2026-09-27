@@ -153,6 +153,7 @@ namespace wfg::surface
         if (button.button == Button::stop)      return Action::stop;
         if (button.button == Button::rewind)    return Action::rewind;
         if (button.button == Button::forward)   return Action::forward;
+        if (button.button == Button::record)    return Action::record;
 
         /*  THE D700'S ARROWS MOVE THE STANDBY (author, 2026-09-26: "Can the
             up(-left) and down(-right) arrows on the D700 be used to move the

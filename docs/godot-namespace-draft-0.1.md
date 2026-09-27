@@ -11448,7 +11448,7 @@ chord's own 0.016.
 | `take.undo` | `<channel s>` | the top layer off, or the pass being laid abandoned | `busy` |
 | `take.clear` | `<channel s>` | the channel empty | `busy` |
 | `take.keep` | `<channel s> [asCue T]` | §19.8 | a take being recorded — `not-closed`; `asCue` under the lock — `locked` |
-| `take.closed` | `<channel s> <samples i>` | engine origin: the length the audio thread closed a take at — full or pressed — so that a replay knows it | — |
+| `take.closed` | `<channel s> <seconds d> <how s>` | engine origin: the length the audio thread closed a take at, and how — `pressed`, `full`, or `held` as its cue let go — so that a replay knows it *(seconds, not samples, as built: 9c.3)* | an identifier that is no rack channel — `unknown-id`; another word, or a length that is no number — `bad-value` |
 | `take.kept` | `<channel s> <file s> <error s>` | engine origin: the file Keep wrote, or why it could not | — |
 
 **Where a press lands in time.** The handler moves the take's state in the model; a hook places the
@@ -11464,11 +11464,66 @@ rule for a target that is not running.
 **GO** (`onGo`): `wait` holds the take silent; `loop` loops it from the in point, and with no take
 waits for Rec; `clear` empties the channel and waits for Rec.
 
+*As built (9c.3), the verbs.* What landed beyond the drawing, or against it:
+
+- **`take.closed` carries seconds**, not samples, and a word: the account the handlers move needs no
+  rate, and a replay does not read the clock header to learn one. `how` is `pressed`; `full`, the
+  take having filled its memory and closed itself, with the sentence on `takeProblem`; or `held`, its
+  cue having let go while it recorded, the take kept and silent. The length is the one thing a replay
+  learns from it: the rest of a take's life is re-derived from the presses.
+- **The account** (`cue/TakeTable`) is each sampling channel's take as the engine knows it - state,
+  length, layers, the points, the last sentence - moved only by the handlers and by `take.closed`, so
+  a replay moves it the same way with no audio. The refusals read the document, the run table and
+  this account, never the recorder (§7's rule). **A handler queues its press and the Runner's hook
+  places it** at `now + the launch latency`; only `serve` has the hook, so the other modes queue
+  nothing. The same hook, every tick, turns what the recorder reports into `take.closed`, reads the
+  playhead, and keeps the recorder's `through` in step with the row of the cue holding the channel.
+- **Two holds.** A stop of the rack track holds the take on the audio side (`HostPlayer::stop` and
+  `kill`), so the tail that rings out after Esc is the plugins' and never the loop playing on; the
+  account holds it when the channel is released (`RunTable::onRelease`), at the run's end. A take
+  still recording then closes held, and its `take.closed … held` gives the length.
+- **`onGo` lands when the cue holds the channel**: at GO when it already does, or when a waiting
+  claim lands for a mic cue that waited for its channel (decision CM).
+- **A transport press is not a stop.** A transport cue whose verb is `record`, `loop`, `overdub` or
+  `clear` leaves its target playing, so the solver and the slot analysis pass it by (`isTakePress`,
+  `cue/ShowWalk.h`): a Rec cue does not plan its target's end. The press rides the transport cue's
+  GO and has no record of its own.
+- **The points' door** is `LiveRows`': `node.set` on `/godot/slot/<id>/loopIn` or `…/loopOut`,
+  clamped to the take and at least two crossfades apart, logged and replayed, never a step of the
+  history, allowed under the lock; the account posts the pair to the recorder at the placed sample.
+  A take closing sets them to its two ends.
+- **`playhead` is published at every publish**, from the runtime half beside `holder`: it moves
+  every block while nothing about the show does, and the cached half, rebuilt when a command
+  applies, froze it between commands. A replay has no audio and reads nought.
+- **The D700's Rec** is `take.record` on the channel of the aimed cue, when that is a mic cue with
+  one (`/godot/cue/<id>/channel` in the tree); with none aimed it sends nothing, and a Mackie's
+  transport REC, the same note, does the same. Its light, and a double click for Undo, wait for the
+  Loop page and the bench (9c.5).
+- **Two reasons are new.** `not-running`: Rec, Loop or a layer asked of a sampling channel that no
+  sounding mic cue holds - its cue not fired, ended, or still ringing out; Undo and Clear only take
+  something away and are never refused it. `layers-full`: every layer in use. A rack channel with no
+  recorder is `bad-value`; an identifier that is no rack channel, `unknown-id`. `busy` waits for Keep
+  (9c.6). A refusal changes nothing, so §19.3's sentence for a full set of layers - *Looper holds its
+  2 layers: Undo one or Clear* - is the take panel's to say, from the rows (9c.4).
+- **What the driver found:** an overdub held longer than the loop lays the input again on every
+  pass, as §19.3 drew it. Held for most of a second over a loop of 0.3 s, a steady input came back at
+  four times the take's level (the take and three passes), so the driver checks for a whole number
+  of passes rather than a double.
+
+Tested by `tests/TakeTests.cpp` (the account and the Runner's hook against a fake audio side: presses
+placed and ordered, the refusals and where each comes from, a transport cue's press, `onGo` at GO and
+at a claim, the hold at release under Esc and double Esc, the points' door, `through` following its
+row, and a load to time passing a press by); the host-player case in `tests/AudioTests.cpp` (the doors
+on a real host: a press at its sample, `take.closed` in seconds, the points in samples, a stop holding
+the take, and a stop landing while it records closing it held); the REC case in
+`tests/SurfaceBridgeTests.cpp`; `logs/take.wfglog` (27 records, replayed in both locales); and
+`blackbox/phase9c_take.py` (42 checks, both locales).
+
 ### 19.7 The hands
 
 - **The D700.** The transport's **Rec** (`0x5F`, `Button::record` — not a strip's REC, which sets a
-  start level, `SurfaceProfile.cpp:121-122`) is `take.record` on the aimed sampling cue's channel; its
-  double click, if the firmware gives that button one, `take.undo`. A **Loop page on Pan** (`0x2A`,
+  start level, `SurfaceProfile.cpp:121-122`) is `take.record` on the aimed sampling cue's channel
+  *(built, 9c.3)*; its double click, if the firmware gives that button one, `take.undo`. A **Loop page on Pan** (`0x2A`,
   unbound: Go.dot has no pan) puts the aimed sampling cue on the rotaries — in, out, a third sliding
   both and keeping the length, and the level — with a law fine enough for a loop point, the first
   thing the bench says. A **Loop** key, if the D700 has one (its protocol note lists Rec, Play and

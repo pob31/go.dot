@@ -105,6 +105,18 @@ namespace wfg::audio
         int inputCount() const override;
         float takeInputPeak (int channel) override;
 
+        /*  A SAMPLING CHANNEL'S TAKE (Phase 9c): a press handed to the channel's
+            recorder at its sample, the points turned into samples at the rate;
+            `through`; what the recorder did by itself, its lengths in seconds;
+            and where its loop is. A stop or a kill of a rack track holds its
+            take as well, as the gate shuts - the loop does not play on under a
+            tail ringing out. */
+        bool postTake (const std::string& channel, cue::TakeVerb verb, std::int64_t sample,
+                       double inSeconds, double outSeconds) override;
+        void setTakeThrough (const std::string& channel, bool through) override;
+        std::vector<TakeReport> takeReports (const std::vector<std::string>& channels) override;
+        double takePlayhead (const std::string& channel) const override;
+
         /*  Performs every queued arm. MESSAGE THREAD - it writes a Tracktion
             ValueTree, which every one of those writes asserts.
 

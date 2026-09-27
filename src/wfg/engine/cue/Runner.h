@@ -57,6 +57,7 @@
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/Solver.h>
+#include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/plugin/PluginTable.h>
@@ -349,6 +350,24 @@ namespace wfg::cue
         virtual int inputCount() const { return 0; }
         virtual float takeInputPeak (int) { return 0.0f; }
 
+        /*  A SAMPLING CHANNEL'S TAKE (Phase 9c, namespace draft §19.6): a press
+            placed at one of Go.dot's samples, its loop points in seconds; whether
+            the channel sounds its input as well as its loop; what the audio
+            thread did by itself since the last ask, for `take.closed`; and where
+            each loop is playing, for the picture. Tick thread. Defaults a player
+            with no recorder is complete with - a replay's, a test's. */
+        struct TakeReport
+        {
+            std::string channel;
+            std::string how;            ///< pressed, full, held
+            double seconds = 0.0;
+        };
+
+        virtual bool postTake (const std::string&, TakeVerb, std::int64_t, double, double) { return false; }
+        virtual void setTakeThrough (const std::string&, bool) {}
+        virtual std::vector<TakeReport> takeReports (const std::vector<std::string>&) { return {}; }
+        virtual double takePlayhead (const std::string&) const { return 0.0; }
+
         /*  Whether the media for that track is actually ready to sound.
 
             SEPARATE FROM THE ARM BEING ACCEPTED, and the separation is the
@@ -391,8 +410,17 @@ namespace wfg::cue
         Runner (const doc::ShowDocument& document, RunTable& runs,
                 doc::IdRegistry& runIds, Focus& focus);
 
+        /** Lets go of the run table's release listener, which calls into this. */
+        ~Runner();
+
         /** Null is legal and means a show with no audio side. */
         void setPlayer (Player* player) noexcept { audio = player; }
+
+        /*  THE TAKES' ACCOUNT (Phase 9c), which the take verbs move too: a
+            transport cue's press, a mic cue's GO and its channel let go move it
+            here, and the hook places the presses. None, and a sampling
+            channel's takes are left alone. */
+        void setTakes (TakeTable* table) noexcept { takes = table; }
         void resetAudioPreparation() { armedStandby.clear(); }
 
         /*  The runs, for the one caller outside the Runner that has to ask
@@ -1051,6 +1079,19 @@ namespace wfg::cue
             `run.arm`, the sampler's door. The tick's, with an audio side. */
         void armWaitingMics (Engine& engine);
 
+        /*  THE TAKES' HOOK (Phase 9c): the presses asked for placed at the
+            launch latency, what the audio thread did by itself reported as
+            `take.closed`, the playheads read, and each channel's `through` as
+            the cue holding it says. Below the null-player gate. */
+        void serviceTakes (Engine& engine);
+
+        /*  A MIC CUE'S GO ON ITS SAMPLING CHANNEL (decision CF): what its
+            `onGo` says, once the cue both has GO and holds the channel. */
+        void takeOnGo (const std::string& runId, const std::string& channelId);
+
+        /** A channel let go, the take held; and a waiting cue's GO acted on. */
+        void takeReleased (const std::string& slotId, const std::string& toRun);
+
         /*  The half of an arm below the track: the routing, the offset, the
             ranges and the request itself, for a run that already holds its
             voice. `armMedia` reaches it after choosing a track; a seek reaches
@@ -1243,6 +1284,7 @@ namespace wfg::cue
         Focus& focus;
 
         Player* audio = nullptr;
+        TakeTable* takes = nullptr;
         int samplesPerTick = 0;
         std::string mediaFolder;
         std::string pluginsFolder;

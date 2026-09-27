@@ -40,6 +40,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <typeinfo>
 #include <utility>
 #include <vector>
@@ -798,7 +799,7 @@ namespace wfg::audio
                 the EQ, then every plugin. A lane keeps its place in the
                 channel's own order whichever side it is built on, since a mic
                 cue's inserts are sent by that place. */
-            auto* take = channel.takeSeconds > 0.0 ? takeFor (channel.id) : nullptr;
+            const auto take = channel.takeSeconds > 0.0 ? takeFor (channel.id) : nullptr;
             trackLanes.emplace_back (channel.plugins.size(), nullptr);
 
             const auto insertProxies = [&] (bool beforeTheRecorder)
@@ -832,7 +833,10 @@ namespace wfg::audio
                 if (recorder == nullptr)
                     return fail ("the recorder would not insert on a sampling channel");
 
-                recorder->bind (take, &tapView);
+                recorder->bind (take.get(), &tapView);
+
+                const std::lock_guard<std::mutex> lock { takesLock };
+                takeTracks[index] = channel.id;
             }
 
             auto eqPlugin = track.pluginList.insertPlugin (EqPlugin::create (rackChannels), -1);
@@ -968,6 +972,10 @@ namespace wfg::audio
             so nothing still plays the takes this lets go of. */
         void refreshTakes (const EditSpec& spec)
         {
+            /*  BUILT BESIDE THE STORE AND SWAPPED IN UNDER THE LOCK: setting a
+                minute aside and touching it is tens of milliseconds, which the
+                tick thread must not wait behind. Read here without the lock,
+                since this thread is the store's only writer. */
             std::map<std::string, TakeStore> kept;
 
             for (const auto& channel : spec.rack)
@@ -988,14 +996,15 @@ namespace wfg::audio
                       && std::abs (found->second.shape.takeSeconds - shape.takeSeconds) < 1.0e-9
                       && found->second.shape.layers == shape.layers)
                 {
-                    found->second.problem.clear();
-                    kept[channel.id] = std::move (found->second);
+                    auto same = found->second;
+                    same.problem.clear();
+                    kept[channel.id] = std::move (same);
                     continue;
                 }
 
                 TakeStore store;
                 store.shape = shape;
-                store.take = std::make_unique<Looper>();
+                store.take = std::make_shared<Looper>();
                 store.take->prepare (shape);
 
                 if (found != takes.end() && found->second.take != nullptr
@@ -1007,13 +1016,32 @@ namespace wfg::audio
                 kept[channel.id] = std::move (store);
             }
 
-            takes = std::move (kept);
+            {
+                const std::lock_guard<std::mutex> lock { takesLock };
+                takes.swap (kept);
+                takeTracks.clear();
+            }
+
+            //  The stores let go of go here, outside the lock.
         }
 
-        Looper* takeFor (const std::string& channelId) noexcept
+        std::shared_ptr<Looper> takeFor (const std::string& channelId)
         {
+            const std::lock_guard<std::mutex> lock { takesLock };
             const auto found = takes.find (channelId);
-            return found != takes.end() ? found->second.take.get() : nullptr;
+            return found != takes.end() ? found->second.take : nullptr;
+        }
+
+        std::shared_ptr<Looper> takeForTrack (int trackIndex)
+        {
+            const std::lock_guard<std::mutex> lock { takesLock };
+            const auto channel = takeTracks.find (trackIndex);
+
+            if (channel == takeTracks.end())
+                return nullptr;
+
+            const auto found = takes.find (channel->second);
+            return found != takes.end() ? found->second.take : nullptr;
         }
 
         /** A rack track's input stage, or null for a voice or no such track. */
@@ -1989,11 +2017,15 @@ namespace wfg::audio
         struct TakeStore
         {
             Looper::Shape shape;
-            std::unique_ptr<Looper> take;
+            std::shared_ptr<Looper> take;
             std::string problem;
         };
 
         std::map<std::string, TakeStore> takes;
+
+        /** Which rack track records which channel's take, for a stop that knows the track. */
+        std::map<int, std::string> takeTracks;
+        std::mutex takesLock;
 
         /** Whether the plugin table holds this graph's slots, to clear at stop. */
         bool toldTable = false;
@@ -2123,9 +2155,14 @@ namespace wfg::audio
         return found != impl->rackTracks.end() ? found->second : -1;
     }
 
-    Looper* AudioHost::takeOf (const std::string& channelId) noexcept
+    std::shared_ptr<Looper> AudioHost::takeOf (const std::string& channelId)
     {
         return impl->takeFor (channelId);
+    }
+
+    std::shared_ptr<Looper> AudioHost::takeOfTrack (int trackIndex)
+    {
+        return impl->takeForTrack (trackIndex);
     }
 
     void AudioHost::setRackSource (int trackIndex, int firstInput, int width) noexcept

@@ -160,6 +160,21 @@ namespace wfg
             and with none there is nowhere for it to be played from - the
             group is not armed, or this member is past the last strip. */
         inline constexpr const char* needsStrip       = "needs-strip";
+
+        /*  A PRESS ON A TAKE WITH NOTHING TO PRESS IT THROUGH (Phase 9c,
+            namespace draft §19.6): Rec, Loop or a layer asked of a sampling
+            channel no sounding mic cue holds - its cue not fired yet, ended,
+            or still ringing out after a stop. What a take records is a cue's
+            input, so with no cue there is nothing to record. Undo and Clear
+            need none and are never refused it. */
+        inline constexpr const char* notRunning       = "not-running";
+
+        /*  EVERY LAYER IN USE (decision CA): the channel keeps as many passes
+            on its take as its `layers` row says, and one more is refused until
+            one is undone or the take is cleared - folding the oldest into the
+            take while the loop plays would be a copy of it on the audio thread. */
+        inline constexpr const char* layersFull       = "layers-full";
+
         /*  The argument's TYPE was right and its VALUE is not one this command
             accepts - a scope that is neither "round" nor "group", a stop verb
             nobody has heard of.

@@ -25,6 +25,7 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
@@ -246,6 +247,8 @@ namespace
             beside the run table rather than in the document, and nought again
             every time a show opens. */
         wfg::cue::DcaTable dcas;
+        wfg::cue::TakeTable takes;
+        takes.setQueueing (false);    // no hook here to place a press
 
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
@@ -261,6 +264,7 @@ namespace
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
+        runner.setTakes (&takes);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -284,6 +288,7 @@ namespace
         wfg::cue::LiveEdits liveEdits;  // what `live.keep` and `live.drop` act on; nothing rides here
         wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
@@ -527,6 +532,8 @@ namespace
             beside the run table rather than in the document, and nought again
             every time a show opens. */
         wfg::cue::DcaTable dcas;
+        wfg::cue::TakeTable takes;
+        takes.setQueueing (false);    // no hook here to place a press
 
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
@@ -542,6 +549,7 @@ namespace
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
+        runner.setTakes (&takes);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -565,6 +573,7 @@ namespace
             machine reporting what happened to a run, and a log of a performance
             has to replay on a laptop with no show open. */
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
@@ -685,7 +694,7 @@ namespace
                     session wrote it through - a fader's trim or a DCA's - so the
                     record applies as it did rather than being refused by a
                     document that cannot hold it. */
-                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
+                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes),
                                     wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                         wfg::cue::fxWriteFor (document, nullptr, &liveEdits))),
                 wfg::cue::liveSendFor (liveEdits, document));
@@ -1152,6 +1161,8 @@ namespace
             beside the run table rather than in the document, and nought again
             every time a show opens. */
         wfg::cue::DcaTable dcas;
+        wfg::cue::TakeTable takes;
+        takes.setQueueing (false);    // no hook here to place a press
 
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
@@ -1167,6 +1178,7 @@ namespace
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
+        runner.setTakes (&takes);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -1176,6 +1188,7 @@ namespace
         wfg::cue::LiveEdits liveEdits;  // what `live.keep` and `live.drop` act on; nothing rides here
         wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
@@ -2586,6 +2599,7 @@ namespace
             beside the run table rather than in the document, and nought again
             every time a show opens. */
         wfg::cue::DcaTable dcas;
+        wfg::cue::TakeTable takes;
 
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
@@ -2601,6 +2615,7 @@ namespace
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
+        runner.setTakes (&takes);
 
         /*  The touch table, for the fader edges (PRD 3.9a): a fader-start
             counts only from a fader released at the bottom, and released is
@@ -2693,7 +2708,7 @@ namespace
             /*  AND UNDER THE LOCK, A CUE'S EQ AND SENDS, ridden live in front
                 of the document that would refuse them (2026-09-25) - and its
                 plugins' parameters, held by the FX door (2026-09-26). */
-            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
+            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes),
                                 wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                     wfg::cue::fxWriteFor (document, &catalogues, &liveEdits))),
             wfg::cue::liveSendFor (liveEdits, document));
@@ -2703,6 +2718,7 @@ namespace
         wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         runner.setLiveEdits (&liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
 
         /*  THE SANDBOX'S TABLE AND ITS TWO COMMANDS (Phase 9a, §17.3). The
             restart reaches the audio host once there is one - the hook is
@@ -3134,6 +3150,7 @@ namespace
             "unbound" until the next start). */
         wfg::midi::PortBinder portBinder { midiIn, midiOut };
         parameters.setDcas (&dcas);
+        parameters.setTakes (&takes);
         parameters.setPlugins (&pluginTable);
         parameters.setLiveEdits (&liveEdits);
 

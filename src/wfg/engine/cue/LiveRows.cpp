@@ -19,6 +19,7 @@
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/document/ShowDocument.h>
 
@@ -38,6 +39,7 @@ namespace wfg::cue
         {
             std::string owner;
             std::string id;
+            std::string row;
         };
 
         std::optional<LiveAddress> split (std::string_view address)
@@ -62,21 +64,27 @@ namespace wfg::cue
             const auto id = rest.substr (first + 1, second - first - 1);
             const auto row = rest.substr (second + 1);
 
-            if (row != "trim" || id.empty() || (owner != "run" && owner != "dca"))
+            if (id.empty())
                 return std::nullopt;
 
-            return LiveAddress { std::string (owner), std::string (id) };
+            const auto trim = row == "trim" && (owner == "run" || owner == "dca");
+            const auto point = owner == "slot" && (row == "loopIn" || row == "loopOut");
+
+            if (! trim && ! point)
+                return std::nullopt;
+
+            return LiveAddress { std::string (owner), std::string (id), std::string (row) };
         }
 
         /*  THE ROW'S OWN PARSER, so a trim written here and a level written to
             the document are the same kind of number: the range, the type and
             the locale-free spelling are the parameter table's, and nothing here
             restates them. */
-        std::optional<double> parseTrim (std::string_view owner, const std::string& text)
+        std::optional<double> parseNumber (std::string_view owner, std::string_view rowName, const std::string& text)
         {
             for (const auto* row : doc::Schema::rowsForOwner (owner))
             {
-                if (row->name != "trim")
+                if (row->name != rowName)
                     continue;
 
                 doc::Value value;
@@ -109,10 +117,11 @@ namespace wfg::cue
                  && isLiveAddress (args.front().getString());
     }
 
-    doc::LiveWrite liveWriteFor (RunTable& runs, DcaTable& dcas, const doc::ShowDocument& document)
+    doc::LiveWrite liveWriteFor (RunTable& runs, DcaTable& dcas, const doc::ShowDocument& document,
+                                 TakeTable* takes)
     {
-        return [&runs, &dcas, &document] (const std::string& address, const std::string& text,
-                                          const std::vector<osc::Value>& args)
+        return [&runs, &dcas, &document, takes] (const std::string& address, const std::string& text,
+                                                 const std::vector<osc::Value>& args)
                    -> std::optional<Outcome>
         {
             const auto live = split (address);
@@ -120,7 +129,28 @@ namespace wfg::cue
             if (! live.has_value())
                 return std::nullopt;
 
-            const auto decibels = parseTrim (live->owner, text);
+            /*  A TAKE'S LOOP POINT (decision CQ): the channel's row parses it,
+                the account keeps it in the take and two crossfades apart, and
+                the hook hands the recorder both points. */
+            if (live->owner == "slot")
+            {
+                const auto seconds = parseNumber ("rackChannel", live->row, text);
+
+                if (! seconds.has_value())
+                    return Outcome::rejected (reason::typeMismatch);
+
+                const auto declared = document.findById (live->id);
+
+                if (! declared.isValid() || declared.getType().toString() != "Channel")
+                    return Outcome::rejected (reason::unknownId);
+
+                if (takes != nullptr)
+                    takes->setPoint (live->id, live->row == "loopIn", *seconds);
+
+                return Outcome::ok (args);
+            }
+
+            const auto decibels = parseNumber (live->owner, "trim", text);
 
             if (! decibels.has_value())
                 return Outcome::rejected (reason::typeMismatch);

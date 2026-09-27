@@ -1439,6 +1439,24 @@ namespace wfg::surface
                             startLevel (box, *strip, submit, tick);
                     break;
 
+                /*  REC PRESSES THE AIMED MIC CUE'S TAKE (Phase 9c, decision
+                    CS), on the channel the tree says it plays through: a media
+                    cue has no channel row, and a mic cue with none plays
+                    through nothing. Whether the press records, loops or lays a
+                    layer is the engine's account to decide, and to refuse in
+                    words - nothing sounding there, every layer in use. */
+                case Action::record:
+                    if (event.down)
+                    {
+                        const auto& aimed = aimNow();
+                        const auto channel = aimed.empty() ? std::string {}
+                                                           : textAt (published.get(), "/godot/cue/" + aimed + "/channel");
+
+                        if (! channel.empty())
+                            submit (commandFrom (box.origin, "take.record", { osc::Value::string (channel) }));
+                    }
+                    break;
+
                 case Action::rewind:
                     if (event.down)
                         submit (commandFrom (box.origin, "standby.previous"));

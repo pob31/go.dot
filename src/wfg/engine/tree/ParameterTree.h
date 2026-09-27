@@ -80,7 +80,7 @@ namespace wfg::midi { class PortTable; }
 
 namespace wfg::surface { class SurfaceTable; }
 
-namespace wfg::cue { class DcaTable; class LiveEdits; }
+namespace wfg::cue { class DcaTable; class LiveEdits; class TakeTable; }
 
 namespace wfg::tree
 {
@@ -292,6 +292,11 @@ namespace wfg::tree
             reads nought, its resting value, which is also the truth. */
         void setDcas (const cue::DcaTable* dcasToRead) noexcept { dcas = dcasToRead; }
 
+        /*  What each sampling channel's take is doing (Phase 9c), for the
+            take's rows under /godot/slot/<id>. Absent - a tree dump - every
+            take reads empty, which is the truth of a show nobody is playing. */
+        void setTakes (const cue::TakeTable* takesToRead) noexcept { takes = takesToRead; }
+
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
             four `none` rows under /godot/plugin/<id>. The surface table's
@@ -416,6 +421,7 @@ namespace wfg::tree
         const midi::PortTable* ports = nullptr;
         const surface::SurfaceTable* surfaces = nullptr;
         const cue::DcaTable* dcas = nullptr;
+        const cue::TakeTable* takes = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;
@@ -435,6 +441,10 @@ namespace wfg::tree
             this rather than walking the show again: those two change with every
             run and the document half is a cache. */
         std::vector<std::string> declaredSlots;
+
+        /*  The rack channels among them, whose take's playhead the runtime
+            half publishes for the same reason (Phase 9c). */
+        std::vector<std::string> declaredRackChannels;
 
         /*  Every cue the show holds, in document order, as the document half
             last saw them - the same shape and the same reason as the slot

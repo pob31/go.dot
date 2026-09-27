@@ -17,6 +17,9 @@
 #include <wfg/engine/audio/HostPlayer.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/audio/Looper.h>
+
+#include <cmath>
 
 namespace wfg::audio
 {
@@ -191,6 +194,11 @@ namespace wfg::audio
         if (audioHost.isRackTrack (track))
         {
             audioHost.shutRackGate (track);
+
+            //  AND ITS TAKE HELD, so the tail that rings out is the plugins' and not the loop's.
+            if (const auto take = audioHost.takeOfTrack (track))
+                take->post ({ Looper::Verb::hold, -1, 0, 0 });
+
             return true;
         }
 
@@ -229,10 +237,85 @@ namespace wfg::audio
         if (audioHost.isRackTrack (track))
         {
             audioHost.killRack (track);
+
+            /*  A double Esc stops everything that sounds and unmakes nothing
+                that was recorded (§19.3): the take held, not emptied. */
+            if (const auto take = audioHost.takeOfTrack (track))
+                take->post ({ Looper::Verb::hold, -1, 0, 0 });
+
             return true;
         }
 
         return audioHost.stopTrack (track);
+    }
+
+    //==============================================================================
+    bool HostPlayer::postTake (const std::string& channel, cue::TakeVerb verb, std::int64_t sample,
+                               double inSeconds, double outSeconds)
+    {
+        const auto take = audioHost.takeOf (channel);
+
+        if (take == nullptr)
+            return false;
+
+        /*  THE ACCOUNT'S VERBS ARE THE RECORDER'S, in the same order
+            (cue/TakeTable.h), and its points are seconds the recorder wants
+            in samples. */
+        const auto rate = static_cast<double> (sampleRate());
+        Looper::Command command;
+        command.verb = static_cast<Looper::Verb> (static_cast<int> (verb));
+        command.at = sample;
+        command.in = static_cast<std::int64_t> (std::llround (inSeconds * rate));
+        command.out = static_cast<std::int64_t> (std::llround (outSeconds * rate));
+        return take->post (command);
+    }
+
+    void HostPlayer::setTakeThrough (const std::string& channel, bool through)
+    {
+        if (const auto take = audioHost.takeOf (channel))
+            take->setThrough (through);
+    }
+
+    std::vector<cue::Player::TakeReport> HostPlayer::takeReports (const std::vector<std::string>& channels)
+    {
+        std::vector<TakeReport> out;
+        const auto rate = static_cast<double> (std::max (1, sampleRate()));
+
+        for (const auto& channel : channels)
+        {
+            const auto take = audioHost.takeOf (channel);
+
+            if (take == nullptr)
+                continue;
+
+            Looper::Event event;
+
+            while (take->nextEvent (event))
+            {
+                /*  A LAYER REFUSED is the account's to say, and it refuses
+                    first; the recorder saying so too is left unreported. */
+                if (event.kind == Looper::Event::Kind::layersFull)
+                    continue;
+
+                TakeReport report;
+                report.channel = channel;
+                report.how = event.kind == Looper::Event::Kind::full ? "full"
+                           : event.into == TakeState::held           ? "held"
+                                                                     : "pressed";
+                report.seconds = static_cast<double> (event.length) / rate;
+                out.push_back (std::move (report));
+            }
+        }
+
+        return out;
+    }
+
+    double HostPlayer::takePlayhead (const std::string& channel) const
+    {
+        const auto take = audioHost.takeOf (channel);
+        const auto rate = sampleRate();
+
+        return take != nullptr && rate > 0 ? static_cast<double> (take->playhead()) / rate : 0.0;
     }
 
     void HostPlayer::setLevelDb (int track, double levelDb)

@@ -53,6 +53,7 @@
 #include <utility>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -814,6 +815,12 @@ namespace wfg::cue
             arm again once the claim has landed - which it asks once. */
         bool waitsForChannel = false;
 
+        /*  A MIC RUN ON A SAMPLING CHANNEL (Phase 9c): GO asked for before the
+            channel was its to act on - `onGo` is acted on when the claim lands
+            - and the `through` last told the audio side, -1 for never. */
+        bool takeOnGoPending = false;
+        int throughSent = -1;
+
         /** The sample the launch was placed at. Zero before it is placed. */
         std::int64_t launchedAtSample = 0;
 
@@ -1032,6 +1039,14 @@ namespace wfg::cue
             queue decides nothing: it is a fact about the queue rather than a
             choice about the show. That is why there is no `claim.land`. */
         void releaseSlotsOf (const std::string& runId);
+
+        /*  SAID OF EVERY SLOT A RUN LETS GO (Phase 9c): the slot, the run that
+            held it, and the run it went to next, or nothing. A sampling
+            channel's take is held as its cue lets go, and a cue that was
+            waiting for it acts on its GO then - both inside the release, which
+            a replay makes too. */
+        std::function<void (const std::string& slotId, const std::string& fromRun,
+                            const std::string& toRun)> onRelease;
 
         const std::vector<Run>& all() const noexcept { return runs; }
 

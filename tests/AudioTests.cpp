@@ -34,6 +34,7 @@
 #include <wfg/engine/audio/RecoveryGate.h>
 #include <wfg/engine/rt/RtCheck.h>
 #include <wfg/engine/audio/HostPlayer.h>
+#include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/CueCommands.h>
@@ -5043,6 +5044,117 @@ TEST_CASE ("host player: an arm and a state asked for the same insert land in th
 
         CHECK (lane->wantedState() == "older.state");
     }
+}
+
+//==============================================================================
+TEST_CASE ("host player: a take's presses reach the recorder at their sample, its closes come back in seconds, and a stop holds it")
+{
+    /*  Phase 9c, stage 9c.3: the Player's take doors on the real host - a
+        sampling channel with no plugin, so no child. A steady input is
+        recorded from the sample the press was placed at to the sample the
+        close was; the recorder's report comes back in seconds for
+        `take.closed`; the points go in as seconds and land in samples; and a
+        stop of the rack track holds the take, as a stop's tail must not be
+        the loop playing on. */
+    constexpr int rate = 48000;
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::RackChannelSpec channel;
+    channel.id = "TK000011";
+    channel.name = "Looper";
+    channel.takeSeconds = 1.0;
+    channel.layers = 2;
+    spec.rack.push_back (channel);
+    REQUIRE (rig.host.buildEdit (spec));
+
+    Engine engine;
+    audio::HostPlayer player { rig.host, engine };
+
+    const auto track = rig.host.rackTrackOf ("TK000011");
+    REQUIRE (track == 1);
+    rig.host.setRackSource (track, 0, 1);
+    rig.host.openRackGate (track, -1);
+
+    const std::vector<float> steady (128, 0.5f), silent (128, 0.0f);
+    const float* inputs[] { steady.data(), silent.data() };
+    const auto run = [&rig, &inputs] (int blocks)
+    {
+        for (int i = 0; i < blocks; ++i)
+            rig.host.processBlock (inputs, 2);
+    };
+
+    run (10);
+
+    const auto recordAt = rig.host.clock().samplesElapsed() + 256;
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, recordAt, 0.0, 0.0));
+    run (40);
+
+    const auto closeAt = rig.host.clock().samplesElapsed() + 64;
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, closeAt, 0.0, 0.0));
+    run (4);
+
+    const auto reports = player.takeReports ({ "TK000011" });
+    REQUIRE (reports.size() == 1u);
+    CHECK (reports[0].channel == "TK000011");
+    CHECK (reports[0].how == "pressed");
+    CHECK (reports[0].seconds == doctest::Approx (static_cast<double> (closeAt - recordAt) / rate));
+    CHECK (player.takeReports ({ "TK000011" }).empty());
+
+    const auto take = rig.host.takeOf ("TK000011");
+    REQUIRE (take != nullptr);
+    CHECK (take->state() == audio::TakeState::looping);
+    CHECK (take->length() == closeAt - recordAt);
+
+    //  The points in seconds, landing in samples at the rate.
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::points, -1, 0.01, 0.05));
+    run (1);
+    CHECK (take->loopIn() == 480);
+    CHECK (take->loopOut() == 2400);
+    CHECK (player.takePlayhead ("TK000011") >= 0.01);
+    CHECK (player.takePlayhead ("TK000011") < 0.05);
+
+    player.setTakeThrough ("TK000011", true);
+    CHECK (take->isThrough());
+
+    //  A STOP OF THE RACK TRACK HOLDS THE TAKE: the loop fades out and stays.
+    REQUIRE (player.stop (track));
+    run (10);
+    CHECK (take->state() == audio::TakeState::held);
+    CHECK (player.takeReports ({ "TK000011" }).empty());
+
+    /*  AND A STOP THAT LANDS WHILE A TAKE RECORDS CLOSES IT HELD, which the
+        report says - `take.closed ... held`, so the account holds it too. */
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::clear, -1, 0.0, 0.0));
+    run (1);
+    REQUIRE (take->state() == audio::TakeState::empty);
+
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, -1, 0.0, 0.0));
+    run (20);
+    REQUIRE (take->state() == audio::TakeState::recording);
+
+    REQUIRE (player.stop (track));
+    run (1);
+
+    const auto held = player.takeReports ({ "TK000011" });
+    REQUIRE (held.size() == 1u);
+    CHECK (held[0].how == "held");
+    CHECK (held[0].seconds == doctest::Approx (20.0 * 128.0 / rate));
+    CHECK (take->state() == audio::TakeState::held);
+
+    //  Nothing for a channel with no recorder.
+    CHECK_FALSE (player.postTake ("NQNQNQNQ", cue::TakeVerb::record, -1, 0.0, 0.0));
+    CHECK (player.takeReports ({ "NQNQNQNQ" }).empty());
 }
 
 //==============================================================================
