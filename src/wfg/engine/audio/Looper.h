@@ -203,6 +203,28 @@ namespace wfg::audio
         int peakCount() const noexcept;
         float peak (int slot, int chunk) const noexcept;
 
+        //======================================================================
+        /*  THE CLOSED TAKE, COPIED FOR KEEP (Phase 9c, stage 9c.6, namespace
+            draft §19.8): the take and its first `layers` closed layers, summed
+            at unity in the order the loop sums them, `frames` samples of the
+            take from `from`. A chunk its slot has moved past reads as
+            silence, as it plays.
+
+            ANY THREAD, BUT ONLY WHILE NOTHING WRITES THOSE SLOTS: the take
+            closed and no layer's tail still falling (`isSettled`), and no Undo
+            or Clear until the copy is done - which the engine's account holds
+            off, refusing them `busy`. A pass laid while it runs is in a slot
+            above `layers`, so it is not read, and nor is the post-roll past the
+            take's end. */
+        void copyTake (int layers, std::int64_t from, int frames, float* left, float* right) const noexcept;
+
+        /*  WHETHER THE CLOSED TAKE AND ITS LAYERS ARE WRITTEN AND STILL:
+            closed - looping, held, or laying a pass in a slot of its own - and
+            no closed layer's tail still falling. Published with the block, so
+            everything the audio thread wrote before it is seen by whoever
+            reads it true. Any thread. */
+        bool isSettled() const noexcept;
+
     private:
         //======================================================================
         float* samplesOf (int slot, int channel) noexcept;
@@ -258,6 +280,7 @@ namespace wfg::audio
         std::atomic<std::int64_t> publishedIn { 0 };
         std::atomic<std::int64_t> publishedOut { 0 };
         std::atomic<std::int64_t> publishedChunks { 0 };
+        std::atomic<bool> publishedSettled { false };
 
         //======================================================================
         /*  THE AUDIO THREAD'S OWN, from prepare() on. */

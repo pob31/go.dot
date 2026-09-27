@@ -506,6 +506,12 @@ namespace wfg::audio
         publishedIn.store (in, std::memory_order_relaxed);
         publishedOut.store (out, std::memory_order_relaxed);
         publishedChunks.store ((recorded + peakSamples - 1) / peakSamples, std::memory_order_relaxed);
+
+        /*  LAST, AND RELEASED: a reader that sees it true sees every sample
+            and stamp written before it (Keep's copy, §19.8). */
+        const auto closed = now == TakeState::looping || now == TakeState::held
+                              || now == TakeState::overdubbing;
+        publishedSettled.store (closed && tailing == 0, std::memory_order_release);
     }
 
     //==============================================================================
@@ -664,6 +670,38 @@ namespace wfg::audio
     int Looper::peakCount() const noexcept
     {
         return static_cast<int> (publishedChunks.load (std::memory_order_relaxed));
+    }
+
+    void Looper::copyTake (int layers, std::int64_t from, int frames, float* left, float* right) const noexcept
+    {
+        const auto top = slots > 0 ? std::clamp (layers, 0, slots - 1) : -1;
+        const auto second = channelsHeld > 1 ? 1 : 0;
+
+        for (int n = 0; n < frames; ++n)
+        {
+            const auto at = from + n;
+            auto leftSum = 0.0f, rightSum = 0.0f;
+
+            if (at >= 0 && at < room)
+            {
+                for (int slot = 0; slot <= top; ++slot)
+                {
+                    if (! isFresh (slot, at))
+                        continue;
+
+                    leftSum += samplesOf (slot, 0)[at];
+                    rightSum += samplesOf (slot, second)[at];
+                }
+            }
+
+            left[n] = leftSum;
+            right[n] = rightSum;
+        }
+    }
+
+    bool Looper::isSettled() const noexcept
+    {
+        return publishedSettled.load (std::memory_order_acquire);
     }
 
     float Looper::peak (int slot, int chunk) const noexcept

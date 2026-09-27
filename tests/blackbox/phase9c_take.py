@@ -25,8 +25,10 @@ then plays the take at a half, the test gain before the recorder printed into
 it; the engine logs the length the take closed at. The loop points are ridden
 from the tree's door and read back. A layer laid by `take.overdub` adds the
 input again on every pass round the loop, as a looper's overdub does, and
-`take.undo` takes the whole layer off again. Esc lets go of the channel and the
-take is held, silent and kept; the mic cue "Scene 5 loop", whose GO loops the
+`take.undo` takes the whole layer off again. `take.keep` writes the take into
+the show's media as a float WAV named after its channel (stage 9c.6), and Keep
+as cue adds a media cue after the mic cue that plays it. Esc lets go of the
+channel and the take is held, silent and kept; the mic cue "Scene 5 loop", whose GO loops the
 take it finds, plays it again with its input heard through as well. Clear
 empties the channel, and a double Esc ends it. And `wfg replay` reproduces the
 session with no audio at all.
@@ -108,6 +110,31 @@ def number(server: Server, row: str) -> float:
         return -1.0
 
 
+def read_float_wav(path: Path) -> "tuple[int, int, int, int, list[float]]":
+    """(format, channels, rate, bits, the first channel's samples) of a WAV -
+    the standard library's `wave` reads integer samples only, and a kept take
+    is 32-bit float, plain or in the extensible header."""
+    data = path.read_bytes()
+    if data[0:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return 0, 0, 0, 0, []
+    pos, fmt, channels, rate, bits, samples = 12, 0, 0, 0, 0, []
+    while pos + 8 <= len(data):
+        tag = data[pos:pos + 4]
+        size = struct.unpack("<I", data[pos + 4:pos + 8])[0]
+        body = data[pos + 8:pos + 8 + size]
+        if tag == b"fmt ":
+            fmt, channels, rate = struct.unpack("<HHI", body[0:8])
+            bits = struct.unpack("<H", body[14:16])[0]
+            if fmt == 0xFFFE and len(body) >= 26:
+                fmt = struct.unpack("<H", body[24:26])[0]
+        elif tag == b"data" and channels and bits == 32:
+            count = size // 4
+            values = struct.unpack("<%df" % count, body[:count * 4])
+            samples = list(values[0::channels])
+        pos += 8 + size + (size & 1)
+    return fmt, channels, rate, bits, samples
+
+
 def loudest_block(samples: "list[float]", start_frame: int, end_frame: int) -> float:
     """The loudest block's mean level between two frames."""
     part = samples[max(0, start_frame):max(0, end_frame)]
@@ -125,13 +152,14 @@ def logged_closes(log: Path) -> "list[str]":
 
 
 def run(locale: "str | None", keep_log: "str | None" = None) -> int:
-    report = Report(f"stage 9c.3: a take recorded, looped, layered and held ({locale or 'C'})")
+    report = Report(f"stages 9c.3 and 9c.6: a take recorded, looped, layered, kept and held ({locale or 'C'})")
     with tempfile.TemporaryDirectory(prefix="wfg-phase9c-take-") as scratch:
         room = Path(scratch)
         bundle = common.copy_bundle(FIXTURE, room / "take")
         inputs = room / "inputs.wav"
         render = room / "out.wav"
         log = room / "session.wfglog"
+        replayed = room / "replayed"
         write_inputs(inputs)
 
         marks: "dict[str, int]" = {}
@@ -217,6 +245,43 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             report.check(wait_for_frames(render, marks["undone"] + int(RATE * 1.2)),
                          "the render runs on without it")
 
+            # KEEP: the take made a file in the show's media, under a name the writer found free.
+            length = number(server, "takeLength")
+            send(server, "/godot/cmd/take/keep", [CHANNEL])
+            kept = common.wait_until(lambda: value_of(server, f"/godot/slot/{CHANNEL}/kept") or None, timeout=10.0)
+            report.equal(kept, "takes/Looper take 1.wav",
+                         "take.keep writes the take into media/takes, named after its channel")
+            written = bundle / "media" / "takes" / "Looper take 1.wav"
+            report.check(written.exists(), "and the file is there, whole", str(written))
+            if written.exists():
+                fmt, wav_channels, rate, bits, samples = read_float_wav(written)
+                report.check(fmt == 3 and wav_channels == 2 and rate == RATE and bits == 32,
+                             "a stereo float WAV at the session's rate",
+                             f"format {fmt}, {wav_channels} channels, {rate} Hz, {bits} bits")
+                report.check(abs(len(samples) - round(length * RATE)) <= 1,
+                             "as long as the take", f"{len(samples)} frames against {length:.4f} s")
+                heard = sorted(abs(s) for s in samples if abs(s) > 0.002)
+                middle = heard[len(heard) // 2] if heard else 0.0
+                report.check(abs(middle - LOOPED) <= TOLERANCE,
+                             "and it is the take as it loops: at a half, the layer undone",
+                             f"{middle:.4f} against {LOOPED:.4f}")
+
+            # KEEP AS CUE: a media cue after the one sounding there, looping the take.
+            before = (value_of(server, "/godot/list/TK000001/order") or "").split()
+            send(server, "/godot/cmd/take/keep", [CHANNEL, True])
+            second = common.wait_until(
+                lambda: (value_of(server, f"/godot/slot/{CHANNEL}/kept") or "").endswith("take 2.wav") or None,
+                timeout=10.0)
+            report.check(bool(second), "Keep as cue writes the next file", str(second))
+            after = (value_of(server, "/godot/list/TK000001/order") or "").split()
+            made = [cue for cue in after if cue not in before]
+            report.check(len(made) == 1 and MIC in after and after.index(made[0]) == after.index(MIC) + 1,
+                         "and a cue after the mic cue", f"{before} then {after}")
+            if len(made) == 1:
+                report.equal(value_of(server, f"/godot/cue/{made[0]}/kind"), "media", "a media cue")
+                report.equal(value_of(server, f"/godot/cue/{made[0]}/file"), "takes/Looper take 2.wav",
+                             "playing the file it wrote")
+
             # ESC: the channel let go of, and the take held - silent, and kept.
             send(server, "/godot/cmd/run/stopAll")
             freed = common.wait_until(lambda: not value_of(server, f"/godot/slot/{CHANNEL}/holder"), timeout=5.0)
@@ -294,7 +359,8 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             report.check(False, "the render is long enough to read every window",
                          f"{len(left)} frames; marks {marks}")
 
-        code, out, err = common.run_wfg("replay", str(log), f"--bundle={bundle}")
+        # Keep as cue edits the show, which autosaves: the replay is given somewhere to save to.
+        code, out, err = common.run_wfg("replay", str(log), f"--bundle={bundle}", f"--out={replayed}")
         report.equal(code, 0, "and `wfg replay` reproduces the session with no audio at all",
                      (out + err).strip()[-400:])
         report.check("reproduced exactly" in out, "saying so in as many words")

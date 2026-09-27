@@ -84,6 +84,19 @@ namespace wfg::client::model
         std::string onGo = "wait";
         bool through = false;
 
+        /*  KEEP (§19.8): whether a file is being written from the take now,
+            the file the last Keep wrote, and whether the show is locked -
+            which leaves Keep and refuses Keep as cue, a change of the show. */
+        bool keeping = false;
+        std::string kept;
+        bool locked = false;
+
+        /** Whether a Keep would be applied: a closed take, and no Keep still writing. */
+        bool mayKeep() const noexcept
+        {
+            return present && state != "empty" && state != "recording" && ! keeping;
+        }
+
         bool hasTake() const noexcept   { return state != "empty"; }
         bool isRecording() const noexcept { return state == "recording"; }
         bool layersFull() const noexcept { return maxLayers > 0 && layers >= maxLayers; }

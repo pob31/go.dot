@@ -190,6 +190,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/LooperPlugin.cpp
     wfg/engine/audio/TakePictures.h
     wfg/engine/audio/TakePictures.cpp
+    wfg/engine/audio/TakeWriter.h
+    wfg/engine/audio/TakeWriter.cpp
     wfg/engine/audio/ProxyPlugin.h
     wfg/engine/audio/ProxyPlugin.cpp
     wfg/engine/audio/DeviceLayer.h

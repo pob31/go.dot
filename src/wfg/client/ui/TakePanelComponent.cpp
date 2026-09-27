@@ -20,8 +20,15 @@ namespace wfg::client::ui
     TakePanelComponent::TakePanelComponent (const model::Theme& themeToUse, Actions actionsToUse)
         : theme (themeToUse), actions (std::move (actionsToUse))
     {
-        for (auto* button : { &rec, &loop, &overdub, &undo, &clear })
+        for (auto* button : { &rec, &loop, &overdub, &undo, &clear, &keep, &keepAsCue })
             addAndMakeVisible (*button);
+
+        /*  KEEP (§19.8): the take made a file in the show's media; as a cue, a
+            media cue after this one that loops it between the points. */
+        keep.onClick = [this] { if (take.present && actions.keep) actions.keep (take.channelId, false, take.cueId); };
+        keepAsCue.onClick = [this] { if (take.present && actions.keep) actions.keep (take.channelId, true, take.cueId); };
+        keep.setTooltip ("Write the take and its layers into the show's media, as a file");
+        keepAsCue.setTooltip ("Write the take into the show's media, and add a cue after this one that loops it");
 
         /*  THE FIVE PRESSES, each the command of its name on the channel -
             what the D700's Rec and a transport cue send too, so the log says
@@ -66,8 +73,13 @@ namespace wfg::client::ui
         rec.setEnabled (sounds);
         loop.setEnabled (sounds && (state == "recording" || state == "overdubbing" || state == "held"));
         overdub.setEnabled (sounds && state != "empty");
-        undo.setEnabled (take.present && (take.layers > 0 || state == "recording" || state == "overdubbing"));
-        clear.setEnabled (take.present && take.hasTake());
+        undo.setEnabled (take.present && ! take.keeping
+                         && (take.layers > 0 || state == "recording" || state == "overdubbing"));
+        clear.setEnabled (take.present && take.hasTake() && ! take.keeping);
+
+        //  A change of the show, which the lock refuses; the file alone is not one.
+        keep.setEnabled (take.mayKeep());
+        keepAsCue.setEnabled (take.mayKeep() && ! take.locked);
     }
 
     void TakePanelComponent::pressed (const char* verb)
@@ -89,6 +101,11 @@ namespace wfg::client::ui
             button->setBounds (strip.removeFromLeft (width));
             strip.removeFromLeft (gap);
         }
+
+        //  Keep at the far end, apart from the presses: it changes no sound.
+        keepAsCue.setBounds (strip.removeFromRight (juce::roundToInt (96.0 * theme.type)));
+        strip.removeFromRight (gap);
+        keep.setBounds (strip.removeFromRight (width));
     }
 
     juce::Rectangle<int> TakePanelComponent::wordsArea() const
@@ -96,6 +113,7 @@ namespace wfg::client::ui
         const auto row = juce::roundToInt (theme.row * theme.type);
         auto strip = getLocalBounds().removeFromTop (row).reduced (10, 0);
         strip.setLeft (clear.getRight() + juce::roundToInt (12.0 * theme.type));
+        strip.setRight (keep.getX() - juce::roundToInt (12.0 * theme.type));
         return strip;
     }
 

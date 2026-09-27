@@ -318,6 +318,21 @@ namespace wfg::audio
         return take != nullptr && rate > 0 ? static_cast<double> (take->playhead()) / rate : 0.0;
     }
 
+    bool HostPlayer::keepTake (const std::string& channel, const std::string& stem, const std::string& mediaFolder)
+    {
+        return audioHost.keepTake (channel, stem, mediaFolder);
+    }
+
+    std::vector<cue::Player::KeptReport> HostPlayer::keptTakes()
+    {
+        std::vector<KeptReport> out;
+
+        for (auto& each : audioHost.keptTakes())
+            out.push_back ({ std::move (each.channel), std::move (each.file), std::move (each.error) });
+
+        return out;
+    }
+
     void HostPlayer::setLevelDb (int track, double levelDb)
     {
         /*  The tick thread, fifty times a second while a fade runs. One relaxed

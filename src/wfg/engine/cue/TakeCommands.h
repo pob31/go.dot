@@ -39,6 +39,17 @@
     Rec, Loop or a layer with no sounding mic cue holding the channel - a cue
     armed ahead, or ringing out after a stop, is not sounding; `layers-full`
     for a layer with every one in use. Undo and Clear need no cue.
+
+    KEEP (stage 9c.6, §19.8). `take.keep <channel s> [asCue T] [after s]` makes
+    the closed take a file under the show's media/takes, and with `asCue` a
+    media cue after the one given - or the one sounding on the channel - that
+    loops it between the take's points. Refused `not-closed` for a take empty
+    or still recording, `busy` while a Keep is still writing, and `locked`
+    with `asCue` under the lock; Undo and Clear are refused `busy` too, until
+    the file is whole. `take.kept <channel s> <file s> <error s> [cue s] [range
+    s] [route s]` is the engine's: the name the writer found on the disk, or
+    why it wrote nothing - and for `asCue` the cue, range and route it made,
+    whose identifiers the record carries so a replay makes the same ones.
 */
 
 #include <wfg/engine/command/CommandRegistry.h>
@@ -56,6 +67,7 @@ namespace wfg::cue
     struct SamplingChannel
     {
         bool declared = false;          ///< a rack channel by that id
+        std::string name;               ///< what the show calls it, which a kept take's file is called after
         double takeSeconds = 0.0;
         int layers = 4;
 
@@ -74,5 +86,5 @@ namespace wfg::cue
     /*  Registers the five presses and `take.closed`. `takes`, `runs` and
         `document` may not outlive the registry. */
     void registerTakeCommands (CommandRegistry& registry, TakeTable& takes, RunTable& runs,
-                               const doc::ShowDocument& document);
+                               doc::ShowDocument& document);
 }

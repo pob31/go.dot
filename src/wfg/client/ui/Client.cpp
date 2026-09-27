@@ -437,6 +437,9 @@ namespace wfg::client
                 footActions.pressTake = [this] (const std::string& verb, const std::string& channelId)
                                         { send (gesture::takePress (verb, channelId)); };
 
+                footActions.keepTake = [this] (const std::string& channelId, bool asCue, const std::string& afterCue)
+                                       { send (gesture::takeKeep (channelId, asCue, afterCue)); };
+
                 footActions.openEqOn = [this] (const std::string& cueId)
                 {
                     if (shell != nullptr && ! cueId.empty())

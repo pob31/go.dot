@@ -17,6 +17,7 @@
 
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/audio/TakeWriter.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/ProxyHost.h>
@@ -280,6 +281,13 @@ namespace wfg::audio
             holds them now - for the take's picture (9c.4), which reads their
             peaks on the window's thread. Copied out under the store's lock. */
         std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> allTakes();
+
+        /*  KEEP (Phase 9c, §19.8): a channel's take queued for the writer
+            beside the takes, which makes it a file under `mediaFolder`/takes
+            named after `stem`; and what it has finished since the last ask.
+            False for a channel with no recorder. Tick thread. */
+        bool keepTake (const std::string& channelId, const std::string& stem, const std::string& mediaFolder);
+        std::vector<TakeWriter::Done> keptTakes();
 
         /*  THE RACK CHANNEL'S INPUT STAGE (Phase 9b, namespace draft §18.4):
             which logical input it takes and how many, and its gate - opened at

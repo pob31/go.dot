@@ -98,6 +98,9 @@ namespace wfg::client::ui
 
             /** `take.<verb> <channel>`, from the take panel's buttons (Phase 9c). */
             std::function<void (const std::string& verb, const std::string& channelId)> pressTake;
+
+            /** `take.keep`, from the take panel's Keep and Keep as cue (Phase 9c). */
+            std::function<void (const std::string& channelId, bool asCue, const std::string& afterCue)> keepTake;
         };
 
         FootPanelComponent (const model::Theme&, Actions);

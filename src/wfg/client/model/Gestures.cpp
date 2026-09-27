@@ -148,6 +148,12 @@ namespace wfg::client::gesture
         return { origin::window, "take." + verb, { osc::Value::string (channelId) } };
     }
 
+    Event takeKeep (const std::string& channelId, bool asCue, const std::string& afterCue)
+    {
+        return { origin::window, "take.keep",
+                 { osc::Value::string (channelId), osc::Value::boolean (asCue), osc::Value::string (afterCue) } };
+    }
+
     Event aimSurfaces (const std::string& cueId)
     {
         return { origin::window, "surface.aim", { osc::Value::string (cueId) } };

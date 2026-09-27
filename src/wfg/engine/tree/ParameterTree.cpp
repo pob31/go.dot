@@ -1915,6 +1915,8 @@ namespace wfg::tree
                             chain["takeLayers"] = std::to_string (take.layers);
                             chain["loopIn"] = osc::formatDouble (take.loopIn);
                             chain["loopOut"] = osc::formatDouble (take.loopOut);
+                            chain["keeping"] = take.keeping ? "true" : "false";
+                            chain["kept"] = take.kept;
 
                             if (! take.problem.empty())
                                 chain["takeProblem"] = take.problem;

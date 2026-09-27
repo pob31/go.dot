@@ -51,6 +51,9 @@ namespace wfg::client::ui
             /** `take.<verb> <channel>`: record, loop, overdub, undo or clear. */
             std::function<void (const std::string& verb, const std::string& channelId)> press;
 
+            /** `take.keep`: the take made a file, and with `asCue` a cue after this one that loops it. */
+            std::function<void (const std::string& channelId, bool asCue, const std::string& afterCue)> keep;
+
             /** A press on an edge: that point on the surfaces' master dial. */
             std::function<void (const std::string& address)> dial;
 
@@ -97,7 +100,7 @@ namespace wfg::client::ui
         std::shared_ptr<const audio::TakePictureSet> pictures;
 
         juce::TextButton rec { "Rec" }, loop { "Loop" }, overdub { "Overdub" },
-                         undo { "Undo" }, clear { "Clear" };
+                         undo { "Undo" }, clear { "Clear" }, keep { "Keep" }, keepAsCue { "Keep as cue" };
 
         Edge hover = Edge::none;
         Edge grabbed = Edge::none;

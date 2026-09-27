@@ -46,6 +46,7 @@
 */
 
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -85,6 +86,27 @@ namespace wfg::cue
 
         /** Where the loop is playing, in seconds - the hook's, for the picture. */
         double playhead = 0.0;
+
+        /*  KEEP (§19.8): whether a file is being written from it now - Undo,
+            Clear and another Keep wait, refused `busy` - and the file the last
+            Keep wrote, relative to the show's media. */
+        bool keeping = false;
+        std::string kept;
+    };
+
+    /*  A KEEP ASKED FOR (Phase 9c, namespace draft §19.8): which channel and
+        what it is called, for the file's name; and when a media cue is to play
+        what it writes, the cue it follows and the loop it plays - the take's
+        points when Keep was pressed, so a point ridden while the file is
+        written does not move the cue's range. */
+    struct KeepRequest
+    {
+        std::string channel;
+        std::string stem;
+        bool asCue = false;
+        std::string afterCue;
+        double loopIn = 0.0;
+        double loopOut = 0.0;
     };
 
     class TakeTable
@@ -130,6 +152,22 @@ namespace wfg::cue
         /** The presses asked for since the last call, in order; the hook's. */
         std::vector<TakePress> takePresses();
 
+        /*  KEEP ASKED (§19.8): the take kept busy until `kept`, and the request
+            queued for the hook, which hands it to the writer. */
+        void keep (KeepRequest);
+
+        /** The Keeps asked for since the last call, in order; the hook's. */
+        std::vector<KeepRequest> keepRequests();
+
+        /*  WHAT THE WRITER DID (`take.kept`): the file it wrote, or why it
+            could not, and the Keep it answers - which says whether a cue is to
+            play the file. Nothing for a channel with no Keep in hand. */
+        std::optional<KeepRequest> kept (const std::string& channel, const std::string& file,
+                                         const std::string& error);
+
+        /** A sentence on the channel, from a handler that did less than it was asked. */
+        void say (const std::string& channel, const std::string& sentence);
+
         /** A replay's table queues nothing: there is no hook to place it. */
         void setQueueing (bool shouldQueue) noexcept    { queueing = shouldQueue; }
 
@@ -144,6 +182,8 @@ namespace wfg::cue
 
         std::map<std::string, Take> takes;
         std::vector<TakePress> pending;
+        std::map<std::string, KeepRequest> keepsInHand;
+        std::vector<KeepRequest> keepsAsked;
         bool queueing = true;
     };
 }

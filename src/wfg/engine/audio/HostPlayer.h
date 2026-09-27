@@ -116,6 +116,8 @@ namespace wfg::audio
         void setTakeThrough (const std::string& channel, bool through) override;
         std::vector<TakeReport> takeReports (const std::vector<std::string>& channels) override;
         double takePlayhead (const std::string& channel) const override;
+        bool keepTake (const std::string& channel, const std::string& stem, const std::string& mediaFolder) override;
+        std::vector<KeptReport> keptTakes() override;
 
         /*  Performs every queued arm. MESSAGE THREAD - it writes a Tracktion
             ValueTree, which every one of those writes asserts.

@@ -175,6 +175,16 @@ namespace wfg
             take while the loop plays would be a copy of it on the audio thread. */
         inline constexpr const char* layersFull       = "layers-full";
 
+        /*  KEEP ASKED OF A TAKE THAT IS NOT CLOSED (Phase 9c, §19.8): nothing
+            recorded yet, or a take still recording - there is no whole take
+            to write until Rec closes it. */
+        inline constexpr const char* notClosed        = "not-closed";
+
+        /*  A KEEP IS STILL WRITING THE TAKE (Phase 9c, §19.8): Undo and Clear
+            would empty what the writer is reading, and a second Keep would
+            write the same take twice. Until `take.kept` says it is done. */
+        inline constexpr const char* busy             = "busy";
+
         /*  The argument's TYPE was right and its VALUE is not one this command
             accepts - a scope that is neither "round" nor "group", a stop verb
             nobody has heard of.

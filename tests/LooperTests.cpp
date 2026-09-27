@@ -32,6 +32,7 @@
 
 #include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/audio/TakePictures.h>
+#include <wfg/engine/audio/TakeWriter.h>
 #include <wfg/engine/rt/RtCheck.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -42,8 +43,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <chrono>
 #include <functional>
 #include <memory>
+#include <thread>
 #include <string>
 #include <utility>
 #include <vector>
@@ -704,4 +707,137 @@ TEST_CASE ("take pictures: the take and each layer, the loudest chunk in each co
     const audio::TakePictures none { {} };
     REQUIRE (none.snapshot() != nullptr);
     CHECK (none.snapshot()->byChannel.empty());
+}
+
+//==============================================================================
+TEST_CASE ("keep: the closed take and its closed layers are copied as the loop sums them, once they are still")
+{
+    /*  Phase 9c, stage 9c.6 (namespace draft 19.8): what Keep writes is the
+        take and every closed layer, summed at unity; a pass being laid is not
+        in it, and nothing is read until the take is closed and no layer's
+        tail is falling. */
+    Rig rig (1.0, 2);
+    CHECK_FALSE (rig.looper.isSettled());
+
+    rig.post (Verb::record, 0);
+    rig.runTo (8192, [] (std::int64_t, int) { return 0.5f; });
+    CHECK_FALSE (rig.looper.isSettled());           // still recording
+
+    rig.post (Verb::record, 8192);
+    rig.runTo (8192 * 2, [] (std::int64_t, int) { return 0.0f; });
+    REQUIRE (rig.looper.state() == TakeState::looping);
+    CHECK (rig.looper.isSettled());
+
+    //  A PASS LAID AT A QUARTER over the whole loop: while it is laid it is not the take's.
+    rig.post (Verb::overdub, 8192 * 2);
+    rig.runTo (8192 * 2 + 4096, [] (std::int64_t, int) { return 0.25f; });
+    REQUIRE (rig.looper.state() == TakeState::overdubbing);
+    CHECK (rig.looper.isSettled());
+
+    std::vector<float> left (8192), right (8192);
+    rig.looper.copyTake (rig.looper.layerCount(), 0, 8192, left.data(), right.data());
+    CHECK (left[4096] == doctest::Approx (0.5f));
+    CHECK (right[4096] == doctest::Approx (0.5f));
+
+    rig.runTo (8192 * 3, [] (std::int64_t, int) { return 0.25f; });
+    rig.post (Verb::loop, 8192 * 3);
+    rig.runTo (8192 * 3 + 128, [] (std::int64_t, int) { return 0.0f; });
+    REQUIRE (rig.looper.layerCount() == 1);
+    CHECK_FALSE (rig.looper.isSettled());           // its tail still falling
+
+    rig.runTo (8192 * 3 + 2048, [] (std::int64_t, int) { return 0.0f; });
+    CHECK (rig.looper.isSettled());
+
+    //  CLOSED: the take and its layer, summed - and without the layer, the take alone.
+    rig.looper.copyTake (1, 0, 8192, left.data(), right.data());
+    CHECK (left[4096] == doctest::Approx (0.75f));
+    CHECK (right[4096] == doctest::Approx (0.75f));
+
+    rig.looper.copyTake (0, 0, 8192, left.data(), right.data());
+    CHECK (left[4096] == doctest::Approx (0.5f));
+
+    //  Past the take's memory, silence; and a looper with no recorder copies nothing.
+    rig.looper.copyTake (1, 8192 * 1000, 4, left.data(), right.data());
+    CHECK (left[0] == doctest::Approx (0.0f));
+
+    Looper none;
+    left[0] = 1.0f;
+    none.copyTake (3, 0, 4, left.data(), right.data());
+    CHECK (left[0] == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("keep: the writer makes a float WAV under media/takes, whole, under the first name free")
+{
+    /*  Phase 9c, stage 9c.6 (namespace draft 19.8): a take at a half, written
+        by the writer's own work and then by its thread, read back. */
+    Rig rig (1.0, 2);
+    rig.post (Verb::record, 0);
+    rig.runTo (4800, [] (std::int64_t, int) { return 0.5f; });
+    rig.post (Verb::record, 4800);
+    rig.runTo (4800 + 2048, [] (std::int64_t, int) { return 0.0f; });
+    REQUIRE (rig.looper.isSettled());
+    REQUIRE (rig.looper.length() == 4800);
+
+    const auto media = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                           .getChildFile ("wfg-keep-" + juce::String::toHexString (juce::Random::getSystemRandom().nextInt64()));
+    REQUIRE (media.createDirectory().wasOk());
+
+    const std::shared_ptr<const Looper> take (&rig.looper, [] (const Looper*) {});
+    const auto folder = media.getFullPathName().toStdString();
+
+    const auto first = audio::TakeWriter::write ({ "CH000001", "Vox/1: loop", folder, take });
+    CHECK (first.error.empty());
+    CHECK (first.channel == "CH000001");
+    CHECK (first.file == "takes/Vox_1_ loop take 1.wav");
+
+    const auto written = media.getChildFile ("takes").getChildFile ("Vox_1_ loop take 1.wav");
+    REQUIRE (written.existsAsFile());
+
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (written));
+    REQUIRE (reader != nullptr);
+    CHECK (reader->numChannels == 2u);
+    CHECK (reader->lengthInSamples == 4800);
+    CHECK (reader->sampleRate == doctest::Approx (48000.0));
+    CHECK (reader->usesFloatingPointData);
+
+    juce::AudioBuffer<float> back (2, 4800);
+    REQUIRE (reader->read (&back, 0, 4800, 0, true, true));
+    CHECK (back.getSample (0, 2400) == doctest::Approx (0.5f));
+    CHECK (back.getSample (1, 4799) == doctest::Approx (0.5f));
+    reader.reset();
+
+    //  THE NEXT IS THE NEXT NAME, and no half file is left beside them.
+    CHECK (audio::TakeWriter::write ({ "CH000001", "Vox/1: loop", folder, take }).file
+             == "takes/Vox_1_ loop take 2.wav");
+    CHECK (media.getChildFile ("takes").findChildFiles (juce::File::findFiles, false, "*.part").isEmpty());
+
+    //  AND BY ITS THREAD: queued, and finished a moment later.
+    {
+        audio::TakeWriter writer;
+        writer.queue ({ "CH000002", "Looper", folder, take });
+
+        std::vector<audio::TakeWriter::Done> done;
+
+        for (int waited = 0; done.empty() && waited < 500; ++waited)
+        {
+            done = writer.finished();
+
+            if (done.empty())
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        REQUIRE (done.size() == 1u);
+        CHECK (done[0].channel == "CH000002");
+        CHECK (done[0].file == "takes/Looper take 1.wav");
+        CHECK (done[0].error.empty());
+    }
+
+    //  NO TAKE, a sentence rather than a file.
+    const auto nothing = audio::TakeWriter::write ({ "CH000003", "Plain", folder, nullptr });
+    CHECK (nothing.file.empty());
+    CHECK (nothing.error == "there is no take on this channel");
+
+    CHECK (media.deleteRecursively());
 }

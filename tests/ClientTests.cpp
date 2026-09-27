@@ -5989,4 +5989,27 @@ TEST_CASE ("client: a mic cue's take is read off its channel's rows, said in wor
     CHECK (press.origin == "window");
     REQUIRE (press.args.size() == 1u);
     CHECK (press.args[0].getString() == "TK000011");
+
+    /*  KEEP (9c.6): writing, then written, said in the sentence - and while
+        it writes, another Keep is not offered. */
+    takes.keep ({ "TK000011", "Looper", false, {}, 0.0, 4.25 });
+    reading = readNow (30, "TK000002");
+    CHECK (reading.keeping);
+    CHECK_FALSE (reading.mayKeep());
+    CHECK (model::takePanelWords (reading).ends_with ("Keeping it as a file..."));
+
+    takes.kept ("TK000011", "takes/Looper take 1.wav", "");
+    reading = readNow (31, "TK000002");
+    CHECK_FALSE (reading.keeping);
+    CHECK (reading.kept == "takes/Looper take 1.wav");
+    CHECK (reading.mayKeep());
+    CHECK (model::takePanelWords (reading).ends_with ("Kept as takes/Looper take 1.wav."));
+    CHECK_FALSE (reading.locked);
+
+    const auto keep = gesture::takeKeep ("TK000011", true, "TK000002");
+    CHECK (keep.command == "take.keep");
+    REQUIRE (keep.args.size() == 3u);
+    CHECK (keep.args[0].getString() == "TK000011");
+    CHECK (keep.args[1].getBool());
+    CHECK (keep.args[2].getString() == "TK000002");
 }

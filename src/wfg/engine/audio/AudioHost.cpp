@@ -1032,6 +1032,27 @@ namespace wfg::audio
             return found != takes.end() ? found->second.take : nullptr;
         }
 
+        bool keepTake (const std::string& channelId, const std::string& stem, const std::string& mediaFolder)
+        {
+            auto take = takeFor (channelId);
+
+            if (take == nullptr)
+                return false;
+
+            /*  THE WRITER BESIDE THE TAKES, made with the first Keep: a show
+                that never keeps a take starts no thread for it. */
+            if (takeWriter == nullptr)
+                takeWriter = std::make_unique<TakeWriter>();
+
+            takeWriter->queue ({ channelId, stem, mediaFolder, std::move (take) });
+            return true;
+        }
+
+        std::vector<TakeWriter::Done> keptTakes()
+        {
+            return takeWriter != nullptr ? takeWriter->finished() : std::vector<TakeWriter::Done> {};
+        }
+
         std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> allTakes()
         {
             std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> out;
@@ -2039,6 +2060,11 @@ namespace wfg::audio
         std::map<int, std::string> takeTracks;
         std::mutex takesLock;
 
+        /*  KEEP'S WRITER (Phase 9c, §19.8), made with the first Keep. A job
+            holds its take by a shared pointer, so a take the store lets go of
+            while it is written lives until the file is whole. */
+        std::unique_ptr<TakeWriter> takeWriter;
+
         /** Whether the plugin table holds this graph's slots, to clear at stop. */
         bool toldTable = false;
         std::vector<std::unique_ptr<plugin::ProxyHost>> proxies;
@@ -2180,6 +2206,16 @@ namespace wfg::audio
     std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> AudioHost::allTakes()
     {
         return impl->allTakes();
+    }
+
+    bool AudioHost::keepTake (const std::string& channelId, const std::string& stem, const std::string& mediaFolder)
+    {
+        return impl->keepTake (channelId, stem, mediaFolder);
+    }
+
+    std::vector<TakeWriter::Done> AudioHost::keptTakes()
+    {
+        return impl->keptTakes();
     }
 
     void AudioHost::setRackSource (int trackIndex, int firstInput, int width) noexcept

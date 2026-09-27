@@ -1754,6 +1754,8 @@ TEST_CASE ("take panel: its five presses are the take verbs, offered only where 
     ui::TakePanelComponent::Actions actions;
     actions.press = [&presses] (const std::string& verb, const std::string& channel)
                     { presses.push_back (verb + " " + channel); };
+    actions.keep = [&presses] (const std::string& channel, bool asCue, const std::string& after)
+                   { presses.push_back (std::string (asCue ? "keep as cue " : "keep ") + channel + " after " + after); };
 
     ui::TakePanelComponent panel (model::Theme {}, actions);
     panel.setSize (1400, 240);
@@ -1804,7 +1806,7 @@ TEST_CASE ("take panel: its five presses are the take verbs, offered only where 
     for (auto* button : buttonsUnder (panel))
         buttons[button->getButtonText().toStdString()] = button;
 
-    for (const auto* name : { "Rec", "Loop", "Overdub", "Undo", "Clear" })
+    for (const auto* name : { "Rec", "Loop", "Overdub", "Undo", "Clear", "Keep", "Keep as cue" })
         REQUIRE (buttons.count (name) == 1u);
 
     //  LOOPING, a cue sounding: a layer and Undo and Clear are offered; Loop has nothing to close.
@@ -1819,6 +1821,30 @@ TEST_CASE ("take panel: its five presses are the take verbs, offered only where 
 
     CHECK (presses == std::vector<std::string> { "record TK000011", "overdub TK000011",
                                                  "undo TK000011", "clear TK000011" });
+
+    /*  KEEP (9c.6): the take made a file, and as a cue, after this one. While
+        a Keep writes, Keep, Undo and Clear wait; under the lock, the file
+        alone. */
+    CHECK (buttons["Keep"]->isEnabled());
+    CHECK (buttons["Keep as cue"]->isEnabled());
+    presses.clear();
+    buttons["Keep"]->onClick();
+    buttons["Keep as cue"]->onClick();
+    CHECK (presses == std::vector<std::string> { "keep TK000011 after TK000002", "keep as cue TK000011 after TK000002" });
+
+    take.keeping = true;
+    panel.show (reading, set);
+    CHECK_FALSE (buttons["Keep"]->isEnabled());
+    CHECK_FALSE (buttons["Undo"]->isEnabled());
+    CHECK_FALSE (buttons["Clear"]->isEnabled());
+
+    take.keeping = false;
+    take.locked = true;
+    panel.show (reading, set);
+    CHECK (buttons["Keep"]->isEnabled());
+    CHECK_FALSE (buttons["Keep as cue"]->isEnabled());
+    take.locked = false;
+    panel.show (reading, set);
 
     /*  IT DRAWS, and with a picture to look at when somebody asks for one. A
         panel that threw or read past an end would take the window down rather

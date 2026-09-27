@@ -92,6 +92,7 @@ namespace wfg::client::ui
                 TakePanelComponent::Actions taking;
                 taking.set = actions.set;
                 taking.press = actions.pressTake;
+                taking.keep = actions.keepTake;
                 taking.dial = actions.dial;
                 taking.say = [this] (const juce::String& sentence)
                 {

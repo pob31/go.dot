@@ -110,6 +110,9 @@ namespace wfg::client::model
             reading.onGo = word;
 
         reading.through = isYes (flag (snapshot, base + "through"));
+        reading.keeping = isYes (flag (snapshot, slot + "keeping"));
+        reading.kept = text (snapshot, slot + "kept");
+        reading.locked = isYes (flag (snapshot, "/godot/document/locked"));
         return reading;
     }
 
@@ -138,6 +141,12 @@ namespace wfg::client::model
             of the next Rec does not say anywhere a hand would see. */
         if (take.layersFull() && (take.state == "looping" || take.state == "held"))
             said += " " + take.channelName + " holds its " + layersWords (take.maxLayers) + ": Undo one or Clear.";
+
+        /*  AND WHAT KEEP DID: writing now, or the file it wrote last. */
+        if (take.keeping)
+            said += " Keeping it as a file...";
+        else if (! take.kept.empty())
+            said += " Kept as " + take.kept + ".";
 
         if (! take.problem.empty())
             said += " " + take.problem + (take.problem.back() == '.' ? "" : ".");

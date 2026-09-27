@@ -2869,6 +2869,21 @@ namespace wfg::cue
         for (const auto& press : takes->takePresses())
             audio->postTake (press.channel, press.verb, at, press.in, press.out);
 
+        /*  KEEP (§19.8): each asked for handed to the writer beside the takes
+            - a channel the audio side holds no take for answered at once, as
+            the writer would answer it - and what the writer has finished, for
+            the log, which is where a replay learns the file's name. */
+        for (const auto& request : takes->keepRequests())
+            if (! audio->keepTake (request.channel, request.stem, mediaFolder))
+                engine.submit (origin::engine, "take.kept",
+                               { osc::Value::string (request.channel), osc::Value::string (std::string {}),
+                                 osc::Value::string ("there is no take on this channel") });
+
+        for (const auto& kept : audio->keptTakes())
+            engine.submit (origin::engine, "take.kept",
+                           { osc::Value::string (kept.channel), osc::Value::string (kept.file),
+                             osc::Value::string (kept.error) });
+
         /*  WHAT THE AUDIO THREAD DID BY ITSELF - a take closed, and at what
             length - for the log, and every channel the account knows is asked,
             emptied ones too: a report left unread would reach a take recorded

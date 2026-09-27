@@ -368,6 +368,20 @@ namespace wfg::cue
         virtual std::vector<TakeReport> takeReports (const std::vector<std::string>&) { return {}; }
         virtual double takePlayhead (const std::string&) const { return 0.0; }
 
+        /*  KEEP (Phase 9c, §19.8): a channel's closed take made a file under
+            the show's media, off the tick thread - `stem` the channel's name,
+            which the file is called after - and what finished since the last
+            ask, for `take.kept`: the file, or why there is none. */
+        struct KeptReport
+        {
+            std::string channel;
+            std::string file;
+            std::string error;
+        };
+
+        virtual bool keepTake (const std::string&, const std::string&, const std::string&) { return false; }
+        virtual std::vector<KeptReport> keptTakes() { return {}; }
+
         /*  Whether the media for that track is actually ready to sound.
 
             SEPARATE FROM THE ARM BEING ACCEPTED, and the separation is the

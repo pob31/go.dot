@@ -570,18 +570,22 @@ add_test(NAME wfg.replay.mic.fr_FR
                  --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/mic-fr_FR
                  --wfg-locale=${WFG_LOCALE_FR})
 
-# A take's life (stage 9c.3, namespace draft 19.6): recorded and looped by transport
-# cues, its points ridden through the tree's door, a layer laid and undone, held by
-# Esc, looped again by a later mic cue whose GO loops what it finds, cleared, and a
-# double Esc - recorded from a hosted session with an input WAV, replayed with no
-# recorder: the take's close is the audio side's take.closed, re-injected.
+# A take's life (stages 9c.3 and 9c.6, namespace draft 19.6 and 19.8): recorded and
+# looped by transport cues, its points ridden through the tree's door, a layer laid
+# and undone, kept as a file and as a cue, held by Esc, looped again by a later mic cue
+# whose GO loops what it finds, cleared, and a double Esc - recorded from a hosted
+# session with an input WAV, replayed with no recorder and no disk: the take's close
+# and the file's name are the audio side's take.closed and take.kept, re-injected. Keep
+# as cue edits the show, which autosaves, so the replay is given somewhere to save to.
 add_test(NAME wfg.replay.take.C
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/take.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/take
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/take-C
                  --wfg-locale=C)
 add_test(NAME wfg.replay.take.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/take.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/take
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/take-fr_FR
                  --wfg-locale=${WFG_LOCALE_FR})
 
 add_test(NAME wfg.replay.persistent.C

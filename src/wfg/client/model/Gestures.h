@@ -173,6 +173,11 @@ namespace wfg::client::gesture
         five the D700's Rec and a transport cue press. */
     Event takePress (const std::string& verb, const std::string& channelId);
 
+    /*  `take.keep <channel> <asCue> <after>`: the take made a file in the
+        show's media, and with `asCue` a media cue after `afterCue` that loops
+        it (Phase 9c, §19.8). */
+    Event takeKeep (const std::string& channelId, bool asCue, const std::string& afterCue);
+
     /*  `surface.aim`: the cue a surface's rotaries edit on their EQ and Send
         pages (author, 2026-09-25) - a click on a running cue's name. Empty
         lets go. */

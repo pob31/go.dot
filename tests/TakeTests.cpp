@@ -57,6 +57,7 @@
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
@@ -161,6 +162,29 @@ namespace
 
         double takePlayhead (const std::string&) const override  { return 1.25; }
 
+        /*  KEEP'S TWO DOORS (§19.8): what was asked to be written, and the
+            reports the test hands back at the next ask. */
+        struct Kept
+        {
+            std::string channel, stem, folder;
+        };
+
+        bool keepTake (const std::string& channel, const std::string& stem, const std::string& folder) override
+        {
+            keeps.push_back ({ channel, stem, folder });
+            return true;
+        }
+
+        std::vector<KeptReport> keptTakes() override
+        {
+            auto out = kept;
+            kept.clear();
+            return out;
+        }
+
+        std::vector<Kept> keeps;
+        std::vector<KeptReport> kept;
+
         void completeArms (Engine& engine)
         {
             for (const auto& arm : arms)
@@ -212,6 +236,7 @@ namespace
             runner.setTakes (&takes);
             runner.setPlayer (&audio);
             runner.setSamplesPerTick (960);
+            runner.setMediaFolder ("MEDIA");
             parameters.setTakes (&takes);
         }
 
@@ -288,6 +313,25 @@ namespace
         }
 
         const cue::Take& take() const { return takes.of ("TK000011"); }
+
+        /** The arguments the last `command` record of the log was applied with. */
+        std::vector<std::string> appliedWith (const std::string& command)
+        {
+            std::vector<std::string> out;
+
+            for (const auto& record : LogFile::parse (engine.log().contents()).records)
+            {
+                if (record.kind != LogRecord::Kind::applied || record.command != command)
+                    continue;
+
+                out.clear();
+
+                for (const auto& arg : record.args)
+                    out.push_back (arg.isString() ? arg.getString() : std::string ("?"));
+            }
+
+            return out;
+        }
 
         Engine engine;
         doc::ShowDocument document;
@@ -602,4 +646,122 @@ TEST_CASE ("take: a load to time passes a transport cue's press by - it stops no
     CHECK (cue::isTakePress (read, recordCue));
     CHECK (cue::isTakePress (read, rig.document.findById ("TK000007")));
     CHECK_FALSE (cue::isTakePress (read, rig.document.findById ("TK000002")));
+}
+
+//==============================================================================
+TEST_CASE ("take: Keep writes the closed take through the audio side, and Undo and Clear wait until it says it is done")
+{
+    /*  Phase 9c, stage 9c.6 (namespace draft 19.8): take.keep is refused for
+        a take not closed, asked of the audio side at the next tick with the
+        channel's name and the show's media, and holds Undo, Clear and another
+        Keep off `busy` until take.kept says what the writer did. */
+    Rig rig;
+    REQUIRE (rig.fireAndLaunch ("TK000002") != nullptr);
+
+    CHECK (rig.refusal ("take.keep", { text (looper) }).find ("not-closed") != std::string::npos);
+    REQUIRE (rig.applied ("take.record", { text (looper) }));
+    CHECK (rig.refusal ("take.keep", { text (looper) }).find ("not-closed") != std::string::npos);
+
+    REQUIRE (rig.applied ("take.record", { text (looper) }));
+    rig.audio.reports.push_back ({ looper, "pressed", 2.5 });
+    rig.tickOnce();
+    rig.tickOnce();
+    REQUIRE (rig.applied ("take.overdub", { text (looper) }));
+    REQUIRE (rig.applied ("take.loop", { text (looper) }));
+    REQUIRE (rig.take().layers == 1);
+
+    //  KEEP: the account busy at once, the writer asked at the next tick.
+    REQUIRE (rig.applied ("take.keep", { text (looper) }));
+    CHECK (rig.take().keeping);
+    CHECK (rig.at ("/godot/slot/TK000011/keeping") == "true");
+    rig.tickOnce();
+    REQUIRE (rig.audio.keeps.size() == 1u);
+    CHECK (rig.audio.keeps[0].channel == looper);
+    CHECK (rig.audio.keeps[0].stem == "Looper");
+    CHECK (rig.audio.keeps[0].folder == "MEDIA");
+
+    //  WHILE IT WRITES: nothing empties what it reads, and it is not written twice.
+    CHECK (rig.refusal ("take.undo", { text (looper) }).find ("busy") != std::string::npos);
+    CHECK (rig.refusal ("take.clear", { text (looper) }).find ("busy") != std::string::npos);
+    CHECK (rig.refusal ("take.keep", { text (looper) }).find ("busy") != std::string::npos);
+
+    //  WRITTEN: logged with the name the writer found, and Undo is Undo again.
+    rig.audio.kept.push_back ({ looper, "takes/Looper take 1.wav", "" });
+    rig.tickOnce();
+    rig.tickOnce();
+    CHECK_FALSE (rig.take().keeping);
+    CHECK (rig.take().kept == "takes/Looper take 1.wav");
+    CHECK (rig.at ("/godot/slot/TK000011/kept") == "takes/Looper take 1.wav");
+    CHECK (rig.appliedWith ("take.kept") == std::vector<std::string> { looper, "takes/Looper take 1.wav", "" });
+    REQUIRE (rig.applied ("take.undo", { text (looper) }));
+    CHECK (rig.take().layers == 0);
+
+    //  A WRITER THAT COULD NOT says why, on the channel, and lets go.
+    REQUIRE (rig.applied ("take.keep", { text (looper) }));
+    rig.audio.kept.push_back ({ looper, "", "the disk would not take the whole take" });
+    rig.tickOnce();
+    rig.tickOnce();
+    CHECK_FALSE (rig.take().keeping);
+    CHECK (rig.take().problem == "the take could not be kept: the disk would not take the whole take");
+
+    CHECK (rig.refusal ("take.keep", { text ("TK000013") }).find ("bad-value") != std::string::npos);
+    CHECK (rig.refusal ("take.keep", { text ("NQNQNQNQ") }).find ("unknown-id") != std::string::npos);
+}
+
+TEST_CASE ("take: Keep as cue makes a media cue after the one sounding there, looping the take between its points, in one step")
+{
+    /*  Phase 9c, stage 9c.6 (namespace draft 19.8): the cue follows the mic
+        cue holding the channel, plays the file the writer named, and loops
+        between the points the take had when Keep was pressed - its
+        identifiers in take.kept's record, so a replay makes the same ones. A
+        change of the show: refused under the lock. */
+    Rig rig;
+    REQUIRE (rig.fireAndLaunch ("TK000002") != nullptr);
+    REQUIRE (rig.applied ("take.record", { text (looper) }));
+    REQUIRE (rig.applied ("take.record", { text (looper) }));
+    rig.audio.reports.push_back ({ looper, "pressed", 2.5 });
+    rig.tickOnce();
+    rig.tickOnce();
+    REQUIRE (rig.applied ("node.set", { text ("/godot/slot/TK000011/loopIn"), osc::Value::float64 (0.5) }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/slot/TK000011/loopOut"), osc::Value::float64 (2.0) }));
+
+    //  UNDER THE LOCK: the file alone, never the cue.
+    REQUIRE (rig.applied ("node.set", { text ("/godot/document/locked"), osc::Value::boolean (true) }));
+    CHECK (rig.refusal ("take.keep", { text (looper), osc::Value::boolean (true) }).find ("locked") != std::string::npos);
+    REQUIRE (rig.applied ("node.set", { text ("/godot/document/locked"), osc::Value::boolean (false) }));
+
+    REQUIRE (rig.applied ("take.keep", { text (looper), osc::Value::boolean (true) }));
+
+    //  A point ridden while the file is written does not move the cue's range.
+    REQUIRE (rig.applied ("node.set", { text ("/godot/slot/TK000011/loopIn"), osc::Value::float64 (1.0) }));
+
+    rig.tickOnce();
+    rig.audio.kept.push_back ({ looper, "takes/Looper take 1.wav", "" });
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto applied = rig.appliedWith ("take.kept");
+    REQUIRE (applied.size() == 6u);
+    const auto& made = applied[3];
+    const auto& range = applied[4];
+
+    //  AFTER LOOP VOICE, in its list.
+    const auto order = client::model::words (rig.at ("/godot/list/TK000001/order"));
+    const auto mic = std::find (order.begin(), order.end(), "TK000002");
+    REQUIRE (mic != order.end());
+    REQUIRE (mic + 1 != order.end());
+    CHECK (*(mic + 1) == made);
+
+    CHECK (rig.at ("/godot/cue/" + made + "/kind") == "media");
+    CHECK (rig.at ("/godot/cue/" + made + "/name") == "Looper take 1");
+    CHECK (rig.at ("/godot/cue/" + made + "/file") == "takes/Looper take 1.wav");
+    CHECK (rig.at ("/godot/range/" + range + "/cue") == made);
+    CHECK (rig.at ("/godot/range/" + range + "/in") == "0.5");
+    CHECK (rig.at ("/godot/range/" + range + "/out") == "2");
+    CHECK (rig.at ("/godot/range/" + range + "/loops") == "0");
+
+    //  ONE STEP: Undo takes the cue away whole, and leaves the file kept.
+    REQUIRE (rig.applied ("undo"));
+    CHECK (rig.at ("/godot/cue/" + made + "/kind").empty());
+    CHECK (rig.take().kept == "takes/Looper take 1.wav");
 }

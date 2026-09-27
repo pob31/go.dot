@@ -11443,14 +11443,14 @@ chord's own 0.016.
 
 | Command | Arguments | What it does, and what it records | What it refuses |
 |---|---|---|---|
-| `take.record` | `<channel s>` | the Rec press, §19.3's table | no sampling cue holding the channel — `not-running`; every layer in use — `layers-full`; a Keep copying — `busy` |
+| `take.record` | `<channel s>` | the Rec press, §19.3's table | no sampling cue holding the channel — `not-running`; every layer in use — `layers-full` *(a Keep copying is no refusal, as built: a pass is laid in a slot the copy does not read, 9c.6)* |
 | `take.loop` | `<channel s>` | the Loop press | `not-running` |
 | `take.overdub` | `<channel s>` | a layer begun while it loops or is held, or closed while one is laid — what Rec's cycle does, said explicitly for a cue | `not-running`, `layers-full` |
 | `take.undo` | `<channel s>` | the top layer off, or the pass being laid abandoned | `busy` |
 | `take.clear` | `<channel s>` | the channel empty | `busy` |
-| `take.keep` | `<channel s> [asCue T]` | §19.8 | a take being recorded — `not-closed`; `asCue` under the lock — `locked` |
+| `take.keep` | `<channel s> [asCue T] [after s]` | §19.8 - `after` the cue the new one follows, the mic cue holding the channel when none is given *(as built)* | a take empty or still recording — `not-closed`; a Keep still writing — `busy`; `asCue` under the lock — `locked`; with `asCue`, no cue to follow — `unknown-id` |
 | `take.closed` | `<channel s> <seconds d> <how s>` | engine origin: the length the audio thread closed a take at, and how — `pressed`, `full`, or `held` as its cue let go — so that a replay knows it *(seconds, not samples, as built: 9c.3)* | an identifier that is no rack channel — `unknown-id`; another word, or a length that is no number — `bad-value` |
-| `take.kept` | `<channel s> <file s> <error s>` | engine origin: the file Keep wrote, or why it could not | — |
+| `take.kept` | `<channel s> <file s> <error s> [cue s] [range s] [route s]` | engine origin: the file Keep wrote, or why it could not; for `asCue`, the cue, range and route it made, whose identifiers the applied record carries *(as built)* | an identifier that is no rack channel — `unknown-id` |
 
 **Where a press lands in time.** The handler moves the take's state in the model; a hook places the
 start of a recording, the close of a take and the start of a layer at the sample `now + the launch
@@ -11626,6 +11626,51 @@ a job off the message thread, and recorded with `take.kept`. With `asCue`, a med
 sampling cue plays the file, with a Range at the loop points set to loop; under the lock it is
 refused, as any change of the show. While the copy runs, Undo and Clear wait, refused `busy`, so the
 file is the take that was asked for.
+
+*As built (9c.6), Keep.*
+
+- **The writer** (`audio/TakeWriter`) is the document writer's shape: one thread, one mutex, one
+  condition variable, a queue in and a list of what finished out, made with the first Keep and
+  kept beside the takes in the audio host. A job holds its take by a shared pointer, so a take the
+  store lets go of mid-write lives until the file is whole. It waits for the recorder to settle -
+  the take closed and no closed layer's tail still falling, which the recorder publishes with the
+  block (`Looper::isSettled`, released, so everything written before it is seen) - then copies the
+  layers closed at that moment (`Looper::copyTake`), a second at a time, summed at unity in the order
+  the loop sums them, a chunk its slot has moved past read as silence. A pass being laid is in a slot
+  above the ones read, and the post-roll past the take's end is not read either, so nothing it reads
+  is being written; Undo and Clear, which would empty what it reads, are refused `busy` until
+  `take.kept`, and so is a second Keep. Rec and a layer are not: they write only slots it does not
+  read.
+- **The file** is a 32-bit float WAV at the take's rate - a sum of layers may pass full scale - named
+  `<channel> take <n>.wav` for the first n free in `media/takes` (the name made safe for any file
+  system), written beside itself as `.<name>.part` and moved into place when whole. The name is the
+  writer's, found where the disk is; `take.kept` carries it, so a replay reads it with no disk to ask.
+  The channel publishes `keeping` and `kept`.
+- **Keep as cue** is made when `take.kept` lands, not at `take.keep`: a media cue at the member
+  position after the cue asked for - the panel passes its own; with none, the mic cue holding the
+  channel - named after the file, playing it, with one range at the points the take had when Keep was
+  pressed (a point ridden while the file is written does not move it) looping for ever, and a route
+  to the first bus; one transaction, so one Undo takes it all, and the file stays kept. Its three
+  identifiers are appended to the applied record, `go`'s pattern, so a replay makes the same objects.
+  The show locked since Keep was pressed, or the cue to follow gone, and the file is kept with a
+  sentence on the channel and no cue. The analyser takes the new file as it takes any file a show
+  edit names, and the edit autosaves as any does - which is why the take fixture's replay is given
+  `--out`.
+- **The window:** the take panel's *Keep* and *Keep as cue* sit apart from the presses, at the far
+  end - they change no sound - offered for a closed take with no Keep writing, *Keep as cue* not
+  under the lock; the sentence says *"Keeping it as a file..."* and then *"Kept as takes/Looper take
+  1.wav."*; Undo and Clear wait while it writes.
+
+Tested by `tests/LooperTests.cpp` (the take and a closed layer copied as the loop sums them, a pass
+being laid not in it, nothing read until the tail has fallen; the writer's float WAV read back, the
+next name, no part file left, its thread, a job with no take); `tests/TakeTests.cpp` (the
+refusals, the writer asked at the next tick with the channel's name and the show's media, Undo and
+Clear `busy` until `take.kept`, a writer's error on the channel; Keep as cue after the sounding mic
+cue with the range at the points Keep was pressed at, its identifiers in the record, one Undo, and
+refused under the lock); the take reading and the panel's buttons in `tests/ClientTests.cpp` and
+`tests/RunPaneUiTests.cpp`; and in `blackbox/phase9c_take.py`, a file under the copy's media/takes
+read back as a stereo float WAV the take's length at the take's level, then Keep as cue's media cue
+after the mic cue - `logs/take.wfglog` re-recorded with both (32 records, replayed with `--out`).
 
 ### 19.9 Fixtures, drivers, and what the phase measures
 

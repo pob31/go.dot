@@ -195,9 +195,56 @@ namespace wfg::cue
         return out;
     }
 
+    void TakeTable::keep (KeepRequest request)
+    {
+        auto& take = takes[request.channel];
+        take.keeping = true;
+        take.problem.clear();
+        keepsInHand[request.channel] = request;
+
+        if (queueing)
+            keepsAsked.push_back (std::move (request));
+    }
+
+    std::vector<KeepRequest> TakeTable::keepRequests()
+    {
+        std::vector<KeepRequest> out;
+        out.swap (keepsAsked);
+        return out;
+    }
+
+    std::optional<KeepRequest> TakeTable::kept (const std::string& channel, const std::string& file,
+                                                const std::string& error)
+    {
+        const auto found = keepsInHand.find (channel);
+
+        if (found == keepsInHand.end())
+            return std::nullopt;
+
+        auto request = found->second;
+        keepsInHand.erase (found);
+
+        auto& take = takes[channel];
+        take.keeping = false;
+
+        if (error.empty())
+            take.kept = file;
+        else
+            take.problem = "the take could not be kept: " + error;
+
+        return request;
+    }
+
+    void TakeTable::say (const std::string& channel, const std::string& sentence)
+    {
+        takes[channel].problem = sentence;
+    }
+
     void TakeTable::clear()
     {
         takes.clear();
         pending.clear();
+        keepsInHand.clear();
+        keepsAsked.clear();
     }
 }
