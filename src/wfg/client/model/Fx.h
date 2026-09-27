@@ -178,6 +178,9 @@ namespace wfg::client::model
 
         /** What it takes, in words - "stereo in, stereo out" (2026-09-26). */
         std::string layout;
+
+        /** On a sampling channel: `before` the recorder or `after` the player (Phase 9c). */
+        std::string side = "after";
     };
 
     /** The set, in chain order. */

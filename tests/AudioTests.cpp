@@ -4920,7 +4920,9 @@ TEST_CASE ("M10: rack channels beside the voices keep every node's identity uniq
         with the live input stage, the EQ, its own proxies and the output stage,
         and no launcher slot. A new shape of track is a new shape of graph, so
         the identity check M10 asked of the voices is asked of it too - beside
-        the voices at the sizes a show uses, each channel with a chain of two. */
+        the voices at the sizes a show uses, each channel with a chain of two -
+        and every other one a sampling channel (Phase 9c, §19.2), its recorder
+        between a plugin before it and one after. */
     HostRig rig;
     REQUIRE (rig.host.start (hostFor (8)));
 
@@ -4944,7 +4946,14 @@ TEST_CASE ("M10: rack channels beside the voices keep every node's identity uniq
                         audio::PluginSpec entry;
                         entry.id = "PG" + std::to_string (100000 + at * 10 + plugin);
                         entry.identifier = "godot:test-gain";
+                        entry.beforeRecorder = plugin == 0;
                         channel.plugins.push_back (entry);
+                    }
+
+                    if (at % 2 == 1)
+                    {
+                        channel.takeSeconds = 0.05;
+                        channel.layers = 2;
                     }
 
                     spec.rack.push_back (channel);

@@ -158,11 +158,12 @@ namespace wfg::plugin
         {
             const std::lock_guard<std::mutex> lock { mutex };
 
-            if (! graphBuilt && builtIds.empty() && builtRack.empty())
+            if (! graphBuilt && builtIds.empty() && builtRack.empty() && builtTakes.empty())
                 return;
 
             builtIds.clear();
             builtRack.clear();
+            builtTakes.clear();
             graphBuilt = false;
             ++revisionCount;
         }
@@ -225,12 +226,45 @@ namespace wfg::plugin
             return builtRack;
         }
 
+        /*  THE TAKES THE GRAPH SET ASIDE (Phase 9c, namespace draft §19.2):
+            for each sampling channel, the longest take and the layers its
+            memory was set aside for, how many bytes that is, and what became
+            of a take a rebuild could not keep. What the document says is the
+            decision; this is what tonight's graph holds, so the Rack tab can
+            tell a change still waiting for Load now. Written with `setBuilt`. */
+        struct BuiltTake
+        {
+            double seconds = 0.0;
+            int layers = 0;
+            std::uint64_t bytes = 0;
+            std::string problem;
+
+            /** The channel's plugins built before the recorder, in chain order. */
+            std::vector<std::string> before;
+        };
+
+        void setBuiltTakes (std::map<std::string, BuiltTake> takes)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            builtTakes = std::move (takes);
+            ++revisionCount;
+        }
+
+        /** A channel's take as the graph holds it; nothing set aside for one with none. */
+        BuiltTake builtTakeOf (const std::string& channelId) const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            const auto found = builtTakes.find (channelId);
+            return found != builtTakes.end() ? found->second : BuiltTake {};
+        }
+
     private:
         mutable std::mutex mutex;
         std::map<std::string, Status> table;
         std::uint64_t revisionCount = 0;
         std::vector<std::string> builtIds;
         std::map<std::string, std::vector<std::string>> builtRack;
+        std::map<std::string, BuiltTake> builtTakes;
         bool graphBuilt = false;
     };
 }

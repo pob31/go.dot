@@ -1885,6 +1885,16 @@ namespace wfg::tree
                         chain["plugins"] = ids;
                         chain["latencySamples"] = std::to_string (worst);
 
+                        /*  ITS TAKE AS TONIGHT'S GRAPH HOLDS IT (Phase 9c, §19.2):
+                            the memory set aside, which moves at Load now and not
+                            when the rows do, and a take a rebuild let go of. */
+                        if (pluginTable != nullptr)
+                        {
+                            const auto built = pluginTable->builtTakeOf (channel[idProperty].toString().toStdString());
+                            chain["takeMemory"] = osc::formatDouble (std::round (static_cast<double> (built.bytes) / 1.0e5) / 10.0);
+                            chain["takeProblem"] = built.problem;
+                        }
+
                         collectSlot (channel, "Channel", "rackChannel", "rackChannel",
                                      analysis, nodes, &chain);
 
@@ -1932,11 +1942,29 @@ namespace wfg::tree
                             if (! channel.hasType ("Channel"))
                                 continue;
 
-                            auto& chainIds = declaredRack[channel[idProperty].toString().toStdString()];
+                            const auto channelId = channel[idProperty].toString().toStdString();
+                            auto& chainIds = declaredRack[channelId];
+
+                            /*  AND ITS RECORDER (Phase 9c, §19.2): the take's
+                                length, its layers and which plugins sit before
+                                it are the graph's shape as much as the chain is. */
+                            const auto seconds = static_cast<double> (channel.getProperty ("takeSeconds", 0.0));
+                            const auto layers = static_cast<int> (channel.getProperty ("layers", 4));
+                            std::vector<std::string> before;
 
                             for (const auto& entry : channel)
                                 if (entry.hasType ("Plugin"))
+                                {
                                     chainIds.push_back (entry[idProperty].toString().toStdString());
+
+                                    if (seconds > 0.0 && entry.getProperty ("side", "after").toString() == "before")
+                                        before.push_back (entry[idProperty].toString().toStdString());
+                                }
+
+                            const auto built = pluginTable->builtTakeOf (channelId);
+
+                            setChanged = setChanged || std::abs (seconds - built.seconds) > 1.0e-9
+                                           || (seconds > 0.0 && layers != built.layers) || before != built.before;
                         }
 
                         setChanged = setChanged || declaredRack != pluginTable->builtRackAll();

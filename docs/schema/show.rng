@@ -2209,9 +2209,27 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="layers">
+          <a:documentation>How many passes the recorder keeps on top of the take, each undoable one at a time (decision CA). A channel that has used them all refuses another pass, in words, until one is undone or the take cleared. Part of the memory the take sets aside; a change takes effect at Load now.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">16</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>What the designer called it. PRD 3.9b: the names appear in the dropdown and on the OLED, and the channel numbers do not - -Voix solo- is what somebody wrote down and -input 3- is a fact about a patch that will change.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="takeSeconds">
+          <a:documentation>The longest take this channel records, in seconds (Phase 9c, namespace draft 19.2): above nought the channel carries a recorder between its plugins before it and after it, and nought is no recorder - the channel of 9b. What it costs is memory, set aside and touched when the graph is built, never when Rec is pressed: (1 + layers) times this, at the rate, two channels, four bytes a sample. A change takes effect at Load now, and empties the take the channel held.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">600</param>
+          </data>
         </attribute>
       </optional>
       <zeroOrMore>
@@ -2568,6 +2586,15 @@
         <attribute name="preset">
           <a:documentation>The preset the plugin is put into when the show opens: a .vstpreset file under the plugins/ folder of the bundle, by name, or empty for the own defaults of the plugin. Applied once per instance in the child; the own values of a cue sit on top of it, so a parameter a cue does not mention rests at the value of this preset. A file and not the bytes, for the reason media/file is.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="side">
+          <a:documentation>On a sampling channel&apos;s plugin (Phase 9c, decision BZ): before the recorder, and what it does is printed into the take, or after the player, and it is heard as the take loops and can be changed without recording again. After by default, so a plugin on a channel that had no recorder stays where it was heard. On a channel with no recorder, and on the set&apos;s plugins, it does nothing. A change takes effect at Load now, as the chain&apos;s order does.</a:documentation>
+          <choice>
+            <value>before</value>
+            <value>after</value>
+          </choice>
         </attribute>
       </optional>
     </element>

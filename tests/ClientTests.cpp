@@ -5803,3 +5803,68 @@ TEST_CASE ("client: the rack reads each channel with its own chain, and says the
     REQUIRE (rack.channels.size() == 2u);
     CHECK (rack.channels[0].chain.size() == 2u);
 }
+
+TEST_CASE ("client: a sampling channel says its recorder, what it sets aside, and which side of it each plugin is on")
+{
+    /*  Phase 9c, stage 9c.2 (namespace draft §19.2): the recorder's rows
+        written as the Rack tab writes them - the take's length and its layers
+        on the channel, a plugin's side - and read back into the tab's words. */
+    using V = osc::Value;
+    Rig rig;
+
+    const auto send = [&rig] (std::int64_t tick, const Event& event)
+    {
+        INFO (event.command);
+        REQUIRE (rig.apply (tick, event.origin, event.command, event.args).applied == 1);
+    };
+
+    REQUIRE (rig.apply (1, "window", "channel.create", { V::string ("mono"), V::string ("K1000001") }).applied == 1);
+    send (2, gesture::setNode ("/godot/slot/K1000001/name", "Loops"));
+    send (3, gesture::createChannelPlugin ("K1000001", "Gain A", "godot:test-gain", "VST3", ""));
+
+    auto rack = model::readRack (*rig.publish (4));
+    REQUIRE (rack.channels.size() == 1u);
+    CHECK_FALSE (rack.channels[0].samples());
+    CHECK (rack.channels[0].takeWord() == "No recorder");
+    CHECK (model::takeWords (rack.channels[0], rack).empty());
+    REQUIRE (rack.channels[0].chain.size() == 1u);
+    CHECK (rack.channels[0].chain[0].side == "after");
+
+    const auto gain = rack.channels[0].chain[0].id;
+    send (5, gesture::setNode ("/godot/slot/K1000001/takeSeconds", "60"));
+    send (6, gesture::setNode ("/godot/slot/K1000001/layers", "4"));
+    send (7, gesture::setNode ("/godot/plugin/" + gain + "/side", "before"));
+
+    rack = model::readRack (*rig.publish (8));
+    auto loops = rack.channels[0];
+    CHECK (loops.samples());
+    CHECK (loops.takeSeconds == doctest::Approx (60.0));
+    CHECK (loops.layers == 4);
+    CHECK (loops.takeWord() == "Take 1 min, 4 layers");
+    CHECK (loops.chain[0].side == "before");
+
+    /*  NOTHING SET ASIDE YET - a rig has no graph - so what Load now will set
+        aside, at the engine's rate: five passes of a minute and a crossfade,
+        two channels, four bytes a sample. */
+    CHECK (model::takeWords (loops, rack)
+             == "It records up to 1 min with 4 layers on top: 115.2 MB to set aside at Load now.");
+
+    loops.takeMemoryMb = 115.2;
+    CHECK (model::takeWords (loops, rack) == "It records up to 1 min with 4 layers on top: 115.2 MB set aside.");
+
+    loops.takeProblem = "the take was cleared: the interface's rate changed";
+    CHECK (model::takeWords (loops, rack).ends_with (" set aside. The take was cleared: the interface's rate changed."));
+
+    auto closed = rack;
+    closed.sampleRate = 0;
+    CHECK (model::takeWords (closed.channels[0], closed)
+             == "It records up to 1 min with 4 layers on top: about 115.2 MB at 48 kHz, set aside when the audio opens.");
+
+    //  The schema's own words for what a row may hold.
+    CHECK (rig.apply (9, "window", "node.set", { V::string ("/godot/slot/K1000001/takeSeconds"), V::string ("900") }).applied == 0);
+    CHECK (rig.apply (10, "window", "node.set", { V::string ("/godot/plugin/" + gain + "/side"), V::string ("sideways") }).applied == 0);
+
+    CHECK (model::secondsWords (10) == "10 s");
+    CHECK (model::secondsWords (90) == "1 min 30 s");
+    CHECK (model::secondsWords (600) == "10 min");
+}

@@ -2075,6 +2075,12 @@ namespace
                         spec.id = channel["id"].toString().toStdString();
                         spec.name = channel["name"].toString().toStdString();
 
+                        /*  THE RECORDER (Phase 9c, §19.2), through the schema's
+                            defaults - the canonical writer leaves out a value
+                            equal to its default, the width lesson above. */
+                        spec.takeSeconds = static_cast<double> (channel.getProperty ("takeSeconds", 0.0));
+                        spec.layers = static_cast<int> (channel.getProperty ("layers", 4));
+
                         for (const auto entry : channel)
                             if (entry.hasType ("Plugin"))
                             {
@@ -2083,6 +2089,7 @@ namespace
                                 plugin.identifier = entry["identifier"].toString().toStdString();
                                 plugin.name = entry["name"].toString().toStdString();
                                 plugin.presetPath = entry["preset"].toString().toStdString();
+                                plugin.beforeRecorder = entry.getProperty ("side", "after").toString() == "before";
                                 spec.plugins.push_back (std::move (plugin));
                             }
 

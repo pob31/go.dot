@@ -54,6 +54,7 @@
 namespace wfg::audio
 {
     class CueEq;
+    class Looper;
 
     /** How the hosted audio interface is opened. No defaults: a rate Go.dot
         chose for itself is a rate nobody chose, which is the same reason
@@ -77,6 +78,11 @@ namespace wfg::audio
 
         /** A preset file, resolved under the bundle, or empty. */
         std::string presetPath;
+
+        /*  ON A SAMPLING CHANNEL (Phase 9c, decision BZ): before the recorder,
+            printed into the take, rather than after the player. Ignored on a
+            channel with no recorder and on the set's entries. */
+        bool beforeRecorder = false;
     };
 
     /*  ONE RACK CHANNEL, as the document declares it (Phase 9b, namespace
@@ -88,6 +94,12 @@ namespace wfg::audio
         std::string id;
         std::string name;
         std::vector<PluginSpec> plugins;
+
+        /*  THE RECORDER (Phase 9c, namespace draft §19.2): the longest take, in
+            seconds - nought for a channel with none - and the passes it keeps
+            on top of it. */
+        double takeSeconds = 0.0;
+        int layers = 4;
     };
 
     /*  What the proxies need from outside the host (Phase 9a, §17.6): the
@@ -249,6 +261,14 @@ namespace wfg::audio
         /*  The track a rack channel was built as, or -1 for one the graph was
             built without (declared since, until Load now). */
         int rackTrackOf (const std::string& channelId) const noexcept;
+
+        /*  A SAMPLING CHANNEL'S TAKE (Phase 9c, namespace draft §19.2): its
+            recorder, which the host keeps beside the Edit so that a rebuilt
+            graph - a media arm, Load now, another interface - finds the take it
+            had while the channel's shape holds. Null for a channel with no
+            recorder or none by that id. One thread posts to it; the host alone
+            prepares it, in buildEdit. */
+        Looper* takeOf (const std::string& channelId) noexcept;
 
         /*  THE RACK CHANNEL'S INPUT STAGE (Phase 9b, namespace draft §18.4):
             which logical input it takes and how many, and its gate - opened at

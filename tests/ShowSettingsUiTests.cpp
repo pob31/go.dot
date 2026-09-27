@@ -301,6 +301,90 @@ TEST_CASE ("show settings UI: the Inputs tab makes named inputs, and a hand patc
     CHECK (rig.sent.size() == before + 1);
 }
 
+TEST_CASE ("show settings UI: the Rack tab offers a recorder, says what it sets aside, and puts a plugin before or after it")
+{
+    /*  Phase 9c, stage 9c.2 (namespace draft 19.2): a sampling channel, one
+        plugin before its recorder and one after, and the graph's record of
+        what it set aside as serve's host would write it. The channel's row
+        says its recorder as a menu, each plugin says its side, and the foot
+        says the memory - set aside, or still to set aside at Load now. */
+    Rig rig;
+    plugin::PluginTable table;
+    rig.parameters.setPlugins (&table);
+    rig.state.sampleRate = 48000;
+
+    const auto loops = rig.document.createRackChannel ("mono");
+    REQUIRE (loops.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + loops.id + "/name", "Loops").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + loops.id + "/takeSeconds", "60").ok);
+
+    const auto drive = rig.document.createChannelPlugin (loops.id, "Drive", "VST3-0badf00d-drve", "VST3", "C:/plugins/drive.vst3");
+    const auto delay = rig.document.createChannelPlugin (loops.id, "Delay", "VST3-0badf00d-dlay", "VST3", "C:/plugins/delay.vst3");
+    REQUIRE (drive.ok);
+    REQUIRE (delay.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/plugin/" + drive.id + "/side", "before").ok);
+
+    plugin::PluginTable::BuiltTake built;
+    built.seconds = 60.0;
+    built.layers = 4;
+    built.bytes = 115219200;
+    built.before = { drive.id };
+    table.setBuiltTakes ({ { loops.id, built } });
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Rack"));
+
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    const auto saying = [] (juce::Component& root, const juce::String& words)
+    {
+        std::function<bool (juce::Component&)> find = [&] (juce::Component& at)
+        {
+            if (auto* label = dynamic_cast<juce::Label*> (&at); label != nullptr && label->getText().contains (words))
+                return true;
+
+            for (auto* child : at.getChildren())
+                if (find (*child))
+                    return true;
+
+            return false;
+        };
+
+        return find (root);
+    };
+
+    CHECK (saying (*page, "It records up to 1 min with 4 layers on top: 115.2 MB set aside."));
+
+    //  The picture first, while the graph agrees with the show.
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.setSize (880, 610);
+        panel.refresh (*rig.publish());
+
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("rack-tab-sampling.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    //  A longer take asked for: the graph still holds the old one, and the foot says Load now.
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + loops.id + "/takeSeconds", "120").ok);
+    panel.refresh (*rig.publish());
+    CHECK (saying (*page, "It records up to 2 min with 4 layers on top: 230.4 MB to set aside at Load now."));
+}
+
 TEST_CASE ("show settings UI: the Rack tab makes channels, and says each chain's worst case against the budget")
 {
     /*  Phase 9b (namespace draft 18.3): two channels to look at, made through

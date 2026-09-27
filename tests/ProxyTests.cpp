@@ -31,6 +31,7 @@
 
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/audio/CueMatrix.h>
+#include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/plugin/PluginCommands.h>
@@ -2405,6 +2406,177 @@ TEST_CASE ("rack: a gate opens over its fade-in, a stop rings until the output i
     CHECK_FALSE (host.isRackSounding (rack));
 
     host.setBlockSink (nullptr);
+    host.stop();
+}
+
+TEST_CASE ("sampling: a take recorded through the plugin before the recorder loops through the plugin after, and a rebuild keeps it")
+{
+    /*  Phase 9c, stage 9c.2 (namespace draft 19.2, decision BZ). A rack
+        channel with a recorder of a second and two test-gain plugins, the first
+        BEFORE the recorder and the second AFTER the player. A steady 0.8 at
+        its input is recorded at a half - the first plugin printed into the
+        take - and loops at a quarter through the second. The second switched
+        out is heard at once, since it is after the player; the first switched
+        out changes nothing, since the take already has it. The graph built
+        again with the same shape keeps the take and plays it on; built with a
+        longer take it empties it and says why; built with no recorder it lets
+        it go. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    host.setProxyServices (services);
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+    spec.proxyDeadlineMicroseconds = 200000;
+
+    audio::RackChannelSpec channel;
+    channel.id = "SM000001";
+    channel.name = "Loops";
+    channel.takeSeconds = 1.0;
+    channel.layers = 2;
+
+    for (const auto& [pluginId, before] : { std::pair<const char*, bool> { "SM000011", true },
+                                            std::pair<const char*, bool> { "SM000012", false } })
+    {
+        audio::PluginSpec entry;
+        entry.id = pluginId;
+        entry.identifier = plugin::Catalogue::testGainIdentifier();
+        entry.name = "Test gain";
+        entry.beforeRecorder = before;
+        channel.plugins.push_back (entry);
+    }
+
+    spec.rack.push_back (channel);
+    REQUIRE (host.buildEdit (spec));
+    CHECK (host.inspectNodeIds().ok());
+
+    auto* take = host.takeOf ("SM000001");
+    REQUIRE (take != nullptr);
+    CHECK (take->capacity() == 48000);
+    CHECK (table.builtTakeOf ("SM000001").bytes == take->bytes());
+    CHECK (table.builtTakeOf ("SM000001").layers == 2);
+    CHECK (host.takeOf ("NQNQNQNQ") == nullptr);
+
+    const auto loaded = [&host, &table]
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (10);
+
+        while (! (table.statusOf ("SM000011").state == "loaded" && table.statusOf ("SM000012").state == "loaded")
+                 && std::chrono::steady_clock::now() < until)
+        {
+            host.pollProxies();
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        return table.statusOf ("SM000011").state == "loaded" && table.statusOf ("SM000012").state == "loaded";
+    };
+
+    const auto rack = host.rackTrackOf ("SM000001");
+    REQUIRE (rack == 1);
+
+    //  The input to the first output, both plugins in, the gate open - what a mic cue's arm and launch do.
+    const auto openChannel = [&host, rack]
+    {
+        auto* matrix = host.trackMatrix (rack);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, 0, 1.0f);
+        matrix->snapToTargets();
+        host.setRackSource (rack, 0, 1);
+
+        for (int slot = 0; slot < 2; ++slot)
+        {
+            host.setTrackFxShape (rack, slot, 1, 1);
+            host.setTrackFxEnabled (rack, slot, true);
+        }
+
+        host.pollProxies();
+        host.openRackGate (rack, -1);
+    };
+
+    REQUIRE (loaded());
+    openChannel();
+
+    LastSamples sink;
+    host.setBlockSink (&sink);
+
+    const std::vector<float> steady (64, 0.8f), silent (64, 0.0f);
+    const float* input[] { steady.data(), silent.data() };
+    const float* quiet[] { silent.data(), silent.data() };
+    const auto run = [&host] (const float* const* inputs, int blocks)
+    {
+        for (int i = 0; i < blocks; ++i)
+            host.processBlock (inputs, 2);
+    };
+
+    //  Open and answering, and silent: the take is empty and `through` is off.
+    run (input, 20);
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+
+    //  Rec, a quarter of a second of the steady input, Rec: the take closes and loops.
+    REQUIRE (take->post ({ audio::Looper::Verb::record, -1, 0, 0 }));
+    run (input, 188);
+    REQUIRE (take->post ({ audio::Looper::Verb::loop, -1, 0, 0 }));
+    run (quiet, 40);
+
+    CHECK (take->state() == audio::TakeState::looping);
+    CHECK (take->length() == 188 * 64);
+    CHECK (sink.last[0].load() == doctest::Approx (0.2f).epsilon (0.001));    // a half printed, a half heard
+
+    //  The plugin after the player out: heard at once - the loop at the half it was recorded at.
+    host.setTrackFxEnabled (rack, 1, false);
+    run (quiet, 20);
+    CHECK (sink.last[0].load() == doctest::Approx (0.4f).epsilon (0.001));
+
+    //  The plugin before the recorder out: nothing moves - the take already has it.
+    host.setTrackFxEnabled (rack, 0, false);
+    run (quiet, 20);
+    CHECK (sink.last[0].load() == doctest::Approx (0.4f).epsilon (0.001));
+
+    //  BUILT AGAIN WITH THE SAME SHAPE - Load now: the same take, still looping, through the new graph.
+    host.setBlockSink (nullptr);
+    REQUIRE (host.buildEdit (spec));
+    CHECK (host.takeOf ("SM000001") == take);
+    CHECK (take->length() == 188 * 64);
+    CHECK (take->state() == audio::TakeState::looping);
+    CHECK (table.builtTakeOf ("SM000001").problem.empty());
+
+    REQUIRE (loaded());
+    openChannel();
+    host.setBlockSink (&sink);
+    run (quiet, 40);
+    CHECK (sink.last[0].load() == doctest::Approx (0.2f).epsilon (0.001));
+
+    //  A longer take asked for: set aside afresh, which empties it, and said.
+    host.setBlockSink (nullptr);
+    spec.rack[0].takeSeconds = 2.0;
+    REQUIRE (host.buildEdit (spec));
+
+    auto* longer = host.takeOf ("SM000001");
+    REQUIRE (longer != nullptr);
+    CHECK (longer->capacity() == 96000);
+    CHECK (longer->state() == audio::TakeState::empty);
+    CHECK (table.builtTakeOf ("SM000001").problem == "the take was cleared: its longest take or its layers changed");
+
+    //  And a channel that no longer samples lets its take go.
+    spec.rack[0].takeSeconds = 0.0;
+    REQUIRE (host.buildEdit (spec));
+    CHECK (host.takeOf ("SM000001") == nullptr);
+    CHECK (table.builtTakeOf ("SM000001").bytes == 0);
+
     host.stop();
 }
 

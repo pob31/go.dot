@@ -11303,6 +11303,40 @@ the Edit**, one store per channel, and not by the plugin: every media arm rebuil
 interface throw the Edit away (`AudioHost.cpp:670`). The store keeps its takes across all three while
 the channel's width and the rate are unchanged, and clears them otherwise with a sentence.
 
+*As built (9c.2), the recorder in the graph.* As drawn, with these particulars:
+
+- **The rows.** `rackChannel,takeSeconds` (0..600 s) and `rackChannel,layers` (1..16) on the channel,
+  `plugin,side` on every plugin (on the set's it does nothing), and two the graph publishes:
+  **`takeMemory`**, the megabytes it has set aside for the channel tonight, and **`takeProblem`**,
+  what became of a take a rebuild could not keep. All three written rows take effect at Load now, as
+  a chain's order does; the tree counts a change of any of them as the graph differing from the show
+  (`plugin/changed`), which is what lights Load now.
+- **The store keeps a take while the rate, the longest take and the layers are what they were** - the
+  width is always two - and a change of any of them sets it aside afresh, which empties it: *the take
+  was cleared: the interface's rate changed*, or *its longest take or its layers changed*. A channel
+  that stops sampling, or is deleted, lets its take go. The store is refreshed in `buildEdit` after
+  the old Edit is gone, so nothing still plays a take it lets go of; `AudioHost::takeOf` hands a
+  channel's `Looper` to whoever posts to it (9c.3's verbs; the tests today).
+- **The order of the chain is the document's with the sides pulled apart**: every `before` plugin in
+  document order, the recorder, the EQ, every `after` one. A lane keeps its place in the channel's
+  own order whichever side it is built on, because a mic cue's inserts are sent by that place
+  (`builtRackOf`); so `rackChannel,plugins` stays the document's order, and the words say which side
+  each is on. With no recorder a side means nothing and the chain is 9b's.
+- **`LooperPlugin`** finds a block's place in Go.dot's count from the live input stage's tap, as the
+  stage does, and hands the block to the channel's `Looper`; it holds nothing and allocates nothing.
+- **The Rack tab**: the recorder is a menu on the channel's row - none, 10 s to 10 min, and the layers
+  on top - each plugin of a sampling channel says *before the recorder* or *after the player*, a menu
+  too, and the foot says the memory in words: *It records up to 1 min with 4 layers on top: 115.2 MB
+  set aside.* - or *to set aside at Load now* while the graph holds another shape, or *about* so much
+  when no audio is open, the engine's own arithmetic.
+
+**Tested** (ProxyTests, through a real child): a steady input recorded through the test gain before
+the recorder and looped through another after the player comes out at a quarter; the one after
+switched out is heard at once and the one before changes nothing; the graph built again keeps the
+same take playing; a longer take empties it and says why; no recorder lets it go. M10 builds every
+other rack channel as a sampling one. ClientTests write the rows through the tab's own gestures and
+read the words; the Rack tab's picture, `rack-tab-sampling.png`.
+
 ### 19.3 The take
 
 | state | Rec | Loop | Undo | Clear |

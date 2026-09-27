@@ -33,6 +33,11 @@
     the sentence says which are not counted rather than pretending they add
     nothing.
 
+    AND A RECORDER, on a sampling channel (Phase 9c, namespace draft §19.2):
+    the longest take and the layers kept on it, what that sets aside in
+    memory, and whether tonight's graph has set it aside yet - it does at Load
+    now, never when the rows move.
+
     std only, and a pure reading of the snapshot the window already holds.
 */
 
@@ -61,8 +66,21 @@ namespace wfg::client::model
             loaded. */
         int latencySamples = 0;
 
+        /*  THE RECORDER (Phase 9c): the longest take in seconds - nought for
+            none - and the layers it keeps; what the graph has set aside for
+            it, in megabytes; and what became of a take a rebuild let go. */
+        double takeSeconds = 0.0;
+        int layers = 4;
+        double takeMemoryMb = 0.0;
+        std::string takeProblem;
+
+        bool samples() const noexcept    { return takeSeconds > 0.0; }
+
         /** "Mono", "Mono to stereo", "Stereo". */
         std::string classWord() const;
+
+        /** "No recorder", "Take 1 min, 4 layers", "Take 30 s, 1 layer". */
+        std::string takeWord() const;
 
         /** "No plugins", "1 plugin", "3 plugins". */
         std::string chainWord() const;
@@ -93,6 +111,16 @@ namespace wfg::client::model
 
     /** "5 ms", "2.5 ms": a tenth of a millisecond at most, never a locale question. */
     std::string millisecondWords (double milliseconds);
+
+    /*  THE RECORDER'S MEMORY, in one sentence for the foot of the tab: "It
+        records up to 1 min with 4 layers on top: 115.3 MB set aside." - or
+        still to set aside at Load now when the graph holds another shape, or
+        about so much when no audio is open; and a take a rebuild let go of.
+        Empty for a channel with no recorder. */
+    std::string takeWords (const RackChannelRow&, const RackReading&);
+
+    /** "10 s", "1 min", "1 min 30 s": what a take's length is said as. */
+    std::string secondsWords (double seconds);
 
     /*  WHAT KEEPS LOAD NOW WAITING (Phase 9b, namespace draft §18.5): the cues
         sounding, by name - "Voix solo is sounding" - or nothing when the graph

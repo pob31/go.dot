@@ -22,6 +22,7 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -47,6 +48,62 @@ namespace wfg::client::model
         if (channelClass == "stereo")       return "Stereo";
 
         return channelClass;
+    }
+
+    std::string RackChannelRow::takeWord() const
+    {
+        if (! samples())
+            return "No recorder";
+
+        return "Take " + secondsWords (takeSeconds) + ", " + std::to_string (layers)
+                 + (layers == 1 ? " layer" : " layers");
+    }
+
+    std::string secondsWords (double seconds)
+    {
+        const auto whole = std::llround (std::max (0.0, seconds));
+
+        if (whole < 60)
+            return std::to_string (whole) + " s";
+
+        const auto minutes = whole / 60, rest = whole % 60;
+        return std::to_string (minutes) + " min" + (rest == 0 ? std::string() : " " + std::to_string (rest) + " s");
+    }
+
+    std::string takeWords (const RackChannelRow& channel, const RackReading& rack)
+    {
+        if (! channel.samples())
+            return {};
+
+        /*  WHAT IT COSTS, the engine's own arithmetic (Looper::prepare): every
+            pass of the longest take plus one crossfade, two channels, four bytes
+            a sample - so the words agree with what the graph sets aside. */
+        const auto rate = rack.sampleRate > 0 ? rack.sampleRate : 48000;
+        const auto crossfade = static_cast<double> (rate) / 100.0;
+        const auto expectedMb = static_cast<double> (1 + channel.layers)
+                                  * (channel.takeSeconds * rate + crossfade) * 2.0 * 4.0 / 1.0e6;
+        const auto megabytes = [] (double value)
+        {
+            const auto tenths = std::llround (std::max (0.0, value) * 10.0);
+            return std::to_string (tenths / 10) + "." + std::to_string (tenths % 10) + " MB";
+        };
+
+        std::string said = "It records up to " + secondsWords (channel.takeSeconds) + " with "
+                             + std::to_string (channel.layers) + (channel.layers == 1 ? " layer" : " layers")
+                             + " on top: ";
+
+        if (rack.sampleRate <= 0)
+            said += "about " + megabytes (expectedMb) + " at 48 kHz, set aside when the audio opens.";
+        else if (channel.takeMemoryMb <= 0.0 || std::abs (channel.takeMemoryMb - expectedMb) > 0.05 * expectedMb + 0.1)
+            said += megabytes (expectedMb) + " to set aside at Load now.";
+        else
+            said += megabytes (channel.takeMemoryMb) + " set aside.";
+
+        if (! channel.takeProblem.empty())
+            said += " " + std::string (1, static_cast<char> (std::toupper (static_cast<unsigned char> (channel.takeProblem.front()))))
+                      + channel.takeProblem.substr (1) + ".";
+
+        return said;
     }
 
     std::string RackChannelRow::chainWord() const
@@ -85,6 +142,11 @@ namespace wfg::client::model
 
             if (row.channelClass.empty())
                 row.channelClass = "mono";
+
+            row.takeSeconds = numberOf (text (snapshot, base + "takeSeconds"), 0.0);
+            row.layers = static_cast<int> (numberOf (text (snapshot, base + "layers"), 4.0));
+            row.takeMemoryMb = numberOf (text (snapshot, base + "takeMemory"), 0.0);
+            row.takeProblem = text (snapshot, base + "takeProblem");
 
             for (const auto& pluginId : words (text (snapshot, base + "plugins")))
                 row.chain.push_back (readPluginEntry (snapshot, pluginId));

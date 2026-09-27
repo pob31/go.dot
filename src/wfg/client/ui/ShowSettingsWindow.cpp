@@ -3872,7 +3872,7 @@ namespace wfg::client::ui
                 said.setText (channel == nullptr
                                 ? juce::String ("No rack channels yet. Add one for a microphone to pass through"
                                                 " plugins of its own - a mic cue names the channel it plays through.")
-                                : juce::String (channel->name) + ": " + juce::String (model::budgetWords (*channel, rack)),
+                                : footWords (*channel),
                               juce::dontSendNotification);
 
                 updateButtons();
@@ -3963,11 +3963,14 @@ namespace wfg::client::ui
                 the name above, and under it the class - a menu - and how many
                 plugins the chain carries. Carved in one place so the painter and
                 the click cut the same cells. */
-            static constexpr int crossWidth = 24, markWidth = 14, classWidth = 118;
+            static constexpr int crossWidth = 24, markWidth = 14, classWidth = 118, takeWidth = 172, sideWidth = 150;
 
+            /*  The name above, and beside it on the right the recorder (Phase
+                9c) - a menu, on the line with the room; under them the class, a
+                menu too, and how many plugins the chain carries. */
             struct ChannelCells
             {
-                juce::Rectangle<int> mark, name, channelClass, count, cross;
+                juce::Rectangle<int> mark, name, channelClass, take, count, cross;
             };
 
             static ChannelCells channelCells (int width, int height)
@@ -3979,10 +3982,34 @@ namespace wfg::client::ui
                 cells.mark = area.removeFromLeft (markWidth).removeFromTop (height / 2).withTrimmedTop (4);
 
                 auto top = area.removeFromTop (height / 2);
+                cells.take = top.removeFromRight (takeWidth).withTrimmedTop (4);
                 cells.name = top.withTrimmedTop (4);
                 cells.channelClass = area.removeFromLeft (classWidth).withTrimmedBottom (4);
                 cells.count = area.withTrimmedBottom (4);
                 return cells;
+            }
+
+            /*  WHAT THE FOOT SAYS OF THE PICKED CHANNEL: the delay against the
+                budget, and on a sampling channel what its take sets aside. */
+            juce::String footWords (const model::RackChannelRow& channel) const
+            {
+                auto words = juce::String (channel.name) + ": " + juce::String (model::budgetWords (channel, rack));
+
+                if (const auto take = model::takeWords (channel, rack); ! take.empty())
+                    words += " " + juce::String (take);
+
+                return words;
+            }
+
+            /*  A PLUGIN'S SIDE on a sampling channel (Phase 9c, decision BZ): the
+                start of its second line, a menu, where the other rows keep that
+                line for what became of the plugin. */
+            static juce::Rectangle<int> sideCell (int width, int height)
+            {
+                auto area = juce::Rectangle<int> (0, 0, width, height).reduced (8, 0);
+                area.removeFromRight (crossWidth);
+                area.removeFromLeft (18 + markWidth);
+                return area.removeFromBottom (height / 2).withTrimmedBottom (4).removeFromLeft (sideWidth);
             }
 
             const model::RackChannelRow* pickedChannel() const
@@ -4036,11 +4063,14 @@ namespace wfg::client::ui
                 for (const auto& channel : reading.channels)
                 {
                     out += channel.id + '|' + channel.name + '|' + channel.channelClass + '|'
-                             + std::to_string (channel.latencySamples) + '\n';
+                             + std::to_string (channel.latencySamples) + '|' + std::to_string (channel.takeSeconds) + '|'
+                             + std::to_string (channel.layers) + '|' + std::to_string (channel.takeMemoryMb) + '|'
+                             + channel.takeProblem + '\n';
 
                     for (const auto& entry : channel.chain)
                         out += ' ' + entry.id + '|' + entry.name + '|' + entry.state + '|' + entry.problem + '|'
-                                 + entry.preset + '|' + std::to_string (entry.latencySamples) + '|' + entry.layout + '\n';
+                                 + entry.preset + '|' + std::to_string (entry.latencySamples) + '|' + entry.layout + '|'
+                                 + entry.side + '\n';
                 }
 
                 return out;
@@ -4092,6 +4122,13 @@ namespace wfg::client::ui
                 g.setColour (Look::colour (theme, "ink-dim"));
                 g.drawText (juce::String (channel.classWord()) + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
                             cells.channelClass, juce::Justification::centredLeft, true);
+
+                /*  THE RECORDER, a menu as the class is (Phase 9c): its word says
+                    whether the channel samples, and a dot marks one that does. */
+                g.drawText ((channel.samples() ? juce::String::fromUTF8 ("\xe2\x97\x8f ") : juce::String())
+                              + juce::String (channel.takeWord())
+                              + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
+                            cells.take, juce::Justification::centredRight, true);
 
                 /*  OVER BUDGET IS SAID, never only coloured (§4.8): the words go
                     after the count, and the whole sentence is at the foot. */
@@ -4146,6 +4183,17 @@ namespace wfg::client::ui
                             area.removeFromTop (height / 2).withTrimmedTop (4), juce::Justification::centredLeft, true);
                 area = area.withTrimmedBottom (4);
 
+                /*  ON A SAMPLING CHANNEL its side comes first, a menu: printed
+                    into the take, or heard as it loops (decision BZ). */
+                if (const auto* channel = pickedChannel(); channel != nullptr && channel->samples())
+                {
+                    g.setFont (Look::font (theme, 12.0f));
+                    g.setColour (Look::colour (theme, "ink"));
+                    g.drawText (juce::String (entry.side == "before" ? "before the recorder" : "after the player")
+                                  + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
+                                area.removeFromLeft (sideWidth), juce::Justification::centredLeft, true);
+                }
+
                 /*  The state is a WORD and the sentence follows it, as on the
                     Plugins tab: what somebody reads when a voice has gone silent. */
                 juce::String words = entry.state;
@@ -4192,8 +4240,7 @@ namespace wfg::client::ui
                     {
                         pickedChannelId = channel.id;
                         pickedPluginId.clear();
-                        said.setText (juce::String (channel.name) + ": " + juce::String (model::budgetWords (channel, rack)),
-                                      juce::dontSendNotification);
+                        said.setText (footWords (channel), juce::dontSendNotification);
                         chainHeading.setText (juce::String (channel.name) + "'s chain, in the order it processes",
                                               juce::dontSendNotification);
                         chainList.updateContent();
@@ -4201,6 +4248,8 @@ namespace wfg::client::ui
 
                     if (! locked && cells.channelClass.contains (event.x, event.y))
                         chooseClass (channel);
+                    else if (! locked && cells.take.contains (event.x, event.y))
+                        chooseTake (channel);
 
                     updateButtons();
                     channelList.repaint();
@@ -4217,6 +4266,11 @@ namespace wfg::client::ui
                 }
 
                 pickedPluginId = entry.id;
+
+                if (! locked && pickedChannel()->samples()
+                      && sideCell (widthOf (event, chainList), chainList.getRowHeight()).contains (event.x, event.y))
+                    chooseSide (entry);
+
                 updateButtons();
                 chainList.repaint();
             }
@@ -4295,6 +4349,67 @@ namespace wfg::client::ui
                                             return;
 
                                         safe->send (gesture::setNode ("/godot/slot/" + id + "/class", words[chosen]));
+                                    });
+            }
+
+            /*  THE RECORDER'S MENU (Phase 9c, namespace draft §19.2): none, or
+                the longest take it records, and how many layers it keeps on
+                top. Both are memory the graph sets aside at Load now. */
+            void chooseTake (const model::RackChannelRow& channel)
+            {
+                static constexpr double lengths[] = { 0.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0 };
+                static constexpr int layerCounts[] = { 1, 2, 4, 8, 16 };
+
+                juce::PopupMenu menu;
+
+                for (int at = 0; at < 7; ++at)
+                    menu.addItem (at + 1, at == 0 ? juce::String ("No recorder")
+                                                  : "Records up to " + juce::String (model::secondsWords (lengths[at])),
+                                  true, std::abs (channel.takeSeconds - lengths[at]) < 1.0e-9);
+
+                juce::PopupMenu layers;
+
+                for (int at = 0; at < 5; ++at)
+                    layers.addItem (100 + at, juce::String (layerCounts[at]) + (layerCounts[at] == 1 ? " layer" : " layers"),
+                                    true, channel.layers == layerCounts[at]);
+
+                menu.addSeparator();
+                menu.addSubMenu ("Layers on top of the take", layers, channel.samples());
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&channelList),
+                                    [safe = juce::Component::SafePointer<RackPage> (this), id = channel.id] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || ! safe->send)
+                                            return;
+
+                                        if (chosen >= 100 && chosen < 105)
+                                            safe->send (gesture::setNode ("/godot/slot/" + id + "/layers",
+                                                                          std::to_string (layerCounts[chosen - 100])));
+                                        else if (chosen <= 7)
+                                            safe->send (gesture::setNode ("/godot/slot/" + id + "/takeSeconds",
+                                                                          std::to_string (std::llround (lengths[chosen - 1]))));
+                                    });
+            }
+
+            /*  A PLUGIN'S SIDE (decision BZ): printed into the take, or heard as
+                it loops and changed without recording again. */
+            void chooseSide (const model::PluginRow& entry)
+            {
+                juce::PopupMenu menu;
+                menu.addItem (1, "Before the recorder - printed into the take", true, entry.side == "before");
+                menu.addItem (2, "After the player - heard as it loops", true, entry.side != "before");
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&chainList),
+                                    [safe = juce::Component::SafePointer<RackPage> (this), id = entry.id,
+                                     was = entry.side] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || ! safe->send)
+                                            return;
+
+                                        const std::string side = chosen == 1 ? "before" : "after";
+
+                                        if (side != was)
+                                            safe->send (gesture::setNode ("/godot/plugin/" + id + "/side", side));
                                     });
             }
 

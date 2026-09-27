@@ -182,6 +182,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/LiveInputPlugin.cpp
     wfg/engine/audio/Looper.h
     wfg/engine/audio/Looper.cpp
+    wfg/engine/audio/LooperPlugin.h
+    wfg/engine/audio/LooperPlugin.cpp
     wfg/engine/audio/ProxyPlugin.h
     wfg/engine/audio/ProxyPlugin.cpp
     wfg/engine/audio/DeviceLayer.h

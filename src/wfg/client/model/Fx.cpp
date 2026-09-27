@@ -362,6 +362,10 @@ namespace wfg::client::model
         row.latencySamples = integer (snapshot, base + "latencySamples");
         row.paramCount = integer (snapshot, base + "paramCount");
         row.layout = text (snapshot, base + "layout");
+
+        if (const auto side = text (snapshot, base + "side"); ! side.empty())
+            row.side = side;
+
         return row;
     }
 

@@ -20,6 +20,8 @@
 #include <wfg/engine/audio/CueOutputPlugin.h>
 #include <wfg/engine/audio/EqPlugin.h>
 #include <wfg/engine/audio/LiveInputPlugin.h>
+#include <wfg/engine/audio/Looper.h>
+#include <wfg/engine/audio/LooperPlugin.h>
 #include <wfg/engine/audio/ProxyPlugin.h>
 #include <wfg/engine/clock/AudioClockSource.h>
 
@@ -216,6 +218,7 @@ namespace wfg::audio
             engine->getPluginManager().createBuiltInType<EqPlugin>();
             engine->getPluginManager().createBuiltInType<ProxyPlugin>();
             engine->getPluginManager().createBuiltInType<LiveInputPlugin>();
+            engine->getPluginManager().createBuiltInType<LooperPlugin>();
 
             auto& hosted = engine->getDeviceManager().getHostedAudioDeviceInterface();
 
@@ -295,6 +298,9 @@ namespace wfg::audio
             voices = 0;
             handles.clear();
             context = nullptr;
+
+            /*  THE TAKES, with no graph left to reach them (Phase 9c, §19.2). */
+            refreshTakes (spec);
 
             /*  createEmptyEdit touches no disk. Edit::createEdit is the only
                 non-test, non-preview factory; the Edit ctor and
@@ -640,6 +646,28 @@ namespace wfg::audio
                 }
 
                 services.table->setBuiltRack (std::move (rackIds));
+
+                std::map<std::string, plugin::PluginTable::BuiltTake> built;
+
+                for (const auto& channel : spec.rack)
+                {
+                    const auto found = takes.find (channel.id);
+
+                    if (found == takes.end() || found->second.take == nullptr)
+                        continue;
+
+                    auto& each = built[channel.id];
+                    each.seconds = found->second.shape.takeSeconds;
+                    each.layers = found->second.shape.layers;
+                    each.bytes = static_cast<std::uint64_t> (found->second.take->bytes());
+                    each.problem = found->second.problem;
+
+                    for (const auto& entry : channel.plugins)
+                        if (entry.beforeRecorder)
+                            each.before.push_back (entry.id);
+                }
+
+                services.table->setBuiltTakes (std::move (built));
             }
 
             /*  No voices, nothing of the set's to host: its entries stay
@@ -762,6 +790,51 @@ namespace wfg::audio
             stage->bindTap (&tapView);
             liveInputs.push_back (stage);
 
+            /*  A SAMPLING CHANNEL (Phase 9c, namespace draft §19.2): the
+                plugins before the recorder, the recorder, then the EQ and the
+                plugins after the player - so what comes before is printed into
+                the take and what comes after is heard as it loops. With no
+                recorder a plugin's side means nothing and the chain is 9b's:
+                the EQ, then every plugin. A lane keeps its place in the
+                channel's own order whichever side it is built on, since a mic
+                cue's inserts are sent by that place. */
+            auto* take = channel.takeSeconds > 0.0 ? takeFor (channel.id) : nullptr;
+            trackLanes.emplace_back (channel.plugins.size(), nullptr);
+
+            const auto insertProxies = [&] (bool beforeTheRecorder)
+            {
+                for (std::size_t slot = 0; slot < channel.plugins.size(); ++slot)
+                {
+                    if ((take != nullptr && channel.plugins[slot].beforeRecorder) != beforeTheRecorder)
+                        continue;
+
+                    auto proxyPlugin = track.pluginList.insertPlugin (
+                        ProxyPlugin::create (rackChannels, static_cast<int> (slot)), -1);
+                    auto* proxy = dynamic_cast<ProxyPlugin*> (proxyPlugin.get());
+
+                    if (proxy == nullptr)
+                        return false;
+
+                    trackLanes.back()[slot] = &proxy->lane();
+                }
+
+                return true;
+            };
+
+            if (take != nullptr)
+            {
+                if (! insertProxies (true))
+                    return fail ("the plugin proxy would not insert on a rack channel");
+
+                auto recorderPlugin = track.pluginList.insertPlugin (LooperPlugin::create (rackChannels), -1);
+                auto* recorder = dynamic_cast<LooperPlugin*> (recorderPlugin.get());
+
+                if (recorder == nullptr)
+                    return fail ("the recorder would not insert on a sampling channel");
+
+                recorder->bind (take, &tapView);
+            }
+
             auto eqPlugin = track.pluginList.insertPlugin (EqPlugin::create (rackChannels), -1);
             auto* eqStage = dynamic_cast<EqPlugin*> (eqPlugin.get());
 
@@ -769,19 +842,9 @@ namespace wfg::audio
                 return fail ("the EQ plugin would not insert on a rack channel");
 
             eqs.push_back (&eqStage->eq());
-            trackLanes.emplace_back();
 
-            for (std::size_t slot = 0; slot < channel.plugins.size(); ++slot)
-            {
-                auto proxyPlugin = track.pluginList.insertPlugin (
-                    ProxyPlugin::create (rackChannels, static_cast<int> (slot)), -1);
-                auto* proxy = dynamic_cast<ProxyPlugin*> (proxyPlugin.get());
-
-                if (proxy == nullptr)
-                    return fail ("the plugin proxy would not insert on a rack channel");
-
-                trackLanes.back().push_back (&proxy->lane());
-            }
+            if (! insertProxies (false))
+                return fail ("the plugin proxy would not insert on a rack channel");
 
             auto outputPlugin = track.pluginList.insertPlugin (
                 CueOutputPlugin::create (rackChannels, current.outputChannels), -1);
@@ -894,6 +957,63 @@ namespace wfg::audio
 
                 proxies.push_back (std::move (host));
             }
+        }
+
+        /*  THE TAKE STORE (Phase 9c, namespace draft §19.2), refreshed each
+            time a graph is built and never emptied by one: a sampling channel
+            whose rate, width, longest take and layers are what they were keeps
+            its take, and one whose shape changed is set aside afresh - which
+            empties it, and a sentence says so. A channel no longer sampling,
+            or gone, lets its take go. Message thread, with the old Edit gone,
+            so nothing still plays the takes this lets go of. */
+        void refreshTakes (const EditSpec& spec)
+        {
+            std::map<std::string, TakeStore> kept;
+
+            for (const auto& channel : spec.rack)
+            {
+                if (channel.takeSeconds <= 0.0)
+                    continue;
+
+                Looper::Shape shape;
+                shape.sampleRate = static_cast<double> (current.sampleRate);
+                shape.channels = 2;
+                shape.takeSeconds = channel.takeSeconds;
+                shape.layers = channel.layers;
+
+                auto found = takes.find (channel.id);
+
+                if (found != takes.end() && found->second.take != nullptr
+                      && std::abs (found->second.shape.sampleRate - shape.sampleRate) < 0.5
+                      && std::abs (found->second.shape.takeSeconds - shape.takeSeconds) < 1.0e-9
+                      && found->second.shape.layers == shape.layers)
+                {
+                    found->second.problem.clear();
+                    kept[channel.id] = std::move (found->second);
+                    continue;
+                }
+
+                TakeStore store;
+                store.shape = shape;
+                store.take = std::make_unique<Looper>();
+                store.take->prepare (shape);
+
+                if (found != takes.end() && found->second.take != nullptr
+                      && found->second.take->state() != TakeState::empty)
+                    store.problem = std::abs (found->second.shape.sampleRate - shape.sampleRate) >= 0.5
+                                        ? "the take was cleared: the interface's rate changed"
+                                        : "the take was cleared: its longest take or its layers changed";
+
+                kept[channel.id] = std::move (store);
+            }
+
+            takes = std::move (kept);
+        }
+
+        Looper* takeFor (const std::string& channelId) noexcept
+        {
+            const auto found = takes.find (channelId);
+            return found != takes.end() ? found->second.take.get() : nullptr;
         }
 
         /** A rack track's input stage, or null for a voice or no such track. */
@@ -1862,6 +1982,19 @@ namespace wfg::audio
             the rack when the graph is built. */
         std::vector<std::int64_t> rackShutAt;
 
+        /*  THE TAKES (Phase 9c, namespace draft §19.2): each sampling channel's
+            recorder, by the channel's id, owned here beside the Edit and never
+            by a plugin, with the shape its memory was set aside for and what
+            became of a take a rebuild could not keep. */
+        struct TakeStore
+        {
+            Looper::Shape shape;
+            std::unique_ptr<Looper> take;
+            std::string problem;
+        };
+
+        std::map<std::string, TakeStore> takes;
+
         /** Whether the plugin table holds this graph's slots, to clear at stop. */
         bool toldTable = false;
         std::vector<std::unique_ptr<plugin::ProxyHost>> proxies;
@@ -1988,6 +2121,11 @@ namespace wfg::audio
     {
         const auto found = impl->rackTracks.find (channelId);
         return found != impl->rackTracks.end() ? found->second : -1;
+    }
+
+    Looper* AudioHost::takeOf (const std::string& channelId) noexcept
+    {
+        return impl->takeFor (channelId);
     }
 
     void AudioHost::setRackSource (int trackIndex, int firstInput, int width) noexcept
