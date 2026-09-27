@@ -2674,6 +2674,16 @@ What it costs: a take's memory is its length times the rate times the layers kep
 seconds and four layers at 48 kHz is 115 MB a channel — held for the session whether or not anything
 is recorded, and a channel that has used every layer refuses another pass until one is undone.
 
+*As built, 2026-09-27 (namespace draft §19.11):* all of the above, in seven stages - the recorder, its
+place in the graph, the take verbs and transport cues, the take's picture at the foot of the window,
+the Loop page on the D700 (on its Pan button), and Keep, which writes a take and its layers into
+`media/takes` as a float WAV and, as a cue, adds a media cue looping it at the take's points. Rec and
+a layer are not refused while Keep writes the file; Undo and Clear wait for it. Measured (§6.11,
+M41–M44): a minute and four layers is 115.7 MB at 48 kHz, set aside in 33 ms when the show opens; a
+block of a loop with sixteen layers costs 56 µs of its 2667; a wrap on a sine steps no further than
+the sine does; and a take starts on the sample Rec was placed at. What waits for the bench is the
+D700's own buttons and the page's law for a point.
+
 ---
 
 ## 4. Constraints as law
@@ -3159,7 +3169,11 @@ Mackie vs HUI first — first week with the D700.
 - **A sampling channel** (§3.31, 2026-09-26): **M41** — a take's memory and the time to set it aside
   and touch it at open (sixty seconds and four layers, at 48 and 96 kHz); **M42** — a block's cost by
   layers, 1 to 16; **M43** — the largest step at a wrap on a sine, against the sine unbroken; **M44**
-  — where a take starts against where Rec was pressed.
+  — where a take starts against where Rec was pressed. *Taken 2026-09-27 on a Debug build:* M41 -
+  115.7 MB touched in 33 ms at 48 kHz, 231.3 MB in 65 ms at 96 kHz; M42 - 5.7 µs a block of 128 with
+  no layer, 22.4 with four, 55.9 with sixteen, against the block's 2667 µs; M43 - a step of 0.02886
+  against the sine's own 0.02886, where a hard join steps 0.382; M44 - out by 0 samples through the
+  host, the interface's own delay the bench's to measure.
 
 ---
 

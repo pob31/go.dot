@@ -10861,8 +10861,10 @@ is not as wide as its channel takes - mono and mono-to-stereo take one channel, 
 3. **The input stage.** At the head of every rack track, `LiveInputPlugin` copies from the tap the
    channels its cue says — a first logical input and a width, two atomics the tick thread writes —
    behind a **gate** that opens and shuts on a click-free ramp at a sample Go.dot places. It reads
-   the block's own start and length, never an assumed whole block, and ramps in after a gap in the
-   blocks, so a device that went away and came back (§6.2) does not open with a step.
+   the block's own start and length, never an assumed whole block. After a gap in the blocks — a
+   device that went away and came back (§6.2), or a block Tracktion muted because the ones before it
+   ran long — the input comes back over five milliseconds of its own rather than with a step, and the
+   gate's ramp goes on from where it was: a gap is never a second entrance (§19.11).
 4. **The chain.** `EqPlugin`, then a `ProxyPlugin` for each of the channel's plugins in order, then
    `CueOutputPlugin` — the voice's own three, unchanged: level, matrix and peak.
 5. **The outputs.** The matrix sends the channel where the cue's direct out, routes, sends and
@@ -11685,6 +11687,16 @@ after the mic cue - `logs/take.wfglog` re-recorded with both (32 records, replay
   wrap: the largest step at the join on a sine, against the same sine unbroken. **M44** — where a take
   starts against where Rec was pressed, from a recorded click.
 
+*Measured, 2026-09-27* (Debug, the author's machine; each figure printed by its test): **M41** - a
+minute and four layers, 115.7 MB set aside and touched in 33 ms at 48 kHz, 231.3 MB in 65 ms at
+96 kHz (`LooperTests`). **M42** - a block of 128 of a loop costs 5.7 µs with no layer, 9.3 with one,
+22.4 with four, 32.2 with eight and 55.9 with sixteen, against the block's own 2667 µs
+(`LooperTests`). **M43** - at a wrap on a 441 Hz sine whose take is no whole number of periods, the
+largest step is 0.02886 against the sine's own 0.02886, where a hard join would step 0.382
+(`LooperTests`). **M44** - through the real host, Rec placed inside a block and a click in the input
+after it: the take, read back with Keep's copy, begins on the sample Rec was placed at, out by 0
+samples (`AudioTests`; the interface's own delay is §18's words, and the bench's).
+
 ### 19.10 What this phase does not build
 
 Overdub feedback, a decay applied to every pass; varispeed and reverse on a loop — the varispeed
@@ -11694,4 +11706,52 @@ page's take panel.
 
 ### 19.11 What was built, against what §19 drew
 
-*Written at close-out.*
+*Written at close-out, 2026-09-27.* Every stage is on `main`: 9c.1 `19dcf27` (with `0d184ba` for the
+strict build), 9c.2 `bc55df6`, 9c.3 `338d3a0`, 9c.4 `2d73400`, 9c.5 `d129ee2` (with `7c22911` for
+the strict build), 9c.6 `4d5ab77`, and 9c.7 - the measurements `2238346`, and this. Each stage's
+*As built* note above says where it departs from the drawing; in brief:
+
+- **The log carries seconds.** `take.closed` says how long a take closed at, and how - pressed, full
+  or held - so the engine's account of the take needs no rate and a replay reads no clock (§19.6).
+- **An account and a hook.** The take verbs move `cue/TakeTable` at once; the Runner's hook places
+  each press at `now + the launch latency`, turns what the recorder did by itself into `take.closed`
+  and what Keep's writer finished into `take.kept`, and reads the playhead. Every refusal reads the
+  document, the run table and the account - never the recorder.
+- **Two holds** where one was drawn: the audio side holds a take at a stop of the rack track, so a
+  tail rings out without the loop; the account holds it at the channel's release.
+- **What the window reads.** The playhead is published from the tree's runtime half, since the
+  cached half is rebuilt only when a command applies; and the take's picture came through a third
+  read door, argued as the media table's (§19.7).
+- **The points are the take's door**, not the show's, for the master dial and the Loop page alike;
+  the page's law is ten milliseconds a detent, fifty spun, three numbers for the bench.
+- **Keep.** The file's name is found where the disk is, by the writer, and logged; Keep as cue is
+  made when `take.kept` lands, its three identifiers in the record; `busy` holds off Undo, Clear and a
+  second Keep, and not Rec or a layer, which write only slots the copy does not read.
+- **Found by the drivers and the renders, not drawn:** a layer's hard edges (9c.1, by ear); an
+  overdub held past the loop laying the input again each pass, as §19.3 said, which a driver
+  expecting a double had not; a playhead frozen between commands (9c.3); and the drivers' own
+  marks: the hosted render reaches the disk about a second at a time, so a mark taken from its length
+  can fall before the event it marks, which put the take driver's window after a hold on the loop on
+  the slower CI runners; and the tick alone can too, since a starved tick thread falls behind the
+  audio where every press and stop is placed. Every mark in the rack's and the take's drivers is
+  now where the audio was when the engine last ticked - the tick in frames and `engine/lateness`,
+  from one snapshot (`a8d2a03`, `a6952dd`) - and the take driver asks the recorder itself, whose
+  playhead stands still once the take is held.
+- **And a fault of the rack's, found on the same runs.** Tracktion mutes a whole block when the ones
+  before it ran past 98 % of their time (`tracktion_DeviceManager.cpp:1376`), as a slow CI runner's
+  do now and then, and the input stage started its gate again from nought after the gap - over the
+  cue's whole fade-in, so a block lost cost half a second of the voice. The input now comes back over
+  five milliseconds of its own and the gate's ramp goes on from where it was (§18.4, `66dac3e`).
+  On the same runs a layer came out empty while its loop played in time. It is laid through the
+  plugin before the recorder, which plays silence while the engine has it failed for lateness (CU) -
+  the likeliest reading, which that run's log, gone with its runner, cannot confirm; the take driver
+  now voids that check when the log says so, and says what it saw when it does not.
+
+**Not built of what §19 drew:** Keep from the D700 and from a transport cue - Keep is the window's
+and a command's; a double click on Rec for Undo, and a Loop key, until the bench says the D700 has
+them (a Mackie's Cycle is `take.loop` already); and the page at `/ui`, which has no take panel (§19.10).
+
+**Waiting for the bench:** a take recorded on a mic cue through a real plugin on the MADIface and
+looped through another; the D700's Rec and its light, and which port lights its transport; the Loop
+page's law for a point; M44 again with a real interface, whose own delay is the part the words
+already say.

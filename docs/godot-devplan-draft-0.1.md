@@ -621,6 +621,19 @@ plugins.
 plugin after it; a layer laid and undone; the in and out points ridden on the D700's Loop page with
 no click; a transport cue records and loops it; Keep leaves a file a media cue loops; CI green.
 
+*As built, 2026-09-27:* every stage on `main` - 9c.1 `19dcf27` (and `0d184ba`), 9c.2 `bc55df6`,
+9c.3 `338d3a0`, 9c.4 `2d73400`, 9c.5 `d129ee2` (and `7c22911` for the strict build), 9c.6 `4d5ab77`,
+9c.7 `2238346` and the close-out - with CI green on all six jobs at `66dac3e`, which also mends a
+fault of the rack's that the close-out's CI runs found: a block Tracktion muted made the input stage
+start its cue's fade-in again. Namespace §19.9 records M41-M44, and §19.11 says where the build
+departs from the drawing. Of the list above, what the code can show is
+shown: a take through a plugin before the recorder looping through one after it (`ProxyTests`, 9c.2);
+a layer laid and undone, the transport cues' Rec and Loop, Keep's file read back and Keep as cue's
+media cue (`blackbox/phase9c_take.py`, `logs/take.wfglog`); the points ridden with no step
+(`LooperTests`) and turned on the Loop page (`SurfaceBridgeTests`). What waits for the bench is the
+D700 itself - its Rec and light, a Loop key if it has one, the page's law - and a take recorded
+through a real plugin on the MADIface.
+
 **Needs from the author:** the D700's Rec (and a Loop key, if it has one) pressed at the bench, and
 the page's law for a loop point.
 
