@@ -53,6 +53,7 @@ FIXTURE = REPO_ROOT / "tests" / "fixtures" / "bundles" / "take"
 
 RATE = 48000
 BLOCK = 128
+SAMPLES_PER_TICK = RATE // 50  # the engine's fifty ticks a second
 INPUT = 0.25                    # the level at the first input
 GAIN = 0.5                      # the test gain's default, before the recorder
 LOOPED = INPUT * GAIN           # what the take holds
@@ -92,6 +93,19 @@ def send(server: Server, address: str, args: "list | None" = None) -> None:
 def wait_for(server: Server, address: str, wanted, timeout: float = 10.0):
     common.wait_until(lambda: value_of(server, address) == wanted, timeout=timeout)
     return value_of(server, address)
+
+
+def clock_frame(server: Server) -> int:
+    """WHERE THE AUDIO HAS GOT TO, by the engine's own clock: the tick the tree
+    was published at, in frames. Not the render's length on disk, which its
+    writer adds to about once a second - a mark taken from the disk just after
+    an event can be a second before it, and on Windows CI (2238346, with Keep
+    writing a file just before Esc) a window after the hold caught the loop
+    still playing. The tick is at most a tick behind the audio and never ahead."""
+    try:
+        return int(value_of(server, "/godot/engine/tick")) * SAMPLES_PER_TICK
+    except (TypeError, ValueError):
+        return 0
 
 
 def wait_for_frames(render: Path, frames: int, timeout: float = 30.0) -> bool:
@@ -190,7 +204,7 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
                          "the transport cue Rec starts the take")
             report.equal(value_of(server, f"/godot/slot/{CHANNEL}/holder"), holder,
                          "and the mic cue plays on: a press is not a stop")
-            marks["recording"] = first_sound.frames_on_disk(render)
+            marks["recording"] = clock_frame(server)
             report.check(wait_for_frames(render, marks["recording"] + int(RATE * 1.2)),
                          "the render runs on while it records")
 
@@ -198,7 +212,7 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             send(server, "/godot/cmd/go")
             report.equal(wait_for(server, f"/godot/slot/{CHANNEL}/take", "looping"), "looping",
                          "the transport cue Loop it closes the take, which loops")
-            marks["looping"] = first_sound.frames_on_disk(render)
+            marks["looping"] = clock_frame(server)
             # The account loops at the press; the length is the recorder's, logged
             # as take.closed once the close has landed at the sample it was placed at.
             common.wait_until(lambda: number(server, "takeLength") > 0.0, timeout=5.0)
@@ -234,14 +248,14 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             send(server, "/godot/cmd/take/loop", [CHANNEL])
             report.equal(wait_for(server, f"/godot/slot/{CHANNEL}/takeLayers", 1), 1,
                          "take.loop closes the layer: one on the take")
-            marks["layered"] = first_sound.frames_on_disk(render)
+            marks["layered"] = clock_frame(server)
             report.check(wait_for_frames(render, marks["layered"] + int(RATE * 1.2)),
                          "the render runs on with the layer")
 
             send(server, "/godot/cmd/take/undo", [CHANNEL])
             report.equal(wait_for(server, f"/godot/slot/{CHANNEL}/takeLayers", 0), 0,
                          "take.undo takes it off again")
-            marks["undone"] = first_sound.frames_on_disk(render)
+            marks["undone"] = clock_frame(server)
             report.check(wait_for_frames(render, marks["undone"] + int(RATE * 1.2)),
                          "the render runs on without it")
 
@@ -288,7 +302,7 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             report.check(freed, "Esc frees the channel once the tail has rung out")
             report.equal(wait_for(server, f"/godot/slot/{CHANNEL}/take", "held"), "held",
                          "and the take is held, not lost")
-            marks["held"] = first_sound.frames_on_disk(render)
+            marks["held"] = clock_frame(server)
             report.check(wait_for_frames(render, marks["held"] + int(RATE * 1.0)), "the render runs on, held")
 
             # SCENE 5: a later mic cue loops the take it finds, its input heard through as well.
@@ -298,7 +312,7 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             report.check(bool(again) and again != holder, "GO on Scene 5 loop takes the channel", str(again))
             report.equal(wait_for(server, f"/godot/slot/{CHANNEL}/take", "looping"), "looping",
                          "and loops the take it found: onGo is loop")
-            marks["scene5"] = first_sound.frames_on_disk(render)
+            marks["scene5"] = clock_frame(server)
             report.check(wait_for_frames(render, marks["scene5"] + int(RATE * 1.2)),
                          "the render runs on with the scene's loop")
 

@@ -49,6 +49,7 @@ FIXTURE = REPO_ROOT / "tests" / "fixtures" / "bundles" / "mic"
 
 RATE = 48000
 BLOCK = 128
+SAMPLES_PER_TICK = RATE // 50  # the engine's fifty ticks a second
 INPUT = 0.25                    # the level at the first input
 GAIN = 0.5                      # the test gain's default
 STEADY = INPUT * GAIN
@@ -88,6 +89,18 @@ def send(server: Server, address: str, args: "list | None" = None) -> None:
 def wait_for(server: Server, address: str, wanted, timeout: float = 10.0):
     common.wait_until(lambda: value_of(server, address) == wanted, timeout=timeout)
     return value_of(server, address)
+
+
+def clock_frame(server: Server) -> int:
+    """WHERE THE AUDIO HAS GOT TO, by the engine's own clock: the tick the tree
+    was published at, in frames. Not the render's length on disk, which its
+    writer adds to about once a second, so a mark taken from it can be a second
+    before the event it marks (the take driver's window after a hold caught
+    the loop on Windows CI at 2238346). At most a tick behind the audio."""
+    try:
+        return int(value_of(server, "/godot/engine/tick")) * SAMPLES_PER_TICK
+    except (TypeError, ValueError):
+        return 0
 
 
 def wait_for_frames(render: Path, frames: int, timeout: float = 30.0) -> bool:
@@ -169,11 +182,11 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             report.equal(wait_for(server, f"/godot/run/{holder}/state", "playing") if holder else None,
                          "playing", "and the run sounds")
 
-            went_at = first_sound.frames_on_disk(render)
+            went_at = clock_frame(server)
             report.check(wait_for_frames(render, went_at + int(RATE * 2.0)), "the render runs two seconds past GO")
 
             # Esc: the input shut, the tail rung out, the run over and the channel free.
-            stopped_at = first_sound.frames_on_disk(render)
+            stopped_at = clock_frame(server)
             send(server, "/godot/cmd/run/stopAll")
             freed = common.wait_until(lambda: not value_of(server, f"/godot/slot/{CHANNEL}/holder"), timeout=5.0)
             report.check(freed, "Esc frees the channel once the tail has rung out")
@@ -186,10 +199,10 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             again = common.wait_until(lambda: value_of(server, f"/godot/slot/{CHANNEL}/holder") or None,
                                       timeout=10.0)
             report.check(bool(again), "fired again, it takes the channel again", str(again))
-            fired_at = first_sound.frames_on_disk(render)
+            fired_at = clock_frame(server)
             report.check(wait_for_frames(render, fired_at + int(RATE * 1.5)), "the render runs past the second GO")
 
-            killed_at = first_sound.frames_on_disk(render)
+            killed_at = clock_frame(server)
             send(server, "/godot/cmd/node/set", [f"/godot/fx/{FX}/p1", 1.0])
             report.equal(wait_for(server, f"/godot/plugin/{PLUGIN}/state", "failed", timeout=5.0), "failed",
                          "p1 at one kills the child, and the plugin reads failed")
@@ -206,7 +219,7 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
                                      timeout=10.0)
             report.check(down, "relaunched once, it fails again and stays down, saying so",
                          value_of(server, f"/godot/plugin/{PLUGIN}/problem") or "")
-            down_at = first_sound.frames_on_disk(render)
+            down_at = clock_frame(server)
             report.check(wait_for_frames(render, down_at + int(RATE * 1.5)), "the render runs past the relaunch")
 
             # A double Esc: over at once.
