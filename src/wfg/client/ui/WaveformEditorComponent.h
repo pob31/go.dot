@@ -28,6 +28,7 @@
 */
 
 #include <wfg/client/model/Foot.h>
+#include <wfg/client/model/Lane.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/View.h>
@@ -37,8 +38,10 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -91,6 +94,12 @@ namespace wfg::client::ui
         void paint (juce::Graphics&) override;
         void resized() override;
 
+        /*  WHERE A LEVEL POINT IS DRAWN, in this component's pixels - the one
+            place that says so, which the painter draws at and a test aims its
+            clicks with, so the two cannot disagree about where a point is. A
+            point at nought on a lane nobody has drawn is on the unity line. */
+        juce::Point<float> pointPosition (const model::LanePoint&) const;
+
         void mouseMove (const juce::MouseEvent&) override;
         void mouseDown (const juce::MouseEvent&) override;
         void mouseDoubleClick (const juce::MouseEvent&) override;
@@ -124,7 +133,21 @@ namespace wfg::client::ui
         void paintHead (juce::Graphics&, juce::Rectangle<int>);
         void paintBar (juce::Graphics&, juce::Rectangle<int>);
         void paintRanges (juce::Graphics&, juce::Rectangle<int>);
+        void paintLane (juce::Graphics&, juce::Rectangle<int>);
         void paintRuler (juce::Graphics&, juce::Rectangle<int>);
+
+        /*  THE LEVEL LANE (namespace draft §20.5): the points as the hand has
+            them while a gesture runs, else as the reading has them; where a
+            height of the bar is on the fader's throw and back; which point is
+            under the pointer; and the one write a gesture sends. */
+        std::vector<model::LanePoint> lane() const;
+        double heightAt (int y) const;
+        float yForLevel (double levelDb) const;
+        double toleranceHeight() const;
+        std::size_t laneHit (juce::Point<int>) const;
+        void sendLane (const std::vector<model::LanePoint>&);
+        void showPicked();
+        juce::Rectangle<int> pointBoxes() const;
 
         model::Theme theme;
         Actions actions;
@@ -179,6 +202,31 @@ namespace wfg::client::ui
 
         model::Hit hover;
         model::Hit grabbed;
+
+        /*  THE LANE AS THE HAND HAS IT. A drag moves a copy and sends the
+            whole list ONCE, on release (the fade editor's rule: a write per
+            mouse move would be a hundred undo steps a second), and the copy
+            is drawn until the reading says the same - so the point does not
+            jump back to where it was for the few passes the write takes to
+            come round. It lets go the moment the reading MOVES - to what was
+            sent, or to somebody else's edit, which is newer than the hand's -
+            and `sentPasses` gives up on a write a refusal means never comes. */
+        std::optional<std::vector<model::LanePoint>> held;
+        std::string laneBeforeSend;
+        int sentPasses = 0;
+
+        static constexpr std::size_t noPoint = static_cast<std::size_t> (-1);
+
+        std::size_t grabbedPoint = noPoint;
+        std::size_t hoverPoint = noPoint;
+        std::size_t pickedPoint = noPoint;   ///< whose numbers the head row's boxes show
+        bool pointMoved = false;
+
+        /*  THE PICKED POINT'S TWO NUMBERS, typed (PRD §3.10: "breakpoint lists
+            with numeric entry, not only draggable pixels"): where it is in the
+            file, and the offset it asks for there. */
+        juce::Label pointAt;
+        juce::Label pointLevel;
         bool panning = false;
         bool onRuler = false;    ///< the press started in the time ruler, so it moves the head
         int panFrom = 0;

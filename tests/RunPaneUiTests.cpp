@@ -9,6 +9,7 @@
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
+#include <wfg/client/ui/WaveformEditorComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
 
@@ -18,6 +19,7 @@
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
+#include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/command/Event.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/plugin/EditorHost.h>
@@ -169,6 +171,185 @@ TEST_CASE ("foot panel: it opens on one subject, draws a file, and a drag writes
 
     panel.open ({});
     CHECK_FALSE (panel.subject().isOpen());
+}
+
+
+TEST_CASE ("waveform: a level lane is drawn over the file, and one gesture is one write")
+{
+    /*  Namespace draft §20.5. The arithmetic of every gesture is `model/Lane`'s
+        and tested there; what is asked here is the wiring - which press finds
+        a point, that a drag writes ONCE and on release, that a double click
+        on the line adds and on a point removes, and that the lock stops all
+        of it - through the component's own mouse handlers. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value)
+    { written.emplace_back (address, value); };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setSize (900, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 10.0;
+
+    editor.show (reading, nullptr);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+
+    const auto mouse = [&] (juce::Point<float> at, int clicks, bool dragged, juce::ModifierKeys mods)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, mods, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &editor, &editor, now, at, now,
+                                 clicks, dragged);
+    };
+
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+
+    const auto lastLane = [&]
+    {
+        REQUIRE_FALSE (written.empty());
+        CHECK (written.back().first == "/godot/cue/CUE00001/levelLane");
+        return written.back().second;
+    };
+
+    //  A DOUBLE CLICK ON THE UNITY LINE of a lane nobody has drawn: the first point, at nought.
+    const auto onLine = editor.pointPosition ({ 3.0, 0.0 });
+    editor.mouseDoubleClick (mouse (onLine, 2, false, left));
+
+    REQUIRE (written.size() == 1u);
+
+    auto parsed = wfg::doc::readLevelLane (lastLane());
+    REQUIRE (parsed.problem.empty());
+    REQUIRE (parsed.points.size() == 1u);
+    CHECK (parsed.points[0].seconds == doctest::Approx (3.0).epsilon (0.02));
+    CHECK (parsed.points[0].levelDb == doctest::Approx (0.0));
+
+    //  THE ENGINE ANSWERS, and the reading carries the point.
+    reading.lane = { { parsed.points[0].seconds, 0.0 } };
+    editor.show (reading, nullptr);
+
+    /*  A DRAG MOVES IT AND WRITES NOTHING UNTIL IT LETS GO: one gesture, one
+        write, one step of undo. */
+    const auto from = editor.pointPosition (reading.lane[0]);
+    const auto to = editor.pointPosition ({ reading.lane[0].seconds, -12.0 });
+
+    editor.mouseDown (mouse (from, 1, false, left));
+    editor.mouseDrag (mouse (from.translated (0.0f, (to.y - from.y) * 0.5f), 1, true, left));
+    editor.mouseDrag (mouse (to, 1, true, left));
+
+    CHECK (written.size() == 1u);
+
+    editor.mouseUp (mouse (to, 1, true, left));
+
+    REQUIRE (written.size() == 2u);
+
+    parsed = wfg::doc::readLevelLane (lastLane());
+    REQUIRE (parsed.points.size() == 1u);
+    CHECK (parsed.points[0].levelDb == doctest::Approx (-12.0).epsilon (0.05));
+
+    //  A PRESS THAT ONLY PICKS a point has decided nothing, and writes nothing.
+    reading.lane = { { parsed.points[0].seconds, parsed.points[0].levelDb } };
+    editor.show (reading, nullptr);
+
+    const auto picked = editor.pointPosition (reading.lane[0]);
+    editor.mouseDown (mouse (picked, 1, false, left));
+    editor.mouseUp (mouse (picked, 1, false, left));
+
+    CHECK (written.size() == 2u);
+
+    //  A DOUBLE CLICK ON THE POINT takes it away, and the last one gone is no lane.
+    editor.mouseDoubleClick (mouse (picked, 2, false, left));
+
+    REQUIRE (written.size() == 3u);
+    CHECK (lastLane().empty());
+
+    /*  THE ENGINE ANSWERS WITH NO LANE, and the editor lets go of the copy
+        it drew while the write came round - drawn from the reading again. */
+    reading.lane.clear();
+    editor.show (reading, nullptr);
+
+    //  UNDER THE LOCK nothing is grabbed, added or taken away.
+    reading.lane = { { 3.0, -12.0 } };
+    reading.locked = true;
+    editor.show (reading, nullptr);
+
+    const auto locked = editor.pointPosition (reading.lane[0]);
+    editor.mouseDown (mouse (locked, 1, false, left));
+    editor.mouseDrag (mouse (locked.translated (0.0f, 20.0f), 1, true, left));
+    editor.mouseUp (mouse (locked.translated (0.0f, 20.0f), 1, true, left));
+    editor.mouseDoubleClick (mouse (locked, 2, false, left));
+    editor.mouseDoubleClick (mouse (editor.pointPosition ({ 7.0, -12.0 }), 2, false, left));
+
+    CHECK (written.size() == 3u);
+
+    /*  AND IT DRAWS, over a file with a shape, with a dip, a picked point and
+        a cue sounding - the picture the author judges the law and the look
+        from (decision DD), written out when WFG_SNAPSHOT_DIR asks for it. */
+    auto pyramid = std::make_shared<wfg::audio::TimbrePyramid>();
+    pyramid->sampleRate = 48000;
+    pyramid->samples = 48000ull * 10ull;
+
+    for (const auto count : { 512, 256, 128, 64 })
+    {
+        std::vector<wfg::audio::timbre::Frame> level;
+
+        for (auto at = 0; at < count; ++at)
+        {
+            wfg::audio::timbre::Frame frame;
+            frame.peak = static_cast<std::uint8_t> (120 + static_cast<int> (100.0 * std::abs (std::sin (at * 0.07))));
+            frame.saturation = 160;
+            frame.lightness = 110;
+            level.push_back (frame);
+        }
+
+        pyramid->levels.push_back (std::move (level));
+    }
+
+    auto table = std::make_shared<wfg::audio::MediaRecords>();
+    wfg::audio::MediaRecord record;
+    record.seconds = 10.0;
+    record.contentHash = "hash";
+    record.pyramid = pyramid;
+    table->emplace ("bed.wav", record);
+
+    reading.locked = false;
+    reading.lane = { { 1.0, 0.0 }, { 2.0, -18.0 }, { 6.0, -18.0 }, { 7.5, 3.0 } };
+    reading.ranges = { { "RNG00001", "verse", 0.5, 8.5, 0, 0 } };
+    reading.running = true;
+    reading.position = 4.0;
+    editor.show (reading, table);
+
+    const auto dip = editor.pointPosition (reading.lane[1]);
+    editor.mouseDown (mouse (dip, 1, false, left));
+    editor.mouseUp (mouse (dip, 1, false, left));
+    editor.show (reading, table);
+
+    juce::Image canvas (juce::Image::ARGB, 900, 220, true);
+    {
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, false);
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto snapshot = editor.createComponentSnapshot (editor.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("waveform-lane.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (snapshot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
 }
 
 

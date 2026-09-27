@@ -2,6 +2,7 @@
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <wfg/client/ui/WaveformEditorComponent.h>
 
+#include <wfg/client/model/Fader.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
@@ -107,6 +108,69 @@ namespace wfg::client::ui
 
         addAndMakeVisible (transport);
         sayWhichWayTheTransportGoes();
+
+        /*  THE PICKED POINT, TYPED. A number that will not parse is put back
+            to what the lane says rather than written as nought - a slip of the
+            keyboard must not move a level - and a number that parses is held
+            between the point's neighbours as a drag would be. */
+        const auto box = [this] (juce::Label& label, const char* tip)
+        {
+            label.setEditable (true, true, false);
+            label.setJustificationType (juce::Justification::centredRight);
+            label.setTooltip (tip);
+            addChildComponent (label);
+        };
+
+        box (pointAt, "Where this level point is in the file, in seconds or minutes:seconds");
+        box (pointLevel, "The level at this point, in dB: nought is the cue as written");
+
+        pointAt.onTextChange = [this]
+        {
+            const auto points = lane();
+
+            if (pickedPoint >= points.size())
+                return;
+
+            const auto asked = model::timeFrom (pointAt.getText().toStdString());
+
+            if (! asked.has_value())
+            {
+                showPicked();
+
+                if (actions.say != nullptr)
+                    actions.say ("that is not a time: seconds, or minutes:seconds");
+
+                return;
+            }
+
+            sendLane (model::withLanePoint (points, pickedPoint, *asked,
+                                            points[pickedPoint].levelDb, reading.fileLength));
+        };
+
+        pointLevel.onTextChange = [this]
+        {
+            const auto points = lane();
+
+            if (pickedPoint >= points.size())
+                return;
+
+            const auto asked = model::levelFrom (pointLevel.getText().toStdString());
+
+            if (! asked.has_value())
+            {
+                showPicked();
+
+                if (actions.say != nullptr)
+                    actions.say ("that is not a level: decibels from -120 to 12, or silence");
+
+                return;
+            }
+
+            sendLane (model::withLanePoint (points, pickedPoint, points[pickedPoint].seconds,
+                                            *asked, reading.fileLength));
+        };
+
+        applyTheme (theme);
     }
 
     /*  WHAT THE BUTTON DOES NEXT, on the button - a triangle to start it and
@@ -130,6 +194,13 @@ namespace wfg::client::ui
         if (table != nullptr)
             table->applyTheme (theme);
 
+        for (auto* label : { &pointAt, &pointLevel })
+        {
+            label->setFont (Look::font (theme, 12.0f));
+            label->setColour (juce::Label::textColourId, Look::colour (theme, "ink"));
+            label->setColour (juce::Label::backgroundColourId, Look::colour (theme, "panel-in"));
+        }
+
         repaint();
     }
 
@@ -152,7 +223,19 @@ namespace wfg::client::ui
             view.reset (reading.fileLength);
             hover = {};
             grabbed = {};
+            held.reset();
+            grabbedPoint = hoverPoint = pickedPoint = noPoint;
         }
+
+        /*  THE HAND'S COPY OF THE LANE LETS GO once the reading moves from
+            where it was when the write went - or after a second of passes,
+            for a write the engine refused and which will never come round. */
+        if (held.has_value() && grabbedPoint == noPoint
+              && (model::writeLane (reading.lane) != laneBeforeSend || ++sentPasses > 25))
+            held.reset();
+
+        if (pickedPoint >= lane().size())
+            pickedPoint = noPoint;
         else if (! juce::approximatelyEqual (view.length, reading.fileLength))
         {
             /*  The length arrives late for a file imported in this session, so
@@ -191,7 +274,125 @@ namespace wfg::client::ui
         if (wasFile != reading.file || wasRanges != reading.ranges.size())
             resized();   // the table's width can change with what is in it
 
+        showPicked();
         repaint();       // the playhead moves every pass; the bar is cached below
+    }
+
+    std::vector<model::LanePoint> WaveformEditorComponent::lane() const
+    {
+        return held.has_value() ? *held : reading.lane;
+    }
+
+    double WaveformEditorComponent::heightAt (int y) const
+    {
+        const auto bar = barArea();
+
+        if (bar.getHeight() <= 0)
+            return 0.0;
+
+        return static_cast<double> (bar.getBottom() - y) / static_cast<double> (bar.getHeight());
+    }
+
+    float WaveformEditorComponent::yForLevel (double levelDb) const
+    {
+        const auto bar = barArea();
+
+        return static_cast<float> (bar.getBottom())
+                 - static_cast<float> (model::laneHeightFor (levelDb) * bar.getHeight());
+    }
+
+    juce::Point<float> WaveformEditorComponent::pointPosition (const model::LanePoint& lanePoint) const
+    {
+        const auto bar = barArea();
+
+        return { static_cast<float> (bar.getX())
+                   + static_cast<float> (view.xForSeconds (lanePoint.seconds, bar.getWidth())),
+                 yForLevel (lanePoint.levelDb) };
+    }
+
+    double WaveformEditorComponent::toleranceHeight() const
+    {
+        const auto bar = barArea();
+        return bar.getHeight() > 0 ? static_cast<double> (grabRadius) / bar.getHeight() : 0.0;
+    }
+
+    std::size_t WaveformEditorComponent::laneHit (juce::Point<int> at) const
+    {
+        if (reading.locked || ! barArea().contains (at))
+            return noPoint;
+
+        return model::nearestLanePoint (lane(), secondsAt (at.x), heightAt (at.y),
+                                        toleranceSeconds(), toleranceHeight());
+    }
+
+    void WaveformEditorComponent::sendLane (const std::vector<model::LanePoint>& points)
+    {
+        /*  REFUSED HERE rather than at the door, in words, for the shapes the
+            door would refuse - which the verbs in `model/Lane` never make, so
+            this is the backstop and not the rule. */
+        if (const auto why = model::whyNotALane (points); ! why.empty())
+        {
+            if (actions.say != nullptr)
+                actions.say (juce::String (why));
+
+            return;
+        }
+
+        const auto text = model::writeLane (points);
+
+        /*  NOTHING TO SEND when the lane is what the reading already says - a
+            point typed back to the number it had. */
+        if (text == model::writeLane (reading.lane))
+        {
+            held.reset();
+            showPicked();
+            repaint();
+            return;
+        }
+
+        held = points;
+        laneBeforeSend = model::writeLane (reading.lane);
+        sentPasses = 0;
+
+        if (actions.set != nullptr)
+            actions.set (model::laneAddress (reading.subject.objectId), text);
+
+        showPicked();
+        repaint();
+    }
+
+    /*  WHERE THE TWO NUMBERS GO: the right of the transport's row, clear of
+        the clock and of the words, and only while a point is picked. */
+    juce::Rectangle<int> WaveformEditorComponent::pointBoxes() const
+    {
+        auto head = headArea();
+        return head.removeFromRight (juce::jmin (230, head.getWidth() / 2)).reduced (0, 2);
+    }
+
+    void WaveformEditorComponent::showPicked()
+    {
+        const auto points = lane();
+        const auto visible = pickedPoint < points.size() && reading.notice.empty();
+
+        pointAt.setVisible (visible);
+        pointLevel.setVisible (visible);
+
+        if (! visible)
+            return;
+
+        pointAt.setEditable (! reading.locked, ! reading.locked, false);
+        pointLevel.setEditable (! reading.locked, ! reading.locked, false);
+
+        /*  NOT UNDER A HAND THAT IS TYPING: the next pass would put the old
+            number back into the box somebody is halfway through. */
+        const auto& shown = points[pickedPoint];
+
+        if (! pointAt.isBeingEdited())
+            pointAt.setText (juce::String (model::timeText (shown.seconds)), juce::dontSendNotification);
+
+        if (! pointLevel.isBeingEdited())
+            pointLevel.setText (juce::String (model::faderText (shown.levelDb)) + " dB",
+                                juce::dontSendNotification);
     }
 
     void WaveformEditorComponent::setRightColumn (int width, int gap)
@@ -338,6 +539,7 @@ namespace wfg::client::ui
 
         paintBar (g, bar);
         paintRanges (g, bar);
+        paintLane (g, bar);
         paintRuler (g, rulerArea());
         paintHead (g, headArea());
     }
@@ -489,6 +691,95 @@ namespace wfg::client::ui
         }
     }
 
+    /*  THE LEVEL LANE OVER THE WAVEFORM (namespace draft §20.5, decision CY):
+        a line across the bar, a dot at each point, and at the playhead a dot
+        where the lane is now. On the fader's throw (DD), and sampled a column
+        at a time, so a segment straight in dB bends where the throw bends and
+        the picture is exactly what will be heard. Black under ink, the
+        playhead's trick, so it reads on whatever colour the analysis drew.
+
+        A LANE NOBODY HAS DRAWN is a dim line at unity - where the cue is as
+        written - and it is the line a double click adds the first point to,
+        so the gesture is discoverable without a word of instruction. */
+    void WaveformEditorComponent::paintLane (juce::Graphics& g, juce::Rectangle<int> bar)
+    {
+        const auto points = lane();
+
+        if (bar.getWidth() <= 1 || ! (view.span() > 0.0))
+            return;
+
+        juce::Path line;
+
+        for (auto x = bar.getX(); ; x = juce::jmin (x + 2, bar.getRight()))
+        {
+            const auto y = yForLevel (model::laneLevelAt (points, secondsAt (x)));
+
+            if (x == bar.getX())
+                line.startNewSubPath (static_cast<float> (x), y);
+            else
+                line.lineTo (static_cast<float> (x), y);
+
+            if (x >= bar.getRight())
+                break;
+        }
+
+        if (points.empty())
+        {
+            g.setColour (Look::colour (theme, "ink-off").withAlpha (0.7f));
+            g.strokePath (line, juce::PathStrokeType (1.0f));
+            return;
+        }
+
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.strokePath (line, juce::PathStrokeType (3.0f));
+        g.setColour (Look::colour (theme, "ink"));
+        g.strokePath (line, juce::PathStrokeType (1.5f));
+
+        /*  THE POINTS. The one under a hand is larger, and the picked one -
+            whose numbers are in the head row - is ringed: a SHAPE, not only a
+            colour (§4.8). */
+        for (std::size_t at = 0; at < points.size(); ++at)
+        {
+            const auto drawnAt = pointPosition (points[at]);
+            const auto x = drawnAt.x;
+            const auto y = drawnAt.y;
+
+            if (x < static_cast<float> (bar.getX() - 6) || x > static_cast<float> (bar.getRight() + 6))
+                continue;
+            const auto live = at == grabbedPoint || at == hoverPoint;
+            const auto radius = live ? 5.5f : 4.0f;
+
+            g.setColour (juce::Colours::black);
+            g.fillEllipse (x - radius - 1.0f, y - radius - 1.0f, 2.0f * (radius + 1.0f), 2.0f * (radius + 1.0f));
+            g.setColour (Look::colour (theme, live ? "live" : "ink"));
+            g.fillEllipse (x - radius, y - radius, 2.0f * radius, 2.0f * radius);
+
+            if (at == pickedPoint)
+            {
+                g.setColour (Look::colour (theme, "picked"));
+                g.drawEllipse (x - radius - 3.0f, y - radius - 3.0f,
+                               2.0f * (radius + 3.0f), 2.0f * (radius + 3.0f), 1.5f);
+            }
+        }
+
+        //  Where the lane is now, while the cue sounds.
+        if (reading.running)
+        {
+            const auto x = static_cast<float> (bar.getX())
+                             + static_cast<float> (view.xForSeconds (reading.position, bar.getWidth()));
+
+            if (x >= static_cast<float> (bar.getX()) && x <= static_cast<float> (bar.getRight()))
+            {
+                const auto y = yForLevel (model::laneLevelAt (points, reading.position));
+
+                g.setColour (juce::Colours::black);
+                g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+                g.setColour (Look::colour (theme, "standby"));
+                g.fillEllipse (x - 2.5f, y - 2.5f, 5.0f, 5.0f);
+            }
+        }
+    }
+
     /*  THE TRANSPORT'S OWN ROW: the button, and beside it where the head is
         and what it is doing. The clock is always written out, because the
         mark on the picture answers "roughly where" and placing an in-point
@@ -505,8 +796,26 @@ namespace wfg::client::ui
         g.setColour (Look::colour (theme, "ink-off"));
         g.setFont (Look::font (theme, 11.0f));
 
-        g.drawText (reading.running ? "playing - drag the ruler to move the playhead"
-                                     : "drag the ruler to place the playhead",
+        /*  THE PICKED POINT'S NUMBERS take the right of the row, captioned
+            in words so two bare numbers are never left to explain themselves,
+            and the row's instructions give way to them: a hand that has picked
+            a point has found the lane already. */
+        if (pointAt.isVisible())
+        {
+            auto boxes = pointBoxes();
+
+            g.drawText ("level point at", boxes.removeFromLeft (boxes.getWidth() - 2 * 64 - 6).withTrimmedRight (4),
+                        juce::Justification::centredRight, true);
+            return;
+        }
+
+        const auto lanes = reading.cueKind == "media" && ! reading.locked
+                             ? juce::String ("  ") + juce::String::fromUTF8 ("\xc2\xb7")
+                                 + "  double-click the level line to add a point"
+                             : juce::String();
+
+        g.drawText ((reading.running ? "playing - drag the ruler to move the playhead"
+                                      : "drag the ruler to place the playhead") + lanes,
                     area, juce::Justification::centredLeft, true);
     }
 
@@ -578,6 +887,11 @@ namespace wfg::client::ui
         auto head = headArea();
         transport.setBounds (head.removeFromLeft (head.getHeight() * 2).reduced (2, 1));
 
+        auto boxes = pointBoxes();
+        pointLevel.setBounds (boxes.removeFromRight (64));
+        boxes.removeFromRight (6);
+        pointAt.setBounds (boxes.removeFromRight (64));
+
         repaint();
     }
 
@@ -596,8 +910,29 @@ namespace wfg::client::ui
             return;
         }
 
+        /*  A LEVEL POINT IS FOUND FIRST: it is a dot on an edge's line more
+            often than not, and a slice's edge has the whole height of the bar
+            to be grabbed by where a point has only itself. */
+        if (const auto under = laneHit (event.getPosition()); under != hoverPoint)
+        {
+            hoverPoint = under;
+            repaint();
+        }
+
+        if (hoverPoint != noPoint)
+        {
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+
+            if (hover.handle != model::Handle::none)
+                hover = {};
+
+            return;
+        }
+
         if (reading.ranges.empty() || ! barArea().contains (event.getPosition()))
         {
+            setMouseCursor (juce::MouseCursor::NormalCursor);
+
             if (hover.handle != model::Handle::none)
             {
                 hover = {};
@@ -649,6 +984,21 @@ namespace wfg::client::ui
             return;
         }
 
+        /*  A LEVEL POINT BEFORE A SLICE'S EDGE (§20.5), and the press picks
+            it - its two numbers come up in the head row - whether or not the
+            hand goes on to drag it. */
+        grabbedPoint = laneHit (event.getPosition());
+
+        if (grabbedPoint != noPoint)
+        {
+            pickedPoint = grabbedPoint;
+            held = lane();
+            pointMoved = false;
+            showPicked();
+            repaint();
+            return;
+        }
+
         grabbed = model::hitTest (reading.ranges, secondsAt (event.x), toleranceSeconds());
 
         /*  A PRESS ON NOTHING PANS, which is the gesture people try first on a
@@ -673,6 +1023,37 @@ namespace wfg::client::ui
         {
             view.panBy (panFrom - event.x, barArea().getWidth());
             panFrom = event.x;
+            repaint();
+            return;
+        }
+
+        if (grabbedPoint != noPoint && held.has_value())
+        {
+            auto seconds = secondsAt (event.x);
+            auto level = model::laneLevelForHeight (heightAt (event.y));
+
+            /*  SNAPPED unless Alt says otherwise, as an edge is: its second to
+                a slice's edges and the file's ends, its level to unity - the
+                cue as written, the one level a hand most often means. */
+            if (! event.mods.isAltDown())
+            {
+                seconds = model::snapTo (seconds, model::snapTargets (reading.ranges, {}, reading.fileLength),
+                                         toleranceSeconds());
+
+                if (std::abs (heightAt (event.y) - model::laneHeightFor (0.0)) < toleranceHeight() * 0.5)
+                    level = 0.0;
+            }
+
+            held = model::withLanePoint (*held, grabbedPoint, seconds, level, reading.fileLength);
+            pointMoved = true;
+
+            const auto& moved = (*held)[grabbedPoint];
+
+            if (actions.say != nullptr)
+                actions.say ("level point at " + clockText (moved.seconds) + ", "
+                               + juce::String (model::faderText (moved.levelDb)) + " dB");
+
+            showPicked();
             repaint();
             return;
         }
@@ -705,8 +1086,41 @@ namespace wfg::client::ui
                            + clockText (writes.front().seconds));
     }
 
-    void WaveformEditorComponent::mouseDoubleClick (const juce::MouseEvent&)
+    void WaveformEditorComponent::mouseDoubleClick (const juce::MouseEvent& event)
     {
+        /*  ON THE LANE, A DOUBLE CLICK DRAWS (§20.5): on a point it takes the
+            point away, and on the line it adds one there - on the line, so the
+            level does not move until somebody moves the point. The fade
+            editor's two gestures, in the same places. */
+        if (reading.cueKind == "media" && ! reading.locked && barArea().contains (event.getPosition()))
+        {
+            const auto points = lane();
+
+            if (const auto hit = laneHit (event.getPosition()); hit != noPoint)
+            {
+                grabbedPoint = hoverPoint = pickedPoint = noPoint;
+                sendLane (model::removeLanePoint (points, hit));
+                return;
+            }
+
+            const auto seconds = secondsAt (event.x);
+
+            if (model::onLaneLine (points, seconds, heightAt (event.y), toleranceHeight()))
+            {
+                if (const auto added = model::insertLanePoint (points, seconds, reading.fileLength))
+                {
+                    for (std::size_t at = 0; at < added->size(); ++at)
+                        if (std::abs ((*added)[at].seconds - seconds) < 1.0e-9)
+                            pickedPoint = at;
+
+                    panning = false;
+                    sendLane (*added);
+                }
+
+                return;
+            }
+        }
+
         /*  BACK TO THE WHOLE FILE, which is the way out of a zoom that has got
             away from somebody. Deliberately NOT Escape: that key is PANIC in
             this window (PRD 4.4), and a panel that quietly took it for its own
@@ -726,6 +1140,20 @@ namespace wfg::client::ui
             onRuler = false;
         }
 
+        /*  THE DRAG'S ONE WRITE, and only if the point moved: a press that
+            only picked a point has decided nothing. */
+        if (grabbedPoint != noPoint)
+        {
+            grabbedPoint = noPoint;
+
+            if (pointMoved && held.has_value())
+                sendLane (*held);
+            else
+                held.reset();
+
+            pointMoved = false;
+        }
+
         grabbed = {};
         panning = false;
 
@@ -737,9 +1165,10 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::mouseExit (const juce::MouseEvent&)
     {
-        if (hover.handle != model::Handle::none)
+        if (hover.handle != model::Handle::none || hoverPoint != noPoint)
         {
             hover = {};
+            hoverPoint = noPoint;
             repaint();
         }
     }
