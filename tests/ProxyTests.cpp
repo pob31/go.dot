@@ -449,16 +449,24 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     Block first (2, 64, 0.8f);
     Block second (2, 64, 0.8f);
 
-    /*  The first block may wake the worker from its millisecond poll; the
-        deadline above covers it. Warm up rather than measure. */
-    for (int i = 0; i < 4; ++i)
+    /*  WARM UP RATHER THAN MEASURE. The first blocks wake the worker from its
+        millisecond poll, and a child on a busy box can take longer than even
+        the deadline above to answer them - two of them on the Windows runner
+        at 7dfeb6c, which a count of every miss since the start then held
+        against the child. So it is fed until a block comes back whole, and
+        what is measured starts there: every block after it, in time. */
+    for (int i = 0; i < 64; ++i)
     {
         std::fill (first.storage.begin(), first.storage.end(), 0.8f);
         lanes[0].process (first.data(), 2, 64);
+
+        if (first.allEqual (0.4f))
+            break;
     }
 
     CHECK (first.allEqual (0.4f));
     CHECK (lanes[0].answered() >= 1);
+    const auto missedWarmingUp = lanes[0].misses();
 
     lanes[1].process (second.data(), 2, 64);
     CHECK (second.allEqual (0.8f));
@@ -476,7 +484,7 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     lanes[0].process (first.data(), 2, 64);
     CHECK (first.allEqual (0.4f));
 
-    CHECK (lanes[0].misses() == 0);
+    CHECK (lanes[0].misses() == missedWarmingUp);
 
     host.stop();
     CHECK_FALSE (host.childIsRunning());
