@@ -42,6 +42,7 @@
 
 #include "TestSupport.h"
 
+#include <initializer_list>
 #include <optional>
 
 #include <wfg/client/model/Curve.h>
@@ -2158,6 +2159,80 @@ TEST_CASE ("client: the new-cue row offers every kind the engine makes, and land
     CHECK (model::madeByCreate (job, "fade", ""));
     CHECK_FALSE (model::madeByCreate (job, "transport", ""));       // another kind
     CHECK_FALSE (model::madeByCreate (job, "fade", "Lights"));  // somebody else's, named already
+}
+
+TEST_CASE ("client: a cue born with its settings is one record, carrying the id it drew")
+{
+    /*  The new-cue lists (2026-09-27) send `cue.create` and `group.wrap` with
+        an EMPTY identifier and the settings after it, as `attribute value`
+        pairs. What a replay needs is the record: the drawn identifier in the
+        empty one's place and the pairs after it, so the second run makes the
+        same cue with the same settings and draws nothing. */
+    Rig rig;
+    rig.engine.log().openInMemory ({});
+
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE_FALSE (listId.empty());
+    const auto membersBefore = model::words (model::text (*rig.publish (0), "/godot/list/" + listId + "/order")).size();
+    auto tick = std::int64_t { 1 };
+
+    const auto args = [] (std::initializer_list<const char*> texts)
+    {
+        std::vector<osc::Value> made;
+        for (const auto* text : texts)
+            made.push_back (osc::Value::string (text));
+        return made;
+    };
+
+    auto create = args ({ "", "", "group", "", "", "mode", "timeline" });
+    create[0] = osc::Value::string (listId);
+    create[1] = osc::Value::int32 (0);
+    rig.document.beginTransaction ("cue.create", tick, "window", {});
+    REQUIRE (rig.apply (tick++, "window", "cue.create", create).applied == 1);
+
+    auto snapshot = rig.publish (tick);
+    const auto group = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
+    REQUIRE (model::text (*snapshot, "/godot/cue/" + group + "/kind") == "group");
+    CHECK (model::text (*snapshot, "/godot/cue/" + group + "/mode") == "timeline");
+
+    auto aimed = args ({ "", "", "transport", "", "", "verb", "afterIteration", "target", "" });
+    aimed[0] = osc::Value::string (listId);
+    aimed[1] = osc::Value::int32 (1);
+    aimed[8] = osc::Value::string (group);
+    rig.document.beginTransaction ("cue.create", tick, "window", {});
+    REQUIRE (rig.apply (tick++, "window", "cue.create", aimed).applied == 1);
+
+    snapshot = rig.publish (tick);
+    const auto stop = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 1);
+    REQUIRE (model::text (*snapshot, "/godot/cue/" + stop + "/kind") == "transport");
+    CHECK (model::text (*snapshot, "/godot/cue/" + stop + "/verb") == "afterIteration");
+    CHECK (model::text (*snapshot, "/godot/cue/" + stop + "/target") == group);
+
+    // One Undo takes the cue and its settings together.
+    REQUIRE (rig.apply (tick++, "window", "undo", {}).applied == 1);
+    CHECK (model::words (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order")).size()
+             == membersBefore + 1);
+
+    // A value missing its name is a message cut short, refused whole.
+    auto cut = args ({ "", "", "memo", "", "", "notes" });
+    cut[0] = osc::Value::string (listId);
+    cut[1] = osc::Value::int32 (0);
+    CHECK (rig.apply (tick++, "window", "cue.create", cut).rejected == 1);
+
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+    std::vector<LogRecord> creates;
+
+    for (const auto& record : parsed.records)
+        if (record.command == "cue.create" && record.kind == LogRecord::Kind::applied)
+            creates.push_back (record);
+
+    REQUIRE (creates.size() == 2);
+    REQUIRE (creates[0].args.size() == 7);
+    CHECK (creates[0].args[4].getString() == group);
+    CHECK (creates[0].args[6].getString() == "timeline");
+    REQUIRE (creates[1].args.size() == 9);
+    CHECK (creates[1].args[4].getString() == stop);
+    CHECK (creates[1].args[8].getString() == group);
 }
 
 //==============================================================================

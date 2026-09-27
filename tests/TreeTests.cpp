@@ -741,7 +741,7 @@ TEST_CASE ("tree: commands are write-only method nodes, and node.set is not one"
 
     CHECK (create->kind == Kind::event);
     CHECK (create->access == Access::write);
-    CHECK (create->typeTags == "sisss");        // parent, index, kind, name, [id]
+    CHECK (create->typeTags == "sissss");       // parent, index, kind, name, [id], [attribute value...]
     CHECK_FALSE (create->soleValue().has_value());    // an event has no value at a given time
 
     CHECK (snapshot->find ("/godot/cmd/node/touch") != nullptr);

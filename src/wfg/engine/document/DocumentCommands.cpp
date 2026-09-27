@@ -19,6 +19,7 @@
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/FxValues.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -94,6 +95,27 @@ namespace wfg::doc
             return args;
         }
 
+        /*  The `attribute value` pairs a create was sent from `first` on, or
+            nothing when a value is missing its name - an odd count is a
+            message cut short, and guessing which half was meant is how a
+            setting lands on the wrong row. */
+        std::optional<ShowDocument::Attributes> pairsFrom (const std::vector<osc::Value>& args,
+                                                           std::size_t first)
+        {
+            ShowDocument::Attributes pairs;
+
+            if (args.size() <= first)
+                return pairs;
+
+            if ((args.size() - first) % 2 != 0)
+                return std::nullopt;
+
+            for (auto at = first; at < args.size(); at += 2)
+                pairs.emplace_back (args[at].getString(), args[at + 1].getString());
+
+            return pairs;
+        }
+
         Outcome fromEdit (const EditResult& edit, std::vector<osc::Value> appliedArgs)
         {
             if (! edit.ok)
@@ -165,21 +187,33 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  AND THE SETTINGS IT IS BORN WITH (2026-09-27), as `attribute value`
+            pairs after the identifier: a timeline group, a stop aimed at a
+            cue, a program change - one click on the window's new-cue lists,
+            one step to undo. AFTER the identifier, so a log written before
+            them replays as it always did; a client that wants the pairs sends
+            an empty identifier and the record carries the drawn one in its
+            place, the `send.create` shape. */
         registry.add ({ "cue.create",
-                        "Creates a cue or a group inside a list or a group.",
+                        "Creates a cue or a group inside a list or a group, with any settings it is"
+                        " born with given as attribute-value pairs after the id.",
                         { { "parent", 's', false }, { "index", 'i', false },
                           { "kind", 's', false }, { "name", 's', false },
-                          { "id", 's', true } },
+                          { "id", 's', true }, { "attribute", 's', true, true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto id = args.size() > 4 ? args[4].getString() : std::string {};
+                            const auto attributes = pairsFrom (args, 5);
+
+                            if (! attributes)
+                                return Outcome::rejected (reason::badValue);
 
                             const auto edit = document.createCue (args[0].getString(),
                                                                  args[1].getInt32(),
                                                                  args[2].getString(),
                                                                  args[3].getString(),
-                                                                 id);
+                                                                 id, *attributes);
 
                             return fromEdit (edit, withId (args, 4, edit.id));
                         } });
@@ -299,12 +333,22 @@ namespace wfg::doc
                             return Outcome::ok (args);
                         } });
 
-        registry.add ({ "group.wrap", "Create a group containing the selected cues in show order.",
-                        { { "cues", 's', false }, { "id", 's', true } }, true,
+        /*  The new group's settings follow the identifier as `cue.create`'s
+            do (2026-09-27): the window's "+ group" list makes a timeline, a
+            shuffle or a sampler around the picked cues in one step. */
+        registry.add ({ "group.wrap", "Create a group containing the selected cues in show order, with any"
+                                      " settings it is born with given as attribute-value pairs after the id.",
+                        { { "cues", 's', false }, { "id", 's', true }, { "attribute", 's', true, true } }, true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
+                            const auto attributes = pairsFrom (args, 2);
+
+                            if (! attributes)
+                                return Outcome::rejected (reason::badValue);
+
                             const auto edit = document.groupSelection (splitWords (args[0].getString()),
-                                                                       args.size() > 1 ? args[1].getString() : std::string {});
+                                                                       args.size() > 1 ? args[1].getString() : std::string {},
+                                                                       *attributes);
                             return fromEdit (edit, withId (args, 1, edit.id));
                         } });
 

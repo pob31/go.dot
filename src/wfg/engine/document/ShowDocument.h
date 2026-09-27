@@ -84,6 +84,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace wfg::doc
@@ -178,13 +179,24 @@ namespace wfg::doc
             logs the identifier it produced, and replaying the log supplies it. */
         EditResult createList (const std::string& name, const std::string& id = {});
 
+        /** Settings a cue is born with: each row's name and its value as text. */
+        using Attributes = std::vector<std::pair<std::string, std::string>>;
+
         /** `kind` is "memo" or "group"; a group is a cue that holds cues.
 
             `index` is a MEMBER position, the same number `move` takes and the
-            same one `order` publishes - see `document/Sequence.h`. */
+            same one `order` publishes - see `document/Sequence.h`.
+
+            `attributes` are settings the cue is BORN with (2026-09-27): a
+            timeline group, a stop aimed at a cue, a program change - what one
+            click on the window's new-cue lists chose, made in the same step as
+            the cue so one Undo takes back what one click made. Only a row
+            somebody could write afterwards is accepted; the name has its own
+            argument and is refused here. */
         EditResult createCue (const std::string& parentId, int index,
                               const std::string& kind, const std::string& name,
-                              const std::string& id = {});
+                              const std::string& id = {},
+                              const Attributes& attributes = {});
 
         /*  Adds a destination to a media cue: which bus it feeds, and nothing
             else. The coefficients are written afterwards through the ordinary
@@ -196,7 +208,13 @@ namespace wfg::doc
             that does not exist. */
         EditResult createRoute (const std::string& cueId, const std::string& busId,
                                 const std::string& id = {});
-        EditResult groupSelection (const std::vector<std::string>& ids, const std::string& id = {});
+        /*  A new group holding the cues named, in show order, where the first
+            of them stood - one step. `attributes` are the new group's, as
+            `createCue` takes them: its mode is written before any cue moves
+            in, so a cue moved into a sampler is treated as a sampler member
+            from the start. */
+        EditResult groupSelection (const std::vector<std::string>& ids, const std::string& id = {},
+                                   const Attributes& attributes = {});
         /** Import convenience: explicitly route an unassigned cue to the first
             output bus. Existing routes and processor feeds are preserved. */
         EditResult defaultMediaRoute (const std::string& cueId, int channels,

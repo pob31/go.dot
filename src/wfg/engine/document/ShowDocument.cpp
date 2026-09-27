@@ -1268,7 +1268,7 @@ namespace wfg::doc
 
     EditResult ShowDocument::createCue (const std::string& parentId, int index,
                                         const std::string& kind, const std::string& name,
-                                        const std::string& id)
+                                        const std::string& id, const Attributes& attributes)
     {
         const auto elementName = elementForKind (kind);
 
@@ -1283,11 +1283,36 @@ namespace wfg::doc
         /*  `kind` is a read-only attribute derived from the element, so it is
             not written: /godot/cue/<id>/kind reports "group" because the element
             is a Group, and a client cannot turn one into the other by writing
-            to it. */
-        return insertObject (parent, index, elementName, id, { { "name", name } });
+            to it.
+
+            AND NEITHER IS ANY OTHER ROW NOBODY COULD WRITE AFTERWARDS: a cue
+            born with a setting is the create and the write it saves, never a
+            second door past `setAttribute`'s read-only check. Asked here,
+            before `insertObject` draws an identifier, so a refusal leaves the
+            registry as it found it. An unknown row and a bad value are
+            `insertObject`'s to refuse, as they are for every create. */
+        const auto* element = Schema::instance().element (elementName);
+        std::vector<std::pair<std::string_view, std::string>> born { { "name", name } };
+
+        for (const auto& [attributeName, text] : attributes)
+        {
+            if (attributeName == "name" || attributeName == "id")
+                return EditResult::failed (reason::badValue);
+
+            if (element != nullptr)
+                if (const auto* attribute = element->attribute (attributeName);
+                    attribute != nullptr
+                      && (attribute->access() == Access::read || attribute->persist() == Persist::none))
+                    return EditResult::failed (reason::readOnly);
+
+            born.emplace_back (attributeName, text);
+        }
+
+        return insertObject (parent, index, elementName, id, born);
     }
 
-    EditResult ShowDocument::groupSelection (const std::vector<std::string>& ids, const std::string& id)
+    EditResult ShowDocument::groupSelection (const std::vector<std::string>& ids, const std::string& id,
+                                             const Attributes& attributes)
     {
         if (auto refusal = refuseIfLocked()) return *refusal;
         if (ids.empty()) return EditResult::failed (reason::badValue);
@@ -1339,7 +1364,8 @@ namespace wfg::doc
             if (isSequenceChild (sibling)) ++position;
         }
         // All sources and the destination are validated before the first edit.
-        const auto created = createCue (parent[idProperty].toString().toStdString(), position, "group", "", id);
+        const auto created = createCue (parent[idProperty].toString().toStdString(), position, "group", "", id,
+                                        attributes);
         if (! created.ok) return created;
         for (const auto& node : ordered)
             move (node[idProperty].toString().toStdString(), created.id, endOfSequence);
