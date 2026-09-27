@@ -49,7 +49,17 @@ held, which no dropped or muted block can produce). So the render is its own
 witness: read block by block, a stretch of 16 ms that moves less than a quarter
 of what the drawn lane moves in that time is a tick that did not come, and a
 check inside it (or in the tick after, while the level catches up) is voided in
-words. How much of a slope stood still is printed, not judged: the macOS
+words - and only a check that MISSED there: a stall may excuse a miss, never
+hide a pass.
+
+ON A SHARED CI RUNNER THE TIMING IS NOT JUDGED AT ALL (the author, 2026-09-28).
+Every check whose answer depends on the tick keeping time - a level read on a
+slope, M45's bound, the step, the loop's passes - is voided there, saying so,
+and judged on a machine in normal conditions. Everything a stall cannot move is
+judged everywhere: the lane published, the cue heard, the held -20 dB, unity
+past the last point, the loop's -12 dB after the lane written while it sounds,
+Go.dot's own allocations, and the replay. So CI still says a lane is APPLIED;
+the machine at the desk says how precisely. How much of a slope stood still is printed, not judged: the macOS
 runner's hosted render holds the tick back for about half of every slope
 (7dfeb6c's run: stretches of 20 to 130 ms), and the readings it leaves match the
 drawing to a tenth of a decibel. What catches a lane nobody reads is what
@@ -69,6 +79,7 @@ Exit codes: 0 everything held, 1 something did not, 2 the harness could not run.
 from __future__ import annotations
 
 import math
+import os
 import statistics
 import struct
 import sys
@@ -115,6 +126,14 @@ STALL_SHARE = 0.25
 # And the fewest readings on the first cue's slopes the witness may leave: it
 # must never be able to void its way to a pass.
 MIN_JUDGED = 6
+
+# ON A SHARED CI RUNNER THE TIMING IS NOT JUDGED (the author, 2026-09-28: "consider
+# the test passes in normal conditions and not on a loaded computer at GH"). What
+# a lane does is judged everywhere; how closely it keeps time is judged where the
+# tick keeps time.
+ON_CI = os.environ.get("GITHUB_ACTIONS") == "true"
+CI_REASON = ("timing is judged off CI: a shared runner holds the tick back for tens of "
+             "milliseconds at a time (namespace draft §20.8)")
 
 
 # =============================================================================
@@ -271,9 +290,26 @@ def clock_frame(server: Server) -> int:
         return 0
 
 
-def check_level(report: Report, spans, frame: int, heard: float, drawn: float, words: str) -> None:
-    """A level against the drawing - or voided, where a held tick moved it."""
-    if starved(spans, frame):
+def timed(report: Report, ok: bool, words: str, detail: str) -> None:
+    """A check whose answer depends on the tick keeping time: judged off CI only."""
+    if ON_CI:
+        report.void(words, f"{detail}; {CI_REASON}")
+        return
+
+    report.check(ok, words, detail)
+
+
+def check_level(report: Report, spans, frame: int, heard: float, drawn: float, words: str,
+                on_a_slope: bool = False) -> None:
+    """A level against the drawing. A STALL MAY EXCUSE A MISS, NEVER HIDE A
+    PASS: a reading on the drawing counts wherever it was taken, and only one
+    that is off AND where a held tick moved it is voided. A reading on a slope
+    keeps time with the tick, so on a shared CI runner it is not judged."""
+    if on_a_slope and ON_CI:
+        report.void(words, f"heard {heard:.2f} dB; {CI_REASON}")
+        return
+
+    if abs(heard - drawn) > LEVEL_TOLERANCE_DB and starved(spans, frame):
         report.void(words, f"heard {heard:.2f} dB where the level stood still while the lane moved: "
                            f"the tick thread did not run (§3.4), and a lane moves only at the tick")
         return
@@ -378,7 +414,8 @@ def run(locale: "str | None") -> int:
         for seconds in (1.5, 2.0, 2.5, 4.5, 5.75, 6.5):
             drawn = lane_at(RAMP_LANE, seconds)
             check_level(report, spans, at(seconds), level_db(left, at(seconds)) - unity, drawn,
-                        f"at the file's {seconds} s the level is the lane's {drawn:.1f} dB")
+                        f"at the file's {seconds} s the level is the lane's {drawn:.1f} dB",
+                        on_a_slope=seconds != 4.5)
 
         check_level(report, spans, at(7.5), level_db(left, at(7.5)) - unity, 0.0,
                     "and past the lane's last point, unity again")
@@ -392,12 +429,14 @@ def run(locale: "str | None") -> int:
             if all(abs(seconds - corner) >= 0.1 for corner in corners):
                 on_slope = abs(lane_at(RAMP_LANE, seconds + 0.01) - lane_at(RAMP_LANE, seconds - 0.01)) > 0.001
 
-                if starved(spans, at(seconds)):
+                heard = level_db(left, at(seconds)) - unity
+                distance = abs(heard - lane_at(RAMP_LANE, seconds))
+
+                #  Excused only when it is off AND a held tick moved it.
+                if distance > LEVEL_TOLERANCE_DB and starved(spans, at(seconds)):
                     voided += 1
                 else:
                     judged_on_slopes += 1 if on_slope else 0
-                    heard = level_db(left, at(seconds)) - unity
-                    distance = abs(heard - lane_at(RAMP_LANE, seconds))
 
                     if distance > worst:
                         worst, worst_at = distance, seconds
@@ -424,13 +463,13 @@ def run(locale: "str | None") -> int:
                  f"it was drawn" if crossed is not None else "; the step was not found")
               + (" (a starved tick beside it)" if step_starved else ""))
 
-        report.check(worst <= LEVEL_TOLERANCE_DB,
-                     "M45: the level follows the lane within half a decibel away from its corners",
-                     f"{worst:.3f} dB at {worst_at:.2f} s")
+        timed(report, worst <= LEVEL_TOLERANCE_DB,
+              "M45: the level follows the lane within half a decibel away from its corners",
+              f"{worst:.3f} dB at {worst_at:.2f} s")
 
-        report.check(judged_on_slopes >= MIN_JUDGED,
-                     "and enough of the slopes were heard in step with the tick to judge them",
-                     f"{judged_on_slopes} reading(s) judged on the slopes, {voided} voided")
+        timed(report, judged_on_slopes >= MIN_JUDGED,
+              "and enough of the slopes were heard in step with the tick to judge them",
+              f"{judged_on_slopes} reading(s) judged on the slopes, {voided} voided")
 
         step_words = "M45: the step lands within a tick of where it was drawn"
 
@@ -438,8 +477,8 @@ def run(locale: "str | None") -> int:
             report.void(step_words, f"{1000.0 * (crossed - STEP_AT):+.1f} ms, with the tick thread held "
                                     f"beside it")
         else:
-            report.check(crossed is not None and abs(crossed - STEP_AT) <= STEP_TOLERANCE_S, step_words,
-                         "not found" if crossed is None else f"{1000.0 * (crossed - STEP_AT):+.1f} ms")
+            timed(report, crossed is not None and abs(crossed - STEP_AT) <= STEP_TOLERANCE_S, step_words,
+                  "not found" if crossed is None else f"{1000.0 * (crossed - STEP_AT):+.1f} ms")
 
         # --- the loop: the same stretch of its lane on every pass ----------------
         tail = at(FILE_SECONDS + 0.2)
@@ -471,7 +510,7 @@ def run(locale: "str | None") -> int:
                     drawn = lane_at(LOOP_LANE, SLICE_IN + into)
                     check_level(report, loop_spans, frame_, level_db(left, frame_) - unity, drawn,
                                 f"pass {passage + 1}, {into} s in: the slice's stretch of the lane, "
-                                f"{drawn:.1f} dB")
+                                f"{drawn:.1f} dB", on_a_slope=True)
 
             # The lane written while it loops: a constant -12 once it has landed.
             for after in (1.25, 2.0):

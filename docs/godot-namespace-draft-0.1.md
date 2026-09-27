@@ -11997,7 +11997,16 @@ runner's hosted render held the tick back for about HALF of every slope, in stre
 is printed and not judged, and what catches a lane nobody reads is what a stall cannot void - the
 held stretch at -20 dB and the loop's -12 dB after its edit, flat lanes a level that never moved
 reads as nought - with a floor of slope readings actually judged, so the witness can never void
-its way to a pass.
+its way to a pass. A stall may excuse a miss, never hide a pass: a reading on the drawing counts
+wherever it was taken.
+
+**And then the author settled it** (2026-09-28: *"consider the test passes in normal conditions and
+not on a loaded computer at GH"*): on a shared CI runner (`GITHUB_ACTIONS`) the driver judges
+nothing whose answer depends on the tick keeping time - the readings on slopes, M45's bound, the
+step, the loop's passes are voided there in words, and M45 is printed for information. What a stall
+cannot move is judged everywhere: the lane published, the cue heard, the held -20 dB, unity past the
+last point, the loop's -12 dB after its edit, the allocations, the replay. CI says a lane is applied;
+the machine at the desk says how precisely.
 
 **Not built** is §20.7's list. **Waiting for the author:** the law and the gestures judged by eye in
 the window (DD), and a lane heard on the MADIface.
