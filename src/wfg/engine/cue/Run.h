@@ -48,6 +48,7 @@
 */
 
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/document/LevelLane.h>
 
 #include <bit>
 #include <utility>
@@ -420,6 +421,42 @@ namespace wfg::cue
             sampler strip holds one. Never logged as a level - the writes that
             set it are logged, which is what a replay needs. */
         double trim = 0.0;
+
+        /*  THE CUE'S LEVEL LANE (namespace draft §20): a volume curve over the
+            FILE, and the fourth term of this run's sum, beside `ownLevel`,
+            `trim` and the DCAs. A term of THIS run's sum and of nobody else's:
+            a group has no lane, and nothing inherits one (§4.12).
+
+            `lane` is the points as `doc::readLevelLane` read them - at the arm,
+            and again whenever the show's revision moves, so an edit reaches a
+            sounding cue on the next tick (decision DB). `laneDb` is what they
+            ask for this tick, read by `Runner::applyLanes` at the second of the
+            file the voice will be at one slew from now (DC). Both a media run's
+            only; nought and empty for every other kind. Never logged: the
+            document is, and the sample clock a replay does not have is what
+            says where in the file a voice was. */
+        std::vector<doc::LanePoint> lane;
+        double laneDb = 0.0;
+
+        /*  WHERE THE LANE IS READ BEFORE THE VOICE IS: the second of the file
+            the voice will start at - the start offset, the second somebody
+            jumped to, or the in-point of the slice it enters - recorded at the
+            arm. `positionOrigin` is not it for a cue with slices, which the
+            launch sets and the arm leaves at nought, and a lane read there
+            would start a voice at the level of a second it never plays. */
+        double laneStart = 0.0;
+
+        /*  THE SLICE A VOICE IS STILL IN between a boundary's placement and its
+            crossing. `advanceRanges` moves the slice's clock when it PLACES the
+            boundary, a little early, which is right for the playhead - it waits
+            at the incoming in-point - and wrong for a level, which would take
+            the incoming slice's value before the sound had left the outgoing
+            one. So the outgoing clock is kept here until the crossing: its
+            origin, where it began and how long a pass of it is. Nought
+            `laneOutgoingAt` is "no boundary pending". */
+        double laneOutgoingOrigin = 0.0;
+        std::int64_t laneOutgoingAt = 0;
+        std::int64_t laneOutgoingPass = 0;
 
         /*  HOW LOUD IT LEFT ITS TRACK over the last tick, in dB below full
             scale (author, 2026-09-25: "On the sampler fader displays of the

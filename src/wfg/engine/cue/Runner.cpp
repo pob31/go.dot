@@ -43,6 +43,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <wfg/engine/cue/InsertChain.h>
+#include <wfg/engine/document/LevelLane.h>
 
 #include <algorithm>
 #include <bit>
@@ -1902,12 +1903,36 @@ namespace wfg::cue
             return;
         }
 
+        /*  THE CUE'S LEVEL LANE (namespace draft §20.4), read here as the EQ
+            is, for a voice with a file; a live input has no file to be bound
+            to. Where the lane is read until the voice is launched is where the
+            voice will START - the offset, or the in-point of the slice it
+            enters - and a boundary pending from an earlier arm is forgotten,
+            since a re-arm is a jump and the slice it was leaving is gone. */
+        run.lane = live ? std::vector<doc::LanePoint> {}
+                        : doc::readLevelLane (textOf (cue, "levelLane")).points;
+        run.laneStart = request.ranges.empty()
+                          ? request.startOffset
+                          : request.ranges[static_cast<std::size_t> (
+                                std::clamp (run.startRange, 0,
+                                            static_cast<int> (request.ranges.size()) - 1))].in;
+        run.laneOutgoingAt = 0;
+        run.laneDb = doc::laneLevelDb (run.lane, run.laneStart);
+
         /*  THE CUE'S AUTHORED LEVEL IS THE RUN'S OWN, which is what a fade
             aimed at this cue moves and what a trim from a group above it is
             added TO. `level` itself is left for applyLevels to compute on the
             next tick, so there is one place that decides what a run is heard
-            at rather than two that could disagree. */
+            at rather than two that could disagree.
+
+            AND THE VOICE IS SNAPPED WITH ITS LANE'S FIRST WORD IN IT (DC). The
+            arm's level is set while the voice is silent, with no slew; a lane
+            drawn up from silence would otherwise start its voice at the cue's
+            level and slide down to where the lane says over the first tick -
+            a burst at the top of a cue the designer drew as a fade-in. The
+            lane is its own term, so the run's own level stays the cue's. */
         run.ownLevel = request.levelDb;
+        request.levelDb += run.laneDb;
         run.level = request.levelDb;
 
         audio->requestArm (request);
@@ -6591,6 +6616,7 @@ namespace wfg::cue
         releaseSolos();
         armStandby (engine);
         advanceFades (engine, tick);
+        applyLanes();
         applyLevels();
         applyRouting();
         applyEq();
@@ -7008,6 +7034,14 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  THE OUTGOING SLICE'S CLOCK, kept for the lane before it is
+                overwritten below: the sound is in that slice until `placeAt`,
+                and a level read from the incoming one's would arrive early by
+                however far ahead the boundary was placed (§20.4). */
+            run->laneOutgoingOrigin = run->positionOrigin;
+            run->laneOutgoingAt = run->rangeStartedAtSample;
+            run->laneOutgoingPass = run->passSamples;
+
             /*  The next range's clock starts at the boundary, so its first pass
                 is measured from where it will actually begin rather than from
                 the tick that decided it. */
@@ -7157,6 +7191,97 @@ namespace wfg::cue
         }
     }
 
+    namespace
+    {
+        /*  THE SECOND OF THE FILE A VOICE IS AT, AT A SAMPLE - the playhead's
+            arithmetic (`updatePositions`), answered for a level rather than a
+            readout. Two answers differ from the playhead's, both where the
+            voice is not yet where the playhead says (§20.4):
+
+            - before the launch, the second the voice will START at, since
+              that is the level it has to be at when it does;
+            - between a slice boundary's placement and its crossing, the
+              OUTGOING slice, whose clock the placement overwrote early. */
+        double lanePositionAt (const Run& run, std::int64_t sample, double rate) noexcept
+        {
+            if (run.launchedAtSample <= 0 || sample < run.launchedAtSample)
+                return run.laneStart;
+
+            if (run.range >= 0 && run.laneOutgoingAt > 0 && sample < run.rangeStartedAtSample)
+            {
+                auto elapsed = std::max<std::int64_t> (0, sample - run.laneOutgoingAt);
+
+                if (run.laneOutgoingPass > 0)
+                    elapsed %= run.laneOutgoingPass;
+
+                return run.laneOutgoingOrigin + static_cast<double> (elapsed) / rate;
+            }
+
+            auto elapsed = sample - run.launchedAtSample;
+
+            /*  A SLICE WRAPS AT EVERY PASS: the clip loops inside Tracktion, so
+                the file is back at the in-point each time round and the lane
+                with it - the same stretch of the curve on every pass (DA). */
+            if (run.range >= 0 && run.rangeStartedAtSample > 0)
+            {
+                elapsed = std::max<std::int64_t> (0, sample - run.rangeStartedAtSample);
+
+                if (run.passSamples > 0)
+                    elapsed %= run.passSamples;
+            }
+
+            return run.positionOrigin + static_cast<double> (elapsed) / rate;
+        }
+    }
+
+    void Runner::applyLanes()
+    {
+        if (audio == nullptr)
+            return;
+
+        const auto rate = static_cast<double> (audio->sampleRate());
+
+        if (! (rate > 0.0))
+            return;
+
+        /*  THE POINTS FOLLOW THE DOCUMENT, gated as `applyEq` is: a tick with
+            nobody editing compares one number, and an edit - or an undo -
+            reaches every sounding run on the next tick (DB). */
+        const auto revision = document.showRevision();
+        const auto reread = revision != laneRevision;
+        laneRevision = revision;
+
+        /*  ONE SLEW AHEAD (DC). The voice arrives at a level one slew after it
+            is given it, so the lane is read where the file will be by then,
+            and a corner the designer drew lands on the second it was drawn at
+            rather than a slew after it. The slew is one tick by design
+            (`audio::CueMatrix::levelSlewSeconds`: "exactly one control tick"),
+            so one tick of samples is what this reads ahead. */
+        const auto at = audio->samplesElapsed() + static_cast<std::int64_t> (samplesPerTick);
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
+                continue;
+
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr)
+                continue;
+
+            if (reread)
+            {
+                const auto cue = document.findById (run->cue);
+
+                if (cue.isValid())
+                    run->lane = doc::readLevelLane (textOf (cue, "levelLane")).points;
+            }
+
+            run->laneDb = run->lane.empty() ? 0.0
+                                            : doc::laneLevelDb (run->lane, lanePositionAt (*run, at, rate));
+        }
+    }
+
     void Runner::applyLevels()
     {
         /*  EFFECTIVE = OWN + EVERY ANCESTOR'S OWN, walked rather than cached.
@@ -7212,7 +7337,10 @@ namespace wfg::cue
             if (run == nullptr || run->isFinished())
                 continue;
 
-            const auto effective = effectiveOf (*run);
+            /*  AND THE CUE'S OWN LANE (namespace draft §20.4), added to this
+                run's sum and walked into nobody else's: a group has none, and
+                a member's lane is the member's. Nought for every run without. */
+            const auto effective = effectiveOf (*run) + run->laneDb;
 
             if (juce::approximatelyEqual (effective, run->level))
                 continue;

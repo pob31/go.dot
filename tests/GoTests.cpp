@@ -54,6 +54,7 @@
 #include <wfg/engine/log/Replay.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <iterator>
 #include <set>
@@ -8143,4 +8144,241 @@ TEST_CASE ("live: eq.reset under the lock holds flat live; unlocked it lets go o
     CHECK (rig.live.empty());
     CHECK (rig.saved (rig.eq ("eqB2Gain")) == "0");
     CHECK (rig.saved (rig.eq ("eqB3Gain")) == "0");
+}
+
+//==============================================================================
+namespace
+{
+    /*  A media cue with a level lane drawn on it (namespace draft §20): the
+        fade rig, whose media cue is the one the lane is drawn over, with the
+        sample clock put where a check wants the file to be. */
+    struct LaneRig : FadeRig
+    {
+        void drawLane (const std::string& text)
+        {
+            REQUIRE (document.setAttribute ("/godot/cue/" + mediaId + "/levelLane", text).ok);
+        }
+
+        /*  Fires the media cue, lets the disk answer, and waits for the launch
+            to be placed, the voice sounding - `startMedia`'s steps, with the
+            arm's request kept for a check on what the voice was snapped to. */
+        std::string launch()
+        {
+            fire (mediaId);
+            REQUIRE_FALSE (audio.arms.empty());
+            armed = audio.arms.back();
+
+            audio.completeArms (engine);
+            tickOnce();
+            tickOnce();
+
+            const auto id = runs.all().front().id;
+            REQUIRE (runs.find (id)->launchedAtSample > 0);
+
+            audio.playing.insert (runs.find (id)->track);
+            tickOnce();
+
+            return id;
+        }
+
+        /*  ONE TICK ON, WITH THE SOUND `seconds` PAST ITS LAUNCH ONE TICK FROM
+            NOW - which is where the lane is read (decision DC), so a check at
+            a second of the file is a check of that second's level. */
+        void hearAt (const std::string& id, double seconds)
+        {
+            const auto launched = runs.find (id)->launchedAtSample;
+
+            audio.samples = launched + static_cast<std::int64_t> (std::llround (seconds * 48000.0)) - 960;
+            tickOnce();
+        }
+
+        cue::ArmRequest armed;
+    };
+}
+
+TEST_CASE ("level lane: the voice follows the lane over the file, read a tick ahead, and starts at its first word")
+{
+    LaneRig rig;
+    rig.drawLane ("0 -40 2 0");             // up from -40 over the first two seconds
+
+    const auto id = rig.launch();
+
+    /*  THE ARM IS SNAPPED WITH THE LANE IN IT (DC): a lane drawn up from
+        silence starts its voice there, not at the cue's level sliding down. */
+    CHECK (rig.armed.levelDb == doctest::Approx (-40.0));
+
+    /*  And the lane is its own term: the run's own level is still the cue's,
+        which is what a fade aimed at it would take over from. */
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (0.0));
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-40.0));
+
+    /*  A second into the file, halfway up - and the voice was told so. */
+    rig.hearAt (id, 1.0);
+    CHECK (rig.runs.find (id)->laneDb == doctest::Approx (-20.0));
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-20.0));
+    REQUIRE_FALSE (rig.audio.levels.empty());
+    CHECK (rig.audio.levels.back().second == doctest::Approx (-20.0));
+
+    /*  Past the last point the lane holds what the last point says. */
+    rig.hearAt (id, 3.5);
+    CHECK (rig.runs.find (id)->level == doctest::Approx (0.0));
+}
+
+TEST_CASE ("level lane: it is read on the file's clock, from the start offset")
+{
+    /*  SECONDS OF THE FILE, not of the cue (§20.2): a cue that starts two
+        seconds into its file starts two seconds into its lane. */
+    LaneRig rig;
+    rig.drawLane ("0 0 4 -40");
+    rig.setCue (rig.mediaId, "startOffset", "2");
+
+    const auto id = rig.launch();
+
+    CHECK (rig.armed.levelDb == doctest::Approx (-20.0));
+
+    rig.hearAt (id, 1.0);                   // the file's third second
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-30.0));
+}
+
+TEST_CASE ("level lane: an offset on the cue's level, which a fade and a hand move beside it")
+{
+    /*  DECISION CZ. The lane is one more term of the sum: a cue written at -6
+        under a lane at -10 plays at -16, a fade aimed at it moves the cue's
+        own level and not the lane's, and a hand on a strip adds to both. */
+    LaneRig rig;
+    rig.setCue (rig.mediaId, "level", "-6");
+    rig.drawLane ("0 -10");
+
+    const auto id = rig.launch();
+
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (-6.0));
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-16.0));
+
+    rig.fire (rig.fadeId);                  // to -20 over a second
+
+    for (int i = 0; i < 60; ++i)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (-20.0));
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-30.0));
+
+    rig.runs.find (id)->trim = -3.0;
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-33.0));
+}
+
+TEST_CASE ("level lane: an edit reaches a sounding cue on the next tick, and clearing it takes it away")
+{
+    /*  DECISION DB: drawing while a loop plays is how a lane gets shaped. */
+    LaneRig rig;
+
+    const auto id = rig.launch();
+    CHECK (rig.runs.find (id)->level == doctest::Approx (0.0));
+
+    rig.drawLane ("0 -12");
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-12.0));
+    REQUIRE_FALSE (rig.audio.levels.empty());
+    CHECK (rig.audio.levels.back().second == doctest::Approx (-12.0));
+
+    rig.drawLane ("");
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->level == doctest::Approx (0.0));
+}
+
+TEST_CASE ("level lane: a jump takes the lane to the second jumped to")
+{
+    /*  §3.10's "scrubs when the clip scrubs" (DA): `run.seek` re-arms the
+        voice at a second of the file, and the lane is read from there. */
+    LaneRig rig;
+    rig.drawLane ("0 0 10 -20");
+
+    const auto id = rig.launch();
+    rig.audio.arms.clear();
+
+    CHECK (rig.submitAndTick ("run.seek", { osc::Value::string (id),
+                                            osc::Value::float64 (5.0) }).applied == 1);
+
+    /*  Snapped at the lane's word for the fifth second. */
+    REQUIRE (rig.audio.arms.size() == 1u);
+    CHECK (rig.audio.arms.front().levelDb == doctest::Approx (-10.0));
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.runs.find (id)->launchedAtSample > 0);
+
+    rig.hearAt (id, 1.0);                   // the file's sixth second
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-12.0));
+}
+
+TEST_CASE ("level lane: a looping slice hears the same stretch of the lane on every pass")
+{
+    /*  DA, and the reason it is the file's clock: a slice that loops plays
+        the same seconds of the file again, and so the same stretch of the
+        lane. Read before the launch at the slice's in-point, not at the
+        file's start, which the lane says something different about. */
+    LaneRig rig;
+
+    const auto range = rig.document.createRange (rig.mediaId, 2.0, 4.0);
+    REQUIRE (range.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + range.id + "/loops", "0").ok);
+
+    rig.drawLane ("0 0 2 -20 4 0");
+
+    const auto id = rig.launch();
+
+    CHECK (rig.armed.levelDb == doctest::Approx (-20.0));
+
+    rig.hearAt (id, 1.0);                   // the first pass, the file's third second
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-10.0));
+
+    rig.hearAt (id, 2.5);                   // the second pass, half a second in
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-15.0));
+
+    rig.hearAt (id, 5.0);                   // the third pass, a second in
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-10.0));
+}
+
+TEST_CASE ("level lane: across a slice boundary it keeps the outgoing slice until the sound crosses")
+{
+    /*  §20.4's second difference from the playhead. The boundary is placed
+        a little ahead and moves the slice's clock when it is placed; the
+        level stays the outgoing slice's until the crossing itself. */
+    LaneRig rig;
+    rig.audio.slots = 2;
+
+    REQUIRE (rig.document.createRange (rig.mediaId, 0.0, 1.0).ok);
+    REQUIRE (rig.document.createRange (rig.mediaId, 5.0, 6.0).ok);
+
+    rig.drawLane ("0 0 1 -20 5 -40 6 -40");
+
+    const auto id = rig.launch();
+    const auto endsAt = rig.runs.find (id)->launchedAtSample + 48000;
+
+    /*  Two ticks before the end: inside the placement horizon, so the
+        boundary is placed on this tick. */
+    rig.audio.samples = endsAt - 1920;
+    rig.tickOnce();
+
+    REQUIRE_FALSE (rig.audio.stopsAt.empty());
+    REQUIRE (rig.audio.stopsAt.back().second == endsAt);
+    REQUIRE (rig.runs.find (id)->rangeStartedAtSample == endsAt);
+
+    /*  Read a tick ahead, still 540 samples short of the crossing: the
+        outgoing slice's last hundredth of a second, not the incoming one. */
+    rig.audio.samples = endsAt - 1500;
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->laneDb == doctest::Approx (-20.0 * (48000.0 - 540.0) / 48000.0));
+
+    /*  And past it, the incoming slice's own second. */
+    rig.audio.samples = endsAt - 480;
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->laneDb == doctest::Approx (-40.0));
 }

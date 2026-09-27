@@ -933,6 +933,14 @@ namespace wfg::cue
         void applyLevels();
         void applyRouting();
 
+        /*  WHAT EACH SOUNDING MEDIA CUE'S LEVEL LANE ASKS FOR THIS TICK
+            (namespace draft §20.4), into `Run::laneDb` for `applyLevels` to add.
+            Just before it, below nothing: with no Player there is no sample
+            clock, no second of any file, and every lane's term stays nought.
+            The points are re-read when the show's revision moves - `applyEq`'s
+            gate - and read at the second the voice will be at one slew ahead. */
+        void applyLanes();
+
         /*  A sounding cue's EQ, kept up with the document (Phase 9a): the
             routing pass's shape, gated on the same revision, pushing only
             the runs whose twenty-three rows differ from what the voice holds. */
@@ -1424,6 +1432,9 @@ namespace wfg::cue
 
         /** The show revision `applyEq` last pushed at; `routingRevision`'s twin. */
         std::uint64_t eqRevision = 0;
+
+        /** The show revision `applyLanes` last read the lanes at; the same twin. */
+        std::uint64_t laneRevision = 0;
 
         /*  And the live layer's, beside each: a turn under the lock moves the
             layer and not the show. */
