@@ -293,9 +293,10 @@ to the node invokes the command; the same names are what the CLI and the event l
 | `list.create` | `/godot/cmd/list/create` | `s` name `[s id]` | the id is optional; the engine generates one and **logs the event with it** |
 | `list.delete` | `/godot/cmd/list/delete` | `s` id | |
 | `list.focus` | `/godot/cmd/list/focus` | `s` id | |
-| `group.create` | `/godot/cmd/group/create` | `s` parent `i` index `s` name `[s id]` | parent is a list or a group |
+| `group.create` | — | — | *never built (2026-09-27)*: a group is `cue.create` with the kind `group`, its mode and the rest given as pairs |
+| `group.wrap` | `/godot/cmd/group/wrap` | `s` cue ids, space-separated `[s id]` `[s attribute s value …]` | *(2026-09-21; pairs 2026-09-27)* a new group where the first of the cues stood, in their common container, holding them in show order - one undo step; the pairs are the group's, written before any cue moves in |
 | `group.delete` | `/godot/cmd/group/delete` | `s` id | deletes the subtree |
-| `cue.create` | `/godot/cmd/cue/create` | `s` parent `i` index `s` kind `s` name `[s id]` | |
+| `cue.create` | `/godot/cmd/cue/create` | `s` parent `i` index `s` kind `s` name `[s id]` `[s attribute s value …]` | *(pairs 2026-09-27)* the settings the cue is BORN with, after the id, so a log written before them replays unchanged; a client wanting them sends an empty id and the record carries the drawn one. A read-only or derived row, the name as a pair, or a value missing its name is refused whole |
 | `cue.delete` | `/godot/cmd/cue/delete` | `s` id | |
 | `cue.move` | `/godot/cmd/cue/move` | `s` id `s` newParent `i` newIndex | also moves groups |
 | `node.set` | *the node's own address* | the node's type | a value write **is** this command; it has no `/cmd` node because its signature is the target's |
@@ -7455,6 +7456,47 @@ every button is `cue.create`, reachable from the page - and building the row fro
 found that the page's list had stopped at OSC, so MIDI was added there in the same commit. The
 inspector's details fold moved in the same round: its button sat at the foot of the pane, a screen
 away from the fields it folds, and now heads the detail lines themselves.
+
+**FOUR OF THE BUTTONS OPEN A LIST (2026-09-27).** *"When clicking on the 'Add group' button I would
+like to have the various group types displayed in a vertical list so the user can pick Timeline group,
+Sequential Group, Sampler Group... And also if a Timeline or Sequential group is selected and compatible
+cues are selected, the system offers to move the cues directly in the new group."* Then the same for
+"+ transport", with Start as one of its lines, and then for the other buttons that stand for several
+things. What was decided, in the author's words where they gave them:
+
+1. **The offer to take the picked cues is IN the list, not a question after it.** §3.6's authoring
+   ergonomics: grouping a selection is one keystroke, *"if it is a dialog, people will resent it by the
+   second tech."* The list's first part makes the group around the picked cues, its second an empty
+   one where any new cue lands; a picked set the engine would refuse (cues in two lists) shows the
+   sentence why in place of the first part.
+2. **Five group types**, the author's number (four were recommended): timeline; sequential on GO;
+   sequential automatic; shuffle, which is an automatic sequence in a fresh order - automatic by force,
+   since a manual group ignores `selection` (decision 1 of §12.5); sampler.
+3. **The sampler takes the picked cues only when every one of them is media**, because a sampler
+   plays its direct media members and nothing else.
+4. **Start stays its own kind.** Only the window lists it under "+ transport" and its button went.
+   Folding it into a transport verb was weighed and declined for now: it touches some twenty places,
+   among them the four `isTakePress` questions of the solver and the slot analysis, which would read a
+   start as a stop and unplan the very cue it starts, and the live recorder that writes start cues.
+5. **A transport or start cue is born aimed at the picked cue** - the one clicked last - and placed
+   after it. A stop with no target stops nothing.
+6. **A transport row's kind column says its verb** - stop, fade out, member, round, advance, rec,
+   loop, overdub, clear - as a group row says its mode.
+7. **"+ midi" and "+ mic" open lists too**: the eight MIDI types in the order a theatre sends them,
+   and each named input with the rack channels that can take it (a mono input through a mono or a
+   mono-to-stereo channel, a stereo one through a stereo channel, never a shared channel), so a mic
+   cue is born able to sound - "+ media"'s file dialog, for a microphone. "+ fade" stays a button.
+8. **"Fade out and stop" belongs to "+ fade"** (the author's choice; the transport list was
+   recommended): the transport list does not offer the `fade` verb, which stays in the engine and in
+   the inspector.
+
+**A line makes its cue BORN WITH ITS SETTINGS**: `cue.create` and `group.wrap` take `attribute value`
+pairs after the identifier (§2.6), so one click is one record and one Undo, where a create followed by
+a `node.set` was two steps and a moment in which the group was a manual sequence nobody asked for. It
+is the `group.create` this draft's command table once listed, as one door for every kind. **The list
+shows the pick as it was when it opened, and a click makes exactly that.** Rule 3 holds: every line is
+`cue.create` or `group.wrap`, and what it makes is reachable on the page as "+ kind" and the fields.
+The popup menus wear the theme now, the settings window's with them.
 
 **PANIC, AND ESC (2026-09-18).** *"Panic is missing and Esc key is not bound."* Until then no client
 had an abort key, deliberately (§14.15's "says nothing about the three levels of stop rather than
