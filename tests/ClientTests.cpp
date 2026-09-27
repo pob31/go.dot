@@ -54,6 +54,7 @@
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Foot.h>
@@ -108,6 +109,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <algorithm>
 #include <memory>
@@ -665,9 +667,32 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::setInputPatchSettled (true), gesture::setInputPatchSettled (false),
         gesture::createRackChannel ("mono"),
         gesture::createChannelPlugin ("K1000001", "Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
+
+        /*  THE NEW-CUE LISTS (2026-09-27): a group made around the picked cues,
+            and a mic cue born with its input and channel. Every line of the
+            fixed lists joins below. */
+        gesture::wrapGroup ({ "B3N8R5TW", "P9XKC2WR" }, { { "mode", "timeline" } }),
+        gesture::wrapGroup ({ "B3N8R5TW" }, {}),
+        gesture::createCue ("7K2QM9X4", 0, "mic", "", { { "input", "N1000001" }, { "channel", "K1000001" } }),
     };
 
-    for (const auto& event : gestures)
+    std::vector<Event> listed = gestures;
+
+    for (const auto* choices : { &model::groupChoices(), &model::transportChoices(), &model::midiChoices() })
+        for (const auto& choice : *choices)
+        {
+            auto settings = choice.settings;
+
+            if (choice.aimed)
+                settings.emplace_back ("target", "B3N8R5TW");
+
+            listed.push_back (gesture::createCue ("7K2QM9X4", 0, choice.kind, "", settings));
+
+            if (choice.kind == "group")
+                listed.push_back (gesture::wrapGroup ({ "B3N8R5TW" }, settings));
+        }
+
+    for (const auto& event : listed)
     {
         INFO ("gesture sends " << event.command);
 
@@ -2233,6 +2258,218 @@ TEST_CASE ("client: a cue born with its settings is one record, carrying the id 
     REQUIRE (creates[1].args.size() == 9);
     CHECK (creates[1].args[4].getString() == stop);
     CHECK (creates[1].args[8].getString() == group);
+}
+
+TEST_CASE ("client: every line of the new-cue lists makes its cue, born with what the line says")
+{
+    /*  The four lists (the author, 2026-09-27) held against the engine, the
+        way the row of buttons is above: each line is a `cue.create` with
+        pairs the engine accepts, and the cue it makes reads back what the line
+        promised. The mic fixture has named inputs and a rack, so the mic list
+        is a real one. */
+    Rig rig ("mic");
+    const std::string listId = "MC000001";
+    auto tick = std::int64_t { 1 };
+
+    // A stereo channel, and a mono one made shared - a bus with a chain, never claimed.
+    REQUIRE (rig.apply (tick++, "window", "channel.create",
+                        { osc::Value::string ("stereo"), osc::Value::string ("CH000031") }).applied == 1);
+    REQUIRE (rig.apply (tick++, "window", "channel.create",
+                        { osc::Value::string ("mono"), osc::Value::string ("CH000032") }).applied == 1);
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/slot/CH000032/access"),
+                          osc::Value::string ("shared") }).applied == 1);
+
+    auto snapshot = rig.publish (tick);
+    const auto mics = model::micChoices (*snapshot);
+
+    const auto through = [&mics] (const std::string& input)
+    {
+        std::vector<std::string> channels;
+        for (const auto& choice : mics)
+            for (const auto& [attribute, value] : choice.settings)
+                if (attribute == "input" && value == input)
+                    for (const auto& [other, channel] : choice.settings)
+                        if (other == "channel")
+                            channels.push_back (channel);
+        return channels;
+    };
+
+    CHECK (through ("MC000021") == std::vector<std::string> { "MC000011" });   // mono into mono-to-stereo
+    CHECK (through ("MC000022") == std::vector<std::string> { "CH000031" });   // stereo into stereo
+    REQUIRE_FALSE (mics.empty());
+    CHECK (mics.back().settings.empty());                                       // "No input yet"
+    CHECK (mics.back().section.empty());
+
+    const auto micLines = model::micMenu (*snapshot, mics, "at the end of the list");
+    CHECK (std::count_if (micLines.begin(), micLines.end(), [] (const model::MenuLine& line)
+                          { return line.kind == model::MenuLine::Kind::item; })
+             == static_cast<std::ptrdiff_t> (mics.size()));
+    CHECK (std::count_if (micLines.begin(), micLines.end(), [] (const model::MenuLine& line)
+                          { return line.kind == model::MenuLine::Kind::header; }) == 2);
+
+    //  --- every line, made -----------------------------------------------------
+    std::vector<model::Choice> every;
+    for (const auto* choices : { &model::groupChoices(), &model::transportChoices(), &model::midiChoices() })
+        every.insert (every.end(), choices->begin(), choices->end());
+    every.insert (every.end(), mics.begin(), mics.end());
+
+    for (const auto& choice : every)
+    {
+        CAPTURE (choice.label);
+
+        auto settings = choice.settings;
+        if (choice.aimed)
+            settings.emplace_back ("target", "MC000006");
+
+        const auto event = gesture::createCue (listId, 0, choice.kind, "", settings);
+        rig.document.beginTransaction (event.command, tick, event.origin, {});
+        const auto outcome = rig.apply (tick++, event.origin, event.command, event.args);
+        CHECK_MESSAGE (outcome.applied == 1, rig.engine.lastError());
+
+        snapshot = rig.publish (tick);
+        const auto made = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
+        REQUIRE (model::text (*snapshot, "/godot/cue/" + made + "/kind") == choice.kind);
+
+        for (const auto& [attribute, value] : settings)
+            CHECK (model::text (*snapshot, "/godot/cue/" + made + "/" + attribute) == value);
+
+        REQUIRE (rig.apply (tick++, "window", "undo", {}).applied == 1);
+    }
+
+    //  --- the buttons that open them ------------------------------------------
+    const auto& kinds = model::cueKinds();
+    CHECK (std::find (kinds.begin(), kinds.end(), "start") == kinds.end());
+    CHECK (std::any_of (model::transportChoices().begin(), model::transportChoices().end(),
+                        [] (const model::Choice& choice) { return choice.kind == "start"; }));
+    CHECK_FALSE (std::any_of (model::transportChoices().begin(), model::transportChoices().end(),
+                              [] (const model::Choice& choice)
+                              { return choice.settings == model::Settings { { "verb", "fade" } }; }));
+
+    for (const char* kind : { "group", "transport", "midi", "mic" })
+        CHECK (model::opensList (kind));
+    for (const char* kind : { "memo", "media", "fade", "osc" })
+        CHECK_FALSE (model::opensList (kind));
+
+    /*  A WORD FOR EVERY VERB THE ENGINE HAS, short enough for the kind
+        column - read off the row's own range, so a verb the engine grows is a
+        failing case here and not a row that shows its raw name. */
+    const auto stop = gesture::createCue (listId, 0, "transport", "");
+    REQUIRE (rig.apply (tick++, stop.origin, stop.command, stop.args).applied == 1);
+    snapshot = rig.publish (tick);
+    const auto stopId = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
+    const auto* verbs = snapshot->find ("/godot/cue/" + stopId + "/verb");
+    REQUIRE (verbs != nullptr);
+    REQUIRE_FALSE (verbs->enumValues.empty());
+
+    std::vector<std::string> shown;
+    for (const auto& verb : verbs->enumValues)
+    {
+        CAPTURE (verb);
+        const auto word = model::verbWord (verb);
+        CHECK_FALSE (word.empty());
+        CHECK (word.size() <= 8);
+        CHECK (std::find (shown.begin(), shown.end(), word) == shown.end());
+        shown.push_back (word);
+    }
+
+    CHECK (model::verbWord ("hard") == "stop");
+    CHECK (model::verbWord ("afterIteration") == "round");
+}
+
+TEST_CASE ("client: the group list offers the picked cues when the engine would take them")
+{
+    Rig rig;
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE_FALSE (listId.empty());
+    auto tick = std::int64_t { 1 };
+
+    const auto create = [&] (const std::string& parent, const char* kind, const char* id)
+    {
+        REQUIRE (rig.apply (tick++, "window", "cue.create",
+                            { osc::Value::string (parent), osc::Value::int32 (0), osc::Value::string (kind),
+                              osc::Value::string (""), osc::Value::string (id) }).applied == 1);
+    };
+
+    create (listId, "memo", "A0000001");
+    create (listId, "media", "B0000001");
+    create (listId, "media", "C0000001");
+    create (listId, "group", "G0000001");
+    create ("G0000001", "memo", "D0000001");
+    REQUIRE (rig.apply (tick++, "window", "list.create",
+                        { osc::Value::string ("Other"), osc::Value::string ("E0000002") }).applied == 1);
+    create ("E0000002", "memo", "E0000001");
+
+    const auto snapshot = rig.publish (tick);
+
+    const auto nothing = model::wrapOf (*snapshot, {});
+    CHECK_FALSE (nothing.possible());
+    CHECK (nothing.why.empty());
+
+    const auto media = model::wrapOf (*snapshot, { "C0000001", "B0000001" });
+    CHECK (media.possible());
+    CHECK (media.count == 2);
+    CHECK (media.allMedia);
+
+    const auto mixed = model::wrapOf (*snapshot, { "A0000001", "B0000001" });
+    CHECK (mixed.count == 2);
+    CHECK_FALSE (mixed.allMedia);
+
+    // A group and its own member: the member rides in with the group.
+    CHECK (model::wrapOf (*snapshot, { "G0000001", "D0000001" }).count == 1);
+
+    const auto apart = model::wrapOf (*snapshot, { "A0000001", "E0000001" });
+    CHECK_FALSE (apart.possible());
+    CHECK_FALSE (apart.why.empty());
+
+    const auto items = [] (const std::vector<model::MenuLine>& lines, bool wrapped)
+    {
+        return std::count_if (lines.begin(), lines.end(), [wrapped] (const model::MenuLine& line)
+                              { return line.kind == model::MenuLine::Kind::item && line.wrap == wrapped; });
+    };
+
+    const auto groups = static_cast<std::ptrdiff_t> (model::groupChoices().size());
+
+    // Nothing picked: the empty part only, and it says where the group lands.
+    const auto plain = model::groupMenu (nothing, "at the end of the list");
+    REQUIRE_FALSE (plain.empty());
+    CHECK (plain.front().kind == model::MenuLine::Kind::header);
+    CHECK (plain.front().text == "An empty new group, at the end of the list");
+    CHECK (items (plain, true) == 0);
+    CHECK (items (plain, false) == groups);
+
+    // All media: every type around them, the sampler included.
+    const auto around = model::groupMenu (media, "after Rain");
+    CHECK (around.front().text == "Put the 2 picked cues in a new…");
+    CHECK (items (around, true) == groups);
+    CHECK (items (around, false) == groups);
+
+    // A memo among them: no sampler around them, still one in the empty part.
+    CHECK (items (model::groupMenu (mixed, "after Rain"), true) == groups - 1);
+
+    CHECK (model::groupMenu (model::wrapOf (*snapshot, { "A0000001" }), "after Rain").front().text
+             == "Put the picked cue in a new…");
+
+    // Two lists: the sentence why, in place of the offer.
+    const auto refused = model::groupMenu (apart, "after Rain");
+    CHECK (refused.front().kind == model::MenuLine::Kind::note);
+    CHECK (refused.front().text == apart.why);
+    CHECK (items (refused, true) == 0);
+
+    // And the engine takes what the list offered.
+    const auto sampler = gesture::wrapGroup (media.cues, model::groupChoices().back().settings);
+    rig.document.beginTransaction (sampler.command, tick, sampler.origin, {});
+    REQUIRE (rig.apply (tick++, sampler.origin, sampler.command, sampler.args).applied == 1);
+    const auto after = rig.publish (tick);
+    const auto group = model::text (*after, "/godot/cue/B0000001/parent");
+    CHECK (model::text (*after, "/godot/cue/" + group + "/mode") == "sampler");
+    CHECK (model::text (*after, "/godot/cue/C0000001/parent") == group);
+
+    // The transport list says where its cue lands, and aims it.
+    const auto aimed = model::transportMenu ("Rain", "after Rain");
+    CHECK (aimed.front().text.find ("Aimed at Rain") == 0);
+    CHECK (items (aimed, false) == static_cast<std::ptrdiff_t> (model::transportChoices().size()));
+    CHECK (model::transportMenu ("", "at the end of the list").front().text.find ("No target yet") == 0);
 }
 
 //==============================================================================

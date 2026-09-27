@@ -348,6 +348,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Media.cpp
     wfg/client/model/NewCue.h
     wfg/client/model/NewCue.cpp
+    wfg/client/model/NewCueMenus.h
+    wfg/client/model/NewCueMenus.cpp
     wfg/client/model/Foot.h
     wfg/client/model/Foot.cpp
     wfg/client/model/OutputList.h

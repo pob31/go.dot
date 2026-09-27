@@ -22,8 +22,11 @@ namespace wfg::client::model
 {
     const std::vector<std::string>& cueKinds()
     {
+        /*  NO "start" (the author, 2026-09-27): a start cue is made from the
+            "+ transport" list, among the other cues that act on a cue. The
+            kind is unchanged; only its button went. */
         static const std::vector<std::string> kinds {
-            "memo", "media", "mic", "fade", "transport", "osc", "midi", "group", "start"
+            "memo", "media", "mic", "fade", "transport", "osc", "midi", "group"
         };
 
         return kinds;

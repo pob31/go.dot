@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::client::gesture
@@ -65,6 +66,50 @@ namespace wfg::client::gesture
         return { origin::window, "cue.create",
                  { osc::Value::string (parent), osc::Value::int32 (index),
                    osc::Value::string (kind), osc::Value::string (name) } };
+    }
+
+    Event createCue (const std::string& parent, int index,
+                     const std::string& kind, const std::string& name,
+                     const std::vector<std::pair<std::string, std::string>>& settings)
+    {
+        auto event = createCue (parent, index, kind, name);
+
+        if (settings.empty())
+            return event;
+
+        event.args.push_back (osc::Value::string (""));     // the identifier: the engine's to draw
+
+        for (const auto& [attribute, value] : settings)
+        {
+            event.args.push_back (osc::Value::string (attribute));
+            event.args.push_back (osc::Value::string (value));
+        }
+
+        return event;
+    }
+
+    Event wrapGroup (const std::vector<std::string>& cueIds,
+                     const std::vector<std::pair<std::string, std::string>>& settings)
+    {
+        std::string ids;
+
+        for (const auto& id : cueIds)
+            ids += (ids.empty() ? "" : " ") + id;
+
+        Event event { origin::window, "group.wrap", { osc::Value::string (ids) } };
+
+        if (settings.empty())
+            return event;
+
+        event.args.push_back (osc::Value::string (""));     // the identifier: the engine's to draw
+
+        for (const auto& [attribute, value] : settings)
+        {
+            event.args.push_back (osc::Value::string (attribute));
+            event.args.push_back (osc::Value::string (value));
+        }
+
+        return event;
     }
 
     Event createSend (const std::string& cueId, const std::string& busId,

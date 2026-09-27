@@ -43,6 +43,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::client::gesture
@@ -102,6 +103,21 @@ namespace wfg::client::gesture
         followed by finding what it made (model/Media.h). */
     Event createCue (const std::string& parent, int index,
                      const std::string& kind, const std::string& name);
+
+    /*  AND BORN WITH ITS SETTINGS (2026-09-27): what a line of a new-cue
+        list chose - a timeline group, a stop aimed at a cue - as `attribute
+        value` pairs after an EMPTY identifier, which the engine fills with the
+        one it draws. One record, one Undo. With no settings it is the plain
+        create above, so a log line is the same as it always was. */
+    Event createCue (const std::string& parent, int index,
+                     const std::string& kind, const std::string& name,
+                     const std::vector<std::pair<std::string, std::string>>& settings);
+
+    /*  A NEW GROUP AROUND THE PICKED CUES, born with its settings: the engine
+        puts it where the first of them stood, in their common container, and
+        moves them in in show order - one step (ShowDocument::groupSelection). */
+    Event wrapGroup (const std::vector<std::string>& cueIds,
+                     const std::vector<std::pair<std::string, std::string>>& settings);
 
     /*  Moves a cue or a group: a row dragged in the cue list (model/Reorder.h).
         `index` is a member position in `parent`, or -1 for the end. */
