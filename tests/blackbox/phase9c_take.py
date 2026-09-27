@@ -368,13 +368,24 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
 
             # THE LAYER: the input laid again on every pass while it was held - the
             # loop is 0.3 s and the overdub most of a second - so at least one pass
-            # of it on the take, and every level a whole number of passes.
+            # of it on the take, and every level a whole number of passes. It is
+            # laid through the plugin before the recorder, and what that plugin
+            # plays while the engine has failed it for lateness is silence, never
+            # the dry input (decision CU): a layer laid then is silent by design and
+            # says nothing about the recorder (macOS CI, a6952dd: 1.00 times the
+            # take, every block of the loop flat).
             layered = common.answered_level(left, marks["layered"] + int(RATE * 0.4),
                                             marks["layered"] + int(RATE * 1.1), BLOCK)
             passes = (layered[0] or 0.0) / LOOPED
-            report.check(layered[0] is not None and passes >= 2.0 - 0.15 and abs(passes - round(passes)) <= 0.15,
-                         "a layer on it adds the input again, a whole pass at a time",
-                         f"{layered[0]} is {passes:.2f} times the take; {layered[1]} of {layered[2]} blocks flat")
+            laid = layered[0] is not None and passes >= 2.0 - 0.15 and abs(passes - round(passes)) <= 0.15
+            late = common.logged_before(log, "plugin.failed", until=" take.undo ", containing="stopped answering")
+            words = "a layer on it adds the input again, a whole pass at a time"
+            detail = f"{layered[0]} is {passes:.2f} times the take; {layered[1]} of {layered[2]} blocks flat"
+            if not laid and late:
+                report.void(words, f"{detail}; the engine failed the plugin before the recorder for lateness"
+                                   f" {late} time(s) on its own before the Undo, and what it lays then is silence")
+            else:
+                report.check(laid, words, f"{detail}; {late} failure(s) for lateness logged before the Undo")
 
             held = loudest_block(left, marks["held"] + int(RATE * 0.3), marks["held"] + int(RATE * 1.0))
             report.check(held <= 0.001, "silent while it is held", f"loudest block {held:.4f}")

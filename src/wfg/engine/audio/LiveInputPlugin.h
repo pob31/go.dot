@@ -52,8 +52,10 @@
     kill (Phase 9b, namespace draft §18.5). The ramp is equal power: the gain
     is the sine of how far along it is, so a long fade-in is not a quarter
     of a second of near-silence and a sudden arrival. And after a gap in the
-    blocks - a device that went away and came back (PRD §6.2) - an open gate
-    ramps in again rather than stepping.
+    blocks - a device that went away and came back (PRD §6.2), or a block
+    Tracktion muted because the ones before it ran long - the input comes back
+    over five milliseconds of its own rather than stepping, while the gate's
+    ramp goes on from where it was: a gap is never a second entrance.
 
     NO AUTOMATABLE PARAMETERS and no latency, for CueOutputPlugin's reasons.
 */
@@ -151,6 +153,14 @@ namespace wfg::audio
             ended, which is how a gap is noticed. Read from any thread. */
         std::atomic<float> gain { 0.0f };
         std::int64_t lastBlockEnd = -1;
+
+        /*  AND HOW FAR THE INPUT HAS COME BACK after a gap in the blocks or a
+            rebuild, over `rampSeconds` whatever the gate is doing - a ramp of
+            its own, so that neither touches the gate's: a fade-in under way
+            goes on, and one already made is not made again. One when nothing
+            is coming back. The audio thread's, and `initialise`'s before any
+            block runs. */
+        float recovery = 1.0f;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LiveInputPlugin)
     };

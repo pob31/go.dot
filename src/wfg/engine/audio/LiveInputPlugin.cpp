@@ -103,9 +103,10 @@ namespace wfg::audio
         /*  Message thread. A rebuild of the graph that keeps this plugin calls
             `initialiseWithoutStopping` instead, so a gate open across a media
             arm's rebuild stays open; this runs at the first build and at a
-            change of rate or block. */
+            change of rate or block, and a gate open through it brings its
+            input back over the de-click ramp - never its cue's fade-in again. */
         sampleRate = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
-        gain.store (0.0f, std::memory_order_relaxed);
+        recovery = gain.load (std::memory_order_relaxed) > 0.0f ? 0.0f : 1.0f;
         lastBlockEnd = -1;
     }
 
@@ -132,14 +133,19 @@ namespace wfg::audio
         const auto firstSample = (tap != nullptr ? tap->blockStart : 0) + start;
 
         /*  A GAP IN THE BLOCKS - the last one did not end where this one
-            starts: an open gate ramps in again rather than stepping onto
-            whatever the input is doing now. */
-        auto g = gain.load (std::memory_order_relaxed);
-
+            starts: the input comes back over the de-click ramp rather than
+            stepping onto whatever it is doing now. The gate's own ramp is left
+            where it was. It used to start again from nought, over the last
+            length it had been given: a voice Tracktion muted for a block under
+            a late plugin came back over its cue's whole half-second fade-in on
+            the macOS runs of the mic driver (a6952dd), and a ten-second
+            entrance would have taken ten. */
         if (lastBlockEnd >= 0 && firstSample != lastBlockEnd)
-            g = 0.0f;
+            recovery = 0.0f;
 
         lastBlockEnd = firstSample + frames;
+
+        auto g = gain.load (std::memory_order_relaxed);
 
         const auto first = sourceFirst.load (std::memory_order_relaxed);
         const auto take = std::clamp (sourceWidth.load (std::memory_order_relaxed), 1, maxTaken);
@@ -147,6 +153,7 @@ namespace wfg::audio
         const auto at = openSample.load (std::memory_order_relaxed);
         const auto step = static_cast<float> (1.0 / std::max (1.0, rampLength.load (std::memory_order_relaxed)
                                                                       * sampleRate));
+        const auto recoveryStep = static_cast<float> (1.0 / std::max (1.0, rampSeconds * sampleRate));
 
         const float* source[maxTaken] { nullptr, nullptr };
 
@@ -159,7 +166,7 @@ namespace wfg::audio
         /*  THE STEADY CASES FIRST, which are nearly every block: open and at
             full gain for the whole of it, a straight copy; shut and silent, a
             clear. Only a block the gate moves in is gained sample by sample. */
-        const auto openAll = open && at < firstSample && g >= 1.0f;
+        const auto openAll = open && at < firstSample && g >= 1.0f && recovery >= 1.0f;
         const auto shutAll = (! open || at >= firstSample + frames) && g <= 0.0f;
 
         if (openAll || shutAll)
@@ -175,6 +182,10 @@ namespace wfg::audio
             }
 
             gain.store (openAll ? 1.0f : 0.0f, std::memory_order_relaxed);
+
+            /*  Open, it has come back; shut and silent, it has nothing to
+                bring back, and its next open ramps in on its own. */
+            recovery = 1.0f;
             return;
         }
 
@@ -182,10 +193,12 @@ namespace wfg::audio
         {
             const auto target = open && (at < 0 || firstSample + n >= at) ? 1.0f : 0.0f;
             g = target > g ? std::min (target, g + step) : std::max (target, g - step);
+            recovery = std::min (1.0f, recovery + recoveryStep);
 
-            /*  EQUAL POWER: the gain is the sine of how far along the ramp it
+            /*  EQUAL POWER: each gain is the sine of how far along its ramp it
                 is, the same curve both ways. */
-            const auto shaped = std::sin (juce::MathConstants<float>::halfPi * g);
+            const auto shaped = std::sin (juce::MathConstants<float>::halfPi * g)
+                                  * std::sin (juce::MathConstants<float>::halfPi * recovery);
 
             for (int channel = 0; channel < width; ++channel)
             {

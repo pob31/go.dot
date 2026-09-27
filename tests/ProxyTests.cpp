@@ -30,6 +30,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/clock/AudioClockSource.h>
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -2404,6 +2405,104 @@ TEST_CASE ("rack: a gate opens over its fade-in, a stop rings until the output i
     host.processBlock (inputs, 2);
     CHECK (sink.last[0].load() == doctest::Approx (0.0f));
     CHECK_FALSE (host.isRackSounding (rack));
+
+    host.setBlockSink (nullptr);
+    host.stop();
+}
+
+TEST_CASE ("rack: a gap in the blocks brings the input back over the de-click ramp, and never starts a fade-in again")
+{
+    /*  The mic driver on macOS CI (a6952dd): a voice that went silent while
+        Tracktion muted blocks under a late plugin came back over its cue's
+        whole half-second fade-in - the gate saw the gap, started again from
+        nought, and ramped over the last length it had been given. The fade-in
+        is the cue's entrance, made once: a gap brings the input back over
+        five milliseconds of its own, and the gate's ramp goes on from where it
+        was - through a fade-in under way, and after one that has arrived. A
+        block skipped is made here as the gate sees one: Go.dot's count moved
+        on with no block run through the graph. A fresh open after a shut
+        takes its own fade-in again. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::RackChannelSpec channel;
+    channel.id = "CH000001";
+    channel.name = "Vox 1";
+    spec.rack.push_back (channel);
+    REQUIRE (host.buildEdit (spec));
+
+    const auto rack = host.rackTrackOf ("CH000001");
+    REQUIRE (rack == 1);
+
+    auto* matrix = host.trackMatrix (rack);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+    host.setRackSource (rack, 0, 1);
+
+    LastSamples sink;
+    host.setBlockSink (&sink);
+
+    const std::vector<float> steady (64, 0.5f), silent (64, 0.0f);
+    const float* inputs[] { steady.data(), silent.data() };
+
+    const auto run = [&host, &inputs] (double seconds)
+    {
+        const auto blocks = static_cast<int> (std::lround (seconds * 48000.0 / 64.0));
+
+        for (int i = 0; i < blocks; ++i)
+            host.processBlock (inputs, 2);
+    };
+
+    /*  A BLOCK SKIPPED, as Tracktion skips one: the count moves on, no block
+        runs. The host's clock is the audio side's own counter, reached here as
+        a test reaches nothing else. */
+    const auto skipBlock = [&host]
+    {
+        const_cast<AudioClockSource&> (static_cast<const AudioClockSource&> (host.clock())).advance (64);
+    };
+
+    //  A fifth of a second's fade-in - 9600 samples - half made: equal power at its middle.
+    host.openRackGate (rack, -1, 0.2);
+    run (0.1);
+    REQUIRE (sink.last[0].load() == doctest::Approx (0.5 * std::sin (juce::MathConstants<double>::pi / 4.0)).epsilon (0.01));
+
+    /*  A GAP HALFWAY: the fade goes on from where it was once the input is
+        back, 4800 + 64 + 960 samples along - not from nought again, which
+        would read 0.083 here. */
+    skipBlock();
+    host.processBlock (inputs, 2);
+    run (0.02);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5 * std::sin (juce::MathConstants<double>::halfPi * 5824.0 / 9600.0))
+                                      .epsilon (0.01));
+
+    //  ARRIVED, and a gap then: back at once, over five milliseconds.
+    run (0.2);
+    REQUIRE (sink.last[0].load() == doctest::Approx (0.5f).epsilon (0.001));
+    skipBlock();
+    host.processBlock (inputs, 2);
+    run (0.01);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5f).epsilon (0.001));
+
+    //  A FRESH OPEN after a shut is an entrance again: equal power at its middle.
+    host.shutRackGate (rack);
+    run (0.1);
+    REQUIRE (sink.last[0].load() == doctest::Approx (0.0f));
+    host.openRackGate (rack, -1, 0.2);
+    run (0.1);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5 * std::sin (juce::MathConstants<double>::pi / 4.0)).epsilon (0.02));
 
     host.setBlockSink (nullptr);
     host.stop();
