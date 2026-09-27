@@ -57,6 +57,7 @@
 #include "TestSupport.h"
 
 #include <algorithm>
+#include <iterator>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -5155,6 +5156,94 @@ TEST_CASE ("host player: a take's presses reach the recorder at their sample, it
     //  Nothing for a channel with no recorder.
     CHECK_FALSE (player.postTake ("NQNQNQNQ", cue::TakeVerb::record, -1, 0.0, 0.0));
     CHECK (player.takeReports ({ "NQNQNQNQ" }).empty());
+}
+
+//==============================================================================
+TEST_CASE ("M44: a take starts on the sample Rec was placed at, found by a click in the input")
+{
+    /*  Phase 9c, stage 9c.7 (namespace draft 19.9): through the real host - the
+        input stage, the tap and the recorder - a press placed at a sample, and
+        a click in the input some way after it. The take's sample k is the
+        input's sample `placed + k` when nothing is late, so the click's place
+        in the take says where the take began. Read back with Keep's own copy.
+        With no plugin before the recorder there is no child to be late. */
+    constexpr int rate = 48000;
+    constexpr int block = 128;
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = block;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::RackChannelSpec channel;
+    channel.id = "TK000011";
+    channel.name = "Looper";
+    channel.takeSeconds = 1.0;
+    channel.layers = 1;
+    spec.rack.push_back (channel);
+    REQUIRE (rig.host.buildEdit (spec));
+
+    Engine engine;
+    audio::HostPlayer player { rig.host, engine };
+
+    const auto track = rig.host.rackTrackOf ("TK000011");
+    REQUIRE (track >= 0);
+    rig.host.setRackSource (track, 0, 1);
+    rig.host.openRackGate (track, -1);
+
+    //  A click: one sample at full scale, at a sample that is no block boundary.
+    const std::int64_t click = 20 * block + 77;
+    std::vector<float> first (block), second (block, 0.0f);
+    const float* inputs[] { first.data(), second.data() };
+
+    const auto run = [&] (int blocks)
+    {
+        for (int n = 0; n < blocks; ++n)
+        {
+            const auto at = rig.host.clock().samplesElapsed();
+
+            for (int k = 0; k < block; ++k)
+                first[static_cast<std::size_t> (k)] = at + k == click ? 1.0f : 0.0f;
+
+            rig.host.processBlock (inputs, 2);
+        }
+    };
+
+    //  The gate's own ramp done, then Rec placed a little ahead, inside a block.
+    run (4);
+    const auto placed = rig.host.clock().samplesElapsed() + 5 * block + 13;
+    REQUIRE (placed < click);
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, placed, 0.0, 0.0));
+    run (30);
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, -1, 0.0, 0.0));
+    run (20);
+
+    const auto take = rig.host.takeOf ("TK000011");
+    REQUIRE (take != nullptr);
+    REQUIRE (take->isSettled());
+
+    const auto length = take->length();
+    REQUIRE (length > click - placed);
+
+    std::vector<float> left (static_cast<std::size_t> (length)), right (static_cast<std::size_t> (length));
+    take->copyTake (0, 0, static_cast<int> (length), left.data(), right.data());
+
+    const auto loudest = std::max_element (left.begin(), left.end(), [] (float a, float b) { return std::abs (a) < std::abs (b); });
+    const auto found = static_cast<std::int64_t> (std::distance (left.begin(), loudest));
+    const auto out = found - (click - placed);
+
+    MESSAGE ("M44: Rec placed at sample " << placed << ", the click at " << click << ": found " << found
+             << " samples into the take, out by " << out << " samples");
+
+    CHECK (std::abs (*loudest) == doctest::Approx (1.0f));
+    CHECK (out == 0);
 }
 
 //==============================================================================

@@ -224,7 +224,8 @@ TEST_CASE ("looper: at a wrap on a sine it steps no further than the sine does, 
     const auto largest = rig.largestStep (length + fade, length * 6);
     const auto hardJoin = std::abs (sine (length - 1, 0) - sine (0, 0)) + sineStep;
 
-    MESSAGE ("largest step " << largest << " against the sine's own " << sineStep << "; a hard join here would step " << hardJoin);
+    MESSAGE ("M43: largest step " << largest << " against the sine's own " << sineStep
+             << "; a hard join here would step " << hardJoin);
     CHECK (largest <= 1.6f * sineStep);
     CHECK (largest < hardJoin);
 }
@@ -840,4 +841,78 @@ TEST_CASE ("keep: the writer makes a float WAV under media/takes, whole, under t
     CHECK (nothing.error == "there is no take on this channel");
 
     CHECK (media.deleteRecursively());
+}
+
+//==============================================================================
+TEST_CASE ("M41: a take's memory, and the time to set it aside and touch it, a minute and four layers at 48 and 96 kHz")
+{
+    /*  Phase 9c, stage 9c.7 (namespace draft 19.9): what `prepare` costs when
+        the show opens - (1 + layers) slots of the longest take and one
+        crossfade, both channels, every page written once so the first Rec
+        never faults one in on the audio thread. The figure is the number;
+        the bound only says it is not absurd on a slow runner. */
+    for (const auto sampleRate : { 48000.0, 96000.0 })
+    {
+        Looper looper;
+        const auto began = std::chrono::steady_clock::now();
+        looper.prepare ({ sampleRate, 2, 60.0, 4 });
+        const auto took = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - began).count();
+
+        const auto samples = static_cast<double> (5 * 2) * (60.0 * sampleRate + looper.crossfadeSamples());
+        const auto bytes = static_cast<double> (looper.bytes());
+
+        MESSAGE ("M41: " << sampleRate << " Hz, a minute and four layers: " << bytes / 1.0e6
+                 << " MB set aside and touched in " << took << " ms");
+
+        CHECK (bytes >= samples * 4.0);
+        CHECK (bytes < samples * 4.0 * 1.05);
+        CHECK (took < 20000.0);
+    }
+}
+
+TEST_CASE ("M42: what a block of a loop costs, by how many layers lie on it")
+{
+    /*  Phase 9c, stage 9c.7 (namespace draft 19.9): a block of 128 of a take
+        looping with none, one, four, eight and sixteen layers on it - the sum
+        read slot by slot, which is what Undo being bit-exact costs. Timed on
+        the calling thread; the bound is the block's own duration, which a
+        take must never come near. */
+    constexpr int block = 128;
+    const auto blockMicroseconds = 1.0e6 * block / rate;
+
+    for (const auto layers : { 0, 1, 4, 8, 16 })
+    {
+        Rig rig (0.5, 16);
+        const std::int64_t period = 12000;
+
+        rig.post (Verb::record, 0);
+        rig.post (Verb::loop, period);
+
+        //  Each layer a whole pass, laid and closed; the loop wraps every period from `period`.
+        for (int layer = 0; layer < layers; ++layer)
+        {
+            const auto from = period * (2 + 2 * layer);
+            rig.post (Verb::overdub, from);
+            rig.post (Verb::loop, from + period);
+        }
+
+        const auto settled = period * (3 + 2 * layers);
+        rig.runTo (settled, [] (std::int64_t s, int) { return 0.1f * static_cast<float> (std::sin (0.01 * static_cast<double> (s))); });
+        REQUIRE (rig.looper.layerCount() == layers);
+
+        std::array<float, block> left {}, right {};
+        float* pointers[] { left.data(), right.data() };
+        constexpr int blocks = 2000;
+
+        const auto began = std::chrono::steady_clock::now();
+
+        for (int n = 0; n < blocks; ++n)
+            rig.looper.process (pointers, 2, block, settled + static_cast<std::int64_t> (n) * block);
+
+        const auto each = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - began).count() / blocks;
+
+        MESSAGE ("M42: " << layers << " layers: " << each << " us a block of " << block
+                 << ", against the block's own " << blockMicroseconds << " us");
+        CHECK (each < blockMicroseconds);
+    }
 }
