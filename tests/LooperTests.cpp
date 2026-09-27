@@ -40,6 +40,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <vector>
 
@@ -144,7 +145,16 @@ namespace
         std::vector<float> heard, heardRight;
     };
 
-    float silence (std::int64_t, int) { return 0.0f; }
+    /*  BIT FOR BIT: the same pattern of bits, which is what Undo promises -
+        and which `==` on two floats would not quite say, and the strict
+        build's -Wfloat-equal forbids besides. */
+    bool sameBits (float a, float b)
+    {
+        std::uint32_t x = 0, y = 0;
+        std::memcpy (&x, &a, sizeof x);
+        std::memcpy (&y, &b, sizeof y);
+        return x == y;
+    }
 }
 
 //==============================================================================
@@ -243,7 +253,7 @@ TEST_CASE ("looper: Undo takes the top layer off, and what is left is what was h
     auto layerHeard = 0;
 
     for (std::int64_t k = 0; k < period; ++k)
-        if (rig.at (4 * period + k) != rig.at (2 * period + k))
+        if (! sameBits (rig.at (4 * period + k), rig.at (2 * period + k)))
             ++layerHeard;
 
     CHECK (layerHeard > period / 2);
@@ -253,10 +263,11 @@ TEST_CASE ("looper: Undo takes the top layer off, and what is left is what was h
 
     for (std::int64_t k = 0; k < period; ++k)
     {
-        if (rig.at (6 * period + k) != rig.at (2 * period + k))
+        if (! sameBits (rig.at (6 * period + k), rig.at (2 * period + k)))
             ++differ;
 
-        if (rig.heardRight[static_cast<std::size_t> (6 * period + k)] != rig.heardRight[static_cast<std::size_t> (2 * period + k)])
+        if (! sameBits (rig.heardRight[static_cast<std::size_t> (6 * period + k)],
+                        rig.heardRight[static_cast<std::size_t> (2 * period + k)]))
             ++differ;
     }
 
