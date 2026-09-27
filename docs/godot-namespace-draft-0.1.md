@@ -11946,11 +11946,16 @@ lever if one ever does is the tick thread's own priority (`elevateCurrentThreadF
 asks for nothing today), not the audio thread. The driver
 now makes the render its own witness: read a period of the tone at a time, sixteen milliseconds that
 move less than a quarter of what the drawn lane moves in them are a tick that did not come, and a
-check inside them is voided in words; a level that stood still for more than a third of a slope
-fails, because a lane nobody reads looks exactly like that. The step sits between two slopes in the
-fixture so that a stall beside it is seen. Checked against a model of the engine's ticks and slew
-before it was trusted: no stretch found in a healthy render at any tick phase, a 70 ms stall found
-where it was put, and a lane never read failing at 99.9 %.
+check inside them is voided in words. The step sits between two slopes in the fixture so that a
+stall beside it is seen. Checked against a model of the engine's ticks and slew before it was
+trusted: no stretch found in a healthy render at any tick phase, a 70 ms stall found where it was
+put, beside the step too. The next run (`7dfeb6c`, 36350555877) said how starved: the macOS
+runner's hosted render held the tick back for about HALF of every slope, in stretches of 20 to
+130 ms, and the readings left matched the drawing to a tenth of a decibel. So how much stood still
+is printed and not judged, and what catches a lane nobody reads is what a stall cannot void - the
+held stretch at -20 dB and the loop's -12 dB after its edit, flat lanes a level that never moved
+reads as nought - with a floor of slope readings actually judged, so the witness can never void
+its way to a pass.
 
 **Not built** is §20.7's list. **Waiting for the author:** the law and the gestures judged by eye in
 the window (DD), and a lane heard on the MADIface.
