@@ -869,7 +869,7 @@ namespace wfg::surface
 
             if (paging.page == Page::loop && ! base.empty())
             {
-                const auto& loopChannel = textAt (at, base + "channel");
+                const auto loopChannel = textAt (at, base + "channel");
                 fxKey += "loop:" + loopChannel + ":" + textAt (at, "/godot/slot/" + loopChannel + "/takeSeconds");
             }
 
@@ -1005,7 +1005,7 @@ namespace wfg::surface
                     four rotaries - or "no take" on the first, for a cue whose
                     channel records nothing, which is an answer where a page
                     that stayed shut would be a question. */
-                const auto& channel = textAt (at, base + "channel");
+                const auto channel = textAt (at, base + "channel");
                 const auto slot = "/godot/slot/" + channel + "/";
 
                 if (channel.empty() || ! (numberAt (at, slot + "takeSeconds").value_or (0.0) > 0.0))
@@ -2384,8 +2384,8 @@ namespace wfg::surface
         {
             auto& shown = box.banks.front();
             const auto channel = aimedChannel();
-            const auto& state = channel.empty() ? noText()
-                                                : textAt (published.get(), "/godot/slot/" + channel + "/take");
+            const auto state = channel.empty() ? std::string {}
+                                               : textAt (published.get(), "/godot/slot/" + channel + "/take");
 
             const auto wanted = state == "recording"   ? Led::on
                               : state == "overdubbing" ? blinked (Led::flash, tick)
