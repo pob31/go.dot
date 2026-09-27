@@ -1300,6 +1300,100 @@ TEST_CASE ("document: a file holding a fade that is not a curve does not open, a
     }
 }
 
+TEST_CASE ("document: a media cue's level lane is a lane, or it is refused")
+{
+    /*  Namespace §20.3. The fade's rules less the fixed ends: a lane's times
+        are seconds of the FILE, which the document does not know the length
+        of, so it may start anywhere and stop anywhere. */
+    auto document = routed();
+    const std::string lane = "/godot/cue/B3N8R5TW/levelLane";
+
+    /*  None drawn: the default, and the cue plays as written. */
+    CHECK (document.getAttribute (lane) == std::string (""));
+
+    /*  Down four seconds in, and back up by six: three points, the first
+        well after the file starts and the last well before it ends. */
+    REQUIRE (document.setAttribute (lane, "4 0  5.50 -12 6 0").ok);
+    CHECK (document.getAttribute (lane) == std::string ("4 0 5.5 -12 6 0"));
+    CHECK (document.validate().empty());
+
+    /*  One point is a lane too - a constant offset, which a fade could never be. */
+    REQUIRE (document.setAttribute (lane, "0 -6").ok);
+    REQUIRE (document.setAttribute (lane, "4 0 5.5 -12 6 0").ok);
+
+    struct Case { const char* text; const char* refusal; const char* why; };
+
+    const Case cases[] = {
+        { "4 0 5.5 -12 6",        reason::badValue,     "an odd count - a point is a second and a level" },
+        { "4 0 5.5 -12 5.5 -6",   reason::badValue,     "two points at one second are a jump" },
+        { "4 0 6 -12 5 0",        reason::badValue,     "seconds that go back" },
+        { "-1 0 4 -6",            reason::badValue,     "a second before the file starts" },
+        { "4 -130",               reason::badValue,     "a level no cue may be written at" },
+        { "4 13",                 reason::badValue,     "a level above a cue's 12 dB" },
+        { "4 0 soon -12",         reason::typeMismatch, "an element that is not a number at all" },
+    };
+
+    for (const auto& c : cases)
+    {
+        INFO (c.why << ": \"" << c.text << "\"");
+        CHECK (document.setAttribute (lane, c.text).reason == std::string (c.refusal));
+
+        /*  And a refusal leaves the lane that was there. */
+        CHECK (document.getAttribute (lane) == std::string ("4 0 5.5 -12 6 0"));
+    }
+
+    /*  Cleared, there is no lane - and the file says nothing. */
+    REQUIRE (document.setAttribute (lane, "").ok);
+    CHECK (CanonicalXml::write (document).find ("levelLane=") == std::string::npos);
+
+    /*  A FADE HAS NO LANE: the row is the media owner's, so a fade's address
+        has none to write (§20.2). */
+    CHECK_FALSE (document.setAttribute ("/godot/cue/E4GP6QSC/levelLane", "0 0").ok);
+}
+
+TEST_CASE ("document: a file holding a level lane that is not a lane does not open, and says why")
+{
+    struct Case { const char* lane; const char* mentions; };
+
+    const Case cases[] = {
+        { "4 0 5.5 -12 6",      "odd number" },
+        { "4 0 5.5 -12 5 0",    "does not come after" },
+        { "-0.5 0 4 -6",        "before the file starts" },
+        { "4 0 5 -200",         "outside -120..12" },
+    };
+
+    for (const auto& c : cases)
+    {
+        const std::string xml =
+            "<Show><Lists><List id=\"7K2QM9X4\" name=\"Sound\">"
+            "<Media id=\"B3N8R5TW\" file=\"thunder.wav\" name=\"Thunder\" levelLane=\""
+            + std::string (c.lane) + "\"/>"
+            "</List></Lists><Mounts/><Audio tracks=\"4\"/></Show>";
+
+        INFO ("levelLane=\"" << c.lane << "\"");
+
+        ShowDocument document;
+        const auto result = CanonicalXml::read (xml, document);
+
+        CHECK_FALSE (result.ok);
+
+        bool mentioned = false;
+        std::string reported;
+
+        for (const auto& problem : result.problems)
+        {
+            reported += "\n  " + problem;
+
+            if (problem.find ("levelLane") != std::string::npos
+                && problem.find (c.mentions) != std::string::npos)
+                mentioned = true;
+        }
+
+        INFO ("reported:" << reported);
+        CHECK (mentioned);
+    }
+}
+
 //==============================================================================
 TEST_CASE ("document commands: every structural edit is a named command")
 {

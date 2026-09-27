@@ -657,6 +657,16 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="levelLane">
+          <a:documentation>A volume curve over the file, as (seconds, level) pairs: seconds of the FILE from its start, not of the cue from its GO, and a level in dB within the -120..12 the cue level may take. An OFFSET on the cue level - one more term beside a fade, a hand on a strip and a DCA - so nought is the cue as written. Straight in dB between two points; before the first it holds the first, after the last the last. It follows the file wherever it plays: the start offset, a jump, a scrub, and every pass of a looping range, which hears the same stretch of it again. Empty, the default, is no lane (namespace draft 20).</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
           <data type="string"/>

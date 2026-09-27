@@ -20,6 +20,7 @@
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/FadePoints.h>
+#include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/OutputLayout.h>
 #include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -1024,6 +1025,12 @@ namespace wfg::doc
 
             if (target.attribute->element == "Fade" && name == "points"
                 && ! readFadePoints (canonical).problem.empty())
+                return EditResult::failed (reason::badValue);
+
+            /*  And a media cue's level lane as a lane (namespace §20.3): pairs,
+                seconds climbing from the file's start, levels a cue may take. */
+            if (target.attribute->element == "Media" && name == "levelLane"
+                && ! readLevelLane (canonical).problem.empty())
                 return EditResult::failed (reason::badValue);
 
             if (name == "gains"
@@ -2963,7 +2970,8 @@ namespace wfg::doc
 
                     /*  A list element by element, as the reader takes one - and
                         a fade's points as a curve besides, by the same function
-                        the write door and the Runner ask (FadePoints.h). */
+                        the write door and the Runner ask (FadePoints.h), and a
+                        media cue's level lane as a lane (LevelLane.h). */
                     if (attribute->isList())
                     {
                         std::string canonical;
@@ -2979,6 +2987,13 @@ namespace wfg::doc
 
                             if (! curve.problem.empty())
                                 problems.push_back (here + ": \"points\" " + curve.problem);
+                        }
+                        else if (elementName == "Media" && attributeName == "levelLane")
+                        {
+                            const auto lane = readLevelLane (canonical);
+
+                            if (! lane.problem.empty())
+                                problems.push_back (here + ": \"levelLane\" " + lane.problem);
                         }
 
                         continue;

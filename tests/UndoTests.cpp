@@ -268,6 +268,36 @@ TEST_CASE ("undo: a curve redrawn is taken back to the curve it was")
     CHECK (rig.document.getAttribute (points) == std::string ("0 0 0.5 -30 1 -10"));
 }
 
+TEST_CASE ("undo: a level lane redrawn is taken back to the lane it was")
+{
+    /*  Namespace §20.5: one gesture over the waveform is one `node.set` of
+        the whole list, and so one step - the curve editor's rule, for a list
+        on a media cue rather than a fade. */
+    Rig rig;
+
+    REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+    REQUIRE (rig.apply (1, "cue.create", { text (mainList), osc::Value::int32 (0),
+                                           text ("media"), text ("Bed"),
+                                           text (firstCue) }).applied == 1);
+
+    const auto lane = "/godot/cue/" + firstCue + "/levelLane";
+
+    REQUIRE (rig.apply (10, "node.set", { text (lane), text ("2 0 3 -20") }).applied == 1);
+    REQUIRE (rig.apply (200, "node.set", { text (lane), text ("2 0 3 -20 8 -20 9 0") }).applied == 1);
+
+    /*  A drawing that is not a lane is refused, and leaves nothing to undo. */
+    CHECK (rig.apply (300, "node.set", { text (lane), text ("2 0 3") }).rejected == 1);
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.set"));
+    CHECK (rig.document.getAttribute (lane) == std::string ("2 0 3 -20"));
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.set"));
+    CHECK (rig.document.getAttribute (lane) == std::string (""));
+
+    REQUIRE (rig.document.redo (doc::UndoDomain::document) == std::string ("node.set"));
+    CHECK (rig.document.getAttribute (lane) == std::string ("2 0 3 -20"));
+}
+
 TEST_CASE ("undo: a create taken back and put back keeps the identifier it drew")
 {
     Rig rig;

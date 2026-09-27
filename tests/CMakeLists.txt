@@ -92,6 +92,7 @@ add_executable(wfg_tests
     GoTests.cpp
     TriggerTests.cpp
     RangeTests.cpp
+    LevelLaneTests.cpp
     AnalysisTests.cpp
     SolverTests.cpp
     SlotTests.cpp
