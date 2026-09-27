@@ -39,6 +39,7 @@ import shutil
 import struct
 import sys
 import tempfile
+import time
 import wave
 from pathlib import Path
 
@@ -96,15 +97,20 @@ def wait_for(server: Server, address: str, wanted, timeout: float = 10.0):
 
 
 def clock_frame(server: Server) -> int:
-    """WHERE THE AUDIO HAS GOT TO, by the engine's own clock: the tick the tree
-    was published at, in frames. Not the render's length on disk, which its
-    writer adds to about once a second - a mark taken from the disk just after
-    an event can be a second before it, and on Windows CI (2238346, with Keep
-    writing a file just before Esc) a window after the hold caught the loop
-    still playing. The tick is at most a tick behind the audio and never ahead."""
+    """WHERE THE AUDIO HAD GOT TO when the engine last ticked: the tick in
+    frames and how late that tick was processed (`engine/lateness`), read from
+    one snapshot. Not the render's length on disk, which its writer adds to
+    about once a second - a mark from the disk just after an event can be a
+    second before it (Windows and macOS CI, 2238346) - and not the tick alone,
+    which a starved runner's tick thread lets fall behind the audio, where the
+    engine places every press and stop (Windows CI, a8d2a03)."""
     try:
-        return int(value_of(server, "/godot/engine/tick")) * SAMPLES_PER_TICK
-    except (TypeError, ValueError):
+        _, answer = common.http_get(server.http_port, "/godot/engine")
+        contents = common.json.loads(answer)["CONTENTS"]
+        tick = int(contents["tick"]["VALUE"][0])
+        lateness = int(contents["lateness"]["VALUE"][0])
+        return tick * SAMPLES_PER_TICK + max(0, lateness)
+    except Exception:
         return 0
 
 
@@ -303,6 +309,15 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             report.equal(wait_for(server, f"/godot/slot/{CHANNEL}/take", "held"), "held",
                          "and the take is held, not lost")
             marks["held"] = clock_frame(server)
+
+            # AND THE RECORDER HAS STOPPED GOING ROUND: its playhead, the audio side's
+            # word published every tick, still a moment apart - which no window read
+            # from the render can confuse with timing.
+            before_still = number(server, "playhead")
+            time.sleep(0.3)
+            after_still = number(server, "playhead")
+            report.check(abs(after_still - before_still) < 1e-6, "and the recorder has stopped going round",
+                         f"its playhead {before_still:.4f} s, then {after_still:.4f} s")
             report.check(wait_for_frames(render, marks["held"] + int(RATE * 1.0)), "the render runs on, held")
 
             # SCENE 5: a later mic cue loops the take it finds, its input heard through as well.

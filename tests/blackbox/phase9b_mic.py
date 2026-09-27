@@ -92,14 +92,18 @@ def wait_for(server: Server, address: str, wanted, timeout: float = 10.0):
 
 
 def clock_frame(server: Server) -> int:
-    """WHERE THE AUDIO HAS GOT TO, by the engine's own clock: the tick the tree
-    was published at, in frames. Not the render's length on disk, which its
-    writer adds to about once a second, so a mark taken from it can be a second
-    before the event it marks (the take driver's window after a hold caught
-    the loop on Windows CI at 2238346). At most a tick behind the audio."""
+    """WHERE THE AUDIO HAD GOT TO when the engine last ticked: the tick in
+    frames and how late that tick was processed (`engine/lateness`), read from
+    one snapshot - the take driver's reasons: the render reaches the disk a
+    second at a time, and a starved runner's tick thread falls behind the
+    audio, where every press and stop is placed."""
     try:
-        return int(value_of(server, "/godot/engine/tick")) * SAMPLES_PER_TICK
-    except (TypeError, ValueError):
+        _, answer = common.http_get(server.http_port, "/godot/engine")
+        contents = common.json.loads(answer)["CONTENTS"]
+        tick = int(contents["tick"]["VALUE"][0])
+        lateness = int(contents["lateness"]["VALUE"][0])
+        return tick * SAMPLES_PER_TICK + max(0, lateness)
+    except Exception:
         return 0
 
 
