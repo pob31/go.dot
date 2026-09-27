@@ -149,7 +149,8 @@ namespace wfg::client::model
     /*  WHERE THE FOOT GOES WHILE A SURFACE ADJUSTS A CUE (author, 2026-09-25:
         "When adjusting either EQ or send levels display the footer on
         screen"): the aimed cue's EQ panel for an EQ page, its send mixer for
-        a Send page - once the page has written something, since a page that
+        a Send page, its chain for an FX page and its take for a Loop page
+        (Phase 9c) - once the page has written something, since a page that
         is only up has adjusted nothing. Nothing otherwise, and the foot is the
         window's own again. `page` is `readSurfacePage`'s answer, passed by its
         parts so this file needs no surface model. */

@@ -105,6 +105,7 @@ namespace wfg::surface
             case Page::eq:   return "eq";
             case Page::send: return "send";
             case Page::fx:   return "fx";
+            case Page::loop: return "loop";
         }
 
         return "show";
@@ -301,6 +302,39 @@ namespace wfg::surface
         if (bipolar)
             return { 1 + static_cast<int> (std::lround (fraction * 10.0)), 1 };
 
+        return { static_cast<int> (std::lround (fraction * 11.0)), 2 };
+    }
+
+    double loopPointTurned (double seconds, int steps) noexcept
+    {
+        const auto per = std::abs (steps) >= loopCoarseFromDetents ? loopCoarseSeconds : loopFineSeconds;
+        const auto moved = std::max (0.0, seconds + static_cast<double> (steps) * per);
+
+        return std::round (moved * 1000.0) / 1000.0;
+    }
+
+    void secondsText (double seconds, bool compact, std::string& out)
+    {
+        const auto milliseconds = std::llround (std::max (0.0, seconds) * 1000.0);
+        const auto rest = milliseconds % 1000;
+
+        out.append (std::to_string (milliseconds / 1000));
+        out.push_back ('.');
+        out.push_back (static_cast<char> ('0' + rest / 100));
+        out.push_back (static_cast<char> ('0' + rest / 10 % 10));
+        out.push_back (static_cast<char> ('0' + rest % 10));
+        out.append (compact ? "s" : " s");
+    }
+
+    Ring d700PositionRing (double seconds, double length) noexcept
+    {
+        const auto fraction = length > 0.0 ? std::clamp (seconds / length, 0.0, 1.0) : 0.0;
+        return { static_cast<int> (std::lround (fraction * 127.0)), 2 };
+    }
+
+    Ring mcuPositionRing (double seconds, double length) noexcept
+    {
+        const auto fraction = length > 0.0 ? std::clamp (seconds / length, 0.0, 1.0) : 0.0;
         return { static_cast<int> (std::lround (fraction * 11.0)), 2 };
     }
 

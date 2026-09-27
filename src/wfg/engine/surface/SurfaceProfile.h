@@ -119,7 +119,13 @@ namespace wfg::surface
         on the rack channel the aimed mic cue plays through - record, then
         loop, then a layer on top, then loop again, each press the next, as the
         engine's account of the take decides. With no mic cue aimed it sends
-        nothing.
+        nothing. Its light says the take records - lit - or lays a layer -
+        blinking. And LOOP, Mackie's Cycle, is `take.loop` there: a take or a
+        layer closed and looped, a held take looped again.
+
+        PAN IS THE LOOP PAGE (Phase 9c, §19.7): Go.dot has no pan, and the
+        button put the aimed mic cue's take on the rotaries - in, out, a slide
+        of both, and the cue's level. Pan again, or `*`, leaves.
 
         MUTE ON A STRIP KILLS WHAT IT PLAYS (author, 2026-09-25: "Can the mute
         switch of a sampler fader be a kill switch for it? Not temporary
@@ -141,8 +147,8 @@ namespace wfg::surface
         a LED pulse."): the level the fader is at, written as its member's
         `initialLevel` - an edit to the show and one undo step. */
     enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel,
-                        record, dialLetGo, dialRest,
-                        aim, eqPage, sendPage, fxPage, leavePage };
+                        record, loop, dialLetGo, dialRest,
+                        aim, eqPage, sendPage, fxPage, loopPage, leavePage };
 
     /*  AND IT SAYS SO: the red MUTE light is on for half a second after a
         kill it sent (author, 2026-09-25: "Can you flash for 0.5s the red mute
@@ -202,6 +208,15 @@ namespace wfg::surface
     inline constexpr double dialFineSeconds = 0.1;
     inline constexpr double dialCoarseSeconds = 1.0;
     inline constexpr double dialCoarseFromSeconds = 10.0;
+
+    /*  A LOOP POINT'S DETENT on the Loop page (Phase 9c, namespace draft
+        §19.7): ten milliseconds, fine enough to find a downbeat by ear, and
+        fifty while the hand spins - `loopCoarseFromDetents` or more arriving
+        in one tick - so a minute's take is crossed in seconds rather than a
+        thousand turns. The first numbers the bench will revise. */
+    inline constexpr double loopFineSeconds = 0.010;
+    inline constexpr double loopCoarseSeconds = 0.050;
+    inline constexpr int loopCoarseFromDetents = 5;
 
     /*  A CONTROL WHOSE BAND IS OUT is lit at this share of its colour - still
         its band's colour, so the eye finds it, and plainly dimmer. The text

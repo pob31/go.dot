@@ -130,6 +130,10 @@ namespace wfg::surface
         /*  FX, the Mackie "Plug-In" (2026-09-26): the aimed cue's inserts. */
         if (button.button == Button::assignPlugin)  return Action::fxPage;
 
+        /*  PAN, which Go.dot has no use for as a pan (Phase 9c): the aimed mic
+            cue's take - the Loop page. */
+        if (button.button == Button::assignPan)     return Action::loopPage;
+
         /*  THE MASTER DIAL'S CLICK AND DOUBLE CLICK (author, 2026-09-26: "click
             could be deselect and double click back to default" - "The D700
             can do it at hardware level"). The dial presses F3; with double
@@ -154,6 +158,7 @@ namespace wfg::surface
         if (button.button == Button::rewind)    return Action::rewind;
         if (button.button == Button::forward)   return Action::forward;
         if (button.button == Button::record)    return Action::record;
+        if (button.button == Button::cycle)     return Action::loop;
 
         /*  THE D700'S ARROWS MOVE THE STANDBY (author, 2026-09-26: "Can the
             up(-left) and down(-right) arrows on the D700 be used to move the

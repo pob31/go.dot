@@ -5389,6 +5389,13 @@ TEST_CASE ("client: a surface adjusting a cue holds the foot on it, and the rest
     CHECK (page.word == "fx");
     CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
              == model::Subject { model::Subject::Kind::fx, cue });
+
+    //  A Loop page, turned (Phase 9c): the take it rides.
+    surfaces.setPage (surfaceId, { "loop", 0, 1, "/godot/slot/CHAN0001/loopIn" });
+    page = model::readSurfacePage (*rig.publish (9));
+    CHECK (page.word == "loop");
+    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+             == model::Subject { model::Subject::Kind::take, cue });
 }
 
 TEST_CASE ("client: a click on a number puts it on the master dial, and the window says what the dial turns")

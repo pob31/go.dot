@@ -53,10 +53,11 @@ namespace wfg::surface
 {
     /*  What a surface's rotaries show. `fx` since 2026-09-26: the aimed cue's
         inserts, their parameters in each plugin's own order (the author's
-        decision), the inserts walked in chain order. */
-    enum class Page { show, eq, send, fx };
+        decision), the inserts walked in chain order. `loop` since Phase 9c:
+        the aimed mic cue's take, on Pan. */
+    enum class Page { show, eq, send, fx, loop };
 
-    /** The word `surface/page` publishes: show, eq, send or fx. */
+    /** The word `surface/page` publishes: show, eq, send, fx or loop. */
     std::string_view pageWord (Page page) noexcept;
 
     /*  HOW A CONTROL MOVES AND READS. A frequency and a width are turned in
@@ -170,6 +171,42 @@ namespace wfg::surface
 
     /** A number turned `steps` detents of the dial, kept in its range. */
     double dialTurned (const DialRange& range, double value, int steps, FaderLaw fader) noexcept;
+
+    /*  THE LOOP PAGE (Phase 9c, stage 9c.5, namespace draft §19.7; decision
+        CD): the aimed mic cue's take on the first four rotaries - its in, its
+        out, a third that slides both by the same amount and keeps the length,
+        and the cue's level. The points are the take's door, not the show's,
+        so the page writes them under the lock as it writes anything. */
+    enum class LoopControl { in, out, slide, level };
+
+    inline constexpr int loopControlCount = 4;
+
+    struct LoopControlText
+    {
+        std::string_view label;       // at most twelve characters, a D700's first row
+        std::string_view shortLabel;  // at most seven, an MCU scribble strip
+    };
+
+    inline constexpr std::array<LoopControlText, loopControlCount> loopControls { {
+        { "Loop in",  "In" },
+        { "Loop out", "Out" },
+        { "Slide",    "Slide" },
+        { "Level",    "Level" },
+    } };
+
+    /*  A LOOP POINT TURNED `steps` detents (SurfaceProfile.h's `loop`
+        numbers): ten milliseconds a detent, fifty while the hand spins;
+        rounded to the millisecond and never below nought. Where it may go
+        in the take is the take's door's to say. */
+    double loopPointTurned (double seconds, int steps) noexcept;
+
+    /*  SECONDS TO THE MILLISECOND, digit by digit so no locale can move the
+        point: "1.250 s"; `compact` drops the space for an MCU: "1.250s". */
+    void secondsText (double seconds, bool compact, std::string& out);
+
+    /** Where a time stands in a take, as a ring filled from the left: empty at nought. */
+    Ring d700PositionRing (double seconds, double length) noexcept;
+    Ring mcuPositionRing (double seconds, double length) noexcept;
 
     /** A shape's ring, which reads a word rather than a number. */
     Ring d700ShapeRing (std::string_view shape) noexcept;

@@ -753,6 +753,11 @@ TEST_CASE ("surface bridge: the profiles say what each surface has and what its 
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x39)) == surface::Action::none);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5f)) == surface::Action::record);
     CHECK (surface::actionFor (d700, surface::buttonForNote (0x5f)) == surface::Action::record);
+
+    //  Phase 9c: Pan is the Loop page, and Loop - Mackie's Cycle - is take.loop.
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x2a)) == surface::Action::loopPage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2a)) == surface::Action::loopPage);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x56)) == surface::Action::loop);
     CHECK (surface::actionFor (surface::Profile::midiPads, surface::buttonForNote (0x5e))
              == surface::Action::none);
 
@@ -3123,6 +3128,164 @@ namespace
         REQUIRE_FALSE (desk.submitted.empty());
         return desk.submitted.back().args.at (1).asDouble();
     }
+
+    /*  A MIC CUE ON A SAMPLING CHANNEL (Phase 9c): MIC00001 on CHAN0001, whose
+        take of four seconds loops between one and three, at -6 dB. */
+    void takeOn (PageDesk& desk)
+    {
+        auto& fake = desk.fake;
+        fake.text ("/godot/cue/MIC00001/name", "Loop voice");
+        fake.text ("/godot/cue/MIC00001/channel", "CHAN0001");
+        fake.number ("/godot/cue/MIC00001/level", -6.0);
+        fake.number ("/godot/slot/CHAN0001/takeSeconds", 10.0);
+        fake.number ("/godot/slot/CHAN0001/takeLength", 4.0);
+        fake.number ("/godot/slot/CHAN0001/loopIn", 1.0);
+        fake.number ("/godot/slot/CHAN0001/loopOut", 3.0);
+        fake.text ("/godot/slot/CHAN0001/take", "looping");
+        desk.publish();
+    }
+}
+
+TEST_CASE ("surface bridge: Pan puts the aimed mic cue's take on the rotaries - in, out, a slide of both, and its level")
+{
+    /*  Phase 9c, stage 9c.5 (namespace draft 19.7, decision CD): the Loop
+        page, whose points are written through the take's door. */
+    PageDesk desk;
+    takeOn (desk);
+    desk.aimAt ("MIC00001");
+    desk.sink.sent.clear();
+
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "loop");
+    CHECK (desk.page().count == 1);
+    desk.settle();
+
+    const auto sent = sentOn (desk.sink, "PORTBNK1");
+    CHECK (contains (sent, surface::d700DisplayRow (0, 0, "Loop in")));
+    CHECK (contains (sent, surface::d700DisplayRow (0, 1, "1.000 s")));
+    CHECK (contains (sent, surface::d700DisplayRow (1, 1, "3.000 s")));
+    CHECK (contains (sent, surface::d700DisplayRow (2, 1, "2.000 s")));       // the slide says the loop's length
+    CHECK (contains (sent, surface::d700DisplayRow (3, 1, "-6.0 dB")));
+    CHECK (contains (sent, surface::d700DisplayRow3 (0, "Loop")));
+    CHECK (contains (sent, surface::d700Ring (0, 32, 2)));                    // in, a quarter into the take
+    CHECK (contains (sent, surface::led (0x2a, surface::Led::on)));
+
+    //  IN, three detents on: thirty milliseconds, through the take's door.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x03 } } });
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].command == "node.set");
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/slot/CHAN0001/loopIn");
+    CHECK (lastValue (desk) == doctest::Approx (1.03));
+    CHECK (desk.page().edited == "/godot/slot/CHAN0001/loopIn");
+
+    //  OUT, spun back five: fifty milliseconds a detent.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x11, 0x45 } } });
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/slot/CHAN0001/loopOut");
+    CHECK (lastValue (desk) == doctest::Approx (2.75));
+
+    //  THE SLIDE: both by the same amount, the point moving away from the other first.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x02 } } });
+    REQUIRE (desk.submitted.size() == 2u);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/slot/CHAN0001/loopOut");
+    CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (3.02));
+    CHECK (desk.submitted[1].args[0].getString() == "/godot/slot/CHAN0001/loopIn");
+    CHECK (desk.submitted[1].args[1].asDouble() == doctest::Approx (1.02));
+
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x41 } } });
+    REQUIRE (desk.submitted.size() == 2u);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/slot/CHAN0001/loopIn");
+    CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (0.99));
+    CHECK (desk.submitted[1].args[0].getString() == "/godot/slot/CHAN0001/loopOut");
+    CHECK (desk.submitted[1].args[1].asDouble() == doctest::Approx (2.99));
+
+    //  Held within the take: a loop whose out is the take's end slides no further on.
+    desk.fake.number ("/godot/slot/CHAN0001/loopOut", 4.0);
+    desk.publish();
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    CHECK (desk.submitted.empty());
+
+    //  A PRESS puts a point at its end of the take, and the level at nought.
+    desk.press ("PORTBNK1", 0x20);
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted.back().args[0].getString() == "/godot/slot/CHAN0001/loopIn");
+    CHECK (lastValue (desk) == doctest::Approx (0.0));
+
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x23);
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted.back().args[0].getString() == "/godot/cue/MIC00001/level");
+    CHECK (lastValue (desk) == doctest::Approx (0.0));
+
+    //  Pan again leaves.
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "show");
+}
+
+TEST_CASE ("surface bridge: the Loop page on a cue with no take says so, and turns nothing")
+{
+    PageDesk desk;
+    desk.aimAt ("CUE00001");
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "loop");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "no take")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "Loop")));
+
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x01 } } });
+    CHECK (desk.submitted.empty());
+
+    //  A take still recording has no loop to move yet, and its points say so.
+    takeOn (desk);
+    desk.fake.number ("/godot/slot/CHAN0001/takeLength", 0.0);
+    desk.fake.text ("/godot/slot/CHAN0001/take", "recording");
+    desk.sink.sent.clear();
+    desk.aimAt ("MIC00001");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 1, "no loop yet")));
+}
+
+TEST_CASE ("surface bridge: Rec is lit while the aimed take records, blinks while a layer is laid, and Loop presses take.loop")
+{
+    /*  Phase 9c, stage 9c.5: the transport's Rec says what the aimed mic
+        cue's take is doing, on the first port, where the transport is. */
+    PageDesk desk;
+    takeOn (desk);
+    desk.fake.text ("/godot/slot/CHAN0001/take", "recording");
+    desk.aimAt ("MIC00001");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::on)));
+    CHECK_FALSE (contains (sentOn (desk.sink, "PORTBNK2"), surface::led (0x5f, surface::Led::on)));
+
+    desk.sink.sent.clear();
+    desk.fake.text ("/godot/slot/CHAN0001/take", "looping");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::off)));
+
+    //  A layer being laid: blinking, lit and dark in turn.
+    desk.sink.sent.clear();
+    desk.fake.text ("/godot/slot/CHAN0001/take", "overdubbing");
+    desk.settle (40);
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::on)));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::off)));
+
+    //  LOOP - Mackie's Cycle - is take.loop on the aimed cue's channel.
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x56);
+    CHECK (desk.writes() == std::vector<std::string> { "take.loop CHAN0001" });
+
+    //  Nothing aimed: nothing pressed.
+    desk.aimAt ("");
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x56);
+    CHECK (desk.submitted.empty());
 }
 
 TEST_CASE ("surface bridge: FX puts the aimed cue's inserts on the rotaries, a plugin's own order, walked in chain order")

@@ -11582,6 +11582,41 @@ addresses, the foot's subject); the dial's loop-point subcase in `tests/SurfaceT
 `tests/RunPaneUiTests.cpp`, the panel's presses and what each offers, and the chain's order with a
 recorder - `take-panel.png` and `fx-panel-take.png` under `WFG_SNAPSHOT_DIR`.
 
+*As built (9c.5), the D700.*
+
+- **Pan is the Loop page** (`Page::loop`, the word `loop`), one page whatever the rotaries, and Pan
+  again or `*` leaves it; its button is lit while it is up. It puts the aimed mic cue's take on the
+  first four rotaries: **Loop in** and **Loop out**, where each stands in seconds to the
+  millisecond with its ring at that place in the take; **Slide**, which says how long the loop is,
+  rings at its middle and moves both points by the same amount; and the cue's **Level**, as a send's
+  reads. The surrounds wear the cue's colour, dimmed while there is no closed take to loop.
+- **The law for a point** is ten milliseconds a detent, and fifty while the hand spins - five
+  detents or more in one tick - rounded to the millisecond and never below nought
+  (`loopPointTurned`; `loopFineSeconds`, `loopCoarseSeconds` and `loopCoarseFromDetents` in
+  `SurfaceProfile.h`, the numbers the bench revises first). The points are written through the
+  take's door, which keeps them in the take and two crossfades apart. A slide is held within the
+  take, so the length is what it was, and the point moving away from the other is written first,
+  so the door never sees the loop shorter than it is. A press puts a point at its end of the take
+  - in at nought, out at the take's length - and the level at nought.
+- **What it says when there is nothing to ride:** a cue whose channel records nothing - or that is
+  not a mic cue - shows the page with *no take* on its first rotary, as the FX page says *no FX
+  in*; a take still recording shows *no loop yet* where its points go.
+- **Rec says what the aimed take is doing:** lit while it records, blinking while a layer is laid,
+  dark otherwise, on the first port - where the transport is, to confirm at the bench. **Loop**,
+  Mackie's *Cycle* (`0x56`), is `take.loop` on the aimed mic cue's channel.
+- **The foot follows the page:** a Loop page that has written opens the take panel on the aimed
+  cue, as an EQ page opens the EQ, and the foot goes back when the page comes down.
+- **Waiting for the bench:** whether the D700 has a Loop key at all (its protocol note lists Rec,
+  Play and Stop), which port lights its transport, whether its firmware gives Rec a double click to
+  put Undo on, and the law's three numbers.
+
+Tested by the laws' case in `tests/SurfacePagesTests.cpp` (a detent's time, a spun one's, nought as
+a floor, a time on a screen in every locale, a point's ring) and three in
+`tests/SurfaceBridgeTests.cpp`: the page itself - its screens, rings and light, a point's turn, a
+spun one, the slide both ways and held at the take's end, the presses, Pan again; a cue with no
+take and a take still recording; and Rec's light through recording, looping and a layer, with Loop
+as `take.loop`.
+
 ### 19.8 Keep
 
 `take.keep <channel> [asCue]`: the closed layers — the take and every layer on it, summed at unity,

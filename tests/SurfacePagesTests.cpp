@@ -399,3 +399,37 @@ TEST_CASE ("surface pages: the master dial turns a number by what its own row sa
         CHECK (near (turned ("sound", "level", -6.0, 0), -6.0));
     }
 }
+
+TEST_CASE ("surface pages: a loop point turns ten milliseconds a detent, fifty while the hand spins, and reads to the millisecond")
+{
+    /*  Phase 9c, stage 9c.5 (namespace draft 19.7): the Loop page's law for
+        its points, its time on a screen in every locale, and where a point
+        stands in its take as a ring. */
+    CHECK (surface::loopPointTurned (1.0, 1) == doctest::Approx (1.01));
+    CHECK (surface::loopPointTurned (1.0, -3) == doctest::Approx (0.97));
+    CHECK (surface::loopPointTurned (1.0, 5) == doctest::Approx (1.25));        // spun: fifty a detent
+    CHECK (surface::loopPointTurned (0.02, -4) == doctest::Approx (0.0));       // never below nought
+    CHECK (surface::loopPointTurned (0.1234, 0) == doctest::Approx (0.123));    // to the millisecond
+
+    std::string text;
+    surface::secondsText (1.25, false, text);
+    CHECK (text == "1.250 s");
+
+    text.clear();
+    surface::secondsText (0.0504, true, text);
+    CHECK (text == "0.050s");
+
+    text.clear();
+    surface::secondsText (61.0, false, text);
+    CHECK (text == "61.000 s");
+
+    CHECK (surface::d700PositionRing (0.0, 4.0) == surface::Ring { 0, 2 });
+    CHECK (surface::d700PositionRing (1.0, 4.0) == surface::Ring { 32, 2 });
+    CHECK (surface::d700PositionRing (4.0, 4.0) == surface::Ring { 127, 2 });
+    CHECK (surface::d700PositionRing (1.0, 0.0) == surface::Ring { 0, 2 });     // no take: an empty ring
+    CHECK (surface::mcuPositionRing (4.0, 4.0) == surface::Ring { 11, 2 });
+
+    CHECK (surface::pageWord (surface::Page::loop) == "loop");
+    CHECK (surface::loopControls[0].label.size() <= 12u);
+    CHECK (surface::loopControls[1].shortLabel.size() <= 7u);
+}

@@ -66,8 +66,10 @@ namespace wfg::surface
         constexpr int selectNote = 0x18;        // + element: SELECT, whose LED says the rotaries are aimed at its cue
         constexpr int vpotNote = 0x20;          // + element: the V-Pot - its press, and the D700's colour
         constexpr int sendButtonNote = 0x29;    // Send, lit while its page is up
+        constexpr int panButtonNote = 0x2a;     // Pan, lit while the Loop page is up (Phase 9c)
         constexpr int fxButtonNote = 0x2b;      // FX (Mackie's Plug-In), lit while its page is up
         constexpr int eqButtonNote = 0x2c;      // EQ, lit while its page is up
+        constexpr int recordButtonNote = 0x5f;  // the transport's Rec: the aimed take records, or lays a layer
         constexpr int masterDialNote = 0x38;    // the D700's master dial: its colour, as its press (McuCodec)
 
         constexpr int ringFillMode = 2;         // MCU "wrap" and the D700's channel 3: fill from the left
@@ -546,6 +548,10 @@ namespace wfg::surface
             int eqLed = -1;
             int sendLed = -1;
             int fxLed = -1;
+            int loopLed = -1;
+
+            //  The transport's Rec, on the first port only - where the transport is (Phase 9c).
+            int recLed = -1;
         };
 
         /*  WHAT A SURFACE'S ROTARIES SHOW (author, 2026-09-25), and where the
@@ -571,6 +577,12 @@ namespace wfg::surface
             std::string fxTitle;
             int fxInsert = 0;
             bool fxNone = false;
+
+            /*  A LOOP PAGE (Phase 9c): the channel whose take is up, the rows
+                every rotary of it reads, and whether the aimed cue has a take
+                to show at all. */
+            std::string loopChannel, loopInAt, loopOutAt, loopLengthAt, loopStateAt;
+            bool loopNone = false;
 
             //  The aimed cue's rows every rotary of the page reads.
             std::string eqOnAt, aimShortAt, aimNameAt, aimColourAt, aimSendsAt;
@@ -757,6 +769,14 @@ namespace wfg::surface
             return textAt (published.get(), aimAddress());
         }
 
+        /*  THE CHANNEL THE AIMED CUE PLAYS THROUGH (Phase 9c), when it is a mic
+            cue with one - a media cue has no channel row. Empty otherwise. */
+        std::string aimedChannel() const
+        {
+            const auto& aimed = aimNow();
+            return aimed.empty() ? std::string {} : textAt (published.get(), "/godot/cue/" + aimed + "/channel");
+        }
+
         /*  WHAT A CLIENT SEES OF THE PAGE: its word, which, how many, and what
             it last wrote - read by the tree's runtime half at every publish. */
         void publishPage (const Surface& box)
@@ -841,9 +861,17 @@ namespace wfg::surface
             const auto sends = paging.page == Page::send && ! base.empty()
                                  ? textAt (at, base + "sends") : std::string {};
 
-            /*  AND AN FX PAGE when the cue's inserts or their catalogues move. */
+            /*  AND AN FX PAGE when the cue's inserts or their catalogues move;
+                and a Loop page when the cue's channel does, or whether it
+                records (Phase 9c). */
             const auto fxPages = paging.page == Page::fx ? fxPagesOf (aim, box.rotaries()) : std::vector<FxPage> {};
-            const auto fxKey = fxKeyOf (fxPages);
+            auto fxKey = fxKeyOf (fxPages);
+
+            if (paging.page == Page::loop && ! base.empty())
+            {
+                const auto& loopChannel = textAt (at, base + "channel");
+                fxKey += "loop:" + loopChannel + ":" + textAt (at, "/godot/slot/" + loopChannel + "/takeSeconds");
+            }
 
             if (paging.madeForAim == aim && paging.madeForPage == paging.page
                   && paging.madeForIndex == paging.index
@@ -863,6 +891,12 @@ namespace wfg::surface
             paging.fxTitle.clear();
             paging.fxInsert = 0;
             paging.fxNone = false;
+            paging.loopChannel.clear();
+            paging.loopInAt.clear();
+            paging.loopOutAt.clear();
+            paging.loopLengthAt.clear();
+            paging.loopStateAt.clear();
+            paging.loopNone = false;
 
             paging.eqOnAt = base.empty() ? std::string {} : base + "eqOn";
             paging.aimShortAt = base.empty() ? std::string {} : base + "shortName";
@@ -964,6 +998,41 @@ namespace wfg::surface
                 return;
             }
 
+            if (paging.page == Page::loop)
+            {
+                /*  THE AIMED MIC CUE'S TAKE (Phase 9c, namespace draft §19.7):
+                    in, out, the slide of both and the cue's level on the first
+                    four rotaries - or "no take" on the first, for a cue whose
+                    channel records nothing, which is an answer where a page
+                    that stayed shut would be a question. */
+                const auto& channel = textAt (at, base + "channel");
+                const auto slot = "/godot/slot/" + channel + "/";
+
+                if (channel.empty() || ! (numberAt (at, slot + "takeSeconds").value_or (0.0) > 0.0))
+                {
+                    paging.loopNone = true;
+                    return;
+                }
+
+                paging.loopChannel = channel;
+                paging.loopInAt = slot + "loopIn";
+                paging.loopOutAt = slot + "loopOut";
+                paging.loopLengthAt = slot + "takeLength";
+                paging.loopStateAt = slot + "take";
+
+                for (int position = 0; position < loopControlCount && position < rotaries; ++position)
+                {
+                    auto& strip = box.strips[static_cast<std::size_t> (position)];
+                    strip.control = position;
+                    strip.controlAt = position == 0 ? paging.loopInAt
+                                    : position == 1 ? paging.loopOutAt
+                                    : position == 3 ? base + "level"
+                                                    : std::string {};
+                }
+
+                return;
+            }
+
             if (paging.page != Page::eq)
                 return;
 
@@ -1005,7 +1074,7 @@ namespace wfg::surface
             paging.index = page == Page::show ? 0 : index;
             paging.bank = bank;
             paging.edited.clear();
-            paging.count = page == Page::show ? 1
+            paging.count = page == Page::show || page == Page::loop ? 1
                          : page == Page::fx ? std::max (1, static_cast<int> (fxPagesOf (aimNow(), box.rotaries()).size()))
                                             : pageCount (controlsOf (page), box.rotaries());
 
@@ -1021,6 +1090,15 @@ namespace wfg::surface
         {
             if (aimNow().empty())
                 return;
+
+            /*  THE LOOP PAGE IS ONE PAGE (Phase 9c), shown for any aimed cue -
+                "no take" on its first rotary is an answer - and Pan again
+                leaves it. */
+            if (kind == Page::loop)
+            {
+                showPage (box, box.paging.page == Page::loop ? Page::show : Page::loop, 0, bank);
+                return;
+            }
 
             /*  AN FX PAGE IS SHOWN EVEN FOR A CUE WITH NO INSERT IN (2026-09-26)
                 - "no FX" on its first rotary is an answer, where a press that
@@ -1343,7 +1421,9 @@ namespace wfg::surface
         void button (Surface& box, std::size_t bank, const McuEvent& event, const Submit& submit,
                      std::int64_t tick)
         {
-            switch (actionFor (*box.profile, event.id))
+            const auto action = actionFor (*box.profile, event.id);
+
+            switch (action)
             {
                 case Action::gate:
                     if (auto* strip = stripAt (box, bank, event.id.index))
@@ -1380,6 +1460,11 @@ namespace wfg::surface
                 case Action::fxPage:
                     if (event.down)
                         turnPage (box, Page::fx, bank);
+                    break;
+
+                case Action::loopPage:
+                    if (event.down)
+                        turnPage (box, Page::loop, bank);
                     break;
 
                 case Action::leavePage:
@@ -1446,15 +1531,11 @@ namespace wfg::surface
                     layer is the engine's account to decide, and to refuse in
                     words - nothing sounding there, every layer in use. */
                 case Action::record:
+                case Action::loop:
                     if (event.down)
-                    {
-                        const auto& aimed = aimNow();
-                        const auto channel = aimed.empty() ? std::string {}
-                                                           : textAt (published.get(), "/godot/cue/" + aimed + "/channel");
-
-                        if (! channel.empty())
-                            submit (commandFrom (box.origin, "take.record", { osc::Value::string (channel) }));
-                    }
+                        if (const auto channel = aimedChannel(); ! channel.empty())
+                            submit (commandFrom (box.origin, action == Action::record ? "take.record" : "take.loop",
+                                                 { osc::Value::string (channel) }));
                     break;
 
                 case Action::rewind:
@@ -1739,6 +1820,8 @@ namespace wfg::surface
                         sendWrite (box, strip, steps, pressed, submit);
                     else if (box.paging.page == Page::fx)
                         fxWrite (box, strip, steps, pressed, submit);
+                    else if (box.paging.page == Page::loop)
+                        loopWrite (box, strip, steps, pressed, submit);
                 }
 
                 if (box.paging.edited != before)
@@ -1940,6 +2023,91 @@ namespace wfg::surface
             box.paging.edited = strip.controlAt;
         }
 
+        /*  A LOOP PAGE'S ROTARY (Phase 9c, namespace draft §19.7): a point
+            turned by the loop law (`loopPointTurned`) and written through the
+            take's door, which keeps it in the take and two crossfades from
+            the other; the slide moving both by the same amount, held within
+            the take so the length is kept - the point moving away from the
+            other written first, so the door never sees the loop shorter than
+            it is; the level along the fader. A press puts a point at its end
+            of the take and the level at nought. */
+        void loopWrite (Surface& box, const Strip& strip, int steps, bool pressed, const Submit& submit) const
+        {
+            const auto* at = published.get();
+            const auto& paging = box.paging;
+
+            const auto write = [&box, &submit] (const std::string& address, double value)
+            {
+                submit (commandFrom (box.origin, "node.set",
+                                     { osc::Value::string (address), osc::Value::float64 (value) }));
+                box.paging.edited = address;
+            };
+
+            const auto toMillisecond = [] (double seconds) { return std::round (seconds * 1000.0) / 1000.0; };
+
+            const auto in = numberAt (at, paging.loopInAt).value_or (0.0);
+            const auto out = numberAt (at, paging.loopOutAt).value_or (0.0);
+            const auto length = numberAt (at, paging.loopLengthAt).value_or (0.0);
+
+            switch (static_cast<LoopControl> (strip.control))
+            {
+                case LoopControl::in:
+                {
+                    const auto next = pressed ? 0.0 : loopPointTurned (in, steps);
+
+                    if (std::abs (next - in) >= 1.0e-9)
+                        write (paging.loopInAt, next);
+
+                    break;
+                }
+
+                case LoopControl::out:
+                {
+                    const auto next = pressed ? length : loopPointTurned (out, steps);
+
+                    if (std::abs (next - out) >= 1.0e-9)
+                        write (paging.loopOutAt, next);
+
+                    break;
+                }
+
+                case LoopControl::slide:
+                {
+                    if (steps == 0)
+                        break;
+
+                    const auto by = std::clamp (loopPointTurned (in, steps) - in, -in, std::max (0.0, length - out));
+
+                    if (std::abs (by) < 1.0e-9)
+                        break;
+
+                    const auto first = by > 0.0 ? paging.loopOutAt : paging.loopInAt;
+                    const auto second = by > 0.0 ? paging.loopInAt : paging.loopOutAt;
+
+                    write (first, toMillisecond ((by > 0.0 ? out : in) + by));
+                    write (second, toMillisecond ((by > 0.0 ? in : out) + by));
+                    break;
+                }
+
+                case LoopControl::level:
+                {
+                    const auto current = numberAt (at, strip.controlAt);
+
+                    if (! current.has_value())
+                        break;
+
+                    const auto next = pressed ? 0.0
+                                              : turned (Law::level, *current, steps, faderSilenceDb, faderLoudestDb,
+                                                        box.topology.faderLaw);
+
+                    if (std::abs (next - *current) >= 1.0e-9)
+                        write (strip.controlAt, next);
+
+                    break;
+                }
+            }
+        }
+
         //======================================================================
         //  Outbound, on the tick thread.
 
@@ -2071,6 +2239,8 @@ namespace wfg::surface
                     bank.eqLed = -1;
                     bank.sendLed = -1;
                     bank.fxLed = -1;
+                    bank.loopLed = -1;
+                    bank.recLed = -1;
                 }
 
                 for (auto& strip : box.strips)
@@ -2118,6 +2288,9 @@ namespace wfg::surface
 
                 paintPageButtons (box, bank, tick);
             }
+
+            if (! box.banks.empty())
+                paintRecButton (box, tick);
 
             if (box.topology.hasRgb && ! box.banks.empty())
                 paintDial (box, tick);
@@ -2176,6 +2349,13 @@ namespace wfg::surface
             const auto eq = here && box.paging.page == Page::eq && lit ? Led::on : Led::off;
             const auto sends = here && box.paging.page == Page::send && lit ? Led::on : Led::off;
             const auto fx = here && box.paging.page == Page::fx && lit ? Led::on : Led::off;
+            const auto loop = here && box.paging.page == Page::loop && lit ? Led::on : Led::off;
+
+            if (static_cast<int> (loop) != shown.loopLed)
+            {
+                send (shown.port, led (panButtonNote, loop));
+                shown.loopLed = static_cast<int> (loop);
+            }
 
             if (static_cast<int> (fx) != shown.fxLed)
             {
@@ -2193,6 +2373,28 @@ namespace wfg::surface
             {
                 send (shown.port, led (sendButtonNote, sends));
                 shown.sendLed = static_cast<int> (sends);
+            }
+        }
+
+        /*  REC SAYS WHAT THE AIMED MIC CUE'S TAKE IS DOING (Phase 9c): lit
+            while it records, blinking while a layer is laid, dark otherwise -
+            on the first port, where the transport is (to confirm at the bench).
+            The take panel says the same in words (§4.8). */
+        void paintRecButton (Surface& box, std::int64_t tick)
+        {
+            auto& shown = box.banks.front();
+            const auto channel = aimedChannel();
+            const auto& state = channel.empty() ? noText()
+                                                : textAt (published.get(), "/godot/slot/" + channel + "/take");
+
+            const auto wanted = state == "recording"   ? Led::on
+                              : state == "overdubbing" ? blinked (Led::flash, tick)
+                                                       : Led::off;
+
+            if (static_cast<int> (wanted) != shown.recLed)
+            {
+                send (shown.port, led (recordButtonNote, wanted));
+                shown.recLed = static_cast<int> (wanted);
             }
         }
 
@@ -2548,10 +2750,69 @@ namespace wfg::surface
 
                 colour = rgbOf (audio::eqColours[static_cast<std::size_t> (paging.fxInsert % 6)], 1.0);
             }
+            else if (strip.control >= 0 && paging.page == Page::loop)
+            {
+                /*  THE TAKE (Phase 9c): a point says where it stands and rings
+                    there in the take; the slide says how long the loop is and
+                    rings at its middle; the level reads as a send's. The cue's
+                    own colour, dimmed while there is no closed take to loop. */
+                const auto& words = loopControls[static_cast<std::size_t> (strip.control)];
+                labelScratch.assign (native ? words.label : words.shortLabel);
+
+                const auto in = numberAt (at, paging.loopInAt).value_or (0.0);
+                const auto out = numberAt (at, paging.loopOutAt).value_or (0.0);
+                const auto length = numberAt (at, paging.loopLengthAt).value_or (0.0);
+                const auto noLoop = ! (length > 0.0);
+
+                switch (static_cast<LoopControl> (strip.control))
+                {
+                    case LoopControl::in:
+                        secondsText (in, ! native, levelScratch);
+                        ring = native ? d700PositionRing (in, length) : mcuPositionRing (in, length);
+                        break;
+
+                    case LoopControl::out:
+                        secondsText (out, ! native, levelScratch);
+                        ring = native ? d700PositionRing (out, length) : mcuPositionRing (out, length);
+                        break;
+
+                    case LoopControl::slide:
+                        secondsText (std::max (0.0, out - in), ! native, levelScratch);
+                        ring = native ? d700PositionRing ((in + out) / 2.0, length)
+                                      : mcuPositionRing ((in + out) / 2.0, length);
+                        break;
+
+                    case LoopControl::level:
+                        if (const auto value = numberAt (at, strip.controlAt))
+                        {
+                            valueText (Law::level, *value, ! native, levelScratch);
+                            ring = native ? d700RingFor (Law::level, *value, faderSilenceDb, faderLoudestDb,
+                                                         box.topology.faderLaw)
+                                          : mcuRingFor (Law::level, *value, faderSilenceDb, faderLoudestDb,
+                                                        box.topology.faderLaw);
+                        }
+                        break;
+                }
+
+                //  Nothing to loop yet: the points say so rather than nought.
+                if (noLoop && static_cast<LoopControl> (strip.control) != LoopControl::level)
+                    levelScratch.assign (native ? "no loop yet" : "none");
+
+                const auto own = colourFromHex (textAt (at, paging.aimColourAt)).value_or (neutralLight);
+                const auto share = noLoop ? pageOffLight : 1.0;
+                colour = Rgb { static_cast<int> (std::lround (own.red * share)),
+                               static_cast<int> (std::lround (own.green * share)),
+                               static_cast<int> (std::lround (own.blue * share)) };
+            }
             else if (paging.page == Page::fx && paging.fxNone && &strip == &box.strips.front())
             {
                 //  A cue with no insert in says so, on the first rotary.
                 labelScratch.assign (native ? "no FX in" : "no FX");
+            }
+            else if (paging.page == Page::loop && paging.loopNone && &strip == &box.strips.front())
+            {
+                //  A cue with no take - not a mic cue, or its channel records nothing - says so.
+                labelScratch.assign ("no take");
             }
 
             if (native)
@@ -2567,7 +2828,11 @@ namespace wfg::surface
                     cue on the others, so a glance says whose EQ this is. */
                 pageScratch.clear();
 
-                if (strip.control >= 0 || (paging.page == Page::fx && paging.fxNone && &strip == &box.strips.front()))
+                const auto sayNone = &strip == &box.strips.front()
+                                       && ((paging.page == Page::fx && paging.fxNone)
+                                           || (paging.page == Page::loop && paging.loopNone));
+
+                if (strip.control >= 0 || sayNone)
                 {
                     if (paging.page == Page::fx && &strip == &box.strips.front())
                     {
@@ -2578,7 +2843,9 @@ namespace wfg::surface
                     {
                         const auto eqOut = paging.page == Page::eq
                                              && soleAt (at, paging.eqOnAt) != nullptr && ! flagAt (at, paging.eqOnAt);
-                        pageScratch.assign (paging.page == Page::send ? "Send" : eqOut ? "EQ out" : "EQ");
+                        pageScratch.assign (paging.page == Page::send ? "Send"
+                                            : paging.page == Page::loop ? "Loop"
+                                            : eqOut ? "EQ out" : "EQ");
 
                         if (! eqOut && paging.count > 1)
                         {

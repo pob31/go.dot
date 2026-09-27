@@ -209,6 +209,10 @@ namespace wfg::client::model
         if (pageWord == "fx")
             return { Subject::Kind::fx, aim };
 
+        //  The Loop page (Phase 9c): the take it rides, at the foot.
+        if (pageWord == "loop")
+            return { Subject::Kind::take, aim };
+
         return {};
     }
 }

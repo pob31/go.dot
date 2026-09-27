@@ -86,12 +86,12 @@ capture did not tabulate, to be read at the bench (§10).
 |---|---|---|
 | Play | note `0x5E` | GO |
 | Stop | note `0x5D` | Esc; a second press within 750 ms is double Esc |
-| Rec | note `0x5F` | `take.record` on the channel of the aimed mic cue - record, loop, a layer, loop (2026-09-27, namespace draft §19.6); nothing with no mic cue aimed |
+| Rec | note `0x5F` | `take.record` on the channel of the aimed mic cue - record, loop, a layer, loop (2026-09-27, namespace draft §19.6); nothing with no mic cue aimed. Lit while that take records, blinking while a layer is laid (§19.7) |
 | ↖ / ↘ arrows | notes `0x2E` / `0x2F` (MCU bank left / right) | the standby back / forward (2026-09-26, §5.7) |
-| Pan / EQ / Send / FX | notes `0x2A` / `0x2C` / `0x29` / `0x2B` | nothing — the page buttons of §5 |
+| Pan / EQ / Send / FX | notes `0x2A` / `0x2C` / `0x29` / `0x2B` | the page buttons of §5 - Pan is the Loop page (Phase 9c, namespace draft §19.7): the aimed mic cue's in, out, a slide of both and its level |
 | `*` | note `0x36` under the Mackie preset (`0x5A` under Reaper's); `0x37` on a double click if enabled | nothing |
 | Metronome | note `0x59`, MCU *Click* — *to confirm* | nothing |
-| Loop | note `0x56`, MCU *Cycle* — *to confirm* | nothing |
+| Loop | note `0x56`, MCU *Cycle* — *to confirm* | `take.loop` on the aimed mic cue's channel (Phase 9c, namespace draft §19.7) |
 | Master dial | turn: MCU jog, CC `0x3C` — *to confirm*; click: note `0x38`; double click: `0x39` expected | the number last clicked in the window; click lets go, double click back to its default (2026-09-26) |
 | Volume knob | pitch bend on channel 9, 14-bit, absolute, **no touch sense**; a click, if it has one, never captured | nothing |
 
