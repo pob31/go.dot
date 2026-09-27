@@ -168,6 +168,11 @@ namespace wfg::client::gesture
     /** `eq.reset`: a media cue's EQ back to flat, one transaction (Phase 9a). */
     Event eqReset (const std::string& cueId);
 
+    /*  `take.<verb> <channel>`: a press on a sampling channel's take from the
+        take panel (Phase 9c) - record, loop, overdub, undo or clear, the same
+        five the D700's Rec and a transport cue press. */
+    Event takePress (const std::string& verb, const std::string& channelId);
+
     /*  `surface.aim`: the cue a surface's rotaries edit on their EQ and Send
         pages (author, 2026-09-25) - a click on a running cue's name. Empty
         lets go. */

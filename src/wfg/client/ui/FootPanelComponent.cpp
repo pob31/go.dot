@@ -42,6 +42,9 @@ namespace wfg::client::ui
         if (fx != nullptr)
             fx->applyTheme (theme);
 
+        if (takePanel != nullptr)
+            takePanel->applyTheme (theme);
+
         repaint();
     }
 
@@ -77,9 +80,30 @@ namespace wfg::client::ui
         curve.reset();
         eq.reset();
         fx.reset();
+        takePanel.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::take:
+            {
+                /*  THE TAKE (Phase 9c): its presses are the take verbs, a
+                    dragged edge is the take's door, and a press on an edge
+                    puts it on the master dial. */
+                TakePanelComponent::Actions taking;
+                taking.set = actions.set;
+                taking.press = actions.pressTake;
+                taking.dial = actions.dial;
+                taking.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                takePanel = std::make_unique<TakePanelComponent> (theme, std::move (taking));
+                addAndMakeVisible (*takePanel);
+                break;
+            }
+
             case model::Subject::Kind::fx:
             {
                 /*  THE CHAIN (author, 2026-09-25). Its EQ box opens the EQ in
@@ -109,6 +133,16 @@ namespace wfg::client::ui
                     {
                         if (self != nullptr && self->actions.openEqOn)
                             self->actions.openEqOn (cueId);
+                    });
+                };
+                chaining.openTake = [this] (const std::string& cueId)
+                {
+                    //  On the next message, for the EQ box's reason.
+                    juce::MessageManager::callAsync ([self = juce::Component::SafePointer<FootPanelComponent> (this),
+                                                      cueId]
+                    {
+                        if (self != nullptr && self->actions.openTakeOn)
+                            self->actions.openTakeOn (cueId);
                     });
                 };
                 chaining.say = [this] (const juce::String& sentence)
@@ -237,7 +271,8 @@ namespace wfg::client::ui
     }
 
     void FootPanelComponent::show (const model::FootReading& reading,
-                                   std::shared_ptr<const audio::MediaRecords> media)
+                                   std::shared_ptr<const audio::MediaRecords> media,
+                                   std::shared_ptr<const audio::TakePictureSet> takes)
     {
         /*  WHAT IT IS SHOWING AND WHAT THAT THING IS CALLED. Said in the title
             rather than left to the drawing, because a panel that opens on one
@@ -269,6 +304,10 @@ namespace wfg::client::ui
 
             case model::Subject::Kind::fx:
                 wanted = "FX";
+                break;
+
+            case model::Subject::Kind::take:
+                wanted = "Take";
                 break;
 
             case model::Subject::Kind::none:
@@ -306,6 +345,9 @@ namespace wfg::client::ui
 
         if (fx != nullptr)
             fx->show (reading);
+
+        if (takePanel != nullptr)
+            takePanel->show (reading, std::move (takes));
     }
 
     void FootPanelComponent::setEditorWords (std::map<std::string, std::string> words)
@@ -385,6 +427,9 @@ namespace wfg::client::ui
 
         if (fx != nullptr)
             fx->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (takePanel != nullptr)
+            takePanel->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
     }
 
     void FootPanelComponent::mouseMove (const juce::MouseEvent& event)

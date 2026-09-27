@@ -85,8 +85,13 @@ namespace wfg::client::ui
         others - the canvas decides where it goes and draws the arrows. */
     struct FxPanelComponent::Box final : public juce::Component
     {
-        Box (FxPanelComponent& ownerToUse, bool isEqToUse)
-            : owner (ownerToUse), isEq (isEqToUse)
+        /*  THREE KINDS OF LINK: the EQ every voice carries, an entry of the set
+            or of the channel's chain, and on a sampling channel the recorder
+            (Phase 9c), which is always in and so has no switch. */
+        enum class Kind { eq, plugin, recorder };
+
+        Box (FxPanelComponent& ownerToUse, Kind kindToUse)
+            : owner (ownerToUse), kind (kindToUse), isEq (kindToUse == Kind::eq)
         {
             inSwitch.setButtonText ("in");
             inSwitch.setWantsKeyboardFocus (false);
@@ -94,7 +99,19 @@ namespace wfg::client::ui
             addAndMakeVisible (inSwitch);
             addAndMakeVisible (door);
 
-            if (isEq)
+            if (kind == Kind::recorder)
+            {
+                inSwitch.setVisible (false);
+                door.setButtonText ("Open");
+                door.setTooltip ("Show the take this channel records in the panel");
+
+                door.onClick = [this]
+                {
+                    if (owner.actions.openTake)
+                        owner.actions.openTake (owner.reading.subject.objectId);
+                };
+            }
+            else if (isEq)
             {
                 door.setButtonText ("Open");
                 inSwitch.setTooltip ("Whether this cue's EQ is in its signal");
@@ -133,6 +150,9 @@ namespace wfg::client::ui
             if (isEq)
                 return owner.reading.eq.settings.on;
 
+            if (kind == Kind::recorder)
+                return true;
+
             return strip.present() ? strip.enabled : owner.pending (strip.pluginId);
         }
 
@@ -140,7 +160,7 @@ namespace wfg::client::ui
         {
             inSwitch.setToggleState (isIn(), juce::dontSendNotification);
 
-            if (! isEq)
+            if (kind == Kind::plugin)
             {
                 inSwitch.setTooltip (strip.present()
                                        ? "Whether " + juce::String (strip.name) + " is in this cue's signal"
@@ -183,6 +203,7 @@ namespace wfg::client::ui
             g.setColour (Look::colour (owner.theme, in ? "ink" : "ink-dim"));
             g.setFont (Look::font (owner.theme, 14.0f));
             g.drawFittedText (isEq ? juce::String ("EQ")
+                                   : kind == Kind::recorder ? juce::String::fromUTF8 ("\xe2\x97\x8f Take")
                                    : juce::String (strip.index + 1) + ". " + juce::String (strip.name),
                               area.removeFromTop (owner.scaled (20)), juce::Justification::centredLeft, 1);
 
@@ -204,6 +225,22 @@ namespace wfg::client::ui
                 g.drawFittedText (in ? eqSummary (owner.reading.eq.settings)
                                      : juce::String ("out: the file is not shaped"),
                                   area.removeFromTop (line * 2), juce::Justification::topLeft, 2);
+                return;
+            }
+
+            /*  THE RECORDER SAYS WHAT ITS TAKE IS DOING, in the channel's own
+                word, and what the sides mean: before it is printed, after it
+                is heard. */
+            if (kind == Kind::recorder)
+            {
+                const auto& state = owner.reading.fx.takeState;
+
+                g.setColour (Look::colour (owner.theme, "ink-dim"));
+                g.drawFittedText (juce::String ("take: ") + juce::String (state.empty() ? "empty" : state),
+                                  area.removeFromTop (line), juce::Justification::topLeft, 1);
+                g.setColour (Look::colour (owner.theme, "ink-faint"));
+                g.drawFittedText ("printed before it, heard after", area.removeFromTop (line * 2),
+                                  juce::Justification::topLeft, 2);
                 return;
             }
 
@@ -236,6 +273,7 @@ namespace wfg::client::ui
         }
 
         FxPanelComponent& owner;
+        const Kind kind;
         const bool isEq;
         model::FxStrip strip;
 
@@ -356,10 +394,11 @@ namespace wfg::client::ui
     //==============================================================================
     std::string FxPanelComponent::shapeOf() const
     {
-        std::string out = reading.subject.objectId + "!" + (reading.fx.present ? "1" : "0");
+        std::string out = reading.subject.objectId + "!" + (reading.fx.present ? "1" : "0")
+                            + (reading.fx.recorder ? "!take" : "");
 
         for (const auto& strip : reading.fx.strips)
-            out += "|" + strip.pluginId;
+            out += "|" + strip.pluginId + ":" + strip.side;
 
         return out;
     }
@@ -414,14 +453,31 @@ namespace wfg::client::ui
 
         if (reading.fx.present)
         {
-            boxes.push_back (std::make_unique<Box> (*this, true));
-
-            for (const auto& strip : reading.fx.strips)
+            const auto plugin = [this] (const model::FxStrip& strip)
             {
-                auto box = std::make_unique<Box> (*this, false);
+                auto box = std::make_unique<Box> (*this, Box::Kind::plugin);
                 box->strip = strip;
                 boxes.push_back (std::move (box));
+            };
+
+            /*  A SAMPLING CHANNEL (Phase 9c, namespace draft §19.2): the
+                plugins before the recorder, the recorder, the EQ, then the
+                plugins after the player - the order its track is built in.
+                Anywhere else the EQ, then every plugin. */
+            if (reading.fx.recorder)
+            {
+                for (const auto& strip : reading.fx.strips)
+                    if (strip.side == "before")
+                        plugin (strip);
+
+                boxes.push_back (std::make_unique<Box> (*this, Box::Kind::recorder));
             }
+
+            boxes.push_back (std::make_unique<Box> (*this, Box::Kind::eq));
+
+            for (const auto& strip : reading.fx.strips)
+                if (! reading.fx.recorder || strip.side != "before")
+                    plugin (strip);
 
             for (auto& box : boxes)
                 canvas->addAndMakeVisible (*box);
@@ -433,10 +489,15 @@ namespace wfg::client::ui
 
     void FxPanelComponent::refresh()
     {
-        /*  THE BOXES ARE THE SAME ONES, so each takes its entry's new reading
-            - the order is the set's, which is what `shape` compared. */
-        for (std::size_t at = 1; at < boxes.size() && at - 1 < reading.fx.strips.size(); ++at)
-            boxes[at]->strip = reading.fx.strips[at - 1];
+        /*  THE BOXES ARE THE SAME ONES, so each takes its entry's new reading,
+            found by the entry: the shape - entries, sides and the recorder -
+            is what `shape` compared, and a sampling channel draws them in
+            another order than the set's. */
+        for (auto& box : boxes)
+            if (box->kind == Box::Kind::plugin)
+                for (const auto& strip : reading.fx.strips)
+                    if (strip.pluginId == box->strip.pluginId)
+                        box->strip = strip;
 
         for (auto& box : boxes)
             box->refresh();

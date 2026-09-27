@@ -238,6 +238,13 @@ namespace wfg::client::model
 
             order = words (text (snapshot, "/godot/slot/" + channel + "/plugins"));
 
+            /*  AND ITS RECORDER, read before a chain with no plugins says so:
+                a sampling channel's chain is the recorder and the EQ even
+                with nothing else in it. */
+            out.recorder = osc::parseDouble (text (snapshot, "/godot/slot/" + channel + "/takeSeconds"))
+                               .value_or (0.0) > 0.0;
+            out.takeState = text (snapshot, "/godot/slot/" + channel + "/take");
+
             if (order.empty())
             {
                 const auto called = text (snapshot, "/godot/slot/" + channel + "/name");
@@ -292,6 +299,9 @@ namespace wfg::client::model
             strip.problem = text (snapshot, base + "problem");
             strip.latencySamples = integer (snapshot, base + "latencySamples");
             strip.layout = text (snapshot, base + "layout");
+
+            if (out.recorder)
+                strip.side = text (snapshot, base + "side") == "before" ? "before" : "after";
 
             if (strip.name.empty())
                 strip.name = pluginId;

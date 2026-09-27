@@ -325,6 +325,32 @@ TEST_CASE ("surface: the master dial takes a number by its address, and refuses 
         CHECK (rig.surfaces.dial().integer);
     }
 
+    SUBCASE ("a sampling channel's loop point is a number a hand may write, and its readings are not")
+    {
+        /*  Rule BQ, amended by namespace draft 19.7 (Phase 9c): the points are
+            tonight's take's, not the show's, and the dial turns them through
+            the take's door. What the take is doing is only read. */
+        REQUIRE (rig.apply ("channel.create", { osc::Value::string ("mono"), osc::Value::string ("K1000001") }).applied == 1);
+        REQUIRE (rig.apply ("node.set", { osc::Value::string ("/godot/slot/K1000001/takeSeconds"),
+                                          osc::Value::float64 (10.0) }).applied == 1);
+
+        for (const auto* point : { "/godot/slot/K1000001/loopIn", "/godot/slot/K1000001/loopOut" })
+        {
+            INFO (point);
+            CHECK (rig.apply ("surface.dial", { osc::Value::string (point) }).applied == 1);
+            CHECK (rig.surfaces.dial().address == point);
+            CHECK (rig.surfaces.dial().unit == "s");
+            CHECK_FALSE (rig.surfaces.dial().integer);
+        }
+
+        for (const auto* reading : { "/godot/slot/K1000001/playhead", "/godot/slot/K1000001/takeLength",
+                                     "/godot/slot/K1000001/takeLayers" })
+        {
+            INFO (reading);
+            CHECK (rig.apply ("surface.dial", { osc::Value::string (reading) }).rejected == 1);
+        }
+    }
+
     SUBCASE ("a word, a switch, a reading or nothing at all is refused, and moves nothing")
     {
         for (const auto& refused : { "/godot/cue/" + media.id + "/name",

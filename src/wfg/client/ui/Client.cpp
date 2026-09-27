@@ -72,6 +72,7 @@
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -316,6 +317,8 @@ namespace wfg::client
                         wanted = model::Subject::Kind::eq;
                     else if (subject == "fx")
                         wanted = model::Subject::Kind::fx;
+                    else if (subject == "take")
+                        wanted = model::Subject::Kind::take;
 
                     if (wanted == model::Subject::Kind::none)
                         return;
@@ -429,10 +432,21 @@ namespace wfg::client
                 footActions.createFx = [this] (const std::string& cueId, const std::string& pluginId)
                                        { send (gesture::createFx (cueId, pluginId)); };
 
+                /*  THE TAKE PANEL'S FIVE PRESSES (Phase 9c): the take verbs,
+                    as the D700's Rec and a transport cue send them. */
+                footActions.pressTake = [this] (const std::string& verb, const std::string& channelId)
+                                        { send (gesture::takePress (verb, channelId)); };
+
                 footActions.openEqOn = [this] (const std::string& cueId)
                 {
                     if (shell != nullptr && ! cueId.empty())
                         shell->setFoot ({ model::Subject::Kind::eq, cueId });
+                };
+
+                footActions.openTakeOn = [this] (const std::string& cueId)
+                {
+                    if (shell != nullptr && ! cueId.empty())
+                        shell->setFoot ({ model::Subject::Kind::take, cueId });
                 };
 
                 /*  EDIT... OPENS THE PLUGIN'S OWN WINDOW (author, 2026-09-25),
@@ -1337,7 +1351,15 @@ namespace wfg::client
                         }
                     }
 
-                    shell->foot.show (model::readFoot (*snapshot, subject), mediaTable);
+                    /*  THE THIRD DOOR, read here and only here, and only while
+                        the take panel is what is open: a take's picture is
+                        built on this thread when it is asked for, and nothing
+                        else in the window draws one. */
+                    const auto takePictures = subject.kind == model::Subject::Kind::take && host.takes != nullptr
+                                                  ? host.takes->snapshot()
+                                                  : nullptr;
+
+                    shell->foot.show (model::readFoot (*snapshot, subject), mediaTable, takePictures);
                 }
 
                 /*  AND EVERY OPEN PLUGIN WINDOW FOLLOWS THE PICK, from this

@@ -51,6 +51,7 @@
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
+#include <wfg/client/model/Take.h>
 #include <wfg/client/model/Timeline.h>
 
 namespace wfg::tree { class TreeSnapshot; }
@@ -61,7 +62,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends, timeline, curve, eq, fx };
+        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -120,6 +121,12 @@ namespace wfg::client::model
             chain starts with the EQ, so `eq` above is filled with it - the
             first box is the EQ's, with its own switch. */
         FxReading fx;
+
+        /*  THE TAKE OF THE CHANNEL A MIC CUE PLAYS THROUGH, filled only when
+            the take panel is what is open (Phase 9c): its state, length,
+            layers, points and playhead, with its own notice for a cue that has
+            none. The peaks come through their own door, beside this. */
+        TakeReading take;
 
         /*  Where the playhead is, when a run of this cue is sounding, and
             whether there is one at all. A cue with no run has no playhead, and

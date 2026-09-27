@@ -72,6 +72,7 @@
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Surfaces.h>
+#include <wfg/client/model/Take.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
@@ -89,6 +90,7 @@
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Bundle.h>
@@ -5867,4 +5869,117 @@ TEST_CASE ("client: a sampling channel says its recorder, what it sets aside, an
     CHECK (model::secondsWords (10) == "10 s");
     CHECK (model::secondsWords (90) == "1 min 30 s");
     CHECK (model::secondsWords (600) == "10 min");
+}
+
+//==============================================================================
+TEST_CASE ("client: a mic cue's take is read off its channel's rows, said in words, with why Rec is not offered")
+{
+    /*  Phase 9c, stage 9c.4 (namespace draft 19.7): the take panel's reading,
+        from the `take` fixture with the engine's account of the take behind
+        the tree - the same table the take verbs move. */
+    Rig rig ("take");
+    cue::TakeTable takes;
+    rig.parameters.setTakes (&takes);
+
+    /*  PRESSED HERE BY HAND, so the tree is told to look again as every
+        applied command tells it in serve: the account only moves inside a
+        take verb, `take.closed` or a release, and each of those applies. */
+    const auto readNow = [&rig] (std::int64_t tick, const std::string& cueId)
+    {
+        rig.parameters.markStale();
+        return model::readTake (*rig.publish (tick), cueId);
+    };
+
+    //  Only a mic cue has one: a transport cue says so.
+    const auto transport = readNow (1, "TK000006");
+    CHECK_FALSE (transport.present);
+    CHECK (transport.notice == "Only a mic cue on a sampling channel has a take.");
+
+    auto reading = readNow (2, "TK000002");
+    REQUIRE (reading.present);
+    CHECK (reading.channelId == "TK000011");
+    CHECK (reading.channelName == "Looper");
+    CHECK (reading.state == "empty");
+    CHECK (reading.capacity == doctest::Approx (10.0));
+    CHECK (reading.maxLayers == 2);
+    CHECK (reading.onGo == "wait");
+    CHECK_FALSE (reading.through);
+    CHECK (reading.span() == doctest::Approx (10.0));
+    CHECK (model::takePanelWords (reading) == "Empty: Rec records up to 10 s.");
+    CHECK (model::takePressWhy (reading) == "Nothing sounds on Looper: GO a mic cue on it to record.");
+
+    //  Scene 5's own rows: its GO loops what it finds, and it hears its input through.
+    const auto scene = readNow (3, "TK000008");
+    CHECK (scene.onGo == "loop");
+    CHECK (scene.through);
+    CHECK (scene.channelId == "TK000011");
+
+    //  A mic cue sounding on the channel: Rec is offered, and the take records.
+    rig.runs.create ("MICRUN01", "TK000002", "mic");
+    auto* run = rig.runs.find ("MICRUN01");
+    REQUIRE (run != nullptr);
+    run->claims = { "TK000011" };
+    run->state = cue::runState::playing;
+
+    takes.press ("TK000011", cue::TakeVerb::record, 2);
+    reading = readNow (4, "TK000002");
+    CHECK (reading.state == "recording");
+    CHECK (reading.channelSounds);
+    CHECK (reading.holderName == "Loop voice");
+    CHECK (model::takePressWhy (reading).empty());
+    CHECK (model::takePanelWords (reading) == "Recording, up to 10 s: Rec again loops it.");
+
+    //  Closed by the recorder at 4.25 s: looping between the take's two ends, the playhead going round.
+    takes.press ("TK000011", cue::TakeVerb::record, 2);
+    takes.closed ("TK000011", 4.25, "pressed", 10.0);
+    takes.setPlayhead ("TK000011", 1.5);
+    reading = readNow (5, "TK000002");
+    CHECK (reading.state == "looping");
+    CHECK (reading.length == doctest::Approx (4.25));
+    CHECK (reading.loopIn == doctest::Approx (0.0));
+    CHECK (reading.loopOut == doctest::Approx (4.25));
+    CHECK (reading.playhead == doctest::Approx (1.5));
+    CHECK (reading.span() == doctest::Approx (4.25));
+    CHECK (model::takePanelWords (reading) == "Looping 4.3 s, 0 of 2 layers on it.");
+
+    //  Both layers in use: section 19.3's sentence, which no refusal says where a hand would see it.
+    for (int layer = 0; layer < 2; ++layer)
+    {
+        takes.press ("TK000011", cue::TakeVerb::overdub, 2);
+        takes.press ("TK000011", cue::TakeVerb::loop, 2);
+    }
+
+    reading = readNow (6, "TK000002");
+    CHECK (reading.layers == 2);
+    CHECK (reading.layersFull());
+    CHECK (model::takePanelWords (reading)
+             == "Looping 4.3 s, 2 of 2 layers on it. Looper holds its 2 layers: Undo one or Clear.");
+
+    //  The cue let go: held, and nothing sounding to press it through.
+    takes.release ("TK000011");
+    run->claims.clear();
+    run->state = cue::runState::done;
+    reading = readNow (7, "TK000002");
+    CHECK (reading.state == "held");
+    CHECK_FALSE (reading.channelSounds);
+    CHECK (model::takePanelWords (reading).starts_with ("Held: 4.3 s, silent until Rec or Loop."));
+
+    //  The door's address, and a tenth of a second spelled the same in either locale.
+    CHECK (model::loopPointAddress ("TK000011", true) == "/godot/slot/TK000011/loopIn");
+    CHECK (model::loopPointAddress ("TK000011", false) == "/godot/slot/TK000011/loopOut");
+    CHECK (model::tenthsOfSeconds (4.25) == "4.3 s");
+    CHECK (model::tenthsOfSeconds (0.04) == "0.0 s");
+
+    //  The foot opens on it by its own word, and it follows the pick.
+    const auto foot = model::readFoot (*rig.publish (8), { model::Subject::Kind::take, "TK000002" });
+    CHECK (foot.take.present);
+    CHECK (foot.notice.empty());
+    CHECK (model::followsPick (model::Subject::Kind::take));
+
+    //  And the gesture is the take verb of its name, from the window.
+    const auto press = gesture::takePress ("record", "TK000011");
+    CHECK (press.command == "take.record");
+    CHECK (press.origin == "window");
+    REQUIRE (press.args.size() == 1u);
+    CHECK (press.args[0].getString() == "TK000011");
 }

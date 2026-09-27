@@ -94,8 +94,18 @@ namespace wfg::surface
                             const auto number = row.type() == doc::ValueType::number
                                              || row.type() == doc::ValueType::integer;
 
-                            if (resolved.isDerived || row.access() != doc::Access::readWrite
-                                  || row.persist() != doc::Persist::show
+                            /*  A LOOP POINT IS A NUMBER A HAND MAY WRITE (Phase 9c,
+                                rule BQ amended by namespace draft §19.7): not the
+                                show's but tonight's take's - which the document
+                                resolves as a node it does not hold - written
+                                through the take's door as a trim is through its
+                                own: logged, never a step of the history, allowed
+                                under the lock. */
+                            const auto loopPoint = row.row->owner == "rackChannel"
+                                                     && (row.row->name == "loopIn" || row.row->name == "loopOut");
+
+                            if ((resolved.isDerived && ! loopPoint) || row.access() != doc::Access::readWrite
+                                  || (row.persist() != doc::Persist::show && ! loopPoint)
                                   || ! number || row.isList() || row.isEnum())
                                 return Outcome::rejected (reason::badValue);
 

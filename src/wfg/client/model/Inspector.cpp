@@ -601,9 +601,12 @@ namespace wfg::client::model
         }
         else if (kind == "mic")
         {
-            /*  A LIVE INPUT HAS NO WAVEFORM: nothing is recorded to draw. */
+            /*  A LIVE INPUT HAS NO WAVEFORM: nothing is recorded to draw - but
+                on a sampling channel it has a take (Phase 9c), and the panel
+                says in its own notice when the channel records nothing. */
             offer ("EQ, four bands and two filters", "eq");
             offer ("FX, its channel's plugins on this cue", "fx");
+            offer ("Take, the loop its channel records", "take");
         }
         else if (kind == "fade")
         {

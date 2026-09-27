@@ -79,6 +79,9 @@ namespace wfg::client::ui
             /** Show this cue's EQ in the foot instead of the chain. */
             std::function<void (const std::string& cueId)> openEq;
 
+            /** Show the take its channel records, from the recorder's box (Phase 9c). */
+            std::function<void (const std::string& cueId)> openTake;
+
             /** Open the plugin's own window for this cue. */
             std::function<void (const std::string& cueId, const std::string& pluginId)> edit;
 

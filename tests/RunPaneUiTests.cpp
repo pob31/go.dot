@@ -5,6 +5,7 @@
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
+#include <wfg/client/ui/TakePanelComponent.h>
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
@@ -25,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -1648,6 +1650,235 @@ TEST_CASE ("fx panel: a mic cue's chain starts at its input, and its path is sai
         juce::PNGImageFormat png;
         CHECK (png.writeImageToStream (picture, out));
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
+TEST_CASE ("fx panel: on a sampling channel the recorder sits after the plugins before it, ahead of the EQ, and opens the take")
+{
+    /*  Phase 9c, stage 9c.4 (namespace draft 19.7): a mic cue on a sampling
+        channel draws its chain as its track is built - the plugins before
+        the recorder, the recorder, the EQ, the plugins after the player - and
+        the recorder's box opens the take panel. With WFG_SNAPSHOT_DIR set,
+        fx-panel-take.png as well. */
+    std::vector<std::string> opened;
+
+    ui::FxPanelComponent::Actions actions;
+    actions.openTake = [&opened] (const std::string& cueId) { opened.push_back (cueId); };
+
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (2300, 250);
+
+    auto reading = chainReading ("CUE00009");
+    reading.cueName = "Loop voice";
+    reading.cueKind = "mic";
+    reading.fx.source = "in \xc2\xb7 Voice";
+    reading.fx.live = true;
+    reading.fx.recorder = true;
+    reading.fx.takeState = "looping";
+
+    //  The second entry is printed into the take; the rest are heard after it.
+    for (auto& strip : reading.fx.strips)
+        strip.side = strip.pluginId == "PG7N0002" ? "before" : "after";
+
+    panel.show (reading);
+
+    auto* take = buttonTipped (panel, "Show the take");
+    auto* eq = buttonTipped (panel, "Show this cue's EQ");
+    auto* before = buttonTipped (panel, "Open Verb");
+    auto* after = buttonTipped (panel, "Open Test gain");
+
+    REQUIRE (take != nullptr);
+    REQUIRE (eq != nullptr);
+    REQUIRE (before != nullptr);
+    REQUIRE (after != nullptr);
+
+    const auto x = [&panel] (juce::Component* control)
+    {
+        return panel.getLocalArea (control, control->getLocalBounds()).getX();
+    };
+
+    CHECK (x (before) < x (take));
+    CHECK (x (take) < x (eq));
+    CHECK (x (eq) < x (after));
+
+    take->onClick();
+    CHECK (opened == std::vector<std::string> { "CUE00009" });
+
+    //  Moved to the other side, the entry is drawn there: a side is part of the chain's shape.
+    for (auto& strip : reading.fx.strips)
+        strip.side = "after";
+
+    panel.show (reading);
+    before = buttonTipped (panel, "Open Verb");
+    take = buttonTipped (panel, "Show the take");
+    REQUIRE (before != nullptr);
+    REQUIRE (take != nullptr);
+    CHECK (x (take) < x (before));
+
+    juce::Image canvas (juce::Image::ARGB, panel.getWidth(), panel.getHeight(), true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, false);
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        for (auto& strip : reading.fx.strips)
+            strip.side = strip.pluginId == "PG7N0002" ? "before" : "after";
+
+        panel.show (reading);
+
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("fx-panel-take.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
+TEST_CASE ("take panel: its five presses are the take verbs, offered only where the engine would apply them")
+{
+    /*  Phase 9c, stage 9c.4 (namespace draft 19.7): Rec, Loop, Overdub, Undo
+        and Clear send the take verb of their name on the channel; Rec, Loop
+        and a layer want a mic cue sounding there, as the engine does. The
+        picture stacks a layer on the take, with the loop's edges and the
+        playhead over it. With WFG_SNAPSHOT_DIR set, take-panel.png as well. */
+    std::vector<std::string> presses;
+
+    ui::TakePanelComponent::Actions actions;
+    actions.press = [&presses] (const std::string& verb, const std::string& channel)
+                    { presses.push_back (verb + " " + channel); };
+
+    ui::TakePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1400, 240);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::take, "TK000002" };
+    reading.cueName = "Loop voice";
+    reading.cueKind = "mic";
+
+    auto& take = reading.take;
+    take.present = true;
+    take.cueId = "TK000002";
+    take.channelId = "TK000011";
+    take.channelName = "Looper";
+    take.state = "looping";
+    take.length = 4.0;
+    take.capacity = 10.0;
+    take.loopIn = 1.0;
+    take.loopOut = 3.25;
+    take.playhead = 2.1;
+    take.layers = 1;
+    take.maxLayers = 2;
+    take.holderRun = "RUN00001";
+    take.holderName = "Loop voice";
+    take.channelSounds = true;
+
+    //  A picture: a take at about a half, and a layer at a quarter over its second half.
+    auto set = std::make_shared<wfg::audio::TakePictureSet>();
+    auto& picture = set->byChannel["TK000011"];
+    picture.sampleRate = 48000;
+    picture.binSamples = 4 * 256;
+    picture.slots = 2;
+    picture.bins = static_cast<int> (std::ceil (4.0 * 48000.0 / picture.binSamples));
+    picture.peaks.assign (static_cast<std::size_t> (picture.slots * picture.bins), 0.0f);
+
+    for (int bin = 0; bin < picture.bins; ++bin)
+    {
+        picture.peaks[static_cast<std::size_t> (bin)] = 0.3f + 0.2f * static_cast<float> (std::sin (bin * 0.15));
+
+        if (bin >= picture.bins / 2)
+            picture.peaks[static_cast<std::size_t> (picture.bins + bin)] = 0.25f;
+    }
+
+    panel.show (reading, set);
+
+    std::map<std::string, juce::Button*> buttons;
+
+    for (auto* button : buttonsUnder (panel))
+        buttons[button->getButtonText().toStdString()] = button;
+
+    for (const auto* name : { "Rec", "Loop", "Overdub", "Undo", "Clear" })
+        REQUIRE (buttons.count (name) == 1u);
+
+    //  LOOPING, a cue sounding: a layer and Undo and Clear are offered; Loop has nothing to close.
+    CHECK (buttons["Rec"]->isEnabled());
+    CHECK_FALSE (buttons["Loop"]->isEnabled());
+    CHECK (buttons["Overdub"]->isEnabled());
+    CHECK (buttons["Undo"]->isEnabled());
+    CHECK (buttons["Clear"]->isEnabled());
+
+    for (const auto* name : { "Rec", "Overdub", "Undo", "Clear" })
+        buttons[name]->onClick();
+
+    CHECK (presses == std::vector<std::string> { "record TK000011", "overdub TK000011",
+                                                 "undo TK000011", "clear TK000011" });
+
+    /*  IT DRAWS, and with a picture to look at when somebody asks for one. A
+        panel that threw or read past an end would take the window down rather
+        than fail a check. */
+    juce::Image canvas (juce::Image::ARGB, panel.getWidth(), panel.getHeight(), true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, false);
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto snapshot = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("take-panel.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (snapshot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    //  NOTHING SOUNDING ON THE CHANNEL: only Undo and Clear, which take something away.
+    take.channelSounds = false;
+    take.holderRun.clear();
+    panel.show (reading, set);
+
+    CHECK_FALSE (buttons["Rec"]->isEnabled());
+    CHECK_FALSE (buttons["Overdub"]->isEnabled());
+    CHECK (buttons["Undo"]->isEnabled());
+    CHECK (buttons["Clear"]->isEnabled());
+
+    //  RECORDING, and drawn growing across the longest take, with nothing to close a loop on yet.
+    take.channelSounds = true;
+    take.state = "recording";
+    take.layers = 0;
+    panel.show (reading, set);
+
+    CHECK (buttons["Loop"]->isEnabled());
+    CHECK (buttons["Undo"]->isEnabled());
+
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, false);
+    }
+
+    //  A CUE WITH NO TAKE draws its sentence and nothing else, and offers nothing.
+    reading.take = model::TakeReading {};
+    reading.take.notice = "Only a mic cue on a sampling channel has a take.";
+    panel.show (reading, nullptr);
+
+    for (const auto* name : { "Rec", "Loop", "Overdub", "Undo", "Clear" })
+        CHECK_FALSE (buttons[name]->isEnabled());
+
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, false);
     }
 }
 

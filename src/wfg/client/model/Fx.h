@@ -91,6 +91,11 @@ namespace wfg::client::model
         /** What it takes, in words - "mono in, stereo out" (2026-09-26). */
         std::string layout;
 
+        /*  ON A SAMPLING CHANNEL (Phase 9c): `before` the recorder, printed
+            into the take, or `after` the player, heard as it loops. Empty
+            where there is no recorder, and the side then means nothing. */
+        std::string side;
+
         std::vector<FxParameter> params;
 
         bool present() const noexcept { return ! fxId.empty(); }
@@ -122,6 +127,13 @@ namespace wfg::client::model
         int inputLatency = 0;
         int outputLatency = 0;
         double budgetMs = 5.0;
+
+        /*  A SAMPLING CHANNEL'S RECORDER (Phase 9c, namespace draft §19.7): a
+            box in its place in the chain - after the plugins before it, ahead
+            of the EQ and the plugins after the player - and what its take is
+            doing, in the channel's own word. */
+        bool recorder = false;
+        std::string takeState;
     };
 
     /*  "Plays as stereo through its inserts, 21 ms late." - or nothing, for a

@@ -26,6 +26,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 /*  Tracktion Engine, stood up with no audio hardware, and the sample counter it
@@ -274,6 +275,11 @@ namespace wfg::audio
             host alone prepares it, in buildEdit. */
         std::shared_ptr<Looper> takeOf (const std::string& channelId);
         std::shared_ptr<Looper> takeOfTrack (int trackIndex);
+
+        /*  EVERY SAMPLING CHANNEL'S RECORDER, by its channel's id, as the store
+            holds them now - for the take's picture (9c.4), which reads their
+            peaks on the window's thread. Copied out under the store's lock. */
+        std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> allTakes();
 
         /*  THE RACK CHANNEL'S INPUT STAGE (Phase 9b, namespace draft §18.4):
             which logical input it takes and how many, and its gate - opened at

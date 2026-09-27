@@ -7272,7 +7272,8 @@ would be a socket opened to talk to itself. So `ClientHost` carries the analyser
 full stop — the boundary gate checks exactly that, and names each door in its output. It is not a
 reach past the tick thread, which is what the rule is actually about: `MediaInfo::snapshot()` is an
 immutable table the ANALYSER thread publishes under a short mutex, and the HTTP thread has been
-reading it on every request since PR 5.8.
+reading it on every request since PR 5.8. *(A third door came with Phase 9c, on the same argument:
+the takes' pictures, §19.7.)*
 
 **ONE ENGINE NODE WAS OWED AND IS NOW THERE.** A countdown needs to know how much of a wait is left,
 and nothing published it: `run,remaining` is a subtraction from `dueTick`, which a handler set from
@@ -11535,6 +11536,51 @@ the take, and a stop landing while it records closing it held); the REC case in
   above it is §18's with the recorder in its place: `in ▶ [before] ▶ ● take ▶ [EQ] ▶ [after] ▶ out`.
 - **The master dial.** Rule BQ (§17.18) is amended: a live row of a sampling channel is a number a
   hand may write, and the dial turns it.
+
+*As built (9c.4), the window and the dial.*
+
+- **The take panel** is an editor at the foot like the others (`Subject::Kind::take`), opened from
+  the inspector's *Take* on any mic cue or from the recorder's box in the cue's chain, and it follows
+  the pick: it reads the take of the channel the picked mic cue plays through, so a later cue on the
+  channel opens on the same take. A mic cue on a channel with no recorder gets a sentence saying to
+  give the channel a longest take and Load now.
+- **THE PICTURE CAME THROUGH A THIRD READ DOOR**, argued as the media table's was (§14's M11 note):
+  a take's peaks are thousands of numbers that change a block at a time, which the tree - text,
+  diffed for every socket - is not for. `ClientHost::takes` is an `audio::TakePictures`: an
+  immutable set built from the recorders' own peaks - atomics the audio thread writes a chunk at a
+  time and any thread may read, behind the store's own lock - on the thread that asks, at most every
+  forty milliseconds, and asked only while the take panel is open. It is not a reach past the tick
+  thread: nothing in it is the tick thread's. The boundary gate counts three doors now, one call
+  site each. A column is whole chunks of the recorder, the loudest of them, at most 2048 a layer.
+- **What it draws:** the take and each layer stacked on it, a pass being laid in the live colour;
+  the loop shaded between its edges, each with where it stands in words; the playhead going round;
+  and while it records, its growing edge across the longest take - the picture spans the longest
+  take until the take is closed and the take after. Over it, the sentence (§4.8, never colour
+  alone): *"Looping 4.3 s, 1 of 2 layers on it."* - and when every layer is in use, §19.3's own
+  sentence, *"Looper holds its 2 layers: Undo one or Clear."*, which the refusal of the next Rec
+  says nowhere a hand would see it.
+- **Its five presses** are the take verbs from the window - Rec, Loop, Overdub, Undo and Clear -
+  offered only where the engine would apply them: the first three want a mic cue sounding on the
+  channel, and the sentence says who holds it when none does. Keep waits for 9c.6.
+- **A dragged edge is the take's door:** one `node.set` on `loopIn` or `loopOut` each time the
+  second it stands on moves by a millisecond, the edge drawn where the hand has it rather than a
+  pass behind; a press on an edge puts the point on the master dial.
+- **The dial takes the points** (rule BQ as amended): `surface.dial` accepts a sampling channel's
+  `loopIn` and `loopOut` although the document resolves them as nodes it does not hold, and still
+  refuses the take's readings. It turns them by its own law for seconds - a tenth a detent below
+  ten seconds, one above; the Loop page's finer law is 9c.5's.
+- **The chain draws the recorder in its place** for a mic cue on a sampling channel, as the track
+  is built: `in ▶ [before] ▶ ● Take ▶ [EQ] ▶ [after] ▶ out`. The recorder's box has no switch -
+  it is always in - and its *Open* shows the take; a plugin's side is part of the chain's shape, so
+  moving one redraws it on its side. Plugin boxes are now matched to their entries by identifier,
+  since a sampling channel draws them in another order than the set's.
+
+Tested by the picture case in `tests/LooperTests.cpp` (the take and a layer as the loudest chunk in
+each column, never more columns than asked, the door never null); the take reading in
+`tests/ClientTests.cpp` (the words through a take's life, why Rec is not offered, the door's
+addresses, the foot's subject); the dial's loop-point subcase in `tests/SurfaceTests.cpp`; and in
+`tests/RunPaneUiTests.cpp`, the panel's presses and what each offers, and the chain's order with a
+recorder - `take-panel.png` and `fx-panel-take.png` under `WFG_SNAPSHOT_DIR`.
 
 ### 19.8 Keep
 

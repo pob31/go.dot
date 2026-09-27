@@ -1032,6 +1032,18 @@ namespace wfg::audio
             return found != takes.end() ? found->second.take : nullptr;
         }
 
+        std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> allTakes()
+        {
+            std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> out;
+            const std::lock_guard<std::mutex> lock { takesLock };
+
+            for (const auto& [channelId, store] : takes)
+                if (store.take != nullptr)
+                    out.emplace_back (channelId, store.take);
+
+            return out;
+        }
+
         std::shared_ptr<Looper> takeForTrack (int trackIndex)
         {
             const std::lock_guard<std::mutex> lock { takesLock };
@@ -2163,6 +2175,11 @@ namespace wfg::audio
     std::shared_ptr<Looper> AudioHost::takeOfTrack (int trackIndex)
     {
         return impl->takeForTrack (trackIndex);
+    }
+
+    std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> AudioHost::allTakes()
+    {
+        return impl->allTakes();
     }
 
     void AudioHost::setRackSource (int trackIndex, int firstInput, int width) noexcept

@@ -188,6 +188,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/Looper.cpp
     wfg/engine/audio/LooperPlugin.h
     wfg/engine/audio/LooperPlugin.cpp
+    wfg/engine/audio/TakePictures.h
+    wfg/engine/audio/TakePictures.cpp
     wfg/engine/audio/ProxyPlugin.h
     wfg/engine/audio/ProxyPlugin.cpp
     wfg/engine/audio/DeviceLayer.h
@@ -370,6 +372,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Fx.cpp
     wfg/client/model/Rack.h
     wfg/client/model/Rack.cpp
+    wfg/client/model/Take.h
+    wfg/client/model/Take.cpp
     wfg/client/model/FxEditor.h
     wfg/client/model/FxEditor.cpp
     wfg/client/model/Timeline.h
@@ -445,6 +449,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/EqPanelComponent.cpp
     wfg/client/ui/FxPanelComponent.h
     wfg/client/ui/FxPanelComponent.cpp
+    wfg/client/ui/TakePanelComponent.h
+    wfg/client/ui/TakePanelComponent.cpp
     wfg/client/ui/PluginEditors.h
     wfg/client/ui/PluginEditors.cpp
     wfg/client/ui/TimelineComponent.h

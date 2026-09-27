@@ -58,6 +58,7 @@
 #include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/audio/SettingsPump.h>
+#include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
@@ -3570,6 +3571,20 @@ namespace
             else if (driver != nullptr)
                 driver->host().startMissingProxies();
         };
+
+        /*  THE TAKES' PICTURES (Phase 9c, stage 9c.4), off whichever graph
+            there is tonight, for the window's third door. Declared before the
+            window, so it outlives it. */
+        const wfg::audio::TakePictures takePictures { [&deviceDriver, &driver]
+        {
+            if (deviceDriver != nullptr)
+                return deviceDriver->host().allTakes();
+
+            if (driver != nullptr)
+                return driver->host().allTakes();
+
+            return std::vector<std::pair<std::string, std::shared_ptr<const wfg::audio::Looper>>> {};
+        } };
         std::unique_ptr<wfg::audio::HostPlayer> player;
         const wfg::SampleClock* blockSource = nullptr;
 
@@ -4616,6 +4631,11 @@ namespace
 
                 clientHost.pluginWorkFolder = engineCacheFolder().getChildFile ("editor")
                                                                  .getFullPathName().toStdString();
+
+                /*  THE TAKES' PICTURES, off whichever audio host is current:
+                    asked on the window's thread, which is the one an interface
+                    is changed on, so the host cannot go from under it. */
+                clientHost.takes = &takePictures;
 
                 client = makeClient (clientHost);
 

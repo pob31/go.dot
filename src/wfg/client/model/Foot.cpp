@@ -65,6 +65,11 @@ namespace wfg::client::model
                 own window opened from it (author, 2026-09-25): which inserts
                 this cue has is a question about the cue in hand. */
             case Subject::Kind::fx:        return true;
+
+            /*  AND THE TAKE (Phase 9c): which take a mic cue plays through is
+                a question about the cue in hand, and a later cue on the same
+                channel opens on the same take - which is the point. */
+            case Subject::Kind::take:      return true;
             case Subject::Kind::none:      break;
         }
 
@@ -132,6 +137,14 @@ namespace wfg::client::model
 
             if (! out.fx.present)
                 out.notice = out.fx.notice;
+        }
+
+        if (subject.kind == Subject::Kind::take)
+        {
+            out.take = readTake (snapshot, subject.objectId);
+
+            if (! out.take.present)
+                out.notice = out.take.notice;
         }
 
         if (subject.kind == Subject::Kind::sends)

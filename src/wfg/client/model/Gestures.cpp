@@ -143,6 +143,11 @@ namespace wfg::client::gesture
         return { origin::window, "eq.reset", { osc::Value::string (cueId) } };
     }
 
+    Event takePress (const std::string& verb, const std::string& channelId)
+    {
+        return { origin::window, "take." + verb, { osc::Value::string (channelId) } };
+    }
+
     Event aimSurfaces (const std::string& cueId)
     {
         return { origin::window, "surface.aim", { osc::Value::string (cueId) } };

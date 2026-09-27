@@ -32,6 +32,7 @@
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/SendMixerComponent.h>
+#include <wfg/client/ui/TakePanelComponent.h>
 #include <wfg/client/ui/TimelineComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
 
@@ -78,6 +79,9 @@ namespace wfg::client::ui
             /** Show a cue's EQ, from the chain's EQ box. */
             std::function<void (const std::string& cueId)> openEqOn;
 
+            /** Show the take a mic cue's channel records, from the chain's recorder (Phase 9c). */
+            std::function<void (const std::string& cueId)> openTakeOn;
+
             /** The transport of whatever the panel is showing: fire, kill, seek. */
             std::function<void (const std::string& cueId)> play;
             std::function<void (const std::string& runId)> stop;
@@ -91,6 +95,9 @@ namespace wfg::client::ui
             /*  A CLICK OR A TOUCH ON A NUMBER in the EQ or the send mixer: that
                 number on the surfaces' master dial (2026-09-26). */
             std::function<void (const std::string& address)> dial;
+
+            /** `take.<verb> <channel>`, from the take panel's buttons (Phase 9c). */
+            std::function<void (const std::string& verb, const std::string& channelId)> pressTake;
         };
 
         FootPanelComponent (const model::Theme&, Actions);
@@ -107,7 +114,11 @@ namespace wfg::client::ui
         void open (const model::Subject&);
         const model::Subject& subject() const noexcept { return showing; }
 
-        void show (const model::FootReading&, std::shared_ptr<const audio::MediaRecords>);
+        /*  The reading for this pass, and the doors' tables taken with it:
+            the analyser's, and the takes' pictures - null unless the take
+            panel is the one open, since nothing else draws them. */
+        void show (const model::FootReading&, std::shared_ptr<const audio::MediaRecords>,
+                   std::shared_ptr<const audio::TakePictureSet> takes = {});
 
         /** What the client knows of each plugin's own window, for the chain to say. */
         void setEditorWords (std::map<std::string, std::string>);
@@ -147,6 +158,7 @@ namespace wfg::client::ui
 
         std::string dialed;
         std::unique_ptr<FxPanelComponent> fx;
+        std::unique_ptr<TakePanelComponent> takePanel;
         std::map<std::string, std::string> editorWords;
         juce::TextButton shut { "x" };
         int columnWidth = 0, columnGap = 0;

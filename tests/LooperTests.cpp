@@ -31,6 +31,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/audio/Looper.h>
+#include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/rt/RtCheck.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -42,6 +43,9 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -630,4 +634,74 @@ TEST_CASE ("looper: a render to listen to - a take of a chord, its points ridden
     REQUIRE (writer != nullptr);
     writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
     MESSAGE ("wrote " << file.getFullPathName());
+}
+
+//==============================================================================
+TEST_CASE ("take pictures: the take and each layer, the loudest chunk in each column, never more columns than asked")
+{
+    /*  Phase 9c, stage 9c.4 (namespace draft 19.7): what the take panel draws
+        is the recorder's own peaks, read on the window's thread - here a take
+        at a half, and a layer at a quarter laid over the second half of its
+        loop, drawn in fewer columns than the take has chunks. */
+    Rig rig (1.0, 2);
+
+    rig.post (Verb::record, 0);
+    rig.runTo (8192, [] (std::int64_t, int) { return 0.5f; });
+    rig.post (Verb::record, 8192);
+    rig.runTo (8192 + 4096, [] (std::int64_t, int) { return 0.0f; });
+    REQUIRE (rig.looper.state() == TakeState::looping);
+    REQUIRE (rig.looper.length() == 8192);
+
+    //  The loop's second half, a layer at a quarter; closed as the loop wraps.
+    rig.post (Verb::overdub, 8192 + 4096);
+    rig.runTo (8192 * 2, [] (std::int64_t, int) { return 0.25f; });
+    rig.post (Verb::loop, 8192 * 2);
+    rig.runTo (8192 * 2 + 2048, [] (std::int64_t, int) { return 0.0f; });
+    REQUIRE (rig.looper.layerCount() == 1);
+
+    const auto chunks = rig.looper.peakCount();
+    REQUIRE (chunks >= 32);
+
+    const auto picture = audio::TakePictures::pictureOf (rig.looper, 8);
+    const auto per = (chunks + 7) / 8;
+
+    CHECK (picture.sampleRate == 48000);
+    CHECK (picture.slots == 2);
+    CHECK (picture.bins <= 8);
+    CHECK (picture.bins == (chunks + per - 1) / per);
+    CHECK (picture.binSamples == per * Looper::peakSamples);
+    CHECK (picture.peaks.size() == static_cast<std::size_t> (picture.slots * picture.bins));
+
+    //  The take at a half from its first column; the layer nowhere in the loop's first half...
+    CHECK (picture.peak (0, 1) == doctest::Approx (0.5f));
+    CHECK (picture.peak (1, 1) == doctest::Approx (0.0f));
+
+    //  ...and at a quarter in its second.
+    CHECK (picture.peak (1, (4096 + 1024) / picture.binSamples + 1) == doctest::Approx (0.25f));
+
+    //  Out of range reads nought, and a picture of no take has no columns.
+    CHECK (picture.peak (2, 0) == doctest::Approx (0.0f));
+    CHECK (picture.peak (0, picture.bins) == doctest::Approx (0.0f));
+
+    Looper blank;
+    blank.prepare ({ rate, 2, 1.0, 2 });
+    CHECK (audio::TakePictures::pictureOf (blank).bins == 0);
+
+    /*  THE DOOR: every channel the source names, never a null set - and
+        nothing for a channel it does not. */
+    const audio::TakePictures door { [&rig]
+    {
+        return std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> {
+            { "CH000001", std::shared_ptr<const Looper> (&rig.looper, [] (const Looper*) {}) } };
+    } };
+
+    const auto set = door.snapshot();
+    REQUIRE (set != nullptr);
+    REQUIRE (set->of ("CH000001") != nullptr);
+    CHECK (set->of ("CH000001")->bins == audio::TakePictures::pictureOf (rig.looper).bins);
+    CHECK (set->of ("NQNQNQNQ") == nullptr);
+
+    const audio::TakePictures none { {} };
+    REQUIRE (none.snapshot() != nullptr);
+    CHECK (none.snapshot()->byChannel.empty());
 }

@@ -46,7 +46,7 @@ namespace wfg
 {
     class Engine;
     namespace tree { class ParameterTree; }
-    namespace audio { class MediaInfo; }
+    namespace audio { class MediaInfo; class TakePictures; }
 
     /** What a compiled client is, seen from here: something alive while the loop runs. */
     struct Client
@@ -106,6 +106,16 @@ namespace wfg
 
         /** Where the helpers' shared regions go: the engine's cache, under editor/. */
         std::string pluginWorkFolder;
+
+        /*  THE THIRD READ DOOR (Phase 9c, stage 9c.4): each sampling channel's
+            take as a picture - its peaks and every layer's, for the take panel
+            at the foot. The media table's shape and its argument: an immutable
+            set, built from the recorders' peaks, which are atomics the audio
+            thread writes and any thread reads, never anything the tick thread
+            owns. Built on the thread that asks, at most every forty
+            milliseconds (audio/TakePictures.h). Null with no audio side; every
+            reader checks. */
+        const audio::TakePictures* takes = nullptr;
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */
