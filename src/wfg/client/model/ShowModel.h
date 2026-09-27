@@ -111,6 +111,11 @@ namespace wfg::client::model
 
         std::string mode;
 
+        /*  A TRANSPORT CUE'S VERB, as the tree spells it (hard, afterMember,
+            record...), so the kind column can say what the cue does the way a
+            group's says its mode (2026-09-27). Empty on anything else. */
+        std::string verb;
+
         /*  A GROUP'S BEHAVIOUR, as the tree spells it: `sequential` or
             `shuffle`, and how many rounds it plays - where nought is for ever
             and one is once. Empty on anything that is not a group. */

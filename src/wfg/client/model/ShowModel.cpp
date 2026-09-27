@@ -307,6 +307,9 @@ namespace wfg::client::model
             this file being edited. */
         row.isGroup = snapshot.find ("/godot/cue/" + cueId + "/order") != nullptr;
 
+        if (row.kind == "transport")
+            row.verb = attribute (snapshot, cueId, "verb");
+
         if (row.isGroup)
         {
             row.mode = attribute (snapshot, cueId, "mode");

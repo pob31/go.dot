@@ -54,6 +54,7 @@
 #include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
@@ -68,6 +69,7 @@
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
 #include <wfg/client/ui/MainWindow.h>
+#include <wfg/client/ui/NewCueMenu.h>
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
@@ -78,6 +80,8 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -366,6 +370,10 @@ namespace wfg::client
                 ui::NewCueBarComponent::Actions newCueActions;
 
                 newCueActions.create = [this] (const std::string& kind) { createCue (kind); };
+                newCueActions.choose = [this] (const std::string& kind, juce::Component& button)
+                {
+                    chooseFromList (kind, button);
+                };
 
                 /*  LOAD TO TIME'S OWN TWO GESTURES: the aim, asked on every
                     change, and the jump. Both go to the focused list, which
@@ -2004,23 +2012,15 @@ namespace wfg::client
 
             void createCue (const std::string& kind)
             {
+                createCue (kind, {});
+            }
+
+            /*  AND BORN WITH ITS SETTINGS, when a line of a list chose them:
+                one `cue.create`, one record, one Undo. */
+            void createCue (const std::string& kind, const model::Settings& bornWith)
+            {
                 if (refusedWhileLocked())
                     return;
-
-                if (kind == "group" && ! selection.empty() && latest)
-                {
-                    if (! groupingCue.empty()) return;
-                    std::string ids;
-                    for (const auto& id : selection.ids()) { if (! ids.empty()) ids += ' '; ids += id; }
-                    groupingCue = selection.ids().front();
-                    for (auto parent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
-                         ! parent.empty(); parent = model::text (*latest, "/godot/cue/" + parent + "/parent"))
-                        if (selection.contains (parent)) groupingCue = parent;
-                    groupingParent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
-                    groupingWait = 0;
-                    send ({ "window", "group.wrap", { osc::Value::string (ids) } });
-                    return;
-                }
 
                 const auto [parent, index] = destination();
 
@@ -2042,8 +2042,126 @@ namespace wfg::client
                 const auto members = static_cast<int> (model::words (orderOf (parent)).size());
                 const auto at = index < 0 ? members : juce::jlimit (0, members, index);
 
-                send (gesture::createCue (parent, at, kind, ""));
+                send (gesture::createCue (parent, at, kind, "", bornWith));
                 creations.push_back ({ parent, at, kind, last.revision, 0 });
+            }
+
+            /*  THE LISTS FOUR BUTTONS OPEN (the author, 2026-09-27): group,
+                transport, midi and mic stand for several things, and the list
+                under the button is where the one meant is chosen. What each
+                line offers and makes is model/NewCueMenus.h's; this reads the
+                pick, shows the list, and sends what the line clicked makes.
+
+                THE PICK IS READ WHEN THE LIST OPENS, and what it offered is
+                what a click makes: the cues the group list offered to take,
+                the cue the transport list said it would aim at. */
+            void chooseFromList (const std::string& kind, juce::Component& button)
+            {
+                if (refusedWhileLocked() || latest == nullptr)
+                    return;
+
+                const auto where = destinationSentence().toStdString();
+
+                std::vector<model::Choice> offered;
+                std::vector<model::MenuLine> lines;
+                model::Wrap around;
+                std::string aim;
+
+                if (kind == "group")
+                {
+                    if (! groupingCue.empty())      // a group still being made around the last pick
+                        return;
+
+                    offered = model::groupChoices();
+                    around = model::wrapOf (*latest, selection.ids());
+                    lines = model::groupMenu (around, where);
+                }
+                else if (kind == "transport")
+                {
+                    offered = model::transportChoices();
+                    aim = selection.anchor();
+
+                    const auto aimName = aim.empty() ? std::string {}
+                                                     : model::text (*latest, "/godot/cue/" + aim + "/name");
+
+                    lines = model::transportMenu (aim.empty() ? std::string {}
+                                                              : (aimName.empty() ? std::string ("the picked cue") : aimName),
+                                                  where);
+                }
+                else if (kind == "midi")
+                {
+                    offered = model::midiChoices();
+                    lines = model::midiMenu (where);
+                }
+                else if (kind == "mic")
+                {
+                    offered = model::micChoices (*latest);
+                    lines = model::micMenu (*latest, offered, where);
+                }
+                else
+                {
+                    createCue (kind);
+                    return;
+                }
+
+                ui::showNewCueMenu (button, lines,
+                                    [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
+                                     this, offered, cues = around.cues, aim] (int picked, bool wrap)
+                                    {
+                                        if (safe == nullptr || picked < 0
+                                              || static_cast<std::size_t> (picked) >= offered.size())
+                                            return;
+
+                                        createFromChoice (offered[static_cast<std::size_t> (picked)],
+                                                          wrap ? cues : std::vector<std::string> {}, aim);
+                                    });
+            }
+
+            void createFromChoice (const model::Choice& line, const std::vector<std::string>& wrapped,
+                                   const std::string& aim)
+            {
+                if (refusedWhileLocked())
+                    return;
+
+                auto bornWith = line.settings;
+
+                if (! wrapped.empty())
+                {
+                    wrapAround (wrapped, bornWith);
+                    return;
+                }
+
+                /*  A STOP WITH NO TARGET STOPS NOTHING: aimed at the cue picked
+                    when the list opened, and placed after it. */
+                if (line.aimed && ! aim.empty())
+                    bornWith.emplace_back ("target", aim);
+
+                createCue (line.kind, bornWith);
+            }
+
+            /*  A NEW GROUP AROUND THE PICKED CUES, found next pass by watching
+                the outermost of them change parent (finishCreations), then
+                picked so the inspector opens on it. */
+            void wrapAround (const std::vector<std::string>& ids, const model::Settings& bornWith)
+            {
+                if (! groupingCue.empty() || latest == nullptr || ids.empty())
+                    return;
+
+                const auto picked = [&ids] (const std::string& id)
+                {
+                    return std::find (ids.begin(), ids.end(), id) != ids.end();
+                };
+
+                groupingCue = ids.front();
+
+                for (auto parent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
+                     ! parent.empty(); parent = model::text (*latest, "/godot/cue/" + parent + "/parent"))
+                    if (picked (parent))
+                        groupingCue = parent;
+
+                groupingParent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
+                groupingWait = 0;
+                send (gesture::wrapGroup (ids, bornWith));
             }
 
             /*  `+ media` asks for the files first and imports them where the

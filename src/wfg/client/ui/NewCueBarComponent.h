@@ -48,6 +48,11 @@ namespace wfg::client::ui
         {
             /** A cue of this kind, where the window decides it goes. */
             std::function<void (const std::string& kind)> create;
+
+            /*  THE LIST FOR THIS KIND (2026-09-27), opened under the button
+                pressed: group, transport, midi and mic stand for several
+                things, and the list is where the one meant is chosen. */
+            std::function<void (const std::string& kind, juce::Component& button)> choose;
         };
 
         NewCueBarComponent (const model::Theme& theme, Actions actions);
@@ -66,9 +71,11 @@ namespace wfg::client::ui
         Actions actions;
         model::Theme theme;
         std::vector<std::unique_ptr<juce::TextButton>> buttons;
+        std::vector<std::string> kinds;     ///< each button's kind, in step with `buttons`
         juce::String destination;
 
         int rowHeight() const noexcept;
+        juce::String tooltipFor (const std::string& kind) const;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NewCueBarComponent)
     };

@@ -17,6 +17,7 @@
 #include <wfg/client/ui/CueListComponent.h>
 
 #include <wfg/client/model/LoadToTime.h>
+#include <wfg/client/model/NewCueMenus.h>
 
 #include <wfg/client/ui/Look.h>
 
@@ -801,9 +802,14 @@ namespace wfg::client::ui
             g.drawText (*when, cell.reduced (pad / 2, 0), juce::Justification::centredRight, false);
         }
 
+        /*  WHAT THE ROW IS, IN A WORD: a group's mode, a transport cue's
+            verb (2026-09-27: "stop", "round", "rec" - the list that made it
+            told them apart, so the row does too), else the kind. */
         auto kindCell = area.removeFromRight (kindChars * unit);
         g.setColour (faint);
-        g.drawText (entry.isGroup && ! entry.mode.empty() ? entry.mode : entry.kind,
+        g.drawText (entry.isGroup && ! entry.mode.empty() ? juce::String (entry.mode)
+                      : ! entry.verb.empty()               ? juce::String (model::verbWord (entry.verb))
+                                                           : juce::String (entry.kind),
                     kindCell, juce::Justification::centredRight, true);
 
         //  The number, then the name, indented by how deep the cue sits.

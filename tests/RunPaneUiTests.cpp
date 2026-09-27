@@ -12,6 +12,10 @@
 #include <wfg/client/ui/WaveformEditorComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
+#include <wfg/client/ui/NewCueBarComponent.h>
+#include <wfg/client/ui/NewCueMenu.h>
+#include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/NewCueMenus.h>
 
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/RunModel.h>
@@ -2335,4 +2339,88 @@ TEST_CASE ("plugin windows: Edit... on an insert the cue has not got switches it
     }
 
     folder.deleteRecursively();
+}
+
+TEST_CASE ("new-cue bar: four buttons open their list under themselves, the rest make a cue")
+{
+    /*  The author (2026-09-27): "+ group" and "+ transport" show a vertical
+        list, and so do "+ midi" and "+ mic"; "+ start" went into the
+        transport list. What a window-less test can see is which buttons
+        there are, which of them ask for a list - with themselves as the place
+        to show it - and that the rest still make their cue at once. */
+    std::vector<std::string> created;
+    std::vector<std::pair<std::string, juce::Component*>> chosen;
+
+    ui::NewCueBarComponent::Actions actions;
+    actions.create = [&created] (const std::string& kind) { created.push_back (kind); };
+    actions.choose = [&chosen] (const std::string& kind, juce::Component& button)
+    {
+        chosen.emplace_back (kind, &button);
+    };
+
+    ui::NewCueBarComponent bar (model::Theme {}, actions);
+    bar.setBounds (0, 0, 1400, bar.preferredHeight());
+
+    const auto buttons = buttonsUnder (bar);
+    REQUIRE (buttons.size() == model::cueKinds().size());
+
+    for (auto* button : buttons)
+        CHECK_FALSE (button->getButtonText().startsWith ("+ start"));
+
+    // A click, as the button delivers it (triggerClick posts, and this build runs no nested loop).
+    for (auto* button : buttons)
+        if (button->onClick)
+            button->onClick();
+
+    CHECK (chosen.size() == 4);
+    for (const auto& [kind, anchor] : chosen)
+    {
+        CAPTURE (kind);
+        CHECK (model::opensList (kind));
+
+        const auto at = std::find_if (buttons.begin(), buttons.end(), [target = anchor] (juce::Button* button)
+                                      { return button == target; });
+        REQUIRE (at != buttons.end());
+        CHECK ((*at)->getButtonText().endsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"))));
+    }
+
+    CHECK (created.size() == model::cueKinds().size() - 4);
+    for (const auto& kind : created)
+        CHECK_FALSE (model::opensList (kind));
+
+    /*  AND THE LIST AS JUCE IS HANDED IT: every line to click answers the
+        choice it names, headings and greyed sentences answer nothing. */
+    const auto lines = model::transportMenu ("Rain", "after Rain");
+    const auto menu = ui::newCueMenu (lines);
+
+    int items = 0;
+    int enabled = 0;
+
+    for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+    {
+        const auto& item = it.getItem();
+
+        if (item.isSectionHeader || item.isSeparator)
+            continue;
+
+        ++items;
+
+        if (! item.isEnabled)
+            continue;
+
+        ++enabled;
+        const auto [choice, wrap] = ui::choiceOfMenuItem (item.itemID);
+        REQUIRE (choice >= 0);
+        REQUIRE (static_cast<std::size_t> (choice) < model::transportChoices().size());
+        CHECK_FALSE (wrap);
+        CHECK (item.text.startsWith (juce::String (model::transportChoices()[static_cast<std::size_t> (choice)].label)));
+    }
+
+    CHECK (enabled == static_cast<int> (model::transportChoices().size()));
+    CHECK (items == enabled + 1);   // the sentence saying where it lands
+
+    CHECK (ui::choiceOfMenuItem (0).first == -1);
+    CHECK (ui::choiceOfMenuItem (1) == std::make_pair (0, false));
+    CHECK (ui::choiceOfMenuItem (2) == std::make_pair (0, true));
+    CHECK (ui::choiceOfMenuItem (7) == std::make_pair (3, false));
 }

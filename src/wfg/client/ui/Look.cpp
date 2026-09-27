@@ -157,5 +157,16 @@ namespace wfg::client::ui
         setColour (juce::AlertWindow::backgroundColourId, panel);
         setColour (juce::AlertWindow::textColourId, ink);
         setColour (juce::AlertWindow::outlineColourId, rule);
+
+        /*  THE LISTS A BUTTON OPENS (2026-09-27: the new-cue lists, and the
+            settings window's menus, which drew in JUCE's own grey until now)
+            wear the show's colours: a list is a panel, its headings the dim
+            ink the cue list's derived lines use, the line under the pointer
+            the raised panel a picked row is drawn on. */
+        setColour (juce::PopupMenu::backgroundColourId, panel);
+        setColour (juce::PopupMenu::textColourId, ink);
+        setColour (juce::PopupMenu::headerTextColourId, colour (theme, "ink-dim"));
+        setColour (juce::PopupMenu::highlightedBackgroundColourId, high);
+        setColour (juce::PopupMenu::highlightedTextColourId, ink);
     }
 }
