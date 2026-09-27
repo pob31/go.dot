@@ -12,7 +12,7 @@
 # tests/fixtures/bundles/lane driven over OSC with no audio device; the header
 # lines below are the session's own.
 #
-# bundle lane sha256:e21ff8ebde68e3b7964dd93804683d84abdeb682258d5bf2f3b17332e827b058
+# bundle lane sha256:ca71e8f8dd2c25c1e98a7ac161951faf7b4ee6b5b711bbdb96e42119f03549e9
 # clock sampleRate=48000 blockSize=128 samplesPerTick=960
 # media tone.wav 0 0.000
 #

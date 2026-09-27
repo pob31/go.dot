@@ -3195,8 +3195,9 @@ Mackie vs HUI first — first week with the D700.
   host, the interface's own delay the bench's to measure.
 - **A level lane** (§3.10, 2026-09-27): **M45** — how closely the rendered level follows the lane
   drawn: the largest error away from its corners, and how late a step lands. *Taken 2026-09-27 on a
-  Debug build:* within 0.014 dB of the lane away from its corners, and a step's midpoint +1.3 to
-  +2.7 ms from where it was drawn - inside a tick, read one slew ahead.
+  Debug build:* within 0.014-0.022 dB of the lane away from its corners, and a step's midpoint -8.0
+  to -5.3 ms from where it was drawn - inside a tick, read one slew ahead. A runner that stalls the
+  tick thread holds the level still, as it holds a fade; the driver voids what a stall moved.
 
 ---
 

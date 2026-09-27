@@ -11931,11 +11931,26 @@ fixture log, M45 and this. Where the build departs from the drawing:
 - **A memo's lane is `bad-address`**, not a lane quietly ignored: the row is a media cue's
   (`logs/lane.wfglog`).
 
-**M45, taken 2026-09-27** (Debug, the author's machine, under a full ctest, both locales, printed by
-`blackbox/lane_level.py`): the rendered level is within **0.014 dB** of the lane away from its
-corners - a ramp of ten decibels a second, which the tick's piecewise approach follows to a
-hundredth - and a step drawn over a millisecond has its midpoint **+2.7 ms** (C) and **+1.3 ms**
-(fr-FR) from where it was drawn: inside a tick, as reading one slew ahead was meant to make it.
+**M45, taken 2026-09-27** (Debug, the author's machine, both locales, printed by
+`blackbox/lane_level.py`): the rendered level is within **0.014 dB** (C) and **0.022 dB** (fr-FR) of
+the lane away from its corners - slopes of five and ten decibels a second, which the tick's
+piecewise approach follows to a hundredth - and a step of twenty decibels drawn over a millisecond
+has its midpoint **-8.0 ms** and **-5.3 ms** from where it was drawn: inside a tick, as reading one
+slew ahead was meant to make it, early or late by where the tick fell.
+
+**And what a starved runner does to it** (macOS CI, `c7a6d6e`, run 36348008437): a ramp read -9.32 dB
+where -10 was drawn - LOUDER on a falling ramp, the level held - and a step landed 47 ms late. The
+tick thread had stopped for tens of milliseconds, which slow runners do (§19.11), and a lane, like a
+fade, moves only at the tick (§3.4); nothing on a show machine that keeps its ticks sees it, and the
+lever if one ever does is the tick thread's own priority (`elevateCurrentThreadForTicking`, which
+asks for nothing today), not the audio thread. The driver
+now makes the render its own witness: read a period of the tone at a time, sixteen milliseconds that
+move less than a quarter of what the drawn lane moves in them are a tick that did not come, and a
+check inside them is voided in words; a level that stood still for more than a third of a slope
+fails, because a lane nobody reads looks exactly like that. The step sits between two slopes in the
+fixture so that a stall beside it is seen. Checked against a model of the engine's ticks and slew
+before it was trusted: no stretch found in a healthy render at any tick phase, a 70 ms stall found
+where it was put, and a lane never read failing at 99.9 %.
 
 **Not built** is §20.7's list. **Waiting for the author:** the law and the gestures judged by eye in
 the window (DD), and a lane heard on the MADIface.

@@ -662,7 +662,8 @@ under its strip's fader; one gesture is one undo step; CI green.
 `5d32619`, L.4 `f5b3d78` and L.5 with the close-out. What the code can show is shown: a lane heard
 following the file through a real Tracktion graph - a ramp, a hold, a step, a looping slice hearing
 the same stretch on each pass and a lane rewritten while it loops (`blackbox/lane_level.py`, both
-locales); M45 within 0.014 dB away from the corners and a step inside a tick; one gesture one write
+locales); M45 within 0.014-0.022 dB away from the corners and a step inside a tick, with the checks a
+starved CI runner's stalled tick moved voided by the render's own witness; one gesture one write
 (`RunPaneUiTests`) and one undo step (`UndoTests`); a hand's trim and a fade beside a lane, each a
 term of the same sum (`GoTests`) - the trim being what a sampler strip's fader writes, though no case
 yet plays a lane through a sampler group itself, which the bench will. Namespace §20.8 says where
