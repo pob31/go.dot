@@ -890,6 +890,16 @@ Curves that must follow a media transport live with that clip; transport-free
 fades are wall-clock interpolators in the control graph, hundreds concurrent,
 no audio engine involvement.
 
+*Added in 0.8, at the author's direction (2026-09-27).* **The first lane built
+is a media cue's level lane** — a volume curve drawn over its waveform
+(`media/levelLane`, `docs/godot-namespace-draft-0.1.md` §20). It lives on the
+cue, and it runs on the **file's** clock, so a looping range hears the same
+stretch of it on every pass and a jump or a scrub takes it along. Its decibels
+are an **offset** on the cue's level — one more term beside the fades, the
+hand's trim and the DCAs, never a second writer of the level. Media cues only:
+a sampler clip and a kept take are media cues and have one; a live take is
+tonight's and has none.
+
 **Curve editor:** breakpoint lists with numeric entry, not only draggable
 pixels.
 
@@ -3086,6 +3096,15 @@ Added 2026-09-26 *(proposed)*, with §3.18 and §3.31:
 - **The shared rack channel** — a reverb return cues send into, §3.9e's *"bus with a chain"* — and a
   media cue's `Insert` made to sound, both still Phase 9b's.
 
+Added 2026-09-27 *(proposed)*, with §3.10's level lane:
+
+- **A lane recorded from a fader** — §3.10's read, touch, latch and write, riding a cue's level on
+  the D700 and keeping the ride as its lane.
+- **The master dial on a lane point's level**, which §17.18's rule against a handle's two numbers
+  keeps out today.
+- **Lanes on other numbers** — pan, a send, a plugin's parameter — each a row beside the number it
+  rides.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -3174,6 +3193,8 @@ Mackie vs HUI first — first week with the D700.
   no layer, 22.4 with four, 55.9 with sixteen, against the block's 2667 µs; M43 - a step of 0.02886
   against the sine's own 0.02886, where a hard join steps 0.382; M44 - out by 0 samples through the
   host, the interface's own delay the bench's to measure.
+- **A level lane** (§3.10, 2026-09-27): **M45** — how closely the rendered level follows the lane
+  drawn: the largest error away from its corners, and how late a step lands.
 
 ---
 

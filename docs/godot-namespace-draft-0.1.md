@@ -11755,3 +11755,150 @@ them (a Mackie's Cycle is `take.loop` already); and the page at `/ui`, which has
 looped through another; the D700's Rec and its light, and which port lights its transport; the Loop
 page's law for a point; M44 again with a real interface, whose own delay is the part the words
 already say.
+
+## 20. Level lanes — a volume curve drawn over a media cue's waveform, on the file's own clock
+
+Written on 2026-09-27, before any of it is built. Rows reach the CSV with the stage that implements
+them, and §20.8 at close-out says what won where the text and the code disagree.
+
+The request: *"There's one thing we missed in the waveform foot panel, I'd like to be able to add a
+volume automation curve that's sync'd with the media file. This for the media cues and the
+samples."*
+
+**What it is, before its name.** A media cue may carry a curve of level against the file's own time:
+points somebody drew over the waveform, each a second of the file and a number of decibels, joined
+by straight lines. While the cue plays, its level follows the curve wherever the file is - from its
+start offset, after a jump, round a looping slice, and again on every pass. The PRD calls it a
+**lane** (§3.10: *"dense breakpoints ... bound to a clip's local transport (scrubs when the clip
+scrubs)"*) and has always said where one is worked out: at the tick, never in the audio callback
+(§3.4), reading the clip's position, never as a Tracktion clip or a Tracktion automation curve
+(§3.25). None of it was built (the devplan's Phase 6 note: "lanes are PRD §3.10's and not built").
+
+**Where it starts, in the code.** A drawn fade already exists (`Fade/@points`, §14.6): pairs in one
+`d*` row, judged by one function (`doc::readFadePoints`) with three callers, drawn by the curve
+editor at the foot and written by one `node.set` on release. A cue's level is already a sum of terms
+on the tick thread (`Runner::applyLevels`: its own, the hand's trim, the DCAs, every ancestor's),
+handed to the voice's `CueMatrix` as one number a tick, which it slews to over one tick. And where
+the file is has been computed on the tick thread since the playhead was published
+(`Runner::updatePositions`), from the sample clock. A lane is those three put together: a list like
+the fade's, one more term in the sum, read at a second computed the way the playhead is.
+
+### 20.1 The decisions (2026-09-27)
+
+Asked with a recommendation each; all taken. The letters go on from §18.13's CW.
+
+| | Decision | Whose |
+|---|---|---|
+| **CX** | **Media cues only.** Sampler clips and kept takes are media cues and have one; a live take has none (it is tonight's, §19), and a mic cue has no file to be bound to | the author's |
+| **CY** | **Drawn on the waveform and edited there**, not on a strip of its own | the author's |
+| **CZ** | **The lane's decibels are an offset** on the cue's level: one more term of the sum, beside the fades, the hand's trim and the DCAs | the author's |
+| **DA** | **On the file's clock**: it follows the start offset, a jump, a scrub, a sampler restart and a looping slice | implementer's call (§3.10, "scrubs when the clip scrubs") |
+| **DB** | **An edit reaches a sounding cue** at the next tick, as the EQ's and the sends' do | implementer's call |
+| **DC** | **Read one slew ahead**, and the arm's snapped level carries the lane's first value | implementer's call |
+| **DD** | **A fader's law on the vertical axis**, not the fade editor's straight decibels | implementer's call; the author judges it by eye |
+
+**CZ - an offset, not the level.** The curve as the level itself would have to say who wins when a
+fade arrives: a fade replaces the run's own level (§3.6), and a lane that replaced it too would be
+two writers of one number. As a term it composes with everything already in the sum, and nought
+means *as the cue is written*, so a lane nobody has drawn changes nothing.
+
+**DA - the file's clock, and what that means round a loop.** A slice that loops plays the same
+seconds of the file again, and so hears the same stretch of the lane again: a lane is a property of
+the recording, not of the night. A curve over the time since GO - a bed that loops for two minutes
+and then fades - is what a fade cue is for.
+
+### 20.2 The row
+
+`media,levelLane`, `d*`, `rw`, persist `show`, empty by default: (seconds, dB) pairs. Seconds of the
+FILE, from its start - not of the cue from its GO - so the lane and the waveform share one axis and
+`run/position` is the second a lane is read at. A curve is a decision (§14.6's reason for `points`),
+so it is saved, undone, and refused under the lock like any `show` row. On the `media` owner, not
+`sound` (§18.2's split), because a mic cue has no file.
+
+### 20.3 What makes a list a lane
+
+One function, `doc::readLevelLane` (`document/LevelLane.h`), and three callers - the write door,
+`validate` and the Runner - as `readFadePoints` has (§14.6). It refuses an element that is not a
+number; an odd count; a negative time; a time that does not climb strictly; and a level outside the
+range `sound,level` declares (-120..12), read from that row rather than written a second time.
+Unlike a fade's, **neither end is fixed**: a lane need not start at nought nor reach the file's end,
+and it says nothing about a file's length, which the document does not know.
+
+Between two points the level runs straight in dB, which is what a drawn fade does; before the first
+point it holds the first one's level, and after the last it holds the last one's. **Empty is no
+lane** - nought throughout - and one point is a constant offset.
+
+### 20.4 Where it is read
+
+On the tick thread, in a pass of its own just before `applyLevels`: each sounding media run's lane
+is read at the second of the file its voice will be at **one slew from now**
+(`CueMatrix::levelSlewSeconds`, 20 ms), and the answer is the run's `laneDb` - a term of its own sum
+and of no one else's (§4.12: nothing inherits; a group has no lane). Reading ahead by the slew is
+what puts a corner on time: a voice arrives at a level one slew after it is given it.
+
+The second comes from the sample clock by the playhead's own arithmetic - the run's origin plus what
+has elapsed since its launch, wrapped by the slice's pass - with two differences from
+`updatePositions`, both for a voice that is not yet where the playhead says:
+
+- **before the launch**, it is where the voice will start: the start offset, the jump's second, or
+  the first slice's in-point, recorded at the arm;
+- **between a slice boundary's placement and its crossing**, it is still the outgoing slice. The
+  placement overwrites the slice's clock early - the playhead reads the incoming in-point until the
+  sound reaches it, which is right for a readout - and the lane keeps the outgoing one's, which is
+  right for a level.
+
+The points are parsed at the arm, and again whenever the show's revision moves (`applyEq`'s gate):
+an edit reaches the sounding run on the next tick (DB), and a tick with nobody editing costs one
+comparison. The arm snaps the voice's level to the cue's level plus the lane at the start, so a lane
+drawn up from silence starts silent rather than sliding down from the cue's level over the first
+tick.
+
+**Nothing on the audio thread changes.** The lane reaches the voice through `setLevelDb`, one relaxed
+store a tick, as every fade has since Phase 2. Its resolution is therefore the tick's (§3.4: control
+rate decides where to go, audio rate how smoothly): a corner is a straight approach over 20 ms, a
+step is a 20 ms ramp, and nothing finer can be drawn and heard. M45 measures how close it comes.
+
+`run/level` carries the lane, being the level the voice is at. A sampler strip's fader shows the
+hand's trim, as before: the lane is not the hand's.
+
+### 20.5 The window
+
+The lane is drawn over the waveform in the foot's media editor (CY): a line across the bar, a dot at
+each point, a dim line at nought when there is none, and at the playhead a dot where the lane is
+now. One axis with the waveform, so zoom and pan move both. The vertical axis is a fader's law (DD):
+the fade editor's straight -120..12 would put everything anybody listens to in its top quarter.
+
+- **A drag on a point** moves it, held strictly between its neighbours in time. A press shows its
+  second and its level as two typed numbers in the head row (PRD §3.10: numeric entry, not only
+  pixels), and typing into either writes the lane.
+- **A double click on the line** adds a point on it - the level does not move until the point does;
+  **on a point** it removes it; anywhere else it shows the whole file, as before.
+- **One gesture, one write**: the whole list in one `node.set .../levelLane`, sent on release - one
+  undo step, the fade editor's rule.
+- A point is found before a slice's edge, within six pixels; its time snaps to a slice's edge unless
+  Alt is held. Under the lock nothing is grabbed.
+
+`model/Lane` holds the rules a second time, checked by `ClientTests` against the real
+`readLevelLane` - `model/Curve`'s arrangement. The desktop inspector does not list the row (the
+Waveform opener is the way in); the page lists it as a plain row among the media rows, so every
+command the desktop sends stays reachable from `/ui` (§14.16).
+
+### 20.6 Fixtures, drivers, and what it measures
+
+- **Unit.** `LevelLaneTests` (the judge, the arithmetic, the door, validate, one write one undo);
+  `GoTests` (the term, the arm's snap, a jump, a looping slice, an edit while sounding, a fade and a
+  trim beside a lane); `ClientTests` (`model/Lane` against the judge, the verbs, the law);
+  `RunPaneUiTests` (the gestures, and `waveform-lane.png` under `WFG_SNAPSHOT_DIR`).
+- **Replay and driver.** `logs/lane.wfglog`; `blackbox/lane_level.py`, a hosted render of a
+  generated tone under a drawn lane: a ramp, a step, and a looping slice heard with the same stretch
+  on each pass.
+- **M45** - how closely the rendered level follows the drawn one: the largest error away from the
+  corners, and how late a step lands.
+
+### 20.7 What it does not build
+
+Recording a lane from a fader (§3.10's read, touch, latch and write, §16.10's queue); the master dial
+on a point's level (§17.18's BV: a handle is two numbers, and a point's level alone is one but has no
+address of its own); lanes on other numbers - pan, a send, a plugin's parameter - each of which would
+be a row beside the one it rides, not a generic object; a lane on a group (§4.12) or on a live take
+(CX); and a curve over the time since GO, which is a fade cue.

@@ -637,6 +637,30 @@ through a real plugin on the MADIface.
 **Needs from the author:** the D700's Rec (and a Loop key, if it has one) pressed at the bench, and
 the page's law for a loop point.
 
+### Level lanes — a volume curve on a media cue · S
+
+*Added on 2026-09-27*, at the author's request: *"a volume automation curve that's sync'd with the
+media file. This for the media cues and the samples."* PRD §3.10's lane, the first one built.
+**Three decisions** of the author's (**CX**, **CY**, **CZ**, `godot-namespace-draft-0.1.md` §20.1)
+and four of the implementer's (DA–DD). Not a phase: it sits here because it follows 9c in time, and
+no later phase is renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| L.0 | Docs: namespace §20, PRD §3.10, §6.9 and §6.11, this section | — |
+| L.1 | The row `media/levelLane`, `doc::readLevelLane`, the write door and `validate` | L.0 |
+| L.2 | The Runner: the lane's term in the level sum, read one slew ahead on the file's clock, the arm's snap | L.1 |
+| L.3 | The window's model: `model/Lane`, the foot's reading, the two inspectors | L.1 |
+| L.4 | The lane over the waveform: its points, the gestures, the typed numbers | L.3 |
+| L.5 | `lane.wfglog`, `blackbox/lane_level.py`, M45 and close-out | L.2, L.4 |
+
+**Done when:** a lane drawn over a media cue's waveform is heard following the file - from its start
+offset, after a jump, and the same on every pass of a looping slice; a sampler clip's lane rides
+under its strip's fader; one gesture is one undo step; CI green.
+
+**Needs from the author:** judging the vertical law and the gestures by eye (DD), and listening on
+the MADIface.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M
