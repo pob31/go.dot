@@ -117,6 +117,21 @@ def shares(samples: "list[float]", start_frame: int, seconds: float = 0.5) -> st
     return ", ".join(f"{named.count(word) / len(named):.0%} {word}" for word in levels if named.count(word))
 
 
+def profile(samples: "list[float]", from_frame: int, to_frame: int, points: int = 16) -> str:
+    """WHERE THE LEVEL WAS, for a failure's detail only: one block's mean at
+    each of `points` evenly spaced places between two frames - the shape a
+    level check cannot say (a ramp, a dip, a step), which the macOS runs that
+    read a fade-in's worth of in-between levels before Esc need next time."""
+    if to_frame - from_frame < BLOCK * points or to_frame > len(samples):
+        return "too short to profile"
+    step = (to_frame - from_frame) // points
+    means = []
+    for n in range(points):
+        part = samples[from_frame + n * step:from_frame + n * step + BLOCK]
+        means.append(f"{sum(abs(s) for s in part) / max(1, len(part)):.3f}")
+    return " ".join(means)
+
+
 def dry_blocks(samples: "list[float]", start_frame: int, end_frame: int) -> int:
     """How many blocks between two frames sit nearer the dry input than the
     processed level - none, ever, since decision CU."""
@@ -136,7 +151,7 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
         replayed = room / "replayed"
         write_inputs(inputs)
 
-        stopped_at = fired_at = killed_at = down_at = 0
+        stopped_at = fired_at = killed_at = down_at = went_at = 0
 
         with Server(bundle, log=log, locale=locale, sample_rate=RATE, buffer_size=BLOCK, hosted=True,
                     render=render, input_wav=inputs, proxy_deadline_us=20000,
@@ -238,7 +253,10 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
                                 (right, "on both sides: the plugin made the mono voice stereo")):
                 common.check_level(report, common.answered_level(side, steady_from, steady_to, BLOCK), STEADY,
                                    TOLERANCE, starved, words,
-                                   shares(side, steady_from, (steady_to - steady_from) / RATE))
+                                   f"{shares(side, steady_from, (steady_to - steady_from) / RATE)};"
+                                   f" GO seen at frame {went_at}, first sound at {start}, window"
+                                   f" {steady_from}-{steady_to}, Esc at {stopped_at}; from the first sound"
+                                   f" to Esc: {profile(side, start, stopped_at)}")
             report.check(after <= 0.001, "silent after Esc", f"{after:.4f}")
             report.check(dead <= 0.001,
                          "with its plugin's child dead, the voice is silent, through the relaunch",
