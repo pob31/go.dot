@@ -213,7 +213,14 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
 
         if start >= 0 and len(left) > down_at + int(RATE * 1.0):
             rising = level(left, start + int(RATE * 0.01), 0.03)
-            steady_from, steady_to = start + int(RATE * 0.75), start + int(RATE * 1.5)
+            # THE STEADY LEVEL, READ JUST BEFORE ESC and not three quarters of a
+            # second after the first sound: the fade-in is moved a tick at a time,
+            # and a CI runner that stalls the tick thread holds it partway - flat
+            # at 0.036 on macOS (bc55df6) and 0.080 on Windows (338d3a0) all
+            # through the old window. Esc is sent two seconds past GO, so this
+            # gives the half-second fade-in about a second and a half.
+            steady_to = stopped_at - int(RATE * 0.1)
+            steady_from = max(start + int(RATE * 0.75), steady_to - int(RATE * 0.6))
             after = level(left, stopped_at + int(RATE * 0.8))
             dead_from, dead_to = killed_at + int(RATE * 1.0), down_at + int(RATE * 1.0)
             dead = level(left, dead_from, (dead_to - dead_from) / RATE)
