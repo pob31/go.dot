@@ -11347,6 +11347,45 @@ outside the loop sends it to the in point, crossfaded. **Every wrap is an equal-
 ten milliseconds taken inside the take, so a point moved onto a loud sample does not click. There is
 no *slide* row: the page's third rotary writes both points by the same amount.
 
+*As built (9c.1), the looper.* `audio/Looper` names no JUCE and no Tracktion type and is tested alone
+(`tests/LooperTests.cpp`); the graph, the store beside the Edit and the verbs are 9c.2 and 9c.3. What
+it does beyond the drawing:
+
+- **The memory** is (1 + `layers`) slots of the longest take plus one crossfade, both channels, in
+  chunks of 256 samples, every page written once in `prepare` (a vector assigned, not reserved); each
+  chunk carries a **stamp** and a **peak**. A slot is emptied by moving its generation on - one store
+  - and a chunk whose stamp is behind reads as silence and is zeroed the first time it is written
+  again, 256 samples at a time on the audio thread. Undo, Clear and a new layer never wipe megabytes
+  in a block. The peaks are the take's picture, per slot, readable from any thread.
+- **"Taken inside the take"** needed somewhere to fade out from when the loop is the whole take: a
+  closed take goes on recording for **one crossfade past its end** (the post-roll), and every wrap
+  fades out through what followed the out point. A take pressed shut before it is two crossfades
+  long goes on recording until it is, and closes then.
+- **A press is placed at a sample** from one thread through a queue of sixty-four with no lock, and
+  what the audio thread did by itself comes back as events for the engine to log - a take **closed**
+  at its length, one that filled its memory (**full**), a pass refused because every layer is in use
+  (**layersFull**).
+- **Nothing steps.** The loop starts and stops over one crossfade (a stop during a start turns round
+  at the gain it had reached); a layer taken off by Undo fades before it goes; and while anything
+  fades out, the next press waits for it - ten milliseconds late at the most, never a click.
+- **A layer has soft edges**, which the drawing did not say and a render found (below): a pass rises
+  over its first crossfade and goes on, falling, for one more after it is closed, and under every wrap
+  or jump the input is laid twice - rising at the in point and falling where the loop was going - so
+  the loop's own crossfade sums the layer back to unity. A pass laid on a loop had had nothing past
+  the out point, and fell to silence in one sample at every wrap: a tenth of full scale on a chord.
+- **What §19.3's table left open**, decided here: Undo while a take records abandons it whole
+  (nothing of it was heard); the cue ending while it records **keeps** the take, held, and while a
+  layer is laid closes the layer and holds; Rec on a held take whose layers are all in use loops it
+  without a layer and says so.
+
+**Measured while testing, Debug:** at a wrap on a 441 Hz sine whose take is no whole number of
+periods, the largest step between samples is the sine's own (0.0289 against 0.0289) where a hard
+join would step 0.38; with a pass begun and closed mid-loop and the points ridden across its edges,
+1.05 times the two sines' slopes together. **To listen:** with `WFG_SNAPSHOT_DIR` set,
+`looper-points.wav` - a chord taken, looped with its points moved every quarter of a second, and a
+layer laid on it. That render is where the layer's edge was heard first: 0.155 at 13.75 s, against the
+chord's own 0.016.
+
 ### 19.5 The rows
 
 | Node | Type, default | Access | Persist | Meaning |

@@ -180,6 +180,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/EqPlugin.cpp
     wfg/engine/audio/LiveInputPlugin.h
     wfg/engine/audio/LiveInputPlugin.cpp
+    wfg/engine/audio/Looper.h
+    wfg/engine/audio/Looper.cpp
     wfg/engine/audio/ProxyPlugin.h
     wfg/engine/audio/ProxyPlugin.cpp
     wfg/engine/audio/DeviceLayer.h
