@@ -11203,11 +11203,16 @@ at the death not sent again; and through the graph, a rack channel whose child i
 the one that has the plugin switched out plays on (it read the dry 0.8 before the wrapper's fix). ClientTests: the two sentences. `phase9a_fx.py` and `phase9b_mic.py`
 read the render from the kill across the relaunch - which the same parameter kills again - as silent,
 and count the blocks at the dry level: none. Neither window depends any more on where a relaunch
-lands. And a processed-level window is **void**, not failed, when the runner starved the child -
-more than half its blocks late and the engine failing the plugin on its own before the kill the
-driver asked for (`Report.void`, `common.logged_before`): silence and words are what the product owes
-then, and the level waits for a run on a machine that keeps up (macOS CI read 87% of a window late at
-`c902356`). `logs/mic.wfglog` was recorded again for the new words.
+lands. A level the plugin makes is read from **the blocks it answered in time**
+(`common.answered_level`): for a constant source those are flat and not silent, where a late block
+is silent and its neighbours fade - which slid a plain median off the level when a starved Windows
+runner made a quarter of a window late (`e20beff`). A window the runner took away whole - fewer
+than five blocks answered - is **void**, not failed, when the engine failed the plugin for lateness
+on its own before the kill the driver asked for (`common.check_level`, `Report.void`,
+`common.logged_before`), and a failure otherwise: silence and words are what the product owes then,
+and the level waits for a run on a machine that keeps up (macOS CI read 87% of a window late at
+`c902356`). The drivers place their windows from the frame on disk at GO, each ending before the
+next write is sent (`d9529b6`). `logs/mic.wfglog` was recorded again for the new words.
 
 ## 19. Phase 9c — live sampling channels: a take, its layers and its loop: what the tree, the commands and the log gain
 
