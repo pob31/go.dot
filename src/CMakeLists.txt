@@ -368,6 +368,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/DirectOuts.cpp
     wfg/client/model/Fader.h
     wfg/client/model/Fader.cpp
+    wfg/client/model/Lane.h
+    wfg/client/model/Lane.cpp
     wfg/client/model/Sends.h
     wfg/client/model/Sends.cpp
     wfg/client/model/Eq.h

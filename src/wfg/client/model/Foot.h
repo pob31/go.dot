@@ -49,6 +49,7 @@
 #include <wfg/client/model/Curve.h>
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/Lane.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Take.h>
@@ -89,6 +90,12 @@ namespace wfg::client::model
         double startOffset = 0.0;
 
         std::vector<RangeRow> ranges;
+
+        /*  THE CUE'S LEVEL LANE, drawn over the waveform (namespace draft
+            §20.5), and whether the show is locked - which is when nothing on
+            the lane may be grabbed, the lane being a decision the lock keeps. */
+        std::vector<LanePoint> lane;
+        bool locked = false;
 
         /*  THE MIX CHANNELS AND WHAT THIS CUE SENDS INTO THEM, filled only
             when the sends are what is open. `cueLevel` is the cue's own

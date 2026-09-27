@@ -785,6 +785,13 @@ namespace wfg::client::model
             std::erase_if (decided, [] (const Field& field)
                                     { return field.name.rfind ("eq", 0) == 0; });
 
+        /*  AND THE LEVEL LANE IS DRAWN OVER THE WAVEFORM (namespace draft
+            §20.5), where its points can be seen against the sound they ride;
+            a list of numbers in a text box is not a way to edit a curve. The
+            Waveform opener is the door, and the page keeps the row. */
+        if (out.kind == "media")
+            std::erase_if (decided, [] (const Field& field) { return field.name == "levelLane"; });
+
         //  The four blocks, in the order somebody fills them in.
         const auto kindRows = [&out]
         {

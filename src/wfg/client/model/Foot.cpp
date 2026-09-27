@@ -100,6 +100,8 @@ namespace wfg::client::model
             out.startOffset = osc::parseDouble (at (cue + "startOffset")).value_or (0.0);
             out.fileLength = osc::parseDouble (at (cue + "duration")).value_or (0.0);
             out.ranges = readRanges (snapshot, subject.objectId);
+            out.lane = readLane (snapshot, subject.objectId);
+            out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 
             /*  WHY THERE IS NOTHING TO DRAW, when there is nothing to draw, in
                 the words that say what to do about it. A panel that just sat

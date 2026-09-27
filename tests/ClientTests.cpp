@@ -97,6 +97,7 @@
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/FadePoints.h>
+#include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfaceTable.h>
@@ -2723,6 +2724,188 @@ TEST_CASE ("client: a drawn fade, and every string it writes is one the engine a
         CHECK (model::writePoints ({}).empty());
         CHECK (doc::readFadePoints ("").problem.empty());
     }
+}
+
+TEST_CASE ("client: a level lane the window writes is one the engine's judge accepts")
+{
+    /*  `doc::readLevelLane` is the ONE judge of what a lane is (namespace
+        draft §20.3) - the door, `validate` and the Runner - and `model/Lane`
+        restates its rules because the boundary forbids reaching for them. So
+        every string the window can write is put to the real judge here. */
+    const auto accepted = [] (const std::vector<model::LanePoint>& points)
+    {
+        const auto text = model::writeLane (points);
+        const auto judged = doc::readLevelLane (text);
+
+        INFO ("wrote: " << text);
+        INFO ("engine said: " << judged.problem);
+
+        return judged.problem.empty() && judged.points.size() == points.size();
+    };
+
+    SUBCASE ("one point, a dip, and a lane over the middle of a file all round-trip")
+    {
+        CHECK (accepted ({ { 12.5, -6.0 } }));
+        CHECK (accepted ({ { 4.0, 0.0 }, { 5.0, -20.0 }, { 8.0, -20.0 }, { 9.0, 0.0 } }));
+        CHECK (accepted ({ { 0.0, -120.0 }, { 0.25, 12.0 }, { 187.4, -3.25 } }));
+    }
+
+    SUBCASE ("and the numbers survive a French locale, which is where a comma would get in")
+    {
+        const auto text = model::writeLane ({ { 4.5, -6.5 }, { 10.25, -120.0 } });
+
+        CHECK (text.find (',') == std::string::npos);
+        CHECK (doc::readLevelLane (text).problem.empty());
+    }
+
+    SUBCASE ("the window refuses what the door would refuse, rather than finding out after")
+    {
+        CHECK_FALSE (model::whyNotALane ({ { -0.5, 0.0 } }).empty());
+        CHECK_FALSE (model::whyNotALane ({ { 4.0, 0.0 }, { 4.0, -6.0 } }).empty());
+        CHECK_FALSE (model::whyNotALane ({ { 5.0, 0.0 }, { 4.0, -6.0 } }).empty());
+        CHECK_FALSE (model::whyNotALane ({ { 4.0, -400.0 } }).empty());
+
+        //  An EMPTY list is not a bad lane, it is the absence of one.
+        CHECK (model::whyNotALane ({}).empty());
+        CHECK (model::writeLane ({}).empty());
+    }
+
+    SUBCASE ("and what the window draws is what the engine plays")
+    {
+        const std::vector<model::LanePoint> points { { 4.0, 0.0 }, { 5.0, -20.0 }, { 9.0, 0.0 } };
+        const auto engine = doc::readLevelLane (model::writeLane (points));
+        REQUIRE (engine.problem.empty());
+
+        for (const auto seconds : { 0.0, 4.0, 4.3, 5.0, 6.75, 9.0, 12.0 })
+        {
+            INFO ("at " << seconds << " s");
+            CHECK (model::laneLevelAt (points, seconds)
+                     == doctest::Approx (doc::laneLevelDb (engine.points, seconds)));
+        }
+    }
+}
+
+TEST_CASE ("client: drawing a level lane over a waveform, point by point")
+{
+    const std::vector<model::LanePoint> dip { { 4.0, 0.0 }, { 5.0, -20.0 }, { 9.0, 0.0 } };
+
+    SUBCASE ("the first point on a lane is a constant offset of nothing, so nothing moves")
+    {
+        const auto made = model::insertLanePoint ({}, 3.0, 30.0);
+
+        REQUIRE (made.has_value());
+        REQUIRE (made->size() == 1u);
+        CHECK (made->front().seconds == doctest::Approx (3.0));
+        CHECK (made->front().levelDb == doctest::Approx (0.0));
+    }
+
+    SUBCASE ("a point added lands on the line, in order, and changes nothing until it moves")
+    {
+        const auto added = model::insertLanePoint (dip, 7.0, 30.0);
+
+        REQUIRE (added.has_value());
+        REQUIRE (added->size() == 4u);
+        CHECK ((*added)[2].seconds == doctest::Approx (7.0));
+        CHECK ((*added)[2].levelDb == doctest::Approx (-10.0));
+
+        for (const auto seconds : { 3.0, 4.5, 7.0, 8.5, 11.0 })
+            CHECK (model::laneLevelAt (*added, seconds) == doctest::Approx (model::laneLevelAt (dip, seconds)));
+
+        //  Beyond both ends it holds, so a point added out there is on the held line.
+        const auto early = model::insertLanePoint (dip, 1.0, 30.0);
+        REQUIRE (early.has_value());
+        CHECK (early->front().levelDb == doctest::Approx (0.0));
+
+        //  Not on top of another, and not outside the file.
+        CHECK_FALSE (model::insertLanePoint (dip, 5.0, 30.0).has_value());
+        CHECK_FALSE (model::insertLanePoint (dip, 31.0, 30.0).has_value());
+        CHECK_FALSE (model::insertLanePoint (dip, -1.0, 30.0).has_value());
+    }
+
+    SUBCASE ("a dragged point stays between its neighbours, in the file, at a level a cue may take")
+    {
+        auto moved = model::dragLanePoint (dip, 1, 11.0, -200.0, 30.0);
+        CHECK (moved.seconds < 9.0);
+        CHECK (moved.seconds > 8.99);
+        CHECK (moved.levelDb == doctest::Approx (-120.0));
+
+        moved = model::dragLanePoint (dip, 1, 2.0, 40.0, 30.0);
+        CHECK (moved.seconds > 4.0);
+        CHECK (moved.seconds < 4.01);
+        CHECK (moved.levelDb == doctest::Approx (12.0));
+
+        //  THE ENDS MOVE IN TIME TOO - a lane has no ends it must keep - but
+        //  not before the file starts, nor past its end.
+        CHECK (model::dragLanePoint (dip, 0, -3.0, 0.0, 30.0).seconds == doctest::Approx (0.0));
+        CHECK (model::dragLanePoint (dip, 2, 45.0, 0.0, 30.0).seconds == doctest::Approx (30.0));
+
+        //  And the lane with it moved is still a lane.
+        const auto lane = model::withLanePoint (dip, 1, 6.5, -9.0, 30.0);
+        CHECK (model::whyNotALane (lane).empty());
+        CHECK (lane[1].seconds == doctest::Approx (6.5));
+    }
+
+    SUBCASE ("any point may go, and the last one gone is no lane")
+    {
+        CHECK (model::removeLanePoint (dip, 0).size() == 2u);
+        CHECK (model::removeLanePoint (dip, 2).size() == 2u);
+        CHECK (model::removeLanePoint ({ { 3.0, -6.0 } }, 0).empty());
+        CHECK (model::removeLanePoint (dip, 7).size() == 3u);
+    }
+
+    SUBCASE ("drawn on a fader's throw, and found by how close it looks")
+    {
+        //  The strips' own law: unity high up, silence at the bottom (DD).
+        CHECK (model::laneHeightFor (0.0) == doctest::Approx (model::fractionForDb (0.0)));
+        CHECK (model::laneHeightFor (-120.0) == doctest::Approx (0.0));
+        CHECK (model::laneLevelForHeight (model::laneHeightFor (-9.5)) == doctest::Approx (-9.5));
+
+        const auto atFive = model::laneHeightFor (-20.0);
+
+        CHECK (model::nearestLanePoint (dip, 5.02, atFive + 0.01, 0.1, 0.05) == 1u);
+        CHECK (model::nearestLanePoint (dip, 6.0, atFive, 0.1, 0.05) == static_cast<std::size_t> (-1));
+        CHECK (model::onLaneLine (dip, 7.0, model::laneHeightFor (-10.0), 0.02));
+        CHECK_FALSE (model::onLaneLine (dip, 7.0, model::laneHeightFor (0.0), 0.02));
+
+        //  An empty lane's line is unity, where the cue is as written.
+        CHECK (model::onLaneLine ({}, 12.0, model::laneHeightFor (0.0), 0.02));
+    }
+
+    SUBCASE ("a typed level reads the way the window writes one")
+    {
+        CHECK (model::levelFrom ("-6").value() == doctest::Approx (-6.0));
+        CHECK (model::levelFrom (" -6.5 dB").value() == doctest::Approx (-6.5));
+        CHECK (model::levelFrom ("+3").value() == doctest::Approx (3.0));
+        CHECK (model::levelFrom ("silence").value() == doctest::Approx (-120.0));
+
+        //  And whatever the box itself shows reads back as the same level.
+        for (const auto level : { -120.0, -18.0, -6.5, 0.0, 3.0 })
+            CHECK (model::levelFrom (model::faderText (level) + " dB").value() == doctest::Approx (level));
+        CHECK_FALSE (model::levelFrom ("loud").has_value());
+        CHECK_FALSE (model::levelFrom ("40").has_value());
+        CHECK_FALSE (model::levelFrom ("").has_value());
+    }
+}
+
+TEST_CASE ("client: the waveform's reading carries the cue's level lane, and the lock")
+{
+    Rig rig ("phase4");
+
+    const auto lane = model::laneAddress ("P4MED001");
+
+    REQUIRE (rig.apply (1, "cli", "node.set", { osc::Value::string (lane),
+                                                osc::Value::string ("4 0 5 -20 9 0") }).applied == 1);
+
+    const auto reading = model::readFoot (*rig.publish (1),
+                                          { model::Subject::Kind::waveform, "P4MED001" });
+
+    REQUIRE (reading.lane.size() == 3u);
+    CHECK (reading.lane[1].seconds == doctest::Approx (5.0));
+    CHECK (reading.lane[1].levelDb == doctest::Approx (-20.0));
+    CHECK_FALSE (reading.locked);
+
+    //  A cue that is not media has no lane to read, whatever its rows say.
+    CHECK (model::readLane (*rig.publish (1), "P4GRP001").empty());
 }
 
 TEST_CASE ("client: drawing on a fade, point by point")
