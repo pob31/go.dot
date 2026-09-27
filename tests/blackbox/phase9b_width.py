@@ -24,7 +24,9 @@ switched out mid-cue, both sides play the mono source at full, exactly as a
 mono cue always has; sent to a mono bus with the insert back in, the two sides
 are heard summed at a half each; and the session replays with no child at all.
 
-A CONSTANT SOURCE, read as the median of block means (phase9a_fx.py says why).
+A CONSTANT SOURCE, each level read from the blocks the plugin answered in time
+(`common.answered_level` says why), and a window the runner took away whole
+void rather than failed when the engine said so.
 """
 
 import argparse
@@ -134,8 +136,10 @@ def run(locale: "str | None") -> int:
                 report.equal(wait_for(server, f"/godot/cue/{MEDIA}/chainChannels", 2), 2,
                              "the mono cue reads two channels wide through it")
 
+                went_at = first_sound.frames_on_disk(render)
                 hand.send("/godot/cmd/go")
-                report.check(wait_for_frames(render, int(RATE * 3.0)), "the render runs three seconds past GO")
+                report.check(wait_for_frames(render, went_at + int(RATE * 3.0)),
+                             "the render runs three seconds past GO")
 
                 switched_at = first_sound.frames_on_disk(render)
                 hand.send("/godot/cmd/node/set", [f"/godot/fx/{FX}/enabled", False])
@@ -164,20 +168,26 @@ def run(locale: "str | None") -> int:
             report.check(start >= 0, "the cue was heard at all")
 
             if start >= 0 and len(left) > centred_at + int(RATE * 2.0):
-                wide_l, wide_r = level(left, start + int(RATE * 1.0)), level(right, start + int(RATE * 1.0))
-                off_l, off_r = level(left, switched_at + int(RATE * 1.5)), level(right, switched_at + int(RATE * 1.5))
-                mid = level(centre, centred_at + int(RATE * 1.5))
-                mid_l = level(left, centred_at + int(RATE * 1.5))
+                # Each window ends before the next write: what was on disk when a
+                # write was sent is earlier than where it landed.
+                wide_from, wide_to = start + int(RATE * 0.5), min(start + int(RATE * 2.0), switched_at)
+                off_from, off_to = switched_at + int(RATE * 1.5), switched_at + int(RATE * 2.5)
+                mid_from, mid_to = centred_at + int(RATE * 1.5), centred_at + int(RATE * 2.5)
+                mid_l = level(left, mid_from)
+                starved = common.logged_before(log, "plugin.failed", containing="stopped answering")
 
-                report.check(abs(wide_l - SOURCE * GAIN) <= TOLERANCE and abs(wide_r - SOURCE * GAIN / 2) <= TOLERANCE,
-                             "through the widener the two sides differ: left at a half, right at a quarter",
-                             f"left {wide_l:.4f}, right {wide_r:.4f}")
-                report.check(abs(off_l - SOURCE) <= TOLERANCE and abs(off_r - SOURCE) <= TOLERANCE,
-                             "switched out, the mono cue plays on both sides at full, as it always has",
-                             f"left {off_l:.4f}, right {off_r:.4f}")
-                report.check(abs(mid - SOURCE * GAIN * 0.75) <= TOLERANCE and mid_l <= 0.01,
-                             "on the mono bus the two sides are summed at a half each, and the stereo bus is quiet",
-                             f"centre {mid:.4f} against {SOURCE * GAIN * 0.75:.4f}, left {mid_l:.4f}")
+                def read(samples: "list[float]", begin: int, end: int, expected: float, words: str) -> None:
+                    common.check_level(report, common.answered_level(samples, begin, end, BLOCK), expected,
+                                       TOLERANCE, starved, words)
+
+                read(left, wide_from, wide_to, SOURCE * GAIN, "through the widener, left at a half")
+                read(right, wide_from, wide_to, SOURCE * GAIN / 2, "and right at a quarter: the two sides differ")
+                read(left, off_from, off_to, SOURCE,
+                     "switched out, the mono cue plays on the left at full, as it always has")
+                read(right, off_from, off_to, SOURCE, "and on the right")
+                read(centre, mid_from, mid_to, SOURCE * GAIN * 0.75,
+                     "on the mono bus the two sides are summed at a half each")
+                report.check(mid_l <= 0.01, "and the stereo bus is quiet", f"left {mid_l:.4f}")
             else:
                 report.check(False, "the render is long enough to read every window", f"{len(left)} frames")
 

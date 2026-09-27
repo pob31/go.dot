@@ -117,14 +117,6 @@ def shares(samples: "list[float]", start_frame: int, seconds: float = 0.5) -> st
     return ", ".join(f"{named.count(word) / len(named):.0%} {word}" for word in levels if named.count(word))
 
 
-def late_fraction(samples: "list[float]", start_frame: int, seconds: float = 0.5) -> float:
-    """How many of the window's blocks sit nearer silence than the processed
-    level - a late block is silent, since decision CV."""
-    part = samples[max(0, start_frame):max(0, start_frame) + int(RATE * seconds)]
-    blocks = [sum(abs(s) for s in part[i:i + BLOCK]) / BLOCK for i in range(0, len(part) - BLOCK + 1, BLOCK)]
-    return sum(1 for b in blocks if b < STEADY / 2) / len(blocks) if blocks else 0.0
-
-
 def dry_blocks(samples: "list[float]", start_frame: int, end_frame: int) -> int:
     """How many blocks between two frames sit nearer the dry input than the
     processed level - none, ever, since decision CU."""
@@ -221,8 +213,7 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
 
         if start >= 0 and len(left) > down_at + int(RATE * 1.0):
             rising = level(left, start + int(RATE * 0.01), 0.03)
-            steady = level(left, start + int(RATE * 1.0))
-            beside = level(right, start + int(RATE * 1.0))
+            steady_from, steady_to = start + int(RATE * 0.75), start + int(RATE * 1.5)
             after = level(left, stopped_at + int(RATE * 0.8))
             dead_from, dead_to = killed_at + int(RATE * 1.0), down_at + int(RATE * 1.0)
             dead = level(left, dead_from, (dead_to - dead_from) / RATE)
@@ -230,19 +221,17 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             report.check(rising < STEADY * 0.5,
                          "it rises over its half-second fade-in rather than stepping",
                          f"{rising:.4f} in its first forty milliseconds against {STEADY:.4f}")
-            # VOID, NOT FAILED, when the runner starved the child: more than half the
-            # window late and the engine failing the plugin on its own before the kill
-            # asked for - silence and words, which is what the product owes then.
-            starved = common.logged_before(log, "plugin.failed", '/p1"')
-            late = late_fraction(left, start + int(RATE * 1.0))
-            for value, words in ((steady, "through Vox 1's plugin at a half"),
-                                 (beside, "on both sides: the plugin made the mono voice stereo")):
-                if starved and late > 0.5:
-                    report.void(words, f"the runner starved the child: {late:.0%} of the blocks late, and the"
-                                       f" engine failed it {starved} time(s) on its own; {value:.4f}")
-                else:
-                    report.check(abs(value - STEADY) <= TOLERANCE, words,
-                                 f"{value:.4f} against {STEADY:.4f}; {shares(left, start + int(RATE * 1.0))}")
+            # WHAT THE BLOCKS VOX 1'S PLUGIN ANSWERED IN TIME ARE AT: a late block
+            # is silent and its neighbours fade (decision CV), which slid a plain
+            # median off the level on Windows CI (e20beff: a quarter of the blocks
+            # late). Void, not failed, if the runner took the whole window and the
+            # engine failed the plugin for lateness on its own before the kill.
+            starved = common.logged_before(log, "plugin.failed", '/p1"', containing="stopped answering")
+            for side, words in ((left, "through Vox 1's plugin at a half"),
+                                (right, "on both sides: the plugin made the mono voice stereo")):
+                common.check_level(report, common.answered_level(side, steady_from, steady_to, BLOCK), STEADY,
+                                   TOLERANCE, starved, words,
+                                   shares(side, steady_from, (steady_to - steady_from) / RATE))
             report.check(after <= 0.001, "silent after Esc", f"{after:.4f}")
             report.check(dead <= 0.001,
                          "with its plugin's child dead, the voice is silent, through the relaunch",

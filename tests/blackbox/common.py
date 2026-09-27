@@ -684,10 +684,12 @@ class Report:
         return 0
 
 
-def logged_before(log: Path, verb: str, until: "str | None" = None) -> int:
+def logged_before(log: Path, verb: str, until: "str | None" = None, containing: "str | None" = None) -> int:
     """How many `verb` records a session's log holds before the first line with
-    `until` in it - every one, with no `until`. How a driver tells the engine
-    failing a plugin on its own (a starved runner) from the kill it asked for."""
+    `until` in it - every one, with no `until` - and, with `containing`, only
+    those that say it. How a driver tells the engine failing a plugin on its
+    own for lateness (a starved runner: "stopped answering") from the kill it
+    asked for, or from a child that died, which is never the runner's doing."""
     try:
         lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -696,9 +698,62 @@ def logged_before(log: Path, verb: str, until: "str | None" = None) -> int:
     for line in lines:
         if until is not None and until in line:
             break
-        if f" {verb} " in line:
+        if f" {verb} " in line and (containing is None or containing in line):
             count += 1
     return count
+
+
+# A window read from fewer answered blocks than this reads nothing.
+ANSWERED_ENOUGH = 5
+
+
+def answered_level(samples: "list[float]", start_frame: int, end_frame: int,
+                   block: int) -> "tuple[float | None, int, int]":
+    """WHAT THE BLOCKS A PLUGIN ANSWERED IN TIME ARE AT, between two frames.
+
+    A constant source through a plugin that answers in time is level, block
+    after block. A block it is late for is silent, and the blocks either side
+    of the silence fade (decision CV, 2026-09-26), so neither says anything
+    about what the plugin does to the sound - and a starved CI runner makes a
+    great many of them (a quarter of a window on Windows at e20beff, which slid
+    a plain median off the level into the fades). The level is the median of
+    the blocks that are flat and not silent; with it, how many there were and
+    how many blocks the window held. The window starts on a block boundary, so
+    each block read is one the engine rendered - a render drops whole blocks,
+    if any, and a block read across two holds whatever changed between them."""
+    first = -(-max(0, start_frame) // block) * block
+    part = samples[first:max(0, end_frame)]
+    means = []
+    seen = 0
+    for i in range(0, len(part) - block + 1, block):
+        piece = [abs(s) for s in part[i:i + block]]
+        seen += 1
+        mean = sum(piece) / block
+        if max(piece) - min(piece) <= 0.002 and mean > 0.002:
+            means.append(mean)
+    if not means:
+        return None, 0, seen
+    means.sort()
+    return means[len(means) // 2], len(means), seen
+
+
+def check_level(report: Report, reading: "tuple[float | None, int, int]", expected: float,
+                tolerance: float, starved: int, description: str, detail: str = "") -> None:
+    """A level read from the answered blocks - or VOID when the runner took the
+    whole window away: fewer than a handful answered in time while the engine
+    failed the plugin on its own for lateness, which is what it owes then (the
+    silence and the words are proved elsewhere). With no such failure said, a
+    window with nothing answered in it is a failure: a path that never answers."""
+    value, counted, seen = reading
+    note = f"{counted} of {seen} blocks answered in time" + (f"; {detail}" if detail else "")
+    if counted < ANSWERED_ENOUGH or value is None:
+        if starved:
+            report.void(description, f"the runner starved the child: {note}; the engine failed it for"
+                                     f" lateness {starved} time(s) on its own")
+        else:
+            report.check(False, description, note)
+        return
+    report.check(abs(value - expected) <= tolerance, description, f"{value:.4f} against {expected:.4f}; {note}")
 
 
 def copy_bundle(source: Path, destination: Path) -> Path:
