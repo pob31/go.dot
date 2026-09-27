@@ -3194,7 +3194,9 @@ Mackie vs HUI first — first week with the D700.
   against the sine's own 0.02886, where a hard join steps 0.382; M44 - out by 0 samples through the
   host, the interface's own delay the bench's to measure.
 - **A level lane** (§3.10, 2026-09-27): **M45** — how closely the rendered level follows the lane
-  drawn: the largest error away from its corners, and how late a step lands.
+  drawn: the largest error away from its corners, and how late a step lands. *Taken 2026-09-27 on a
+  Debug build:* within 0.014 dB of the lane away from its corners, and a step's midpoint +1.3 to
+  +2.7 ms from where it was drawn - inside a tick, read one slew ahead.
 
 ---
 

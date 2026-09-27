@@ -880,6 +880,40 @@ TEST_CASE ("sampler: a pad's clip starts at its initial level too")
     CHECK_FALSE (rig.liveRunOf (members[1])->launchRequested);
 }
 
+TEST_CASE ("sampler: a clip's level lane rides under its strip's fader, each its own term")
+{
+    /*  THE AUTHOR'S "SAMPLES" (namespace draft §20.1, decision CX): a sampler
+        member is a media cue, so it has a lane like any other, and the lane is
+        a term of its level beside the hand's trim - the fader moves the trim
+        and not the lane, the lane moves neither. This rig's clock stands at
+        nought, so the lane is read where the clip starts. */
+    Rig rig;
+    const auto& members = rig.membersOf[rig.bankA];
+    rig.set ("/godot/cue/" + members[0] + "/initialLevel", "-6");
+    rig.set ("/godot/cue/" + members[0] + "/levelLane", "0 -10 4 -30");
+    rig.arm (rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.sound (members[0]);
+
+    const auto* run = rig.liveRunOf (members[0]);
+    REQUIRE (run != nullptr);
+
+    CHECK (std::abs (run->trim - (-6.0)) < 1.0e-9);
+    CHECK (std::abs (run->laneDb - (-10.0)) < 1.0e-9);
+    CHECK (std::abs (run->level - (-16.0)) < 1.0e-9);
+
+    //  The hand on the fader moves its own term, and the lane stays where it was drawn.
+    const auto trim = "/godot/run/" + run->id + "/trim";
+    rig.send ("node.set", { osc::Value::string (trim), osc::Value::float64 (-3.0) }, "window");
+    rig.tickOnce();
+
+    run = rig.liveRunOf (members[0]);
+    REQUIRE (run != nullptr);
+    CHECK (std::abs (run->laneDb - (-10.0)) < 1.0e-9);
+    CHECK (std::abs (run->level - (-13.0)) < 1.0e-9);
+}
+
 TEST_CASE ("sampler: a sequence that plays itself arms a bank and goes on, and lasts until the bank is stopped")
 {
     /*  A SAMPLER GROUP IS A WINDOW ON THE SIDE OF THE CUES (author,

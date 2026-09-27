@@ -1,0 +1,43 @@
+# wfg-log 1
+# fixture lane - a media cue's level lane redrawn, refused, cleared and put back
+# (namespace draft §20).
+#
+# WHAT IT IS FOR: that a session in which the waveform's hands drew on a media
+# cue's level lane - one node.set of the whole list per gesture, through the
+# document's own door - reproduces exactly, refusals included. What a lane does
+# to a LEVEL is not in this file and cannot be, for fade-curve's reason: §3.15
+# keeps the fifty values a second out of the log, a replay runs no tick hooks,
+# and the level a lane rides is checked in GoTests and heard by
+# blackbox/lane_level.py instead. Recorded from a real `wfg serve` of
+# tests/fixtures/bundles/lane driven over OSC with no audio device; the header
+# lines below are the session's own.
+#
+# bundle lane sha256:e21ff8ebde68e3b7964dd93804683d84abdeb682258d5bf2f3b17332e827b058
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media tone.wav 0 0.000
+#
+# THE FIRST CUE'S LANE REDRAWN: the ramp now goes down to -30 by the second
+# second, held, and back at the sixth. One datagram carrying the whole list, as
+# the waveform sends it when a drag lets go.
+A 26 0 udp:127.0.0.1:49752 node.set s:"/godot/cue/VC000002/levelLane" s:"1 0 2 -30 6 -30 6.001 0"
+#
+# THREE DRAWINGS THE DOOR WOULD NOT TAKE, each with the reason it deserves, and
+# the lane drawn a moment ago stays. A point missing its level: every element a
+# number, so the type was right, and together not a lane - `bad-value`.
+R 41 1 udp:127.0.0.1:49753 bad-value node.set s:"/godot/cue/VC000002/levelLane" s:"1 0 2"
+#
+# A level no cue may be written at (-120..12, the cue's own level row): `bad-value`.
+R 56 2 udp:127.0.0.1:49754 bad-value node.set s:"/godot/cue/VC000002/levelLane" s:"1 0 2 -130"
+#
+# And a word where a number goes, the wrong KIND of thing: `type-mismatch`.
+R 71 3 udp:127.0.0.1:49755 type-mismatch node.set s:"/godot/cue/VC000002/levelLane" s:"1 0 2 later"
+#
+# THE LOOP'S LANE CLEARED - the last point double-clicked away - and the undo
+# that puts it back: a lane is a decision, so it is one step of the show's
+# history like any other row.
+A 86 4 udp:127.0.0.1:49756 node.set s:"/godot/cue/VC000005/levelLane" s:""
+A 101 5 udp:127.0.0.1:49758 undo s:"document" s:"node.set"
+#
+# A MEMO HAS NO LANE: the row is a media cue's (§20.2), so its address does not
+# exist on anything else - `bad-address`, not a lane quietly ignored.
+R 116 6 udp:127.0.0.1:49763 bad-address node.set s:"/godot/cue/VC000008/levelLane" s:"0 -6"

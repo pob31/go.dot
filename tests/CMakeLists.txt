@@ -528,6 +528,18 @@ add_test(NAME wfg.replay.eq.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/eq.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/eq
                  --wfg-locale=${WFG_LOCALE_FR})
+# A MEDIA CUE'S LEVEL LANE AS RECORDS (namespace draft §20): a lane redrawn in
+# one node.set, three drawings refused with the reason each deserves, a lane
+# cleared and put back by undo, and a lane refused on a memo - replayed through
+# the document door under both locales.
+add_test(NAME wfg.replay.lane.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/lane.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/lane
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.lane.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/lane.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/lane
+                 --wfg-locale=${WFG_LOCALE_FR})
 # A LOCKED SHOW'S EQ AND SENDS RIDDEN LIVE (2026-09-25): rides refused by the
 # document and taken by the live layer in front of it, a send made live with
 # its drawn identifier, then unlocked, kept as one transaction and undone -
@@ -1139,6 +1151,22 @@ add_test(NAME blackbox.phase9a-eq.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9a_eq.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase9a-eq.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# A MEDIA CUE'S LEVEL LANE, HEARD (namespace draft §20.6): a tone through a
+# cue whose lane ramps, holds and steps, then a looping slice hearing the same
+# stretch of its lane on every pass and a new lane written while it loops,
+# served with a real Tracktion graph and rendered; M45 is printed. Then the
+# session replays.
+add_test(NAME blackbox.lane-level.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_level.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.lane-level.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.lane-level.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_level.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.lane-level.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # A cue's insert, heard (Phase 9a, PR 9a.8): the test-gain child on a voice through

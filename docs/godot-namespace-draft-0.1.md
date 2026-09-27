@@ -11902,3 +11902,40 @@ on a point's level (§17.18's BV: a handle is two numbers, and a point's level a
 address of its own); lanes on other numbers - pan, a send, a plugin's parameter - each of which would
 be a row beside the one it rides, not a generic object; a lane on a group (§4.12) or on a live take
 (CX); and a curve over the time since GO, which is a fade cue.
+
+### 20.8 What was built, against what §20 drew
+
+*Written at close-out, 2026-09-27.* Every stage is on `main`: L.0 `d39d589` (this section's
+drawing), L.1 `d807e1f`, L.2 `e8fddd0`, L.3 `5d32619`, L.4 `f5b3d78`, and L.5 - the driver, the
+fixture log, M45 and this. Where the build departs from the drawing:
+
+- **The fader's law is the strips' own** (DD): `model/Fader`'s four points, unity at 0.85 of the
+  throw, not a law of the lane's. A lane is a fader drawn over time, and one throw in the window is
+  one thing to learn.
+- **One slew ahead is one tick of samples.** `CueMatrix` says its level slew is exactly one control
+  tick, by design, so the Runner reads the lane `samplesPerTick` ahead rather than naming the audio
+  side's constant.
+- **The hand's copy lets go when the reading moves** - to what was sent, or to somebody else's edit,
+  which is newer - and after a second of passes for a write refused; and a lane typed back to what
+  it was sends nothing. Drawn first as "until the reading holds what was sent", which the UI test
+  showed would hold a stale copy if another hand wrote in between.
+- **The head row**: the picked point's second and level in two boxes captioned "level point at",
+  the level written with its unit ("-18 dB", "-inf dB" for silence) and read back as written; the
+  row's instructions give way to the boxes. A point's level snaps to unity within half the grab
+  radius unless Alt is held.
+- **Where the tests went**: the door and the loader beside their fade twins (`DocumentTests`), the
+  undo in `UndoTests`, the Runner's term in `GoTests`, the rules and the verbs in `ClientTests`, the
+  wiring in `RunPaneUiTests` - its first case to drive a component's own mouse handlers, with
+  synthetic events aimed by `pointPosition`, the painter's own answer to where a point is.
+  `LevelLaneTests` keeps what needs no document.
+- **A memo's lane is `bad-address`**, not a lane quietly ignored: the row is a media cue's
+  (`logs/lane.wfglog`).
+
+**M45, taken 2026-09-27** (Debug, the author's machine, under a full ctest, both locales, printed by
+`blackbox/lane_level.py`): the rendered level is within **0.014 dB** of the lane away from its
+corners - a ramp of ten decibels a second, which the tick's piecewise approach follows to a
+hundredth - and a step drawn over a millisecond has its midpoint **+2.7 ms** (C) and **+1.3 ms**
+(fr-FR) from where it was drawn: inside a tick, as reading one slew ahead was meant to make it.
+
+**Not built** is §20.7's list. **Waiting for the author:** the law and the gestures judged by eye in
+the window (DD), and a lane heard on the MADIface.
