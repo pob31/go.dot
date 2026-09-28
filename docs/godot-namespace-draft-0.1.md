@@ -12546,6 +12546,29 @@ What each part of the patch does with the answers:
   than the scratch pool holds or the file cache allows (its assert is at 48 000,
   `AudioFileCache.cpp:913`). A read over the limit is split in two. It never happens at one.
 
+**What building 0002 found in Tracktion's resampler (S.2, 2026-09-28), and what it mends.** The
+first renders of a moving speed clicked - faintly, at the first sample of a block, a step of
+0.045 where the tone's own largest was 0.033 - and the cause was older than the speed. It was
+three things about the Lagrange reader, each true of any ratio that is not a whole number of
+frames a block, which includes every file at another sample rate:
+
+- **It fed the interpolator a whole number of frames a block, at that number's own ratio**, so
+  the file drifted from where the beats put it. Now it gives the interpolator the exact ratio and
+  one frame more than it can use, and puts back what it did not consume.
+- **It moved the file to the rounded request every block**, handing the interpolator a frame
+  twice or skipping one. Now it moves the file only on a jump.
+- **It judged a jump against the file's whole-frame position**, which lags the interpolator by
+  the part of a frame it has pending: about one frame at one, two at two. A moving speed moved
+  the lag past the one-sample tolerance, and the reader reset. Now it carries where it exactly
+  is, the integral of every ratio it has read at, and judges against that.
+
+A graph rebuilt mid-play had the same effect: arming any cue rebuilds the graph, and the fresh
+slot's first block told the reader the playhead had jumped. At one the reset re-reads the same
+samples (M4's bit-identical rebuilds); at any other speed it lost the interpolator's phase. A
+launched clip's reader now judges continuity by its exact position alone, and a rebuilt slot
+carries on playing. At exactly one every read is the same doubles as before, and the whole
+suite says so.
+
 **Signalsmith is switched on** in the build, `TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH=1`, on the
 interface every translation unit sees, so they all agree on the default mode. It is MIT-licensed
 and vendored inside Tracktion. It is also the only one of Tracktion's stretchers that reaches twenty

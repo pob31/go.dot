@@ -64,6 +64,11 @@ section 5(a):
 - `0001-auto-tempo-clips-may-resample.patch` (2026-09-28): an engine behaviour
   that lets an auto-tempo clip left at `disabled` be resampled rather than handed
   the default time-stretcher.
+- `0002-launched-clip-speed.patch` (2026-09-28): a speed source a launched
+  clip's handle can carry, read by its wave node and its slot so the clip plays
+  at a speed that moves; a freeze at nought for a stretched clip; and the Lagrange
+  reader made to track the interpolator exactly, so a ratio that is not a whole
+  number of frames a block no longer clicks.
 
 Tracktion Engine vendors several libraries of its own inside
 `modules/3rd_party/` and `modules/tracktion_engine/3rd_party/`. The ones that

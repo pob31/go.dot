@@ -199,6 +199,7 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/TakeWriter.cpp
     wfg/engine/audio/ProxyPlugin.h
     wfg/engine/audio/ProxyPlugin.cpp
+    wfg/engine/audio/RateVoice.h
     wfg/engine/audio/DeviceLayer.h
     wfg/engine/audio/DeviceLayer.cpp
     wfg/engine/audio/MediaInfo.h
@@ -222,6 +223,7 @@ add_library(wfg_engine STATIC
     wfg/engine/clock/AudioClockSource.h
     wfg/engine/clock/DummyAudioClock.cpp
     wfg/engine/clock/DummyAudioClock.h
+    wfg/engine/clock/RateClock.h
     wfg/engine/clock/SampleClock.h
     wfg/engine/clock/SampleTime.cpp
     wfg/engine/clock/SampleTime.h

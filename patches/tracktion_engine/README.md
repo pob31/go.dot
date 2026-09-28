@@ -35,3 +35,4 @@ Moving the Tracktion pin is in the root `README.md`, under *Bumping a pin*.
 | Patch | Since | What |
 |---|---|---|
 | `0001-auto-tempo-clips-may-resample.patch` | 2026-09-28 | `EngineBehaviour::autoTempoClipsUseDefaultTimeStretcher()`: an auto-tempo clip left at `disabled` may be resampled instead of stretched. Upstreamable. |
+| `0002-launched-clip-speed.patch` | 2026-09-28 | `LaunchHandle::SpeedSource`: a launched clip's speed, which can move while it plays, read by `WaveNodeRealTime` and `SlotControlNode`; the varispeed gate and the stretched freeze at nought; the stretcher primed at one; and the Lagrange reader tracking the interpolator exactly (no click at a ratio that is not a whole number of frames a block, nor at a rebuild mid-play). |

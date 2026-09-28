@@ -60,10 +60,13 @@
 #include <iterator>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -5568,4 +5571,547 @@ TEST_CASE ("audio host: a cue in varispeed is resampled, though a stretcher is c
     //  And no slot, no clip: a question about nothing is a no.
     CHECK_FALSE (rig.host.isTrackStretched (0, 5));
     CHECK_FALSE (rig.host.isTrackStretched (3, 0));
+}
+
+//==============================================================================
+/*  A CUE'S SPEED, HEARD (namespace draft §22, patch 0002): a voice's speed
+    placed ahead as breakpoints, read by the slot through Tracktion's wave node,
+    counted out of the render. Every case launches one file on one sample and
+    places its speed from there, the way the Runner will; what they count is
+    what an ear would hear - a pitch, an end, a click, a silence, a held sound. */
+namespace
+{
+    struct SpeedRig
+    {
+        HostRig rig;
+        int rate = 48000;
+        int block = 256;
+        std::int64_t launch = 0;
+
+        /*  One voice with `file` on it, in varispeed or timestretch, its ranges
+            if it has any; the voice routed to the first output at unity. */
+        bool open (const juce::File& file, bool stretch,
+                   const std::vector<audio::AudioHost::RangeSpec>& ranges = {}, int tracks = 1)
+        {
+            audio::HostSettings settings;
+            settings.sampleRate = rate;
+            settings.blockSize = block;
+            settings.outputChannels = 2;
+
+            if (! rig.host.start (settings))
+                return false;
+
+            audio::EditSpec spec;
+            spec.tracks = tracks;
+            spec.channelsPerTrack = 1;
+            spec.slots = std::max (1, static_cast<int> (ranges.size()));
+
+            if (! rig.host.buildEdit (spec)
+                 || ! rig.host.setTrackRanges (0, file.getFullPathName().toStdString(), ranges, 0.0, stretch)
+                 || ! rig.host.waitForTrackSourceReady (0, 10000))
+                return false;
+
+            auto* matrix = rig.host.trackMatrix (0);
+
+            if (matrix == nullptr)
+                return false;
+
+            matrix->setLevelDb (0.0f);
+            matrix->setGain (0, 0, 1.0f);
+            matrix->snapToTargets();
+
+            for (int i = 0; i < 8; ++i)
+                rig.host.processBlock();
+
+            return true;
+        }
+
+        std::int64_t at (double secondsAfterLaunch) const
+        {
+            return launch + static_cast<std::int64_t> (std::llround (secondsAfterLaunch * rate));
+        }
+
+        /*  Launches slot 0 a few blocks from now at `speed`: the speed held at
+            what the voice had until the launch, then a step to this one - the
+            two breakpoints the Runner places for a GO. */
+        bool go (double speed, int slot = 0)
+        {
+            launch = rig.host.clock().samplesElapsed() + 4 * block;
+
+            return rig.host.placeTrackRate (0, launch, 1.0)
+                && rig.host.placeTrackRate (0, launch, speed)
+                && rig.host.launchTrackAt (0, slot, rig.host.beatsAtSample (launch));
+        }
+
+        /** From the last breakpoint, a straight line to `speed` at `seconds` after the launch. */
+        bool speedAt (double seconds, double speed)
+        {
+            return rig.host.placeTrackRate (0, at (seconds), speed);
+        }
+
+        void runTo (std::int64_t sample)
+        {
+            while (rig.host.clock().samplesElapsed() + block <= sample)
+                rig.host.processBlock();
+        }
+
+        /*  `seconds` of the first output, from the first block at or after
+            `from` seconds after the launch. `startedAt` is that block's
+            sample. */
+        juce::AudioBuffer<float> record (double from, double seconds)
+        {
+            runTo (at (from));
+            startedAt = rig.host.clock().samplesElapsed();
+
+            RecordingSink sink;
+            sink.prepare (1, static_cast<int> (std::llround (seconds * rate)));
+            rig.host.setBlockSink (&sink);
+
+            while (sink.written < sink.buffer.getNumSamples())
+                rig.host.processBlock();
+
+            rig.host.setBlockSink (nullptr);
+            return sink.buffer;
+        }
+
+        std::int64_t startedAt = 0;
+    };
+
+    int risingCrossings (const juce::AudioBuffer<float>& buffer, int from = 0, int to = -1)
+    {
+        const auto* x = buffer.getReadPointer (0);
+        const auto end = to < 0 ? buffer.getNumSamples() : to;
+        auto count = 0;
+
+        for (int n = std::max (1, from); n < end; ++n)
+            if (x[n - 1] < 0.0f && x[n] >= 0.0f)
+                ++count;
+
+        return count;
+    }
+
+    /** The largest difference between neighbouring samples: a click is a step no tone makes. */
+    float largestStep (const juce::AudioBuffer<float>& buffer, int from = 0, int to = -1)
+    {
+        const auto* x = buffer.getReadPointer (0);
+        const auto end = to < 0 ? buffer.getNumSamples() : to;
+        auto largest = 0.0f;
+
+        for (int n = std::max (1, from); n < end; ++n)
+            largest = std::max (largest, std::abs (x[n] - x[n - 1]));
+
+        return largest;
+    }
+
+    float rmsOver (const juce::AudioBuffer<float>& buffer, int from, int to)
+    {
+        const auto* x = buffer.getReadPointer (0);
+        auto sum = 0.0;
+
+        for (int n = from; n < to; ++n)
+            sum += static_cast<double> (x[n]) * x[n];
+
+        return static_cast<float> (std::sqrt (sum / std::max (1, to - from)));
+    }
+
+    /** The last sample whose magnitude clears `floorLevel`, or -1. */
+    int lastSoundAt (const juce::AudioBuffer<float>& buffer, float floorLevel = 0.001f)
+    {
+        const auto* x = buffer.getReadPointer (0);
+
+        for (int n = buffer.getNumSamples(); --n >= 0;)
+            if (std::abs (x[n]) > floorLevel)
+                return n;
+
+        return -1;
+    }
+
+    /*  A file of silence with one click at the start of every second: what a
+        loop's wraps are counted by. */
+    juce::File writeClicks (const juce::File& folder, int rate, int seconds)
+    {
+        const auto file = folder.getChildFile ("clicks.wav");
+        folder.createDirectory();
+
+        juce::WavAudioFormat format;
+        std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
+
+        if (stream == nullptr)
+            return {};
+
+        auto writer = format.createWriterFor (stream,
+                                              juce::AudioFormatWriterOptions{}
+                                                .withSampleRate (static_cast<double> (rate))
+                                                .withNumChannels (1)
+                                                .withBitsPerSample (24));
+
+        if (writer == nullptr)
+            return {};
+
+        juce::AudioBuffer<float> buffer { 1, rate * seconds };
+        buffer.clear();
+
+        for (int second = 0; second < seconds; ++second)
+            buffer.setSample (0, second * rate, 0.9f);
+
+        writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+        return file;
+    }
+}
+
+TEST_CASE ("audio host: at twice the speed, varispeed doubles the pitch and timestretch keeps it, and the file ends at half")
+{
+    for (const auto stretch : { false, true })
+    {
+        INFO ("mode " << (stretch ? "timestretch" : "varispeed"));
+
+        SpeedRig speed;
+        const auto tone = writeSineTone (speed.rig.storage.folder, speed.rate, 1000.0, 0.25f, 4);
+        REQUIRE (tone.existsAsFile());
+        REQUIRE (speed.open (tone, stretch));
+        CHECK (speed.rig.host.isTrackStretched (0, 0) == stretch);
+
+        REQUIRE (speed.go (2.0));
+
+        //  One second of it from half a second in, well clear of the launch.
+        const auto heard = speed.record (0.5, 1.0);
+        const auto rising = risingCrossings (heard);
+
+        INFO (rising << " rising crossings in a second of a 1 kHz file played at twice its speed");
+
+        if (stretch)
+        {
+            CHECK (rising >= 990);
+            CHECK (rising <= 1010);
+        }
+        else
+        {
+            CHECK (rising >= 1995);
+            CHECK (rising <= 2005);
+        }
+
+        //  A four-second file at twice its speed has ended two seconds after its launch.
+        const auto around = speed.record (1.8, 0.5);
+        const auto last = speed.startedAt + lastSoundAt (around);
+        const auto ends = static_cast<double> (last - speed.launch) / speed.rate;
+
+        INFO ("the last sound " << ends << " s after the launch");
+        CHECK (ends > 1.99);
+        CHECK (ends < 2.01);
+
+        speed.runTo (speed.at (2.3));
+        CHECK_FALSE (speed.rig.host.trackPlayState (0).playing);
+        CHECK (speed.rig.host.trackRateLateCount (0) == 0);
+    }
+}
+
+TEST_CASE ("audio host: a speed ramped from one to two has no step in it")
+{
+    /*  Half a kilohertz, ramped to twice its speed over a second: the pitch
+        glides to a kilohertz. A click is a step between two samples no tone of
+        that pitch could make; the largest step a 1 kHz sine at a quarter of
+        full scale makes is 2 pi x 1000 / 48000 x 0.25, about 0.033.
+
+        What this case found, in Tracktion's Lagrange reader, before patch 0002
+        mended it: fed a whole number of frames a block and moved to the rounded
+        request every block, it clicked faintly at the first sample of a block
+        whenever the ratio was not a whole number of frames a block - 0.045 here,
+        against the tone's 0.033. */
+    SpeedRig speed;
+    const auto tone = writeSineTone (speed.rig.storage.folder, speed.rate, 500.0, 0.25f, 5);
+    REQUIRE (speed.open (tone, false));
+
+    rt::resetCounts();
+
+    REQUIRE (speed.go (1.0));
+    REQUIRE (speed.speedAt (0.5, 1.0));
+    REQUIRE (speed.speedAt (1.5, 2.0));
+
+    const auto heard = speed.record (0.25, 1.5);
+
+    INFO ("largest step " << largestStep (heard));
+    CHECK (largestStep (heard) < 0.035f);
+
+    //  Where it lands: a kilohertz over the last quarter of a second.
+    const auto tail = risingCrossings (heard, static_cast<int> (1.25 * speed.rate));
+    INFO (tail << " rising crossings in the last quarter second");
+    CHECK (tail >= 245);
+    CHECK (tail <= 255);
+
+    INFO ("Go.dot's own code allocated " << rt::violations() << " times while the speed moved");
+    CHECK (rt::violations() == 0);
+    CHECK (speed.rig.host.trackRateLateCount (0) == 0);
+}
+
+TEST_CASE ("audio host: varispeed down to nought slides into silence with no click, and the cue still plays")
+{
+    SpeedRig speed;
+    const auto tone = writeSineTone (speed.rig.storage.folder, speed.rate, 500.0, 0.25f, 5);
+    REQUIRE (speed.open (tone, false));
+
+    REQUIRE (speed.go (1.0));
+    REQUIRE (speed.speedAt (0.5, 1.0));
+    REQUIRE (speed.speedAt (1.5, 0.0));
+
+    const auto heard = speed.record (0.25, 2.0);
+
+    //  No step larger than the tone's own at its full speed: 2 pi x 500 / 48000 x 0.25.
+    INFO ("largest step " << largestStep (heard));
+    CHECK (largestStep (heard) < 0.02f);
+
+    //  Silent - exactly - once the speed is below a hundredth, which a ramp
+    //  from one to nought over a second is for its last ten milliseconds.
+    const auto* x = heard.getReadPointer (0);
+    auto nonZero = 0;
+
+    for (int n = static_cast<int> (1.3 * speed.rate); n < heard.getNumSamples(); ++n)
+        if (std::abs (x[n]) > 0.0f)     // not `!=`: -Wfloat-equal
+            ++nonZero;
+
+    CHECK (nonZero == 0);
+
+    //  A stopped tape is still a loaded one: the file has not ended.
+    CHECK (speed.rig.host.trackPlayState (0).playing);
+}
+
+TEST_CASE ("audio host: timestretch at nought holds the sound, and goes on when the speed does")
+{
+    /*  Decision DR: timestretch's nought is the instant held, pitch and all.
+        Down to nought over half a second, held for a second, back to one. */
+    SpeedRig speed;
+    const auto tone = writeSineTone (speed.rig.storage.folder, speed.rate, 500.0, 0.25f, 6);
+    REQUIRE (speed.open (tone, true));
+
+    REQUIRE (speed.go (1.0));
+    REQUIRE (speed.speedAt (0.5, 1.0));
+    REQUIRE (speed.speedAt (1.0, 0.0));
+    REQUIRE (speed.speedAt (2.0, 0.0));
+    REQUIRE (speed.speedAt (2.5, 1.0));
+
+    const auto held = speed.record (1.25, 0.5);
+    const auto level = rmsOver (held, 0, held.getNumSamples());
+    const auto rising = risingCrossings (held);
+
+    INFO ("held at nought: RMS " << level << ", " << rising << " rising crossings in half a second");
+    CHECK (level > 0.05f);
+    CHECK (rising >= 240);
+    CHECK (rising <= 260);
+
+    const auto after = speed.record (2.75, 0.5);
+    CHECK (rmsOver (after, 0, after.getNumSamples()) > 0.05f);
+    CHECK (speed.rig.host.trackPlayState (0).playing);
+}
+
+TEST_CASE ("audio host: a looping range at one and a half wraps where the source says")
+{
+    /*  A range of the first second of a file with a click at its start, looped,
+        at one and a half: the click comes back every two thirds of a second -
+        32 000 samples at 48 kHz - however many passes go by. */
+    SpeedRig speed;
+    const auto clicks = writeClicks (speed.rig.storage.folder, speed.rate, 2);
+    REQUIRE (clicks.existsAsFile());
+    REQUIRE (speed.open (clicks, false, { { 0.0, 1.0, 0 } }));
+
+    REQUIRE (speed.go (1.5));
+
+    const auto heard = speed.record (0.1, 3.0);
+    const auto* x = heard.getReadPointer (0);
+
+    std::vector<std::int64_t> wraps;
+
+    for (int n = 0; n < heard.getNumSamples(); ++n)
+    {
+        if (std::abs (x[n]) < 0.2f)
+            continue;
+
+        //  The loudest sample of this click, and past it.
+        auto peak = n;
+
+        while (n < heard.getNumSamples() && std::abs (x[n]) >= 0.05f)
+        {
+            if (std::abs (x[n]) > std::abs (x[peak]))
+                peak = n;
+
+            ++n;
+        }
+
+        wraps.push_back (speed.startedAt + peak);
+    }
+
+    REQUIRE (wraps.size() >= 4);
+
+    for (std::size_t i = 1; i < wraps.size(); ++i)
+    {
+        INFO ("wrap " << i << " after " << (wraps[i] - wraps[i - 1]) << " samples");
+        CHECK (std::llabs (wraps[i] - wraps[i - 1] - 32000) <= 2);
+    }
+}
+
+TEST_CASE ("audio host: a graph rebuilt in the middle of a ramp keeps its place")
+{
+    /*  Tracktion keeps no answer about speed between blocks, so a rebuild
+        needs nothing carried across it (patch 0002). Two voices; one plays a
+        ramp, and halfway through it the other is armed - a rebuild. Against the
+        same ramp with no rebuild, the voice that plays must not have moved. */
+    auto render = [] (bool rebuild)
+    {
+        SpeedRig speed;
+        const auto tone = writeSineTone (speed.rig.storage.folder, speed.rate, 500.0, 0.25f, 5);
+        const auto other = writeSineTone (speed.rig.storage.folder.getChildFile ("other"), speed.rate, 300.0, 0.25f, 2);
+        REQUIRE (speed.open (tone, false, {}, 2));
+
+        //  Both renders launch on the same sample, whatever the disk made open() pump.
+        speed.runTo (30 * speed.rate);
+
+        REQUIRE (speed.go (1.0));
+        REQUIRE (speed.speedAt (0.25, 1.0));
+        REQUIRE (speed.speedAt (1.25, 2.0));
+
+        auto first = speed.record (0.1, 0.6);
+
+        if (rebuild)
+            REQUIRE (speed.rig.host.setTrackSource (1, 0, other.getFullPathName().toStdString()));
+
+        auto second = speed.record (0.75, 1.0);
+        return std::make_pair (first, second);
+    };
+
+    const auto plain = render (false);
+    const auto rebuilt = render (true);
+
+    const auto* a = plain.second.getReadPointer (0);
+    const auto* b = rebuilt.second.getReadPointer (0);
+    auto largest = 0.0f;
+
+    for (int n = 0; n < plain.second.getNumSamples(); ++n)
+        largest = std::max (largest, std::abs (a[n] - b[n]));
+
+    INFO ("largest difference after the rebuild: " << largest);
+    CHECK (largest < 1.0e-6f);
+}
+
+TEST_CASE ("audio host: a cue at one is exact, bit for bit, whatever speeds the voice had before")
+{
+    /*  §22.4: at exactly one from a launch on, a slot answers with Tracktion's
+        own arithmetic. So a voice that played a cue at a half and then plays one
+        at one must sound exactly as a voice that never had a speed. */
+    auto render = [] (bool history)
+    {
+        SpeedRig speed;
+        const auto tone = writeSineTone (speed.rig.storage.folder, speed.rate, 700.0, 0.25f, 3);
+        REQUIRE (speed.open (tone, false));
+
+        if (history)
+        {
+            REQUIRE (speed.go (0.5));
+            speed.runTo (speed.at (0.6));
+            REQUIRE (speed.rig.host.stopTrackAt (0, 0, speed.rig.host.beatsAtSample (speed.at (0.6) + 4 * speed.block)));
+        }
+
+        //  Both launch the second cue on the same sample, whatever the disk
+        //  made open() pump - thirty seconds is past any of it.
+        speed.runTo (30 * speed.rate);
+        REQUIRE (speed.go (1.0));
+
+        return speed.record (0.05, 0.5);
+    };
+
+    const auto fresh = render (false);
+    const auto after = render (true);
+
+    CHECK (fresh.getNumSamples() == after.getNumSamples());
+    CHECK (std::memcmp (fresh.getReadPointer (0), after.getReadPointer (0),
+                        sizeof (float) * static_cast<std::size_t> (fresh.getNumSamples())) == 0);
+    CHECK (rmsOver (fresh, 0, fresh.getNumSamples()) > 0.1f);
+}
+
+TEST_CASE ("audio host: speed renders for the ear, written when WFG_SPEED_WAVS names a folder")
+{
+    /*  Not a check: the S.2 stage's promise to the author, who judges a speed
+        by listening. With WFG_SPEED_WAVS set, five short renders land there -
+        both modes at a half and at two, a tape stop, and a freeze that lets go.
+        Without it, the case runs one of them and writes nothing. */
+    const auto folderName = juce::SystemStats::getEnvironmentVariable ("WFG_SPEED_WAVS", {});
+    const auto writing = folderName.isNotEmpty();
+    const juce::File folder = writing ? juce::File (folderName) : juce::File();
+
+    struct Take
+    {
+        const char* name;
+        bool stretch;
+        std::vector<std::pair<double, double>> speeds;   // (seconds after the launch, speed), after the launch's own
+        double launchSpeed;
+    };
+
+    const std::vector<Take> takes {
+        { "varispeed-half",  false, {}, 0.5 },
+        { "varispeed-twice", false, {}, 2.0 },
+        { "stretch-half",    true,  {}, 0.5 },
+        { "stretch-twice",   true,  {}, 2.0 },
+        { "tape-stop",       false, { { 1.0, 1.0 }, { 3.0, 0.0 } }, 1.0 },
+        { "freeze",          true,  { { 1.0, 1.0 }, { 2.0, 0.0 }, { 4.0, 0.0 }, { 4.5, 1.0 } }, 1.0 },
+    };
+
+    for (const auto& take : takes)
+    {
+        if (! writing && std::string (take.name) != "tape-stop")
+            continue;
+
+        SpeedRig speed;
+
+        /*  A chord with some movement in it - a fifth and an octave, and a
+            slow tremolo - so a stretcher's work and a resampler's are both
+            audible. */
+        const auto file = speed.rig.storage.folder.getChildFile ("chord.wav");
+        speed.rig.storage.folder.createDirectory();
+        {
+            juce::WavAudioFormat format;
+            std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
+            REQUIRE (stream != nullptr);
+            auto writer = format.createWriterFor (stream, juce::AudioFormatWriterOptions{}
+                                                             .withSampleRate (speed.rate)
+                                                             .withNumChannels (1)
+                                                             .withBitsPerSample (24));
+            REQUIRE (writer != nullptr);
+            juce::AudioBuffer<float> buffer { 1, speed.rate * 6 };
+
+            for (int n = 0; n < buffer.getNumSamples(); ++n)
+            {
+                const auto t = static_cast<double> (n) / speed.rate;
+                const auto tremolo = 0.75 + 0.25 * std::sin (2.0 * juce::MathConstants<double>::pi * 3.0 * t);
+                const auto value = tremolo * (std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * t)
+                                               + 0.6 * std::sin (2.0 * juce::MathConstants<double>::pi * 330.0 * t)
+                                               + 0.4 * std::sin (2.0 * juce::MathConstants<double>::pi * 440.0 * t));
+                buffer.setSample (0, n, static_cast<float> (0.2 * value));
+            }
+
+            writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+        }
+
+        REQUIRE (speed.open (file, take.stretch));
+        REQUIRE (speed.go (take.launchSpeed));
+
+        for (const auto& [seconds, value] : take.speeds)
+            REQUIRE (speed.speedAt (seconds, value));
+
+        const auto heard = speed.record (0.0, 6.0);
+        CHECK (rmsOver (heard, 0, speed.rate / 2) > 0.01f);
+
+        if (writing)
+        {
+            folder.createDirectory();
+            const auto out = folder.getChildFile (juce::String (take.name) + ".wav");
+            out.deleteFile();
+            juce::WavAudioFormat format;
+            std::unique_ptr<juce::OutputStream> stream { out.createOutputStream() };
+            REQUIRE (stream != nullptr);
+            auto writer = format.createWriterFor (stream, juce::AudioFormatWriterOptions{}
+                                                             .withSampleRate (speed.rate)
+                                                             .withNumChannels (1)
+                                                             .withBitsPerSample (24));
+            REQUIRE (writer != nullptr);
+            writer->writeFromAudioSampleBuffer (heard, 0, heard.getNumSamples());
+            MESSAGE ("wrote " << out.getFullPathName());
+        }
+    }
 }
