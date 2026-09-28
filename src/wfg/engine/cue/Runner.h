@@ -221,6 +221,14 @@ namespace wfg::cue
         bool live = false;
         int firstInput = -1;
         int inputWidth = 1;
+
+        /*  THE CUE'S MODE (namespace draft §22.2): timestretch when true, the
+            speed then changing how long the sound takes and not its pitch;
+            varispeed when false. Read at the arm and applied there, because a
+            mode is on Tracktion's rebuild list (DV). The speed itself is not in
+            the request: it is placed on the voice at the launch, and moves
+            after it (Player::placeRate). */
+        bool stretch = false;
     };
 
     /*  The audio side, as the cue layer sees it.
@@ -277,6 +285,23 @@ namespace wfg::cue
         /*  The level a track's cue is playing at, in dB. Tick thread, once per
             tick while a fade runs, and one relaxed atomic store. */
         virtual void setLevelDb (int track, double levelDb) = 0;
+
+        /*  A VOICE'S SPEED, placed ahead (namespace draft §22.4): from the last
+            breakpoint the voice holds, its speed moves in a straight line to
+            `rate` at `sample` - one is the file's own - and two at one sample
+            are a step. The Runner places each change a launch horizon ahead,
+            as it places a launch, so what a block plays is decided before it
+            plays. Tick thread, never blocking.
+
+            The default does nothing, which is a voice at one: a replay, and
+            every rig that plays no speed. */
+        virtual bool placeRate (int, std::int64_t, double) { return true; }
+
+        /*  The fastest a time-stretched cue can play at this graph's rate:
+            the stretcher's buffer is its latency long, and it takes 256 x
+            speed frames a chunk. The Runner holds a stretched cue's speed to
+            it, so its clock and the voice's agree. */
+        virtual double stretchSpeedLimit() const { return 20.0; }
 
         /*  Where a SOUNDING cue's channels go, changed under it. Tick thread,
             on an edit and never per tick.
@@ -984,6 +1009,15 @@ namespace wfg::cue
             gate - and read at the second the voice will be at one slew ahead. */
         void applyLanes();
 
+        /*  EVERY SOUNDING MEDIA CUE'S SPEED (namespace draft §22.4): the cue's
+            `rate` re-read when the show's revision moves - unless a speed fade
+            holds the run - and any change placed on the voice a launch horizon
+            ahead, held until then and ramped over a tick, on the run's own
+            clock and the Player's alike, so the two never disagree. Between the
+            launch and the range boundaries, which read that clock. `rateNow` is
+            the readout. */
+        void applyRates();
+
         /*  THE PASS (§20.9), just after `applyLanes` and before the sum: the
             ride's value while nobody holds it, the hand's level as the voice's
             lane term from the first touch (latch, DH), a sample of it per tick
@@ -1489,6 +1523,9 @@ namespace wfg::cue
 
         /** The show revision `applyLanes` last read the lanes at; the same twin. */
         std::uint64_t laneRevision = 0;
+
+        /** The show revision `applyRates` last read the speeds at; the same twin. */
+        std::uint64_t rateRevision = 0;
 
         /*  THE PASS'S OWN BOOKS (§20.9): the table `lane.*` moves; the ride so
             far, a segment per stretch between a loop's wraps; the lane of the

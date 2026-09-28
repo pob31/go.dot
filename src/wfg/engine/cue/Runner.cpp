@@ -1850,6 +1850,7 @@ namespace wfg::cue
         request.levelDb = levelDb;
         request.routing = routing;
         request.ranges = rangesOf (cue);
+        request.stretch = run.stretch;
 
         /*  THE CUE'S EQ RIDES THE ARM (Phase 9a), read through the schema
             here and applied on the far side while the voice is silent, as
@@ -2781,6 +2782,20 @@ namespace wfg::cue
             same voice. The audio side confirms with audio.armed once the graph
             and the disk are ready; until then the run is armed and silent. */
         run->track = track;
+
+        /*  THE SPEED AND ITS MODE (namespace draft §22), read here because the
+            arm is where the mode has to be - it rebuilds Tracktion's graph - and
+            where a fresh run's speed begins. A seek arms again through
+            requestArmOn and keeps both (DV). Read with one as the fallback, never
+            nought: an unreadable number read as nought would be a stopped tape.
+            A stretched run is held to the stretcher's limit at this rate, so the
+            run's clock and the voice's never disagree. */
+        run->stretch = textOf (cue, "rateMode") == "timestretch";
+        run->rateSeen = osc::parseDouble (textOf (cue, "rate")).value_or (1.0);
+        const auto stretchLimit = audio != nullptr ? audio->stretchSpeedLimit() : 0.0;
+        run->ownRate = run->stretch && stretchLimit > 0.0 ? std::min (run->rateSeen, stretchLimit) : run->rateSeen;
+        run->ratePlaced = run->ownRate;
+        run->rateNow = run->ownRate;
 
         requestArmOn (engine, cue, *run, numberOf (cue, "level"));
     }
@@ -6813,6 +6828,10 @@ namespace wfg::cue
         armWaitingMics (engine);
         serviceTakes (engine);
         launchIfDue (engine, tick);
+
+        /*  AFTER THE LAUNCH AND BEFORE THE RANGES: a launch starts its run's
+            clock, and a range's boundary is read off it (§22.4). */
+        applyRates();
         advanceRanges (engine);
 
         /*  AFTER THE RANGES AND BEFORE THE EDGES, which is the only place it
@@ -6936,6 +6955,21 @@ namespace wfg::cue
             {
                 run->launchRequested = false;
                 run->launchedAtSample = target;
+
+                /*  THE SPEED FROM THE LAUNCH (namespace draft §22.4): the run's
+                    clock starts on the launch's sample at the run's speed, and
+                    the voice is told the same breakpoint, so the two begin
+                    together. A voice at one told one stays the identity, and a
+                    cue at one plays exactly as it did before there was a speed. */
+                if (run->kind == "media")
+                {
+                    run->rateClock.start (static_cast<double> (target), run->ownRate);
+                    run->launchSource = static_cast<double> (target);
+                    run->rangeSource = run->launchSource;
+                    run->ratePlaced = run->ownRate;
+                    run->rateNow = run->ownRate;
+                    audio->placeRate (run->track, target, run->ownRate);
+                }
 
                 engine.submit (origin::engine, "run.started", one (run->id));
 
@@ -7079,8 +7113,37 @@ namespace wfg::cue
                 nought through every replay - and because at 50 Hz a pass
                 shorter than 20 ms would be missed entirely by anything that
                 counted edges. */
-            const auto elapsed = std::max<std::int64_t> (0, now - run->rangeStartedAtSample);
-            run->rangeIteration = static_cast<int> (elapsed / run->passSamples) + 1;
+            /*  AT A SPEED (namespace draft §22.4) a pass is the slice's length
+                of the FILE, and how far the file has got is the run's clock's
+                business; at exactly one from the launch on, the count below. */
+            const auto atSpeed = ! run->rateClock.isIdentityFrom (static_cast<double> (run->launchedAtSample));
+            const auto pass = static_cast<double> (run->passSamples);
+            const auto played = atSpeed ? std::max (0.0, run->rateClock.sourceAt (static_cast<double> (now)) - run->rangeSource)
+                                        : 0.0;
+
+            if (atSpeed)
+            {
+                run->rangeIteration = static_cast<int> (played / pass) + 1;
+            }
+            else
+            {
+                const auto elapsed = std::max<std::int64_t> (0, now - run->rangeStartedAtSample);
+                run->rangeIteration = static_cast<int> (elapsed / run->passSamples) + 1;
+            }
+
+            /*  The sample at which the file will have played `passes` of the
+                slice, at the speeds placed so far - nothing while a speed held
+                at nought never gets there, and a boundary that is never reached
+                is not placed. */
+            const auto sampleAfterPasses = [&] (double passes) -> std::optional<std::int64_t>
+            {
+                const auto when = run->rateClock.whenSourceReaches (run->rangeSource + passes * pass);
+
+                if (! when.has_value())
+                    return std::nullopt;
+
+                return static_cast<std::int64_t> (std::llround (*when));
+            };
 
             if (run->rangesFinished)
                 continue;
@@ -7133,14 +7196,38 @@ namespace wfg::cue
                     The horizon belongs to the PLACEMENT and not to the choice
                     of instant. If the pass ends too soon to place cleanly, that
                     is what `run.late` is for. */
-                const auto passesGone = (now - run->rangeStartedAtSample) / run->passSamples;
+                if (atSpeed)
+                {
+                    const auto when = sampleAfterPasses (std::floor (played / pass) + 1.0);
 
-                endsAt = run->rangeStartedAtSample + (passesGone + 1) * run->passSamples;
+                    if (! when.has_value())
+                        continue;               // held at nought: the advance waits for the file to move
+
+                    endsAt = *when;
+                }
+                else
+                {
+                    const auto passesGone = (now - run->rangeStartedAtSample) / run->passSamples;
+
+                    endsAt = run->rangeStartedAtSample + (passesGone + 1) * run->passSamples;
+                }
             }
             else if (wanted > 0)
             {
-                endsAt = run->rangeStartedAtSample
-                           + static_cast<std::int64_t> (wanted) * run->passSamples;
+                if (atSpeed)
+                {
+                    const auto when = sampleAfterPasses (static_cast<double> (wanted));
+
+                    if (! when.has_value())
+                        continue;
+
+                    endsAt = *when;
+                }
+                else
+                {
+                    endsAt = run->rangeStartedAtSample
+                               + static_cast<std::int64_t> (wanted) * run->passSamples;
+                }
             }
             else
             {
@@ -7219,11 +7306,13 @@ namespace wfg::cue
             run->laneOutgoingOrigin = run->positionOrigin;
             run->laneOutgoingAt = run->rangeStartedAtSample;
             run->laneOutgoingPass = run->passSamples;
+            run->laneOutgoingSource = run->rangeSource;
 
             /*  The next range's clock starts at the boundary, so its first pass
                 is measured from where it will actually begin rather than from
                 the tick that decided it. */
             run->rangeStartedAtSample = placeAt;
+            run->rangeSource = run->rateClock.sourceAt (static_cast<double> (placeAt));
 
             /*  THE PLAYHEAD'S ORIGIN MOVES WITH THAT CLOCK, and both move when
                 the boundary is PLACED rather than when it is crossed. They have
@@ -7344,6 +7433,25 @@ namespace wfg::cue
                                         : Run::silentDb;
             }
 
+            /*  AT A SPEED (namespace draft §22.4) the file moves by the run's
+                clock - the breakpoints the voice was given - rather than one
+                second a second: how far it has moved since the launch, or since
+                the slice began, wrapped by the slice's pass as below. A run at
+                exactly one from its launch on takes the count below instead,
+                the same integers as before there was a speed. */
+            if (! run->rateClock.isIdentityFrom (static_cast<double> (run->launchedAtSample)))
+            {
+                const auto inRange = run->range >= 0 && run->rangeStartedAtSample > 0;
+                const auto origin = inRange ? run->rangeSource : run->launchSource;
+                auto played = std::max (0.0, run->rateClock.sourceAt (static_cast<double> (now)) - origin);
+
+                if (inRange && run->passSamples > 0)
+                    played = std::fmod (played, static_cast<double> (run->passSamples));
+
+                run->position = run->positionOrigin + played / rate;
+                continue;
+            }
+
             /*  MEASURED FROM THE LAUNCH, and clamped at nought because the
                 launch is PLACED a few ticks into the future: between the
                 placement and the instant itself the difference is negative, and
@@ -7384,6 +7492,30 @@ namespace wfg::cue
         {
             if (run.launchedAtSample <= 0 || sample < run.launchedAtSample)
                 return run.laneStart;
+
+            /*  AT A SPEED (namespace draft §22.4), the file by the run's clock:
+                the same origins and wraps as below, measured in the file's
+                samples rather than the clock's. A lane is a property of the
+                recording, so a slowed cue hears its lane slowed with it. */
+            if (! run.rateClock.isIdentityFrom (static_cast<double> (run.launchedAtSample)))
+            {
+                const auto source = run.rateClock.sourceAt (static_cast<double> (sample));
+                const auto inSlice = run.range >= 0 && run.rangeStartedAtSample > 0;
+                const auto outgoing = run.range >= 0 && run.laneOutgoingAt > 0 && sample < run.rangeStartedAtSample;
+
+                const auto originSource = outgoing ? run.laneOutgoingSource
+                                        : inSlice ? run.rangeSource
+                                                  : run.launchSource;
+                const auto pass = static_cast<double> (outgoing ? run.laneOutgoingPass : run.passSamples);
+                const auto secondOrigin = outgoing ? run.laneOutgoingOrigin : run.positionOrigin;
+
+                auto played = std::max (0.0, source - originSource);
+
+                if ((outgoing || inSlice) && pass > 0.0)
+                    played = std::fmod (played, pass);
+
+                return secondOrigin + played / rate;
+            }
 
             if (run.range >= 0 && run.laneOutgoingAt > 0 && sample < run.rangeStartedAtSample)
             {
@@ -7457,6 +7589,87 @@ namespace wfg::cue
 
             run->laneDb = run->lane.empty() ? 0.0
                                             : doc::laneLevelDb (run->lane, lanePositionAt (*run, at, rate));
+        }
+    }
+
+    void Runner::applyRates()
+    {
+        if (audio == nullptr || samplesPerTick <= 0)
+            return;
+
+        /*  THE CUE'S SPEED FOLLOWS THE DOCUMENT, gated as `applyLanes` is: a
+            tick with nobody editing compares one number, and an edit - or an
+            undo - reaches every sounding run on the next tick (DW). Only the
+            cue whose `rate` moved is moved: an edit of anything else reads the
+            same number and places nothing. A speed fade holds its run
+            (`rateHeld`), and the document waits until it lets go. */
+        const auto revision = document.showRevision();
+        const auto reread = revision != rateRevision;
+        rateRevision = revision;
+
+        const auto now = audio->samplesElapsed();
+        const auto lead = static_cast<std::int64_t> (latencyTicks()) * samplesPerTick;
+        const auto stretchLimit = audio->stretchSpeedLimit();
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
+                continue;
+
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr)
+                continue;
+
+            if (reread && ! run->rateHeld)
+            {
+                if (const auto cue = document.findById (run->cue); cue.isValid())
+                {
+                    const auto decided = osc::parseDouble (textOf (cue, "rate")).value_or (1.0);
+
+                    if (std::bit_cast<std::uint64_t> (decided) != std::bit_cast<std::uint64_t> (run->rateSeen))
+                    {
+                        run->rateSeen = decided;
+                        run->ownRate = run->stretch && stretchLimit > 0.0 ? std::min (decided, stretchLimit) : decided;
+                    }
+                }
+            }
+
+            /*  Before the launch the launch places it (`launchIfDue`). */
+            if (run->launchedAtSample <= 0)
+            {
+                run->rateNow = run->ownRate;
+                continue;
+            }
+
+            /*  A CHANGE IS HELD UNTIL ONE HORIZON FROM NOW, then a straight line
+                to it over a tick - the same two breakpoints on the run's clock
+                and on the voice, so the playhead is read off the arithmetic the
+                audio thread plays by. A speed fade moves `ownRate` every tick,
+                and its ramps join end to end: each starts where the last one
+                ended. */
+            if (std::bit_cast<std::uint64_t> (run->ownRate) != std::bit_cast<std::uint64_t> (run->ratePlaced))
+            {
+                const auto last = run->rateClock.size() > 0 ? run->rateClock.back().at : 0.0;
+                const auto from = std::max (static_cast<double> (now + lead), last);
+                const auto to = from + static_cast<double> (samplesPerTick);
+
+                if (from > last)
+                {
+                    run->rateClock.place (from, run->ratePlaced);
+                    audio->placeRate (run->track, static_cast<std::int64_t> (from), run->ratePlaced);
+                }
+
+                run->rateClock.place (to, run->ownRate);
+                audio->placeRate (run->track, static_cast<std::int64_t> (to), run->ownRate);
+                run->ratePlaced = run->ownRate;
+            }
+
+            /*  The past the clock no longer needs: what the playhead reads is
+                now and after, and where the file was at the launch and at the
+                slice's start is kept on the run. */
+            run->rateClock.forgetBefore (static_cast<double> (now) - static_cast<double> (samplesPerTick));
+            run->rateNow = run->rateClock.rateAt (static_cast<double> (now));
         }
     }
 

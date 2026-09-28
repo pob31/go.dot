@@ -5836,6 +5836,160 @@ TEST_CASE ("audio host: a cue slowed and brought back to one keeps its place in 
     CHECK (ends < 4.51);
 }
 
+TEST_CASE ("audio host: a cue's speed from the show to the speaker - the document's rate, the Runner's clock, the voice's")
+{
+    /*  S.3, end to end (namespace draft §22): a media cue whose `rate` says
+        two, fired by a GO through the Runner, the HostPlayer and a real graph.
+        Its kilohertz is heard at two in varispeed and at one in timestretch;
+        the playhead reads the file's seconds, twice the clock's; and an edit of
+        the rate to one while it sounds is heard a moment later. */
+    for (const auto stretch : { false, true })
+    {
+        INFO ("mode " << (stretch ? "timestretch" : "varispeed"));
+
+        constexpr int rate = 48000;
+        constexpr int blockSize = 128;
+
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = rate;
+        settings.blockSize = blockSize;
+        settings.outputChannels = 2;
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 1;
+        spec.channelsPerTrack = 1;
+        REQUIRE (rig.host.buildEdit (spec));
+
+        const auto tone = writeSineTone (rig.storage.folder, rate, 1000.0, 0.25f, 8);
+        REQUIRE (tone.existsAsFile());
+
+        Engine engine;
+        doc::ShowDocument document;
+        cue::RunTable runs;
+        cue::Focus focus;
+        auto runIds = doc::IdRegistry::withSeed (3);
+        cue::Runner runner { document, runs, runIds, focus };
+
+        engine.log().openInMemory ({});
+        doc::registerDocumentCommands (engine.commands(), document);
+        cue::registerCueCommands (engine.commands(), document, focus);
+        cue::registerRunCommands (engine.commands(), runs);
+        cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+        const auto listId = document.createList ("Sound").id;
+        const auto cueId = document.createCue (listId, 0, "media", "Doubled").id;
+
+        REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/file", tone.getFileName().toStdString()).ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/rate", "2").ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/rateMode",
+                                        stretch ? "timestretch" : "varispeed").ok);
+
+        auto audioNode = document.root().getChildWithName ("Audio");
+        audioNode.setProperty (juce::Identifier ("tracks"), 1, nullptr);
+
+        juce::ValueTree bus { "Bus" };
+        bus.setProperty (juce::Identifier ("id"), "J3MT5XYA", nullptr);
+        bus.setProperty (juce::Identifier ("name"), "Main", nullptr);
+        bus.setProperty (juce::Identifier ("firstChannel"), 0, nullptr);
+        bus.setProperty (juce::Identifier ("width"), 1, nullptr);
+        audioNode.appendChild (bus, nullptr);
+
+        juce::ValueTree route { "Route" };
+        route.setProperty (juce::Identifier ("id"), "Z04EH7PH", nullptr);
+        route.setProperty (juce::Identifier ("bus"), "J3MT5XYA", nullptr);
+        route.setProperty (juce::Identifier ("gains"), "1", nullptr);
+        document.findById (cueId).appendChild (route, nullptr);
+
+        document.setAttribute (cue::standbyAddressOf (listId), cueId);
+
+        audio::HostPlayer player { rig.host, engine };
+        runner.setPlayer (&player);
+        runner.setSamplesPerTick (rate / 50);
+        runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
+
+        std::int64_t tick = 0;
+
+        const auto oneTick = [&]
+        {
+            runner.beforeTick (engine, tick);
+            engine.processTick (tick++);
+            player.serviceArms();
+
+            for (int i = 0; i < (rate / 50) / blockSize; ++i)
+                rig.host.processBlock();
+        };
+
+        for (int i = 0; i < 4; ++i)
+            oneTick();
+
+        REQUIRE (engine.submit ("cli", "go", {}));
+
+        for (int i = 0; i < 400 && ! rig.host.trackPlayState (0).playing; ++i)
+            oneTick();
+
+        REQUIRE (rig.host.trackPlayState (0).playing);
+        CHECK (rig.host.isTrackStretched (0, 0) == stretch);
+
+        //  Half a second in, then a second of it.
+        for (int i = 0; i < 25; ++i)
+            oneTick();
+
+        const auto countOver = [&] (int ticks)
+        {
+            RecordingSink sink;
+            sink.prepare (2, ticks * (rate / 50));
+            rig.host.setBlockSink (&sink);
+
+            while (sink.written < sink.buffer.getNumSamples())
+                oneTick();
+
+            rig.host.setBlockSink (nullptr);
+
+            const auto* x = sink.buffer.getReadPointer (0);
+            auto rising = 0;
+
+            for (int n = 1; n < sink.written; ++n)
+                if (x[n - 1] < 0.0f && x[n] >= 0.0f)
+                    ++rising;
+
+            return rising;
+        };
+
+        const auto atTwo = countOver (50);
+        INFO (atTwo << " rising crossings in a second at the document's two");
+
+        if (stretch)
+            CHECK (std::abs (atTwo - 1000) <= 12);
+        else
+            CHECK (std::abs (atTwo - 2000) <= 12);
+
+        REQUIRE (runs.all().size() == 1u);
+        const auto runId = runs.all().front().id;
+        const auto* run = runs.find (runId);
+
+        //  The playhead reads the file: twice the clock since the launch.
+        const auto clockSeconds = static_cast<double> (rig.host.clock().samplesElapsed() - run->launchedAtSample) / rate;
+        INFO ("the clock " << clockSeconds << " s after the launch, the playhead at " << run->position);
+        CHECK (run->position == doctest::Approx (2.0 * clockSeconds).epsilon (0.02));
+        CHECK (run->rateNow == doctest::Approx (2.0));
+
+        //  An edit to one while it sounds, heard once the horizon and the ramp have passed.
+        REQUIRE (engine.submit ("cli", "node.set", { osc::Value::string ("/godot/cue/" + cueId + "/rate"),
+                                                     osc::Value::float64 (1.0) }));
+
+        for (int i = 0; i < 10; ++i)
+            oneTick();
+
+        const auto atOne = countOver (50);
+        INFO (atOne << " rising crossings in a second after the edit to one");
+        CHECK (std::abs (atOne - 1000) <= 12);
+        CHECK (runs.find (runId)->rateNow == doctest::Approx (1.0));
+    }
+}
+
 TEST_CASE ("audio host: a speed ramped from one to two has no step in it")
 {
     /*  Half a kilohertz, ramped to twice its speed over a second: the pitch

@@ -68,9 +68,11 @@ namespace wfg::client::model
                     from (2026-09-25), where its fader waits, then what a hand
                     on its strip does, in the order a press happens - it is let
                     go, it is pressed again, it was struck, it is leant on, it
-                    fades. */
+                    fades. The speed and its mode sit after where the file
+                    starts: two more things said about how the file is played
+                    (namespace draft §22.7). */
                 { "media",   { "file", "channels", "stereoToMono", "directOut",
-                               "level", "startOffset", "dca", "strip", "initialLevel", "release",
+                               "level", "startOffset", "rate", "rateMode", "dca", "strip", "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
                                "releaseFade" } },
 
@@ -119,6 +121,8 @@ namespace wfg::client::model
                 { "velocityFloor", "velocity floor" },
                 { "releaseFade", "release fade" },
                 { "initialLevel", "initial level" },
+                { "rate", "speed" },
+                { "rateMode", "speed mode" },
             };
 
             return table;

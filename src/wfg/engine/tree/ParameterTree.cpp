@@ -3265,6 +3265,8 @@ namespace wfg::tree
                 //  What left the track after the fader, to a tenth, as the envelope is.
                 else if (name == "meter")     text = osc::formatDouble (std::round (run.meter * 10.0) / 10.0);
                 else if (name == "level")     text = osc::formatDouble (run.level);
+                //  The speed it plays at now (namespace draft §22), to a thousandth.
+                else if (name == "rate")      text = osc::formatDouble (std::round (run.rateNow * 1000.0) / 1000.0);
                 else if (name == "trim")      text = osc::formatDouble (run.trim);
                 else if (name == "late")      text = std::to_string (run.late);
                 else if (name == "parent")    text = run.parent;

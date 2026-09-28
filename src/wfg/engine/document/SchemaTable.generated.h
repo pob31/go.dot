@@ -36,6 +36,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
+    inline constexpr std::string_view enum_media_rateMode[] = { "varispeed", "timestretch" };
     inline constexpr std::string_view enum_media_release[] = { "hold", "playOut" };
     inline constexpr std::string_view enum_media_secondPress[] = { "restart", "noop", "stop" };
     inline constexpr std::string_view enum_sound_eqB1Shape[] = { "peak", "lowShelf" };
@@ -598,6 +599,22 @@ namespace wfg::doc::generated
           "s", 50.0, false, "park",
           "",
           "How far into the file playback begins. A cue that starts at the downbeat rather than at the top of the recording." },
+        { "media", "rate",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
+          true, "1",
+          true, 0.0, true, 20.0,
+          nullptr, 0,
+          "x", 50.0, false, "park",
+          "",
+          "The speed the cue plays at, as decided (namespace draft §22): one is the file's own, a half takes twice as long, two takes half; up to twenty. Nought holds the file where it is - silent in varispeed, a stopped tape, and a held sound in timestretch (decision DR). Heard while the cue sounds: an edit reaches a playing run on the next tick, placed a launch horizon ahead as a launch is, unless a speed fade holds that run. What rateMode says a speed other than one does to the pitch. Rests at one (PRD 4.6)." },
+        { "media", "rateMode",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "varispeed",
+          false, 0.0, false, 0.0,
+          enum_media_rateMode, 2,
+          "", 50.0, false, "park",
+          "",
+          "What a speed other than one does (namespace draft §22): varispeed moves the pitch with it, as a tape does; timestretch keeps the pitch where it was recorded and changes only how long the sound takes. Read when the cue is armed, because a mode is on Tracktion's rebuild list - a change reaches the next GO, never a sounding cue (DV). Timestretch goes through Signalsmith's stretcher even at one, because the operator chose it." },
         { "media", "channels",
           ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show,
           true, "0",
@@ -1566,6 +1583,14 @@ namespace wfg::doc::generated
           "dB", 50.0, false, "park",
           "",
           "The level it is playing at now, which is what a fade writes. Not the cue's authored level - that one stays where the designer left it, so a night of riding faders does not rewrite the show." },
+        { "run", "rate",
+          ValueType::number, 'd', false, Access::read, Kind::state, Persist::none,
+          true, "1",
+          true, 0.0, true, 20.0,
+          nullptr, 0,
+          "x", 50.0, false, "park",
+          "",
+          "The speed it is playing at now, which is what a speed fade writes and what the playhead advances by (namespace draft §22). Not the cue's authored rate - that one stays where the designer left it, so a night of speed fades does not rewrite the show. One for every run that is not a media cue." },
         { "run", "late",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
           true, "0",

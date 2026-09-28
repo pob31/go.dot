@@ -106,7 +106,8 @@ const SAID_LAST = ["enabled", "preset"];
     happens. A group's `takeover` sits beside `mode`, the answer that makes it a
     question; a fade's `dca` beside `target`, the other thing it can move. */
 const KIND_ORDER = {
-  media:   ["file", "level", "startOffset", "levelLane", "dca", "initialLevel", "release", "secondPress",
+  // The speed and its mode after where the file starts (namespace draft §22.7).
+  media:   ["file", "level", "startOffset", "rate", "rateMode", "levelLane", "dca", "initialLevel", "release", "secondPress",
             "velocity", "velocityFloor", "pressure", "releaseFade",
             // The EQ (Phase 9a): the switch, the two filters, then four bands - each its
             // own switch (2026-09-25), then frequency, gain and width, the outer two with a

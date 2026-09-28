@@ -48,6 +48,7 @@
 */
 
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/clock/RateClock.h>
 #include <wfg/engine/document/LevelLane.h>
 
 #include <bit>
@@ -457,6 +458,35 @@ namespace wfg::cue
         double laneOutgoingOrigin = 0.0;
         std::int64_t laneOutgoingAt = 0;
         std::int64_t laneOutgoingPass = 0;
+
+        /*  THE SPEED (namespace draft §22), a media run's only; one, and the
+            identity, for every other kind.
+
+            `ownRate` is what the voice plays at, as decided: the cue's `rate`
+            at the arm, moved by an edit of it while the cue sounds (DW) and by
+            a speed fade, which then holds it (`rateHeld`) until it ends.
+            `rateSeen` is the cue's `rate` as last read, which is how an edit is
+            told from nothing. `ratePlaced` is the last speed placed on the
+            voice, and `rateNow` the readout: the speed at this tick's sample.
+            `stretch` is the cue's mode at the arm (DV).
+
+            `rateClock` is the run's speed as breakpoints on the SAMPLE axis -
+            the same breakpoints placed on the voice, so the playhead, the lane
+            and a range's boundary are read off the arithmetic the audio thread
+            plays by (§22.4). Where the file had got to at the launch, at the
+            slice's start and at the outgoing slice's start are kept, because
+            the clock lets go of its past. Never logged: the document is, and
+            the edits and fades that move a speed are. */
+        double ownRate = 1.0;
+        double rateSeen = 1.0;
+        double ratePlaced = 1.0;
+        double rateNow = 1.0;
+        bool stretch = false;
+        bool rateHeld = false;
+        RateClock rateClock;
+        double launchSource = 0.0;
+        double rangeSource = 0.0;
+        double laneOutgoingSource = 0.0;
 
         /*  HOW LOUD IT LEFT ITS TRACK over the last tick, in dB below full
             scale (author, 2026-09-25: "On the sampler fader displays of the

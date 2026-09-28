@@ -1025,6 +1025,34 @@ TEST_CASE ("document: addresses resolve, and only to what they name")
     CHECK_FALSE (document.resolve ("/godot/list/B3N8R5TW/name").isValid());
 }
 
+TEST_CASE ("document: a media cue's speed is nought to twenty, one when unsaid, and its mode is one of two words")
+{
+    /*  Namespace draft §22.2. Nought is a speed - a stopped tape, a held
+        sound - and not a refusal; twenty is the top. An absent speed reads one
+        and an absent mode varispeed, so every cue written before there was a
+        speed plays as it did. */
+    ShowDocument document;
+    const auto list = document.createList ("Main");
+    const auto cue = document.createCue (list.id, 0, "media", "Tape");
+    const auto address = "/godot/cue/" + cue.id + "/";
+
+    CHECK (document.getAttribute (address + "rate") == std::string ("1"));
+    CHECK (document.getAttribute (address + "rateMode") == std::string ("varispeed"));
+
+    CHECK (document.setAttribute (address + "rate", "0").ok);
+    CHECK (document.setAttribute (address + "rate", "20").ok);
+    CHECK (document.setAttribute (address + "rate", "0.25").ok);
+    CHECK (document.setAttribute (address + "rate", "20.5").reason == reason::typeMismatch);
+    CHECK (document.setAttribute (address + "rate", "-0.5").reason == reason::typeMismatch);
+
+    CHECK (document.setAttribute (address + "rateMode", "timestretch").ok);
+    CHECK (document.setAttribute (address + "rateMode", "backwards").reason == reason::typeMismatch);
+
+    //  A memo has no file to speed up.
+    const auto memo = document.createCue (list.id, 1, "memo", "Note");
+    CHECK (document.setAttribute ("/godot/cue/" + memo.id + "/rate", "2").reason == reason::badAddress);
+}
+
 TEST_CASE ("document: a write is checked before it lands")
 {
     ShowDocument document;

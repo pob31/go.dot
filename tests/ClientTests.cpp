@@ -5449,15 +5449,20 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
 
     CHECK (seen == wanted);
 
+    /*  The speed and its mode straight after where the file starts, then the
+        sampler's rows (namespace draft §22.7). */
     const auto startOffsetAt = positionOf (does, "startOffset");
-    REQUIRE (startOffsetAt + 1 < does.size());
-    CHECK (does[startOffsetAt + 1] == "dca");
+    REQUIRE (startOffsetAt + 3 < does.size());
+    CHECK (does[startOffsetAt + 1] == "rate");
+    CHECK (does[startOffsetAt + 2] == "rateMode");
+    CHECK (does[startOffsetAt + 3] == "dca");
 
     //  Two words the tree runs together, said as two words.
     const std::vector<std::pair<std::string, std::string>> spoken {
         { "secondPress", "second press" }, { "velocityFloor", "velocity floor" },
         { "releaseFade", "release fade" }, { "shortName", "short name" },
-        { "initialLevel", "initial level" } };
+        { "initialLevel", "initial level" }, { "rate", "speed" },
+        { "rateMode", "speed mode" } };
 
     for (const auto& said : spoken)
     {

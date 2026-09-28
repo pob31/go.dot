@@ -128,6 +128,20 @@ namespace
             levels.push_back ({ track, levelDb });
         }
 
+        /*  A voice's speed (namespace draft §22.4): every breakpoint placed, in
+            the order it was placed. */
+        struct RatePoint { int track; std::int64_t sample; double speed; };
+        std::vector<RatePoint> ratePoints;
+        double speedLimit = 20.0;
+
+        bool placeRate (int track, std::int64_t sample, double speed) override
+        {
+            ratePoints.push_back ({ track, sample, speed });
+            return true;
+        }
+
+        double stretchSpeedLimit() const override { return speedLimit; }
+
         /*  Kept per track and COUNTED, because the two things worth asserting
             about a live routing change are what it became and that it did not
             also disturb the level. */
@@ -8874,4 +8888,253 @@ TEST_CASE ("level lane: across a slice boundary it keeps the outgoing slice unti
     rig.tickOnce();
 
     CHECK (rig.runs.find (id)->laneDb == doctest::Approx (-40.0));
+}
+
+//==============================================================================
+/*  A CUE'S SPEED, AS THE RUNNER KEEPS IT (namespace draft §22.4): read at the
+    arm, placed on the voice at the launch and a horizon ahead of every change,
+    and read back off the same breakpoints for the playhead, the lane and a
+    slice's boundary. The fake player keeps every breakpoint it is given. At
+    48 kHz a tick is 960 samples, and the fake's 128-sample blocks make the
+    horizon two ticks: 1920. */
+TEST_CASE ("speed: a cue at one places its launch and nothing more, and its playhead is the count it always was")
+{
+    LaneRig rig;
+    const auto id = rig.launch();
+    const auto launched = rig.runs.find (id)->launchedAtSample;
+
+    REQUIRE (rig.audio.ratePoints.size() == 1u);
+    CHECK (rig.audio.ratePoints[0].sample == launched);
+    CHECK (rig.audio.ratePoints[0].speed == doctest::Approx (1.0));
+    CHECK (rig.runs.find (id)->rateClock.isIdentityFrom (static_cast<double> (launched)));
+
+    rig.audio.samples = launched + 72000;
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->position == doctest::Approx (1.5));
+    CHECK (rig.runs.find (id)->rateNow == doctest::Approx (1.0));
+    CHECK (rig.audio.ratePoints.size() == 1u);
+}
+
+TEST_CASE ("speed: a cue at a half plays its file at half from its launch")
+{
+    LaneRig rig;
+    rig.setCue (rig.mediaId, "rate", "0.5");
+
+    const auto id = rig.launch();
+    const auto launched = rig.runs.find (id)->launchedAtSample;
+
+    REQUIRE_FALSE (rig.audio.ratePoints.empty());
+    CHECK (rig.audio.ratePoints.front().sample == launched);
+    CHECK (rig.audio.ratePoints.front().speed == doctest::Approx (0.5));
+
+    rig.audio.samples = launched + 96000;   // two seconds on
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->position == doctest::Approx (1.0));
+    CHECK (rig.runs.find (id)->rateNow == doctest::Approx (0.5));
+}
+
+TEST_CASE ("speed: an edit reaches a sounding cue a horizon later over a tick, and an edit of anything else places nothing")
+{
+    /*  DECISION DW. The change is held at the speed the voice had until a
+        horizon from now - so it lands after anything already placed - then a
+        straight line over a tick. */
+    LaneRig rig;
+    const auto id = rig.launch();
+    const auto launched = rig.runs.find (id)->launchedAtSample;
+
+    rig.audio.samples = launched + 48000;
+    rig.tickOnce();
+    const auto placed = rig.audio.ratePoints.size();
+
+    rig.setCue (rig.mediaId, "level", "-3");
+    rig.tickOnce();
+    CHECK (rig.audio.ratePoints.size() == placed);
+
+    rig.setCue (rig.mediaId, "rate", "2");
+    const auto now = rig.audio.samples;
+    rig.tickOnce();
+
+    REQUIRE (rig.audio.ratePoints.size() == placed + 2);
+    const auto hold = rig.audio.ratePoints[placed];
+    const auto target = rig.audio.ratePoints[placed + 1];
+
+    CHECK (hold.sample == now + 1920);
+    CHECK (hold.speed == doctest::Approx (1.0));
+    CHECK (target.sample == now + 1920 + 960);
+    CHECK (target.speed == doctest::Approx (2.0));
+    CHECK (rig.runs.find (id)->ownRate == doctest::Approx (2.0));
+
+    /*  The file: at one until the hold, a tick ramping from one to two, then
+        a second at two. */
+    rig.audio.samples = target.sample + 48000;
+    rig.tickOnce();
+
+    const auto expected = static_cast<double> (hold.sample - launched) / 48000.0
+                            + 0.5 * (1.0 + 2.0) * 960.0 / 48000.0 + 2.0;
+
+    CHECK (rig.runs.find (id)->position == doctest::Approx (expected));
+    CHECK (rig.runs.find (id)->rateNow == doctest::Approx (2.0));
+
+    /*  Nothing placed again while nothing changes. */
+    rig.tickOnce();
+    CHECK (rig.audio.ratePoints.size() == placed + 2);
+}
+
+TEST_CASE ("speed: the mode is the arm's, and a sounding cue keeps the one it was armed with")
+{
+    /*  DECISION DV: a mode rebuilds Tracktion's graph, so it changes at the
+        next arm and never under a sounding cue. */
+    LaneRig rig;
+    rig.setCue (rig.mediaId, "rateMode", "timestretch");
+
+    const auto id = rig.launch();
+
+    CHECK (rig.armed.stretch);
+    CHECK (rig.runs.find (id)->stretch);
+
+    const auto placed = rig.audio.ratePoints.size();
+    rig.audio.arms.clear();
+
+    rig.setCue (rig.mediaId, "rateMode", "varispeed");
+    rig.tickOnce();
+
+    CHECK (rig.audio.arms.empty());
+    CHECK (rig.runs.find (id)->stretch);
+    CHECK (rig.audio.ratePoints.size() == placed);
+}
+
+TEST_CASE ("speed: a stretched cue is held to the stretcher's limit, a resampled one is not")
+{
+    for (const auto stretch : { true, false })
+    {
+        INFO ("mode " << (stretch ? "timestretch" : "varispeed"));
+
+        LaneRig rig;
+        rig.audio.speedLimit = 18.75;
+        rig.setCue (rig.mediaId, "rateMode", stretch ? "timestretch" : "varispeed");
+        rig.setCue (rig.mediaId, "rate", "20");
+
+        const auto id = rig.launch();
+
+        CHECK (rig.runs.find (id)->ownRate == doctest::Approx (stretch ? 18.75 : 20.0));
+        REQUIRE_FALSE (rig.audio.ratePoints.empty());
+        CHECK (rig.audio.ratePoints.front().speed == doctest::Approx (stretch ? 18.75 : 20.0));
+    }
+}
+
+TEST_CASE ("speed: a jump keeps the run's speed and mode")
+{
+    LaneRig rig;
+    rig.setCue (rig.mediaId, "rateMode", "timestretch");
+    rig.setCue (rig.mediaId, "rate", "0.5");
+
+    const auto id = rig.launch();
+    rig.audio.arms.clear();
+
+    CHECK (rig.submitAndTick ("run.seek", { osc::Value::string (id),
+                                            osc::Value::float64 (2.0) }).applied == 1);
+
+    REQUIRE (rig.audio.arms.size() == 1u);
+    CHECK (rig.audio.arms.front().stretch);
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.runs.find (id)->launchedAtSample > 0);
+    REQUIRE_FALSE (rig.audio.ratePoints.empty());
+    CHECK (rig.audio.ratePoints.back().sample == rig.runs.find (id)->launchedAtSample);
+    CHECK (rig.audio.ratePoints.back().speed == doctest::Approx (0.5));
+}
+
+TEST_CASE ("speed: a level lane follows the file at the speed it plays")
+{
+    /*  The lane is the recording's (§20.2, DA): at twice the speed, a second
+        after the launch is the file's second second. */
+    LaneRig rig;
+    rig.setCue (rig.mediaId, "rate", "2");
+    rig.drawLane ("0 0 4 -40");
+
+    const auto id = rig.launch();
+
+    rig.hearAt (id, 1.0);
+    CHECK (rig.runs.find (id)->laneDb == doctest::Approx (-20.0));
+}
+
+TEST_CASE ("speed: a slice's boundary is where the file reaches its end, at the speed")
+{
+    /*  One second of file at one and a half is two thirds of a second: 32 000
+        samples, placed where the lane's case places it at one. */
+    LaneRig rig;
+    rig.audio.slots = 2;
+
+    REQUIRE (rig.document.createRange (rig.mediaId, 0.0, 1.0).ok);
+    REQUIRE (rig.document.createRange (rig.mediaId, 5.0, 6.0).ok);
+    rig.setCue (rig.mediaId, "rate", "1.5");
+
+    const auto id = rig.launch();
+    const auto endsAt = rig.runs.find (id)->launchedAtSample + 32000;
+
+    rig.audio.samples = endsAt - 1920;
+    rig.tickOnce();
+
+    REQUIRE_FALSE (rig.audio.stopsAt.empty());
+    CHECK (rig.audio.stopsAt.back().second == endsAt);
+    CHECK (rig.runs.find (id)->rangeStartedAtSample == endsAt);
+}
+
+TEST_CASE ("speed: held at nought, a slice's pass never ends and an advance waits for the file to move")
+{
+    LaneRig rig;
+    rig.audio.slots = 2;
+
+    const auto range = rig.document.createRange (rig.mediaId, 0.0, 1.0);
+    REQUIRE (range.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + range.id + "/loops", "0").ok);
+    REQUIRE (rig.document.createRange (rig.mediaId, 5.0, 6.0).ok);
+    rig.setCue (rig.mediaId, "rate", "0");
+
+    const auto id = rig.launch();
+    const auto launched = rig.runs.find (id)->launchedAtSample;
+
+    CHECK (rig.submitAndTick ("run.advance", { osc::Value::string (id) }).applied == 1);
+
+    rig.audio.samples = launched + 480000;  // ten seconds on
+    rig.tickOnce();
+
+    CHECK (rig.audio.stopsAt.empty());
+    CHECK (rig.runs.find (id)->position == doctest::Approx (0.0));
+}
+
+TEST_CASE ("speed: slowed and brought back to one, the playhead keeps the file's count")
+{
+    /*  The Runner's side of the fault found in S.3: once the slow stretch has
+        been let go of, the clock still knows the run was not at one from its
+        launch on. */
+    LaneRig rig;
+    rig.setCue (rig.mediaId, "rate", "0.5");
+
+    const auto id = rig.launch();
+    const auto launched = rig.runs.find (id)->launchedAtSample;
+
+    rig.audio.samples = launched + 96000;   // a second of file in two
+    rig.tickOnce();
+
+    rig.setCue (rig.mediaId, "rate", "1");
+    const auto now = rig.audio.samples;
+    rig.tickOnce();
+
+    //  Well past the ramp, and past whatever the clock let go of.
+    rig.audio.samples = now + 480000;
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto hold = now + 1920;
+    const auto expected = static_cast<double> (hold - launched) * 0.5 / 48000.0
+                            + 0.5 * (0.5 + 1.0) * 960.0 / 48000.0
+                            + static_cast<double> (now + 480000 - (hold + 960)) / 48000.0;
+
+    CHECK (rig.runs.find (id)->position == doctest::Approx (expected));
 }

@@ -725,6 +725,24 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="rate">
+          <a:documentation>The speed the cue plays at, as decided (namespace draft §22): one is the file&apos;s own, a half takes twice as long, two takes half; up to twenty. Nought holds the file where it is - silent in varispeed, a stopped tape, and a held sound in timestretch (decision DR). Heard while the cue sounds: an edit reaches a playing run on the next tick, placed a launch horizon ahead as a launch is, unless a speed fade holds that run. What rateMode says a speed other than one does to the pitch. Rests at one (PRD 4.6).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">20</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="rateMode">
+          <a:documentation>What a speed other than one does (namespace draft §22): varispeed moves the pitch with it, as a tape does; timestretch keeps the pitch where it was recorded and changes only how long the sound takes. Read when the cue is armed, because a mode is on Tracktion&apos;s rebuild list - a change reaches the next GO, never a sounding cue (DV). Timestretch goes through Signalsmith&apos;s stretcher even at one, because the operator chose it.</a:documentation>
+          <choice>
+            <value>varispeed</value>
+            <value>timestretch</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="release">
           <a:documentation>sampler member: what letting go does. hold stops the clip on release - a pad lifted, a touched fader let go at silence - after the short releaseFade, so it does not click; playOut lets it run to its end, and silence on the fader is a mute rather than a stop.</a:documentation>
           <choice>
