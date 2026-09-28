@@ -900,6 +900,14 @@ hand's trim and the DCAs, never a second writer of the level. Media cues only:
 a sampler clip and a kept take are media cues and have one; a live take is
 tonight's and has none.
 
+*Added in 0.8, at the author's direction (2026-09-28).* **A lane is recorded
+from a fader, in latch** - the first automation mode built. Rec in the
+waveform arms a cue's lane and the first fader touched on any surface is
+taken for it; it flies to the curve's start value; Rec again (or the D700's
+transport Rec) plays the cue with the fader following the lane, and from the
+first touch the hand's level is heard and written, held after let-go, until
+the pass stops - one pass, one step of undo (namespace draft §20.9).
+
 **Curve editor:** breakpoint lists with numeric entry, not only draggable
 pixels.
 
@@ -3139,8 +3147,8 @@ Added 2026-09-26 *(proposed)*, with §3.18 and §3.31:
 
 Added 2026-09-27 *(proposed)*, with §3.10's level lane:
 
-- **A lane recorded from a fader** — §3.10's read, touch, latch and write, riding a cue's level on
-  the D700 and keeping the ride as its lane.
+- ~~**A lane recorded from a fader**~~ — *decided 2026-09-28*: latch, from a fader taken by touch
+  (§3.10, namespace draft §20.9). Touch and write modes stay proposed.
 - **The master dial on a lane point's level**, which §17.18's rule against a handle's two numbers
   keeps out today.
 - **Lanes on other numbers** — pan, a send, a plugin's parameter — each a row beside the number it

@@ -672,6 +672,26 @@ the build departs from the drawing.
 **Needs from the author:** judging the vertical law and the gestures by eye (DD), and listening on
 the MADIface.
 
+**Recording a lane from a fader** - *added on 2026-09-28*: *"Could we use a chosen fader to record
+the level curve instead of mouse clicks only?"* §3.10's automation, latch first. Four decisions of
+the author's (**DF**-**DI**, `godot-namespace-draft-0.1.md` §20.9), three against the
+recommendation - a fader taken by touch, the curve's start value, latch - and five of the
+implementer's (DJ-DN).
+
+| Stage | What | Depends on |
+|---|---|---|
+| R.0 | Docs: namespace §20.9, PRD §3.10 and §6.9, this | L.5 |
+| R.1 | The pick: the `surfaces` lane rows, `lane.arm`/`take`/`free`, the taken strip's target, the ride's live door | R.0 |
+| R.2 | The pass: `lane.record`/`stop`, the Runner's recorder, the splice and the thinning, Esc and double Esc | R.1 |
+| R.3 | The hands: the bridge (a touch that takes, the Rec key, the lights) and the virtual panel | R.2 |
+| R.4 | The window: the Rec button's four states, the fader's name, the trail | R.2 |
+| R.5 | `blackbox/lane_record.py`, `logs/lane-record.wfglog`, close-out §20.10 | R.3, R.4 |
+
+**Done when:** a fader touched while a lane waits is taken and flies to the curve's start; a pass
+plays the cue with the fader following the lane; a touch is heard at once and written, held after
+let-go, until the pass stops; the lane holds the ride and one undo takes the pass away; the D700's
+Rec starts and stops it; CI green.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

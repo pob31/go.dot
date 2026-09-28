@@ -12086,6 +12086,116 @@ the machine at the desk says how precisely.
 **Not built** is §20.7's list. **Waiting for the author:** the law and the gestures judged by eye in
 the window (DD), and a lane heard on the MADIface.
 
+### 20.9 Recording a lane from a fader (2026-09-28)
+
+Written on 2026-09-28, before any of it is built; §20.10 at close-out says what won where the text
+and the code disagree. The request: *"Could we use a chosen fader to record the level curve instead
+of mouse clicks only? Let the user pick a fader, place at initial value, once the rec starts
+playback the curve (flat at initial value if nothing has been already recorded) and record the curve
+from the moment the user picks up the fader (touch)."* It is §3.10's *"recordable from gesture"*, and
+the first of its automation modes to be built - latch.
+
+**What it is, before its names.** Rec in a media cue's waveform ARMS its lane. The next fader
+somebody touches - on the D700, on any Mackie, on the window's virtual panel - is TAKEN for it, and
+that touch does nothing else. Let go, and the fader flies to what the lane says where playback
+starts. Rec again (in the window, or the D700's Rec key) starts a PASS: the cue plays from the
+playhead, and the fader follows the lane as it plays. From the moment a hand touches the fader, the
+level is the hand's - heard at once, and written - and it stays written after the hand lets go, at
+the last value, until the pass stops. Then the stretch that was ridden replaces that stretch of the
+lane, in one step anybody can undo.
+
+**Where it starts, in the code.** A strip rides whatever node its published `target` names: the
+bridge and the virtual panel both `node.touch` it, `node.set` it while they move and `node.release`
+it, and while nobody holds it the motor (or the panel) follows its value (`ParameterTree.cpp`'s strip
+derivation, `SurfaceBridge::paintStrip`). A hand's runtime value goes in front of the document by the
+live door (`cue/LiveRows`), logged and never undone. `surface.aim` and `surface.dial` hold a runtime
+pick in `SurfaceTable`. The lane's own arithmetic is §20.3-§20.4's. So the recorder is a node a
+strip can be pointed at, a pick held beside the aim, and a hook that samples the hand against the
+file's clock.
+
+#### The decisions
+
+Asked with a recommendation each; three of the four answered otherwise.
+
+| | Decision | Whose |
+|---|---|---|
+| **DF** | **The fader is taken by touch**: Rec in the waveform arms the cue's lane, and the first fader touched on any surface is taken for it; that touch does nothing else | the author's - the recommendation was a menu of faders |
+| **DG** | **The initial value is the curve's start value**: once taken, the fader flies to what the lane says where playback starts, nought with no lane; nothing is written until it is touched during a pass | the author's - the recommendation was wherever the hand left the fader |
+| **DH** | **Latch**: from the first touch in a pass, the ride is written until the pass stops, the last value held after the hand lets go | the author's - the recommendation was touch, returning to the curve at let-go |
+| **DI** | **The D700's transport Rec** starts and stops a pass while a lane's fader is taken, and its light shows the pass; otherwise it records a sampling take, as §19.7 says | the author's |
+| DJ | **One ride node, `/godot/surface/laneRide`**: the taken strip's `target` is pointed at it; its value is the lane where the file is (where it starts, outside a pass) until the first touch, and the hand's from then on; written by the live door | implementer's call |
+| DK | **One pass is one write**: at its end the ridden stretch replaces that stretch of the lane in one engine `node.set …/levelLane` - logged, replayed exactly, one step of undo | implementer's call |
+| DL | **The ride is thinned** to straight lines within a tenth of a decibel (Ramer-Douglas-Peucker), and joined to the curve it replaces with 50 ms at each end | implementer's call |
+| DM | **How a pass ends**: Rec again, the waveform's stop, the run ending, or Esc - all keep the ride; double Esc drops it, as it drops every action (§4.4) | implementer's call |
+| DN | **The fader stays taken for the session**, until the window's ✕ frees it or the show is locked; a pad cannot be taken; a strip's sampler clip or DCA comes back to it when it is freed | implementer's call |
+
+**DF and DG together.** Taking a fader by touching it means the program cannot fly it anywhere
+before somebody has put a hand on it, and a motor does not move under a hand. So the fader flies to
+the lane's start value when the taking hand lets go - the order the two answers imply.
+
+**DH - latch, not touch.** Touch returns to the curve when the hand lets go; latch keeps the hand's
+last value until the pass stops. A pass is therefore a single decision from its first touch to its
+end, which is also why DK writes it once.
+
+#### The rows
+
+Owner `surfaces`, beside `aim` and `dial`, all `persist=none` - a pick and a pass are tonight's
+(§4.10), and the lane they end in is the decision:
+
+| Node | Type | Access | Meaning |
+|---|---|---|---|
+| `/godot/surface/lane` | `s` | r | the media cue whose lane is armed or has a fader, or empty |
+| `/godot/surface/laneFader` | `s` | r | the strip taken for it, or empty while it waits for a touch |
+| `/godot/surface/laneRecording` | `T` | r | a pass is running |
+| `/godot/surface/laneRide` | `d`, -120..12 dB | rw | what the taken fader rides (DJ) |
+
+#### The commands
+
+- `lane.arm <cue>` - arms a media cue's lane; empty frees the fader and ends the arming. Refused
+  (`bad-value`) for a cue that is not media, `locked` under the lock, `busy` while a pass runs.
+- `lane.take <strip>` - the bridge's and the panel's, for the first fader touched while a lane
+  waits. Refused `not-waiting`, and `bad-value` for a pad or a strip that is not.
+- `lane.free` - lets the fader go back to what it rode; `busy` while a pass runs.
+- `lane.record [from]` - starts a pass on the taken cue: it is fired as `cue.fire` fires it and moved
+  to `from` when given (the window's playhead point). Refused `not-taken` and `busy`.
+- `lane.stop [dropped]` - the hand's: asks the pass to end, which the Runner does on its next tick
+  (it holds the samples); and the Runner's own, once the lane is written or dropped, which clears the
+  pass. So the log carries the whole order: the ask, the lane, the end.
+
+#### The pass
+
+A hook of the Runner's, between `applyLanes` and `applyLevels`. **Outside a pass**, with a fader
+taken, the ride is the lane at the cue's start - `startOffset`, or the first range's `in` (DG). **In
+a pass**, until a hand touches the ride, the ride is the run's `laneDb` - read - and the motor
+follows the curve. From the first touch (any holder of the ride node, in the touch table) it is
+LATCHED (DH): the run's lane term is the hand's value, so the voice is heard where the hand is, and
+each tick appends `(the second the voice is at NOW, the hand's value)` - now and not one slew ahead,
+because a hand answers what it hears. **A loop's wrap** starts a new segment: the second falls back
+to the in-point, and a later segment overwrites what an earlier one wrote over the same stretch.
+
+**At the end** the segments are thinned, spliced into the lane with a 50 ms join at each end (DL),
+judged by `doc::readLevelLane`, and written in one engine `node.set` (DK); then the run is stopped if
+it still sounds, and the engine's `lane.stop` clears the pass. A run killed - double Esc - writes
+nothing, and `lane.stop dropped` says so.
+
+#### The hands
+
+- **The bridge**: while a lane waits, a fader touch submits `lane.take <strip>` and no `node.touch`;
+  with a fader taken, the transport Rec toggles `lane.record` / `lane.stop` (DI), and its light and
+  the taken strip's own REC light show the pass; the strip's screen reads `lane` and the cue.
+- **The virtual panel**: while a lane waits, a press on any fader strip - even one that rides
+  nothing - sends `lane.take`.
+- **The window**: a Rec button after the transport - `Rec` arms; `Rec…` waits, saying *"touch a
+  fader"* (a click cancels); `● Rec` with the fader's name and a ✕ starts a pass from the playhead;
+  `■` stops it. The ride is drawn as a trail over the lane while it records. Nothing is offered
+  under the lock.
+
+#### What it does not build
+
+Touch and write modes; more than one lane recorded at once; a fader recorded onto another number
+than a media cue's level; the touch-without-move filter (§16.10) - a brushed fader counts as a
+touch, so an armed lane takes whatever is brushed first.
+
 ## 21. GO and Esc as the show wants them: the least time between two GOs, and the panic fade
 
 Built on 2026-09-28. The request: *"In the show settings, there should be a 'time between' Go's and
