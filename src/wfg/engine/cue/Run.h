@@ -464,7 +464,9 @@ namespace wfg::cue
 
             `ownRate` is what the voice plays at, as decided: the cue's `rate`
             at the arm, moved by an edit of it while the cue sounds (DW) and by
-            a speed fade, which then holds it (`rateHeld`) until it ends.
+            a speed fade, which then holds it until it ends. `rateHeld` is
+            whether one held it at the last pass, so the pass that finds it let
+            go reads the cue again (`applyRates`).
             `rateSeen` is the cue's `rate` as last read, which is how an edit is
             told from nothing. `ratePlaced` is the last speed placed on the
             voice, and `rateNow` the readout: the speed at this tick's sample.

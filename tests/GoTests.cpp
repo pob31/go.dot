@@ -9138,3 +9138,534 @@ TEST_CASE ("speed: slowed and brought back to one, the playhead keeps the file's
 
     CHECK (rig.runs.find (id)->position == doctest::Approx (expected));
 }
+
+//==============================================================================
+/*  FADES ON THE SPEED (namespace draft §22.6): a fade cue's `rateOn` moves its
+    target's speed to its `rate` over its duration, beside the level or
+    instead of it. A speed job's key is `rate:` and the run, so it takes over a
+    speed fade and leaves a level fade alone; a fade that moves both is two
+    jobs under one run. Played with the clock moving a tick of samples a tick,
+    as a sound card's does, so the run's clock lets go of its past. */
+namespace
+{
+    /*  The rig's own fade - or another - turned into one that moves the
+        speed: to `rate` over `seconds`, the level left alone unless asked. */
+    void aimAtTheSpeed (LaneRig& rig, const std::string& fadeId, const char* rate,
+                        const char* seconds, bool level = false)
+    {
+        rig.setCue (fadeId, "levelOn", level ? "true" : "false");
+        rig.setCue (fadeId, "rateOn", "true");
+        rig.setCue (fadeId, "rate", rate);
+        rig.setCue (fadeId, "duration", seconds);
+    }
+
+    std::string newFade (LaneRig& rig, int at)
+    {
+        const auto id = rig.document.createCue (rig.listId, at, "fade", "Again").id;
+        rig.setCue (id, "target", rig.mediaId);
+        return id;
+    }
+
+    std::size_t speedJobs (const LaneRig& rig)
+    {
+        const auto& jobs = rig.runner.fades();
+        return static_cast<std::size_t> (std::count_if (jobs.begin(), jobs.end(),
+                                                        [] (const cue::FadeJob& job) { return job.movesRate; }));
+    }
+
+    void play (LaneRig& rig, int ticks)
+    {
+        for (int n = 0; n < ticks; ++n)
+        {
+            rig.audio.samples += 960;
+            rig.tickOnce();
+        }
+    }
+
+    /*  Plays until `ready` holds, a tick at a time, and answers whether it
+        ever did. */
+    template <typename Predicate>
+    bool playUntil (LaneRig& rig, Predicate ready, int bound)
+    {
+        for (int n = 0; n < bound && ! ready(); ++n)
+            play (rig, 1);
+
+        return ready();
+    }
+
+    int reportsOf (LaneRig& rig, const char* command, const std::string& runId)
+    {
+        auto count = 0;
+
+        for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+            if (record.command == command && ! record.args.empty()
+                  && record.args.front().getString() == runId)
+                ++count;
+
+        return count;
+    }
+}
+
+TEST_CASE ("speed fade: a fade that moves only the speed takes it along its curve and leaves the level where it is")
+{
+    LaneRig rig;
+    const auto id = rig.launch();
+
+    //  The rig's fade says -20 dB, and with its level switch off that is nobody's business.
+    aimAtTheSpeed (rig, rig.fadeId, "0.5", "1");
+    rig.fire (rig.fadeId);
+
+    const auto fade = rig.runs.all().back().id;
+    REQUIRE (rig.runs.find (fade)->cue == rig.fadeId);
+    CHECK (rig.runs.find (fade)->state == cue::runState::playing);
+
+    REQUIRE (rig.runner.fades().size() == 1u);
+    const auto job = rig.runner.fades().front();
+    CHECK (job.movesRate);
+    CHECK (job.target == "rate:" + id);
+    CHECK (job.heldRun() == id);
+    CHECK (job.fromRate == doctest::Approx (1.0));
+    CHECK (job.toRate == doctest::Approx (0.5));
+
+    play (rig, 25);
+
+    const auto halfway = rig.runs.find (id)->ownRate;
+    INFO ("halfway through, at " << halfway);
+    CHECK (halfway < 0.95);
+    CHECK (halfway > 0.55);
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (0.0));
+
+    //  On the voice as it moves: the last breakpoint placed is where the fade has got to.
+    REQUIRE_FALSE (rig.audio.ratePoints.empty());
+    CHECK (rig.audio.ratePoints.back().speed == doctest::Approx (halfway));
+
+    CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 40));
+    CHECK (rig.runs.find (id)->ownRate == doctest::Approx (0.5));
+    CHECK (rig.audio.ratePoints.back().speed == doctest::Approx (0.5));
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (0.0));
+
+    //  Arrived, it stops nothing it was not asked to, and reports once.
+    CHECK (rig.runs.find (id)->state == cue::runState::playing);
+    CHECK (rig.runner.fades().empty());
+    CHECK (reportsOf (rig, "run.ended", fade) == 1);
+
+    //  And the readout says what the voice plays at, once the horizon has passed.
+    play (rig, 4);
+    CHECK (rig.runs.find (id)->rateNow == doctest::Approx (0.5));
+}
+
+TEST_CASE ("speed fade: a speed fade takes over a speed fade from where it has got to, and leaves a level fade moving")
+{
+    /*  DECISION EA: takeover is per run AND per thing moved. */
+    LaneRig rig;
+    const auto id = rig.launch();
+
+    //  The rig's own fade moves the level: to -20 over two seconds.
+    rig.setCue (rig.fadeId, "duration", "2");
+    rig.fire (rig.fadeId);
+    const auto levelFade = rig.runs.all().back().id;
+
+    const auto up = newFade (rig, 4);
+    aimAtTheSpeed (rig, up, "2", "1");
+    rig.fire (up);
+    const auto upRun = rig.runs.all().back().id;
+
+    CHECK (rig.runner.fades().size() == 2u);
+    CHECK (speedJobs (rig) == 1u);
+
+    play (rig, 20);
+    const auto reached = rig.runs.find (id)->ownRate;
+    REQUIRE (reached > 1.1);
+
+    const auto down = newFade (rig, 5);
+    aimAtTheSpeed (rig, down, "0.5", "1");
+    rig.fire (down);
+
+    //  One speed job, the new one, starting where the speed stood as it was fired.
+    REQUIRE (rig.runner.fades().size() == 2u);
+    REQUIRE (speedJobs (rig) == 1u);
+
+    for (const auto& job : rig.runner.fades())
+    {
+        if (! job.movesRate)
+            continue;
+
+        CHECK (job.fromRate >= reached);
+        CHECK (job.fromRate == doctest::Approx (rig.runs.find (id)->ownRate));
+        CHECK (job.toRate == doctest::Approx (0.5));
+    }
+
+    //  The speed fade taken over is over; the level fade is not.
+    play (rig, 1);
+    CHECK (rig.runs.find (upRun)->isFinished());
+    CHECK_FALSE (rig.runs.find (levelFade)->isFinished());
+
+    play (rig, 55);
+    CHECK (rig.runs.find (id)->ownRate == doctest::Approx (0.5));
+
+    CHECK (playUntil (rig, [&] { return rig.runs.find (levelFade)->isFinished(); }, 60));
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (-20.0));
+    CHECK (rig.runs.find (id)->ownRate == doctest::Approx (0.5));
+}
+
+TEST_CASE ("speed fade: one fade moving both is two jobs under one run, which ends once, when the second is done")
+{
+    LaneRig rig;
+    const auto id = rig.launch();
+
+    aimAtTheSpeed (rig, rig.fadeId, "2", "1", true);     // and the level, to -20
+    rig.fire (rig.fadeId);
+    const auto both = rig.runs.all().back().id;
+
+    REQUIRE (rig.runner.fades().size() == 2u);
+    CHECK (speedJobs (rig) == 1u);
+
+    for (const auto& job : rig.runner.fades())
+        CHECK (job.self == both);
+
+    play (rig, 10);
+
+    //  A level fade takes the level, and only the level: the first run goes on while its speed moves.
+    const auto level = newFade (rig, 4);
+    rig.setCue (level, "level", "0");
+    rig.setCue (level, "duration", "3");
+    rig.fire (level);
+    const auto levelRun = rig.runs.all().back().id;
+
+    play (rig, 2);
+    CHECK_FALSE (rig.runs.find (both)->isFinished());
+    CHECK (speedJobs (rig) == 1u);
+    CHECK (reportsOf (rig, "run.ended", both) == 0);
+
+    //  And it ends when the speed arrives, once, with the level fade still going.
+    CHECK (playUntil (rig, [&] { return rig.runs.find (both)->isFinished(); }, 60));
+    CHECK (rig.runs.find (id)->ownRate == doctest::Approx (2.0));
+    CHECK_FALSE (rig.runs.find (levelRun)->isFinished());
+
+    play (rig, 5);
+    CHECK (reportsOf (rig, "run.ended", both) == 1);
+
+    SUBCASE ("and left alone, the two arrive together and the run reports once")
+    {
+        LaneRig again;
+        const auto sounding = again.launch();
+
+        aimAtTheSpeed (again, again.fadeId, "0.5", "1", true);
+        again.fire (again.fadeId);
+        const auto run = again.runs.all().back().id;
+
+        CHECK (playUntil (again, [&] { return again.runs.find (run)->isFinished(); }, 60));
+        CHECK (again.runs.find (sounding)->ownRate == doctest::Approx (0.5));
+        CHECK (again.runs.find (sounding)->ownLevel == doctest::Approx (-20.0));
+
+        play (again, 5);
+        CHECK (reportsOf (again, "run.ended", run) == 1);
+    }
+}
+
+TEST_CASE ("speed fade: a stop at the end waits a horizon and a tick, until the speed has been heard")
+{
+    /*  DECISION ED. The fake's horizon is two ticks; the last ramp takes one
+        more. A stop cut in with the fade's last tick would never let the
+        voice play the end of its ramp. */
+    SUBCASE ("a fade that moves only the speed carries the stop")
+    {
+        LaneRig rig;
+        const auto id = rig.launch();
+        const auto track = rig.runs.find (id)->track;
+
+        aimAtTheSpeed (rig, rig.fadeId, "0", "1");
+        rig.setCue (rig.fadeId, "stopWhenDone", "true");
+
+        const auto firedAt = rig.tick;
+        rig.fire (rig.fadeId);
+
+        REQUIRE (rig.runner.fades().size() == 1u);
+        CHECK (rig.runner.fades().front().stopWhenDone);
+        CHECK (rig.runner.fades().front().stopsAtTick == firedAt + 50 + 2 + 1);
+        CHECK (rig.runs.find (id)->state == cue::runState::stopping);
+
+        play (rig, 51);
+        CHECK (rig.runs.find (id)->ownRate == doctest::Approx (0.0));
+        CHECK (rig.audio.playing.count (track) == 1u);
+
+        play (rig, 3);
+        CHECK (rig.audio.playing.count (track) == 0u);
+    }
+
+    SUBCASE ("a fade that moves both: the level's job carries it, as late")
+    {
+        LaneRig rig;
+        rig.launch();
+
+        aimAtTheSpeed (rig, rig.fadeId, "0", "1", true);
+        rig.setCue (rig.fadeId, "stopWhenDone", "true");
+
+        const auto firedAt = rig.tick;
+        rig.fire (rig.fadeId);
+
+        REQUIRE (rig.runner.fades().size() == 2u);
+
+        for (const auto& job : rig.runner.fades())
+        {
+            INFO ((job.movesRate ? "the speed's job" : "the level's job"));
+            CHECK (job.stopWhenDone == ! job.movesRate);
+
+            if (! job.movesRate)
+                CHECK (job.stopsAtTick == firedAt + 50 + 2 + 1);
+        }
+    }
+
+    SUBCASE ("a level fade alone stops when its level arrives, as it always did")
+    {
+        LaneRig rig;
+        rig.launch();
+        rig.setCue (rig.fadeId, "stopWhenDone", "true");
+
+        const auto firedAt = rig.tick;
+        rig.fire (rig.fadeId);
+
+        REQUIRE (rig.runner.fades().size() == 1u);
+        CHECK (rig.runner.fades().front().stopsAtTick == firedAt + 50);
+    }
+}
+
+TEST_CASE ("speed fade: Esc fades the level and leaves the speed where it has got to")
+{
+    /*  DECISION EB. */
+    SUBCASE ("a speed fade under way")
+    {
+        LaneRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+        const auto id = rig.launch();
+        const auto track = rig.runs.find (id)->track;
+
+        aimAtTheSpeed (rig, rig.fadeId, "2", "2");
+        rig.fire (rig.fadeId);
+        const auto fade = rig.runs.all().back().id;
+
+        play (rig, 25);
+
+        rig.audio.samples += 960;
+        REQUIRE (rig.submitAndTick ("run.stopAll").applied == 1);
+
+        const auto held = rig.runs.find (id)->ownRate;
+        INFO ("the speed at Esc: " << held);
+        REQUIRE (held > 1.1);
+        REQUIRE (held < 1.9);
+
+        //  The panic fade's level job, and no speed job left.
+        CHECK (speedJobs (rig) == 0u);
+        CHECK (rig.runner.fades().size() == 1u);
+
+        play (rig, 10);
+        CHECK (rig.runs.find (id)->ownRate == doctest::Approx (held));
+        CHECK (rig.runs.find (id)->state == cue::runState::stopping);
+        CHECK (rig.runs.find (fade)->isFinished());
+
+        CHECK (playUntil (rig, [&] { return rig.audio.playing.count (track) == 0u; }, 50));
+        CHECK (rig.runs.find (id)->ownRate == doctest::Approx (held));
+    }
+
+    SUBCASE ("a speed fade's own stop, due later, goes with it and never hands the cue back")
+    {
+        LaneRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+        const auto id = rig.launch();
+        const auto track = rig.runs.find (id)->track;
+
+        aimAtTheSpeed (rig, rig.fadeId, "0.5", "10");
+        rig.setCue (rig.fadeId, "stopWhenDone", "true");
+        rig.fire (rig.fadeId);
+
+        play (rig, 10);
+        REQUIRE (rig.runs.find (id)->state == cue::runState::stopping);
+
+        rig.audio.samples += 960;
+        REQUIRE (rig.submitAndTick ("run.stopAll").applied == 1);
+        CHECK (speedJobs (rig) == 0u);
+
+        //  Stopping all the way down - never handed back to `playing` by the fade Esc ended.
+        auto handedBack = false;
+
+        for (int n = 0; n < 45; ++n)
+        {
+            play (rig, 1);
+            handedBack = handedBack || rig.runs.find (id)->state == cue::runState::playing;
+        }
+
+        CHECK_FALSE (handedBack);
+        CHECK (playUntil (rig, [&] { return rig.audio.playing.count (track) == 0u; }, 20));
+    }
+}
+
+TEST_CASE ("speed fade: a double Esc drops its stop with every other action, and cuts at once")
+{
+    LaneRig rig;
+    const auto id = rig.launch();
+    const auto track = rig.runs.find (id)->track;
+
+    aimAtTheSpeed (rig, rig.fadeId, "0.5", "10");
+    rig.setCue (rig.fadeId, "stopWhenDone", "true");
+    rig.fire (rig.fadeId);
+
+    play (rig, 10);
+    REQUIRE (rig.audio.playing.count (track) == 1u);
+
+    rig.audio.samples += 960;
+    REQUIRE (rig.submitAndTick ("run.killAll").applied == 1);
+    play (rig, 1);
+
+    CHECK (speedJobs (rig) == 0u);
+    CHECK (rig.audio.playing.count (track) == 0u);
+    CHECK (playUntil (rig, [&] { return rig.runs.find (id)->isFinished(); }, 5));
+}
+
+TEST_CASE ("speed fade: aimed at nothing with a speed it moves nothing, and a fade with neither switch ends at once")
+{
+    /*  DECISION EC, and the fade that moves nothing at all. */
+    SUBCASE ("a group")
+    {
+        TrimRig rig;
+        rig.setStandby (rig.groupId);
+
+        rig.submitAndTick ("go");
+        rig.audio.completeArms (rig.engine);
+        rig.settle (10);
+
+        REQUIRE_FALSE (rig.runOf (rig.member).empty());
+
+        const auto fade = rig.fadeAt (rig.groupId, "-6", "0.2");
+        rig.document.setAttribute ("/godot/cue/" + fade + "/levelOn", "false");
+        rig.document.setAttribute ("/godot/cue/" + fade + "/rateOn", "true");
+        rig.document.setAttribute ("/godot/cue/" + fade + "/rate", "2");
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string (fade) });
+
+        CHECK (std::none_of (rig.runner.fades().begin(), rig.runner.fades().end(),
+                             [] (const cue::FadeJob& job) { return job.movesRate; }));
+
+        rig.settle (3);
+        CHECK (rig.runs.find (rig.runOf (fade))->isFinished());
+        CHECK (rig.runs.find (rig.runOf (rig.member))->ownRate == doctest::Approx (1.0));
+        CHECK (rig.ownLevelOf (rig.groupId) == doctest::Approx (0.0));
+    }
+
+    SUBCASE ("a DCA, whose fade reads no target")
+    {
+        LaneRig rig;
+        const auto id = rig.launch();
+
+        const auto dca = rig.document.createDca ("Music");
+        REQUIRE (dca.ok);
+
+        //  The rig's fade still names the cue: a fade that names a DCA does not read it.
+        aimAtTheSpeed (rig, rig.fadeId, "2", "1");
+        rig.setCue (rig.fadeId, "dca", dca.id);
+        rig.fire (rig.fadeId);
+        const auto fade = rig.runs.all().back().id;
+
+        CHECK (speedJobs (rig) == 0u);
+
+        play (rig, 2);
+        CHECK (rig.runs.find (fade)->isFinished());
+        CHECK (rig.runs.find (id)->ownRate == doctest::Approx (1.0));
+    }
+
+    SUBCASE ("neither switch")
+    {
+        LaneRig rig;
+        const auto id = rig.launch();
+
+        rig.setCue (rig.fadeId, "levelOn", "false");
+        rig.fire (rig.fadeId);
+        const auto fade = rig.runs.all().back().id;
+
+        play (rig, 2);
+        CHECK (rig.runs.find (fade)->isFinished());
+        CHECK (rig.runs.find (fade)->state != cue::runState::failed);
+        CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (0.0));
+        CHECK (rig.runs.find (id)->ownRate == doctest::Approx (1.0));
+    }
+
+    SUBCASE ("a cue that is not running")
+    {
+        LaneRig rig;
+
+        aimAtTheSpeed (rig, rig.fadeId, "2", "1");
+        rig.fire (rig.fadeId);
+        const auto fade = rig.runs.all().back().id;
+
+        rig.tickOnce();
+        rig.tickOnce();
+        CHECK (rig.runs.find (fade)->isFinished());
+        CHECK (rig.runs.find (fade)->state != cue::runState::failed);
+        CHECK (rig.runner.fades().empty());
+    }
+}
+
+TEST_CASE ("speed fade: an edit of the cue's speed under the fade waits, and lands as the fade lets go")
+{
+    /*  DECISION DW's exception: a fade holds the run, and the document waits
+        - then is read again the tick the fade lets go, not at whatever edit
+        comes next. */
+    SUBCASE ("edited under it")
+    {
+        LaneRig rig;
+        const auto id = rig.launch();
+
+        aimAtTheSpeed (rig, rig.fadeId, "2", "1");
+        rig.fire (rig.fadeId);
+        const auto fade = rig.runs.all().back().id;
+
+        play (rig, 10);
+        rig.setCue (rig.mediaId, "rate", "0.5");
+        play (rig, 2);
+
+        const auto moving = rig.runs.find (id)->ownRate;
+        INFO ("under the fade, at " << moving);
+        CHECK (moving > 1.1);
+
+        CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 60));
+        play (rig, 1);
+        CHECK (rig.runs.find (id)->ownRate == doctest::Approx (0.5));
+    }
+
+    SUBCASE ("not edited: the speed stays where the fade took it, whatever else is edited")
+    {
+        LaneRig rig;
+        const auto id = rig.launch();
+
+        aimAtTheSpeed (rig, rig.fadeId, "2", "1");
+        rig.fire (rig.fadeId);
+        const auto fade = rig.runs.all().back().id;
+
+        CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 60));
+        play (rig, 1);
+        CHECK (rig.runs.find (id)->ownRate == doctest::Approx (2.0));
+
+        rig.setCue (rig.mediaId, "level", "-3");
+        play (rig, 2);
+        CHECK (rig.runs.find (id)->ownRate == doctest::Approx (2.0));
+    }
+}
+
+TEST_CASE ("speed fade: a stretched cue's speed fade is held to the stretcher's limit")
+{
+    LaneRig rig;
+    rig.audio.speedLimit = 18.75;
+    rig.setCue (rig.mediaId, "rateMode", "timestretch");
+
+    const auto id = rig.launch();
+
+    aimAtTheSpeed (rig, rig.fadeId, "20", "0.2");
+    rig.fire (rig.fadeId);
+
+    REQUIRE (speedJobs (rig) == 1u);
+    CHECK (rig.runner.fades().front().toRate == doctest::Approx (18.75));
+
+    play (rig, 15);
+    CHECK (rig.runs.find (id)->ownRate == doctest::Approx (18.75));
+}

@@ -5411,6 +5411,65 @@ TEST_CASE ("client: the DCAs are read in the show's order, and a menu of them st
     CHECK (model::dcaChoices ({}).size() == 1u);
 }
 
+TEST_CASE ("client: a fade's two switches, each before what it moves, and what a switch leaves alone is greyed")
+{
+    /*  Namespace draft §22.7: the Level switch before the level, the Speed
+        switch before the speed, and the curve - the shape of both - after
+        both. Greyed while its switch is off and never hidden, so turning one
+        on finds the row where it already was; and a greyed number is not one
+        the dial turns. */
+    Rig rig;
+
+    const auto fade = rig.document.createCue ("7K2QM9X4", 0, "fade", "Slower");
+    REQUIRE (fade.ok);
+
+    const auto panelNow = [&rig, &fade]
+    {
+        rig.parameters.markStale();
+        return model::inspect (*rig.publish (1), fade.id);
+    };
+
+    auto panel = panelNow();
+    const auto does = namesUnder (panel, "what it does");
+    const auto levelOnAt = positionOf (does, "levelOn");
+    REQUIRE (levelOnAt + 4 < does.size());
+    CHECK (does[levelOnAt + 1] == "level");
+    CHECK (does[levelOnAt + 2] == "rateOn");
+    CHECK (does[levelOnAt + 3] == "rate");
+    CHECK (does[levelOnAt + 4] == "curve");
+
+    for (const auto& said : std::vector<std::pair<std::string, std::string>> {
+             { "levelOn", "moves level" }, { "rateOn", "moves speed" }, { "rate", "speed" } })
+    {
+        INFO ("row " << said.first);
+        REQUIRE (rowIn (panel, said.first) != nullptr);
+        CHECK (rowIn (panel, said.first)->label == said.second);
+    }
+
+    //  As every fade was: the level moves, the speed does not.
+    CHECK (rowIn (panel, "level")->applies);
+    CHECK_FALSE (rowIn (panel, "rate")->applies);
+    CHECK (rowIn (panel, "curve")->applies);
+    CHECK_FALSE (model::mayDial (*rowIn (panel, "rate")));
+
+    //  The speed switched on: its row lights, and the dial may turn it.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/rateOn", "true").ok);
+    panel = panelNow();
+    CHECK (rowIn (panel, "rate")->applies);
+    CHECK (model::mayDial (*rowIn (panel, "rate")));
+
+    //  The level switched off: the level greys, the curve still shapes the speed.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/levelOn", "false").ok);
+    panel = panelNow();
+    CHECK_FALSE (rowIn (panel, "level")->applies);
+    CHECK (rowIn (panel, "curve")->applies);
+
+    //  Neither: nothing to shape.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/rateOn", "false").ok);
+    panel = panelNow();
+    CHECK_FALSE (rowIn (panel, "curve")->applies);
+}
+
 TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler rows follow what a media cue has")
 {
     Rig rig;
@@ -5490,10 +5549,11 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
     //  A fade's DCA beside its target - the other thing it can move - and a menu too.
     const auto fading = model::inspect (*snapshot, fade.id);
     const auto fadeRows = namesUnder (fading, "what it does");
-    REQUIRE (fadeRows.size() >= 3u);
+    REQUIRE (fadeRows.size() >= 4u);
     CHECK (fadeRows[0] == "target");
     CHECK (fadeRows[1] == "dca");
-    CHECK (fadeRows[2] == "level");
+    CHECK (fadeRows[2] == "levelOn");
+    CHECK (fadeRows[3] == "level");
     REQUIRE (rowIn (fading, "dca") != nullptr);
     CHECK (rowIn (fading, "dca")->control == model::Control::dcaRef);
 

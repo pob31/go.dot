@@ -484,6 +484,13 @@ namespace wfg::cue
             if (entry.element != "Fade" || ! read.flag (entry.node, "cue", "enabled"))
                 continue;
 
+            /*  A FADE THAT LEAVES THE LEVEL ALONE trims nothing (namespace
+                draft §22.6): read as a level, a fade that moves only the speed
+                would be a fade to its `level`'s default, silence. Its speed is
+                not solved (EE). */
+            if (! read.flag (entry.node, "fade", "levelOn"))
+                continue;
+
             const auto targetCue = read.text (entry.node, "fade", "target");
 
             if (targetCue.empty())
@@ -730,7 +737,11 @@ namespace wfg::cue
                     happened inside it: a fade three seconds into six has moved
                     its target half of the way. Linear, which is the shape a
                     reading can promise without the curve; the run that is
-                    built from this plays the real one. */
+                    built from this plays the real one. A fade that leaves the
+                    level alone trims nothing, as above. */
+                if (! read.flag (entry->node, "fade", "levelOn"))
+                    continue;
+
                 const auto targetCue = read.text (entry->node, "fade", "target");
                 const auto cue = document.findById (targetCue);
 

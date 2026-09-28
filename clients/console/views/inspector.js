@@ -118,7 +118,8 @@ const KIND_ORDER = {
             "eqB2On", "eqB2Freq", "eqB2Gain", "eqB2Q",
             "eqB3On", "eqB3Freq", "eqB3Gain", "eqB3Q",
             "eqB4On", "eqB4Shape", "eqB4Freq", "eqB4Gain", "eqB4Q"],
-  fade:    ["target", "dca", "level", "curve", "points", "stopWhenDone"],
+  // Each thing a fade moves is a switch, then where it goes: level, then speed (§22.7).
+  fade:    ["target", "dca", "levelOn", "level", "rateOn", "rate", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],
   start:   ["target"],
   osc:     ["address", "value", "wait", "timeout"],

@@ -314,6 +314,41 @@ TEST_CASE ("solve: a fade leaves a trim behind, as base plus what it moved")
     CHECK (plan.trims[0].decibels == doctest::Approx (-12.0));
 }
 
+TEST_CASE ("solve: a fade that leaves the level alone trims nothing, read in order or from what happened")
+{
+    /*  Namespace draft §22.6. Read as a level, a fade that moves only the
+        speed is a fade to its `level`'s default, silence, and load-to-time
+        would silence its target. Its speed is not solved (EE). */
+    SolverRig rig;
+
+    const auto bed = rig.media (rig.listId, 0, "Ambience");
+
+    const auto fade = rig.document.createCue (rig.listId, 1, "fade", "Slower").id;
+    rig.document.setAttribute ("/godot/cue/" + fade + "/target", bed);
+    rig.document.setAttribute ("/godot/cue/" + fade + "/levelOn", "false");
+    rig.document.setAttribute ("/godot/cue/" + fade + "/rateOn", "true");
+    rig.document.setAttribute ("/godot/cue/" + fade + "/rate", "0.5");
+
+    const auto target = rig.document.createCue (rig.listId, 2, "memo", "Here").id;
+
+    const std::vector<cue::Step> steps { { 0, bed, 'g' }, { 50, fade, 'g' }, { 100, target, 'g' } };
+    const auto fromWhatHappened = [&]
+    {
+        return cue::solveHistory (rig.document, &rig.durations, nullptr, { rig.listId, target, 0.0 }, steps);
+    };
+
+    CHECK (rig.solve (target, -1.0).trims.empty());
+
+    const auto history = fromWhatHappened();
+    CHECK (history.how == "history");
+    CHECK (history.trims.empty());
+
+    //  The same fade with its level switch on trims as it always did.
+    rig.document.setAttribute ("/godot/cue/" + fade + "/levelOn", "true");
+    CHECK (rig.solve (target, -1.0).trims.size() == 1u);
+    CHECK (fromWhatHappened().trims.size() == 1u);
+}
+
 TEST_CASE ("solve: the target's own groups come with it")
 {
     /*  A member sounds as part of its scene, so the plan has to say the scene

@@ -1053,6 +1053,75 @@ TEST_CASE ("document: a media cue's speed is nought to twenty, one when unsaid, 
     CHECK (document.setAttribute ("/godot/cue/" + memo.id + "/rate", "2").reason == reason::badAddress);
 }
 
+TEST_CASE ("document: a fade's two switches, and a speed fade aimed at something with no speed")
+{
+    /*  Namespace draft §22.2 and §22.6. A fade moves the level unless told
+        not to and the speed only when told to, so every fade written before
+        there was a speed is unchanged. A speed fade aimed at a group, a mic
+        cue or a DCA moves nothing, and a fade with neither switch on does
+        nothing: each is a warning, never a refusal (EC). */
+    ShowDocument document;
+    const auto list = document.createList ("Main");
+    const auto media = document.createCue (list.id, 0, "media", "Tape");
+    const auto group = document.createCue (list.id, 1, "group", "Scene");
+    const auto fade = document.createCue (list.id, 2, "fade", "Slower");
+    const auto address = "/godot/cue/" + fade.id + "/";
+
+    CHECK (document.getAttribute (address + "levelOn") == std::string ("true"));
+    CHECK (document.getAttribute (address + "rateOn") == std::string ("false"));
+    CHECK (document.getAttribute (address + "rate") == std::string ("1"));
+
+    CHECK (document.setAttribute (address + "rate", "0").ok);
+    CHECK (document.setAttribute (address + "rate", "20.5").reason == reason::typeMismatch);
+    CHECK (document.setAttribute (address + "rateOn", "maybe").reason == reason::typeMismatch);
+
+    const auto aboutThisFade = [&document, &fade]
+    {
+        std::vector<std::string> found;
+
+        for (const auto& problem : document.warnings())
+            if (problem.find ("Fade[" + fade.id + "]") != std::string::npos)
+                found.push_back (problem);
+
+        return found;
+    };
+
+    //  On a media cue, both switches are what they say.
+    REQUIRE (document.setAttribute (address + "target", media.id).ok);
+    REQUIRE (document.setAttribute (address + "rateOn", "true").ok);
+    CHECK (aboutThisFade().empty());
+
+    //  On a group, the speed moves nothing.
+    REQUIRE (document.setAttribute (address + "target", group.id).ok);
+    auto problems = aboutThisFade();
+    REQUIRE (problems.size() == 1u);
+    INFO (problems[0]);
+    CHECK (problems[0].find ("@rateOn") != std::string::npos);
+    CHECK (problems[0].find ("a group cue") != std::string::npos);
+    CHECK (problems[0].find ("only the level moves") != std::string::npos);
+
+    //  On a DCA, the same.
+    const auto dca = document.createDca ("Music");
+    REQUIRE (dca.ok);
+    REQUIRE (document.setAttribute (address + "target", std::string {}).ok);
+    REQUIRE (document.setAttribute (address + "dca", dca.id).ok);
+    problems = aboutThisFade();
+    REQUIRE (problems.size() == 1u);
+    CHECK (problems[0].find ("a DCA has no speed") != std::string::npos);
+
+    //  And a fade with neither switch on does nothing at all.
+    REQUIRE (document.setAttribute (address + "dca", std::string {}).ok);
+    REQUIRE (document.setAttribute (address + "target", media.id).ok);
+    REQUIRE (document.setAttribute (address + "rateOn", "false").ok);
+    REQUIRE (document.setAttribute (address + "levelOn", "false").ok);
+    problems = aboutThisFade();
+    REQUIRE (problems.size() == 1u);
+    CHECK (problems[0].find ("neither the level nor the speed") != std::string::npos);
+
+    //  Warnings, all of them: the show still loads.
+    CHECK (document.validate().empty());
+}
+
 TEST_CASE ("document: a write is checked before it lands")
 {
     ShowDocument document;

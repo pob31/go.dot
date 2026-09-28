@@ -1406,6 +1406,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="levelOn">
+          <a:documentation>Whether the fade moves its target&apos;s level (namespace draft §22.6). On, so every fade written before a fade could move a speed moves the level it always did; off, the fade leaves the level alone and moves only what rateOn asks for. QLab&apos;s shape: a switch per thing a fade moves.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
           <data type="string"/>
@@ -1453,6 +1462,24 @@
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="rate">
+          <a:documentation>The speed a fade with rateOn takes its target to, over its duration and along its curve - straight or S-shaped in the ratio itself, since nought has no logarithm (EA). One is the file&apos;s own speed; nought is a tape stop in varispeed and a held sound in timestretch. The drawn points stay the level&apos;s.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">20</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="rateOn">
+          <a:documentation>Whether the fade moves its target&apos;s speed, to its rate (namespace draft §22.6). Off unless asked. A switch rather than an empty rate, because an unreadable number reads as nought in places, and nought is a speed: a stopped tape. A speed fade aimed at a group, a DCA or a mic cue moves nothing, and wfg validate says so (EC).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
       <optional>

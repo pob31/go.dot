@@ -51,6 +51,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <utility>
 
 namespace wfg::cue
@@ -3457,10 +3458,31 @@ namespace wfg::cue
         const auto toDb = drawn.points.empty() ? numberOf (cue, "level")
                                                : drawn.points.back().levelDb;
 
+        /*  WHAT IT MOVES (namespace draft §22.6): the level unless `levelOn`
+            says not, the speed when `rateOn` says so - one fade, either or both,
+            QLab's shape. A fade that moves neither is a fade that moves
+            nothing: its run ends at once, and `wfg validate` says why. So is a
+            fade on a DCA with its level switch off: a DCA has no speed (EC),
+            and its `target` is not read. */
+        const auto levelOn = textOf (cue, "levelOn") != "false";
+        const auto rateOn = textOf (cue, "rateOn") == "true";
+
+        if (! levelOn && (! rateOn || ! textOf (cue, "dca").empty()))
+        {
+            if (auto* selfRun = runs.find (runId))
+                selfRun->state = runState::playing;
+
+            FadeJob nothing;
+            nothing.self = runId;
+            running.push_back (nothing);
+            return;
+        }
+
         /*  A FADE THAT NAMES A DCA MOVES THE DCA (Phase 6, `fade/dca`), and
             `target` is not read: a DCA has no run to find, and a fade that
             named both would otherwise have to choose which of two levels it
-            meant. `wfg validate` says so when both are written. */
+            meant. `wfg validate` says so when both are written. A DCA has no
+            speed, so `rateOn` there moves nothing (EC). */
         if (const auto dcaId = textOf (cue, "dca"); ! dcaId.empty())
         {
             beginDcaFade (dcaId, runId, toDb, numberOf (cue, "duration"),
@@ -3474,14 +3496,32 @@ namespace wfg::cue
             silently, until it ended by itself - right for a fade that will
             come back up, and a surprise for the common fade-out. `false`
             reads as the default the writer omits, so an unsaid box is off. */
-        beginFade (cue[idProperty].toString().toStdString(),
-                          textOf (cue, "target"),
-                          runId, "fade",
-                          toDb,
-                          numberOf (cue, "duration"),
-                          fadeCurveFrom (textOf (cue, "curve")),
-                          textOf (cue, "stopWhenDone") == "true",
-                          std::move (drawn.points));
+        const auto stopWhenDone = textOf (cue, "stopWhenDone") == "true";
+
+        /*  THE SPEED FIRST, so the level knows whether to wait for it: a
+            speed is heard a horizon after the tick that moved it, so a fade
+            that moves both and stops at the end stops once the speed has
+            arrived too (ED). The level's job carries that stop; a fade that
+            moves only the speed carries its own. Read with one as the
+            fallback, never nought, for the reason the cue's own speed is. */
+        const auto speedMoves = rateOn
+                                  && beginRateFade (textOf (cue, "target"), runId,
+                                                    osc::parseDouble (textOf (cue, "rate")).value_or (1.0),
+                                                    numberOf (cue, "duration"),
+                                                    fadeCurveFrom (textOf (cue, "curve")),
+                                                    stopWhenDone && ! levelOn,
+                                                    ! levelOn);
+
+        if (levelOn)
+            beginFade (cue[idProperty].toString().toStdString(),
+                              textOf (cue, "target"),
+                              runId, "fade",
+                              toDb,
+                              numberOf (cue, "duration"),
+                              fadeCurveFrom (textOf (cue, "curve")),
+                              stopWhenDone,
+                              std::move (drawn.points),
+                              speedMoves ? latencyTicks() + 1 : 0);
     }
 
     int Runner::advanceTargetOf (const juce::ValueTree& cue, const Run& run) const
@@ -3657,6 +3697,7 @@ namespace wfg::cue
             else now) and which SCHEDULE is inherited (a stop that was already
             coming). The first is about lifetime; the second is about time. */
         Takeover out;
+        std::vector<std::string> supersededSelves;
 
         for (const auto& superseded : running)
         {
@@ -3683,7 +3724,7 @@ namespace wfg::cue
 
                 QUEUED RATHER THAN SUBMITTED, because only the tick hook
                 reports. See advanceFades. */
-            supersededRuns.push_back (superseded.self);
+            supersededSelves.push_back (superseded.self);
 
             /*  BUT A STOP IS NOT A FADE, AND IT STILL HAPPENS (author,
                 2026-09-06). A fade takes over the LEVEL; it does not call off
@@ -3719,6 +3760,15 @@ namespace wfg::cue
                                        }),
                        running.end());
 
+        /*  A FADE CUE THAT MOVES TWO THINGS ENDS WHEN BOTH ARE TAKEN (namespace
+            draft §22.6): a level fade over one that also moves the speed takes
+            the level and leaves the speed moving, and the older fade's run goes
+            on until that job is done too. */
+        for (const auto& self : supersededSelves)
+            if (std::none_of (running.begin(), running.end(),
+                              [&self] (const FadeJob& job) { return job.self == self; }))
+                supersededRuns.push_back (self);
+
         return out;
     }
 
@@ -3726,7 +3776,8 @@ namespace wfg::cue
                             const std::string& targetCueId,
                             const std::string& selfRunId, const std::string& kind,
                             double toDb, double seconds, FadeCurve curve,
-                            bool stopWhenDone, std::vector<doc::FadePoint> points)
+                            bool stopWhenDone, std::vector<doc::FadePoint> points,
+                            int stopLagTicks)
     {
         juce::ignoreUnused (selfCueId, kind);
 
@@ -3847,8 +3898,9 @@ namespace wfg::cue
         {
             /*  A stop of its own, landing when its own fade arrives. The two
                 are the same number here and diverge only when somebody fades
-                over the top of it. */
-            job.stopsAtTick = currentTick + job.ticksTotal;
+                over the top of it - or when the same fade moves the speed,
+                which is heard later (ED). */
+            job.stopsAtTick = currentTick + job.ticksTotal + stopLagTicks;
         }
 
         /*  A MIC CUE FADED OUT IS ITS INPUT FADED (Phase 9b, namespace draft
@@ -3873,6 +3925,86 @@ namespace wfg::cue
                 stopping->state = runState::stopping;
 
         running.push_back (job);
+    }
+
+    bool Runner::beginRateFade (const std::string& targetCueId, const std::string& selfRunId,
+                                double toRate, double seconds, FadeCurve curve,
+                                bool stopWhenDone, bool alone)
+    {
+        auto* selfRun = runs.find (selfRunId);
+
+        if (selfRun == nullptr)
+            return false;
+
+        selfRun->state = runState::playing;
+
+        /*  NOTHING TO MOVE, said once: by this job when the fade moves only the
+            speed, by the level's job when it moves both. */
+        const auto nothing = [&] (std::string failure)
+        {
+            if (! alone)
+                return false;
+
+            FadeJob orphan;
+            orphan.self = selfRunId;
+            orphan.failure = std::move (failure);
+            running.push_back (orphan);
+            return false;
+        };
+
+        if (! targetCueId.empty() && ! document.findById (targetCueId).isValid())
+            return nothing (runError::badTarget);
+
+        /*  A MEDIA CUE'S, and one that is running (§3.8's silent no-op). A
+            group, a mic cue, a memo: nothing there has a speed to move (EC). */
+        const auto* live = runs.liveRunOf (targetCueId);
+
+        if (live == nullptr || live->kind != "media")
+            return nothing ({});
+
+        const auto targetId = live->id;
+        const auto takeover = resolveTakeover ("rate:" + targetId);
+        auto* target = runs.find (targetId);
+
+        if (target == nullptr)
+            return false;
+
+        FadeJob job;
+        job.target = "rate:" + targetId;
+        job.self = selfRunId;
+        job.movesRate = true;
+        job.fromRate = target->ownRate;
+
+        /*  Nought to twenty, as the row is, whatever reached here - and a
+            stretched cue held to the stretcher's limit, as its own speed is,
+            so its clock and its voice agree. */
+        const auto stretchLimit = audio != nullptr ? audio->stretchSpeedLimit() : 0.0;
+        const auto wanted = std::isfinite (toRate) ? std::clamp (toRate, 0.0, 20.0) : 1.0;
+        job.toRate = target->stretch && stretchLimit > 0.0 ? std::min (wanted, stretchLimit) : wanted;
+        job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
+        job.curve = curve;
+        job.stopWhenDone = stopWhenDone;
+
+        /*  A STOP ONCE THE SPEED HAS ARRIVED (ED). The last speed is placed a
+            horizon ahead of the tick that wrote it and reached over one more,
+            and a stop is heard at the next block: stopped with the fade's last
+            tick, the voice would never play the end of the ramp. A stop this
+            job inherited keeps its own tick, as a level's does. */
+        if (takeover.keepStopping)
+        {
+            job.stopWhenDone = true;
+            job.stopsAtTick = takeover.stopsAtTick;
+        }
+        else if (stopWhenDone)
+        {
+            job.stopsAtTick = currentTick + job.ticksTotal + latencyTicks() + 1;
+        }
+
+        if (job.stopWhenDone)
+            target->state = runState::stopping;
+
+        running.push_back (job);
+        return true;
     }
 
     void Runner::beginDcaFade (const std::string& dcaId, const std::string& selfRunId,
@@ -4383,13 +4515,16 @@ namespace wfg::cue
                 issue, and is left to it. */
             if (run.state == runState::stopping)
             {
-                const auto job = std::find_if (running.begin(), running.end(),
-                                               [&run] (const FadeJob& held)
-                                               {
-                                                   return held.stopWhenDone && held.target == run.id;
-                                               });
+                /*  The soonest of them: a level's stop and a speed's can hold
+                    one voice (§22.6), and the first to land is the one that
+                    counts. */
+                auto soonest = std::numeric_limits<std::int64_t>::max();
 
-                if (job != running.end() && job->stopsAtTick > stopsAt)
+                for (const auto& held : running)
+                    if (held.stopWhenDone && held.heldRun() == run.id)
+                        soonest = std::min (soonest, held.stopsAtTick);
+
+                if (soonest != std::numeric_limits<std::int64_t>::max() && soonest > stopsAt)
                     sounding.push_back (run.id);
             }
 
@@ -4410,10 +4545,10 @@ namespace wfg::cue
         for (auto& job : running)
         {
             if (! job.stopWhenDone || ! job.dca.empty()
-                  || std::find (sounding.begin(), sounding.end(), job.target) != sounding.end())
+                  || std::find (sounding.begin(), sounding.end(), job.heldRun()) != sounding.end())
                 continue;
 
-            const auto* held = runs.find (job.target);
+            const auto* held = runs.find (job.heldRun());
 
             if (held == nullptr || held->track < 0)
                 continue;
@@ -4431,8 +4566,11 @@ namespace wfg::cue
 
             /*  A FADE ALREADY ON IT GIVES WAY, from wherever its level has got
                 to - and the stop it may have carried with it lands later than
-                this one, or it would not be here. */
+                this one, or it would not be here. So does a fade on its SPEED,
+                which Esc does not move: the speed stays where it has got to
+                (EB), and a speed fade's stop, due later, goes with it. */
             resolveTakeover (id);
+            resolveTakeover ("rate:" + id);
 
             FadeJob job;
             job.target = id;
@@ -5220,6 +5358,18 @@ namespace wfg::cue
 
         supersededRuns.clear();
 
+        /*  WHETHER A JOB IS THE LAST OF ITS FADE CUE STILL MOVING: a fade that
+            moves the level and the speed is two jobs under one run, and the run
+            reports once, when the second of them is done (§22.6). */
+        const auto lastOfItsCue = [this] (const FadeJob& job)
+        {
+            return std::none_of (running.begin(), running.end(),
+                                 [&job] (const FadeJob& other)
+                                 {
+                                     return &other != &job && ! other.retired && other.self == job.self;
+                                 });
+        };
+
         for (auto& job : running)
         {
             /*  KILLED, and this is the half of `run.kill` that did not exist.
@@ -5273,12 +5423,15 @@ namespace wfg::cue
             if (selfRun != nullptr && selfRun->state == runState::stopping)
             {
                 if (job.stopWhenDone)
-                    if (auto* held = runs.find (job.target))
+                    if (auto* held = runs.find (job.heldRun()))
                         if (held->state == runState::stopping && ! held->stopIssued)
                             held->state = runState::playing;
 
                 job.retired = true;
-                engine.submit (origin::engine, "run.ended", one (job.self));
+
+                if (lastOfItsCue (job))
+                    engine.submit (origin::engine, "run.ended", one (job.self));
+
                 continue;
             }
 
@@ -5305,7 +5458,7 @@ namespace wfg::cue
                 continue;
             }
 
-            auto* target = runs.find (job.target);
+            auto* target = runs.find (job.heldRun());
 
             /*  What was being faded has gone - it ended on its own, or somebody
                 killed it. The fade has nothing left to do and says so, rather
@@ -5315,13 +5468,17 @@ namespace wfg::cue
             {
                 job.retired = true;
 
-                if (job.reportsSelf)
+                if (job.reportsSelf && lastOfItsCue (job))
                     engine.submit (origin::engine, "run.ended", one (job.self));
 
                 continue;
             }
 
-            const auto level = job.currentDb();
+            /*  A SPEED FADE moves the run's own speed, which `applyRates`
+                places on the voice a horizon ahead (namespace draft §22.4), and
+                leaves its level to whatever else is moving it. */
+            if (job.movesRate)
+                target->ownRate = job.currentRate();
 
             /*  THE RUN'S OWN LEVEL, and only that.
 
@@ -5335,7 +5492,8 @@ namespace wfg::cue
                 NEITHER IS LOGGED - §3.15 keeps continuous readouts out of the
                 log, and a replay recomputes them from the GO that started the
                 fade and the document it read. */
-            target->ownLevel = level;
+            if (! job.movesRate)
+                target->ownLevel = job.currentDb();
 
             /*  WHAT THIS JOB IS WAITING FOR. A plain fade is done when its
                 level arrives. A job carrying a stop is done when the STOP is
@@ -5378,7 +5536,7 @@ namespace wfg::cue
                     engine.submit (origin::engine, "run.ended", one (target->id));
             }
 
-            if (job.reportsSelf)
+            if (job.reportsSelf && lastOfItsCue (job))
                 engine.submit (origin::engine, "run.ended", one (job.self));
 
             job.retired = true;
@@ -7601,8 +7759,8 @@ namespace wfg::cue
             tick with nobody editing compares one number, and an edit - or an
             undo - reaches every sounding run on the next tick (DW). Only the
             cue whose `rate` moved is moved: an edit of anything else reads the
-            same number and places nothing. A speed fade holds its run
-            (`rateHeld`), and the document waits until it lets go. */
+            same number and places nothing. A speed fade holds its run, and the
+            document waits until it lets go. */
         const auto revision = document.showRevision();
         const auto reread = revision != rateRevision;
         rateRevision = revision;
@@ -7621,7 +7779,20 @@ namespace wfg::cue
             if (run == nullptr)
                 continue;
 
-            if (reread && ! run->rateHeld)
+            /*  HELD WHILE A SPEED FADE MOVES IT (DW), asked of the fades
+                themselves, so every way one ends - arriving, taken over,
+                killed, dropped by a double Esc - lets go the same way. And
+                read again as it lets go: an edit of the cue's speed made under
+                the fade lands then, not at whatever edit comes next. */
+            const auto held = std::any_of (running.begin(), running.end(),
+                                           [&snapshot] (const FadeJob& job)
+                                           {
+                                               return job.movesRate && job.heldRun() == snapshot.id;
+                                           });
+            const auto letGo = run->rateHeld && ! held;
+            run->rateHeld = held;
+
+            if ((reread || letGo) && ! held)
             {
                 if (const auto cue = document.findById (run->cue); cue.isValid())
                 {
@@ -8219,7 +8390,7 @@ namespace wfg::cue
                                            [&snapshot] (const FadeJob& job)
                                            {
                                                return job.stopWhenDone
-                                                        && job.target == snapshot.id;
+                                                        && job.heldRun() == snapshot.id;
                                            });
 
             if (held)

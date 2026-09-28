@@ -111,6 +111,29 @@ namespace wfg::cue
             a run: a DCA has no sound of its own to find or to stop. */
         std::string dca;
 
+        /*  WHAT THE JOB MOVES (namespace draft §22.6): the run's level, as
+            every fade did until 2026-09-28, or - when this is true - its SPEED,
+            from `fromRate` to `toRate` along the same curve, straight or S in
+            the ratio itself (EA). A speed job's `target` is `rate:` and the
+            run's identifier, so a takeover finds speed jobs and level jobs
+            apart and a speed fade never cancels a level fade; `heldRun()` is
+            the run behind either. A fade that moves both is two jobs sharing
+            `self`, and the run reports when the last of them is done. */
+        bool movesRate = false;
+        double fromRate = 1.0;
+        double toRate = 1.0;
+
+        /*  The run whose sound this job moves, whatever its key: the target
+            itself for a level, what follows `rate:` for a speed, nothing for a
+            DCA, which has no run. */
+        std::string heldRun() const
+        {
+            if (! dca.empty())
+                return {};
+
+            return movesRate && target.size() > 5 ? target.substr (5) : target;
+        }
+
         /*  The run of the FADE CUE itself, which reports done when the fade
             reaches its end. A fade is a cue, so pressing GO on it creates a run
             like any other - and that run finishing is how a group will know the
@@ -187,6 +210,19 @@ namespace wfg::cue
 
             return points.empty() ? fadeLevelDb (fromDb, toDb, progress, curve)
                                   : fadeLevelDb (fromDb, points, progress);
+        }
+
+        /*  The speed now, for a job that moves one: the same interpolation as a
+            level's two-word curve - it is a straight line or a smoothstep
+            between two numbers, and says nothing about decibels - in the ratio
+            itself. Never the drawn points, which are the level's (EA). */
+        double currentRate() const noexcept
+        {
+            if (ticksTotal <= 0)
+                return toRate;
+
+            const auto progress = static_cast<double> (ticksDone) / ticksTotal;
+            return fadeLevelDb (fromRate, toRate, progress, curve);
         }
     };
 }

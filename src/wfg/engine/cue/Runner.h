@@ -1275,12 +1275,30 @@ namespace wfg::cue
         Takeover resolveTakeover (const std::string& targetId);
 
         /*  `points` is a drawn curve, or empty for the two words; a stop
-            passes it empty, having no curve to draw (§14.6). */
+            passes it empty, having no curve to draw (§14.6). `stopLagTicks`
+            holds a stop of its own back that many ticks past the level's
+            arrival: a fade that also moves the speed stops once the speed has
+            been heard too (§22.6, ED). */
         void beginFade (const std::string& selfCueId,
                         const std::string& targetCueId,
                         const std::string& selfRunId, const std::string& kind,
                         double toDb, double seconds, FadeCurve, bool stopWhenDone,
-                        std::vector<doc::FadePoint> points);
+                        std::vector<doc::FadePoint> points,
+                        int stopLagTicks = 0);
+
+        /*  A FADE ON A SPEED (namespace draft §22.6): the target's own speed,
+            from wherever it stands to `toRate`, straight or S in the ratio. A
+            media cue's only: aimed at a group, a mic cue or a cue not running
+            it moves nothing (EC). Its takeover key is `rate:` and the run, so
+            it takes over a speed fade and never a level fade. `alone` is a fade
+            that moves the speed only: then it says what became of a target
+            that is not there, and carries the fade's stop, which lands once the
+            speed has reached the voice - a horizon and a tick after its last
+            breakpoint (ED). With the level moving too, the level's job does
+            both. Answers whether a job now moves the speed. */
+        bool beginRateFade (const std::string& targetCueId, const std::string& selfRunId,
+                            double toRate, double seconds, FadeCurve, bool stopWhenDone,
+                            bool alone);
 
         /*  A FADE AIMED AT A DCA (`fade/dca`, Phase 6): the DCA's trim moves
             from wherever it stands to `toDb`. No run to find and nothing to

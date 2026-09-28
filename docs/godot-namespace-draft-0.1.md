@@ -12442,7 +12442,7 @@ and §21.5. Nothing is renumbered. A reference to one of them says which section
 | DY | **One resampler at every speed**, Tracktion's Lagrange: exact at one, and what it does above one is measured (M47) | implementer's call |
 | DZ | **Timestretch is Signalsmith's default preset**, stretched even at one - the operator chose it | implementer's call |
 | EA | **A speed fade** runs straight or S-curved in the ratio itself (nought has no logarithm); drawn points stay the level's. A fade takes over from another per run AND per thing moved, so a speed fade never cancels a level fade | implementer's call |
-| EB | **Esc fades the level only**: a speed fade ends with its voice. Double Esc drops a speed fade's stop, as it drops every action (§4.4) | implementer's call |
+| EB | **Esc fades the level only**: the speed stays where it has got to, and a speed fade under way ends at the press. Double Esc drops a speed fade's stop, as it drops every action (§4.4) | implementer's call |
 | EC | **A speed fade aimed at a group, a DCA or a mic cue** moves nothing, and `wfg validate` says so | implementer's call (§4.12: nothing inherits downward) |
 | ED | **Inside one fade, the speed lags the level by one lead** (five ticks at most), and a stop waits for the speed | implementer's call |
 | EE | **The list, the walk, the timeline and load-to-time read the cue's own speed**: a file's length over its speed, for ever at nought. Speed fades are not solved | implementer's call |
@@ -12657,13 +12657,20 @@ the one cue moves both: two jobs under one report, so the fade is done when both
 - **Takeover is per run and per thing moved.** A speed fade takes over from a speed fade on the same
   run, and leaves a level fade alone.
 - **The speed arrives one lead after the level** inside one fade (ED). A stop at the fade's end waits
-  for the speed to have arrived.
-- **Esc fades the level** over the show's panic fade; the speed stays where it is, and a speed fade
-  ends when its voice does (EB). **Double Esc** drops every stop still to come, a speed fade's
-  included.
+  for the speed to have arrived: a horizon and one tick past the fade's last tick, because the last
+  speed is placed a horizon ahead and reached over one more tick. In a fade that moves both, the
+  level's job carries that stop.
+- **Esc fades the level** over the show's panic fade and leaves the speed where it has got to (EB). A
+  speed fade under way ends at the press, and a stop it was carrying goes with it, since the panic's
+  stop lands first. **Double Esc** drops every stop still to come, a speed fade's included.
+- **An edit of the cue's own speed under a speed fade waits** (DW), and lands on the tick the fade
+  lets go, whichever way it ends: arriving, taken over, or ended by Esc. With no edit under it, the
+  speed stays where the fade took it. An edit that writes the speed the document already says moves
+  nothing, because the document has not changed: a fade's work is undone by a fade, or by the next GO.
 - **A speed fade aimed at a group, a DCA or a mic cue moves nothing** (EC). A group's level trim is a
   term every member adds (§3.6); a speed trim would be a factor every member multiplies by, and that
-  is a proposal, not a rule to read into §4.12.
+  is a proposal, not a rule to read into §4.12. `wfg validate` says so, and says so of a fade with
+  both switches off, which moves nothing at all.
 - **The solver learns `levelOn`.** Today every fade is solved as a level (`Solver.cpp:738-756`), so a
   speed-only fade would have load-to-time silence its target.
 
