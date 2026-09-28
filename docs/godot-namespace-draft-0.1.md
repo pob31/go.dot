@@ -10431,7 +10431,14 @@ impulse response, a sample, a mode - is kept with the cue as a file:
   thread): a cue armed in standby is always ready; a cue fired cold is **late by the load, not
   wrong**, and `run.late` says by how much. A state changed after the arm and before the launch
   (an undo in standby) is loaded before the launch; one changed on a cue already sounding is not -
-  the knobs follow live, the rest applies next time the cue plays. A file that is not there is
+  the knobs follow live, the rest applies next time the cue plays. *(Corrected 2026-09-28: an
+  insert **switched in** after the arm and before the launch is the same case - the arm asked for
+  no state while it was out, so the cue played through whatever the instance last held, the last
+  cue's state on that voice, which `phase9a_fx.py`'s third session heard at the Pad's quarter where
+  a half was due. The switch now asks for the cue's state, the preset's own when it has none, and
+  the launch waits for it; and a lane switched in is reset first (`ProxyLane::setEnabled`), so
+  nothing it held while out of the chain - a tail, a frozen delay line - is the first thing
+  heard, whether the cue has launched or not.)* A file that is not there is
   the preset with a sentence (`plugin/stateProblem`), and `wfg validate` names every cue whose
   state is missing from the bundle, or outside `plugins/`. A child that has been loading one for
   five seconds is hung and failed like any other; the state that was loading when a child died is

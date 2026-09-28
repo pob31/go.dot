@@ -168,6 +168,16 @@ namespace
         std::vector<FxEnable> fxEnables;
         std::vector<FxValue> fxValues;
 
+        /*  A whole state asked for after the arm (2026-09-25), in order: what
+            the voice loads before the cue may launch. Empty path = the preset's own. */
+        struct FxState { int track; int slot; std::string path; };
+        std::vector<FxState> fxStates;
+
+        void requestFxState (int track, int slot, const std::string& path) override
+        {
+            fxStates.push_back ({ track, slot, path });
+        }
+
         bool isPlaying (int track) const override
         {
             return playing.count (track) > 0;
@@ -7469,6 +7479,71 @@ TEST_CASE ("fx: the arm carries the cue's inserts against the set, an edit pushe
 
         CHECK (rig.audio.fxValues.size() == pushes);
     }
+}
+
+TEST_CASE ("fx: an insert switched in before GO asks for the cue's state; one switched in while it sounds does not")
+{
+    /*  Found 2026-09-28. A cue armed at standby with its insert out asks the
+        voice for no state - the arm's rule loads one only for what is switched
+        in - so switching it in before GO sent the switch alone, and the cue
+        played through whatever the instance last held: the previous cue's
+        state on that voice, which the arm's own comment says must never be
+        heard under this one. Now the switch asks for the cue's state (the
+        preset's own, when it has none), and the launch waits for it. While the
+        cue sounds nothing is loaded - the knobs follow live - and the lane's
+        reset on the switch clears what it held (ProxyTests). */
+    RoutedRig rig;
+    rig.setMedia (rig.mediaId, 2);
+    rig.aimAt (rig.mediaId, rig.main);
+
+    const auto gain = rig.document.createPlugin ("Test gain", "godot:test-gain", "VST3", "", "");
+    REQUIRE (gain.ok);
+    const auto fx = rig.document.createFx (rig.mediaId, gain.id, "");
+    REQUIRE (fx.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/fx/" + fx.id + "/enabled", "false").ok);
+
+    const auto switchTo = [&] (const char* value)
+    {
+        rig.submitAndTick ("node.set", { osc::Value::string ("/godot/fx/" + fx.id + "/enabled"),
+                                         osc::Value::string (value) });
+        rig.tickOnce();
+    };
+
+    //  Armed at standby with the insert out: the arm asks for nothing of it.
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.mediaId).empty(); }));
+    const auto run = rig.runOf (rig.mediaId);
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+    REQUIRE (rig.audio.lastArmFx.size() == 1u);
+    CHECK_FALSE (rig.audio.lastArmFx[0].enabled);
+    CHECK (rig.audio.fxStates.empty());
+
+    //  Switched in while it waits: the switch, and the preset's own state.
+    switchTo ("true");
+    REQUIRE (rig.audio.fxEnables.size() == 1u);
+    CHECK (rig.audio.fxEnables[0].enabled);
+    REQUIRE (rig.audio.fxStates.size() == 1u);
+    CHECK (rig.audio.fxStates[0].track == track);
+    CHECK (rig.audio.fxStates[0].slot == 0);
+    CHECK (rig.audio.fxStates[0].path.empty());
+
+    //  Out and in again before GO: asked again - the instance may have been
+    //  given to nobody else, but the rule costs nothing when the state is held.
+    switchTo ("false");
+    switchTo ("true");
+    CHECK (rig.audio.fxStates.size() == 2u);
+
+    //  GO, and switched out and in while it sounds: the switch, never a state.
+    rig.audio.completeArms (rig.engine);
+    CHECK (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (run)->launchedAtSample > 0; }));
+
+    switchTo ("false");
+    switchTo ("true");
+    CHECK (rig.audio.fxEnables.size() == 5u);
+    CHECK (rig.audio.fxEnables.back().enabled);
+    CHECK (rig.audio.fxStates.size() == 2u);
 }
 
 TEST_CASE ("fx: the slots are the graph's - an entry added since has none, one moved ahead keeps its own, one taken out is switched out")

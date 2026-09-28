@@ -7569,8 +7569,18 @@ namespace wfg::cue
                 /*  A NEW STATE ON A CUE THAT HAS NOT LAUNCHED is loaded before
                     it may (an undo in standby, a capture while it waits); on
                     one already sounding it is not - the knobs follow live, and
-                    the rest applies the next time the cue plays. */
-                if (next.stateFile != last.stateFile && run->launchedAtSample == 0 && next.enabled)
+                    the rest applies the next time the cue plays.
+
+                    AND AN INSERT SWITCHED IN BEFORE GO (found 2026-09-28): the
+                    arm asked for no state while it was out, so the instance
+                    still held the last cue's - which the arm's own rule says
+                    must never be heard under this one. So switching in asks for
+                    the cue's state, the preset's own when it has none, whether
+                    or not the row changed; and the launch waits for it, as it
+                    waits for an arm's. */
+                const auto switchedIn = next.enabled && ! last.enabled;
+
+                if (next.enabled && run->launchedAtSample == 0 && (switchedIn || next.stateFile != last.stateFile))
                     audio->requestFxState (run->track, next.slot, next.statePath);
 
                 /*  Both sorted by index: one walk finds what moved, what

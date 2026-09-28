@@ -84,6 +84,15 @@ namespace wfg::plugin
     //==============================================================================
     void ProxyLane::setEnabled (bool shouldBeEnabled) noexcept
     {
+        /*  SWITCHED IN, IT STARTS FROM SILENCE (2026-09-28). An insert out of
+            the chain is not called, so whatever it last held - the tail of the
+            last cue that went through it on this voice, a delay line frozen
+            the moment it was switched out - would otherwise be the first thing
+            heard. The reset is asked for before the switch lands, so the first
+            block the child is called for already comes after it. */
+        if (shouldBeEnabled && enabled.load (std::memory_order_relaxed) == 0)
+            requestReset();
+
         enabled.store (shouldBeEnabled ? 1 : 0, std::memory_order_relaxed);
     }
 
