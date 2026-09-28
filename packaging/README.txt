@@ -16,9 +16,12 @@ Starting it
 -----------
 
 Every platform has a launcher beside the binary. With nothing else it opens
-the empty show in the folder "Untitled", on your default audio device, in a
-window. Give it a show folder to open that instead. Use Save As in the window
-to keep a show of your own somewhere else.
+the empty show in the folder "Untitled", in a window, on your system's default
+audio interface. Give it a show folder to open that instead.
+
+In the window, "New show...", "Open show..." and "Save as..." work on show
+folders anywhere you like; "Show settings..." picks the audio interface, and
+a show remembers the one it was saved with.
 
   Windows   Double-click Go.dot.cmd, or drop a show folder on it.
             SmartScreen will warn that the publisher is unknown: choose
@@ -32,7 +35,9 @@ to keep a show of your own somewhere else.
                 xattr -dr com.apple.quarantine .
 
             The binary is universal (Apple silicon and Intel) and needs
-            macOS 13.3 or later.
+            macOS 13.3 or later. It runs inside Terminal, so the first mic
+            cue or recording asks for microphone access for Terminal: allow
+            it, or inputs stay silent.
 
   Linux     ./go.dot.sh  (or ./go.dot.sh ~/shows/Tuesday)
             Built on Ubuntu 24.04; it needs ALSA, FreeType, fontconfig and

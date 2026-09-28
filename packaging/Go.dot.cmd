@@ -22,8 +22,13 @@ set "HERE=%~dp0"
 set "SHOW=%HERE%Untitled"
 if not "%~1"=="" set "SHOW=%~f1"
 
+rem No --device, deliberately: a bare --device means "the system default" and
+rem overrides the interface a show has saved, and the window's New and Open pass
+rem every flag on to the show they start. Each show names its own interface; the
+rem empty one beside this file says "the system default".
+rem
 rem --ui is resolved against the working directory, so run from beside the binary.
 cd /d "%HERE%"
-"%HERE%wfg.exe" serve "%SHOW%" --device --window --ui=console
+"%HERE%wfg.exe" serve "%SHOW%" --window --ui=console
 if errorlevel 1 pause
 endlocal
