@@ -2111,6 +2111,9 @@ built until the author says.
 
 ### 12.10 Rate — at arm, not live, and the PRD has to be told
 
+*Superseded on 2026-09-28 by §22: the speed is live, from nought to twenty, with a Tracktion patch the
+build applies. What follows is kept as the record of why Phase 3 did not build it.*
+
 `media/rate` (`d`, 1, 0.25..4) and `media/rateMode` (`varispeed | stretch`) are applied **at arm**:
 the clip's beat count and its length are scaled together (scaling one alone leaves a clip that
 ends early or runs into silence); varispeed is the resampler Tracktion already uses when no
@@ -12366,3 +12369,314 @@ transport line's words. `ShowSettingsUiTests`: the Playback tab - both boxes, a 
 value it already has sending nothing, the lock. `RangeTests`' Esc case now allows the fade before it
 checks the run has ended. **Owed to the bench:** Esc on the MADIface with a bed, a mic cue with a
 reverb, and a group with a footer; and the GO window at the D700's PLAY.
+
+## 22. Speed — varispeed and timestretch on a media cue, moved while it sounds
+
+Written on 2026-09-28, before any of it is built. It supersedes §12.10. Rows reach the CSV with the
+stage that implements them, and a close-out subsection will say what won where the text and the
+code disagree.
+
+The request: *"We have unfinished work on Varispeed and Timestretch. This is a toggle in each media
+file to change the behaviour of faster or slower playback speed. The playback speed can be adjusted
+from 0.f to 20.f default to 1.f."* Earlier the same day the author had asked for fades on the rate
+of playback *"in either mode"*.
+
+**What it is, before its name.** Every media cue gets a speed, from nought to twenty, one by
+default, and a choice of what a speed other than one does to it. **Varispeed** is the tape machine:
+faster is higher, slower is lower, and nought is a stopped tape. **Timestretch** keeps the pitch where
+it was recorded and changes only how long the sound takes; at nought, the instant it reached is held,
+sounding, until the speed moves again. The speed is a number like any other: typed in the inspector,
+turned on the master dial, moved over time by a fade cue, and heard while the cue sounds rather than
+only at its next GO.
+
+**It is not §11.1's resample.** That one changes neither pitch nor duration while the interface's
+clock changes under the show: it is the machine's, and it never reaches the document. This one is
+somebody's decision, and it is saved with the show (§4.10). The two meet in one place only - the
+resampler that converts a file's own rate to the graph's also carries the speed, multiplied in -
+and neither changes what the other does.
+
+**Why Phase 3 did not build it.** §12.10 drew it as `media/rate` (0.25..4) and `media/rateMode`,
+applied when the cue is armed. PR 3.10 was dropped rather than build half of it, because Tracktion
+cannot change the speed of a clip that is playing in a launcher slot, which is where every media cue
+plays. Three things make that so at the pin Go.dot builds (13b5132), each re-read for this section:
+
+- **The file position is recomputed from the beat grid every block.** A slot clip is played through
+  auto-tempo (Tracktion forces it, `tracktion_ClipOwner.cpp:442-458`). Each block its reader is told
+  which stretch of the file the block's beats cover, and is moved there
+  (`tracktion_WaveNode.cpp:1144-1171`). Go.dot's one-to-one is a beat count equal to the file's
+  length in seconds, at sixty beats a minute (`AudioHost.cpp:1339-1352`). A speed handed to the
+  resampler alone would be undone at the next block. The speed has to move *which part of the file*
+  each block reads (the one read is `WaveNode.cpp:2448`); Tracktion's own per-block ratio (`:1158`)
+  then drives the resampler or the stretcher by itself.
+- **A stretcher compiled in takes every clip.** No time-stretcher is compiled today (the DECLINED
+  list in `cmake/WfgThirdParty.cmake`). Compile one in, and every auto-tempo clip whose mode says
+  *disabled* is given the default stretcher instead (`tracktion_AudioClipBase.cpp:669`). That is
+  every media cue, those at one included: no longer bit-exact, primed, and a stretcher's CPU spent
+  for nothing.
+- **A slot ends its own clip at "launch plus length" on the beat grid**, re-queued every block
+  (`tracktion_SlotControlNode.cpp:134-151`). And a stop sent to a handle that has not started yet
+  cancels its queued play (`tracktion_LaunchHandle.cpp:71-79`). Under a speed the file ends
+  somewhere else, and Go.dot cannot place that stop from outside.
+
+So both halves of the request - timestretch at all, and a speed that moves - need Tracktion changed.
+It is changed by a small patch that Go.dot's own build applies (§22.3).
+
+### 22.1 The decisions (2026-09-28)
+
+The author's three were each asked with a recommendation; one was answered otherwise. The rest are
+the implementer's, and the author's to overrule. The letters go on from §21.5's DP.
+
+**DF to DN are each already used twice** in this document: DF-DJ in §11.1 and §20.9, DK-DN in §20.9
+and §21.5. Nothing is renumbered. A reference to one of them says which section it means.
+
+| | Decision | Whose |
+|---|---|---|
+| **DQ** | **Tracktion is changed by a patch the build applies**: kept in `patches/tracktion_engine/`, applied to the submodule's working tree when CMake configures. Tracktion stays at its upstream pin, and the submodule shows as modified | the author's; the recommendation was a fork under pob31 |
+| **DR** | **At nought, timestretch freezes**: the instant reached keeps sounding, pitch held, until the speed moves. Varispeed at nought is silence, a stopped tape: no value held, no click | the author's |
+| **DS** | **The fade cue gains a speed**: one fade moves the level, the speed, or both | the author's; the two switches (`levelOn`, `rateOn`) are the implementer's refinement |
+| DT | **The engine ends a sped clip**: the patched slot stops where the SOURCE has played the clip's length. Go.dot places no whole-file stop, and `observeEdges` is unchanged | implementer's call |
+| DU | **Go.dot owns the speed schedule and places it ahead**, one lead early, as it places a launch: a breakpoint a tick into a lock-free queue for the voice; every change is a ramp of at least one tick; one pure clock does the arithmetic on both sides | implementer's call |
+| DV | **The speed is live, the mode is not**: the mode applies at the arm (it rebuilds Tracktion's graph), so a change of mode waits for the next GO. A seek keeps the run's speed and mode | implementer's call |
+| DW | **An edit of a cue's speed reaches it while it sounds**, on the next tick, heard one lead later - unless a speed fade holds that run. An edit of anything else moves no speed | implementer's call |
+| DX | **The varispeed gate**: full level down to 0.05×, silent below 0.01× (Tracktion's own tape-stop and slowest-clip numbers), a smooth step between. Below 0.01× the file is not read at all | implementer's call; the author's ear tunes it |
+| DY | **One resampler at every speed**, Tracktion's Lagrange: exact at one, and what it does above one is measured (M47) | implementer's call |
+| DZ | **Timestretch is Signalsmith's default preset**, stretched even at one - the operator chose it | implementer's call |
+| EA | **A speed fade** runs straight or S-curved in the ratio itself (nought has no logarithm); drawn points stay the level's. A fade takes over from another per run AND per thing moved, so a speed fade never cancels a level fade | implementer's call |
+| EB | **Esc fades the level only**: a speed fade ends with its voice. Double Esc drops a speed fade's stop, as it drops every action (§4.4) | implementer's call |
+| EC | **A speed fade aimed at a group, a DCA or a mic cue** moves nothing, and `wfg validate` says so | implementer's call (§4.12: nothing inherits downward) |
+| ED | **Inside one fade, the speed lags the level by one lead** (five ticks at most), and a stop waits for the speed | implementer's call |
+| EE | **The list, the walk, the timeline and load-to-time read the cue's own speed**: a file's length over its speed, for ever at nought. Speed fades are not solved | implementer's call |
+| EF | **The master dial moves the speed a semitone a detent**, on the equal-tempered grid, down to nought below 2^(-52/12); a double click is one again | implementer's call |
+| EG | **It rests at one**: `park`, and a default of one | implementer's call (§4.6) |
+| EH | **The speed is not ridden under the lock** | implementer's call; a live ride, as EQ and sends have (§17.14, AM), is proposed |
+
+**DQ - a patch the build applies.** The author chose it over a fork. Tracktion stays at its upstream
+pin, and the change lives in Go.dot's own repository, beside the code that needs it. The price is a
+submodule that `git status` reports as modified, and a pin move that takes the patch off first and
+puts it back after (§22.3).
+
+**DR - nought.** Each mode's nought is where that mode goes as the speed falls. Varispeed slides down
+through the subsonic into nothing, so its nought is silence. Timestretch holds the pitch while the
+sound lasts longer and longer, so its nought is the instant held for ever. The same gesture, a fade
+to nought, is a tape stop in one mode and time standing still in the other. That is why the mode is
+the decision and nought is not a special case.
+
+**DS - two switches, not an empty number.** A fade today always moves its target's level, to -120
+unless told otherwise. It gains `levelOn` (on, so every fade already written is unchanged) and
+`rateOn` (off), with the `rate` it goes to. QLab's fade has the same shape: a switch per thing it
+moves. An empty number would have been shorter to write and wrong to read, because in several
+places an unreadable number is read as nought (`Runner.cpp:179-182`), and nought here means stop.
+
+**DT and DU - who knows the speed.** A range boundary is placed inside the lead
+(`Runner.cpp:7150-7200`), so the tick thread must know the speed for the whole lead before it
+places one. A schedule placed a lead ahead gives that for nothing: any breakpoint written later
+lands after every boundary already placed. The same schedule, integrated by the same arithmetic on
+the audio side, tells the slot where the file really ends. So the engine can end the clip exactly
+where the source runs out, and Go.dot never has to place a stop against a handle that would cancel
+its own play. The Looper already works this way: its presses are placed a launch latency ahead into
+a queue of sixty-four (`Looper.cpp:107-113, 534-544`).
+
+### 22.2 The rows
+
+| Node | Type, default | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/cue/<id>/rate` (media) | `d`, 1 (0..20), unit `x` | rw | show | the speed the cue plays at, as decided |
+| `/godot/cue/<id>/rateMode` (media) | `s`, `varispeed` (`varispeed \| timestretch`) | rw | show | what a speed other than one does: pitch moves with it, or holds |
+| `/godot/run/<id>/rate` | `d` | r | none | the speed the voice plays at now, which is what a fade writes |
+| `/godot/cue/<id>/levelOn` (fade) | `T`, true | rw | show | whether the fade moves its target's level |
+| `/godot/cue/<id>/rateOn` (fade) | `T`, false | rw | show | whether it moves its target's speed |
+| `/godot/cue/<id>/rate` (fade) | `d`, 1 (0..20), unit `x` | rw | show | the speed it goes to |
+
+- **Owners.** The media rows are on owner `media`, not `sound`: a mic cue has no file to speed up
+  (§18.2's split).
+- **Resting value.** All six are `park`, and rest at their defaults (§4.6). A speed rests at one.
+- **Names.** They are §12.10's, so the PRD's word stays *rate*; the window says **Speed**.
+- **The mode's second value** is the author's word, `timestretch`, where §12.10 had `stretch`.
+- **`media/duration` stays the file's own length**: a fact about the file, which the waveform draws
+  and the analyser reads. Wherever a length means time on the clock, it is divided by the speed
+  (§22.5).
+
+The unit `x` is what gives the dial its law (EF). A range from nought has no geometric law in
+`dialTurned`, and its linear one - a hundred-and-twenty-eighth of the range a detent, 0.156 - would
+cross the whole musical range in six detents.
+
+### 22.3 The patch, and how the build applies it
+
+Two patches, in `patches/tracktion_engine/`, named in order in a `series` file. Every file they touch
+carries a notice inside the hunk that says Go.dot modified it, when, and from which patch, which is
+GPL-3 §5(a)'s requirement for a modified work.
+
+**0001 - an auto-tempo clip may be resampled.** About ten lines, and written to be offered upstream.
+- **A switch on the engine's behaviour.** `EngineBehaviour` gains a virtual,
+  `autoTempoClipsUseDefaultTimeStretcher`, true by default, so Tracktion behaves as it always has.
+- **Where it is read.** `AudioClipBase::getActualTimeStretchMode` substitutes the default stretcher
+  for an auto-tempo clip only when the virtual says so. Go.dot's `Behaviour` says no.
+- **The arm names the mode every time**, *disabled* or Signalsmith's, because a clip created from a
+  loopable file is given another mode by Tracktion (`tracktion_ClipOwner.cpp:291-297`).
+
+**0002 - a launched clip's speed.** About 130 lines.
+
+The launch handle gains a **speed source**: an interface Go.dot implements, set once, and asked two
+questions by the audio thread.
+- **How far ahead of one-for-one** has the clip launched at beat L played, u beats after its launch?
+- **At which beat will it have played** a given length of the file?
+
+Tracktion keeps no answer between blocks, so a graph rebuild in the middle of a fade needs nothing
+carried across it. The integral at each launch lives in Go.dot's adaptor for that slot, which is
+never rebuilt.
+
+What each part of the patch does with the answers:
+- **The wave node reads the part of the file the speed says**, instead of the part the beats say.
+  Tracktion's own per-block ratio then turns that into the resampler's ratio (varispeed) or the
+  stretcher's (timestretch).
+- **The slot ends a clip where the source has played its length** (DT). No answer means no stop
+  yet: a frozen or silent voice at nought has not ended.
+- **The varispeed gate** is applied in the node, ramped across the block (DX). Below 0.01× the
+  buffer is cleared and the file is not read. That also keeps a vanishing ratio away from the
+  resampler, which would otherwise ask for thousands of frames of warm-up after a reset
+  (`WaveNode.cpp:336`) - an allocation on the audio thread.
+- **The freeze.** When the node is driven by a speed and holds a stretcher, the reader no longer
+  returns silence for an empty stretch of file (`WaveNode.cpp:1152-1156`): it feeds the stretcher
+  nothing, and Signalsmith keeps sounding what it holds. The stretcher is told nought as a very
+  large stretch rather than a division by nought (`:668`).
+- **The stretcher is primed at speed one, then set to its speed.** Tracktion's prime counts output
+  frames as if they were input frames (`:736-767`). At speed one the two are the same; at twenty it
+  reads twenty times too much and starts in the wrong place.
+- **High ratios are read in pieces.** At twenty, one block can ask the resampler for more frames
+  than the scratch pool holds or the file cache allows (its assert is at 48 000,
+  `AudioFileCache.cpp:913`). A read over the limit is split in two. It never happens at one.
+
+**Signalsmith is switched on** in the build, `TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH=1`, on the
+interface every translation unit sees, so they all agree on the default mode. It is MIT-licensed
+and vendored inside Tracktion. It is also the only one of Tracktion's stretchers that reaches twenty
+- its limit is the stretcher's latency over 256 frames, about 24× at 44.1 kHz - and it freezes when
+fed nothing. SoundTouch is sized for 0.25 to 4 and asserts at twenty; RubberBand and Elastique are
+still declined.
+
+**How the build applies it.** `cmake/WfgTracktionPatches.cmake` runs just before Tracktion's modules
+are added. It is straight-line CMake, as the file beside it demands.
+1. **One configure at a time.** It takes a file lock beside Tracktion's git directory, so the four
+   build trees in one checkout, and the sessions sharing it, apply the patches one after another.
+2. **Already applied?** If the series reverses cleanly, it is already on. The step does nothing and
+   writes nothing, so a configure causes no rebuild.
+3. **A clean checkout?** If the series applies cleanly, it is applied, and a copy is kept as a stamp.
+4. **A patch that was edited?** If the stamp of the old series reverses cleanly, the old series comes
+   off and the new one goes on. An edit to a patch heals itself in every tree.
+5. **Anything else stops the configure.** The message names the pin and says how to see the changes
+   and how to discard them. The step never resets a tree it does not recognise.
+
+`.gitattributes` gains `*.patch text eol=lf`: on the author's machine Tracktion is checked out with
+CRLF endings, and `git apply` compares through the tree's own attributes, not the patch's.
+`scripts/check-pins.py` gains a check that the series is on or applies cleanly, and
+`scripts/te-patches.py` does `status`, `apply`, `revert` and `refresh`.
+
+**Moving the Tracktion pin** becomes (README, *Bumping a pin*):
+1. Make sure nobody else is building.
+2. `te-patches.py revert`.
+3. Move Tracktion and JUCE as before.
+4. `te-patches.py apply --3way`, resolve anything that does not fit, then `refresh`.
+5. Reconfigure every tree and run the whole suite.
+6. Commit the two gitlinks and the patches as one commit.
+
+`THIRD_PARTY_NOTICES.md` says Tracktion is modified, names the patches, and gains Signalsmith's
+entry. Its Tracktion commit, still `b88a6ee`, is corrected to the pin.
+
+### 22.4 The schedule: Go.dot owns the speed
+
+**Where a speed comes from.** A run's speed is `ownRate`. It is set at the arm from the cue's `rate`;
+moved by an edit of that row while the cue sounds (DW); and moved by a speed fade, which then holds
+it until the fade ends.
+
+**How a change reaches the voice.** Once a tick, a new pass, `applyRates`, runs between the launch
+and the range boundaries. For each sounding voice whose speed has changed, it places a breakpoint -
+this speed, at this sample - one lead ahead: `launchLatencyTicks`, the horizon a launch uses. Each
+breakpoint goes into a queue of sixty-four for that voice. The audio thread drains the queue before
+the graph runs, and the speed between breakpoints is a straight line. So a change is a ramp of one
+tick at least, and a fade is the fade's own curve sampled fifty times a second.
+
+**Both sides use the same clock.** One small pure class, `RateClock`, holds the breakpoints and
+integrates them. On the tick thread it counts in samples; on the audio side, in beats. It answers:
+- where the file is at a sample;
+- when the file will have reached a second;
+- whether anything is moving at all.
+
+Because the schedule is placed ahead and read by the same arithmetic on both sides, the tick thread
+knows exactly where the voice is, not approximately. The playhead, the level lane (§20.4), the range
+passes and the boundaries all come from it.
+
+**At one, with nothing moving, nothing changes.** A clock with one point at exactly one (compared bit
+for bit) answers nought extra, and the slot's stop is today's expression. The Runner keeps its
+integer arithmetic on that branch, so every render at one is bit-identical to the day before.
+
+### 22.5 Where the speed reaches
+
+- **The playhead** is the file's second, as §20.2 defined it: it now advances at the speed.
+- **The level lane** follows the file, not the clock, so a lane drawn under a slowed cue is heard
+  slowed with it.
+- **A range's pass** lasts its length over the speed. A boundary is placed where the source reaches
+  the range's end; at nought it is never reached, and an `advance` waits.
+- **The end of a whole file** is the slot's own (DT). The run ends on the stopped edge, as always.
+- **A seek** keeps the run's speed and mode (DV), and so does a sampler clip's restart.
+- **The mode is read at the arm** and written into the clip there; a change reaches the next GO.
+- **What counts a length as time on the clock** divides the file's length by the cue's own speed:
+  the cue list's time column, the walk that places timeline members and sizes a group, slot
+  analysis, and load-to-time's seat (EE). At nought the length is for ever. A speed fade is not
+  solved: load-to-time puts a cue whose speed was faded where its own speed would have taken it, a
+  named limitation.
+- **The speed itself.** `run/<id>/rate` publishes what the voice plays at now.
+
+### 22.6 Fades on the speed
+
+A fade with `rateOn` moves its target's `ownRate` to its `rate`, over its duration, along its curve
+in the ratio itself: straight, or an S (EA). Its drawn `points` stay the level's. With `levelOn` too,
+the one cue moves both: two jobs under one report, so the fade is done when both are.
+
+- **Takeover is per run and per thing moved.** A speed fade takes over from a speed fade on the same
+  run, and leaves a level fade alone.
+- **The speed arrives one lead after the level** inside one fade (ED). A stop at the fade's end waits
+  for the speed to have arrived.
+- **Esc fades the level** over the show's panic fade; the speed stays where it is, and a speed fade
+  ends when its voice does (EB). **Double Esc** drops every stop still to come, a speed fade's
+  included.
+- **A speed fade aimed at a group, a DCA or a mic cue moves nothing** (EC). A group's level trim is a
+  term every member adds (§3.6); a speed trim would be a factor every member multiplies by, and that
+  is a proposal, not a rule to read into §4.12.
+- **The solver learns `levelOn`.** Today every fade is solved as a level (`Solver.cpp:738-756`), so a
+  speed-only fade would have load-to-time silence its target.
+
+### 22.7 The window and the dial
+
+- **The inspector** shows **Speed** and **Speed mode** after the start offset: a number and a
+  two-word choice, from the generic rows. A fade shows its Level switch before its level, and its
+  Speed switch before its speed, each greyed while its switch is off.
+- **The running pane** writes the speed beside a run that plays at anything but one - `×0.5` - and
+  the waveform's head row carries the speed and the mode.
+- **The master dial** moves the speed a semitone a detent, along the equal-tempered grid, so
+  varispeed's steps are musical and twelve detents are an octave. Below 2^(-52/12), about 0.05, the
+  next detent is nought; the firmware's double click is one (EF).
+
+### 22.8 What it has to measure
+
+| | What | Why it gates |
+|---|---|---|
+| **M14** | a file's duration at 0.5× and 2× in both modes, and its pitch: moved under varispeed, held under timestretch | reopened from §12.13: what the speed claims |
+| **M46** | a voice's cost a block by mode, at 1, 2, 8 and 20×, at 48 and 96 kHz, in blocks of 64 to 1024; what a block that re-primes the stretcher costs; no allocation at 20× with the widest file; a cold file at 20× | the stretcher re-primes on a launch at an offset, a restart, a seek and every wrap of a stretched loop (the loop is split above the stretcher, `WaveNode.cpp:1312-1336`). If a prime costs more than a small block allows, it moves to the message thread at the arm; if a wrap still does, timestretch on a ranged cue is refused until the loop sits below the stretcher |
+| **M47** | the resampler's aliasing above one (1.3, 2, 4, 20×); the largest step through the gate at a block of 64; the level of a freeze; the damage at a stretched wrap | whether Lagrange is good enough above one, and whether the gate's two numbers are right |
+
+### 22.9 Not in this work
+
+Each is a proposal in PRD §6.9, awaiting a yes or a no:
+- The speed ridden under the lock, as `run/<id>/rate` through the live door, as EQ and sends are
+  (§17.14, AM). Until then the row's own door refuses it `locked` under the lock (§17.18, BT).
+- A lane on the speed, drawn over the waveform as §20's is.
+- A drawn speed curve in a fade.
+- A group's speed as a trim its members multiply by.
+- Reverse.
+- Varispeed on a live take (the Looper, §19).
+- Pitch as a number of its own.
+- A sinc resampler above one, which would first need Tracktion's own sinc reader fixed: it looks
+  wrong at any speed other than one (`WaveNode.cpp:436-446, 574`).
+- Speed fades in load-to-time.
+
+**Video, when Phase 8 brings it**, presents frames against the audio position (PRD §3.19d), so it
+follows the speed with nothing more to do.

@@ -150,6 +150,10 @@ document would be a row that does not do what the PRD says. It is a proposed
 amendment rather than a deferral, and the engine-side change that would settle it
 is named in the close-out.
 
+*Answered 2026-09-28:* built as a live speed rather than rate at arm, once a patch
+the build applies to Tracktion made a playing clip's speed movable - *Speed:
+varispeed and timestretch on a media cue*, below, and namespace draft §22.
+
 ---
 
 ## Phase 4 — Prepare/commit, solver, allocator · L
@@ -698,6 +702,43 @@ latched and written once (`LaneRecordTests`, `logs/lane-record.wfglog`); a touch
 Rec key's pass (`SurfaceBridgeTests`); the panel's take and the window's four states
 (`RunPaneUiTests`); and the whole of it over a real graph - heard, written, undone, replayed
 (`blackbox/lane_record.py`, timing judged off CI). The D700 itself is the bench's.
+
+### Speed: varispeed and timestretch on a media cue · M
+
+*Added on 2026-09-28*, at the author's request: *"We have unfinished work on Varispeed and
+Timestretch. This is a toggle in each media file to change the behaviour of faster or slower
+playback speed. The playback speed can be adjusted from 0.f to 20.f default to 1.f"* - and, the same
+day, fades on the rate *"in either mode"*. Phase 3's one dropped line (PR 3.10), built live rather
+than at arm.
+
+**Three decisions** are the author's (`godot-namespace-draft-0.1.md` §22.1), one against the
+recommendation:
+- **DQ**: Tracktion is changed by a patch the build applies, not a fork.
+- **DR**: timestretch freezes at nought.
+- **DS**: the fade cue gains a speed.
+
+Fifteen more are the implementer's (DT-EH). Not a phase: it sits here because it follows the lanes
+in time, and no later phase is renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| S.0 | Docs: namespace §22, PRD §3.24, §3.25, §6.9 and §6.11, this | - |
+| S.1 | The patch mechanism (`patches/tracktion_engine/`, `cmake/WfgTracktionPatches.cmake`, `te-patches.py`, `check-pins` (g)), patch 0001, Signalsmith switched on - no change in behaviour | S.0 |
+| S.2 | Patch 0002 (a launched clip's speed), `RateClock`, `RateVoice`, the slot adaptors, heard through a real graph | S.1 |
+| S.3 | The rows, the Runner's clock (playhead, lane, ranges), the wiring, the inspector's two rows | S.2 |
+| S.4 | Speed fades: the fade's switches, per-parameter takeover, Esc, the solver's `levelOn` | S.3 |
+| S.5 | The window: the running pane's `×`, the head row, the dial's semitone law, the page | S.3 |
+| S.6 | The list, the walk, the timeline and load-to-time at the cue's own speed | S.3 |
+| S.7 | `blackbox/rate_speed.py`, `logs/rate.wfglog`, M14, M46, M47 and the close-out | S.4-S.6 |
+
+**Done when:** a media cue plays at any speed from nought to twenty in either mode, typed, dialled or
+faded while it sounds. Varispeed's pitch moves and timestretch's holds; nought is silence in one mode
+and a freeze in the other. At one, every render is bit-identical to the day before. The playhead, a
+level lane and a looping range follow the file at its speed, and one fade moves the level, the speed
+or both. CI is green on fresh checkouts with the patch applied by the build.
+
+**Needs from the author:** listening at S.2 (tape stop, freeze, 2× both ways), before any row exists;
+the D700 dial's semitone law; a Mac mini run.
 
 ---
 

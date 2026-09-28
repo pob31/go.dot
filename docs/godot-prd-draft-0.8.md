@@ -1870,6 +1870,18 @@ the wave node, which this engine does not have; when it does, rate becomes a
 node like any other. Rate changes apply to the **whole cue**, driven off the
 sample clock, so audio and video move together (§3.19d).
 
+*Amended 2026-09-28, at the author's direction — namespace draft §22.* The
+per-clip speed the paragraph above waited for now exists, as a patch Go.dot's
+build applies to Tracktion (decision DQ), and rate becomes a node like any
+other: a **speed from nought to twenty**, one by default and at rest, on every
+media cue, heard while the cue sounds when it is typed, turned on the master
+dial or moved by a fade. The toggle is **varispeed | timestretch**, set per cue
+and read when the cue is armed. At nought, varispeed is silence - a stopped
+tape - and timestretch **freezes** the instant it reached, pitch held, until the
+speed moves again (DR). A fade cue moves the speed as it moves the level, either
+or both (DS). A lane on the speed, riding it under the lock, and a group's speed
+as a trim are *(proposed)*, §6.9.
+
 #### Joins
 
 - **Sample-accurate loop points**, with an **optional short crossfade at the
@@ -2105,6 +2117,14 @@ it declared would delay the whole show.
 
 - **Varispeed** = speed ratio with stretch off (resampling). **Time-stretch** via
   Elastique or RubberBand, licence permitting.
+  *Amended 2026-09-28 — namespace draft §22:* time-stretch is **Signalsmith
+  Stretch** (MIT, vendored inside Tracktion), the only one of Tracktion's
+  stretchers that reaches the twenty the speed allows and freezes at nought;
+  Elastique and RubberBand stay declined. Both modes ride one patch to
+  Tracktion that Go.dot's build applies (decision DQ): a launched clip asks
+  Go.dot how far its source has played, so the speed is Go.dot's schedule,
+  placed ahead like a launch - no custom clip type, and no curve inside the
+  engine.
 - **Video stays Go.dot's**, reading TE's playhead each frame (§3.19d).
 - **Timecode chase** = TE's transport following MTC (Waveform does it; verify the
   engine exposes it). LTC is decoded by Go.dot and fed to the same mechanism.
@@ -3140,7 +3160,8 @@ Added 2026-09-26 *(proposed)*, with §3.18 and §3.31:
 - **Loop points written in the show**, a cue saying *loop the first two seconds*.
 - **Overdub feedback**, each pass decaying the layers under it.
 - **Varispeed and reverse on a loop** — the conversation about varispeed on files (2026-09-21) is the
-  same one.
+  same one. *2026-09-28:* varispeed on FILES is decided (§3.24, namespace draft §22); a loop's is
+  still this proposal.
 - **A mic cue as a sampler member**: fader-start for a microphone.
 - **The shared rack channel** — a reverb return cues send into, §3.9e's *"bus with a chain"* — and a
   media cue's `Insert` made to sound, both still Phase 9b's.
@@ -3153,6 +3174,21 @@ Added 2026-09-27 *(proposed)*, with §3.10's level lane:
   keeps out today.
 - **Lanes on other numbers** — pan, a send, a plugin's parameter — each a row beside the number it
   rides.
+
+Added 2026-09-28 *(proposed)*, with §3.24's speed (namespace draft §22). The implementer's calls
+DT-EH in §22.1 are the author's to overrule; these are what the work left out:
+
+- **The speed ridden under the lock**: `run/<id>/rate` through the live door, as EQ and sends are
+  ridden (namespace draft §17.14, decision AM). Today the lock refuses it (§17.18, BT).
+- **A lane on the speed**, drawn over the waveform as the level's is.
+- **A drawn speed curve in a fade**: a fade's `points` stay the level's.
+- **A group's speed as a trim** its members multiply by. Today a speed fade aimed at a group moves
+  nothing and `wfg validate` says so.
+- **Reverse.**
+- **Pitch as a number of its own**, apart from the speed.
+- **A sinc resampler above one**, which needs Tracktion's own sinc reader fixed first (M47 says
+  whether it is worth it).
+- **Speed fades in load-to-time**: the solve reads a cue's own speed, not a fade's.
 
 ### 6.10 Protocol implementation order (§3.16)
 
@@ -3247,6 +3283,12 @@ Mackie vs HUI first — first week with the D700.
   Debug build:* within 0.014-0.022 dB of the lane away from its corners, and a step's midpoint -8.0
   to -5.3 ms from where it was drawn - inside a tick, read one slew ahead. A runner that stalls the
   tick thread holds the level still, as it holds a fade; the driver voids what a stall moved.
+- **A cue's speed** (§3.24, 2026-09-28, namespace draft §22.8): **M14**, reopened from Phase 3 - a
+  file's duration at 0.5× and 2× in both modes, its pitch moved under varispeed and held under
+  timestretch; **M46** - a voice's cost a block by mode at 1, 2, 8 and 20×, at 48 and 96 kHz, in
+  blocks of 64 to 1024, what a block that re-primes the stretcher costs, and no allocation at 20×;
+  **M47** - the resampler's aliasing above one, the largest step through varispeed's gate near
+  nought, the level of a freeze, and the damage at a stretched loop's wrap. Not yet taken.
 
 ---
 
