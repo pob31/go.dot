@@ -84,6 +84,12 @@ namespace wfg::client::model
 
         std::string status;           ///< `/godot/audio/status`
         std::string lastError;        ///< `/godot/engine/lastError`; empty when nothing was refused
+
+        /*  `/godot/audio/rateMoved` and its tick, as digits: the last time the
+            show followed the interface onto another clock (PRD §6.2), in
+            words - said until something newer is refused (`errorLine`). */
+        std::string rateMoved;
+        std::string rateMovedTick;
         std::string dial;             ///< what the master dial turns, in words (`dialLine`); empty while free
         std::string writeError;       ///< `/godot/document/writeError`; empty when no write is outstanding
 

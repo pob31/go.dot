@@ -4577,6 +4577,51 @@ TEST_CASE ("audio recovery: stable callbacks are required and an interrupted val
     CHECK (gate.callback());
 }
 
+TEST_CASE ("audio recovery: the same interface on another clock is told apart, steady, and never resumed")
+{
+    /*  PRD §6.2's second failure (2026-09-21): not the interface gone, its
+        clock MOVED. The gate says `moved` only for the same box, only once it
+        has been steady by the rule a return passes, and never lets the paused
+        graph run on it - pretending the old show can continue at the new rate
+        is the one thing the amendment forbids. */
+    audio::RecoveryGate gate;
+    gate.started (audio::Verdict::same);
+    REQUIRE (gate.resume (true));
+    gate.observe (0);
+
+    gate.stopped();
+    CHECK (gate.observe (10).retry);
+    CHECK_FALSE (gate.observe (10).moved);
+
+    gate.started (audio::Verdict::moved);
+    gate.observe (100);
+    CHECK_FALSE (gate.observe (100).moved);          // no callbacks yet is not steady
+    CHECK_FALSE (gate.observe (100).retry);          // and nothing to put back by retrying
+
+    for (int i = 1; i <= 8; ++i)
+    {
+        CHECK_FALSE (gate.callback());               // silent: the graph does not run
+        const auto result = gate.observe (100 + i * 40);
+        CHECK (result.moved == (i >= 7));
+        CHECK_FALSE (result.ready);
+        CHECK_FALSE (result.retry);
+    }
+
+    CHECK (gate.paused());
+    CHECK_FALSE (gate.resume());
+
+    //  A moved interface that stalls is gone again, and retried.
+    CHECK (gate.observe (1000).retry);
+    CHECK_FALSE (gate.observe (1000).moved);
+
+    //  Another interface altogether is not a moved clock.
+    gate.started (audio::Verdict::foreign);
+    gate.observe (2000);
+    for (int i = 1; i <= 8; ++i) { gate.callback(); gate.observe (2000 + i * 40); }
+    CHECK_FALSE (gate.observe (2400).moved);
+    CHECK (gate.observe (2400).retry);
+}
+
 TEST_CASE ("audio recovery: paused media keeps its position and resumes its existing launch handle")
 {
     HostRig rig;
@@ -4631,6 +4676,80 @@ TEST_CASE ("audio recovery: connection state is logged and failed validation can
     CHECK (engine.processTick (5).applied == 1);
     CHECK (state.status == "running");
     CHECK (state.settingsError.empty());
+}
+
+TEST_CASE ("audio recovery: a moved clock stops what plays the Esc way, says so, and asks to be followed")
+{
+    /*  PRD §6.2's answer to the clock moving, as the engine applies it
+        (2026-09-28): a stop, then an adaptation. At setup nothing plays and the
+        show simply follows; mid-show what plays is stopped the Esc way
+        (decision DG) - in the handler, before the scheduler can see a member
+        fall silent on the new graph and start the next one - and prepared
+        runs are revoked, as for any settings operation. */
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (31);
+    cue::Runner runner { document, runs, runIds, focus };
+    audio::AudioState state;
+    audio::registerAudioCommands (engine.commands(), state);
+    audio::registerAudioSettingsCommands (engine, document, runner, runs, state);
+
+    auto follows = 0;
+    state.followClock = [&follows] { ++follows; };
+    state.sampleRate = 48000;
+
+    const auto moved = [&engine] (int rate, int block)
+    {
+        engine.submit ("engine", "audio.clockMoved", { osc::Value::int32 (rate), osc::Value::int32 (block) });
+    };
+
+    //  An interface that is running has no moved clock to follow.
+    state.status = "running";
+    moved (96000, 256);
+    CHECK (engine.processTick (10).rejected == 1);
+    CHECK (engine.lastError().find ("audio-not-reconnecting") != std::string::npos);
+    CHECK (follows == 0);
+
+    //  At setup: nothing plays, nothing is stopped, and the show follows.
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (false) });
+    CHECK (engine.processTick (11).applied == 1);
+    moved (96000, 256);
+    CHECK (engine.processTick (12).applied == 1);
+    CHECK (follows == 1);
+    CHECK (state.rateMovedTick == 12);
+    CHECK (state.rateMoved == "The interface's clock moved from 48000 Hz to 96000 Hz; the show runs at 96000 Hz.");
+
+    //  Mid-show: a group playing a member, and a prepared run beside them.
+    runs.create ("RUNGRP01", "CUEGRP01", "group");
+    runs.create ("RUNMED01", "CUEMED01", "media", "RUNGRP01");
+    runs.create ("RUNPRE01", "CUEPRE01", "media");
+    runs.find ("RUNGRP01")->state = cue::runState::playing;
+    runs.find ("RUNMED01")->state = cue::runState::playing;
+    runs.find ("RUNPRE01")->state = cue::runState::preparing;
+
+    moved (44100, 512);
+    CHECK (engine.processTick (20).applied == 1);
+    CHECK (follows == 2);
+    CHECK (runs.find ("RUNGRP01")->state == cue::runState::stopping);
+    CHECK_FALSE (runs.find ("RUNGRP01")->skipFooter);                   // the Esc way: its footer runs
+    CHECK (runs.find ("RUNMED01")->state == cue::runState::playing);    // its group brings it down, in order
+    CHECK (runs.find ("RUNPRE01")->state == cue::runState::done);       // revoked
+    CHECK (state.rateMoved.find ("to 44100 Hz") != std::string::npos);
+    CHECK (state.rateMoved.find ("the cues that were playing were stopped") != std::string::npos);
+    CHECK (state.rateMovedTick == 20);
+
+    //  Apply is let through an outage (decision DI) and refused on its own
+    //  terms while anything plays - not as `audio-reconnecting`.
+    engine.submit ("udp:127.0.0.1:9000", "audio.apply", {});
+    CHECK (engine.processTick (21).rejected == 1);
+    CHECK (engine.lastError().find ("audio-busy") != std::string::npos);
+
+    //  Everything else still is, GO among it: dropped, never queued.
+    engine.submit ("udp:127.0.0.1:9000", "audio.defaults", {});
+    CHECK (engine.processTick (22).rejected == 1);
+    CHECK (engine.lastError().find ("audio-reconnecting") != std::string::npos);
 }
 
 //==============================================================================
@@ -5330,4 +5449,86 @@ TEST_CASE ("M38: the live rack's cost in the audio callback, with 0, 8 and 32 ch
 
             CHECK (cost > 0.0);
         }
+}
+
+//==============================================================================
+TEST_CASE ("audio host: a file at another rate plays at its own pitch")
+{
+    /*  PRD §6.2's own test of following a moved clock, in the author's words
+        (2026-09-21): "up or down sample, no Alvin and the Chipmunks". The show
+        follows an interface onto a new rate by building its graph again on it,
+        and nothing else - no file is converted on disk - so a file written at
+        one rate has to come out at its own pitch on a graph running at another.
+        A thousand hertz written at the file's rate is counted back out of the
+        render by its rising zero crossings: the cheap reinterpretation, the
+        same samples played at the graph's rate, would count two thousand or
+        five hundred. */
+    struct Pair { int file, graph; };
+
+    for (const auto pair : { Pair { 48000, 96000 }, Pair { 96000, 48000 }, Pair { 44100, 48000 } })
+    {
+        INFO ("a " << pair.file << " Hz file on a " << pair.graph << " Hz graph");
+
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = pair.graph;
+        settings.blockSize = 256;
+        settings.outputChannels = 2;
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 1;
+        spec.channelsPerTrack = 1;
+        REQUIRE (rig.host.buildEdit (spec));
+
+        const auto tone = writeSineTone (rig.storage.folder, pair.file, 1000.0, 0.25f, 3);
+        REQUIRE (tone.existsAsFile());
+        REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
+        REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+        auto* matrix = rig.host.trackMatrix (0);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, 0, 1.0f);
+        matrix->snapToTargets();
+
+        for (int i = 0; i < 8; ++i)
+            rig.host.processBlock();
+
+        REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (rig.host.clock().samplesElapsed() + 1024)));
+
+        //  Half a second in, well clear of the launch and the click suppressor.
+        for (int i = 0; i < pair.graph / 2 / settings.blockSize; ++i)
+            rig.host.processBlock();
+
+        REQUIRE (rig.host.trackPlayState (0).playing);
+
+        //  One second of it, at the graph's rate.
+        RecordingSink sink;
+        sink.prepare (2, pair.graph);
+        rig.host.setBlockSink (&sink);
+
+        while (sink.written < pair.graph)
+            rig.host.processBlock();
+
+        rig.host.setBlockSink (nullptr);
+
+        const auto* samples = sink.buffer.getReadPointer (0);
+        auto rising = 0;
+        auto peak = 0.0f;
+
+        for (int n = 1; n < sink.written; ++n)
+        {
+            peak = std::max (peak, std::abs (samples[n]));
+
+            if (samples[n - 1] < 0.0f && samples[n] >= 0.0f)
+                ++rising;
+        }
+
+        INFO ("peak " << peak << ", " << rising << " rising crossings in one second");
+        REQUIRE (peak > 0.1f);
+        CHECK (rising >= 995);
+        CHECK (rising <= 1005);
+    }
 }

@@ -476,6 +476,27 @@ TEST_CASE ("client: a row the pointer cannot stand on is not offered, and a refu
         visible rather than swallowed into a wrong-looking sentence. */
     reading.lastError = "something else entirely";
     CHECK (reading.errorLine() == "something else entirely");
+
+    /*  THE CLOCK MOVED AND THE SHOW FOLLOWED IT (PRD §6.2, 2026-09-28): said
+        until something is refused after it - the cues it stopped are what
+        anybody at the desk asks about first - and a refusal from before it is
+        older news. The outage itself outranks both. */
+    reading.rateMoved = "The interface's clock moved from 48000 Hz to 96000 Hz; the show runs at 96000 Hz, "
+                        "and the cues that were playing were stopped.";
+    reading.rateMovedTick = "6000";
+    CHECK (reading.errorLine() == "something else entirely");     // a record the model cannot date stays visible
+
+    reading.lastError = "5411 26 window not-a-stop standby.set";
+    CHECK (reading.errorLine() == reading.rateMoved);
+
+    reading.lastError.clear();
+    CHECK (reading.errorLine() == reading.rateMoved);
+
+    reading.lastError = "6021 30 window not-a-stop standby.set";
+    CHECK (reading.errorLine() == "standby.set refused: not-a-stop");
+
+    reading.status = "noClock";
+    CHECK (reading.errorLine() == "Audio disconnected - cues paused; waiting for the interface and clock.");
 }
 
 TEST_CASE ("client: show mode does not offer a save, and nothing else is withdrawn")
@@ -591,7 +612,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     /*  And the audio settings' commands, where Load now's plugin.load lives
         beside audio.apply (2026-09-26). */
     audio::AudioState audioState;
-    audio::registerAudioSettingsCommands (rig.engine, rig.document, runner, audioState);
+    audio::registerAudioSettingsCommands (rig.engine, rig.document, runner, rig.runs, audioState);
 
     /*  And the surfaces' aim and the live layer's two (2026-09-25): the running
         pane's name and the bar's buttons. */

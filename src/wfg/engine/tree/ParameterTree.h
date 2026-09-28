@@ -120,6 +120,11 @@ namespace wfg::tree
         int audioSampleRate = 0, audioBufferSize = 0, hardwareInputs = 0, hardwareOutputs = 0;
         int audioSettingsRevision = 0;
 
+        /*  The last time the show followed the interface onto another clock
+            (PRD §6.2, 2026-09-28): the sentence, and the tick it happened at. */
+        std::string audioRateMoved;
+        std::int64_t audioRateMovedTick = 0;
+
         /*  THE INPUTS' SIDE (Phase 9b, namespace draft §18.2). How many logical
             inputs the open interface hands the graph, the interface's own two
             delays as its driver reported them, and the loudest sample on each

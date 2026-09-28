@@ -45,14 +45,19 @@
 #include <wfg/engine/audio/DeviceLayer.h>
 
 #include <juce_core/juce_core.h>
+#include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
 #include <chrono>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 using namespace wfg;
 
@@ -161,7 +166,7 @@ TEST_CASE ("devices: media reaches the patched hardware output")
         bool recovered = false;
         for (int i = 0; i < 1000 && ! recovered; ++i)
         {
-            recovered = driver.serviceRecovery();
+            recovered = driver.serviceRecovery().ready;
             std::this_thread::sleep_for (std::chrono::milliseconds (5));
         }
         REQUIRE_MESSAGE (recovered, driver.lastError());
@@ -380,4 +385,363 @@ TEST_CASE ("devices: a real one opens, reports what it granted, and feeds the gr
 
     driver.close();
     CHECK_FALSE (driver.isRunning());
+}
+
+//==============================================================================
+/*  AN INTERFACE WHOSE CLOCK A TEST CAN MOVE (2026-09-28), and the only way PRD
+    §6.2's second failure runs anywhere but the author's rig: no CI runner has
+    an interface, and nobody's Dante domain can be moved from a script.
+
+    WHAT IT IS NOT: a model of any driver. It is the two behaviours §6.2 has to
+    tell apart - an interface that takes the rate it is asked for (USB, most
+    ASIO boxes) and one that keeps the rate its clock domain gives it (Dante,
+    anything on word clock) - plus the one that surprised the design: a Dante
+    or MADI interface at double speed offers half its channels.
+
+    ONE DOMAIN FOR EVERY DEVICE OBJECT the type makes, because the device
+    manager deletes the device and makes a new one on every reopen: the clock
+    belongs to the room, not to the object. Message thread, except the block
+    thread each device runs while started. */
+namespace
+{
+    struct ClockDomain
+    {
+        double rate = 48000.0;
+        bool settable = false;
+        bool halvesAtDoubleSpeed = false;
+
+        std::vector<int> asked;                         // every rate an open asked for
+        juce::AudioIODevice* current = nullptr;
+
+        int outputs() const { return halvesAtDoubleSpeed && rate > 50000.0 ? 4 : 8; }
+    };
+
+    juce::StringArray channelNames (const juce::String& stem, int count)
+    {
+        juce::StringArray out;
+
+        for (int i = 1; i <= count; ++i)
+            out.add (stem + " " + juce::String (i));
+
+        return out;
+    }
+
+    juce::BigInteger within (juce::BigInteger mask, int available)
+    {
+        if (mask.getHighestBit() >= available)
+            mask.setRange (available, mask.getHighestBit() + 1 - available, false);
+
+        return mask;
+    }
+
+    class MovableDevice final : public juce::AudioIODevice, private juce::Thread
+    {
+    public:
+        explicit MovableDevice (ClockDomain& domainToUse)
+            : juce::AudioIODevice ("Movable clock", "Go.dot test clock"),
+              juce::Thread ("movable clock"),
+              domain (domainToUse)
+        {
+            domain.current = this;
+        }
+
+        ~MovableDevice() override
+        {
+            close();
+
+            if (domain.current == this)
+                domain.current = nullptr;
+        }
+
+        juce::StringArray getOutputChannelNames() override    { return channelNames ("out", domain.outputs()); }
+        juce::StringArray getInputChannelNames() override     { return channelNames ("in", 2); }
+        juce::Array<double> getAvailableSampleRates() override { return { 48000.0, 96000.0 }; }
+        juce::Array<int> getAvailableBufferSizes() override   { return { 256 }; }
+        int getDefaultBufferSize() override                   { return 256; }
+
+        juce::String open (const juce::BigInteger& inputs, const juce::BigInteger& outputs,
+                           double sampleRate, int bufferSize) override
+        {
+            close();
+            domain.asked.push_back (static_cast<int> (sampleRate));
+
+            if (domain.settable && sampleRate > 0.0)
+                domain.rate = sampleRate;
+
+            takeTheDomain (inputs, outputs);
+            block = bufferSize > 0 ? bufferSize : 256;
+            opened = true;
+            return {};
+        }
+
+        void close() override       { stop(); opened = false; }
+        bool isOpen() override      { return opened; }
+
+        void start (juce::AudioIODeviceCallback* callbackToUse) override
+        {
+            if (! opened || callbackToUse == nullptr || callback != nullptr)
+                return;
+
+            callbackToUse->audioDeviceAboutToStart (this);
+            callback = callbackToUse;
+            startThread();
+        }
+
+        void stop() override
+        {
+            if (callback == nullptr)
+                return;
+
+            stopThread (2000);
+            std::exchange (callback, nullptr)->audioDeviceStopped();
+        }
+
+        bool isPlaying() override                            { return callback != nullptr; }
+        juce::String getLastError() override                 { return {}; }
+        int getCurrentBufferSizeSamples() override           { return block; }
+        double getCurrentSampleRate() override               { return rate; }
+        int getCurrentBitDepth() override                    { return 32; }
+        juce::BigInteger getActiveOutputChannels() const override { return activeOutputs; }
+        juce::BigInteger getActiveInputChannels() const override  { return activeInputs; }
+        int getOutputLatencyInSamples() override             { return 0; }
+        int getInputLatencyInSamples() override              { return 0; }
+
+        /*  THE DOMAIN MOVES, and the driver resets itself the way a
+            clock-slaved one does: stopped, and started again at whatever the
+            domain now runs at, asking nobody - which is also what a settable
+            interface does when somebody changes its rate at its own panel. */
+        void moveClock (double newRate)
+        {
+            auto* was = callback;
+            stop();
+            domain.rate = newRate;
+            takeTheDomain (activeInputs, activeOutputs);
+
+            if (was != nullptr)
+                start (was);
+        }
+
+    private:
+        void takeTheDomain (const juce::BigInteger& inputs, const juce::BigInteger& outputs)
+        {
+            rate = domain.rate;
+            activeInputs = within (inputs, 2);
+            activeOutputs = within (outputs, domain.outputs());
+        }
+
+        void run() override
+        {
+            const auto ins = activeInputs.countNumberOfSetBits();
+            const auto outs = activeOutputs.countNumberOfSetBits();
+            juce::AudioBuffer<float> input (std::max (1, ins), block);
+            juce::AudioBuffer<float> output (std::max (1, outs), block);
+            const auto period = std::max (1.0, 1000.0 * block / rate);
+
+            while (! threadShouldExit())
+            {
+                input.clear();
+                output.clear();
+                callback->audioDeviceIOCallbackWithContext (input.getArrayOfReadPointers(), ins,
+                                                            output.getArrayOfWritePointers(), outs,
+                                                            block, {});
+                wait (period);
+            }
+        }
+
+        ClockDomain& domain;
+        juce::AudioIODeviceCallback* callback = nullptr;
+        juce::BigInteger activeInputs, activeOutputs;
+        double rate = 48000.0;
+        int block = 256;
+        bool opened = false;
+    };
+
+    class MovableType final : public juce::AudioIODeviceType
+    {
+    public:
+        explicit MovableType (ClockDomain& domainToUse)
+            : juce::AudioIODeviceType ("Go.dot test clock"), domain (domainToUse)
+        {
+        }
+
+        void scanForDevices() override {}
+        juce::StringArray getDeviceNames (bool) const override { return { "Movable clock" }; }
+        int getDefaultDeviceIndex (bool) const override        { return 0; }
+        bool hasSeparateInputsAndOutputs() const override      { return false; }
+
+        int getIndexOfDevice (juce::AudioIODevice* device, bool) const override
+        {
+            return device != nullptr ? 0 : -1;
+        }
+
+        juce::AudioIODevice* createDevice (const juce::String& output, const juce::String& input) override
+        {
+            if (output != "Movable clock" && input != "Movable clock")
+                return nullptr;
+
+            return new MovableDevice (domain);
+        }
+
+    private:
+        ClockDomain& domain;
+    };
+
+    audio::DeviceAudioDriver::Request movableRequest()
+    {
+        audio::DeviceAudioDriver::Request request;
+        request.deviceName = "Movable clock";
+        request.deviceType = "Go.dot test clock";
+        request.edit.tracks = 1;
+        request.edit.channelsPerTrack = 2;
+        return request;
+    }
+
+    /*  Blocks through the graph, which is the whole claim: a device that
+        called back into a closed gate delivers none. */
+    bool graphFed (audio::DeviceAudioDriver& driver, std::int64_t blocks = 20)
+    {
+        const auto from = driver.blocksDelivered();
+
+        for (int i = 0; i < 500; ++i)
+        {
+            if (driver.blocksDelivered() - from >= blocks)
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        return false;
+    }
+
+    /*  The watchdog's own loop, run here the way the message thread runs it:
+        a look every twenty milliseconds until the outage has come to what the
+        case waits for, for at most ten seconds. */
+    template <typename Until>
+    audio::DeviceAudioDriver::Recovery serviceUntil (audio::DeviceAudioDriver& driver, Until until)
+    {
+        audio::DeviceAudioDriver::Recovery last;
+
+        for (int i = 0; i < 500; ++i)
+        {
+            last = driver.serviceRecovery();
+
+            if (until (last))
+                return last;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (20));
+        }
+
+        return last;
+    }
+
+    MovableDevice& movableOf (ClockDomain& domain)
+    {
+        REQUIRE (domain.current != nullptr);
+        return static_cast<MovableDevice&> (*domain.current);
+    }
+}
+
+TEST_CASE ("devices: a clock the interface will not give back is followed, on the interface as it runs")
+{
+    /*  THE DANTE CASE (PRD §6.2, decisions DF and DH): the domain moved from
+        48 kHz to 96, the interface came back on it, was asked for 48 again
+        and would not. It is the same interface - with half its channels, when
+        it is the kind that halves them - so the show follows it: the engine
+        brought up again on the device as it runs, without closing it. Until
+        then the paused graph never runs on the new clock, which would be
+        every cue at twice its pitch. */
+    for (const auto halves : { false, true })
+    {
+        const auto* what = halves ? "half the channels at double speed" : "every channel at double speed";
+        INFO (what);
+
+        ClockDomain domain;
+        domain.halvesAtDoubleSpeed = halves;
+
+        ScopedRoom room;
+        audio::DeviceAudioDriver driver { room.path() };
+        driver.addDeviceType (std::make_unique<MovableType> (domain));
+
+        const auto request = movableRequest();
+        REQUIRE_MESSAGE (driver.open (request), driver.lastError());
+        CHECK (driver.settings().sampleRate == 48000);
+        CHECK (driver.outputChannels() == 8);
+        REQUIRE (graphFed (driver));
+        CHECK_FALSE (driver.recoveryPaused());
+
+        domain.asked.clear();
+        movableOf (domain).moveClock (96000.0);
+        CHECK (driver.recoveryPaused());
+
+        const auto moved = serviceUntil (driver, [] (const auto& r) { return r.moved; });
+        REQUIRE (moved.moved);
+        CHECK_FALSE (moved.ready);
+        CHECK (moved.sampleRate == 96000);
+        CHECK (moved.blockSize == 256);
+
+        //  Asked for the clock the show ran on first, and refused.
+        CHECK (std::find (domain.asked.begin(), domain.asked.end(), 48000) != domain.asked.end());
+        CHECK (static_cast<int> (domain.rate) == 96000);
+
+        //  Held until it is followed: nothing reaches the old graph meanwhile.
+        const auto held = driver.blocksDelivered();
+        std::this_thread::sleep_for (std::chrono::milliseconds (100));
+        CHECK (driver.blocksDelivered() == held);
+        CHECK (driver.recoveryPaused());
+
+        REQUIRE (driver.followClock (request) == audio::DeviceAudioDriver::Follow::followed);
+        CHECK (driver.lastError().empty());
+        CHECK (driver.settings().sampleRate == 96000);
+        CHECK (driver.host().settings().sampleRate == 96000);
+        CHECK (driver.outputChannels() == (halves ? 4 : 8));
+        CHECK_FALSE (driver.recoveryPaused());
+        REQUIRE (graphFed (driver));
+
+        //  Followed, it is the show's clock now: nothing moved, nothing to follow.
+        CHECK_FALSE (driver.serviceRecovery().moved);
+        CHECK (driver.followClock (request) == audio::DeviceAudioDriver::Follow::nothing);
+
+        driver.close();
+        CHECK_FALSE (driver.isRunning());
+    }
+}
+
+TEST_CASE ("devices: a clock the interface gives back when asked is put back, and the paused show goes on")
+{
+    /*  THE USB CASE, and the reason a moved clock is asked back before it is
+        followed (decision DF): an interface power-cycled mid-show comes back
+        at its own default rate, and one that takes the rate it is asked for
+        takes the old one again - so the outage stays the pause §6.2 promises,
+        on the graph and the launch handles it had, rather than a stop nobody
+        needed. */
+    ClockDomain domain;
+    domain.settable = true;
+
+    ScopedRoom room;
+    audio::DeviceAudioDriver driver { room.path() };
+    driver.addDeviceType (std::make_unique<MovableType> (domain));
+
+    REQUIRE_MESSAGE (driver.open (movableRequest()), driver.lastError());
+    REQUIRE (graphFed (driver));
+
+    movableOf (domain).moveClock (96000.0);
+    CHECK (driver.recoveryPaused());
+    const auto paused = driver.host().clock().samplesElapsed();
+
+    const auto back = serviceUntil (driver, [] (const auto& r) { return r.ready || r.moved; });
+    REQUIRE (back.ready);
+    CHECK_FALSE (back.moved);
+    CHECK (static_cast<int> (domain.rate) == 48000);
+    CHECK (driver.settings().sampleRate == 48000);
+    CHECK (driver.host().clock().samplesElapsed() == paused);
+
+    REQUIRE (driver.resumeConnection());
+    CHECK_FALSE (driver.recoveryPaused());
+    REQUIRE (graphFed (driver));
+
+    //  The same graph going on, not a new one: its clock resumed from where it paused.
+    CHECK (driver.host().clock().samplesElapsed() > paused);
+    CHECK (driver.followClock (movableRequest()) == audio::DeviceAudioDriver::Follow::nothing);
+
+    driver.close();
 }

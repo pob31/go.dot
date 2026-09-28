@@ -22,6 +22,9 @@ namespace wfg::audio
         /** `plugin.load`'s work (2026-09-26): the graph built again on what plays now. */
         std::function<void()> rebuild;
 
+        /** `audio.clockMoved`'s work (2026-09-28): the show brought up on the interface's new clock. */
+        std::function<void()> follow;
+
         void post (const AudioSettings& settings, bool defaultsOnly)
         {
             const std::lock_guard<std::mutex> lock (mutex);
@@ -33,24 +36,32 @@ namespace wfg::audio
             const std::lock_guard<std::mutex> lock (mutex);
             rebuildAsked = true;
         }
+
+        void postFollow()
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            followAsked = true;
+        }
     private:
         void timerCallback() override
         {
             std::deque<std::pair<AudioSettings, bool>> work;
-            auto rebuildNow = false;
+            auto rebuildNow = false, followNow = false;
             {
                 const std::lock_guard<std::mutex> lock (mutex);
                 work.swap (queued);
                 rebuildNow = std::exchange (rebuildAsked, false);
+                followNow = std::exchange (followAsked, false);
             }
             for (const auto& item : work) perform (item.first, item.second);
             if (rebuildNow && rebuild) rebuild();
+            if (followNow && follow) follow();
             if (maintenance) maintenance();
         }
         SettingsRequest perform;
         std::mutex mutex;
         std::deque<std::pair<AudioSettings, bool>> queued;
-        bool rebuildAsked = false;
+        bool rebuildAsked = false, followAsked = false;
     };
 
     // Repointed only while the tick thread is joined. Device sample counters

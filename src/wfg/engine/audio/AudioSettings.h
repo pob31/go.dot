@@ -8,7 +8,7 @@
 
 namespace wfg { class Engine; }
 namespace wfg::doc { class ShowDocument; }
-namespace wfg::cue { class Runner; }
+namespace wfg::cue { class Runner; class RunTable; }
 
 namespace wfg::audio
 {
@@ -53,6 +53,6 @@ namespace wfg::audio
 
     struct AudioState;
     using SettingsRequest = std::function<void (const AudioSettings&, bool defaultsOnly)>;
-    void registerAudioSettingsCommands (Engine&, doc::ShowDocument&, cue::Runner&,
+    void registerAudioSettingsCommands (Engine&, doc::ShowDocument&, cue::Runner&, cue::RunTable&,
                                         AudioState&, SettingsRequest = {});
 }

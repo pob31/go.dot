@@ -255,10 +255,23 @@ function renderStrip() {
   note.hidden = !focused || !!parked;
   note.textContent = note.hidden ? "" : "standby is clear — click a row's left edge to park it";
 
+  /*  THE CLOCK MOVED AND THE SHOW FOLLOWED IT (PRD §6.2, 2026-09-28): said in
+      the banner until something is refused after it, the desktop transport's
+      rule (`TransportReading::errorLine`) - the cues it stopped are the first
+      thing anybody will ask about, and a refusal from before it is older news. */
   const refusal = tree.get("/godot/engine/lastError", "");
+  const moved = String(tree.get("/godot/audio/rateMoved", ""));
+  const movedAt = Number(tree.get("/godot/audio/rateMovedTick", 0));
+  const refusedAt = Number(String(refusal).split(" ")[0]);
   const banner = el("refusal");
-  banner.className = refusal ? "show" : "";
-  banner.innerHTML = refusal ? "refused: <code>" + esc(refusal) + "</code>" : "";
+
+  if (moved && (!refusal || refusedAt <= movedAt)) {
+    banner.className = "show";
+    banner.textContent = moved;
+  } else {
+    banner.className = refusal ? "show" : "";
+    banner.innerHTML = refusal ? "refused: <code>" + esc(refusal) + "</code>" : "";
+  }
 }
 
 export { renderStrip };

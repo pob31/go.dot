@@ -604,30 +604,15 @@ namespace wfg::cue
             AN EMPTY TABLE IS APPLIED AND DOES NOTHING. Esc on a silent show is
             not a mistake, and the hand that pressed it needs no error to read.
             The third level, Go Doh!, stays deferred in the law itself. */
-        const auto rootsOf = [&runs]
-        {
-            std::vector<std::string> roots;
-
-            for (const auto& run : runs.all())
-                if (! run.isFinished()
-                      && (run.parent.empty() || runs.find (run.parent) == nullptr))
-                    roots.push_back (run.id);
-
-            return roots;
-        };
-
         registry.add ({ "run.stopAll",
                         "Stops every run now, gracefully: Esc. Members come down in order and"
                         " every footer runs.",
                         {},
                         true,
-                        [&runs, rootsOf, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             if (stopDiagnostics) stopDiagnostics();
-                            for (const auto& id : rootsOf())
-                                if (auto* run = runs.find (id))
-                                    run->state = runState::stopping;
-
+                            stopEveryRoot (runs, false);
                             return Outcome::ok (args);
                         } });
 
@@ -644,19 +629,32 @@ namespace wfg::cue
                         " as it was.",
                         {},
                         true,
-                        [&runs, rootsOf, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             if (stopDiagnostics) stopDiagnostics();
-                            for (const auto& id : rootsOf())
-                            {
-                                if (auto* run = runs.find (id))
-                                {
-                                    run->skipFooter = true;
-                                    run->state = runState::stopping;
-                                }
-                            }
-
+                            stopEveryRoot (runs, true);
                             return Outcome::ok (args);
                         } });
+    }
+
+    void stopEveryRoot (RunTable& runs, bool immediate)
+    {
+        std::vector<std::string> roots;
+
+        for (const auto& run : runs.all())
+            if (! run.isFinished()
+                  && (run.parent.empty() || runs.find (run.parent) == nullptr))
+                roots.push_back (run.id);
+
+        for (const auto& id : roots)
+        {
+            if (auto* run = runs.find (id))
+            {
+                if (immediate)
+                    run->skipFooter = true;
+
+                run->state = runState::stopping;
+            }
+        }
     }
 }

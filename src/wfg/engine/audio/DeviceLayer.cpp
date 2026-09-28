@@ -154,14 +154,31 @@ namespace wfg::audio
                 What the device says here is what the show runs at. */
             observedRate.store (device->getCurrentSampleRate(), std::memory_order_relaxed);
             observedBlock.store (device->getCurrentBufferSizeSamples(), std::memory_order_relaxed);
-            recovery.started (device->getTypeName() == pinnedType
-                && device->getName() == pinnedSetup.outputDeviceName
-                // The int domain `granted.sampleRate` was stored in, by the same
-                // cast (`open` below), so the round trip compares exactly.
-                && static_cast<int> (device->getCurrentSampleRate()) == granted.sampleRate
-                && device->getCurrentBufferSizeSamples() == granted.blockSize
-                && device->getActiveInputChannels() == pinnedSetup.inputChannels
-                && device->getActiveOutputChannels() == pinnedSetup.outputChannels);
+            recovery.started (! sameInterface (*device) ? Verdict::foreign
+                              : sameClock (*device)     ? Verdict::same
+                                                        : Verdict::moved);
+        }
+
+        /*  THE SAME INTERFACE is its driver type and its name, and nothing
+            more (decision DH): a Dante or MADI interface at double speed
+            offers half the channels it had, and it is still the box the show
+            was playing through - its clock moved, not the hardware. */
+        bool sameInterface (juce::AudioIODevice& device) const
+        {
+            return device.getTypeName() == pinnedType
+                && device.getName() == pinnedSetup.outputDeviceName;
+        }
+
+        /*  THE SAME CLOCK: the rate, block and both channel layouts the show
+            was brought up on. The rate in the int domain `granted.sampleRate`
+            was stored in, by the same cast (`bringUp`), so the round trip
+            compares exactly. */
+        bool sameClock (juce::AudioIODevice& device) const
+        {
+            return static_cast<int> (device.getCurrentSampleRate()) == granted.sampleRate
+                && device.getCurrentBufferSizeSamples() == granted.blockSize
+                && device.getActiveInputChannels() == pinnedSetup.inputChannels
+                && device.getActiveOutputChannels() == pinnedSetup.outputChannels;
         }
 
         void audioDeviceStopped() override { recovery.stopped(); }
@@ -253,7 +270,99 @@ namespace wfg::audio
         juce::AudioDeviceManager::AudioDeviceSetup pinnedSetup;
         juce::String pinnedType;
         double nextRetry = 0;
+
+        /*  Whether this outage has asked the interface for the clock the show
+            ran on yet: a moved clock is followed only once it has refused. */
+        bool askedThisOutage = false;
+
+        bool bringUp (juce::AudioIODevice& device, const Request& request);
     };
+
+    /*  THE ENGINE BROUGHT UP ON AN OPEN DEVICE, and the callback started: the
+        second half of `open`, and the whole of `followClock`. False with
+        `error` set; the caller closes. */
+    bool DeviceAudioDriver::Impl::bringUp (juce::AudioIODevice& device, const Request& request)
+    {
+        HostSettings settings;
+        settings.sampleRate = static_cast<int> (device.getCurrentSampleRate());
+        settings.blockSize = device.getCurrentBufferSizeSamples();
+        settings.outputChannels = device.getActiveOutputChannels().countNumberOfSetBits();
+        hardwareInputs = device.getActiveInputChannels().countNumberOfSetBits();
+        hardwareOutputs = settings.outputChannels;
+        for (const auto channel : request.inputPatch)
+            if (channel >= hardwareInputs)
+            { error = "The input patch names an unavailable hardware input"; return false; }
+        for (const auto channel : request.outputPatch)
+            if (channel >= hardwareOutputs)
+            { error = "The output patch names an unavailable hardware output"; return false; }
+        settings.inputChannels = request.inputPatch.empty() ? hardwareInputs
+                                                           : static_cast<int> (request.inputPatch.size());
+        if (request.logicalOutputs > 0) settings.outputChannels = request.logicalOutputs;
+        inputPatch = request.inputPatch;
+        sink.patch = request.outputPatch;
+        sink.observer = request.outputObserver;
+        inputScratch.setSize (settings.inputChannels, settings.blockSize);
+
+        if (settings.outputChannels <= 0)
+        {
+            error = "\"" + device.getName().toStdString()
+                      + "\" opened with no output channels";
+            return false;
+        }
+
+        /*  THE ENGINE IS BROUGHT UP ON WHAT THE DEVICE GAVE, never on what was
+            asked for. This line is the whole of PRD §6.2's "the rate is
+            observed": everything downstream - the tick clock's samples per
+            tick, the Edit's tempo, the launch-tick arithmetic - is computed
+            from the number the driver reported, so a device that opened at
+            44.1 when it was asked for 48 makes a show that is in tune. */
+        if (! audioHost.start (settings))
+        {
+            error = audioHost.lastError();
+            return false;
+        }
+
+        if (! audioHost.buildEdit (request.edit))
+        {
+            error = audioHost.lastError();
+            audioHost.stop();
+            return false;
+        }
+
+        granted = settings;
+
+        /*  PINNED FROM THE DEVICE, not from the manager's copy alone: the
+            manager keeps the rate it was ASKED for, which after a clock the
+            interface would not give up is the old one - and the pin is both
+            what a return is compared with and what a reopen asks for. */
+        pinnedSetup = manager.getAudioDeviceSetup();
+        pinnedSetup.sampleRate = device.getCurrentSampleRate();
+        pinnedSetup.bufferSize = settings.blockSize;
+        pinnedSetup.useDefaultInputChannels = false;
+        pinnedSetup.useDefaultOutputChannels = false;
+        pinnedSetup.inputChannels = device.getActiveInputChannels();
+        pinnedSetup.outputChannels = device.getActiveOutputChannels();
+        pinnedType = device.getTypeName();
+        sink.test.prepare (settings.sampleRate, settings.blockSize);
+        openedName = device.getName().toStdString();
+        inputLatency = std::max (0, device.getInputLatencyInSamples());
+        outputLatency = std::max (0, device.getOutputLatencyInSamples());
+        bufferSizes.clear();
+        for (const auto size : device.getAvailableBufferSizes())
+        {
+            if (! bufferSizes.empty()) bufferSizes += ' ';
+            bufferSizes += std::to_string (size);
+        }
+
+        audioHost.setBlockSink (&sink);
+        manager.addAudioCallback (this);
+        // The open has already validated its format. Reopens must first prove
+        // that callbacks and clock have returned through serviceRecovery.
+        recovery.resume (true);
+        askedThisOutage = false;
+        running = true;
+        return true;
+    }
 
     //==============================================================================
     DeviceAudioDriver::DeviceAudioDriver (std::string storageFolder)
@@ -451,72 +560,11 @@ namespace wfg::audio
             }
         }
 
-        HostSettings settings;
-        settings.sampleRate = static_cast<int> (device->getCurrentSampleRate());
-        settings.blockSize = device->getCurrentBufferSizeSamples();
-        settings.outputChannels = device->getActiveOutputChannels().countNumberOfSetBits();
-        impl->hardwareInputs = device->getActiveInputChannels().countNumberOfSetBits();
-        impl->hardwareOutputs = settings.outputChannels;
-        for (const auto channel : request.inputPatch)
-            if (channel >= impl->hardwareInputs)
-            { impl->error = "The input patch names an unavailable hardware input"; close(); return false; }
-        for (const auto channel : request.outputPatch)
-            if (channel >= impl->hardwareOutputs)
-            { impl->error = "The output patch names an unavailable hardware output"; close(); return false; }
-        settings.inputChannels = request.inputPatch.empty() ? impl->hardwareInputs
-                                                           : static_cast<int> (request.inputPatch.size());
-        if (request.logicalOutputs > 0) settings.outputChannels = request.logicalOutputs;
-        impl->inputPatch = request.inputPatch;
-        impl->sink.patch = request.outputPatch;
-        impl->sink.observer = request.outputObserver;
-        impl->inputScratch.setSize (settings.inputChannels, settings.blockSize);
+        if (impl->bringUp (*device, request))
+            return true;
 
-        if (settings.outputChannels <= 0)
-        {
-            impl->error = "\"" + device->getName().toStdString()
-                            + "\" opened with no output channels";
-            return false;
-        }
-
-        /*  THE ENGINE IS BROUGHT UP ON WHAT THE DEVICE GAVE, never on what was
-            asked for. This line is the whole of PRD §6.2's "the rate is
-            observed": everything downstream - the tick clock's samples per
-            tick, the Edit's tempo, the launch-tick arithmetic - is computed
-            from the number the driver reported, so a device that opened at
-            44.1 when it was asked for 48 makes a show that is in tune. */
-        if (! impl->audioHost.start (settings))
-        {
-            impl->error = impl->audioHost.lastError();
-            return false;
-        }
-
-        if (! impl->audioHost.buildEdit (request.edit))
-        {
-            impl->error = impl->audioHost.lastError();
-            impl->audioHost.stop();
-            return false;
-        }
-
-        impl->granted = settings;
-        impl->pinnedSetup = impl->manager.getAudioDeviceSetup();
-        impl->pinnedType = device->getTypeName();
-        impl->sink.test.prepare (settings.sampleRate, settings.blockSize);
-        impl->openedName = device->getName().toStdString();
-        impl->inputLatency = std::max (0, device->getInputLatencyInSamples());
-        impl->outputLatency = std::max (0, device->getOutputLatencyInSamples());
-        for (const auto size : device->getAvailableBufferSizes())
-        {
-            if (! impl->bufferSizes.empty()) impl->bufferSizes += ' ';
-            impl->bufferSizes += std::to_string (size);
-        }
-
-        impl->audioHost.setBlockSink (&impl->sink);
-        impl->manager.addAudioCallback (impl.get());
-        // The initial open has already validated its format. Reopens must first
-        // prove that callbacks and clock have returned through serviceRecovery.
-        impl->recovery.resume (true);
-        impl->running = true;
-        return true;
+        close();
+        return false;
     }
 
     void DeviceAudioDriver::close()
@@ -553,14 +601,29 @@ namespace wfg::audio
         impl->nextRetry = 0;
     }
 
-    bool DeviceAudioDriver::serviceRecovery()
+    DeviceAudioDriver::Recovery DeviceAudioDriver::serviceRecovery()
     {
-        if (! impl->running) return false;
+        Recovery out;
+        if (! impl->running) return out;
         const auto now = juce::Time::getMillisecondCounterHiRes();
         const auto observation = impl->recovery.observe (now);
-        if (observation.retry && now >= impl->nextRetry)
+        if (! impl->recovery.paused()) impl->askedThisOutage = false;
+
+        /*  ASKED ONCE BEFORE IT IS FOLLOWED (decision DF). A clock that moved
+            is first asked to come back - the reopen below asks for the setup
+            the show ran on, its rate among it - and only a clock the interface
+            insists on is followed. A USB interface power-cycled mid-show comes
+            back at its own default, takes the old rate again, and the paused
+            show goes on; a Dante interface whose domain moved cannot, and says
+            so by coming back moved a second time. JUCE's own ASIO reset asks
+            for the old rate too, so this is the library's rule kept, not a
+            new one. */
+        const auto askFirst = observation.moved && ! impl->askedThisOutage;
+
+        if ((observation.retry || askFirst) && now >= impl->nextRetry)
         {
             impl->nextRetry = now + 1000.0;
+            impl->askedThisOutage = true;
             // Never tear down AudioHost here: it owns the paused launch handles,
             // range state, routing and sample counter. No second ASIO instance.
             impl->manager.removeAudioCallback (impl.get());
@@ -572,8 +635,57 @@ namespace wfg::audio
             const auto problem = impl->manager.setAudioDeviceSetup (setup, false);
             impl->error = problem.toStdString();
             impl->manager.addAudioCallback (impl.get());
+
+            // What it came back as is judged from the next look, once steady.
+            return out;
         }
-        return observation.ready;
+
+        out.ready = observation.ready;
+        out.moved = observation.moved && impl->askedThisOutage;
+
+        if (out.moved)
+            if (auto* device = impl->manager.getCurrentAudioDevice())
+            {
+                out.sampleRate = static_cast<int> (device->getCurrentSampleRate());
+                out.blockSize = device->getCurrentBufferSizeSamples();
+            }
+
+        return out;
+    }
+
+    DeviceAudioDriver::Follow DeviceAudioDriver::followClock (const Request& request)
+    {
+        auto* device = impl->manager.getCurrentAudioDevice();
+
+        if (! impl->running || device == nullptr || ! device->isPlaying()
+              || ! impl->recovery.paused()
+              || ! impl->sameInterface (*device) || impl->sameClock (*device))
+            return Follow::nothing;
+
+        /*  The callback out first, which is JUCE's promise that the audio
+            thread is not inside the graph while it is taken down; the device
+            itself stays open and running, feeding nobody, until the engine is
+            back on it. */
+        impl->manager.removeAudioCallback (impl.get());
+        impl->audioHost.setBlockSink (nullptr);
+        impl->audioHost.stop();
+        impl->running = false;
+        impl->error.clear();
+
+        if (impl->bringUp (*device, request))
+            return Follow::followed;
+
+        close();
+        return Follow::failed;
+    }
+
+    void DeviceAudioDriver::addDeviceType (std::unique_ptr<juce::AudioIODeviceType> type)
+    {
+        /*  The platform's own first: JUCE creates them only into an EMPTY
+            list, so a type added to a manager that has not scanned yet would
+            be the only one it ever had. */
+        scanTypes (impl->manager);
+        impl->manager.addAudioDeviceType (std::move (type));
     }
 
     std::int64_t DeviceAudioDriver::blocksDelivered() const noexcept

@@ -20,6 +20,7 @@
 
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -128,13 +129,29 @@ namespace wfg::client::model
     {
         if (status == "noClock")
             return "Audio disconnected - cues paused; waiting for the interface and clock.";
-        if (lastError.empty())
-            return {};
 
         /*  tick, sequence, origin, reason, command - and the command may carry
             no spaces, so five fields is exactly what a well-formed record has.
             Anything else is shown as it came. */
         const auto fields = words (lastError);
+
+        /*  THE CLOCK MOVED AND THE SHOW FOLLOWED IT (PRD §6.2, 2026-09-28):
+            said until something is refused after it, because the cues it
+            stopped are the first thing anybody at the desk will ask about -
+            and a refusal from before it is older news. */
+        const auto tickOf = [] (std::string_view digits) -> std::int64_t
+        {
+            std::int64_t value = -1;
+            const auto* end = digits.data() + digits.size();
+            return std::from_chars (digits.data(), end, value).ptr == end ? value : -1;
+        };
+
+        if (! rateMoved.empty()
+              && (lastError.empty() || (fields.size() == 5 && tickOf (fields[0]) <= tickOf (rateMovedTick))))
+            return rateMoved;
+
+        if (lastError.empty())
+            return {};
 
         if (fields.size() != 5)
             return lastError;
@@ -170,7 +187,7 @@ namespace wfg::client::model
                              r.listId, r.listName, r.standbyId, r.standbyName, r.standbyKind,
                              r.standbyNotes,
                              r.canUndo, r.canRedo, r.undoName, r.redoName,
-                             r.status, r.lastError, r.dial, r.writeError,
+                             r.status, r.lastError, r.rateMoved, r.rateMovedTick, r.dial, r.writeError,
                              r.warningCount, r.warningFirst, r.revision);
         };
 
@@ -223,6 +240,8 @@ namespace wfg::client::model
 
         reading.status = text (snapshot, "/godot/audio/status");
         reading.lastError = text (snapshot, "/godot/engine/lastError");
+        reading.rateMoved = text (snapshot, "/godot/audio/rateMoved");
+        reading.rateMovedTick = text (snapshot, "/godot/audio/rateMovedTick");
         reading.writeError = text (snapshot, "/godot/document/writeError");
         reading.dial = dialLine (snapshot);
         /*  READ, SUMMARISED, AND THE LONG STRING DROPPED on the spot: nothing

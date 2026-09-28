@@ -2733,6 +2733,8 @@ namespace wfg::tree
             else if (name == "hardwareOutputs") text = std::to_string (state.hardwareOutputs);
             else if (name == "inputLatency") text = std::to_string (state.inputLatency);
             else if (name == "outputLatency") text = std::to_string (state.outputLatency);
+            else if (name == "rateMoved") text = state.audioRateMoved;
+            else if (name == "rateMovedTick") text = std::to_string (state.audioRateMovedTick);
             else                         text = std::string (row->defaultText);
 
             engineValue (*row, "audio", text);

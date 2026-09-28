@@ -68,4 +68,12 @@ namespace wfg::cue
     */
     void registerRunCommands (CommandRegistry& registry, RunTable& runs,
                               std::function<void()> stopDiagnostics = {});
+
+    /*  EVERY ROOT RUN STOPPED: the way Esc stops them, members coming down in
+        order and every footer running, or with `immediate` the way a double
+        Esc does, no footer. `run.stopAll` and `run.killAll` are this, and so
+        is the one other command that has to stop everything -
+        `audio.clockMoved`, when the interface's clock moved under the show
+        (PRD §6.2). For a handler only: the table's writer. */
+    void stopEveryRoot (RunTable& runs, bool immediate);
 }
