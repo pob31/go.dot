@@ -62,6 +62,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 namespace wfg
@@ -92,6 +93,8 @@ namespace wfg
         {
             points[0] = { at, rate, at };
             count = 1;
+            identitySince = isOne (rate) ? -std::numeric_limits<double>::infinity()
+                                         : std::numeric_limits<double>::infinity();
         }
 
         int size() const noexcept                   { return count; }
@@ -120,9 +123,21 @@ namespace wfg
                 return false;
 
             const auto length = at - last.at;
+            const auto wasOne = isOne (last.rate);
+
             points[static_cast<std::size_t> (count)] = { at, rate,
                                                         last.source + length * 0.5 * (last.rate + rate) };
             ++count;
+
+            /*  From when the speed has been exactly one, kept as points arrive
+                rather than read off the points held, which the past is let go
+                of: a speed that went to a half and came back must not read as
+                one for ever once the half has been forgotten. */
+            if (! isOne (rate))
+                identitySince = std::numeric_limits<double>::infinity();
+            else if (! wasOne)
+                identitySince = at;
+
             return true;
         }
 
@@ -226,18 +241,11 @@ namespace wfg
             return std::nullopt;
         }
 
-        /*  Whether, from `t` on, the speed is exactly one everywhere: the point
-            in force at `t` and every one after it say one, bit for bit. */
+        /*  Whether, from `t` on, the speed is exactly one everywhere, bit for
+            bit - including what the clock has let go of. */
         bool isIdentityFrom (double t) const noexcept
         {
-            if (count == 0)
-                return true;
-
-            for (int i = std::max (0, segmentOf (t)); i < count; ++i)
-                if (! isOne (points[static_cast<std::size_t> (i)].rate))
-                    return false;
-
-            return true;
+            return count == 0 || t >= identitySince;
         }
 
         /*  Lets go of the points nobody will ask about again: every one before
@@ -257,6 +265,11 @@ namespace wfg
     private:
         std::array<Point, capacity> points {};
         int count = 0;
+
+        /*  The time from which the speed has been exactly one and stayed so:
+            minus infinity for a clock that has never moved, plus infinity while
+            its last point is anything else. */
+        double identitySince = -std::numeric_limits<double>::infinity();
 
         /*  The index of the last point at or before `t`, or -1 when `t` is before
             them all. From the end: the audio thread asks about now, and now is

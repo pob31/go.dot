@@ -208,6 +208,32 @@ TEST_CASE ("rate clock: identity is judged from a moment on, bit for bit")
     CHECK_FALSE (clock.isIdentityFrom (4.5));
 }
 
+TEST_CASE ("rate clock: a speed that went away and came back is not the identity, whatever has been let go")
+{
+    /*  Found while the Runner's half was written (S.3): identity was read off
+        the points the clock still held, and the clock lets go of its past. A
+        cue slowed to a half and brought back to one, once the half had been
+        forgotten, read as one for ever - and its reads jumped forward by the
+        time it had spent slow. */
+    RateClock clock;
+    clock.start (0.0, 1.0);
+    REQUIRE (clock.place (1.0, 1.0));
+    REQUIRE (clock.place (1.0, 0.5));
+    REQUIRE (clock.place (2.0, 0.5));
+    REQUIRE (clock.place (3.0, 1.0));
+    REQUIRE (clock.place (4.0, 1.0));
+
+    const auto before = clock.sourceAt (10.0);
+
+    clock.forgetBefore (5.0);
+
+    CHECK_FALSE (clock.isIdentityFrom (0.5));
+    CHECK_FALSE (clock.isIdentityFrom (2.5));
+    CHECK (clock.isIdentityFrom (3.0));
+    CHECK (clock.isIdentityFrom (6.0));
+    CHECK (sameBits (clock.sourceAt (10.0), before));
+}
+
 TEST_CASE ("rate voice: a voice nobody moves is the identity, and a late breakpoint is placed now and counted")
 {
     audio::RateVoice voice;

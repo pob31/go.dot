@@ -5805,6 +5805,37 @@ TEST_CASE ("audio host: at twice the speed, varispeed doubles the pitch and time
     }
 }
 
+TEST_CASE ("audio host: a cue slowed and brought back to one keeps its place in the file")
+{
+    /*  A four-second file, at one for half a second, a half for a second, then
+        one again: it has played one second of itself at 1.5 s, and ends three
+        seconds later, 4.5 s after its launch. What this guards (found in S.3):
+        a slot that read its speed as one "from the launch on" once the slow
+        second had been forgotten, jumped its file forward by half a second -
+        a click, and an end half a second early. */
+    SpeedRig speed;
+    const auto tone = writeSineTone (speed.rig.storage.folder, speed.rate, 500.0, 0.25f, 4);
+    REQUIRE (speed.open (tone, false));
+
+    REQUIRE (speed.go (1.0));
+    REQUIRE (speed.speedAt (0.5, 1.0));
+    REQUIRE (speed.speedAt (0.5, 0.5));
+    REQUIRE (speed.speedAt (1.5, 0.5));
+    REQUIRE (speed.speedAt (1.5, 1.0));
+
+    const auto through = speed.record (1.0, 2.5);
+
+    INFO ("largest step " << largestStep (through));
+    CHECK (largestStep (through) < 0.02f);
+
+    const auto around = speed.record (4.3, 0.5);
+    const auto ends = static_cast<double> (speed.startedAt + lastSoundAt (around) - speed.launch) / speed.rate;
+
+    INFO ("the last sound " << ends << " s after the launch");
+    CHECK (ends > 4.49);
+    CHECK (ends < 4.51);
+}
+
 TEST_CASE ("audio host: a speed ramped from one to two has no step in it")
 {
     /*  Half a kilohertz, ramped to twice its speed over a second: the pitch
