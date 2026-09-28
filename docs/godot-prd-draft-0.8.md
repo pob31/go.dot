@@ -2913,6 +2913,47 @@ section's: the state is a first-class one, it is distinct from both "running" an
 validation, the dropped GO and the resume. *Not yet built:* the rate-change stop,
 the resampling, and the operator-facing indication that reconnection is under way.
 
+*Built 2026-09-28, at the author's direction — the rate-change stop and the adaptation.* Asked
+*"Don't you think we will need the flexibility to adapt to a new sample rate? If the computer
+interface goes between locations with 48kHz and others with 96kHz..."*, and of the mid-show case,
+*"I hope the rate never changes while running, at least not during a show. But at setup this might
+happen"* — both built. The same interface coming back from an outage on another clock is first
+**asked for the clock the show ran on** (JUCE's own ASIO reset asks the same), and only a clock it
+**insists on** is followed: a USB interface power-cycled mid-show takes the old rate back and the
+outage stays the pause above; a Dante interface whose domain moved cannot, and the show follows it.
+Following is this section's stop and adaptation. Whatever is playing is stopped **the Esc way** —
+members down in order, every footer run, the sound itself gone since the outage began — the
+prepared runs are revoked, and the engine is brought up again on the interface as it runs,
+**without closing it**, with the graph it had. At setup there is nothing to stop, and it is simply
+the show following the room. The operator is told in words on the transport line of both clients
+(`/godot/audio/rateMoved`) until something newer is refused.
+
+**The resampling is Tracktion's, and was already there.** Every file is read at its own rate and
+converted to the graph's as it plays, so following a clock converts nothing on disk. The author's
+test is now a unit test — a thousand hertz written at 48 kHz counted back out of a 96 kHz graph by
+its zero crossings, the reverse, and 44.1 on 48 — and it passes: no Alvin. What cannot follow a
+clock is what is held in memory at the old rate: a live-sampling take not yet kept is cleared, with
+its sentence (*"the take was cleared: the interface's rate changed"*), as the take store has done
+since Phase 9c (namespace draft §19).
+
+**The same interface is its type and its name, not its channel count:** a Dante or MADI interface
+at double speed offers half its channels and is still the box the show was playing through. A show
+whose patch names a channel the interface no longer has at the new rate fails the follow, and says
+which. **Apply is let through an outage when nothing plays** — refused `audio-busy` when something
+does — the way out when the interface is gone for good, which until now was a relaunch. These are
+implementer's calls, recorded as decisions DF–DJ in the namespace draft's §11.1 with the rest of
+what was built, and the author's to overrule.
+
+**At load nothing is compared, because nothing is stored.** A show file carries no rate
+(`AudioSettings` has none), every open asks the interface for its own, and a show made at 48 kHz
+opened in a 96 kHz room runs at 96: the *(proposed)* paragraph above describes what the code has
+always done. Whether opening such a file should *ask* first stays the open question it was — and a
+moot one until a show records the rate it was made at.
+
+*Still not built:* reconnection shown as a state rather than a line of text (§4.8). *Owed to the
+bench:* the Digiface Dante with its domain moved in Dante Controller, at setup and under a playing
+cue — the CI tests move the clock of an interface that exists only in the test.
+
 *Amended 2026-09-26 — live input handling answered* (§3.18, `docs/godot-namespace-draft-0.1.md`
 §18). A live input is a **named input** of the show — packed onto the logical inputs the input patch
 already maps to hardware, with a meter whether or not anything listens — and is heard only through a

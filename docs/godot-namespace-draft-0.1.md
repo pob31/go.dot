@@ -1221,7 +1221,8 @@ be told why it is still. What it may not do is change it. Every command is
 refused with `audio-reconnecting` except the ones an outage needs — the four stop
 and kill verbs, `audio.testStop`, the document's save and autosave path, the
 engine's own `audio.armed` and `run.failed` bookkeeping, and the two commands
-below.
+below. *(Since 2026-09-28 also `audio.clockMoved`, the two records a settings
+operation ends with, and Apply — below.)*
 
 Recovery insists on **the same hardware**: interface name, device type, sample
 rate, block size and both channel layouts must match what was granted at the
@@ -1240,7 +1241,7 @@ outrun the clock it is waiting for. On resume the graph continues from where it
 paused, on the launch handles it still held, and the second-resolution clock
 triggers missed during the outage are dropped rather than all fired at once.
 
-A device that returns at a **different sample rate** is held at `noClock` and
+*Superseded 2026-09-28 — see the update below.* A device that returns at a **different sample rate** is held at `noClock` and
 retried, and that is where the code stops rather than where the design does.
 §6.2's 2026-09-21 amendment decides it the other way: a rate change is a **stop**,
 not a pause, and Go.dot then **adapts by resampling** — pitch and duration
@@ -1252,6 +1253,73 @@ question.
 The other debt is operator-facing: `noClock` reaches a client through
 `/godot/audio/status` and a line of text, which §6.2 says is not enough. The state
 has to be visible as a state — and, per §4.8, not by colour alone.
+
+Implementation update (2026-09-28) — **the clock moving, followed.** The paragraph on a device
+that returns at a different sample rate, two above, is superseded: a moved clock is now §6.2's stop
+and adaptation, built at the author's direction (*"I hope the rate never changes while running, at
+least not during a show. But at setup this might happen"*).
+
+The gate tells three returns apart (`RecoveryGate`, `Verdict`). **The same** interface on the clock
+the show ran on — type, name, rate, block and both channel layouts — is the pause above. **The same
+interface on another clock** — the same type and name, anything else different — is `moved`. And
+**another interface** is waited for as before. A moved return is held silent like any other, never
+resumed, and is reported once it has been steady by the rule a return passes (three callbacks,
+250 ms).
+
+`serviceRecovery` then asks it back: one reopen per outage asks for the setup the show ran on, its
+rate among it. An interface that takes it comes back the same and the pause goes on (the USB case).
+One that does not comes back moved a second time, and only then is the engine told:
+
+| Command | Arguments | Effect | Refused |
+|---|---|---|---|
+| `audio.clockMoved` | `i` sampleRate `i` bufferSize | the engine's own, from its watchdog, logged like `audio.connection`. Revokes prepared runs; stops every live root the Esc way (`run.stopAll`'s walk, now `cue::stopEveryRoot`); writes `rateMoved` and `rateMovedTick`; asks the Console to follow. The stop is made in the handler, because the scheduler runs before the commands on each tick: a `run.stopAll` sent from here would reach a group one tick after it had seen its member fall silent on the new graph and started the next one | `audio-not-reconnecting` outside an outage; `bad-value` for a rate or block of nought |
+
+The Console's follow (`DeviceAudioDriver::followClock`) takes the callback out, stops the
+AudioHost and brings it up again on the device as it runs — the rate, block and channels it
+insists on, the graph and patches it had — **without closing the device**. Then come
+`audio.settingsReady` and `audio.editBuilt`, as for an Apply; the tick is rebased (`rebaseAudio`)
+and un-suspended, and the second-resolution triggers it slept through are dropped. When there is
+nothing to follow any more (it went away again, or came back as it was), the paused show is left
+as it stood. A follow that fails is opened again from the start, and failing that the dummy clock
+carries the control plane and `settingsError` says why.
+
+Two nodes, read-only, `persist = none`:
+
+| Node | Type | Meaning |
+|---|---|---|
+| `/godot/audio/rateMoved` | `s` | the last follow in words — from which rate to which, and whether the cues that were playing were stopped; empty until it happens |
+| `/godot/audio/rateMovedTick` | `i` | the tick it happened at, so a client can tell it from a refusal made before or after it |
+
+Both clients say it on the transport line — the desktop's `errorLine`, the page's refusal banner —
+until something is refused after it; the outage's own line outranks it. A refusal the client cannot
+date is still shown whole, as before.
+
+The outage's list of what it lets through gains `audio.clockMoved`, `audio.settingsReady` and
+`audio.editBuilt` — a follow, or an Apply made during the outage, would otherwise never be heard to
+finish — and `audio.apply` and `audio.setup` themselves, which still refuse `audio-busy` while
+anything plays. An Apply that runs ends the outage, whatever it opened.
+
+*Found on the way:* `plugin.load`'s rebuild left `blockSource` pointing into a destroyed driver
+when the interface could not be put back. It now falls back to the dummy clock, as an Apply does.
+
+**The decisions** (2026-09-28). The author asked for both halves built and left these to the
+implementer; they are his to overrule:
+
+| | Decision | Whose |
+|---|---|---|
+| **DF** | **Ask for the clock the show ran on first; follow only what the interface insists on.** One rule idle or mid-show, and the one JUCE's own ASIO reset keeps | implementer's call |
+| **DG** | **A clock moved under playing cues stops them the Esc way**: footers run, since nobody declared an emergency; the sound went with the outage | implementer's call |
+| **DH** | **The same interface is its type and its name.** A rate, block or channel count it insists on is a moved clock, never another interface — a Dante or MADI box at double speed has half its channels | implementer's call |
+| **DI** | **Apply is let through an outage when nothing plays**: the way out when the interface is gone for good, which was a relaunch | implementer's call |
+| **DJ** | **The show follows on the open device, with the graph it had.** Load now stays the door for a plugin set not yet applied | implementer's call |
+
+**Tests.** The gate's three verdicts, the command's two cases and its refusals, and the pitch of a
+file at another rate (48 on 96, 96 on 48, 44.1 on 48, counted by zero crossings) are in
+`AudioTests`; the transport line is in `ClientTests`. New: **an interface whose clock a test can
+move** (`DeviceTests`). A Dante-like one keeps its domain's rate, with and without halving its
+channels, and is followed and fed at 96 kHz; a USB-like one takes the old rate back and resumes its
+paused graph. It is the first time this area runs on a CI runner. **Owed to the bench:** the
+Digiface Dante with its domain moved in Dante Controller, at setup and under a playing cue.
 
 ### 11.2 Cue kinds
 
