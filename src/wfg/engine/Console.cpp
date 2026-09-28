@@ -22,6 +22,8 @@
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/LiveRows.h>
+#include <wfg/engine/cue/LaneCommands.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/RunCommands.h>
@@ -266,6 +268,11 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
         runner.setTakes (&takes);
+
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): tonight's,
+            moved by `lane.*` and read by the Runner's hook and the tree. */
+        wfg::cue::LaneTable lanes;
+        runner.setLanes (&lanes);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -291,6 +298,7 @@ namespace
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+        wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -551,6 +559,11 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
         runner.setTakes (&takes);
+
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): tonight's,
+            moved by `lane.*` and read by the Runner's hook and the tree. */
+        wfg::cue::LaneTable lanes;
+        runner.setLanes (&lanes);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -576,6 +589,7 @@ namespace
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+        wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -695,7 +709,7 @@ namespace
                     session wrote it through - a fader's trim or a DCA's - so the
                     record applies as it did rather than being refused by a
                     document that cannot hold it. */
-                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes),
+                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
                                     wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                         wfg::cue::fxWriteFor (document, nullptr, &liveEdits))),
                 wfg::cue::liveSendFor (liveEdits, document));
@@ -1180,6 +1194,11 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
         runner.setTakes (&takes);
+
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): tonight's,
+            moved by `lane.*` and read by the Runner's hook and the tree. */
+        wfg::cue::LaneTable lanes;
+        runner.setLanes (&lanes);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -1191,6 +1210,7 @@ namespace
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+        wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -2618,6 +2638,11 @@ namespace
         runner.setDcas (&dcas);
         runner.setTakes (&takes);
 
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): tonight's,
+            moved by `lane.*` and read by the Runner's hook and the tree. */
+        wfg::cue::LaneTable lanes;
+        runner.setLanes (&lanes);
+
         /*  The touch table, for the fader edges (PRD 3.9a): a fader-start
             counts only from a fader released at the bottom, and released is
             what this table knows. Serve only - a replay runs no hooks, and the
@@ -2709,7 +2734,7 @@ namespace
             /*  AND UNDER THE LOCK, A CUE'S EQ AND SENDS, ridden live in front
                 of the document that would refuse them (2026-09-25) - and its
                 plugins' parameters, held by the FX door (2026-09-26). */
-            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes),
+            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
                                 wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                     wfg::cue::fxWriteFor (document, &catalogues, &liveEdits))),
             wfg::cue::liveSendFor (liveEdits, document));
@@ -2811,6 +2836,7 @@ namespace
                            { wfg::osc::Value::string (id), wfg::osc::Value::string (problem) });
         };
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+        wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
@@ -3298,6 +3324,7 @@ namespace
             refers to has to outlive it. */
         const auto surfaceBridge = std::make_shared<wfg::surface::SurfaceBridge> (midiOut, surfaceTable);
         parameters.setSurfaces (&surfaceTable);
+        parameters.setLanes (&lanes);
 
         /*  WHAT THE SHOW DECLARES ABOUT ITS SURFACES, read off the document -
             at start and whenever the show changes - and what this machine has

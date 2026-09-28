@@ -18,6 +18,7 @@
 
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/document/Schema.h>
@@ -42,9 +43,16 @@ namespace wfg::cue
             std::string row;
         };
 
+        /*  THE LANE'S RIDE, one node for the one lane a fader records at a time
+            (DJ) - three parts, not an object's leaf, so it is named whole. */
+        constexpr std::string_view laneRide = "/godot/surface/laneRide";
+
         std::optional<LiveAddress> split (std::string_view address)
         {
             constexpr std::string_view godot = "/godot/";
+
+            if (address == laneRide)
+                return LiveAddress { "surfaces", {}, "laneRide" };
 
             if (address.substr (0, godot.size()) != godot)
                 return std::nullopt;
@@ -118,16 +126,36 @@ namespace wfg::cue
     }
 
     doc::LiveWrite liveWriteFor (RunTable& runs, DcaTable& dcas, const doc::ShowDocument& document,
-                                 TakeTable* takes)
+                                 TakeTable* takes, LaneTable* lanes)
     {
-        return [&runs, &dcas, &document, takes] (const std::string& address, const std::string& text,
-                                                 const std::vector<osc::Value>& args)
+        return [&runs, &dcas, &document, takes, lanes] (const std::string& address, const std::string& text,
+                                                        const std::vector<osc::Value>& args)
                    -> std::optional<Outcome>
         {
             const auto live = split (address);
 
             if (! live.has_value())
                 return std::nullopt;
+
+            /*  THE LANE'S RIDE (DJ): the hand's level for the pass running, which
+                the Runner reads once the ride has been touched in it. With no
+                pass it is a fader a hand is setting before anything is recorded
+                - applied, and ignored (DG). */
+            if (live->owner == "surfaces")
+            {
+                const auto decibels = parseNumber ("surfaces", "laneRide", text);
+
+                if (! decibels.has_value())
+                    return Outcome::rejected (reason::typeMismatch);
+
+                if (lanes != nullptr && lanes->recording)
+                {
+                    lanes->handDb = *decibels;
+                    lanes->handSeen = true;
+                }
+
+                return Outcome::ok (args);
+            }
 
             /*  A TAKE'S LOOP POINT (decision CQ): the channel's row parses it,
                 the account keeps it in the take and two crossfades apart, and

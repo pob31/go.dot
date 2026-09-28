@@ -80,7 +80,7 @@ namespace wfg::midi { class PortTable; }
 
 namespace wfg::surface { class SurfaceTable; }
 
-namespace wfg::cue { class DcaTable; class LiveEdits; class TakeTable; }
+namespace wfg::cue { class DcaTable; class LaneTable; class LiveEdits; class TakeTable; }
 
 namespace wfg::tree
 {
@@ -302,6 +302,11 @@ namespace wfg::tree
             take reads empty, which is the truth of a show nobody is playing. */
         void setTakes (const cue::TakeTable* takesToRead) noexcept { takes = takesToRead; }
 
+        /*  A lane being recorded from a fader (namespace draft §20.9), for
+            `/godot/surface/lane…` and the taken strip's target. Absent - a tree
+            dump - no lane is armed, which is the truth. */
+        void setLanes (const cue::LaneTable* lanesToRead) noexcept { lanes = lanesToRead; }
+
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
             four `none` rows under /godot/plugin/<id>. The surface table's
@@ -427,6 +432,7 @@ namespace wfg::tree
         const surface::SurfaceTable* surfaces = nullptr;
         const cue::DcaTable* dcas = nullptr;
         const cue::TakeTable* takes = nullptr;
+        const cue::LaneTable* lanes = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;

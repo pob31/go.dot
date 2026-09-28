@@ -57,6 +57,8 @@
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/Solver.h>
+#include <wfg/engine/cue/LaneRecording.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -435,6 +437,13 @@ namespace wfg::cue
             here, and the hook places the presses. None, and a sampling
             channel's takes are left alone. */
         void setTakes (TakeTable* table) noexcept { takes = table; }
+
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): the
+            table `lane.*` moves, which the hook `recordLane` reads each tick -
+            the ride's value, and during a pass the hand sampled against the
+            file's clock. Absent - a replay, a tree dump - nothing is recorded,
+            and the lane a pass ended in arrives from the log instead. */
+        void setLanes (LaneTable* table) noexcept { lanes = table; }
         void resetAudioPreparation() { armedStandby.clear(); }
 
         /*  The runs, for the one caller outside the Runner that has to ask
@@ -975,6 +984,13 @@ namespace wfg::cue
             gate - and read at the second the voice will be at one slew ahead. */
         void applyLanes();
 
+        /*  THE PASS (§20.9), just after `applyLanes` and before the sum: the
+            ride's value while nobody holds it, the hand's level as the voice's
+            lane term from the first touch (latch, DH), a sample of it per tick
+            where the voice is, and - when the pass ends - the lane it leaves,
+            written in one engine `node.set` (DK). */
+        void recordLane (Engine& engine);
+
         /*  A sounding cue's EQ, kept up with the document (Phase 9a): the
             routing pass's shape, gated on the same revision, pushing only
             the runs whose twenty-three rows differ from what the voice holds. */
@@ -1473,6 +1489,18 @@ namespace wfg::cue
 
         /** The show revision `applyLanes` last read the lanes at; the same twin. */
         std::uint64_t laneRevision = 0;
+
+        /*  THE PASS'S OWN BOOKS (§20.9): the table `lane.*` moves; the ride so
+            far, a segment per stretch between a loop's wraps; the lane of the
+            cue being ridden, re-read when the show's revision moves; and the
+            run whose pass has been written, so the tick between the write and
+            its `lane.stop` landing does not write it twice. */
+        LaneTable* lanes = nullptr;
+        std::vector<RideSegment> ride;
+        std::vector<doc::LanePoint> rideLane;
+        std::string rideLaneCue;
+        std::uint64_t rideLaneRevision = 0;
+        std::string rideWritten;
 
         /*  And the live layer's, beside each: a turn under the lock moves the
             layer and not the show. */

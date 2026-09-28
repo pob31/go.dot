@@ -43,6 +43,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <wfg/engine/cue/InsertChain.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/document/LevelLane.h>
 
 #include <algorithm>
@@ -6793,6 +6794,7 @@ namespace wfg::cue
         armStandby (engine);
         advanceFades (engine, tick);
         applyLanes();
+        recordLane (engine);
         applyLevels();
         applyRouting();
         applyEq();
@@ -7456,6 +7458,132 @@ namespace wfg::cue
             run->laneDb = run->lane.empty() ? 0.0
                                             : doc::laneLevelDb (run->lane, lanePositionAt (*run, at, rate));
         }
+    }
+
+    void Runner::recordLane (Engine& engine)
+    {
+        if (lanes == nullptr || ! lanes->taken())
+        {
+            ride.clear();
+            return;
+        }
+
+        const auto cue = document.findById (lanes->cue());
+        const std::string rideAddress = "/godot/surface/laneRide";
+
+        /*  THE LANE AS THE SHOW HAS IT, re-read when the show's revision moves
+            or the lane changes hands - the curve the fader follows, and the one
+            a pass is spliced into. */
+        if (rideLaneCue != lanes->cue() || rideLaneRevision != document.showRevision())
+        {
+            rideLaneCue = lanes->cue();
+            rideLaneRevision = document.showRevision();
+            rideLane = cue.isValid() ? doc::readLevelLane (textOf (cue, "levelLane")).points
+                                     : std::vector<doc::LanePoint> {};
+        }
+
+        /*  OUTSIDE A PASS, THE FADER SITS WHERE THE LANE STARTS (DG): at the
+            cue's start offset, or at the in-point of its first slice. */
+        if (! lanes->recording)
+        {
+            ride.clear();
+            rideWritten.clear();
+
+            if (cue.isValid())
+            {
+                const auto ranges = rangesOf (cue);
+                const auto start = ranges.empty() ? numberOf (cue, "startOffset") : ranges.front().in;
+
+                lanes->rideDb = doc::laneLevelDb (rideLane, start);
+            }
+
+            return;
+        }
+
+        //  Written already, and waiting for the `lane.stop` that says so.
+        if (lanes->run == rideWritten)
+            return;
+
+        auto* run = runs.find (lanes->run);
+
+        /*  HOW THE PASS ENDS (DM). A hand asking - Rec again, the window's stop
+            - keeps the ride and stops the cue; the cue ending on its own, a stop
+            cue or Esc keeps it and leaves the stop to what started it; a KILL -
+            double Esc, which drops every action (§4.4) - drops it. */
+        const auto handAsked = lanes->stopping;
+        const auto gone = run == nullptr || run->isFinished();
+        const auto killed = run != nullptr && run->skipFooter;
+        const auto stopped = run != nullptr && run->state == runState::stopping;
+
+        if (handAsked || gone || stopped)
+        {
+            rideWritten = lanes->run;
+
+            if (killed || ! cue.isValid())
+            {
+                ride.clear();
+                engine.submit (origin::engine, "lane.stop", one ("dropped"));
+                return;
+            }
+
+            if (lanes->touched && ! ride.empty())
+            {
+                const auto text = laneText (spliceRide (rideLane, ride, 0.05, 0.1));
+
+                /*  JUDGED BEFORE IT IS SENT: a lane the door would refuse is a
+                    ride lost with nothing to show for it, and the refusal is
+                    worth a record of its own rather than a surprise. */
+                if (doc::readLevelLane (text).problem.empty())
+                    engine.submit (origin::engine, "node.set",
+                                   { osc::Value::string ("/godot/cue/" + lanes->cue() + "/levelLane"),
+                                     osc::Value::string (text) });
+            }
+
+            ride.clear();
+
+            if (handAsked && run != nullptr && ! gone && ! stopped)
+                engine.submit (origin::engine, "run.kill", one (run->id));
+
+            engine.submit (origin::engine, "lane.stop", one ("kept"));
+            return;
+        }
+
+        /*  UNTIL A HAND TOUCHES THE RIDE, THE FADER READS THE LANE: the run's
+            own lane term, where the file is. From the first touch the pass is
+            LATCHED (DH) - the hand's level is the voice's lane term, heard at
+            once, and it stays the hand's after the hand lets go. A touch with
+            no move yet has written nothing, so the latch starts from where the
+            fader was. */
+        const auto held = touches != nullptr && ! touches->holdersOf (rideAddress).empty();
+
+        if (held && ! lanes->touched)
+        {
+            lanes->touched = true;
+
+            if (! lanes->handSeen)
+                lanes->handDb = lanes->rideDb;
+        }
+
+        if (! lanes->touched)
+        {
+            lanes->rideDb = run->laneDb;
+            return;
+        }
+
+        run->laneDb = lanes->handDb;
+        lanes->rideDb = lanes->handDb;
+
+        /*  AND A SAMPLE WHERE THE VOICE IS NOW - not one slew ahead, as the lane
+            is read: a hand answers what it hears. Only once the voice sounds;
+            before its launch the second does not move. */
+        if (audio == nullptr || run->state != runState::playing || run->launchedAtSample <= 0)
+            return;
+
+        const auto rate = static_cast<double> (audio->sampleRate());
+        const auto now = audio->samplesElapsed();
+
+        if (rate > 0.0 && now >= run->launchedAtSample)
+            appendRide (ride, lanePositionAt (*run, now, rate), lanes->handDb);
     }
 
     void Runner::applyLevels()

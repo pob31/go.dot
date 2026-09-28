@@ -17,6 +17,7 @@
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <wfg/engine/cue/TakeTable.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/ShowWalk.h>
@@ -1597,6 +1598,23 @@ namespace wfg::tree
                           && document.resolve (surfaces->dial().address).isValid())
                         text = surfaces->dial().address;
 
+                    /*  THE LANE A FADER RECORDS (namespace draft §20.9), from the
+                        table the `lane.*` commands move - every one of them a
+                        command, so this half is rebuilt when they apply. The
+                        RIDE is the runtime half's: it moves every tick. */
+                    if (name == "laneRide")
+                        continue;
+
+                    if (name == "lane" && lanes != nullptr && ! lanes->cue().empty()
+                          && document.findById (lanes->cue()).isValid())
+                        text = lanes->cue();
+
+                    if (name == "laneFader" && lanes != nullptr)
+                        text = lanes->strip();
+
+                    if (name == "laneRecording")
+                        text = lanes != nullptr && lanes->recording ? "true" : "false";
+
                     nodes.push_back (makeLeaf (std::string (godot) + "/surface/" + name,
                                                *row, text));
                 }
@@ -3105,13 +3123,32 @@ namespace wfg::tree
             trim; a sampler strip rides the trim of the run holding it, which
             changes at every handover - that is how one fader plays a different
             sound after a bank change. */
+        /*  THE LANE'S RIDE (DJ): what the taken fader rides - the lane where the
+            file is, or where it starts, until a hand touches it in a pass, and
+            the hand's level from then on. Nothing while no fader is taken. */
+        if (lanes != nullptr && lanes->taken())
+            for (const auto* row : doc::Schema::rowsForOwner ("surfaces"))
+                if (row->name == "laneRide")
+                    runtime.push_back (makeLeaf (std::string (godot) + "/surface/laneRide", *row,
+                                                 osc::formatDouble (std::round (lanes->rideDb * 100.0) / 100.0)));
+
         for (const auto& strip : declaredStrips)
         {
             std::string target;
             std::string word;
             std::string cueText;
 
-            if (strip.role == "dca")
+            /*  A STRIP TAKEN FOR A LANE rides the lane's node and nothing else
+                while it is taken (DN) - before its DCA and before any clip the
+                sampler put under it, whose claim is untouched and comes back to
+                it when the lane lets the fader go. */
+            if (lanes != nullptr && lanes->taken() && lanes->strip() == strip.id)
+            {
+                target = std::string (godot) + "/surface/laneRide";
+                word = lanes->recording ? "recording" : "lane";
+                cueText = lanes->cue();
+            }
+            else if (strip.role == "dca")
             {
                 word = strip.dca.empty() ? "unassigned" : "dca";
 
