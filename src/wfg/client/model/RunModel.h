@@ -180,6 +180,12 @@ namespace wfg::client::model
             channel's plugins decay. Empty for every other run. */
         std::string liveWords;
 
+        /*  THE SPEED IT PLAYS AT NOW (namespace draft §22.7), the run's own
+            readout - what a fade is moving, as the voice hears it - written
+            beside its name as "×0.5" whenever it is not one. One for every run
+            that has no speed. */
+        double rate = 1.0;
+
         /** Whether it is counting down: a pre-wait or a post-wait, which read alike. */
         bool isWaiting() const noexcept;
 

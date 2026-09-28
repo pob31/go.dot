@@ -178,6 +178,49 @@ TEST_CASE ("foot panel: it opens on one subject, draws a file, and a drag writes
 }
 
 
+TEST_CASE ("waveform: the head row carries the cue's speed and mode beside the clock")
+{
+    /*  Namespace draft §22.7. The clock counts the file's seconds, so the row
+        says when they are not the room's. With WFG_SNAPSHOT_DIR set,
+        waveform-speed.png as well. */
+    ui::WaveformEditorComponent editor (model::Theme {}, {});
+    editor.setSize (900, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 10.0;
+    reading.rate = 0.5;
+    reading.rateMode = "timestretch";
+    reading.running = true;
+    reading.position = 4.0;
+
+    editor.show (reading, nullptr);
+
+    juce::Image canvas (juce::Image::ARGB, 900, 220, true);
+    {
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, false);
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto snapshot = editor.createComponentSnapshot (editor.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("waveform-speed.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (snapshot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
 TEST_CASE ("waveform: a level lane is drawn over the file, and one gesture is one write")
 {
     /*  Namespace draft §20.5. The arithmetic of every gesture is `model/Lane`'s
@@ -2279,6 +2322,53 @@ TEST_CASE ("take panel: its five presses are the take verbs, offered only where 
     {
         juce::Graphics g (canvas);
         panel.paintEntireComponent (g, false);
+    }
+}
+
+TEST_CASE ("run pane: a run at a speed other than one says so beside its name, after whatever else it says")
+{
+    /*  Namespace draft §22.7: "×0.5" beside a media run, and after a
+        sampler member's strip. Painted, so a layout that lost it would at least
+        be drawn; with WFG_SNAPSHOT_DIR set, run-pane-speed.png as well. */
+    const auto media = [] (const char* runId, const char* name, double rate, const char* words)
+    {
+        model::RunRow row;
+        row.id = runId;
+        row.cueId = std::string ("CUE") + runId;
+        row.cueName = name;
+        row.kind = "media";
+        row.state = "playing";
+        row.position = "12.5";
+        row.rate = rate;
+        row.samplerWords = words;
+        return row;
+    };
+
+    const std::vector<model::RunRow> rows { media ("RUN00001", "Slowed", 0.5, ""),
+                                            media ("RUN00002", "At one", 1.0, ""),
+                                            media ("RUN00003", "Pad", 2.0, "on 3") };
+
+    ui::RunPaneComponent pane (model::Theme {}, {});
+    pane.setSize (450, 200);
+    pane.show (rows, {});
+
+    juce::Image canvas (juce::Image::ARGB, 450, 200, true);
+    juce::Graphics g (canvas);
+    pane.paintEntireComponent (g, false);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto picture = pane.createComponentSnapshot (pane.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("run-pane-speed.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
 }
 

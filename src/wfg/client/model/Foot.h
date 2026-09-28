@@ -90,6 +90,12 @@ namespace wfg::client::model
         double fileLength = 0.0; ///< the cue's `duration`, or nought when unknown
         double startOffset = 0.0;
 
+        /*  THE SPEED THE CUE PLAYS AT AND ITS MODE (namespace draft §22.7), as
+            the document says them: the head row carries both, since the clock
+            beside them counts the file's seconds and not the room's. */
+        double rate = 1.0;
+        std::string rateMode;
+
         std::vector<RangeRow> ranges;
 
         /*  THE CUE'S LEVEL LANE, drawn over the waveform (namespace draft

@@ -12677,13 +12677,20 @@ the one cue moves both: two jobs under one report, so the fade is done when both
 ### 22.7 The window and the dial
 
 - **The inspector** shows **Speed** and **Speed mode** after the start offset: a number and a
-  two-word choice, from the generic rows. A fade shows its Level switch before its level, and its
-  Speed switch before its speed, each greyed while its switch is off.
-- **The running pane** writes the speed beside a run that plays at anything but one - `×0.5` - and
-  the waveform's head row carries the speed and the mode.
+  two-word choice, from the generic rows. A fade shows its Level switch ("moves level") before its
+  level, and its Speed switch ("moves speed") before its speed, each greyed while its switch is off;
+  the curve, which shapes both, comes after both and greys only when neither is on.
+- **The running pane** writes the speed beside a run that plays at anything but one - `×0.5`,
+  after a sampler member's strip when it has one - read from the run's own readout, so a fade is
+  seen moving it. The page's running list says it the same way. The waveform's head row carries
+  the cue's speed and mode beside the clock whenever either is not the plain one: `×0.5 varispeed`,
+  `×1 timestretch`.
 - **The master dial** moves the speed a semitone a detent, along the equal-tempered grid, so
   varispeed's steps are musical and twelve detents are an octave. Below 2^(-52/12), about 0.05, the
-  next detent is nought; the firmware's double click is one (EF).
+  next detent is nought, and a detent up from nought is that lowest step. A speed typed off the
+  grid joins it at the first detent, on the side the turn goes. What the dial writes is kept to
+  four significant figures - within a hundredth of a semitone of the grid, and readable in a box.
+  The firmware's double click puts the row back to its rest, which is one (EF).
 
 ### 22.8 What it has to measure
 

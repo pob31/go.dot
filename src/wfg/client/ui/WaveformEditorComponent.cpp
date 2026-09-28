@@ -3,6 +3,7 @@
 #include <wfg/client/ui/WaveformEditorComponent.h>
 
 #include <wfg/client/model/Fader.h>
+#include <wfg/client/model/Text.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
@@ -23,6 +24,23 @@ namespace wfg::client::ui
             pixels. Generous, because an in-point is one pixel wide and a hand
             on a trackpad is not. */
         constexpr int grabRadius = 7;
+
+        /*  What the head row says of a media cue's speed: nothing when it plays
+            at one in varispeed, its speed and its mode otherwise. */
+        juce::String speedWords (const model::FootReading& reading)
+        {
+            if (reading.cueKind != "media")
+                return {};
+
+            const auto speed = model::speedText (reading.rate);
+            const auto stretched = reading.rateMode == "timestretch";
+
+            if (speed.empty() && ! stretched)
+                return {};
+
+            return juce::String (juce::CharPointer_UTF8 ((speed.empty() ? std::string ("\xc3\x97" "1") : speed).c_str()))
+                     + (stretched ? " timestretch" : " varispeed");
+        }
 
         /** A time, as a ruler writes it: 1.5 s, or 1:04.2 once there are minutes. */
         juce::String clockText (double seconds)
@@ -953,6 +971,17 @@ namespace wfg::client::ui
 
         g.setColour (Look::colour (theme, "ink-off"));
         g.setFont (Look::font (theme, 11.0f));
+
+        /*  THE SPEED AND ITS MODE (namespace draft §22.7), beside the clock -
+            which counts the file's seconds, not the room's - whenever either
+            is not the plain one: "×0.5 varispeed", "×1 timestretch". */
+        if (const auto speed = speedWords (reading); speed.isNotEmpty())
+        {
+            g.setColour (Look::colour (theme, "ink-dim"));
+            g.drawText (speed, area.removeFromLeft (juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), speed) + 12),
+                        juce::Justification::centredLeft, false);
+            g.setColour (Look::colour (theme, "ink-off"));
+        }
 
         /*  THE PICKED POINT'S NUMBERS take the right of the row, captioned
             in words so two bare numbers are never left to explain themselves,

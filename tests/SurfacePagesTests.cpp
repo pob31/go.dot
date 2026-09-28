@@ -387,6 +387,32 @@ TEST_CASE ("surface pages: the master dial turns a number by what its own row sa
         CHECK (near (turned ("cue", "preWait", 30.0, 5), 35.0));
     }
 
+    SUBCASE ("a speed, a semitone a detent, with nought below the grid")
+    {
+        //  Twelve detents are an octave, either way.
+        CHECK (near (turned ("media", "rate", 1.0, 12), 2.0));
+        CHECK (near (turned ("media", "rate", 1.0, -12), 0.5));
+        CHECK (near (turned ("fade", "rate", 1.0, 1), 1.059));
+
+        //  Kept to four figures, and a turn back from one still lands where it began.
+        CHECK (near (turned ("media", "rate", turned ("media", "rate", 1.0, 1), -1), 1.0));
+
+        //  Below 2^(-52/12) is nought, and up from nought is that lowest step.
+        CHECK (near (turned ("media", "rate", 1.0, -52), 0.04961));
+        CHECK (near (turned ("media", "rate", 0.04961, -1), 0.0));
+        CHECK (near (turned ("media", "rate", 0.0, 1), 0.04961));
+        CHECK (near (turned ("media", "rate", 0.0, -1), 0.0));
+
+        //  Typed off the grid, the first detent joins it on the side the turn goes.
+        CHECK (near (turned ("media", "rate", 0.7, 1), 0.7071));
+        CHECK (near (turned ("media", "rate", 0.7, -1), 0.6674));
+
+        //  Held at twenty, and a step down from there is back on the grid.
+        CHECK (near (turned ("media", "rate", 19.03, 1), 20.0));
+        CHECK (near (turned ("media", "rate", 20.0, 1), 20.0));
+        CHECK (near (turned ("media", "rate", 20.0, -1), 19.03));
+    }
+
     SUBCASE ("a whole number, one a detent, held at its ends")
     {
         CHECK (near (turned ("group", "loops", 3.0, 2), 5.0));

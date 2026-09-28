@@ -2669,6 +2669,49 @@ TEST_CASE ("client: the foot panel says which subject it is on, and follows a pi
 }
 
 
+TEST_CASE ("client: a speed is said where it is not one - beside a run, and in the waveform's head row")
+{
+    /*  Namespace draft §22.7. To the thousandth, in no locale's spelling, and
+        nothing at all at one. */
+    CHECK (model::speedText (1.0).empty());
+    CHECK (model::speedText (0.9996).empty());
+    CHECK (model::speedText (0.5) == "×0.5");
+    CHECK (model::speedText (2.0) == "×2");
+    CHECK (model::speedText (0.0) == "×0");
+    CHECK (model::speedText (1.0594630943592953) == "×1.059");
+
+    Rig rig ("phase4");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED001/rate", "0.5").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED001/rateMode", "timestretch").ok);
+
+    //  The run's readout is what a fade is moving, so the row reads the run.
+    rig.runs.create ("SPEEDRUN", "P4MED001", "media");
+    auto* run = rig.runs.find ("SPEEDRUN");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::playing;
+    run->rateNow = 0.75;
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+
+    auto found = false;
+
+    for (const auto& row : model::readRuns (*snapshot))
+        if (row.id == "SPEEDRUN")
+        {
+            found = true;
+            CHECK (row.rate == doctest::Approx (0.75));
+            CHECK (model::speedText (row.rate) == "×0.75");
+        }
+
+    CHECK (found);
+
+    //  The head row reads the cue: what the document decided, speed and mode.
+    const auto reading = model::readFoot (*snapshot, { model::Subject::Kind::waveform, "P4MED001" });
+    CHECK (reading.rate == doctest::Approx (0.5));
+    CHECK (reading.rateMode == "timestretch");
+}
+
 TEST_CASE ("client: a time reads and writes back as the same instant, in either locale")
 {
     /*  The table types where the bar drags: a loop point is FOUND with a hand
