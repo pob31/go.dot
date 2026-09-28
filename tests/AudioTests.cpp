@@ -5763,7 +5763,7 @@ TEST_CASE ("audio host: at twice the speed, varispeed doubles the pitch and time
 {
     for (const auto stretch : { false, true })
     {
-        INFO ("mode " << (stretch ? "timestretch" : "varispeed"));
+        INFO ("mode " << std::string (stretch ? "timestretch" : "varispeed"));
 
         SpeedRig speed;
         const auto tone = writeSineTone (speed.rig.storage.folder, speed.rate, 1000.0, 0.25f, 4);
@@ -5938,14 +5938,25 @@ namespace
                 oneTick();
         }
 
-        /** GO, and the ticks until the voice sounds. */
+        /*  GO, and the ticks until the voice sounds - each tick that finds it
+            silent waiting a real tick as well. Between the GO and the first
+            sample are an arm, a graph rebuild and a disk read on Tracktion's
+            own thread, and those are wall clock: four hundred bare ticks ran
+            in a fraction of a second, and a loaded macOS runner was still
+            reading when they ran out (CI run 36494964799) - the lesson this
+            file's older cases already carry. A fast machine never waits. */
         bool go()
         {
             if (! engine.submit ("cli", "go", {}))
                 return false;
 
-            for (int i = 0; i < 400 && ! rig.host.trackPlayState (0).playing; ++i)
+            for (int i = 0; i < 600 && ! rig.host.trackPlayState (0).playing; ++i)
+            {
                 oneTick();
+
+                if (! rig.host.trackPlayState (0).playing)
+                    std::this_thread::sleep_for (std::chrono::milliseconds (20));
+            }
 
             return rig.host.trackPlayState (0).playing;
         }
@@ -6001,7 +6012,7 @@ TEST_CASE ("audio host: a cue's speed from the show to the speaker - the documen
         the rate to one while it sounds is heard a moment later. */
     for (const auto stretch : { false, true })
     {
-        INFO ("mode " << (stretch ? "timestretch" : "varispeed"));
+        INFO ("mode " << std::string (stretch ? "timestretch" : "varispeed"));
 
         SpeedShow show;
         REQUIRE (show.open (1000.0, 8, "2", stretch ? "timestretch" : "varispeed"));
@@ -6053,7 +6064,7 @@ TEST_CASE ("audio host: a fade cue takes a cue's speed to nought and back - a ta
         Both come back to the tone they were, and the level is never touched. */
     for (const auto stretch : { false, true })
     {
-        INFO ("mode " << (stretch ? "timestretch" : "varispeed"));
+        INFO ("mode " << std::string (stretch ? "timestretch" : "varispeed"));
 
         SpeedShow show;
         REQUIRE (show.open (500.0, 8, "1", stretch ? "timestretch" : "varispeed"));

@@ -9009,7 +9009,7 @@ TEST_CASE ("speed: a stretched cue is held to the stretcher's limit, a resampled
 {
     for (const auto stretch : { true, false })
     {
-        INFO ("mode " << (stretch ? "timestretch" : "varispeed"));
+        INFO ("mode " << std::string (stretch ? "timestretch" : "varispeed"));
 
         LaneRig rig;
         rig.audio.speedLimit = 18.75;
@@ -9408,7 +9408,7 @@ TEST_CASE ("speed fade: a stop at the end waits a horizon and a tick, until the 
 
         for (const auto& job : rig.runner.fades())
         {
-            INFO ((job.movesRate ? "the speed's job" : "the level's job"));
+            INFO (std::string (job.movesRate ? "the speed's job" : "the level's job"));
             CHECK (job.stopWhenDone == ! job.movesRate);
 
             if (! job.movesRate)
