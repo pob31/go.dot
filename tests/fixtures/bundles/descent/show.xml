@@ -1,5 +1,5 @@
 <Show>
-  <Lists>
+  <Lists goDebounce="0">
     <List id="ACT10001" name="Act One">
       <Cue id="AAAA1111" name="House to half" number="1"/>
       <Group id="BBBB2222" name="Scene" number="2">

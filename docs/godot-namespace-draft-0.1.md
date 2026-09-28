@@ -12102,7 +12102,7 @@ Phase 10.
 
 | Node | Type, default | Access | Persist | Meaning |
 |---|---|---|---|---|
-| `/godot/list/goDebounce` | `d`, 0 s (0..10) | rw | show | the least time between two GOs; nought is off |
+| `/godot/list/goDebounce` | `d`, 0.5 s (0..10) | rw | show | the least time between two GOs; nought is off |
 | `/godot/audio/panicFade` | `d`, 1 s (0..30) | rw | show | how long Esc fades what is sounding before it stops it; nought is a cut |
 
 Both are the show's: saved with it, set by `node.set`, undone by Ctrl-Z, refused under the lock. The
@@ -12128,6 +12128,14 @@ GOs the night did.
 
 The desktop's transport line says it in words: *"GO ignored: too soon after the last one (Show
 settings > Playback)"* instead of `go refused: too-soon`.
+
+**Half a second unless the show says otherwise** (the author, the same day: *"I would set the
+default Go debounce to 0.5s"*). What that reached: every test rig and fixture that presses GO as a
+script does - faster than any hand - and so fired GOs the new default refuses. The rigs of
+`GoTests`, `SamplerTests` and `MicTests` and six fixture shows (`waits`, `descent`, `dca`, `phase4`
+for their replays; `phase2`, `surfaces` for their drivers) now say `goDebounce="0"`, which is true
+of how they were written: a log recorded before the window existed had none. A show of the
+author's saved before today says nothing, and so has the half second.
 
 ### 21.3 The panic fade
 
@@ -12193,7 +12201,7 @@ implementer and is the author's to overrule:
 |---|---|---|
 | **DK** | **Both are show settings**, on `Lists` and `Audio`, not user preferences as PRD §3.7 words the debounce | the author's (*"in the show settings"*); the placement is the implementer's |
 | **DL** | **A GO inside the window is refused `too-soon`** and said on the transport line; the standby stays; measured from the last GO that fired; every GO counts, `cue.fire` and triggers never | implementer's call |
-| **DM** | **The defaults: a panic fade of one second, a GO window of nought (off).** A show that says nothing now fades on Esc | implementer's call |
+| **DM** | **The defaults: a panic fade of one second, a GO window of half a second.** A show that says nothing now fades on Esc and refuses a second GO inside half a second | the fade's the implementer's call; the GO window's the author's (2026-09-28: *"I would set the default Go debounce to 0.5s"*), which replaced an implementer's nought the same day |
 | **DN** | **Esc fades only what is sounding; the stop that lands first wins**; a mic cue is faded at its input | implementer's call |
 | **DO** | **A double Esc drops every stop still to come**, the panic's and a stop cue's alike | §4.4, *"drops all actions"* |
 | **DP** | **A GO during the fade enters a stopping group afresh** rather than joining it | implementer's call |
@@ -12209,8 +12217,9 @@ something the show holds; neither was edited.
 
 `GoTests`: the fade and its stop, nought as a cut, the one-second default, a double Esc mid-fade, the
 three holes of §21.4 and the group case beside them, the stop that lands first (both ways round), a
-group's footer after its member has faded, a GO into a manual group while it fades, and the GO window (refused, standby kept, the
-next GO after the window, and off by default with two GOs on one tick). `ClientTests`: the
+group's footer after its member has faded, a GO into a manual group while it fades, and the GO
+window (refused, standby kept, the next GO after the window, half a second in a show that says
+nothing, and two GOs on one tick at nought). `ClientTests`: the
 transport line's words. `ShowSettingsUiTests`: the Playback tab - both boxes, a comma typed, the
 value it already has sending nothing, the lock. `RangeTests`' Esc case now allows the fade before it
 checks the run has ended. **Owed to the bench:** Esc on the MADIface with a bed, a mic cue with a

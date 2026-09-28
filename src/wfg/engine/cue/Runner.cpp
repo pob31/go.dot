@@ -4465,8 +4465,10 @@ namespace wfg::cue
         if (lastGoTick < 0)
             return false;
 
+        /*  The schema's half second when the show cannot say, as the panic
+            fade falls back to its own default rather than to nothing. */
         const auto seconds = osc::parseDouble (document.getAttribute ("/godot/list/goDebounce")
-                                                 .value_or ("0")).value_or (0.0);
+                                                 .value_or ("0.5")).value_or (0.5);
         const auto window = static_cast<std::int64_t> (std::llround (std::max (0.0, seconds)
                                                                       * TickClock::rateHz));
 
@@ -8517,8 +8519,9 @@ namespace wfg::cue
                                 rather than applied-and-ignored, so the error
                                 line says a GO was eaten and the log says whose;
                                 the pointer does not move, so the next press
-                                fires what this one would have. Nought, the
-                                default, is off. */
+                                fires what this one would have. Half a second
+                                unless the show says otherwise (the author's
+                                default, 2026-09-28); nought is off. */
                             if (runner.goTooSoon (context.tick))
                                 return Outcome::rejected (reason::tooSoon);
 

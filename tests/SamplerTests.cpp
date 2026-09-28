@@ -156,6 +156,10 @@ namespace
             bankA = group ("Bank A", 0, 4);
             bankB = group ("Bank B", 1, 2);
             after = document.createCue (listId, 2, "memo", "After").id;
+
+            /*  A script presses GO here, as fast as the ticks come; a show that
+                says nothing refuses a GO inside half a second (2026-09-28). */
+            set ("/godot/list/goDebounce", "0");
         }
 
         std::string group (const std::string& name, int index, int members)

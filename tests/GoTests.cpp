@@ -253,6 +253,13 @@ namespace
             memoId = document.createCue (listId, 1, "memo", "House to half").id;
 
             document.setAttribute ("/godot/cue/" + mediaId + "/file", "thunder.wav");
+
+            /*  A SCRIPT PRESSES GO, NOT A HAND: these cases press it as fast as
+                the ticks come, to see what the scheduler does with each press,
+                and a show that says nothing now refuses a GO inside half a
+                second of the last one (2026-09-28). The cases about that window
+                set it back themselves. */
+            document.setAttribute ("/godot/list/goDebounce", "0");
         }
 
         /** One tick, with the Runner observing first as the tick thread does. */
@@ -3926,11 +3933,13 @@ TEST_CASE ("go: inside the least time between two GOs a GO is refused, and the s
     CHECK (rig.standby() == third);
 }
 
-TEST_CASE ("go: with no least time, two GOs on one tick both fire")
+TEST_CASE ("go: a show that says nothing waits half a second between GOs, and nought lets two on one tick both fire")
 {
-    Rig rig;
-    CHECK (rig.document.getAttribute ("/godot/list/goDebounce") == std::optional<std::string> ("0"));
+    //  The author's default (2026-09-28): a show that says nothing is protected.
+    const doc::ShowDocument fresh;
+    CHECK (fresh.getAttribute ("/godot/list/goDebounce") == std::optional<std::string> ("0.5"));
 
+    Rig rig;                               // which says nought, as a script would
     rig.setStandby (rig.mediaId);
     REQUIRE (rig.engine.submit ("cli", "go", {}));
     REQUIRE (rig.engine.submit ("cli", "go", {}));

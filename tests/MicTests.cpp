@@ -429,6 +429,10 @@ namespace
             engine.log().openInMemory ({});
             REQUIRE (doc::Bundle::open (micBundle(), document).ok);
 
+            /*  A script presses GO here, as fast as the ticks come; a show that
+                says nothing refuses a GO inside half a second (2026-09-28). */
+            REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
             doc::registerDocumentCommands (engine.commands(), document, {},
                                            cue::liveWriteFor (runs, dcas, document));
             cue::registerCueCommands (engine.commands(), document, focus);

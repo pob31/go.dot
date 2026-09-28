@@ -1,5 +1,5 @@
 <Show>
-  <Lists>
+  <Lists goDebounce="0">
     <List id="SRF00001" name="Surfaces">
       <Group id="SRF00002" mode="sampler" name="Pads" number="1">
         <Media id="SRF00003" file="knock.wav" name="Knock" number="1.1"/>

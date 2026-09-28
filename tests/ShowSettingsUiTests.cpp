@@ -550,8 +550,8 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     auto* between = boxes[0];
     auto* fade = boxes[1];
 
-    //  What a show that says nothing has: off, and one second.
-    CHECK (between->getText().getDoubleValue() == doctest::Approx (0.0));
+    //  What a show that says nothing has: half a second, and one.
+    CHECK (between->getText().getDoubleValue() == doctest::Approx (0.5));
     CHECK (fade->getText().getDoubleValue() == doctest::Approx (1.0));
 
     //  A comma is a decimal point, as a French booth types it.
