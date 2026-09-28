@@ -1,5 +1,5 @@
 <Show>
-  <Lists>
+  <Lists goDebounce="0">
     <List id="TK000001" name="Loops">
       <Mic id="TK000002" channel="TK000011" input="TK000021" name="Loop voice" number="1">
         <Route id="TK000003" bus="TK000004" gains="1 0 0 1"/>
