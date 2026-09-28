@@ -4702,6 +4702,52 @@ TEST_CASE ("client: every range in the show is gathered in one pass, owned by it
     CHECK (model::readRanges (*snapshot, "NOSUCHID").empty());
 }
 
+TEST_CASE ("client: a media cue's time is its file's at its own speed - in the list's column and on a timeline")
+{
+    /*  Namespace draft §22.5, decision EE: `duration` stays the file's own
+        length, and what counts time as heard divides it by the cue's speed -
+        for ever at nought, which no bar can end. */
+    Rig rig ("phase4");
+    const std::map<std::string, double> lengths { { "segments.wav", 30.0 }, { "ramp.wav", 4.0 } };
+    rig.parameters.setMediaDurations (&lengths);
+
+    const auto columnAt = [&rig] (std::int64_t tick)
+    {
+        rig.parameters.markStale();
+        model::ShowModel show;
+        REQUIRE (show.refresh (*rig.publish (tick), "P4ACT001"));
+
+        const auto at = show.indexOf ("P4MED003");
+        REQUIRE (at >= 0);
+        return show.rows()[static_cast<std::size_t> (at)].duration;
+    };
+
+    const auto besideAt = [&rig] (std::int64_t tick)
+    {
+        rig.parameters.markStale();
+        const auto reading = model::readTimeline (*rig.publish (tick), "P4GRP002");
+        REQUIRE (reading.bars.size() == 2u);
+        return reading.bars[1];
+    };
+
+    CHECK (columnAt (1) == "30.0");
+    CHECK (besideAt (1).lengthKnown);
+    CHECK (besideAt (1).length == doctest::Approx (30.0));
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED003/rate", "2").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED002/rate", "2").ok);
+    CHECK (columnAt (2) == "15.0");
+    CHECK (besideAt (2).length == doctest::Approx (15.0));
+
+    //  The file's own length is the file's, whatever the speed.
+    CHECK (model::text (*rig.publish (2), "/godot/cue/P4MED003/duration") == "30");
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED003/rate", "0").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED002/rate", "0").ok);
+    CHECK (columnAt (3) == "\xe2\x88\x9e");
+    CHECK_FALSE (besideAt (3).lengthKnown);
+}
+
 TEST_CASE ("client: a playhead needs a length, and a countdown empties")
 {
     CHECK (model::playhead (0.0, 10.0) == 0.0);

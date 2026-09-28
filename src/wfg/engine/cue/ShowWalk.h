@@ -516,6 +516,20 @@ namespace wfg::cue
             return std::nullopt;
         }
 
+        /*  SECONDS OF THE FILE AS SECONDS ON THE CLOCK, at the cue's own speed
+            (namespace draft §22.5, decision EE): the walk places members and
+            sizes groups in time as it is heard. Nought is for ever, which has
+            no number - as an ambience bed has none. */
+        std::optional<double> onTheClock (const juce::ValueTree& node, double fileSeconds) const
+        {
+            const auto speed = reader.number (node, "media", "rate");
+
+            if (! (speed > 0.0))
+                return std::nullopt;
+
+            return fileSeconds / speed;
+        }
+
         std::optional<double> mediaLength (const juce::ValueTree& node) const
         {
             double total = 0.0;
@@ -545,7 +559,7 @@ namespace wfg::cue
             }
 
             if (anyRange)
-                return total;
+                return onTheClock (node, total);
 
             if (durations == nullptr)
                 return std::nullopt;
@@ -560,7 +574,7 @@ namespace wfg::cue
                 return std::nullopt;
 
             const auto span = found->second - reader.number (node, "media", "startOffset");
-            return span > 0.0 ? std::optional<double> (span) : std::nullopt;
+            return span > 0.0 ? onTheClock (node, span) : std::nullopt;
         }
 
         std::optional<double> groupLength (const juce::ValueTree& node) const
@@ -656,7 +670,9 @@ namespace wfg::cue
                          && reader.integer (child, "range", "loops") <= 0)
                         return false;
 
-                return true;
+                /*  AND A CUE AT NOUGHT (namespace draft §22.5): its file never
+                    reaches its end, a stopped tape or a held instant. */
+                return reader.number (node, "media", "rate") > 0.0;
             }
 
             if (element != "Group")

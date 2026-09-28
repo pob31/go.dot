@@ -96,6 +96,18 @@ test("a duration nobody may write is a reading, and one no cue carries is nothin
   assert.equal(timeCell("A", "postWait"), '<div class="when"></div>');
 });
 
+test("a media cue's length is read at its own speed, and at nought it is for ever", () => {
+  /*  Namespace draft §22.5: `duration` stays the file's, and the column says
+      how long the cue sounds. */
+  serve([node("/godot/cue/A/duration", 30, 1), node("/godot/cue/A/rate", 2),
+         node("/godot/cue/B/duration", 30, 1), node("/godot/cue/B/rate", 0),
+         node("/godot/cue/C/duration", 30, 1), node("/godot/cue/C/rate", 1)]);
+
+  assert.match(timeCell("A", "duration"), />15.0</);
+  assert.match(timeCell("B", "duration"), />∞</);
+  assert.match(timeCell("C", "duration"), />30.0</);
+});
+
 test("a run says playing and armed as marks, and every other state as its word", () => {
   const playing = stateMark("playing");
   const armed = stateMark("armed");

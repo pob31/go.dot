@@ -12642,10 +12642,16 @@ integer arithmetic on that branch, so every render at one is bit-identical to th
 - **A seek** keeps the run's speed and mode (DV), and so does a sampler clip's restart.
 - **The mode is read at the arm** and written into the clip there; a change reaches the next GO.
 - **What counts a length as time on the clock** divides the file's length by the cue's own speed:
-  the cue list's time column, the walk that places timeline members and sizes a group, slot
-  analysis, and load-to-time's seat (EE). At nought the length is for ever. A speed fade is not
-  solved: load-to-time puts a cue whose speed was faded where its own speed would have taken it, a
-  named limitation.
+  the cue list's time column (and the page's), the walk that places timeline members and sizes a
+  group, the timeline panel's bars, slot analysis, and load-to-time's seat (EE). At nought the length
+  is for ever: the column says `∞`, a bar has no end, and the walk counts the cue among those that
+  never end on their own, as it counts a bed that loops for ever. A speed fade is not solved:
+  load-to-time puts a cue whose speed was faded where its own speed would have taken it, a named
+  limitation.
+- **Load-to-time seats a cue where its FILE has got to**: the seconds since it began, times its speed,
+  walked through its ranges or counted from where it starts in its file. Building this found that a
+  cue with no ranges was handed the seconds since it began as a place in the file, so a jump into a
+  cue that starts two seconds into its file landed two seconds early; S.6 mended it.
 - **The speed itself.** `run/<id>/rate` publishes what the voice plays at now.
 
 ### 22.6 Fades on the speed

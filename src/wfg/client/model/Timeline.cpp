@@ -145,6 +145,21 @@ namespace wfg::client::model
             if (kind == "media" || kind == "fade" || kind == "transport")
             {
                 length = secondsAt (snapshot, "/godot/cue/" + id + "/duration");
+
+                /*  A MEDIA CUE'S AT ITS OWN SPEED (namespace draft §22.5): its
+                    `duration` is the file's, and a bar is time as it is heard.
+                    At nought it sounds for ever, which no bar can end. */
+                if (kind == "media")
+                {
+                    const auto speed = osc::parseDouble (text (snapshot, "/godot/cue/" + id + "/rate"))
+                                         .value_or (1.0);
+
+                    if (! (speed > 0.0))
+                        return false;
+
+                    length /= speed;
+                }
+
                 return length > 0.0;
             }
 

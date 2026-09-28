@@ -189,8 +189,15 @@ function timeCell(id, name) {
       still names the attribute, so the empty cell can be asked. */
   if (!writable) {
     const number = Number(value);
+
+    /*  A MEDIA CUE'S LENGTH AT ITS OWN SPEED (namespace draft §22.5): its
+        `duration` is the file's, and the column says how long the cue sounds -
+        for ever at nought. */
+    const speed = name === "duration" ? Number(tree.cue(id, "rate", 1)) : 1;
+    const heard = Number.isFinite(speed) && speed > 0 ? number / speed : Infinity;
+
     const shown = value === "" || !Number.isFinite(number) || number === 0
-                    ? "" : number.toFixed(1);
+                    ? "" : Number.isFinite(heard) ? heard.toFixed(1) : "∞";
 
     return '<div class="when ro" title="' + note + '">' + esc(shown) + "</div>";
   }
