@@ -91,6 +91,8 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
+#include <wfg/engine/cue/LaneCommands.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/cue/Runner.h>
@@ -626,8 +628,16 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     cue::LiveEdits live;
     cue::registerLiveCommands (rig.engine.commands(), rig.document, live);
 
+    /*  And the lane recorded from a fader (namespace draft §20.9): the
+        waveform's Rec and ✕, and the virtual panel's press that takes a fader. */
+    cue::LaneTable lanes;
+    cue::registerLaneCommands (rig.engine.commands(), rig.engine, runner, rig.document, lanes);
+
     const std::vector<Event> gestures
     {
+        gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneTake ("STRP0001"),
+        gesture::laneFree(), gesture::laneRecord (0.0), gesture::laneRecord (12.5), gesture::laneStop(),
+
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
         gesture::stopAll(), gesture::killAll(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
@@ -3244,6 +3254,50 @@ TEST_CASE ("client: the waveform's reading carries the cue's level lane, and the
 
     //  A cue that is not media has no lane to read, whatever its rows say.
     CHECK (model::readLane (*rig.publish (1), "P4GRP001").empty());
+}
+
+TEST_CASE ("client: a lane recorded from a fader reads as the tree says, and names its fader as a person would")
+{
+    /*  Namespace draft §20.9: the lane's cue, whether it waits, the fader taken
+        and what it rides - and the waveform's reading carries it, whichever
+        cue it is for, so the panel can say when it is another's. */
+    Rig rig ("surfaces");
+    cue::LaneTable lanes;
+    rig.parameters.setLanes (&lanes);
+
+    auto reading = model::readLaneRecord (*rig.publish (0));
+    CHECK (reading.cue.empty());
+    CHECK_FALSE (reading.waiting);
+    CHECK_FALSE (reading.taken);
+
+    lanes.arm ("SRF00005");
+    rig.parameters.markStale();
+    reading = model::readLaneRecord (*rig.publish (1));
+
+    CHECK (reading.cue == "SRF00005");
+    CHECK (reading.waiting);
+    CHECK_FALSE (reading.taken);
+    CHECK_FALSE (reading.hasRide);
+
+    lanes.take ("SRFT0003");
+    lanes.rideDb = -12.0;
+    rig.parameters.markStale();
+    reading = model::readLaneRecord (*rig.publish (2));
+
+    CHECK (reading.taken);
+    CHECK_FALSE (reading.waiting);
+    CHECK (reading.strip == "SRFT0003");
+    CHECK (reading.faderLabel == "Panel \xc2\xb7 fader 3");
+    REQUIRE (reading.hasRide);
+    CHECK (reading.rideDb == doctest::Approx (-12.0));
+
+    lanes.startPass ("RN000001");
+    rig.parameters.markStale();
+    CHECK (model::readLaneRecord (*rig.publish (3)).recording);
+
+    const auto foot = model::readFoot (*rig.publish (3), { model::Subject::Kind::waveform, "SRF00005" });
+    CHECK (foot.laneRecord.recording);
+    CHECK (foot.laneRecord.cue == "SRF00005");
 }
 
 TEST_CASE ("client: drawing on a fade, point by point")

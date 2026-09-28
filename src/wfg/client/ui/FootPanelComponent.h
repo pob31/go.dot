@@ -87,6 +87,14 @@ namespace wfg::client::ui
             std::function<void (const std::string& runId)> stop;
             std::function<void (const std::string& runId, double seconds)> seek;
 
+            /*  RECORDING THE LANE FROM A FADER (namespace draft §20.9): arm this
+                cue's lane (empty cancels), let the fader go, start a pass from
+                a second of the file, end it. */
+            std::function<void (const std::string& cueId)> laneArm;
+            std::function<void()> laneFree;
+            std::function<void (double fromSeconds)> laneRecord;
+            std::function<void()> laneStop;
+
             std::function<void()> close;
 
             /** The height changed by a drag on the top edge, in pixels. */

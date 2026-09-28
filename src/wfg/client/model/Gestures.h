@@ -194,6 +194,16 @@ namespace wfg::client::gesture
         it (Phase 9c, §19.8). */
     Event takeKeep (const std::string& channelId, bool asCue, const std::string& afterCue);
 
+    /*  RECORDING A LANE FROM A FADER (namespace draft §20.9): `lane.arm` - the
+        cue's lane waits for a fader, empty lets go; `lane.take` - the fader a
+        panel strip's press takes while one waits; `lane.free`; `lane.record`
+        from the playhead's second; `lane.stop`, the hand's end of a pass. */
+    Event laneArm (const std::string& cueId);
+    Event laneTake (const std::string& stripId);
+    Event laneFree();
+    Event laneRecord (double fromSeconds);
+    Event laneStop();
+
     /*  `surface.aim`: the cue a surface's rotaries edit on their EQ and Send
         pages (author, 2026-09-25) - a click on a running cue's name. Empty
         lets go. */

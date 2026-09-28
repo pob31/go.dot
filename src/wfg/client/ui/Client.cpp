@@ -492,6 +492,18 @@ namespace wfg::client
                 footActions.seek = [this] (const std::string& runId, double seconds)
                                    { send (gesture::seek (runId, seconds)); };
 
+                /*  THE LANE RECORDED FROM A FADER (§20.9), the same four named
+                    commands a surface's Rec key and the network send. */
+                footActions.laneArm = [this] (const std::string& cueId)
+                                      { send (gesture::laneArm (cueId)); };
+
+                footActions.laneFree = [this] { send (gesture::laneFree()); };
+
+                footActions.laneRecord = [this] (double fromSeconds)
+                                         { send (gesture::laneRecord (fromSeconds)); };
+
+                footActions.laneStop = [this] { send (gesture::laneStop()); };
+
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
                                                             std::move (listActions),
                                                             std::move (runActions),

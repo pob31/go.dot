@@ -52,6 +52,7 @@
 #include <wfg/client/model/Lane.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Take.h>
 #include <wfg/client/model/Timeline.h>
 
@@ -96,6 +97,10 @@ namespace wfg::client::model
             the lane may be grabbed, the lane being a decision the lock keeps. */
         std::vector<LanePoint> lane;
         bool locked = false;
+
+        /*  AND A LANE BEING RECORDED FROM A FADER (namespace draft §20.9) -
+            whichever cue it is for, so the waveform can say it is another's. */
+        LaneRecordReading laneRecord;
 
         /*  THE MIX CHANNELS AND WHAT THIS CUE SENDS INTO THEM, filled only
             when the sends are what is open. `cueLevel` is the cue's own

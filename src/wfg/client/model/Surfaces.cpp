@@ -272,6 +272,41 @@ namespace wfg::client::model
         return false;
     }
 
+    LaneRecordReading readLaneRecord (const tree::TreeSnapshot& snapshot)
+    {
+        LaneRecordReading out;
+        out.cue = text (snapshot, "/godot/surface/lane");
+        out.strip = text (snapshot, "/godot/surface/laneFader");
+        out.waiting = ! out.cue.empty() && out.strip.empty();
+        out.taken = ! out.cue.empty() && ! out.strip.empty();
+        out.recording = out.taken && isYes (flag (snapshot, "/godot/surface/laneRecording"));
+
+        if (const auto ride = osc::parseDouble (text (snapshot, "/godot/surface/laneRide")))
+        {
+            out.hasRide = true;
+            out.rideDb = *ride;
+        }
+
+        /*  THE FADER AS A PERSON NAMES IT: its surface's label and its number
+            on that surface, counted from one - what is printed on the desk. */
+        if (out.taken)
+        {
+            const auto base = "/godot/slot/" + out.strip + "/";
+            const auto surfaceId = text (snapshot, base + "surface");
+            const auto index = osc::parseDouble (text (snapshot, base + "index")).value_or (0.0);
+
+            std::string surfaceLabel = surfaceId;
+
+            for (const auto& surface : readSurfaces (snapshot))
+                if (surface.id == surfaceId)
+                    surfaceLabel = surface.label();
+
+            out.faderLabel = surfaceLabel + " · fader " + std::to_string (static_cast<int> (index) + 1);
+        }
+
+        return out;
+    }
+
     std::vector<StripRow> readStrips (const tree::TreeSnapshot& snapshot)
     {
         /*  ONE PASS for the strips themselves, which live among the other

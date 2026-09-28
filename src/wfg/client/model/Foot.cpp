@@ -102,6 +102,7 @@ namespace wfg::client::model
             out.ranges = readRanges (snapshot, subject.objectId);
             out.lane = readLane (snapshot, subject.objectId);
             out.locked = isYes (flag (snapshot, "/godot/document/locked"));
+            out.laneRecord = readLaneRecord (snapshot);
 
             /*  WHY THERE IS NOTHING TO DRAW, when there is nothing to draw, in
                 the words that say what to do about it. A panel that just sat

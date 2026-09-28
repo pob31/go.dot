@@ -238,6 +238,10 @@ namespace wfg::client::ui
                 editing.play = actions.play;
                 editing.stop = actions.stop;
                 editing.seek = actions.seek;
+                editing.laneArm = actions.laneArm;
+                editing.laneFree = actions.laneFree;
+                editing.laneRecord = actions.laneRecord;
+                editing.laneStop = actions.laneStop;
                 editing.say = [this] (const juce::String& sentence)
                 {
                     note = sentence;
