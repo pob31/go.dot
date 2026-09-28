@@ -831,6 +831,40 @@ namespace wfg::cue
         /** Every fade in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<FadeJob>& fades() const noexcept { return running; }
 
+        /*  ESC, THE GRACEFUL WAY, AS A FADE (author, 2026-09-28: "a 'Panic'
+            fade duration that fades out all playing cues. It seems the Panic
+            cuts everything with no fade time").
+
+            What `run.stopAll` does to the sound before it asks every root to
+            stop: every run that is sounding is faded to silence over the show's
+            `audio/panicFade` and stopped when it gets there - the job a stop
+            cue's `fade` verb runs, one per voice, with no cue behind it. A
+            group is asked to stop as it always was; its members are already
+            fading, so its footer runs when they have gone, which is §4.4's
+            "same code path as normal completion, entered early" at the speed
+            the show chose. Nought is the cut Esc used to be.
+
+            A run already on its way out keeps its own stop when that lands
+            first. `tick` is the command's own, for the reason `fire`'s is. */
+        void beginPanicFade (std::int64_t tick);
+
+        /*  AND A DOUBLE ESC DURING IT (§4.4, "drops all actions"): every job
+            that is holding a voice for a stop still to come lets go, so the
+            runs `run.killAll` marks are cut on this tick by `enforceStops`
+            rather than faded to the end. Without it the second Esc would be
+            waited out - and, for a stop cue's fade, the target was put back to
+            `playing` by the killed fade and never stopped at all. */
+        void dropStopFades();
+
+        /*  THE LEAST TIME BETWEEN TWO GOs (PRD §3.7's GO debounce, a show
+            setting since 2026-09-28): whether a GO at `tick` falls inside the
+            show's `list/goDebounce` of the last GO that fired something. The
+            handler asks, and says `too-soon` when it does; `noteGo` is the GO
+            that fired. Handler state, so a replay - which runs the handler -
+            refuses the same GOs the night did. */
+        bool goTooSoon (std::int64_t tick) const;
+        void noteGo (std::int64_t tick) noexcept { lastGoTick = tick; }
+
         /*  The mounted namespaces and the socket that serves them, which is
             what a network cue needs and nothing else does.
 
@@ -1353,6 +1387,10 @@ namespace wfg::cue
             handler can be scheduled against the same clock the tick hook
             reads. Set by beforeTick, which runs before the handlers do. */
         std::int64_t currentTick = 0;
+
+        /*  The tick of the last GO that fired something, or none yet. */
+        std::int64_t lastGoTick = -1;
+
         std::vector<OscJob> sending;
 
         tree::MountTable* mounts = nullptr;

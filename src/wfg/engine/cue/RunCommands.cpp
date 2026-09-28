@@ -603,7 +603,13 @@ namespace wfg::cue
 
             AN EMPTY TABLE IS APPLIED AND DOES NOTHING. Esc on a silent show is
             not a mistake, and the hand that pressed it needs no error to read.
-            The third level, Go Doh!, stays deferred in the law itself. */
+            The third level, Go Doh!, stays deferred in the law itself.
+
+            THE RUNNER SPECIALISES BOTH (2026-09-28, `registerGoCommands`): Esc
+            fades what is sounding over the show's `audio/panicFade` before the
+            roots are asked to stop, and a double Esc lets go of every stop
+            still to come before they are dropped. What is here is the half
+            that needs only the run table, and a rig with no Runner has it. */
         registry.add ({ "run.stopAll",
                         "Stops every run now, gracefully: Esc. Members come down in order and"
                         " every footer runs.",

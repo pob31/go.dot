@@ -63,6 +63,15 @@
 
   <define name="Lists">
     <element name="Lists">
+      <optional>
+        <attribute name="goDebounce">
+          <a:documentation>The least time between two GOs, in seconds (PRD 3.7-s GO debounce; a show setting since 2026-09-28, at the author-s direction). A GO pressed sooner than this after the last GO that fired something is refused as too-soon: nothing fires, the standby does not move, and the error line says a GO was eaten - so a hand that bounced, or two people on two GO buttons, cannot fire the cue after the one the operator meant. Every GO counts, from the keyboard, a surface-s PLAY or a network client; a cue fired by name or by a trigger is not a GO and is never held back. Nought, the default, is off.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
       <zeroOrMore>
         <ref name="List"/>
       </zeroOrMore>
@@ -2134,6 +2143,15 @@
         <attribute name="outputPatch">
           <a:documentation>Space-separated hardware output indices per logical output. Zero based; -1 disconnects. Empty preserves identity routing.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="panicFade">
+          <a:documentation>How long Esc takes, in seconds (author, 2026-09-28: a Panic fade duration that fades out all playing cues). Esc and the PANIC button fade every cue that is sounding to silence over this long and then stop it; a group-s footer runs when its members have gone, as PRD 4.4 has it. A mic cue is faded at its input and its reverb rings on. A cue already fading out on a stop of its own keeps that stop when it lands first. Esc again within the double-press window cuts everything at once, fade or not. Nought is a cut. Read at the press, so a change lands at the next Esc.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">30</param>
+          </data>
         </attribute>
       </optional>
       <optional>

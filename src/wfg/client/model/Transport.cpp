@@ -156,6 +156,12 @@ namespace wfg::client::model
         if (fields.size() != 5)
             return lastError;
 
+        /*  A BOUNCED GO IN WORDS (2026-09-28): the refusal the operator is
+            likeliest to meet mid-show, and "go refused: too-soon" makes them
+            read a code to learn that the press was eaten on purpose. */
+        if (fields[4] == "go" && fields[3] == "too-soon")
+            return "GO ignored: too soon after the last one (Show settings > Playback)";
+
         return fields[4] + " refused: " + fields[3];
     }
 

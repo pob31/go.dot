@@ -1986,7 +1986,12 @@ namespace wfg::cue
                 it and descend through it. A horizon that rebuilt what it had
                 built a moment ago would re-arm every voice in the block every
                 time the pointer twitched. */
-            if (const auto* live = runs.liveRunOf (groupId))
+            /*  NOT ONE ON ITS WAY OUT (2026-09-28): a group Esc is fading down
+                is going, and preparing a member into it would hand the member
+                to a group about to kill it. The horizon builds a fresh one,
+                as it would once the old one has ended. */
+            if (const auto* live = runs.liveRunOf (groupId);
+                live != nullptr && live->state != runState::stopping)
             {
                 parentRun = live->id;
                 continue;
@@ -2166,8 +2171,16 @@ namespace wfg::cue
 
             /*  ALREADY RUNNING IS THE ORDINARY CASE: the operator pressed GO on
                 member one a moment ago, and members two onwards join the run
-                that started then. */
-            if (const auto* live = runs.liveRunOf (groupId))
+                that started then.
+
+                NOT A GROUP ON ITS WAY OUT, though (2026-09-28). Esc fades a
+                scene down before it stops it, so a group can be `stopping` for
+                as long as the show's panic fade - and a member spawned into it
+                would be killed by it on the next tick, a GO that made no sound.
+                The GO starts the scene again instead, which is what it did
+                when the group was gone a tick after Esc. */
+            if (const auto* live = runs.liveRunOf (groupId);
+                live != nullptr && live->state != runState::stopping)
             {
                 parentRun = live->id;
                 continue;
@@ -4307,6 +4320,159 @@ namespace wfg::cue
         running.push_back (job);
     }
 
+    void Runner::beginPanicFade (std::int64_t tick)
+    {
+        /*  THE SHOW'S NUMBER, read at the press: an edit to it lands at the next
+            Esc and never under one already fading. A show that cannot say -
+            no Audio element, a value that will not parse - gets the schema's
+            second rather than a cut nobody chose. */
+        const auto seconds = std::max (0.0, osc::parseDouble (document.getAttribute ("/godot/audio/panicFade")
+                                                                .value_or ("1")).value_or (1.0));
+        const auto ticks = static_cast<int> (std::lround (seconds * TickClock::rateHz));
+
+        /*  NOUGHT IS THE CUT, and nothing is started for it: `enforceStops`
+            stops every run the roots' stop reaches - once no stop cue's fade is
+            holding it back. Left holding, a fade-and-stop whose own run the
+            roots' stop reaches next hands its target back its level (the rule
+            for a stop cue killed on its own), and the cue played on after Esc.
+            Found by this change's tests, and older than it. */
+        if (ticks <= 0)
+        {
+            dropStopFades();
+            return;
+        }
+
+        const auto stopsAt = tick + ticks;
+
+        /*  WHAT IS SOUNDING, collected before anything is changed, since a fade
+            begun here takes over the jobs the next one would be asked about. */
+        std::vector<std::string> sounding;
+
+        for (const auto& run : runs.all())
+        {
+            if (run.isFinished() || run.track < 0 || run.stopIssued)
+                continue;
+
+            if (run.state == runState::playing)
+            {
+                sounding.push_back (run.id);
+                continue;
+            }
+
+            /*  ALREADY ON ITS WAY OUT, by a stop cue's fade or a clip's release.
+                The stop that lands first wins: a ten-second fade-and-stop is
+                brought down with everything else, and a stop due sooner than
+                the panic's is left to land where it was going to. A `stopping`
+                run no job holds is a hard stop `enforceStops` is about to
+                issue, and is left to it. */
+            if (run.state == runState::stopping)
+            {
+                const auto job = std::find_if (running.begin(), running.end(),
+                                               [&run] (const FadeJob& held)
+                                               {
+                                                   return held.stopWhenDone && held.target == run.id;
+                                               });
+
+                if (job != running.end() && job->stopsAtTick > stopsAt)
+                    sounding.push_back (run.id);
+            }
+
+            /*  ARMED AND NOT SOUNDING - a standby made ready, a clip waiting for
+                its launch, a cue in its pre-wait - has nothing to fade, and the
+                roots' stop ends it at once as it always did. */
+        }
+
+        /*  A SOONER STOP ON A VOICE LANDS, LET GO OF BY THE STOP CUE THAT
+            STARTED IT. The roots' stop is about to reach that stop cue's own
+            run, and a fade whose run is stopped gives its target back its level
+            - the rule for a stop cue killed on its own - so the cue went back to
+            `playing` and played on after Esc. Found by this change's tests, and
+            older than it. Held by nobody's run, the job lands its stop, and the
+            stop cue's run, stopped like every other and owned by no job, ends
+            with the rest. A stop on a group is left as it was: the group is a
+            root the same press stops, and it came down without this. */
+        for (auto& job : running)
+        {
+            if (! job.stopWhenDone || ! job.dca.empty()
+                  || std::find (sounding.begin(), sounding.end(), job.target) != sounding.end())
+                continue;
+
+            const auto* held = runs.find (job.target);
+
+            if (held == nullptr || held->track < 0)
+                continue;
+
+            job.self.clear();
+            job.reportsSelf = false;
+        }
+
+        for (const auto& id : sounding)
+        {
+            auto* target = runs.find (id);
+
+            if (target == nullptr)
+                continue;
+
+            /*  A FADE ALREADY ON IT GIVES WAY, from wherever its level has got
+                to - and the stop it may have carried with it lands later than
+                this one, or it would not be here. */
+            resolveTakeover (id);
+
+            FadeJob job;
+            job.target = id;
+            job.reportsSelf = false;
+            job.fromDb = target->ownLevel;
+            job.toDb = silenceDb;
+            job.ticksTotal = ticks;
+            job.curve = FadeCurve::linear;
+            job.stopWhenDone = true;
+            job.stopsAtTick = stopsAt;
+
+            /*  A MIC CUE IS FADED AT ITS INPUT, as a stop cue's fade fades one
+                (namespace draft §18.5): the voice goes and the channel's reverb
+                rings on after it, which is what Esc has always let a mic cue
+                do. The output stays where it is. */
+            if (target->kind == "mic")
+            {
+                job.toDb = job.fromDb;
+
+                if (audio != nullptr)
+                    audio->shutLive (target->track, seconds);
+            }
+
+            target->state = runState::stopping;
+            running.push_back (job);
+        }
+    }
+
+    void Runner::dropStopFades()
+    {
+        /*  ONLY THE JOBS THAT HOLD A STOP. A plain fade's own run is marked by
+            the double Esc like every other root and `advanceFades` retires it;
+            it holds no voice, so nothing waits on it. A job that holds a stop
+            is the one thing `enforceStops` defers to, and deferring is exactly
+            what a double Esc does not do. */
+        running.erase (std::remove_if (running.begin(), running.end(),
+                                       [] (const FadeJob& job)
+                                       {
+                                           return job.stopWhenDone && job.dca.empty();
+                                       }),
+                       running.end());
+    }
+
+    bool Runner::goTooSoon (std::int64_t tick) const
+    {
+        if (lastGoTick < 0)
+            return false;
+
+        const auto seconds = osc::parseDouble (document.getAttribute ("/godot/list/goDebounce")
+                                                 .value_or ("0")).value_or (0.0);
+        const auto window = static_cast<std::int64_t> (std::llround (std::max (0.0, seconds)
+                                                                      * TickClock::rateHz));
+
+        return window > 0 && tick >= lastGoTick && tick - lastGoTick < window;
+    }
+
     std::string Runner::pressStrip (Engine& engine, std::int64_t tick, const std::string& stripId,
                                     int velocity, const std::string& origin)
     {
@@ -5167,7 +5333,15 @@ namespace wfg::cue
                     of the fade verb: by the time the clip stops the level is
                     already at silence, so Tracktion's own click suppression has
                     nothing left to suppress. */
-                if (audio != nullptr && target->track >= 0)
+                /*  NOT A RUN THAT HAS ALREADY ENDED (2026-09-28). A cue whose
+                    file ran out during the fade gave its voice back when it
+                    did, and a finished run still names that track - so a stop
+                    issued now would land on whatever cue took the voice since.
+                    Esc made that likely rather than rare: the fade is a second
+                    long, and a GO inside it is exactly what an operator does
+                    next. The job still runs to its tick for the stop cue's
+                    own run; it just has nothing left to stop. */
+                if (audio != nullptr && target->track >= 0 && ! target->isFinished())
                 {
                     /*  MARKED BEFORE IT IS ISSUED, so that enforceStops does
                         not come along on the next tick and issue a second one.
@@ -7821,6 +7995,51 @@ namespace wfg::cue
         };
 
         //----------------------------------------------------------------------
+        /*  ESC AND DOUBLE ESC, SPECIALISED WITH THE RUNNER (2026-09-28).
+
+            `registerRunCommands` gave them their meaning on the run table: every
+            root asked to stop, gracefully or at once. What that cannot do is
+            move a level - which is what the author asked Esc to do ("a 'Panic'
+            fade duration that fades out all playing cues") - because the fades
+            are the Runner's. So the two are taken over here, the registry's own
+            "last registration wins", and each does its Runner half FIRST and
+            then exactly what it did before: `run.stopAll` fades what sounds over
+            `audio/panicFade` and then stops every root, `run.killAll` lets go of
+            every stop still to come and then drops every root.
+
+            WRAPPED, NOT REWRITTEN, so what the earlier registration carries -
+            the output test it stops, since 2026-09-21 - comes with it; and a
+            rig that registered the run commands alone keeps the plain ones. */
+        for (const auto* level : { "run.stopAll", "run.killAll" })
+        {
+            const auto* plain = registry.find (level);
+
+            if (plain == nullptr)
+                continue;
+
+            auto specialised = *plain;
+            const auto graceful = std::string (level) == "run.stopAll";
+
+            if (graceful)
+                specialised.description = "Stops every run now, gracefully: Esc. What is sounding fades to"
+                                          " silence over audio/panicFade first; members come down in order"
+                                          " and every footer runs.";
+
+            specialised.handler = [&runner, graceful, before = plain->handler]
+                                  (CommandContext& context, const std::vector<osc::Value>& args)
+            {
+                if (graceful)
+                    runner.beginPanicFade (context.tick);
+                else
+                    runner.dropStopFades();
+
+                return before (context, args);
+            };
+
+            registry.add (std::move (specialised));
+        }
+
+        //----------------------------------------------------------------------
         /*  ARMING LIVES HERE, WITH THE RUNNER, because it is an ACTION and not
             a report: it reserves a voice and asks the audio side for media.
             RunCommands holds only what the machine says happened, which is what
@@ -8289,6 +8508,21 @@ namespace wfg::cue
                                 would bury the rejections that matter. */
                             if (standby.empty())
                                 return Outcome::ok (args);
+
+                            /*  TOO SOON AFTER THE LAST ONE (PRD §3.7's GO
+                                debounce, a show setting since 2026-09-28): a
+                                hand that bounced, or two people on two GO
+                                buttons, and the second press would fire the
+                                cue after the one the operator meant. Refused
+                                rather than applied-and-ignored, so the error
+                                line says a GO was eaten and the log says whose;
+                                the pointer does not move, so the next press
+                                fires what this one would have. Nought, the
+                                default, is off. */
+                            if (runner.goTooSoon (context.tick))
+                                return Outcome::rejected (reason::tooSoon);
+
+                            runner.noteGo (context.tick);
 
                             /*  STANDBY MOVES FIRST, and unconditionally (§3.5).
                                 Whether the cue makes a sound, fails to find a

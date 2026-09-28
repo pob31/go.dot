@@ -477,6 +477,11 @@ TEST_CASE ("client: a row the pointer cannot stand on is not offered, and a refu
     reading.lastError = "something else entirely";
     CHECK (reading.errorLine() == "something else entirely");
 
+    /*  A BOUNCED GO IS SAID IN WORDS, and where to change it (2026-09-28). */
+    reading.lastError = "5500 27 window too-soon go";
+    CHECK (reading.errorLine() == "GO ignored: too soon after the last one (Show settings > Playback)");
+    reading.lastError = "something else entirely";
+
     /*  THE CLOCK MOVED AND THE SHOW FOLLOWED IT (PRD §6.2, 2026-09-28): said
         until something is refused after it - the cues it stopped are what
         anybody at the desk asks about first - and a refusal from before it is

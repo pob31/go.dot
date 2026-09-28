@@ -1453,7 +1453,18 @@ namespace wfg::client
                 else
                 {
                     send (gesture::stopAll());
-                    shell->transport.setNotice ("Esc: every cue stopping, footers run - Esc again drops everything");
+
+                    /*  HOW LONG IT WILL TAKE, said in the show's own number
+                        (2026-09-28): a fade the operator did not know about
+                        reads as an Esc that did not work. */
+                    const auto fade = latest != nullptr ? model::text (*latest, "/godot/audio/panicFade")
+                                                        : std::string {};
+                    const auto seconds = juce::String (fade).getDoubleValue();
+
+                    shell->transport.setNotice (seconds > 0.0
+                        ? "Esc: every cue fading out over " + juce::String (fade) + " s, footers run"
+                          " - Esc again cuts at once"
+                        : juce::String ("Esc: every cue stopping, footers run - Esc again drops everything"));
                 }
             }
 

@@ -4586,6 +4586,116 @@ namespace wfg::client::ui
                              loadButton { "Load now" };
             std::unique_ptr<juce::FileChooser> chooser;
         };
+
+        /*  GO AND ESC, THE WAY THIS SHOW WANTS THEM (author, 2026-09-28: "In
+            the show settings, there should be a 'time between' Go's and a
+            'Panic' fade duration that fades out all playing cues").
+
+            TWO NUMBERS, EACH A `node.set` that lands at once and that Ctrl-Z
+            takes back, like every row on the Outputs tab: they are the show's,
+            saved with it, and nothing on this tab waits for Apply. Each says in
+            a sentence what it does and what nought means, because a box that
+            only reads "0.3" is one nobody dares touch in the middle of a tech. */
+        class PlaybackPage final : public juce::Component
+        {
+        public:
+            PlaybackPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : send (std::move (dispatch))
+            {
+                debounce.address = "/godot/list/goDebounce";
+                debounce.label.setText ("Least time between two GOs", juce::dontSendNotification);
+                debounce.explanation.setText ("A GO pressed sooner than this after the last one is ignored, and"
+                                              " the line at the foot of the window says so - a bounced key or a"
+                                              " second hand on a GO button cannot fire the next cue by accident."
+                                              " The standby stays where it was. 0 turns it off.",
+                                              juce::dontSendNotification);
+
+                panicFade.address = "/godot/audio/panicFade";
+                panicFade.label.setText ("Panic fade (Esc)", juce::dontSendNotification);
+                panicFade.explanation.setText ("Esc and the PANIC button fade every playing cue out over this long,"
+                                               " then stop it; a group's footer runs once its cues have gone. A mic"
+                                               " cue's reverb rings on. Esc twice cuts everything at once, fade or"
+                                               " not. 0 cuts at once.",
+                                               juce::dontSendNotification);
+
+                for (auto* field : { &debounce, &panicFade })
+                {
+                    for (auto* label : { &field->label, &field->unit, &field->explanation })
+                        addAndMakeVisible (*label);
+
+                    addAndMakeVisible (field->editor);
+
+                    field->unit.setText ("s", juce::dontSendNotification);
+                    field->explanation.setJustificationType (juce::Justification::topLeft);
+                    field->explanation.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
+                    field->editor.setJustification (juce::Justification::centredLeft);
+                    field->editor.setInputRestrictions (5, "0123456789.,");
+                    field->editor.setTitle (field->label.getText());
+                    field->editor.onReturnKey = [this, field] { commit (*field); };
+                    field->editor.onFocusLost = [this, field] { commit (*field); };
+                }
+            }
+
+            void show (const std::string& debounceNow, const std::string& panicFadeNow, bool editable)
+            {
+                for (auto [field, now] : { std::pair { &debounce, &debounceNow }, std::pair { &panicFade, &panicFadeNow } })
+                {
+                    field->shown = *now;
+
+                    /*  Not while it is being typed into, or a refresh twenty-five
+                        times a second would take the caret back on every keystroke. */
+                    if (! field->editor.hasKeyboardFocus (true) && field->editor.getText() != juce::String (*now))
+                        field->editor.setText (juce::String (*now), juce::dontSendNotification);
+
+                    field->editor.setEnabled (editable);
+                }
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (22);
+
+                for (auto* field : { &debounce, &panicFade })
+                {
+                    auto line = area.removeFromTop (30);
+                    field->label.setBounds (line.removeFromLeft (230));
+                    field->editor.setBounds (line.removeFromLeft (70).reduced (0, 2));
+                    line.removeFromLeft (6);
+                    field->unit.setBounds (line.removeFromLeft (30));
+
+                    field->explanation.setBounds (area.removeFromTop (52).withTrimmedLeft (4));
+                    area.removeFromTop (14);
+                }
+            }
+
+        private:
+            struct Field
+            {
+                std::string address, shown;
+                juce::Label label, unit, explanation;
+                juce::TextEditor editor;
+            };
+
+            void commit (Field& field)
+            {
+                if (! send || ! field.editor.isEnabled())
+                    return;
+
+                /*  A COMMA IS A DECIMAL POINT HERE, as on the Rack tab: somebody
+                    in a French booth types 0,5, and the engine reads its own
+                    text, never the locale's. */
+                const auto typed = field.editor.getText().trim().replaceCharacter (',', '.').toStdString();
+                const auto value = osc::parseDouble (typed);
+
+                if (! value || std::abs (*value - osc::parseDouble (field.shown).value_or (-1.0)) < 1.0e-9)
+                    return;
+
+                send (gesture::setNode (field.address, typed));
+            }
+
+            std::function<void (Event)> send;
+            Field debounce, panicFade;
+        };
     }
 
     class ShowSettingsWindow::Panel final : public juce::Component
@@ -4656,6 +4766,7 @@ namespace wfg::client::ui
             surfaces = std::make_unique<SurfacesPage> (theme, send);
             plugins = std::make_unique<PluginsPage> (theme, send);
             rackPage = std::make_unique<RackPage> (theme, send);
+            playback = std::make_unique<PlaybackPage> (theme, send);
 
             /*  THE FIRST HAND EDIT OF THE OUTPUT PATCH IS WHAT SETTLES IT
                 (PRD §6.2). Sent BEFORE the edit lands, so that the engine's own
@@ -4723,6 +4834,10 @@ namespace wfg::client::ui
             /*  AFTER PLUGINS: a channel's chain is made of what the machine's
                 scan found, and the scan is on the tab before (Phase 9b). */
             tabs.addTab ("Rack", background, rackPage.get(), false);
+
+            /*  LAST: the two numbers that say how GO and Esc behave, set once
+                a show is otherwise ready to run (2026-09-28). */
+            tabs.addTab ("Playback", background, playback.get(), false);
             for (auto* component : std::initializer_list<juce::Component*> { &enabled, &type, &output, &input,
                      &buffer, &typeLabel, &outputLabel, &inputLabel, &bufferLabel, &rate, &explanation, &rescan })
                 interfacePage.addAndMakeVisible (*component);
@@ -4842,6 +4957,12 @@ namespace wfg::client::ui
                             model::readKnownPlugins (snapshot), model::text (snapshot, "/godot/document/path"),
                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
                             model::readSetChanged (snapshot), model::busyWords (snapshot));
+
+            /*  GO AND ESC: the document's, re-read every pass like the outputs,
+                since each lands at once as a `node.set`. */
+            playback->show (model::text (snapshot, "/godot/list/goDebounce"),
+                            model::text (snapshot, "/godot/audio/panicFade"),
+                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 
             if (readCapabilities (snapshot)) capabilities();
             const auto state = model::text (snapshot, "/godot/audio/settingsStatus");
@@ -5039,6 +5160,7 @@ namespace wfg::client::ui
         std::unique_ptr<SurfacesPage> surfaces;
         std::unique_ptr<PluginsPage> plugins;
         std::unique_ptr<RackPage> rackPage;
+        std::unique_ptr<PlaybackPage> playback;
         bool settled = false;
 
         /*  The input patch's own regime, the twin of `settled` (Phase 9b). */

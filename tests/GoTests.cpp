@@ -32,6 +32,7 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/cue/CueCommands.h>
@@ -57,7 +58,9 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <optional>
 #include <set>
+#include <string>
 #include <vector>
 
 using namespace wfg;
@@ -3527,6 +3530,412 @@ TEST_CASE ("stop levels: run.stopAll runs every footer, run.killAll runs none, a
         REQUIRE (rig.submitAndTick ("run.killAll").applied == 1);
         CHECK (rig.engine.lastError().empty());
     }
+}
+
+//==============================================================================
+/*  THE PANIC FADE (author, 2026-09-28: "there should be ... a 'Panic' fade
+    duration that fades out all playing cues. It seems the Panic cuts
+    everything with no fade time").
+
+    Esc is §4.4's graceful level, and a cut was the least graceful thing it
+    could do to a cue that was sounding. It now fades every sounding run to
+    silence over the show's `audio/panicFade` and stops it there - the job a
+    stop cue's fade verb runs - and a double Esc still cuts at once. */
+TEST_CASE ("panic fade: Esc fades what is sounding over the show's number, and stops it there")
+{
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    const auto media = rig.startMedia();
+    const auto track = rig.runs.find (media)->track;
+    REQUIRE (rig.audio.playing.count (track) == 1u);
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").applied == 1);
+    CHECK (rig.runs.find (media)->state == cue::runState::stopping);
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    /*  Halfway down and still sounding: a fade, not a cut. */
+    CHECK (rig.audio.playing.count (track) == 1u);
+    CHECK (rig.runs.find (media)->level < -1.0);
+    CHECK (rig.runs.find (media)->level > -120.0);
+
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    /*  At silence, and then stopped - the order a fade verb keeps, so the
+        clip's own click suppression has nothing left to do. */
+    CHECK (rig.audio.playing.count (track) == 0u);
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (media)->isFinished(); }, 5));
+}
+
+TEST_CASE ("panic fade: nought is the cut Esc always was, and a show that says nothing fades for a second")
+{
+    SUBCASE ("nought")
+    {
+        FadeRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+
+        const auto media = rig.startMedia();
+        const auto track = rig.runs.find (media)->track;
+
+        rig.submitAndTick ("run.stopAll");
+        rig.tickOnce();
+
+        CHECK (rig.audio.playing.count (track) == 0u);
+        CHECK (rig.runner.fades().empty());
+    }
+
+    SUBCASE ("the default")
+    {
+        FadeRig rig;
+        CHECK (rig.document.getAttribute ("/godot/audio/panicFade") == std::optional<std::string> ("1"));
+
+        const auto media = rig.startMedia();
+        rig.submitAndTick ("run.stopAll");
+
+        REQUIRE (rig.runner.fades().size() == 1u);
+        CHECK (rig.runner.fades().front().ticksTotal == TickClock::rateHz);
+        CHECK (rig.runner.fades().front().target == media);
+    }
+}
+
+TEST_CASE ("panic fade: a double Esc in the middle of it cuts at once")
+{
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "2").ok);
+
+    const auto media = rig.startMedia();
+    const auto track = rig.runs.find (media)->track;
+
+    rig.submitAndTick ("run.stopAll");
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.audio.playing.count (track) == 1u);
+
+    /*  §4.4: "drops all actions". The fade is an action, and it is dropped -
+        waiting out the rest of two seconds is not immediate. */
+    REQUIRE (rig.submitAndTick ("run.killAll").applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.audio.playing.count (track) == 0u);
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (media)->isFinished(); }, 5));
+}
+
+TEST_CASE ("double Esc: a cue a stop cue is fading out is cut, not handed back its level")
+{
+    /*  FOUND WHILE BUILDING THE PANIC FADE, and older than it. A double Esc
+        marks the stop cue's run and its target alike; the killed fade then
+        put its target back to `playing` - the rule for a stop cue killed on
+        its own, where the operator asked nothing of the cue - and nothing was
+        left to stop it. The cue played on, at whatever level the fade had
+        reached, after the one press that promises everything is dropped. */
+    FadeRig rig;
+    const auto media = rig.startMedia();
+    const auto track = rig.runs.find (media)->track;
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "10");
+    rig.fire (rig.stopId);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.audio.playing.count (track) == 1u);
+
+    REQUIRE (rig.submitAndTick ("run.killAll").applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.audio.playing.count (track) == 0u);
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (media)->isFinished(); }, 5));
+}
+
+TEST_CASE ("Esc: a cue a stop cue is fading out is stopped with everything else, never handed back")
+{
+    /*  THE SINGLE-ESC TWIN of the case above, and just as old: Esc marked the
+        stop cue's run with the other roots, the fade whose run was stopped gave
+        its target back its level, and the cue played on. With a panic fade of
+        nought Esc is a cut, and the cue is cut with the rest. */
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+
+    const auto media = rig.startMedia();
+    const auto track = rig.runs.find (media)->track;
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "10");
+    rig.fire (rig.stopId);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.audio.playing.count (track) == 0u);
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (media)->isFinished(); }, 5));
+    CHECK (rig.tickUntil ([&] { return rig.runs.all().back().isFinished(); }, 5));   // and the stop cue's run
+}
+
+TEST_CASE ("panic fade: a cue already fading out keeps whichever stop lands first")
+{
+    SUBCASE ("a long fade-and-stop is brought down with everything else")
+    {
+        FadeRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+        const auto media = rig.startMedia();
+        const auto track = rig.runs.find (media)->track;
+
+        rig.setCue (rig.stopId, "verb", "fade");
+        rig.setCue (rig.stopId, "duration", "10");
+        rig.fire (rig.stopId);
+        rig.tickOnce();
+
+        rig.submitAndTick ("run.stopAll");
+
+        for (int n = 0; n < 60; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.audio.playing.count (track) == 0u);
+    }
+
+    SUBCASE ("a short one is left to land where it was going to")
+    {
+        FadeRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "5").ok);
+
+        const auto media = rig.startMedia();
+        const auto track = rig.runs.find (media)->track;
+
+        rig.setCue (rig.stopId, "verb", "fade");
+        rig.setCue (rig.stopId, "duration", "0.4");
+        rig.fire (rig.stopId);
+        rig.tickOnce();
+
+        rig.submitAndTick ("run.stopAll");
+
+        for (int n = 0; n < 25; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.audio.playing.count (track) == 0u);
+    }
+}
+
+TEST_CASE ("panic fade: a group's footer runs once its members have faded out")
+{
+    /*  §4.4: "same code path as normal completion, entered early". The group
+        is asked to stop as it always was; its sounding member is already
+        fading, so the footer - the releasing - waits for the fade rather than
+        cutting underneath it. */
+    GroupRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    const auto rain = rig.document.createCue (rig.groupId, 0, "media", "Rain").id;
+    rig.setCue (rain, "file", "rain.wav");
+
+    const auto footer = rig.roleOf (rig.groupId, "footer");
+    const auto closing = rig.document.createCue (footer, 0, "memo", "Release").id;
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rain).empty(); }));
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto rainRun = rig.runOf (rain);
+    const auto track = rig.runs.find (rainRun)->track;
+    REQUIRE (track >= 0);
+    rig.audio.playing.insert (track);
+    rig.tickOnce();
+
+    const auto groupRun = rig.runOf (rig.groupId);
+    REQUIRE (rig.submitAndTick ("run.stopAll").applied == 1);
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.audio.playing.count (track) == 1u);             // still fading
+    CHECK (rig.runOf (closing).empty());                       // and the footer waits for it
+    CHECK_FALSE (rig.runs.find (groupRun)->isFinished());
+
+    CHECK (rig.runToCompletion (groupRun) < 100);
+    CHECK (rig.audio.playing.count (track) == 0u);
+    CHECK_FALSE (rig.runOf (closing).empty());                 // the footer ran on the way out
+}
+
+TEST_CASE ("panic fade: a cue whose file ends during it gives its voice back, and the stop does not follow it")
+{
+    /*  A finished run still names the track it held. A fade that ends in a stop
+        used to stop that track at its tick whether or not the cue had already
+        ended - so a cue that ran out during Esc's fade, and a GO that took its
+        voice a moment later, had the new cue cut when the old fade arrived. */
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    const auto old = rig.startMedia();
+    const auto track = rig.runs.find (old)->track;
+
+    rig.submitAndTick ("run.stopAll");
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    //  The file runs out, a fifth of the way down.
+    rig.audio.playing.erase (track);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (old)->isFinished(); }, 5));
+
+    //  GO on the next thing, which takes the voice that was given back.
+    rig.fire (rig.mediaId);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto again = rig.runs.all().back().id;
+    REQUIRE (again != old);
+    REQUIRE (rig.runs.find (again)->track == track);
+    rig.audio.playing.insert (track);
+
+    for (int n = 0; n < 60; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.audio.playing.count (track) == 1u);
+    CHECK_FALSE (rig.runs.find (again)->isFinished());
+}
+
+TEST_CASE ("Esc: a group a stop cue is fading out stops with everything else, and its footer runs")
+{
+    /*  The group-sized twin of the stop cue's hole, which turned out not to be
+        one: a stop cue fading a GROUP holds no voice, so the panic fade does not
+        take it over, and Esc stops the group as the root it is - its sequence
+        does not carry on, and its footer runs. Kept because the voice-sized
+        case above was broken, and this is where the same rule would break
+        next. */
+    for (const auto* seconds : { "1", "0" })
+    {
+        INFO ("panicFade " << seconds);
+
+        GroupRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", seconds).ok);
+
+        const auto footer = rig.roleOf (rig.groupId, "footer");
+        const auto closing = rig.document.createCue (footer, 0, "memo", "Release").id;
+        rig.setCue (rig.first, "preWait", "10");             // hold the group in its members
+
+        const auto stopId = rig.document.createCue (rig.listId, 3, "transport", "Preshow out").id;
+        rig.setCue (stopId, "target", rig.groupId);
+        rig.setCue (stopId, "verb", "fade");
+        rig.setCue (stopId, "duration", "20");
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").applied == 1);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+        const auto groupRun = rig.runOf (rig.groupId);
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string (stopId) });
+        rig.tickOnce();
+        REQUIRE (rig.runs.find (groupRun)->state == cue::runState::stopping);
+
+        REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+
+        //  Well inside the stop cue's twenty seconds: Esc has brought it down.
+        CHECK (rig.runToCompletion (groupRun) < 100);
+        CHECK_FALSE (rig.runOf (closing).empty());
+        CHECK (rig.runOf (rig.second).empty());               // and the sequence did not carry on
+    }
+}
+
+TEST_CASE ("panic fade: a GO while a manual group fades out starts the scene again")
+{
+    /*  Before the fade, the group was gone a tick after Esc, so a GO a moment
+        later entered it afresh. A group that takes a second to leave must not
+        swallow that GO: the member it fires would be spawned into a group
+        that kills it on the next tick - a GO that made no sound. */
+    GroupRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+    rig.setCue (rig.groupId, "advance", "manual");
+
+    const auto rain = rig.document.createCue (rig.groupId, 0, "media", "Rain").id;
+    rig.setCue (rain, "file", "rain.wav");
+
+    rig.setStandby (rain);                // the pointer on the member, as a manual group has it
+    REQUIRE (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rain).empty(); }));
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto track = rig.runs.find (rig.runOf (rain))->track;
+    REQUIRE (track >= 0);
+    rig.audio.playing.insert (track);
+    rig.tickOnce();
+
+    const auto oldGroup = rig.runOf (rig.groupId);
+    REQUIRE (rig.standby() == rig.first);
+
+    rig.submitAndTick ("run.stopAll");
+    rig.tickOnce();
+    REQUIRE (rig.runs.find (oldGroup)->state == cue::runState::stopping);
+
+    //  Rejections, not applications: the same tick applies the machine's own reports.
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }, 20));
+
+    const auto* one = rig.runs.find (rig.runOf (rig.first));
+    REQUIRE (one != nullptr);
+    CHECK (one->parent != oldGroup);
+    CHECK_FALSE (one->killed);
+    CHECK_FALSE (one->skipFooter);
+}
+
+//==============================================================================
+/*  THE LEAST TIME BETWEEN TWO GOs (PRD §3.7's GO debounce, a show setting
+    since 2026-09-28, author: "a 'time between' Go's"). */
+TEST_CASE ("go: inside the least time between two GOs a GO is refused, and the standby does not move")
+{
+    Rig rig;
+    const auto third = rig.document.createCue (rig.listId, 2, "memo", "Blackout").id;
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0.5").ok);
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.standby() == rig.memoId);
+
+    /*  A bounce, two ticks later: refused in words, and nothing moved. */
+    rig.tickOnce();
+    const auto bounced = rig.submitAndTick ("go");
+    CHECK (bounced.applied == 0);
+    CHECK (rig.engine.lastError().find ("too-soon") != std::string::npos);
+    CHECK (rig.standby() == rig.memoId);
+    CHECK (rig.runOf (rig.memoId).empty());
+
+    /*  Measured from the GO that FIRED, not from the one refused: half a
+        second after the first press, the next one fires what the bounce
+        would have. */
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").applied == 1);
+    CHECK_FALSE (rig.runOf (rig.memoId).empty());
+    CHECK (rig.standby() == third);
+}
+
+TEST_CASE ("go: with no least time, two GOs on one tick both fire")
+{
+    Rig rig;
+    CHECK (rig.document.getAttribute ("/godot/list/goDebounce") == std::optional<std::string> ("0"));
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.engine.submit ("cli", "go", {}));
+    REQUIRE (rig.engine.submit ("cli", "go", {}));
+    CHECK (rig.tickOnce().applied == 2);
+    CHECK_FALSE (rig.runOf (rig.memoId).empty());
 }
 
 TEST_CASE ("group: a header's cues are published as cues, and are not members of the group")

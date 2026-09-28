@@ -644,7 +644,9 @@ TEST_CASE ("range scheduler: Esc, panic and the cross stop a cue whose range loo
             else
                 rig.submitAndTick (command);
 
-            rig.ticks (5);
+            /*  Esc fades for the show's panic fade first - a second, unless the
+                show says otherwise (2026-09-28) - and the two kills cut. */
+            rig.ticks (std::string (command) == "run.stopAll" ? 60 : 5);
             CHECK (rig.run (id)->isFinished());
             CHECK (rig.audio.playing.empty());
         }

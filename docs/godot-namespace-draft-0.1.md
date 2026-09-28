@@ -12085,3 +12085,133 @@ the machine at the desk says how precisely.
 
 **Not built** is §20.7's list. **Waiting for the author:** the law and the gestures judged by eye in
 the window (DD), and a lane heard on the MADIface.
+
+## 21. GO and Esc as the show wants them: the least time between two GOs, and the panic fade
+
+Built on 2026-09-28. The request: *"In the show settings, there should be a 'time between' Go's and
+a 'Panic' fade duration that fades out all playing cues. It seems the Panic cuts everything with no
+fade time."*
+
+**What it was, before.** Esc and the PANIC button send `run.stopAll`, which asks every root run to
+stop the graceful way (§4.4: footers run). Nothing in that path moved a level: `enforceStops` told
+the audio side to stop each voice on the next tick, which is a cut. A GO was taken whenever it came;
+PRD §3.7 has always said a GO debounce is a setting and not a constant, and the devplan put it in
+Phase 10.
+
+### 21.1 The two rows
+
+| Node | Type, default | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/list/goDebounce` | `d`, 0 s (0..10) | rw | show | the least time between two GOs; nought is off |
+| `/godot/audio/panicFade` | `d`, 1 s (0..30) | rw | show | how long Esc fades what is sounding before it stops it; nought is a cut |
+
+Both are the show's: saved with it, set by `node.set`, undone by Ctrl-Z, refused under the lock. The
+GO's is on `Lists`, beside `focus` (which list GO acts on); the fade's is on `Audio`, beside
+`rackBudget`, since it is what Esc does to sound. Both are read at the moment they are used - the
+fade at the press, the window at each GO - so an edit never lands under a fade already running.
+
+The window has a **Playback** tab, last, with the two numbers, their unit and a sentence each on
+what they do and what nought means. A comma is a decimal point there, as on the Rack tab.
+
+### 21.2 The GO window
+
+A GO whose tick is less than `goDebounce` after the last GO that FIRED something is refused with a
+new reason, **`too-soon`**. Nothing fires and the standby does not move, so the next GO outside the
+window fires what the refused one would have. The window is measured from the GO that fired, not
+from the refused one, so a hand hammering the key still gets a GO every window. A GO with nothing in
+standby fires nothing and does not start a window.
+
+Every GO counts, whoever sends it - the keyboard, a surface's PLAY, a network client - because the
+check is in the `go` handler. `cue.fire`, a trigger and a strip press are not GOs and are never held
+back. The last GO's tick is handler state, so a replay, which runs the handler, refuses the same
+GOs the night did.
+
+The desktop's transport line says it in words: *"GO ignored: too soon after the last one (Show
+settings > Playback)"* instead of `go refused: too-soon`.
+
+### 21.3 The panic fade
+
+`registerGoCommands` specialises `run.stopAll` and `run.killAll` (the registry's "last registration
+wins"): each does its Runner half first and then exactly what the run-table registration did.
+
+**Esc** (`Runner::beginPanicFade`): every run that holds a voice and is `playing` gets the job a
+stop cue's `fade` verb runs - to silence over `panicFade`, then the stop - with no cue behind it
+(`reportsSelf = false`, a sampler release's shape). A fade already on the run gives way from wherever
+its level has got to. Then every root is asked to stop, as before. A group's members are already
+fading, so the group's graceful stop (which kills its children) waits for them, and its footer runs
+when they have gone: §4.4's *"same code path as normal completion, entered early"*, at the speed the
+show chose. A mic cue is faded at its input, as a stop cue's fade does it (§18.5): the voice goes and
+the channel's reverb rings on. Nothing armed, waiting or in its pre-wait is faded; it has nothing to
+fade and stops at once, as it always did.
+
+**A run already on its way out keeps whichever stop lands first.** A ten-second fade-and-stop is
+brought down with everything else; a stop due sooner than the panic's lands where it was going to.
+
+**Nought** starts nothing, and Esc is the cut it was.
+
+**Double Esc** (`Runner::dropStopFades`): every job holding a stop still to come lets go - the
+panic's, a stop cue's fade, a sampler release - so the roots `run.killAll` marks are cut by
+`enforceStops` on the next tick instead of being faded to the end. §4.4: *"drops all actions"*.
+
+**A GO during the fade.** A group can now be `stopping` for as long as the fade. Both walks that
+descend into a live group (`fireStandby`, `prepareStandby`) pass over one that is stopping and make
+a fresh run: a member spawned into the dying group would be killed by it on the next tick, a GO that
+made no sound. Before, the group was gone a tick after Esc and a GO entered it afresh anyway.
+
+The desktop's Esc notice says the number: *"Esc: every cue fading out over 1 s, footers run - Esc
+again cuts at once"*.
+
+### 21.4 Three holes found on the way, older than this
+
+All three were found by this change's tests, and all three are closed by it:
+
+- **Esc while a stop cue was fading a cue out left the cue playing.** Esc marked the stop cue's own
+  run with the other roots, and a fade whose run is stopped gives its target back its level - the
+  rule for a stop cue killed on its own from the running pane, where the operator asked nothing of
+  the cue. The cue went back to `playing`, nothing was left to stop it, and it played on. Now a
+  stop that lands before the panic's is detached from the stop cue's run and lands; with a panic
+  fade of nought, it is dropped and the cue is cut with the rest.
+- **A double Esc in the same position did the same**, which is worse: the one press that promises
+  everything is dropped. Now it cuts.
+- **A fade that ends in a stop stopped its target's voice even after the target had ended.** A
+  finished run still names the track it held, and the job ran to its stop tick regardless - so a cue
+  whose file ran out during the fade gave its voice back, a GO took it, and the new cue was cut when
+  the old fade arrived. Rare with a stop cue; likely with Esc, whose fade is a second long and whose
+  next gesture is a GO. The stop now reaches only a run that has not ended; the job still runs to its
+  tick, for the stop cue's own run.
+
+Each was checked by disabling its fix and running its case against the old path: all three failed
+as described. The same rule aimed at a GROUP (a stop cue fading a scene, then Esc) was checked the
+same way and was not broken - the group is a root the press stops - so it keeps a test and no fix.
+
+### 21.5 The decisions
+
+The author asked for the two settings and for the Panic to fade; the rest was left to the
+implementer and is the author's to overrule:
+
+| | Decision | Whose |
+|---|---|---|
+| **DK** | **Both are show settings**, on `Lists` and `Audio`, not user preferences as PRD §3.7 words the debounce | the author's (*"in the show settings"*); the placement is the implementer's |
+| **DL** | **A GO inside the window is refused `too-soon`** and said on the transport line; the standby stays; measured from the last GO that fired; every GO counts, `cue.fire` and triggers never | implementer's call |
+| **DM** | **The defaults: a panic fade of one second, a GO window of nought (off).** A show that says nothing now fades on Esc | implementer's call |
+| **DN** | **Esc fades only what is sounding; the stop that lands first wins**; a mic cue is faded at its input | implementer's call |
+| **DO** | **A double Esc drops every stop still to come**, the panic's and a stop cue's alike | §4.4, *"drops all actions"* |
+| **DP** | **A GO during the fade enters a stopping group afresh** rather than joining it | implementer's call |
+
+**Not changed, and worth knowing.** Decision N still counts a cue that Esc is fading out as running,
+so a GO on that same cue during the fade is ignored; after Esc the standby is normally on the next
+cue, so this needs the operator to have moved it back inside the fade. A single Esc during the fade
+- after the double-press window - is applied and changes nothing: the fade carries on. PRD §3.7
+("a user preference") and the devplan's Phase 10 line ("Debounce as a user preference") now describe
+something the show holds; neither was edited.
+
+### 21.6 Tests
+
+`GoTests`: the fade and its stop, nought as a cut, the one-second default, a double Esc mid-fade, the
+three holes of §21.4 and the group case beside them, the stop that lands first (both ways round), a
+group's footer after its member has faded, a GO into a manual group while it fades, and the GO window (refused, standby kept, the
+next GO after the window, and off by default with two GOs on one tick). `ClientTests`: the
+transport line's words. `ShowSettingsUiTests`: the Playback tab - both boxes, a comma typed, the
+value it already has sending nothing, the lock. `RangeTests`' Esc case now allows the fade before it
+checks the run has ended. **Owed to the bench:** Esc on the MADIface with a bed, a mic cue with a
+reverb, and a group with a footer; and the GO window at the D700's PLAY.

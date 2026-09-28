@@ -161,6 +161,13 @@ namespace wfg
             group is not armed, or this member is past the last strip. */
         inline constexpr const char* needsStrip       = "needs-strip";
 
+        /*  A GO INSIDE THE SHOW'S LEAST TIME BETWEEN TWO GOs (`list/goDebounce`,
+            PRD §3.7, 2026-09-28): the last GO fired something less than that
+            long ago, so this one is taken for a bounce and fires nothing. The
+            standby has not moved, so the next GO outside the window fires what
+            this one would have. */
+        inline constexpr const char* tooSoon          = "too-soon";
+
         /*  A PRESS ON A TAKE WITH NOTHING TO PRESS IT THROUGH (Phase 9c,
             namespace draft §19.6): Rec, Loop or a layer asked of a sampling
             channel no sounding mic cue holds - its cue not fired yet, ended,
