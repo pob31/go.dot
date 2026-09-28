@@ -1,0 +1,52 @@
+# wfg-log 1
+# fixture lane-record - a lane recorded from a fader: the pick, the refusals,
+# and a pass (namespace draft §20.9).
+#
+# WHAT IT IS FOR: that the lane commands and every refusal they owe reproduce
+# exactly under both locales. Recorded from a real `wfg serve` of
+# tests/fixtures/bundles/lane-record driven over OSC with NO audio device -
+# which is why the pass below ends with nothing written: with no sample clock
+# there is no second of the file for a hand to be recorded at. The lane a pass
+# writes is an engine `node.set` in the log of a session that had sound, and
+# `blackbox/lane_record.py` replays one of those every run. The header lines
+# below are the session's own.
+#
+# bundle lane-record sha256:45c4cb58b8d985e45c412c4941869f5a85caf3e5ee342541aa7a67951ebf1efe
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media tone.wav 0 0.000
+#
+# NOTHING WAITS, so a fader offered is `not-waiting`; no fader is taken, so a
+# pass is `no-fader`; and a list is not a media cue.
+R 26 0 udp:127.0.0.1:54584 not-waiting lane.take s:"VR000006"
+R 41 1 udp:127.0.0.1:54586 no-fader lane.record
+R 56 2 udp:127.0.0.1:54587 bad-value lane.arm s:"VR000001"
+#
+# THE PICK (DF): the lane armed, the panel's first strip taken - and the second
+# refused, the lane having its fader.
+A 71 3 udp:127.0.0.1:54588 lane.arm s:"VR000002"
+A 86 4 udp:127.0.0.1:54589 lane.take s:"VR000006"
+R 101 5 udp:127.0.0.1:54590 not-waiting lane.take s:"VR000007"
+#
+# A HAND SETTING THE FADER BEFORE ANY PASS: applied through the live door, and
+# ignored - nothing is written until a touch in a pass (DG).
+A 116 6 udp:127.0.0.1:54591 node.set s:"/godot/surface/laneRide" f:-3
+#
+# THE PASS: the cue fired as `cue.fire` fires it, the run's drawn identifier in
+# the record; the fader cannot be freed under it.
+A 131 7 udp:127.0.0.1:54592 lane.record d:0 s:"Y63KSHEK"
+R 146 8 udp:127.0.0.1:54593 busy lane.free
+#
+# The ride: touched, set, let go - latched - and the hand's stop.
+A 161 9 udp:127.0.0.1:54594 node.touch s:"/godot/surface/laneRide"
+A 176 10 udp:127.0.0.1:54595 node.set s:"/godot/surface/laneRide" f:-9
+A 191 11 udp:127.0.0.1:54596 node.release s:"/godot/surface/laneRide"
+A 206 12 udp:127.0.0.1:54597 lane.stop
+#
+# THE RUNNER ENDS IT on the next tick: the cue stopped, and the pass cleared as
+# kept - with no lane written, there being no sound to have been at a second of.
+A 207 13 engine run.kill s:"Y63KSHEK"
+A 207 14 engine lane.stop s:"kept"
+A 208 15 engine run.ended s:"Y63KSHEK"
+#
+# And the fader goes back to what it rode.
+A 246 16 udp:127.0.0.1:54598 lane.free

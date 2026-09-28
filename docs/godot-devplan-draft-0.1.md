@@ -692,6 +692,13 @@ plays the cue with the fader following the lane; a touch is heard at once and wr
 let-go, until the pass stops; the lane holds the ride and one undo takes the pass away; the D700's
 Rec starts and stops it; CI green.
 
+*As built, 2026-09-28:* R.0 `39600af`, R.1-R.2 `447d14d`, R.3-R.4 `7767a52` and R.5 with the
+close-out (namespace §20.10). What the code can show is shown: the pick, the refusals and a pass
+latched and written once (`LaneRecordTests`, `logs/lane-record.wfglog`); a touch that takes and the
+Rec key's pass (`SurfaceBridgeTests`); the panel's take and the window's four states
+(`RunPaneUiTests`); and the whole of it over a real graph - heard, written, undone, replayed
+(`blackbox/lane_record.py`, timing judged off CI). The D700 itself is the bench's.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

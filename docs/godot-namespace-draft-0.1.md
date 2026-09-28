@@ -12196,6 +12196,38 @@ Touch and write modes; more than one lane recorded at once; a fader recorded ont
 than a media cue's level; the touch-without-move filter (§16.10) - a brushed fader counts as a
 touch, so an armed lane takes whatever is brushed first.
 
+### 20.10 What was built, against what §20.9 drew
+
+*Written at close-out, 2026-09-28.* R.0 `39600af` (§20.9's drawing), R.1-R.2 `447d14d` (the engine),
+R.3-R.4 `7767a52` (the bridge, the panel, the window), and R.5 - the bridge's own case, the driver, the
+replay fixture and this. Where the build departs from the drawing:
+
+- **The pick's table is the lane's own**, `cue/LaneTable`, not a part of the surfaces' table: the
+  commands, the Runner's hook and the tree share it; the bridge reads only the tree. `lane`,
+  `laneFader` and `laneRecording` are published from the tree's document half - every change to them
+  is a command - and `laneRide` from its runtime half, since it moves every tick.
+- **The pass is fired, not GONE**: `lane.record` calls what `cue.fire` calls, so the GO window of §21
+  never holds it back and the standby does not move; the run's drawn identifier rides in the record.
+- **`lane.stop` has two voices**: bare, a hand asking; with `kept` or `dropped`, the Runner saying it
+  has - logged after the lane's own `node.set`, so a replay reads the ask, the lane and the end in
+  order. Two refusal words are new: `not-waiting` and `no-fader`.
+- **The window's transport ENDS a pass rather than killing it**: a kill is double Esc's verb and drops
+  the ride (DM), so while this cue's lane records, the transport's stop sends `lane.stop`.
+- **A touch that takes holds nothing**, and the let-go after it releases nothing; a taken strip's own
+  REC press sets no starting level (the cue is the lane's, not a sampler member's). The strip's word
+  gained `lane` and `recording`, in the standby's colour and the recording's on the panel.
+- **A touch with no move latches where the fader was** - the ride's own value - not at a level a
+  hand left in another pass; and the ride's text drops any point that stops climbing once rounded to
+  a tenth of a millisecond, so one close pair never costs a whole ride.
+- **The driver's numbers** (Debug, this machine, both locales): the hand's levels heard where they
+  were set, the latch held after let-go, the ride's turn written about 60 ms after the moment the
+  driver marked sending it (the tick, and the datagram's way there) - within the tenth of a second the
+  driver allows off CI, and not judged on it.
+
+**Waiting for the author and the bench:** the D700's transport Rec starting and stopping a pass and
+its light; the taken strip's REC light and screen; the motor flying to the lane's start value when
+the taking hand lets go; and the gestures judged by eye in the window.
+
 ## 21. GO and Esc as the show wants them: the least time between two GOs, and the panic fade
 
 Built on 2026-09-28. The request: *"In the show settings, there should be a 'time between' Go's and
