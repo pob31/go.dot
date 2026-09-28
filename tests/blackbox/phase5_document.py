@@ -1342,7 +1342,8 @@ def run(locale: "str | None") -> int:
                 found = common.wait_until(lambda: runs_for(server, SOUNDING))
                 sounding_run = found[0] if found else ""
 
-                report.check(bool(sounding_run), "GO gives the media cue a run of its own")
+                report.check(bool(sounding_run), "GO gives the media cue a run of its own",
+                             f"lastError reads {value_of(server, '/godot/engine/lastError')!r}")
 
                 state = f"/godot/run/{sounding_run}/state"
 
