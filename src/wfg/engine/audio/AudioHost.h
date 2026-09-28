@@ -463,6 +463,16 @@ namespace wfg::audio
             on with the tick. Any thread. */
         bool isTrackSourceReady (int trackIndex) const;
 
+        /*  Whether a slot's clip will play through a time-stretcher, asked
+            with the predicate Tracktion builds the graph with. False for a cue
+            in varispeed however many stretchers are compiled in: that is what
+            patch 0001 and the engine behaviour are for (namespace draft
+            §22.3), and a test that asks this is how a build that lost either
+            finds out. False for a slot with no clip.
+
+            Message thread: it reads Tracktion's model. */
+        bool isTrackStretched (int trackIndex, int slot = 0) const;
+
         /*  Points a track's output stage at a set of destinations: absolute
             hardware channels and their gains, plus the cue's level in dB.
 

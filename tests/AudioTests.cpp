@@ -5532,3 +5532,40 @@ TEST_CASE ("audio host: a file at another rate plays at its own pitch")
         CHECK (rising <= 1005);
     }
 }
+
+TEST_CASE ("audio host: a cue in varispeed is resampled, though a stretcher is compiled in")
+{
+    /*  Namespace draft §22.3. Signalsmith is compiled in, which makes it
+        Tracktion's default stretcher, and Tracktion hands the default to every
+        auto-tempo clip whose mode is `disabled` - every slot clip Go.dot has.
+        Patch 0001 and the engine behaviour are what keep a cue at its own
+        speed, with its own samples, on the resampler. Asked of a real arm,
+        with the predicate the graph is built with: if either went missing,
+        every cue would be stretched and nothing else would say so, since a
+        stretcher at one plays at the right pitch - just not the same samples. */
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 256;
+    settings.outputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    //  The resident clip, before anything is armed on it.
+    CHECK_FALSE (rig.host.isTrackStretched (0, 0));
+
+    const auto tone = writeSineTone (rig.storage.folder, 48000, 1000.0, 0.25f, 2);
+    REQUIRE (tone.existsAsFile());
+    REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
+
+    CHECK_FALSE (rig.host.isTrackStretched (0, 0));
+
+    //  And no slot, no clip: a question about nothing is a no.
+    CHECK_FALSE (rig.host.isTrackStretched (0, 5));
+    CHECK_FALSE (rig.host.isTrackStretched (3, 0));
+}

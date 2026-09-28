@@ -1,0 +1,64 @@
+Go.dot patch 0001 for Tracktion Engine: an auto-tempo clip may be resampled.
+
+Every clip in a launcher slot is auto-tempo (Tracktion forces it), and
+AudioClipBase::getActualTimeStretchMode hands any auto-tempo clip whose mode is
+`disabled` the default time-stretcher. With no stretcher compiled in that default
+is `disabled` too, and nothing happens; with one compiled in, every clip is
+stretched - including those Go.dot wants resampled, which then stop being
+bit-exact and cost a stretcher's CPU for nothing.
+
+This adds EngineBehaviour::autoTempoClipsUseDefaultTimeStretcher(), true by
+default so Tracktion behaves as it always has, and reads it there. Go.dot's
+engine behaviour returns false: a cue in varispeed stays on the resampler, and a
+cue in timestretch names its stretcher explicitly.
+
+Written to be offered upstream. Each file it touches carries a notice that Go.dot
+modified it (GPL-3, section 5(a)).
+
+Applied by Go.dot's build, cmake/WfgTracktionPatches.cmake, in the order
+patches/tracktion_engine/series gives; refreshed from the working tree with
+scripts/te-patches.py refresh, which keeps this header. Against Tracktion Engine
+13b5132 (2026-09-23). Namespace draft section 22.3, decision DQ.
+
+diff --git a/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.cpp b/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.cpp
+index 23657cac089..0e11cee73e4 100644
+--- a/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.cpp
++++ b/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.cpp
+@@ -666,7 +666,14 @@ TimeStretcher::Mode AudioClipBase::getActualTimeStretchMode() const noexcept
+ {
+     TimeStretcher::Mode ts = timeStretchMode;
+ 
+-    if (ts == TimeStretcher::disabled && (getAutoPitch() || getAutoTempo() || getPitchChange() != 0.0f))
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++    // patches/tracktion_engine/0001-auto-tempo-clips-may-resample.patch: auto-tempo alone
++    // takes the default stretcher only when the engine's behaviour says so, so a disabled
++    // clip can be resampled (EngineBehaviour::autoTempoClipsUseDefaultTimeStretcher).
++    const auto autoTempoWantsStretcher = getAutoTempo()
++                                          && edit.engine.getEngineBehaviour().autoTempoClipsUseDefaultTimeStretcher();
++
++    if (ts == TimeStretcher::disabled && (getAutoPitch() || autoTempoWantsStretcher || getPitchChange() != 0.0f))
+         ts = TimeStretcher::defaultMode;
+ 
+     return ts;
+diff --git a/modules/tracktion_engine/utilities/tracktion_EngineBehaviour.h b/modules/tracktion_engine/utilities/tracktion_EngineBehaviour.h
+index a21ea9c0d8d..2cd688c1175 100644
+--- a/modules/tracktion_engine/utilities/tracktion_EngineBehaviour.h
++++ b/modules/tracktion_engine/utilities/tracktion_EngineBehaviour.h
+@@ -124,6 +124,17 @@ public:
+     /// thread to reduce audio CPU use.
+     virtual bool enableReadAheadForTimeStretchNodes()                               { return false; }
+ 
++    /// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++    /// patches/tracktion_engine/0001-auto-tempo-clips-may-resample.patch, which Go.dot's
++    /// build applies to this Tracktion Engine checkout. This function is Go.dot's addition.
++    ///
++    /// Should an auto-tempo clip whose time-stretch mode is disabled be handed the default
++    /// time-stretcher anyway? True by default, which is what Tracktion has always done.
++    /// Returning false lets such a clip be resampled instead - its pitch moving with its
++    /// speed - so a host can choose varispeed or time-stretch per clip while a stretcher is
++    /// compiled in. Auto-pitch and a pitch change still take the default stretcher.
++    virtual bool autoTempoClipsUseDefaultTimeStretcher()                            { return true; }
++
+     /// Should return true if the incoming timestamp for MIDI messages should be used.
+     /// If this returns false, the current system time will be used (which could be less accurate).
+     /// N.B. this is called from multiple threads, including the MIDI thread for every

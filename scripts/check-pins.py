@@ -35,7 +35,7 @@ Nothing in git enforces that. This script does — as the first CI job, so a
 skewed pair costs fifteen seconds instead of three platforms' worth of compile
 minutes on a repo that is private, and therefore billed, until alpha.
 
-THE SIX CHECKS
+THE SEVEN CHECKS
 
  (a) every submodule is checked out at the SHA its gitlink names
  (b) TE's own modules/juce gitlink == our ThirdParty/JUCE gitlink
@@ -43,6 +43,9 @@ THE SIX CHECKS
  (d) no CMake file of ours does add_subdirectory() of TE's ROOT
  (e) no workflow uses `submodules: recursive`
  (f) ThirdParty/juce_simpleweb/asio/ is POPULATED on disk
+ (g) Go.dot's Tracktion patches (patches/tracktion_engine/series) are on the
+     tree, or fit it cleanly - so a pin moved without reworking them fails here,
+     in seconds, rather than at every job's configure
 
 (c) and (f) are the same question with opposite answers, and the pair is the
 whole submodule policy in two lines. There are two nested submodules in this
@@ -74,6 +77,7 @@ SIMPLEWEB = "ThirdParty/juce_simpleweb"
 SPATCORE = "ThirdParty/spatcore"
 TE_VENDORED_JUCE = "ThirdParty/tracktion_engine/modules/juce"
 SIMPLEWEB_ASIO = "ThirdParty/juce_simpleweb/asio"
+TE_PATCHES = "patches/tracktion_engine"
 
 # How to repair each submodule, which is NOT the same command for all of them:
 # juce_simpleweb has a nested asio and needs a scoped --recursive, and the other
@@ -316,6 +320,49 @@ def check_e(failures):
         print("  ok  (e) no workflow uses submodules: recursive")
 
 
+def check_g(failures):
+    """Go.dot's patches to Tracktion are on the tree, or fit it cleanly.
+
+    The build applies patches/tracktion_engine/series at every configure
+    (cmake/WfgTracktionPatches.cmake), so this asks the same two questions it
+    does, in the same order, without changing anything: does the series reverse
+    cleanly (it is on), or apply cleanly (a fresh checkout, which is what CI
+    has at this point). A pin moved without the patches reworked against it
+    fails here, before any toolchain exists.
+    """
+    series = REPO_ROOT / TE_PATCHES / "series"
+    if not series.is_file():
+        failures.append(f"{TE_PATCHES}/series is missing; the build cannot apply Go.dot's "
+                        "patches to Tracktion without it")
+        return
+    names = [line.strip() for line in series.read_text(encoding="utf-8").splitlines()
+             if line.strip() and not line.strip().startswith("#")]
+    patches = [REPO_ROOT / TE_PATCHES / name for name in names]
+    missing = [p.name for p in patches if not p.is_file()]
+    if missing:
+        failures.append(f"{TE_PATCHES}/series names {', '.join(missing)}, which is not there")
+        return
+    if not patches:
+        print("  ok  (g) no Tracktion patches in the series")
+        return
+    reversed_args = [str(p) for p in reversed(patches)]
+    if git("apply", "--check", "--reverse", *reversed_args, cwd=REPO_ROOT / TE).returncode == 0:
+        print(f"  ok  (g) Tracktion carries the {len(patches)} patch(es) of the series")
+        return
+    fits = git("apply", "--check", *[str(p) for p in patches], cwd=REPO_ROOT / TE)
+    if fits.returncode == 0:
+        print(f"  ok  (g) the {len(patches)} Tracktion patch(es) fit the pin cleanly")
+        return
+    why = fits.stderr.strip().replace("\n", "\n        ")
+    failures.append(
+        f"Go.dot's Tracktion patches ({TE_PATCHES}/series) neither are on {TE} nor\n"
+        f"    apply to it cleanly:\n        {why}\n"
+        "    If the pin has just moved, rework them against it:\n"
+        "        python3 scripts/te-patches.py apply --3way   (resolve), then refresh\n"
+        "    If the tree carries other changes: git -C ThirdParty/tracktion_engine status"
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
@@ -337,6 +384,7 @@ def main() -> int:
     check_d(failures)
     check_e(failures)
     check_f(failures)
+    check_g(failures)
 
     if failures:
         print("\ncheck-pins: FAILED\n")

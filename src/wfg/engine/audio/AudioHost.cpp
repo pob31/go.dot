@@ -140,6 +140,19 @@ namespace wfg::audio
                 sample-accurate; a fade nobody declared is exactly the kind of
                 thing that makes a join not be. */
             bool autoAddClipEdgeFades() override { return false; }
+
+            /*  A CUE IN VARISPEED IS RESAMPLED, NOT STRETCHED - the question
+                patch 0001 adds to Tracktion (patches/tracktion_engine/, decision
+                DQ, namespace draft §22.3).
+
+                Every slot clip is auto-tempo, and Tracktion hands an auto-tempo
+                clip whose mode is `disabled` the default stretcher. Since
+                Signalsmith is compiled in (§22, DZ) that default is Signalsmith,
+                so without this every cue - those at one included - would go
+                through a stretcher: no longer bit-exact, primed, and its CPU spent
+                for nothing. With it, `disabled` means the resampler, and a cue in
+                timestretch names Signalsmith itself at the arm. */
+            bool autoTempoClipsUseDefaultTimeStretcher() override { return false; }
         };
 
         /*  Where Tracktion keeps its preferences and cache.
@@ -1349,6 +1362,15 @@ namespace wfg::audio
 
             clip.setAutoPitch (false);
             clip.setSpeedRatio (1.0);
+
+            /*  THE MODE IS NAMED, NEVER INHERITED. `disabled` is the resampler
+                (the engine behaviour above sees to that), and it is written on
+                every arm because Tracktion gives a clip created from a loopable
+                file a stretch mode of its own (tracktion_ClipOwner.cpp:291-297),
+                which would be Signalsmith now that one is compiled in. Writing
+                the value a clip already holds changes nothing and rebuilds
+                nothing. */
+            clip.setTimeStretchMode (te::TimeStretcher::disabled);
         }
 
         /*  Points one slot's clip at one file, whole - the Phase 2 arm, now
@@ -1652,6 +1674,14 @@ namespace wfg::audio
                     return false;
 
             return true;
+        }
+
+        bool isTrackStretched (int trackIndex, int slotIndex) const
+        {
+            const auto* clip = clipOn (trackIndex, slotIndex);
+
+            return clip != nullptr
+                     && clip->getActualTimeStretchMode() != te::TimeStretcher::disabled;
         }
 
         void setTrackRouting (int trackIndex, double levelDb,
@@ -2461,6 +2491,11 @@ namespace wfg::audio
     bool AudioHost::isTrackSourceReady (int trackIndex) const
     {
         return impl->isTrackSourceReady (trackIndex);
+    }
+
+    bool AudioHost::isTrackStretched (int trackIndex, int slot) const
+    {
+        return impl->isTrackStretched (trackIndex, slot);
     }
 
     void AudioHost::setTrackRouting (int trackIndex, double levelDb,

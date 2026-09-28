@@ -646,17 +646,47 @@ using the one TE was tested against, while pinning it ourselves so the URL is
 HTTPS and the build never enters TE's root `CMakeLists.txt`. Keeping that
 equality true is the whole job of `scripts/check-pins.py`.
 
+### Go.dot's patches to Tracktion Engine
+
+Tracktion is built with a short series of changes of Go.dot's own, in
+`patches/tracktion_engine/` - today, what a media cue's speed needs (namespace
+draft §22.3). **The build applies them**: every configure puts the series on the
+submodule's working tree before a Tracktion source is read, or finds it already
+on and touches nothing (`cmake/WfgTracktionPatches.cmake`). So:
+
+- `git status` shows `ThirdParty/tracktion_engine` as **modified**. That is the
+  series, and it is expected. `git -C ThirdParty/tracktion_engine diff` shows it.
+- A configure refuses a Tracktion tree carrying anything else, and says how to
+  look at it and how to clean it. It never cleans it itself.
+- `python3 scripts/te-patches.py status | apply | revert | refresh | new` does by
+  hand what the configure does, and what it cannot: `refresh` rewrites a patch
+  from the tree after an edit in the submodule; `new` starts one.
+- `check-pins.py` check (g) says whether the series is on or fits the pin.
+
+Every file the series touches carries a notice that Go.dot modified it, and
+`THIRD_PARTY_NOTICES.md` says the Tracktion Engine in this build is modified.
+
 ### Bumping a pin
 
+0. Make sure nothing else is building from this checkout, then take Go.dot's
+   patches off Tracktion: `python3 scripts/te-patches.py revert`. Git will not
+   check a new commit out over files the patches changed.
 1. Move `ThirdParty/tracktion_engine` to the new tag.
 2. Read TE's new vendored JUCE SHA:
    `git -C ThirdParty/tracktion_engine ls-tree HEAD modules/juce`.
 3. Move `ThirdParty/JUCE` to **that exact SHA**. Not to the tip of `develop`, not
    to the nearest tag.
-4. Run `python3 scripts/check-pins.py`, then the presets locally on at least one
-   platform.
-5. **Commit both gitlinks in one commit**, so a bisect can never land on a
-   skewed pair.
+4. Put the patches back on: `python3 scripts/te-patches.py apply --3way`. If a
+   hunk no longer fits, resolve it in the submodule, then
+   `python3 scripts/te-patches.py refresh` rewrites the patch from the tree.
+5. Run `python3 scripts/check-pins.py`, then configure every build tree and run
+   the presets locally on at least one platform.
+6. **Commit both gitlinks and the patches in one commit**, so a bisect can never
+   land on a skewed pair, or on a pin its patches do not fit.
+
+**Pulling somebody else's pin move** is step 0 and then the pull: revert, pull,
+`git submodule update --init ThirdParty/tracktion_engine ThirdParty/JUCE`, and
+the next configure applies the moved series.
 
 Never `git submodule update --remote` — it moves a pin to a branch tip behind
 your back, which is the one thing a pin exists to prevent. Never a **blanket**
@@ -755,6 +785,10 @@ Two directories that do **not** exist here, and will not:
    cmake --build --preset vs-debug
    ```
 4. Update `docs/` when the behaviour it describes changes.
+5. A change to Tracktion Engine goes in `patches/tracktion_engine/`, never as a
+   commit in the submodule: edit the submodule's files, then
+   `python3 scripts/te-patches.py refresh` (or `new` for a patch of its own),
+   and carry the modification notice the other patches carry.
 
 <!-- No CI badge: the repo is private until alpha, and a badge for a private
      repo renders as a broken image for everyone outside it. Add one at the
