@@ -17,15 +17,41 @@
 #include <wfg/engine/document/DocumentCommands.h>
 
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/cue/FxValues.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace wfg::doc
 {
     namespace
     {
+        /*  A STATE FILE'S NAME, as the editing helper writes one: `state/`,
+            then letters, digits, hyphens and underscores, then `.state`.
+            Nothing that could climb out of plugins/ or name a file elsewhere. */
+        bool isStateFileName (const std::string& name)
+        {
+            constexpr std::string_view folder = "state/";
+            constexpr std::string_view extension = ".state";
+
+            if (name.size() <= folder.size() + extension.size()
+                  || name.compare (0, folder.size(), folder) != 0
+                  || name.compare (name.size() - extension.size(), extension.size(), extension) != 0)
+                return false;
+
+            const auto stem = std::string_view (name).substr (folder.size(),
+                                                              name.size() - folder.size() - extension.size());
+
+            for (const auto c : stem)
+                if (! ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_'))
+                    return false;
+
+            return true;
+        }
+
         /*  Every create command takes its identifier as an OPTIONAL last
             argument, and returns the one it used. That single convention is
             what makes replay work without randomness: the engine draws an
@@ -69,6 +95,27 @@ namespace wfg::doc
             return args;
         }
 
+        /*  The `attribute value` pairs a create was sent from `first` on, or
+            nothing when a value is missing its name - an odd count is a
+            message cut short, and guessing which half was meant is how a
+            setting lands on the wrong row. */
+        std::optional<ShowDocument::Attributes> pairsFrom (const std::vector<osc::Value>& args,
+                                                           std::size_t first)
+        {
+            ShowDocument::Attributes pairs;
+
+            if (args.size() <= first)
+                return pairs;
+
+            if ((args.size() - first) % 2 != 0)
+                return std::nullopt;
+
+            for (auto at = first; at < args.size(); at += 2)
+                pairs.emplace_back (args[at].getString(), args[at + 1].getString());
+
+            return pairs;
+        }
+
         Outcome fromEdit (const EditResult& edit, std::vector<osc::Value> appliedArgs)
         {
             if (! edit.ok)
@@ -106,7 +153,7 @@ namespace wfg::doc
     }
 
     void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document,
-                                   ForeignWrite foreign, LiveWrite live)
+                                   ForeignWrite foreign, LiveWrite live, LiveCreate liveSend)
     {
         registry.add ({ "audio.configure", "Set the show's audio interface and channel patches as one edit.",
                         { { "enabled", 'T', false }, { "deviceType", 's', false },
@@ -140,21 +187,33 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  AND THE SETTINGS IT IS BORN WITH (2026-09-27), as `attribute value`
+            pairs after the identifier: a timeline group, a stop aimed at a
+            cue, a program change - one click on the window's new-cue lists,
+            one step to undo. AFTER the identifier, so a log written before
+            them replays as it always did; a client that wants the pairs sends
+            an empty identifier and the record carries the drawn one in its
+            place, the `send.create` shape. */
         registry.add ({ "cue.create",
-                        "Creates a cue or a group inside a list or a group.",
+                        "Creates a cue or a group inside a list or a group, with any settings it is"
+                        " born with given as attribute-value pairs after the id.",
                         { { "parent", 's', false }, { "index", 'i', false },
                           { "kind", 's', false }, { "name", 's', false },
-                          { "id", 's', true } },
+                          { "id", 's', true }, { "attribute", 's', true, true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto id = args.size() > 4 ? args[4].getString() : std::string {};
+                            const auto attributes = pairsFrom (args, 5);
+
+                            if (! attributes)
+                                return Outcome::rejected (reason::badValue);
 
                             const auto edit = document.createCue (args[0].getString(),
                                                                  args[1].getInt32(),
                                                                  args[2].getString(),
                                                                  args[3].getString(),
-                                                                 id);
+                                                                 id, *attributes);
 
                             return fromEdit (edit, withId (args, 4, edit.id));
                         } });
@@ -177,20 +236,37 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });
 
+        /*  AND THE LEVEL IT IS BORN AT, when one is given (2026-09-25). A
+            hand raising a silent fader makes the send and sets its level in
+            one move, and the send used to be born at the row's default of
+            nought and fixed a round trip later - the voice climbed towards
+            unity for those ticks, which the author heard: "when moving them
+            from -inf play at full level for a brief instant before taking the
+            actual level". AFTER the identifier, so a log written before it
+            replays as it always did. */
         registry.add ({ "send.create",
-                        "Adds a send from a media cue into one mix channel. The level is written"
-                        " afterwards, like any other value. Refuses a second send into a bus this"
-                        " cue already sends to.",
+                        "Adds a send from a media cue into one mix channel, at the level given -"
+                        " the one a hand raising a silent fader asked for - or at the row's default"
+                        " when none is. Refuses a second send into a bus this cue already sends to.",
                         { { "cue", 's', false }, { "bus", 's', false },
-                          { "id", 's', true } },
+                          { "id", 's', true }, { "level", 's', true } },
                         true,
-                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&document, liveSend = std::move (liveSend)]
+                        (CommandContext&, const std::vector<osc::Value>& args)
                         {
+                            /*  A SEND UNDER THE LOCK rides live (2026-09-25),
+                                answered in front of the document, which would
+                                refuse it. */
+                            if (liveSend)
+                                if (auto outcome = liveSend (args))
+                                    return std::move (*outcome);
+
                             const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+                            const auto level = args.size() > 3 ? args[3].getString() : std::string {};
 
                             const auto edit = document.createSend (args[0].getString(),
                                                                    args[1].getString(),
-                                                                   id);
+                                                                   id, level);
 
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });
@@ -213,12 +289,66 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });
 
-        registry.add ({ "group.wrap", "Create a group containing the selected cues in show order.",
-                        { { "cues", 's', false }, { "id", 's', true } }, true,
+        /*  A PLUGIN'S WHOLE STATE, KEPT WITH A CUE (the author's decision of
+            2026-09-25). The editing helper has written the bytes into the
+            bundle - a fact about the disk, like a media file copied in - and
+            this is the decision: the Fx names that file and holds every
+            parameter's value beside it, in ONE transaction, so Undo takes both
+            back together. And when it follows a turn of the same insert's knobs
+            from the same hand, it joins that turn's step (ShowDocument's
+            beginTransaction): a turn and its state are one thing somebody did.
+
+            It never reads the disk - it runs on the tick thread, and a replay
+            has no files - so a name that is not in the bundle is `wfg
+            validate`'s to say. It refuses a name that could point anywhere but
+            plugins/state/. */
+        registry.add ({ "fx.capture",
+                        "Keeps a plugin's whole state with a cue: the file under the bundle's"
+                        " plugins/ folder its editing helper wrote, and every parameter's value"
+                        " beside it, in one step.",
+                        { { "fx", 's', false }, { "stateFile", 's', false }, { "values", 's', false } },
+                        true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
+                            const auto fxId = args[0].getString();
+                            const auto file = args[1].getString();
+
+                            if (! document.findById (fxId).hasType ("Fx"))
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (! isStateFileName (file))
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto values = cue::formatFxValues (cue::parseFxValues (args[2].getString()));
+
+                            for (const auto& [row, text] : { std::pair<const char*, std::string> { "stateFile", file },
+                                                             std::pair<const char*, std::string> { "values", values } })
+                            {
+                                const auto edit = document.setAttribute ("/godot/fx/" + fxId + "/" + row, text);
+
+                                if (! edit.ok)
+                                    return Outcome::rejected (edit.reason);
+                            }
+
+                            return Outcome::ok (args);
+                        } });
+
+        /*  The new group's settings follow the identifier as `cue.create`'s
+            do (2026-09-27): the window's "+ group" list makes a timeline, a
+            shuffle or a sampler around the picked cues in one step. */
+        registry.add ({ "group.wrap", "Create a group containing the selected cues in show order, with any"
+                                      " settings it is born with given as attribute-value pairs after the id.",
+                        { { "cues", 's', false }, { "id", 's', true }, { "attribute", 's', true, true } }, true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto attributes = pairsFrom (args, 2);
+
+                            if (! attributes)
+                                return Outcome::rejected (reason::badValue);
+
                             const auto edit = document.groupSelection (splitWords (args[0].getString()),
-                                                                       args.size() > 1 ? args[1].getString() : std::string {});
+                                                                       args.size() > 1 ? args[1].getString() : std::string {},
+                                                                       *attributes);
                             return fromEdit (edit, withId (args, 1, edit.id));
                         } });
 
@@ -357,6 +487,61 @@ namespace wfg::doc
                         {
                             return fromEdit (document.resizeBus (args[0].getString(),
                                                                  args[1].getInt32()), args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  THE NAMED INPUTS (Phase 9b, namespace draft §18.3): the output
+            layout's four for the other side of the interface, for its reason -
+            the logical inputs are the running sum of the widths before each
+            input and nothing else may set them. `inputPatch` follows the list
+            until `inputPatchSettled`, as `outputPatch` follows the buses. The
+            index is required for `bus.create`'s reason: the identifier after
+            it is the optional one. */
+        registry.add ({ "input.create",
+                        "Adds a named input to the show: a microphone or a line, one to eight"
+                        " channels wide, packed onto the logical inputs. Index is a position in"
+                        " the input list; -1 appends.",
+                        { { "width", 'i', false }, { "index", 'i', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createInput (args[0].getInt32(),
+                                                                    args[1].getInt32(), id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        registry.add ({ "input.delete",
+                        "Takes a named input away and repacks the ones after it.",
+                        { { "input", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.removeInput (args[0].getString()), args);
+                        } });
+
+        registry.add ({ "input.move",
+                        "Puts a named input at another place in the list. Index is a position in"
+                        " the list as it stands.",
+                        { { "input", 's', false }, { "index", 'i', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.moveInput (args[0].getString(),
+                                                                 args[1].getInt32()), args);
+                        } });
+
+        registry.add ({ "input.width",
+                        "Makes a named input mono, stereo or wider, up to eight channels, and"
+                        " repacks the ones after it.",
+                        { { "input", 's', false }, { "width", 'i', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.resizeInput (args[0].getString(),
+                                                                   args[1].getInt32()), args);
                         } });
 
         //----------------------------------------------------------------------
@@ -566,6 +751,29 @@ namespace wfg::doc
                                                                      args[3].getString(), id);
 
                             return fromEdit (edit, withId (args, 4, edit.id));
+                        } });
+
+        /*  PHASE 9b: a plugin at the end of a rack channel's chain (namespace
+            draft 18.3). Its own command rather than an argument on
+            `plugin.create`, whose identifier is its trailing optional one: a
+            log written before would read the channel as the identifier. */
+        registry.add ({ "channel.plugin",
+                        "Adds a plugin at the end of a rack channel's chain: loaded switched off when"
+                        " the graph is built, switched in by the mic cues through the channel. Name,"
+                        " the scan's identifier, format and path.",
+                        { { "channel", 's', false }, { "name", 's', false }, { "identifier", 's', false },
+                          { "format", 's', false }, { "path", 's', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 5 ? args[5].getString() : std::string {};
+                            const auto edit = document.createChannelPlugin (args[0].getString(),
+                                                                            args[1].getString(),
+                                                                            args[2].getString(),
+                                                                            args[3].getString(),
+                                                                            args[4].getString(), id);
+
+                            return fromEdit (edit, withId (args, 5, edit.id));
                         } });
 
         //----------------------------------------------------------------------

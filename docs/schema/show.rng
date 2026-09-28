@@ -85,6 +85,7 @@
           <ref name="Cue"/>
           <ref name="Group"/>
           <ref name="Media"/>
+          <ref name="Mic"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -306,6 +307,7 @@
           <ref name="Cue"/>
           <ref name="Group"/>
           <ref name="Media"/>
+          <ref name="Mic"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -329,6 +331,7 @@
           <ref name="Cue"/>
           <ref name="Group"/>
           <ref name="Media"/>
+          <ref name="Mic"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -349,6 +352,7 @@
           <ref name="Cue"/>
           <ref name="Group"/>
           <ref name="Media"/>
+          <ref name="Mic"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -369,6 +373,7 @@
           <ref name="Cue"/>
           <ref name="Group"/>
           <ref name="Media"/>
+          <ref name="Mic"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -439,6 +444,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="eqB1On">
+          <a:documentation>Whether band one is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25). A switch rather than the gain parked at nought, for the reason eqHpf gives: a press that moved a number would move it somewhere, and the number is what somebody decided.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="eqB1Q">
           <a:documentation>The width of band one: higher is narrower. 0.7 is a gentle bell, 5 is a notch. On a shelf it sets how steep the corner is.</a:documentation>
           <data type="double">
@@ -475,6 +489,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="eqB2On">
+          <a:documentation>Whether band two is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="eqB2Q">
           <a:documentation>The width of band two.</a:documentation>
           <data type="double">
@@ -502,6 +525,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="eqB3On">
+          <a:documentation>Whether band three is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="eqB3Q">
           <a:documentation>The width of band three.</a:documentation>
           <data type="double">
@@ -526,6 +558,15 @@
             <param name="minInclusive">-24</param>
             <param name="maxInclusive">24</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4On">
+          <a:documentation>Whether band four is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -613,6 +654,16 @@
             <param name="minInclusive">-120</param>
             <param name="maxInclusive">12</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="levelLane">
+          <a:documentation>A volume curve over the file, as (seconds, level) pairs: seconds of the FILE from its start, not of the cue from its GO, and a level in dB within the -120..12 the cue level may take. An OFFSET on the cue level - one more term beside a fade, a hand on a strip and a DCA - so nought is the cue as written. Straight in dB between two points; before the first it holds the first, after the last the last. It follows the file wherever it plays: the start offset, a jump, a scrub, and every pass of a looping range, which hears the same stretch of it again. Empty, the default, is no lane (namespace draft 20).</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
         </attribute>
       </optional>
       <optional>
@@ -724,6 +775,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="strip">
+          <a:documentation>sampler member: the strip this clip is played from, by identifier - a fader or a pad (author, 2026-09-25: &apos;I need to specify which track goes where&apos;). Empty is automatic: the next sampler strip nobody in the group has named, in member order, which is how every member was placed before. Two members naming one strip: the first in member order has it and the other is placed automatically. A strip that is not a sampler strip of this layout - deleted, or made a DCA strip - is no pin at all, and the member is placed automatically rather than left silent.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="velocity">
           <a:documentation>sampler member: whether the velocity of a press sets the level the clip starts at (author, 2026-09-23). Off, a press starts at the member&apos;s initialLevel, which is where its fader already is. On, a press at 127 starts at 0 dB and a press at one at velocityFloor, in a straight line between them in dB.</a:documentation>
           <choice>
@@ -750,6 +807,369 @@
           <ref name="Range"/>
           <ref name="Trigger"/>
           <ref name="Fx"/>
+        </choice>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Mic">
+    <element name="Mic">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="channel">
+          <a:documentation>The rack channel it plays through, by identifier: the channel&apos;s plugins, EQ and output are the cue&apos;s for as long as it holds the channel (decision BX). A cue wanting a channel another holds waits for it and says so. Empty plays through nothing, and wfg validate says so.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA this cue is assigned to, by identifier, or empty. A mark on the member and never a list on the DCA (PRD 3.28), so assigning eight cues is a multi-select edit and nothing flows downward (4.12). Adds that DCA&apos;s trim, and the trim of every DCA it sits inside, to the level of every run of this cue - level only, one to one in dB; a mapping per assignment comes later.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="directOut">
+          <a:documentation>The direct out this cue-s channels land on, by identifier; empty routes it nowhere by this road and is what every cue starts as. A mono cue feeds every channel of a stereo out; a cue wider than its out fails the run as bad-route rather than being quietly folded, unless stereoToMono says to fold it. Chosen among the outputs whose kind is direct - a mix channel is reached through a Send, at a level, which is the whole difference between the two.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Freq">
+          <a:documentation>The centre of band one, or the corner of its shelf.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Gain">
+          <a:documentation>The gain of band one. Nought is the band out of the signal, which is what every band starts at and rests at (PRD 4.6): a peak at nought is no peak.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1On">
+          <a:documentation>Whether band one is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25). A switch rather than the gain parked at nought, for the reason eqHpf gives: a press that moved a number would move it somewhere, and the number is what somebody decided.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Q">
+          <a:documentation>The width of band one: higher is narrower. 0.7 is a gentle bell, 5 is a notch. On a shelf it sets how steep the corner is.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Shape">
+          <a:documentation>What band one is: a peak, or a shelf that lifts or drops everything below its frequency. The low band is the one that wants to be a shelf.</a:documentation>
+          <choice>
+            <value>peak</value>
+            <value>lowShelf</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2Freq">
+          <a:documentation>The centre of band two. Always a peak.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2Gain">
+          <a:documentation>The gain of band two; nought is out.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2On">
+          <a:documentation>Whether band two is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2Q">
+          <a:documentation>The width of band two.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3Freq">
+          <a:documentation>The centre of band three. Always a peak.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3Gain">
+          <a:documentation>The gain of band three; nought is out.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3On">
+          <a:documentation>Whether band three is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3Q">
+          <a:documentation>The width of band three.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Freq">
+          <a:documentation>The centre of band four, or the corner of its shelf.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Gain">
+          <a:documentation>The gain of band four; nought is out.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4On">
+          <a:documentation>Whether band four is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Q">
+          <a:documentation>The width of band four, or the steepness of its shelf.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Shape">
+          <a:documentation>What band four is: a peak, or a shelf over everything above its frequency. The high band is the one that wants to be a shelf.</a:documentation>
+          <choice>
+            <value>peak</value>
+            <value>highShelf</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqHpf">
+          <a:documentation>Whether the high-pass is in. A flag rather than a frequency parked at the band edge, because the click of a rotary switches a filter in and out, and a click that moved a frequency would move it somewhere.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqHpfFreq">
+          <a:documentation>Where the high-pass turns over: second-order Butterworth, -3 dB here and 12 dB an octave below. 80 Hz takes the rumble out of a voice.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqLpf">
+          <a:documentation>Whether the low-pass is in. As eqHpf.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqLpfFreq">
+          <a:documentation>Where the low-pass turns over, second-order. 12 kHz takes the hiss off a recording without dulling it.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1000</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqOn">
+          <a:documentation>Whether the EQ of this cue is in the signal at all. Off, every band is skipped and the audio passes untouched - the A/B a designer reaches for. On with every band flat is the same sound and the same bytes, by construction.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fadeIn">
+          <a:documentation>How long GO takes to bring it from silence to its level. Nought opens it at once, behind a click-free ramp (namespace draft 18.5).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="input">
+          <a:documentation>The named input this cue takes, by identifier - Voix solo, not input 3 (PRD 3.18, namespace draft 18.2). Empty takes nothing, and is what a new mic cue starts as. An input its channel cannot take fails the run in words, and wfg validate says so before the show.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="level">
+          <a:documentation>The level the cue plays at, as decided. Not what it is doing: a fade writes run/&lt;id&gt;/level and leaves this alone, so the document keeps saying what somebody chose while the run says what is happening. -120 dB is silence rather than a very small number.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-120</param>
+            <param name="maxInclusive">12</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="onGo">
+          <a:documentation>On a sampling channel (Phase 9c, decision CF): what GO does with a take the channel already holds. wait leaves it silent until Rec or Loop - the default, which makes no sound nobody asked for; loop plays it from the in point, and with no take waits for Rec; clear empties the channel for a fresh take. A later cue on the channel finding the take of an earlier one is how scene 5 brings back the loop of scene 2.</a:documentation>
+          <choice>
+            <value>wait</value>
+            <value>loop</value>
+            <value>clear</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="sharedOut">
+          <a:documentation>This cue is MEANT to share its direct out with another. PRD 3.9c-s -allow marking deliberate sharing-, as feed/shared already gives a processor slot: the live-range analysis is conservative by design and reports overlaps it cannot prove impossible, so this is how a designer says of one pair that they considered it. It silences that pair-s warning and NOTHING ELSE - the menu still marks the out as taken, because which outs carry sound is a fact and the warning is a complaint, and only a complaint can be answered.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="stereoToMono">
+          <a:documentation>Fold a two-channel file to one before it is routed, each side at half, so a stereo recording can play out of a mono direct out. Ignored unless channels is 2: a fold is a statement about a stereo file, and applying it to a mono or a six-channel one would mean inventing a rule nobody asked for. PRD 3.18 leaves stereo-to-mono out of the RACK classes deliberately; this is the cue output stage, where the coefficients are the cue-s own and a fold costs nothing.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="through">
+          <a:documentation>On a sampling channel (Phase 9c, namespace draft 19.3): whether the channel sounds its input as well as its loop, while it records and while it loops. Off by default: the voice being sampled is usually heard through the desk already, and would otherwise double.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <choice>
+          <ref name="Route"/>
+          <ref name="Send"/>
+          <ref name="Feed"/>
+          <ref name="Fx"/>
+          <ref name="Trigger"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -1132,13 +1552,17 @@
       </optional>
       <optional>
         <attribute name="verb">
-          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary.</a:documentation>
+          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary. record, loop, overdub and clear are not stops at all (Phase 9c, namespace draft 19.6): aimed at a sounding mic cue on a sampling channel they are the press of that name on its take - Rec, Loop, a layer begun or closed, the channel emptied - and against anything else they are applied and do nothing, as a stop aimed at a cue that is not running is.</a:documentation>
           <choice>
             <value>hard</value>
             <value>fade</value>
             <value>afterMember</value>
             <value>afterIteration</value>
             <value>advance</value>
+            <value>record</value>
+            <value>loop</value>
+            <value>overdub</value>
+            <value>clear</value>
           </choice>
         </attribute>
       </optional>
@@ -1713,6 +2137,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="rackBudget">
+          <a:documentation>How much delay the plugins of a mic cue may add, in milliseconds, before the cue, its channel and the plugin that did it say so (PRD 3.18, decision BY). Never refused and never compensated: a budget is a line drawn, and crossing it is said in words.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="tracks">
           <a:documentation>How many cues can sound at once - the fixed number of audio tracks, and so the polyphony ceiling. Zero is legal and means a show with no audio. Required, and deliberately without a default: the number is a decision about the shape of a show, and no value here could be right for every rig. WRITABLE since 2026-09-21, because a decision a client cannot state is a decision nobody can take: it was read-only, no command set it, and a show made by File - New therefore declared nought and could never play anything. The graph is built from it when the audio settings are applied, so a change lands at the next apply and not under a running show - which is the same moment a changed buffer size lands.</a:documentation>
           <data type="integer">
@@ -1721,6 +2154,9 @@
         </attribute>
       </optional>
       <interleave>
+        <optional>
+          <ref name="Inputs"/>
+        </optional>
         <optional>
           <ref name="Rack"/>
         </optional>
@@ -1806,11 +2242,32 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="layers">
+          <a:documentation>How many passes the recorder keeps on top of the take, each undoable one at a time (decision CA). A channel that has used them all refuses another pass, in words, until one is undone or the take cleared. Part of the memory the take sets aside; a change takes effect at Load now.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">16</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>What the designer called it. PRD 3.9b: the names appear in the dropdown and on the OLED, and the channel numbers do not - -Voix solo- is what somebody wrote down and -input 3- is a fact about a patch that will change.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="takeSeconds">
+          <a:documentation>The longest take this channel records, in seconds (Phase 9c, namespace draft 19.2): above nought the channel carries a recorder between its plugins before it and after it, and nought is no recorder - the channel of 9b. What it costs is memory, set aside and touched when the graph is built, never when Rec is pressed: (1 + layers) times this, at the rate, two channels, four bytes a sample. A change takes effect at Load now, and empties the take the channel held.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">600</param>
+          </data>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <ref name="Plugin"/>
+      </zeroOrMore>
     </element>
   </define>
 
@@ -1932,6 +2389,15 @@
           </data>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="on">
+          <a:documentation>Whether this send is in the mix. Off contributes nothing and keeps its level, so switching it back on brings back the same send - the press of its rotary on a surface page (author, 2026-09-25). Unlike a send at silence, an off send still says what level it would arrive at.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
     </element>
   </define>
 
@@ -1952,6 +2418,12 @@
       <optional>
         <attribute name="plugin">
           <a:documentation>Which entry of the show-s set this cue switches in, by the entry-s id - the id and not the scan-s identifier, because a set may hold one plugin twice and a cue must say which. One Fx per entry per cue: a second naming the same one is refused when it is created, because an entry is on the voice once.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="stateFile">
+          <a:documentation>The whole state of the plugin for this cue, as a file under the plugins/ folder of the bundle, by name - state/ then the entry-s id and the start of a hash of the bytes - or empty for the preset of the entry. What the own window of the plugin changes that is not a parameter (an impulse response, a sample, a mode) is kept here, captured by the editing helper a moment after the hand stops (author, 2026-09-25); it is loaded onto the voice when the cue is armed, before it may launch, and values sit on top of it. Files are never changed once written, so undo points the row back at an older one. A file and not the bytes, for the reason media/file is.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -2058,7 +2530,7 @@
       </optional>
       <optional>
         <attribute name="role">
-          <a:documentation>What this strip is for (PRD 3.9a, 3.27): a sampler strip is unpinned and filled by whichever sampler group is armed, in member order across the sampler strips of every surface; a dca strip is pinned to one DCA and never reassigned. The two may be mixed on one surface.</a:documentation>
+          <a:documentation>What this strip is for (PRD 3.9a, 3.27): a sampler strip is filled by whichever sampler group is armed - by the member whose strip row names it, or else automatically in member order across the sampler strips of every surface; a dca strip is pinned to one DCA and never reassigned. The two may be mixed on one surface.</a:documentation>
           <choice>
             <value>sampler</value>
             <value>dca</value>
@@ -2117,7 +2589,7 @@
       </attribute>
       <optional>
         <attribute name="format">
-          <a:documentation>Which kind of plugin it is, from the scan. LV2 is listed and not built (Phase 9b).</a:documentation>
+          <a:documentation>Which kind of plugin it is, from the scan: VST3 on every platform, LV2 on every platform since 2026-09-26, AU on macOS. JUCE names an AU AudioUnit; the show says AU.</a:documentation>
           <choice>
             <value>VST3</value>
             <value>AU</value>
@@ -2147,6 +2619,54 @@
         <attribute name="preset">
           <a:documentation>The preset the plugin is put into when the show opens: a .vstpreset file under the plugins/ folder of the bundle, by name, or empty for the own defaults of the plugin. Applied once per instance in the child; the own values of a cue sit on top of it, so a parameter a cue does not mention rests at the value of this preset. A file and not the bytes, for the reason media/file is.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="side">
+          <a:documentation>On a sampling channel&apos;s plugin (Phase 9c, decision BZ): before the recorder, and what it does is printed into the take, or after the player, and it is heard as the take loops and can be changed without recording again. After by default, so a plugin on a channel that had no recorder stays where it was heard. On a channel with no recorder, and on the set&apos;s plugins, it does nothing. A change takes effect at Load now, as the chain&apos;s order does.</a:documentation>
+          <choice>
+            <value>before</value>
+            <value>after</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Inputs">
+    <element name="Inputs">
+      <zeroOrMore>
+        <ref name="Input"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Input">
+    <element name="Input">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="firstChannel">
+          <a:documentation>Its first logical input, counting from zero: the running sum of the widths before it, maintained by input.create, input.delete, input.move and input.width as a bus first channel is by the bus commands. The input patch maps logical inputs to the channels of the interface.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the input is called - Voix solo - in every menu that offers one. PRD 3.9b: names appear in a dropdown and on a scribble strip, channel numbers do not, because an input number is a fact about a patch that will change.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="width">
+          <a:documentation>How many consecutive logical inputs it takes: one for a microphone, two for a stereo line. Read-only at the door and changed by input.width, which repacks the inputs after it, exactly as bus.width does for the outputs.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">8</param>
+          </data>
         </attribute>
       </optional>
     </element>
@@ -2284,6 +2804,15 @@
 
   <define name="State.Audio">
     <element name="Audio">
+      <optional>
+        <attribute name="inputPatchSettled">
+          <a:documentation>Whether the input patch has stopped following the list of named inputs one for one - the twin of patchSettled, for the other side of the interface. False in a fresh show: the input patch stays empty, which the device layer reads as identity, so every input added, removed, moved or widened re-flows it. True once somebody edits the input patch by hand, after which every named input keeps the interface channels it has and a new one takes the next free ones. State rather than show, for the reason patchSettled gives.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
       <optional>
         <attribute name="patchSettled">
           <a:documentation>Whether the output patch has stopped following the output layout one for one. False in a fresh show: the patch stays empty, which the device layer already reads as identity, so every output added, removed, moved or widened simply re-flows it and the designer never touches a matrix. It goes true when somebody edits the patch by hand, and when the first media run launches with audio - after which every output keeps the interface channels it has and a new one takes the next free ones. State rather than show: it records what has happened to this rig, not a decision about what the show plays, so it lands in state.xml beside the standby and does not mark the show unsaved.</a:documentation>

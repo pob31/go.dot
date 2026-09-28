@@ -91,7 +91,23 @@ namespace wfg::client::model
                 const auto waits = words (pending);
                 const auto forVoice = std::find (waits.begin(), waits.end(), "voice") != waits.end();
 
-                return line + separator + (forVoice ? "pending voice" : "pending");
+                /*  SAID AS WHAT IS WRONG, NOT AS A STATE (author, 2026-09-25:
+                    "Sampler show 'on 2 - pending voice' No sound"). A member
+                    waiting for a voice is waiting for a TRACK, and every one
+                    the show has is sounding or held ready for GO - so the
+                    words give the show's count, the number to raise (Show
+                    settings, Outputs, how many cues can sound at once). A
+                    member waiting for its strip is waiting for another
+                    group's clip on it to end. */
+                if (forVoice)
+                {
+                    const auto tracks = text (snapshot, "/godot/audio/tracks");
+
+                    return line + separator + "no free track"
+                           + (tracks.empty() ? std::string {} : std::string (separator) + "the show has " + tracks);
+                }
+
+                return line + separator + "waiting for the strip";
             }
 
             if (text (snapshot, slot + "holder") == runId)
@@ -103,6 +119,31 @@ namespace wfg::client::model
             }
 
             return line;
+        }
+    }
+
+    namespace
+    {
+        /*  A MIC RUN'S WORDS (Phase 9b), read off the tree: its cue's channel
+            by the name somebody gave it, its queue, and its state. */
+        std::string micWords (const tree::TreeSnapshot& snapshot, const RunRow& row)
+        {
+            const auto channel = text (snapshot, "/godot/cue/" + row.cueId + "/channel");
+            auto called = text (snapshot, "/godot/slot/" + channel + "/name");
+
+            if (called.empty())
+                called = channel;
+
+            if (! row.pending.empty())
+                return "waiting for " + called;
+
+            if (row.state == "stopping")
+                return "ringing out";
+
+            if (row.state == "playing" && ! called.empty())
+                return "on " + called;
+
+            return {};
         }
     }
 
@@ -297,6 +338,9 @@ namespace wfg::client::model
         for (const auto& id : order)
             parentOf.emplace (id, at (snapshot, id, "parent"));
 
+        //  The cue a surface's rotaries are aimed at, read once for the pass.
+        const auto aim = text (snapshot, "/godot/surface/aim");
+
         for (const auto& id : order)
         {
             RunRow row;
@@ -334,6 +378,9 @@ namespace wfg::client::model
             if (const auto strip = at (snapshot, id, "strip"); ! strip.empty())
                 row.samplerWords = memberWords (snapshot, id, strip, row.pending);
 
+            if (row.kind == "mic")
+                row.liveWords = micWords (snapshot, row);
+
             if (const auto late = osc::parseDouble (at (snapshot, id, "late")); late.has_value())
                 row.late = static_cast<int> (*late);
 
@@ -342,6 +389,8 @@ namespace wfg::client::model
                 operator is looking for in this pane is which cue that is. */
             if (! row.cueId.empty())
                 row.cueName = text (snapshot, "/godot/cue/" + row.cueId + "/name");
+
+            row.aimed = ! row.cueId.empty() && row.cueId == aim;
 
             if (row.launched())
                 row.position = seconds (at (snapshot, id, "position"));

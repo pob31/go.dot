@@ -23,6 +23,8 @@ namespace wfg::surface
 {
     static_assert (colourIntervalTicks >= 1, "a colour write needs at least a tick to itself");
     static_assert (doubleStopTicks >= 1, "a double STOP needs a window");
+    static_assert (7 * (pageBlinkOnTicks + pageBlinkOffTicks) <= pageBlinkCycleTicks,
+                   "seven blinks must fit in a page button's cycle");
 
     std::optional<Profile> profileFor (std::string_view word)
     {
@@ -63,13 +65,17 @@ namespace wfg::surface
                 break;
 
             case Profile::mcu:
+                topology.hasMeters = true;
                 break;
 
             case Profile::d700:
                 /*  Mackie, and on top of it the D700's own: an RGB surround on
-                    every encoder, three native rows and a number field. */
+                    every encoder, three native rows and a number field - and
+                    faders that land on their engraving (+7 at the top). */
                 topology.hasRgb = true;
                 topology.nativeDisplay = true;
+                topology.hasMeters = true;
+                topology.faderLaw = FaderLaw::d700;
                 break;
 
             case Profile::midiPads:
@@ -106,11 +112,77 @@ namespace wfg::surface
         if (button.button == Button::vpotPress)
             return button.index >= 0 ? Action::gate : Action::none;
 
+        if (button.button == Button::mute)
+            return button.index >= 0 ? Action::kill : Action::none;
+
+        if (button.button == Button::solo)
+            return button.index >= 0 ? Action::solo : Action::none;
+
+        if (button.button == Button::rec)
+            return button.index >= 0 ? Action::startLevel : Action::none;
+
+        if (button.button == Button::select)
+            return button.index >= 0 ? Action::aim : Action::none;
+
+        if (button.button == Button::assignEq)      return Action::eqPage;
+        if (button.button == Button::assignSend)    return Action::sendPage;
+
+        /*  FX, the Mackie "Plug-In" (2026-09-26): the aimed cue's inserts. */
+        if (button.button == Button::assignPlugin)  return Action::fxPage;
+
+        /*  PAN, which Go.dot has no use for as a pan (Phase 9c): the aimed mic
+            cue's take - the Loop page. */
+        if (button.button == Button::assignPan)     return Action::loopPage;
+
+        /*  THE MASTER DIAL'S CLICK AND DOUBLE CLICK (author, 2026-09-26: "click
+            could be deselect and double click back to default" - "The D700
+            can do it at hardware level"). The dial presses F3; with double
+            click ticked for it in the Configurator the firmware withholds the
+            click until the gesture resolves and sends a double as another note
+            alone - F4, by `*`'s pattern (F1 single, F2 double), to confirm at
+            the bench. A Mackie's F3 and F4 are its own function keys and stay
+            unmapped. */
+        if (profile == Profile::d700 && button.button == Button::function)
+        {
+            if (button.index == 2) return Action::dialLetGo;
+            if (button.index == 3) return Action::dialRest;
+        }
+
+        /*  `*`, under the Mackie preset the D700 is pinned to: F1, and F2 for
+            its double press when the Configurator is asked for one. */
+        if (button.button == Button::function && (button.index == 0 || button.index == 1))
+            return Action::leavePage;
+
         if (button.button == Button::play)      return Action::go;
         if (button.button == Button::stop)      return Action::stop;
         if (button.button == Button::rewind)    return Action::rewind;
         if (button.button == Button::forward)   return Action::forward;
+        if (button.button == Button::record)    return Action::record;
+        if (button.button == Button::cycle)     return Action::loop;
+
+        /*  THE D700'S ARROWS MOVE THE STANDBY (author, 2026-09-26: "Can the
+            up(-left) and down(-right) arrows on the D700 be used to move the
+            standby cursor?"). They send the Mackie bank notes, and the D700 has
+            no rewind or forward, so without this nothing on it moved the
+            pointer but GO. A Mackie keeps its bank arrows for banking (§3.9d);
+            it has the transport's own pair. */
+        if (profile == Profile::d700)
+        {
+            if (button.button == Button::bankLeft)  return Action::rewind;
+            if (button.button == Button::bankRight) return Action::forward;
+        }
 
         return Action::none;
+    }
+
+    int meterStepFor (double db) noexcept
+    {
+        int step = 0;
+
+        for (const auto from : meterStepsDb)
+            if (db >= from)
+                ++step;
+
+        return step;
     }
 }

@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/document/Schema.h>
 
 #include <string>
@@ -56,12 +57,13 @@ namespace wfg::cue
 
     //==============================================================================
     void registerCueCommands (CommandRegistry& registry, doc::ShowDocument& document,
-                              Focus& focus)
+                              Focus& focus, LiveEdits* live)
     {
         //----------------------------------------------------------------------
         registry.add ({ "standby.set",
                         "Parks the focused list's standby on a cue, including one inside a group."
-                        " GO acts on whatever this names.",
+                        " A cue of a sampler group, a header or a footer parks on the group holding"
+                        " it. GO acts on whatever this names.",
                         { { "cue", 's', false } },
                         true,
                         [&document, &focus] (CommandContext&, const std::vector<osc::Value>& args)
@@ -129,16 +131,28 @@ namespace wfg::cue
                                 The two refusals are told apart because they send
                                 somebody somewhere different. `not-in-list` means
                                 the cue belongs to another list. `not-a-stop`
-                                means it is in THIS list and is not a row of the
-                                show at all - a cue in some group's header, its
-                                footer or a persistent section - and the remedy
-                                is to park on the group that owns it. */
+                                means it is in THIS list and nothing here can
+                                stand for it - a cue in a persistent section, or
+                                one somebody switched off. A header's, a footer's
+                                or a sampler group's cue has a group that does,
+                                and lands there (below). */
                             if (! mayStandOn (list, cueId))
                             {
-                                const auto elsewhere = ! isInList (list, cueId);
+                                if (! isInList (list, cueId))
+                                    return Outcome::rejected (reason::notInList);
 
-                                return Outcome::rejected (elsewhere ? reason::notInList
-                                                                    : reason::notAStop);
+                                /*  AND THE GROUP STANDS FOR WHAT IT HOLDS
+                                    (author, 2026-09-26): a sampler member, a
+                                    header's cue or a footer's cue parks on the
+                                    group holding it rather than being refused.
+                                    What is left refused is a persistent bed
+                                    and a disabled cue - `nearestStop` says why. */
+                                const auto group = nearestStop (list, cueId);
+
+                                if (group.empty())
+                                    return Outcome::rejected (reason::notAStop);
+
+                                return moveStandbyTo (document, list, group, args);
                             }
 
                             return moveStandbyTo (document, list, cueId, args);
@@ -162,18 +176,20 @@ namespace wfg::cue
 
         //----------------------------------------------------------------------
         /*  THE FLAT BUTTON, AND THE DOUBLE-CLICK ON A ROTARY (Phase 9a): every
-            one of a media cue's nineteen EQ rows back to its default, in ONE
-            command - so it is one transaction on the show's history and Undo
-            takes the whole reset back as one step, where nineteen node.set
-            records from a client would be nineteen. The defaults are the
-            table's own, read off the rows, so this can never disagree with
-            what a fresh cue is. */
+            one of a media cue's twenty-three EQ rows back to its default, in
+            ONE command - so it is one transaction on the show's history and
+            Undo takes the whole reset back as one step, where twenty-three
+            node.set records from a client would be twenty-three. The defaults
+            are the table's own, read off the rows, so this can never disagree
+            with what a fresh cue is - every band's switch back on with the
+            rest (2026-09-25). */
         registry.add ({ "eq.reset",
-                        "Puts a media cue's EQ back to flat: every band at nought, both filters"
-                        " out, on. One transaction, so Undo takes the whole reset back at once.",
+                        "Puts a media cue's EQ back to flat: every band in and at nought, both"
+                        " filters out, on. One transaction, so Undo takes the whole reset back at"
+                        " once.",
                         { { "cue", 's', false } },
                         true,
-                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&document, live] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto id = args[0].getString();
                             const auto cue = document.findById (id);
@@ -181,15 +197,47 @@ namespace wfg::cue
                             if (! cue.isValid())
                                 return Outcome::rejected (reason::unknownId);
 
-                            if (! cue.hasType ("Media"))
+                            /*  A MEDIA CUE'S EQ, OR A MIC CUE'S (Phase 9b):
+                                the rows are the `sound` owner's, and both
+                                carry them. */
+                            if (! cue.hasType ("Media") && ! cue.hasType ("Mic"))
                                 return Outcome::rejected (reason::badValue);
 
-                            for (const auto* row : doc::Schema::rowsForOwner ("media"))
+                            /*  UNDER THE LOCK, FLAT RIDES LIVE with the rest of
+                                the EQ (2026-09-25): each row the show has
+                                somewhere else is held at its default in the
+                                layer, and each it already has at its default
+                                rides nothing. Unlocked, what rode live on this
+                                cue is let go first, or it would hide the reset. */
+                            if (live != nullptr && document.isLocked())
+                            {
+                                for (const auto* row : doc::Schema::rowsForOwner ("sound"))
+                                {
+                                    const std::string name { row->name };
+
+                                    if (name.rfind ("eq", 0) != 0)
+                                        continue;
+
+                                    const auto saved = document.getAttribute ("/godot/cue/" + id + "/" + name);
+
+                                    if (saved.value_or (std::string {}) == row->defaultText)
+                                        live->dropRow (id, name);
+                                    else
+                                        live->setRow (id, name, std::string (row->defaultText));
+                                }
+
+                                return Outcome::ok (args);
+                            }
+
+                            for (const auto* row : doc::Schema::rowsForOwner ("sound"))
                             {
                                 const std::string name { row->name };
 
                                 if (name.rfind ("eq", 0) != 0)
                                     continue;
+
+                                if (live != nullptr)
+                                    live->dropRow (id, name);
 
                                 const auto edit = document.setAttribute ("/godot/cue/" + id + "/" + name,
                                                                          std::string (row->defaultText));

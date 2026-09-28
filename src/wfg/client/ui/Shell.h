@@ -37,6 +37,7 @@
 #include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/HistoryPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/ui/LiveBarComponent.h>
 #include <wfg/client/ui/NewCueBarComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/TransportComponent.h>
@@ -83,6 +84,12 @@ namespace wfg::client::ui
         NewCueBarComponent newCues;
         HistoryPanelComponent history;
         UndoPanelComponent undoPanel;
+
+        /*  WHAT A LOCKED SHOW RODE LIVE (2026-09-25): a row under the transport
+            while something rides, asking once the show is unlocked whether to
+            keep it or discard it. Hidden while nothing does. */
+        LiveBarComponent liveBar;
+        void setLive (int count, bool locked);
 
         /*  THE NEW-CUE ROW STANDS WHILE THE SHOW MAY BE EDITED and goes when
             it is locked (author, 2026-09-18: "Lock makes them disappear"). A

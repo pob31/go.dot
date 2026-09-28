@@ -40,6 +40,7 @@
 
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -73,9 +74,27 @@ namespace wfg::client::model
         std::string state;
         std::string problem;
 
+        /*  How late a cue is while this entry is in its signal, in samples:
+            the plugin's own latency, uncompensated (PRD §3.25). Nought for
+            one that adds none, and for one that has not loaded. */
+        int latencySamples = 0;
+
         /** The cue's Fx for it, when there is one; empty until the first switch-in. */
         std::string fxId;
         bool enabled = false;
+
+        /*  Why it plays THIS cue dry, switched in (2026-09-26): the cue wider
+            than it takes, or it would give the cue back narrower. The Fx's own
+            `problem` row; empty when it takes the cue. */
+        std::string dryWhy;
+
+        /** What it takes, in words - "mono in, stereo out" (2026-09-26). */
+        std::string layout;
+
+        /*  ON A SAMPLING CHANNEL (Phase 9c): `before` the recorder, printed
+            into the take, or `after` the player, heard as it loops. Empty
+            where there is no recorder, and the side then means nothing. */
+        std::string side;
 
         std::vector<FxParameter> params;
 
@@ -87,12 +106,66 @@ namespace wfg::client::model
         bool present = false;
         std::vector<FxStrip> strips;
         std::string notice;
+
+        /*  THE CUE THROUGH ITS INSERTS (2026-09-26): its file's width, how
+            wide it comes out, and how many samples late - read off the cue's
+            `channels`, `chainChannels` and `insertLatency` rows. */
+        int fileChannels = 0;
+        int chainChannels = 0;
+        int insertLatency = 0;
+        int sampleRate = 0;
+
+        /*  WHERE THE CHAIN BEGINS, in words: "file" for a media cue, and for a
+            mic cue "in" and its named input - "in · Voix solo" (Phase 9b). */
+        std::string source = "file";
+
+        /*  A MIC CUE'S PATH (Phase 9b, namespace draft §18.7): the interface's
+            own delays in and out, in samples, and the show's budget for what
+            the plugins may add, in milliseconds. `live` says which sentence
+            `chainWords` writes. */
+        bool live = false;
+        int inputLatency = 0;
+        int outputLatency = 0;
+        double budgetMs = 5.0;
+
+        /*  A SAMPLING CHANNEL'S RECORDER (Phase 9c, namespace draft §19.7): a
+            box in its place in the chain - after the plugins before it, ahead
+            of the EQ and the plugins after the player - and what its take is
+            doing, in the channel's own word. */
+        bool recorder = false;
+        std::string takeState;
     };
+
+    /*  "Plays as stereo through its inserts, 21 ms late." - or nothing, for a
+        cue its inserts neither widen nor delay. For a mic cue the whole path,
+        always, against the budget (decision BY): "7.3 ms from the microphone
+        to the output: 2.5 ms the interface's, 4.8 ms its plugins' - within the
+        5 ms budget." */
+    std::string chainWords (const FxReading&);
 
     /*  The cue's strips against the set. `present` is false, with a sentence,
         for a cue that is not media; strips are empty, with a sentence, for a
         show that declares no set. */
     FxReading readFx (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /*  WHAT BECAME OF AN ENTRY TONIGHT, in words, for its box in the chain:
+        the engine's state word, its sentence, and - only when this cue has
+        the entry in - what that means for the sound. A plugin that is not
+        there is not a problem for a cue that does not use it. */
+    std::string stateSentence (const FxStrip&);
+
+    /** "64 samples late while it is in", or nothing for an entry that adds none. */
+    std::string latencyWords (const FxStrip&);
+
+    /** One insert the cue holds: its Fx, and whether it is in the signal. */
+    struct HeldInsert
+    {
+        std::string fxId;
+        bool enabled = true;
+    };
+
+    /** The cue's inserts, by the set entry each is for. */
+    std::map<std::string, HeldInsert> insertsOf (const tree::TreeSnapshot&, const std::string& cueId);
 
     /** `/godot/fx/<id>/<leaf>`. */
     std::string fxAddress (const std::string& fxId, const std::string& leaf);
@@ -114,10 +187,20 @@ namespace wfg::client::model
         std::string problem;
         int latencySamples = 0;
         int paramCount = 0;
+
+        /** What it takes, in words - "stereo in, stereo out" (2026-09-26). */
+        std::string layout;
+
+        /** On a sampling channel: `before` the recorder or `after` the player (Phase 9c). */
+        std::string side = "after";
     };
 
     /** The set, in chain order. */
     std::vector<PluginRow> readPluginSet (const tree::TreeSnapshot&);
+
+    /*  ONE ENTRY, by its id, off /godot/plugin/<id>/: the set's or a rack
+        channel's alike (Phase 9b), since the two are the same element. */
+    PluginRow readPluginEntry (const tree::TreeSnapshot&, const std::string& pluginId);
 
     /** One plugin this machine's scan found. */
     struct KnownPluginRow
@@ -131,4 +214,33 @@ namespace wfg::client::model
 
     /** What the last scan found, as the tree lists it; empty when none was run. */
     std::vector<KnownPluginRow> readKnownPlugins (const tree::TreeSnapshot&);
+
+    /*  WHERE THE APP'S PLUGIN SCAN IS (2026-09-26, the author's decision: a
+        Scan button in Show settings, Plugins), read off /godot/plugin/scan. */
+    struct ScanRow
+    {
+        /** idle, scanning, finished, failed. */
+        std::string state = "idle";
+        std::string format;
+        std::string file;
+        int done = 0;
+        int total = 0;
+        int found = 0;
+        int skipped = 0;
+        std::string problem;
+    };
+
+    ScanRow readScan (const tree::TreeSnapshot&);
+
+    /** The files a scan gave up on - the ones Retry names. */
+    std::vector<std::string> readSkippedPlugins (const tree::TreeSnapshot&);
+
+    /** Whether the show's set differs from the audio graph: what Load now is for. */
+    bool readSetChanged (const tree::TreeSnapshot&);
+
+    /*  What the Plugins tab says under the machine's list, in words: the
+        scan's progress while it runs, why it failed when it did, how many
+        plugins the machine knows otherwise - and what to press when it knows
+        none. */
+    std::string scanWords (const ScanRow& scan, std::size_t knownCount);
 }

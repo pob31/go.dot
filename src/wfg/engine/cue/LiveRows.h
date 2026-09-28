@@ -43,6 +43,11 @@
 
     LOGGED AND REPLAYED like any `node.set`: the record is the address and the
     value as submitted, and a replay applies it through this same door.
+
+    AND A TAKE'S LOOP POINTS (Phase 9c, decision CQ): `/godot/slot/<id>/loopIn`
+    and `/loopOut` on a sampling channel belong to tonight's take, not to the
+    show, and are ridden the way a trim is - a rotary, the master dial, the
+    take's picture - so they come through this door too.
 */
 
 #include <wfg/engine/document/DocumentCommands.h>
@@ -57,9 +62,11 @@ namespace wfg::cue
 {
     class DcaTable;
     class RunTable;
+    class TakeTable;
 
     /** Whether `address` is one of the rows answered here rather than by the
-        document: `/godot/run/<id>/trim` or `/godot/dca/<id>/trim`. */
+        document: `/godot/run/<id>/trim`, `/godot/dca/<id>/trim`, or a take's
+        `/godot/slot/<id>/loopIn` and `/loopOut`. */
     bool isLiveAddress (std::string_view address);
 
     /*  Whether an applied command was a ride on a live row - `node.set` on
@@ -79,7 +86,11 @@ namespace wfg::cue
         - a run that does not exist, or has finished, is APPLIED AND IGNORED:
           a surface a tick behind a clip that just ended is not making a
           mistake, and fifty refusals a second while a hand lets go would be
-          noise. */
+          noise.
+        - a loop point on a channel the show does not declare is `unknown-id`;
+          on a take with no length to keep it in - recording its first pass,
+          or empty - it is applied and ignored, for the finished run's reason.
+          `takes` may be null, and every point is then ignored. */
     doc::LiveWrite liveWriteFor (RunTable& runs, DcaTable& dcas,
-                                 const doc::ShowDocument& document);
+                                 const doc::ShowDocument& document, TakeTable* takes = nullptr);
 }

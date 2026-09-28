@@ -20,20 +20,27 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
+#include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/KnownList.h>
 #include <wfg/engine/plugin/PluginCommands.h>
+#include <wfg/engine/plugin/PluginEditorChild.h>
 #include <wfg/engine/plugin/PluginHostChild.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
+#include <wfg/engine/plugin/ScanJob.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/midi/MidiSender.h>
+#include <wfg/engine/midi/PortBinder.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/DocumentWriter.h>
@@ -51,6 +58,7 @@
 #include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/audio/SettingsPump.h>
+#include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
@@ -240,6 +248,8 @@ namespace
             beside the run table rather than in the document, and nought again
             every time a show opens. */
         wfg::cue::DcaTable dcas;
+        wfg::cue::TakeTable takes;
+        takes.setQueueing (false);    // no hook here to place a press
 
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
@@ -255,7 +265,9 @@ namespace
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
+        runner.setTakes (&takes);
         wfg::audio::AudioState audioState;
+        wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
         const auto nowhere = juce::File::getCurrentWorkingDirectory();
 
@@ -273,7 +285,11 @@ namespace
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
+        wfg::cue::LiveEdits liveEdits;  // what `live.keep` and `live.drop` act on; nothing rides here
+        wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
@@ -282,6 +298,7 @@ namespace
         {
             wfg::plugin::PluginCommandHooks hooks;
             hooks.knows = wfg::plugin::pluginKnownBy (document);
+            hooks.locked = wfg::plugin::showLockedBy (document);
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
         wfg::tree::registerTreeCommands (engine.commands(), touches);
@@ -516,6 +533,8 @@ namespace
             beside the run table rather than in the document, and nought again
             every time a show opens. */
         wfg::cue::DcaTable dcas;
+        wfg::cue::TakeTable takes;
+        takes.setQueueing (false);    // no hook here to place a press
 
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
@@ -531,7 +550,15 @@ namespace
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
+        runner.setTakes (&takes);
         wfg::audio::AudioState audioState;
+        wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
+
+        /*  WHAT A LOCKED SHOW RODE LIVE (2026-09-25), replayed through the same
+            doors the session wrote it through, so the runs arm with what was
+            heard and a `live.keep` keeps what was kept. */
+        wfg::cue::LiveEdits liveEdits;
+        runner.setLiveEdits (&liveEdits);
 
         /*  REGISTERED WHETHER OR NOT A BUNDLE WAS GIVEN, unlike everything
             below. `audio.editBuilt` needs no document - it is the machine
@@ -547,6 +574,7 @@ namespace
             machine reporting what happened to a run, and a log of a performance
             has to replay on a laptop with no show open. */
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
@@ -555,6 +583,7 @@ namespace
         {
             wfg::plugin::PluginCommandHooks hooks;
             hooks.knows = wfg::plugin::pluginKnownBy (document);
+            hooks.locked = wfg::plugin::showLockedBy (document);
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
 
@@ -666,10 +695,14 @@ namespace
                     session wrote it through - a fader's trim or a DCA's - so the
                     record applies as it did rather than being refused by a
                     document that cannot hold it. */
-                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
-                                    wfg::cue::fxWriteFor (document, nullptr)));
+                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes),
+                                    wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
+                                                        wfg::cue::fxWriteFor (document, nullptr, &liveEdits))),
+                wfg::cue::liveSendFor (liveEdits, document));
 
-            wfg::cue::registerCueCommands (engine.commands(), document, focus);
+            wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
+            wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
+            wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
             wfg::tree::registerTreeCommands (engine.commands(), touches);
             wfg::tree::registerMountCommands (engine.commands(), document, mounts, bundle);
 
@@ -683,7 +716,7 @@ namespace
                 week to find, because every existing fixture replays perfectly
                 without it - what a replay compares is records, and coalescing
                 shows up in the records of nothing anybody has recorded yet. */
-            engine.setBeforeApply ([&document] (const wfg::Command& appliedCommand,
+            engine.setBeforeApply ([&document, &liveEdits] (const wfg::Command& appliedCommand,
                                                 const wfg::Event& submitted,
                                                 const std::vector<wfg::osc::Value>& coerced,
                                                 std::int64_t tickIndex)
@@ -691,7 +724,9 @@ namespace
                                        /*  A RIDE IS NOT AN EDIT: hundreds of
                                            writes a second, none of them a
                                            decision (§14.9's reserved domain). */
-                                       if (wfg::cue::isLiveWrite (appliedCommand.name, coerced))
+                                       if (wfg::cue::isLiveWrite (appliedCommand.name, coerced)
+                                             || wfg::cue::isLiveEdit (appliedCommand.name, coerced,
+                                                                      document, liveEdits))
                                            return;
 
                                        document.beginTransaction (appliedCommand.name, tickIndex,
@@ -1127,6 +1162,8 @@ namespace
             beside the run table rather than in the document, and nought again
             every time a show opens. */
         wfg::cue::DcaTable dcas;
+        wfg::cue::TakeTable takes;
+        takes.setQueueing (false);    // no hook here to place a press
 
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
@@ -1142,11 +1179,17 @@ namespace
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
+        runner.setTakes (&takes);
         wfg::audio::AudioState audioState;
+        wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
+        wfg::cue::LiveEdits liveEdits;  // what `live.keep` and `live.drop` act on; nothing rides here
+        wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
@@ -1155,6 +1198,7 @@ namespace
         {
             wfg::plugin::PluginCommandHooks hooks;
             hooks.knows = wfg::plugin::pluginKnownBy (document);
+            hooks.locked = wfg::plugin::showLockedBy (document);
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
         wfg::tree::registerTreeCommands (engine.commands(), touches);
@@ -1353,6 +1397,53 @@ namespace
 
         for (const auto& problem : analysis.referenceWarnings())
             result.problems.push_back (problem);
+
+        /*  AND A CUE'S WHOLE PLUGIN STATE THAT IS NOT THERE (the author's
+            decision of 2026-09-25: a plugin's whole state kept per cue, as a
+            file under the bundle's plugins/). The engine never reads the disk
+            for it - `fx.capture` runs on the tick thread, and a replay has no
+            files - so a state that went missing, a folder copied without its
+            plugins/, is found here or on the night. The show still runs: that
+            voice plays the preset with the cue's own values, which is what
+            each line says. */
+        if (target.isDirectory())
+        {
+            std::function<void (const juce::ValueTree&)> walk = [&] (const juce::ValueTree& node)
+            {
+                if (! node.hasType ("Fx"))
+                {
+                    for (const auto& child : node)
+                        walk (child);
+
+                    return;
+                }
+
+                const auto file = node.getProperty ("stateFile").toString();
+
+                if (file.isEmpty())
+                    return;
+
+                const auto cue = node.getParent();
+                const auto entry = document.findById (node.getProperty ("plugin").toString().toStdString());
+                const auto label = "cue " + cue.getProperty ("number").toString() + " \""
+                                     + cue.getProperty ("name").toString() + "\": its "
+                                     + (entry.isValid() ? entry.getProperty ("name").toString()
+                                                        : node.getProperty ("plugin").toString())
+                                     + " insert names ";
+                const auto climbs = file.contains ("..") || file.containsChar (':')
+                                      || file.startsWithChar ('/') || file.startsWithChar ('\\');
+
+                if (climbs)
+                    result.problems.push_back ((label + "a state outside the bundle's plugins/ folder - that voice"
+                                                        " will play the preset with the cue's own values").toStdString());
+                else if (! target.getChildFile ("plugins").getChildFile (file).existsAsFile())
+                    result.problems.push_back ((label + "plugins/" + file + ", which this bundle does not have -"
+                                                        " that voice will play the preset with the cue's own values")
+                                                   .toStdString());
+            };
+
+            walk (document.root());
+        }
 
         for (const auto& problem : result.problems)
             std::cerr << "    " << problem << std::endl;
@@ -1634,11 +1725,32 @@ namespace
         Tracktion's settings, and the silent placeholder WAV that every resident
         clip sits on until a cue is armed onto it. Per user, shared between
         runs, and outside every bundle. */
+    juce::File& engineFolderOverride()
+    {
+        static juce::File folder;
+        return folder;
+    }
+
     juce::File engineCacheFolder()
     {
+        if (engineFolderOverride() != juce::File())
+            return engineFolderOverride();
+
         return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                  .getChildFile ("Go.dot")
                  .getChildFile ("engine");
+    }
+
+    /*  `--engine-folder=<dir>` (2026-09-26): the machine's own folder somewhere
+        else - for a test, which must never scan into or read from the
+        developer's real list, and for a second installation on one machine.
+        `serve` and `plugins` take it; everything under the engine folder
+        follows it, and so does the sibling audio-defaults file. */
+    void useEngineFolderOption (const juce::ArgumentList& args)
+    {
+        if (args.containsOption ("--engine-folder"))
+            engineFolderOverride() = juce::File::getCurrentWorkingDirectory()
+                                       .getChildFile (args.getValueForOption ("--engine-folder"));
     }
 
     /*  `wfg plugins`: what this machine has, and finding out (Phase 9a, §17.7).
@@ -1669,7 +1781,7 @@ namespace
 
         juce::File descriptionFile;
 
-        if (identifier != wfg::plugin::Catalogue::testGainIdentifier())
+        if (! wfg::plugin::Catalogue::isTestIdentifier (identifier))
         {
             const auto xml = wfg::plugin::describePlugin (storage, identifier);
 
@@ -1727,6 +1839,7 @@ namespace
 
     int runPlugins (const juce::ArgumentList& args)
     {
+        useEngineFolderOption (args);
         const auto storage = engineCacheFolder().getFullPathName().toStdString();
 
         if (args.containsOption ("--catalogue"))
@@ -1736,14 +1849,26 @@ namespace
 
         if (args.containsOption ("--scan"))
         {
-            const auto word = args.getValueForOption ("--scan").toLowerCase().toStdString();
-            const auto extra = args.containsOption ("--path")
-                                 ? args.getValueForOption ("--path").toStdString() : std::string {};
+            /*  --progress, --stop-file and --retry are what the app hands a
+                scan it launches (2026-09-26): where to say how far it is,
+                what to look for between two plugins, and one skipped file to
+                try again alone. By hand they mean the same. */
+            const auto optionText = [&args] (const char* name)
+            {
+                return args.containsOption (name) ? args.getValueForOption (name).toStdString() : std::string {};
+            };
+
+            wfg::plugin::ScanOptions options;
+            options.formatWord = args.getValueForOption ("--scan").toLowerCase().toStdString();
+            options.extraFolder = optionText ("--path");
+            options.retrySkipped = args.containsOption ("--retry-skipped");
+            options.retryFile = optionText ("--retry");
+            options.progressFile = optionText ("--progress");
+            options.stopFile = optionText ("--stop-file");
 
             std::string problem;
             std::vector<std::string> skipped;
-            known = wfg::plugin::scanPlugins (storage, word, extra, args.containsOption ("--retry-skipped"),
-                                              skipped, problem);
+            known = wfg::plugin::scanPlugins (storage, options, skipped, problem);
 
             if (! problem.empty())
             {
@@ -1802,6 +1927,10 @@ namespace
 
         /** The show's plugin set, in document order (Phase 9a). */
         std::vector<wfg::audio::PluginSpec> plugins;
+
+        /*  The live rack's channels, each with its own chain, in document
+            order (Phase 9b): a track each, after the voices. */
+        std::vector<wfg::audio::RackChannelSpec> rack;
 
         std::string problem;
     };
@@ -1874,6 +2003,42 @@ namespace
         return widest;
     }
 
+    /*  WHAT THE SHOW SAYS EACH OF ITS MIDI PORTS SHOULD BE PUT ON, read the
+        same way at start and after every show edit. */
+    std::vector<wfg::midi::PortWish> portWishesOf (const wfg::doc::ShowDocument& document)
+    {
+        std::vector<wfg::midi::PortWish> wishes;
+
+        for (const auto& ports : document.root())
+        {
+            if (ports.getType().toString() != "MidiPorts")
+                continue;
+
+            for (const auto& port : ports)
+            {
+                wfg::midi::PortWish wish;
+                wish.id = port[juce::Identifier ("id")].toString().toStdString();
+
+                if (wish.id.empty())
+                    continue;
+
+                const auto base = "/godot/port/" + wish.id + "/";
+
+                const auto reads = [&document, &base] (const char* row)
+                { return document.getAttribute (base + row).value_or (std::string {}); };
+
+                wish.label = document.getAttribute (base + "name").value_or (wish.id);
+                wish.inputDevice = reads ("inputDevice");
+                wish.inputDeviceId = reads ("inputDeviceId");
+                wish.outputDevice = reads ("outputDevice");
+                wish.outputDeviceId = reads ("outputDeviceId");
+                wishes.push_back (std::move (wish));
+            }
+        }
+
+        return wishes;
+    }
+
     AudioShape audioShapeOf (const wfg::doc::ShowDocument& document)
     {
         AudioShape shape;
@@ -1896,13 +2061,54 @@ namespace
             shape.channelsPerTrack = declared;
         shape.slots = std::max (slotFloor, widestRangeCount (document.root()) + slotHeadroom);
 
+        /*  A BUS'S WIDTH THROUGH ITS DEFAULT TOO (found 2026-09-26): the
+            canonical writer leaves out a width of one, which read raw is
+            nought - so a mono bus last in a saved show was built no output
+            at all, and whatever was sent to it went nowhere. Buses only: the
+            set and the rack sit among them and have no channels. */
         for (const auto bus : audio)
         {
-            const auto first = static_cast<int> (bus["firstChannel"]);
-            const auto width = static_cast<int> (bus["width"]);
+            if (! bus.hasType ("Bus"))
+                continue;
+
+            const auto first = static_cast<int> (bus.getProperty ("firstChannel", 0));
+            const auto width = static_cast<int> (bus.getProperty ("width", 1));
 
             shape.outputs = std::max (shape.outputs, first + width);
         }
+
+        /*  THE RACK (Phase 9b, decision BX): every Channel under Audio/Rack in
+            document order, each with its own Plugin children in the order of
+            its chain. A track each, after the voices. */
+        for (const auto rack : audio)
+            if (rack.hasType ("Rack"))
+                for (const auto channel : rack)
+                    if (channel.hasType ("Channel"))
+                    {
+                        wfg::audio::RackChannelSpec spec;
+                        spec.id = channel["id"].toString().toStdString();
+                        spec.name = channel["name"].toString().toStdString();
+
+                        /*  THE RECORDER (Phase 9c, §19.2), through the schema's
+                            defaults - the canonical writer leaves out a value
+                            equal to its default, the width lesson above. */
+                        spec.takeSeconds = static_cast<double> (channel.getProperty ("takeSeconds", 0.0));
+                        spec.layers = static_cast<int> (channel.getProperty ("layers", 4));
+
+                        for (const auto entry : channel)
+                            if (entry.hasType ("Plugin"))
+                            {
+                                wfg::audio::PluginSpec plugin;
+                                plugin.id = entry["id"].toString().toStdString();
+                                plugin.identifier = entry["identifier"].toString().toStdString();
+                                plugin.name = entry["name"].toString().toStdString();
+                                plugin.presetPath = entry["preset"].toString().toStdString();
+                                plugin.beforeRecorder = entry.getProperty ("side", "after").toString() == "before";
+                                spec.plugins.push_back (std::move (plugin));
+                            }
+
+                        shape.rack.push_back (std::move (spec));
+                    }
 
         /*  THE SET (Phase 9a, decision AE): every Plugin under Audio/Plugins in
             document order, which is the chain's order on every voice. The
@@ -1936,18 +2142,52 @@ namespace
         return shape;
     }
 
+    /*  THE GRAPH A SHOW ASKS FOR, the same for every path that builds one
+        (2026-09-26). It had been assembled twice, and the two had drifted: the
+        device path left a set entry's preset as the bare name the show stores
+        (so no preset loaded on a real interface) and dropped
+        --proxy-deadline-us; the hosted path left the show's channels per
+        track at two. A preset is a file under the bundle's plugins/ folder,
+        by name (§17.7); the child gets the whole path. */
+    wfg::audio::EditSpec editSpecOf (const AudioShape& shape, const juce::File& bundle,
+                                     std::int64_t proxyDeadlineMicroseconds)
+    {
+        wfg::audio::EditSpec spec;
+        spec.tracks = shape.tracks;
+        spec.channelsPerTrack = shape.channelsPerTrack;
+        spec.slots = shape.slots;
+        spec.plugins = shape.plugins;
+        spec.rack = shape.rack;
+        spec.proxyDeadlineMicroseconds = proxyDeadlineMicroseconds;
+
+        const auto resolve = [&bundle] (wfg::audio::PluginSpec& plugin)
+        {
+            if (! plugin.presetPath.empty())
+                plugin.presetPath = bundle.getChildFile ("plugins")
+                                        .getChildFile (juce::String (plugin.presetPath))
+                                        .getFullPathName().toStdString();
+        };
+
+        for (auto& plugin : spec.plugins)
+            resolve (plugin);
+
+        for (auto& channel : spec.rack)
+            for (auto& plugin : channel.plugins)
+                resolve (plugin);
+
+        return spec;
+    }
+
     wfg::audio::DeviceAudioDriver::Request deviceRequestFor (
-        const wfg::audio::AudioSettings& settings, const AudioShape& shape)
+        const wfg::audio::AudioSettings& settings, const AudioShape& shape,
+        const juce::File& bundle, std::int64_t proxyDeadlineMicroseconds)
     {
         wfg::audio::DeviceAudioDriver::Request request;
         request.deviceName = settings.outputDevice;
         request.deviceType = settings.deviceType;
         request.inputDeviceName = settings.inputDevice;
         request.blockSize = settings.bufferSize;
-        request.edit.tracks = shape.tracks;
-        request.edit.channelsPerTrack = shape.channelsPerTrack;
-        request.edit.slots = shape.slots;
-        request.edit.plugins = shape.plugins;
+        request.edit = editSpecOf (shape, bundle, proxyDeadlineMicroseconds);
         wfg::audio::readPatch (settings.inputPatch, request.inputPatch);
         wfg::audio::readPatch (settings.outputPatch, request.outputPatch);
         request.logicalOutputs = std::max (shape.outputs, static_cast<int> (request.outputPatch.size()));
@@ -2029,6 +2269,8 @@ namespace
         juce::initialiseNSApplication();
        #endif
 
+        useEngineFolderOption (args);
+
         const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
 
         if (path.isEmpty())
@@ -2052,6 +2294,15 @@ namespace
         auto blockSize = args.containsOption ("--buffer")
                             ? args.getValueForOption ("--buffer").getIntValue() : 256;
         const auto hosted = args.containsOption ("--hosted");
+
+        /*  `--input-wav=<file>`: a WAV fed into the hosted interface's logical
+            inputs, looped, one channel an input (Phase 9b, namespace draft
+            §18.10). How a machine with no interface - CI, a driver, a replay
+            fixture being recorded - hears a live input. The hosted interface's
+            alone: a device has inputs of its own. */
+        const auto inputWav = args.containsOption ("--input-wav")
+                                ? args.getValueForOption ("--input-wav").toStdString()
+                                : std::string();
 
         /*  The proxies' spin limit, for a measurement (M31); nought is the
             rule - the smaller of 250 µs and a quarter of the block. */
@@ -2349,6 +2600,7 @@ namespace
             beside the run table rather than in the document, and nought again
             every time a show opens. */
         wfg::cue::DcaTable dcas;
+        wfg::cue::TakeTable takes;
 
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
@@ -2364,6 +2616,7 @@ namespace
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
+        runner.setTakes (&takes);
 
         /*  The touch table, for the fader edges (PRD 3.9a): a fader-start
             counts only from a fader released at the bottom, and released is
@@ -2396,7 +2649,24 @@ namespace
         wfg::plugin::CatalogueStore catalogues {
             engineCacheFolder().getChildFile ("plugins").getChildFile ("catalogue")
                 .getFullPathName().toStdString() };
-        std::vector<wfg::plugin::KnownPlugin> knownPlugins;
+
+        /*  AND WHAT THIS MACHINE'S SCAN FOUND, read from known.xml now,
+            whatever the audio turns out to be (2026-09-26): it used to be read
+            off the hosted engine alone, so a show served on a real interface
+            offered nothing in its Plugins tab. A file read and nothing more. */
+        wfg::plugin::KnownList knownList;
+        knownList.set (wfg::plugin::knownPlugins (engineCacheFolder().getFullPathName().toStdString()),
+                       wfg::plugin::skippedPlugins (engineCacheFolder().getFullPathName().toStdString()));
+
+        /*  THE SURFACES' RUNTIME STATE, declared here rather than beside the
+            bridge further down because `surface.aim` writes it and is
+            registered below (2026-09-25). The bridge fills the rest of it. */
+        wfg::surface::SurfaceTable surfaceTable;
+
+        /*  WHAT A LOCKED SHOW IS RIDING LIVE - a cue's EQ and sends, the
+            author's decision of 2026-09-25 - declared before the doors that
+            write it and handed to the Runner and the tree below. */
+        wfg::cue::LiveEdits liveEdits;
 
         wfg::doc::registerDocumentCommands (
             engine.commands(), document,
@@ -2436,11 +2706,20 @@ namespace
                 lock, the transaction and the coalescing apply. The two doors
                 as one: a live row is answered first, in front of the
                 document; an FX parameter through it. */
-            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
-                                wfg::cue::fxWriteFor (document, &catalogues)));
+            /*  AND UNDER THE LOCK, A CUE'S EQ AND SENDS, ridden live in front
+                of the document that would refuse them (2026-09-25) - and its
+                plugins' parameters, held by the FX door (2026-09-26). */
+            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes),
+                                wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
+                                                    wfg::cue::fxWriteFor (document, &catalogues, &liveEdits))),
+            wfg::cue::liveSendFor (liveEdits, document));
 
-        wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
+        wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
+        wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
+        runner.setLiveEdits (&liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
+        wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
 
         /*  THE SANDBOX'S TABLE AND ITS TWO COMMANDS (Phase 9a, §17.3). The
             restart reaches the audio host once there is one - the hook is
@@ -2449,6 +2728,39 @@ namespace
             too, and handed to whichever driver builds the graph. */
         wfg::plugin::PluginTable pluginTable;
         std::function<bool (const std::string&, std::string&)> restartPlugin;
+
+        /*  And the runner sends a cue's inserts by the graph's slots, which
+            the audio host writes into this table when it builds (2026-09-26). */
+        runner.setPlugins (&pluginTable);
+
+        /*  THE APP'S PLUGIN SCAN (2026-09-26, the author's decision): the
+            command line's own scan run as a child (plugin/ScanJob.h), on the
+            message thread, reporting into a table the tree publishes. When it
+            is over the machine's list is read again from known.xml, any entry
+            of the set that read `missing` is asked again - a scan may just
+            have found it - and `plugin.scanned` ends the scan in the log. The
+            graph's own entries are the audio host's, filled in where it is
+            built. */
+        wfg::plugin::ScanTable scanTable;
+        std::function<void()> startMissingPlugins;
+        wfg::plugin::ScanJob::Launch scanLaunch;
+        scanLaunch.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                    .getFullPathName().toStdString();
+
+        wfg::plugin::ScanJob scanJob {
+            engineCacheFolder().getFullPathName().toStdString(), scanLaunch, scanTable,
+            [&engine, &knownList, &startMissingPlugins] (int found, int skipped, const std::string& problem)
+            {
+                const auto storage = engineCacheFolder().getFullPathName().toStdString();
+                knownList.set (wfg::plugin::knownPlugins (storage), wfg::plugin::skippedPlugins (storage));
+
+                if (startMissingPlugins)
+                    startMissingPlugins();
+
+                engine.submit (wfg::origin::engine, "plugin.scanned",
+                               { wfg::osc::Value::int32 (found), wfg::osc::Value::int32 (skipped),
+                                 wfg::osc::Value::string (problem) });
+            } };
 
         {
             wfg::plugin::PluginCommandHooks hooks;
@@ -2461,11 +2773,36 @@ namespace
                 return false;
             };
             hooks.knows = wfg::plugin::pluginKnownBy (document);
+            hooks.locked = wfg::plugin::showLockedBy (document);
+            hooks.scans = &scanTable;
+
+            /*  Applied on the tick thread; launched on the message thread,
+                which is where the job and its timer live. */
+            hooks.scan = [&scanJob] (const std::string& formatWord, const std::string& retryFile,
+                                     const std::string& folder)
+            {
+                juce::MessageManager::callAsync ([&scanJob, formatWord, retryFile, folder]
+                {
+                    scanJob.start (formatWord, retryFile, folder);
+                });
+            };
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
 
+        /*  EVERY FIELD FILLED HERE, before any driver is handed a copy: the
+            device path takes its copy a few hundred lines down, long before
+            the tree is wired, and a field set afterwards never reached it -
+            which is how children on a real interface came to report their
+            catalogues into nothing (found 2026-09-26). The children report
+            into the machine's catalogue cache (PR 9a.7) and make their
+            plugins from the same list the tree publishes. */
         wfg::audio::ProxyServices proxyServices;
         proxyServices.table = &pluginTable;
+        proxyServices.catalogues = &catalogues;
+        proxyServices.describe = [&knownList] (const std::string& identifier)
+        {
+            return knownList.describe (identifier);
+        };
         proxyServices.onFailed = [&engine] (const std::string& id, const std::string& problem)
         {
             /*  ONE record per failure, never per miss: the queue is finite
@@ -2489,7 +2826,7 @@ namespace
             fixture there is and diverges only where coalescing mattered: a log
             of thousands of drags, and a failure nobody would think to look for
             here. */
-        engine.setBeforeApply ([&document] (const wfg::Command& appliedCommand,
+        engine.setBeforeApply ([&document, &liveEdits] (const wfg::Command& appliedCommand,
                                             const wfg::Event& submitted,
                                             const std::vector<wfg::osc::Value>& coerced,
                                             std::int64_t tickIndex)
@@ -2499,7 +2836,9 @@ namespace
                                        of it is a decision about the show, so it
                                        opens no transaction and Undo never moves
                                        a fader (§14.9's reserved domain). */
-                                   if (wfg::cue::isLiveWrite (appliedCommand.name, coerced))
+                                   if (wfg::cue::isLiveWrite (appliedCommand.name, coerced)
+                                         || wfg::cue::isLiveEdit (appliedCommand.name, coerced,
+                                                                  document, liveEdits))
                                        return;
 
                                    document.beginTransaction (appliedCommand.name, tickIndex,
@@ -2597,7 +2936,8 @@ namespace
         {
             const auto shape = audioShapeOf (document);
             if (! shape.problem.empty()) { std::cerr << shape.problem << std::endl; return 2; }
-            activeDeviceRequest = deviceRequestFor (selectedAudio, shape);
+            activeDeviceRequest = deviceRequestFor (selectedAudio, shape, target,
+                                                    static_cast<std::int64_t> (proxyDeadlineUs));
             if (args.containsOption ("--device"))
             {
                 activeDeviceRequest.deviceName = args.getValueForOption ("--device").toStdString();
@@ -2804,19 +3144,25 @@ namespace
         midiPorts.setDevices (wfg::midi::MidiInputs::availableDevices(),
                               wfg::midi::MidiSender::availableDevices());
         parameters.setMidiPorts (&midiPorts);
+
+        /*  AND WHAT PUTS EACH DECLARED PORT ON ITS DEVICES - at start, below,
+            and again whenever the show changes a port while it runs (found by
+            the author on 2026-09-25: ports added in the MIDI tab stayed
+            "unbound" until the next start). */
+        wfg::midi::PortBinder portBinder { midiIn, midiOut };
         parameters.setDcas (&dcas);
+        parameters.setTakes (&takes);
         parameters.setPlugins (&pluginTable);
+        parameters.setLiveEdits (&liveEdits);
 
         /*  WHAT THIS MACHINE KNOWS OF THE PLUGINS THE SHOW DECLARES (Phase 9a,
             §17.7): the catalogue cache, one file per identifier under the
             engine's own folder, read here for every entry of the set - at
             start and again when the show changes - and never on a tick that
-            edits nothing. The known list is filled once the host is up. */
+            edits nothing. */
         parameters.setCatalogues (&catalogues);
-        parameters.setKnownPlugins (&knownPlugins);
-
-        /*  And the children report into the same cache (PR 9a.7). */
-        proxyServices.catalogues = &catalogues;
+        parameters.setKnownList (&knownList);
+        parameters.setScans (&scanTable);
 
         const auto loadShowCatalogues = [&catalogues, &document]
         {
@@ -2847,84 +3193,27 @@ namespace
             while the rest of the show runs (§4.10). What it must not do is go
             quiet: the sentence lands on `/godot/port/<id>/problem`, which the
             settings window draws. */
-        for (const auto& ports : document.root())
+        for (const auto& bound : portBinder.bindAll (portWishesOf (document)))
         {
-            if (ports.getType().toString() != "MidiPorts")
-                continue;
+            const auto base = "/godot/port/" + bound.id + "/";
 
-            for (const auto& port : ports)
-            {
-                const auto portId = port[juce::Identifier ("id")].toString().toStdString();
+            const auto reads = [&document, &base] (const char* row)
+            { return document.getAttribute (base + row).value_or (std::string {}); };
 
-                if (portId.empty())
-                    continue;
+            /*  AND THE IDENTIFIER IS WRITTEN DOWN, so the next start is exact
+                rather than by name. A state row: what the machine matched is
+                not what anybody decided, so it does not dirty the show and is
+                writable under the edit lock, which is what lets it happen
+                during a locked session. Here, before the tick thread runs; a
+                port rebound while the show runs waits for the next start
+                (PortBinder.h says why). */
+            if (! bound.inputMatched.empty() && bound.inputMatched != reads ("inputDeviceId"))
+                document.setAttribute (base + "inputDeviceId", bound.inputMatched);
 
-                const auto base = "/godot/port/" + portId + "/";
-                const auto label = document.getAttribute (base + "name").value_or (portId);
+            if (! bound.outputMatched.empty() && bound.outputMatched != reads ("outputDeviceId"))
+                document.setAttribute (base + "outputDeviceId", bound.outputMatched);
 
-                const auto reads = [&document, &base] (const char* row)
-                { return document.getAttribute (base + row).value_or (std::string {}); };
-
-                wfg::midi::PortTable::Binding binding;
-                std::vector<std::string> troubles;
-
-                /*  THE INPUT SIDE, AND IT IS OPENED AS THE PORT: what arrives
-                    is stamped with the show's own word for the cable, so a
-                    trigger names "Lights" and goes on firing when somebody
-                    moves the interface to another socket. */
-                if (const auto listens = reads ("inputDevice"); ! listens.empty())
-                {
-                    std::string matched, why;
-
-                    if (midiIn.openAs (listens, reads ("inputDeviceId"), portId, matched, why))
-                    {
-                        binding.bound = true;
-
-                        if (! matched.empty() && matched != reads ("inputDeviceId"))
-                            document.setAttribute (base + "inputDeviceId", matched);
-                    }
-                    else
-                    {
-                        troubles.push_back (why);
-                    }
-                }
-
-                if (const auto sends = reads ("outputDevice"); ! sends.empty())
-                {
-                    const auto remembered = reads ("outputDeviceId");
-                    std::string matched, why;
-
-                    if (midiOut.bind (portId, label, sends, remembered, matched, why))
-                    {
-                        binding.bound = true;
-                        binding.deviceId = matched;
-
-                        /*  AND THE IDENTIFIER IS WRITTEN DOWN, so the next
-                            start is exact rather than by name. A state row:
-                            what the machine matched is not what anybody
-                            decided, so it does not dirty the show and is
-                            writable under the edit lock, which is what lets it
-                            happen during a locked session. */
-                        if (! matched.empty() && matched != remembered)
-                            document.setAttribute (base + "outputDeviceId", matched);
-                    }
-                    else
-                    {
-                        binding.bound = false;
-                        troubles.push_back (why);
-                    }
-                }
-
-                for (const auto& trouble : troubles)
-                {
-                    if (! binding.problem.empty())
-                        binding.problem += "; ";
-
-                    binding.problem += trouble;
-                }
-
-                midiPorts.setBinding (portId, binding);
-            }
+            midiPorts.setBinding (bound.id, bound.binding);
         }
 
         /*  AND THE TREE IS TOLD TO LOOK AGAIN. `bound` and `problem` are
@@ -3007,7 +3296,6 @@ namespace
             keeps the bridge alive for as long as it can be called, and
             `arrived` touches nothing but the bridge's own inbox, so nothing it
             refers to has to outlive it. */
-        wfg::surface::SurfaceTable surfaceTable;
         const auto surfaceBridge = std::make_shared<wfg::surface::SurfaceBridge> (midiOut, surfaceTable);
         parameters.setSurfaces (&surfaceTable);
 
@@ -3273,6 +3561,30 @@ namespace
             device mode rather than a simulation of it. */
         std::unique_ptr<wfg::DummyAudioClock> dummy;
         std::unique_ptr<wfg::audio::HostedAudioDriver> driver;
+
+        /*  Whichever graph there is tonight, once a scan is over: the entries
+            that read `missing` asked again. */
+        startMissingPlugins = [&deviceDriver, &driver]
+        {
+            if (deviceDriver != nullptr)
+                deviceDriver->host().startMissingProxies();
+            else if (driver != nullptr)
+                driver->host().startMissingProxies();
+        };
+
+        /*  THE TAKES' PICTURES (Phase 9c, stage 9c.4), off whichever graph
+            there is tonight, for the window's third door. Declared before the
+            window, so it outlives it. */
+        const wfg::audio::TakePictures takePictures { [&deviceDriver, &driver]
+        {
+            if (deviceDriver != nullptr)
+                return deviceDriver->host().allTakes();
+
+            if (driver != nullptr)
+                return driver->host().allTakes();
+
+            return std::vector<std::pair<std::string, std::shared_ptr<const wfg::audio::Looper>>> {};
+        } };
         std::unique_ptr<wfg::audio::HostPlayer> player;
         const wfg::SampleClock* blockSource = nullptr;
 
@@ -3313,6 +3625,7 @@ namespace
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media")
                                      .getFullPathName().toStdString());
+            runner.setPluginsFolder (target.getChildFile ("plugins").getFullPathName().toStdString());
 
             blockSource = &deviceDriver->host().clock();
         }
@@ -3343,6 +3656,7 @@ namespace
             hostSettings.renderFile = args.containsOption ("--render")
                                         ? args.getValueForOption ("--render").toStdString()
                                         : std::string();
+            hostSettings.inputFile = inputWav;
 
             if (! driver->open (hostSettings))
             {
@@ -3354,19 +3668,7 @@ namespace
                 fixed at show load, and this is show load. It happens before a
                 single block goes through, because building it while the pump
                 ran would be a structural edit racing the graph that reads it. */
-            wfg::audio::EditSpec spec;
-            spec.tracks = shape.tracks;
-            spec.slots = shape.slots;
-            spec.plugins = shape.plugins;
-            spec.proxyDeadlineMicroseconds = static_cast<std::int64_t> (proxyDeadlineUs);
-
-            /*  A preset is a file under the bundle's plugins/ folder, by name
-                (§17.7); the child gets the path. */
-            for (auto& plugin : spec.plugins)
-                if (! plugin.presetPath.empty())
-                    plugin.presetPath = target.getChildFile ("plugins")
-                                            .getChildFile (juce::String (plugin.presetPath))
-                                            .getFullPathName().toStdString();
+            const auto spec = editSpecOf (shape, target, static_cast<std::int64_t> (proxyDeadlineUs));
 
             driver->host().setProxyServices (proxyServices);
 
@@ -3375,13 +3677,6 @@ namespace
                 std::cerr << "wfg serve --hosted: " << driver->host().lastError() << std::endl;
                 return 2;
             }
-
-            /*  THE MACHINE'S LIST, read off the engine that just came up: what
-                the last `wfg plugins --scan` left in the shared storage - and
-                the tree told to look again, since the list is published from
-                the cached document half. */
-            knownPlugins = driver->host().knownPlugins();
-            parameters.markStale();
 
             /*  Asked once, at load, about the graph that will play. A duplicate
                 is a defect rather than a warning - two nodes sharing an id
@@ -3421,6 +3716,7 @@ namespace
             player = std::make_unique<wfg::audio::HostPlayer> (driver->host(), engine);
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
+            runner.setPluginsFolder (target.getChildFile ("plugins").getFullPathName().toStdString());
 
             /*  And the restart, now there is a graph to restart in. */
             restartPlugin = [&driver] (const std::string& id, std::string& problem)
@@ -3613,6 +3909,16 @@ namespace
                                 state.audioBufferSize = audioState.bufferSize;
                                 state.hardwareInputs = audioState.inputs;
                                 state.hardwareOutputs = audioState.hardwareOutputs;
+
+                                /*  THE INPUTS' SIDE (Phase 9b): the interface's
+                                    delays as the logged record carried them,
+                                    and each logical input's meter as the runner
+                                    took it this tick - which also says how many
+                                    logical inputs there are. */
+                                state.inputLatency = audioState.inputLatency;
+                                state.outputLatency = audioState.outputLatency;
+                                state.inputMetersDb = runner.inputMetersDb();
+                                state.logicalInputs = static_cast<int> (state.inputMetersDb.size());
                                 state.sampleRate = ticks.sampleRate();
                                 state.samplesPerTick = ticks.samplesPerTick();
                                 if (audioState.bufferSize > 0) state.blockSize = audioState.bufferSize;
@@ -3700,6 +4006,26 @@ namespace
                                     where the decision is taken. The two halves
                                     split by what they are: this one observes,
                                     that one decides and submits. */
+                                /*  WHAT THE MESSAGE THREAD FINISHED BINDING,
+                                    into the table the tree and the surfaces
+                                    read - on this thread, their only writer. A
+                                    surface on a port that has just found its
+                                    device connects and is painted whole here.
+                                    One relaxed atomic on every other tick. */
+                                if (auto rebound = portBinder.take(); ! rebound.empty())
+                                {
+                                    for (auto& port : rebound)
+                                    {
+                                        if (port.gone)
+                                            midiPorts.forget (port.id);
+                                        else
+                                            midiPorts.setBinding (port.id, std::move (port.binding));
+                                    }
+
+                                    declareSurfaces();
+                                    parameters.markStale();
+                                }
+
                                 if (showRevisionNow != showRevisionSeen)
                                 {
                                     showRevisionSeen = showRevisionNow;
@@ -3740,6 +4066,19 @@ namespace
                                         reason: a surface added, a port renamed
                                         or a strip made a DCA strip during a tech
                                         rehearsal reaches the bridge here. */
+                                    /*  AND ITS MIDI PORTS (2026-09-25): a port
+                                        added, or put on another device, is put
+                                        on it now. The document is read here, on
+                                        the tick thread; the devices are opened
+                                        on the message thread, which is where
+                                        enumerating them may block. What came of
+                                        it is taken below, on a later tick. */
+                                    if (portBinder.want (portWishesOf (document)))
+                                        juce::MessageManager::callAsync ([&portBinder]
+                                                                         {
+                                                                             portBinder.rebind();
+                                                                         });
+
                                     if (declareSurfaces())
                                         parameters.markStale();
 
@@ -3911,7 +4250,7 @@ namespace
             runner.setPlayer (nullptr);
             std::string error;
             const auto shape = audioShapeOf (document);
-            auto wanted = deviceRequestFor (settings, shape);
+            auto wanted = deviceRequestFor (settings, shape, target, static_cast<std::int64_t> (proxyDeadlineUs));
             if (settings.enabled)
             {
                 if (! deviceDriver)
@@ -3964,12 +4303,15 @@ namespace
             }
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
+            runner.setPluginsFolder (target.getChildFile ("plugins").getFullPathName().toStdString());
             sessionClock.use (*blockSource, ticks.rebaseAudio (rate));
             engine.submit ("engine", "audio.settingsReady",
                 { wfg::osc::Value::string (error), wfg::osc::Value::int32 (rate),
                   wfg::osc::Value::int32 (buffer), wfg::osc::Value::int32 (inputs),
                   wfg::osc::Value::int32 (outputs), wfg::osc::Value::string (
-                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}) });
+                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->inputLatency() : 0),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->outputLatency() : 0) });
             if (deviceDriver)
                 engine.submit ("engine", "audio.editBuilt",
                     { wfg::osc::Value::string (deviceDriver->deviceName()),
@@ -3980,6 +4322,114 @@ namespace
         });
         audioState.requestSettings = [&settingsPump] (const wfg::audio::AudioSettings& settings, bool defaultsOnly)
         { settingsPump.post (settings, defaultsOnly); };
+
+        /*  LOAD NOW (2026-09-26): the graph built again from the show as it
+            stands - a plugin added to the set, taken out or moved - on exactly
+            what plays now: the same interface, rate, block and patches, or the
+            same hosted driver. The clock is gapped as for audio.apply, and the
+            same two records say what came of it. A failed rebuild on an
+            interface falls back to the graph it had. With no graph at all
+            there is nothing to rebuild, and it says so as ready. */
+        settingsPump.rebuild = [&]
+        {
+            ticks.stop();
+            player.reset();
+            runner.setPlayer (nullptr);
+
+            std::string error;
+            const auto shape = audioShapeOf (document);
+            const auto edit = editSpecOf (shape, target, static_cast<std::int64_t> (proxyDeadlineUs));
+
+            if (! shape.problem.empty())
+            {
+                error = shape.problem;
+            }
+            else if (deviceDriver)
+            {
+                auto wanted = activeDeviceRequest;
+                wanted.edit = edit;
+                wanted.logicalOutputs = std::max (shape.outputs, static_cast<int> (wanted.outputPatch.size()));
+                deviceDriver->close();
+
+                if (deviceDriver->open (wanted))
+                {
+                    activeDeviceRequest = wanted;
+                }
+                else
+                {
+                    error = deviceDriver->lastError();
+                    deviceDriver->close();
+
+                    if (deviceDriver->open (activeDeviceRequest))
+                        error += "; the graph it had was put back";
+                    else
+                    {
+                        error += "; the graph it had could not be put back";
+                        deviceDriver.reset();
+                    }
+                }
+            }
+            else if (driver)
+            {
+                /*  Stopping the hosted driver takes its engine down with it,
+                    so it is opened again the way it was - with the show's
+                    output count as it stands - and the graph built on that. */
+                auto reopen = driver->openedWith();
+                reopen.outputChannels = shape.outputs;
+                driver->stop();
+
+                if (! driver->open (reopen))
+                    error = driver->lastError();
+                else
+                {
+                    driver->host().setProxyServices (proxyServices);
+
+                    if (! driver->host().buildEdit (edit))
+                        error = driver->host().lastError();
+                }
+            }
+
+            int rate = ticks.sampleRate(), buffer = blockSize, inputs = 0, outputs = 0;
+
+            if (deviceDriver)
+            {
+                const auto granted = deviceDriver->settings();
+                rate = granted.sampleRate;
+                buffer = granted.blockSize;
+                inputs = deviceDriver->inputChannels();
+                outputs = deviceDriver->outputChannels();
+                player = std::make_unique<wfg::audio::HostPlayer> (deviceDriver->host(), engine);
+                blockSource = &deviceDriver->host().clock();
+            }
+            else if (driver && driver->start())
+            {
+                player = std::make_unique<wfg::audio::HostPlayer> (driver->host(), engine);
+                blockSource = &driver->clock();
+                rate = driver->host().settings().sampleRate;
+                buffer = driver->host().settings().blockSize;
+                outputs = driver->host().settings().outputChannels;
+            }
+
+            runner.setPlayer (player.get());
+            sessionClock.use (*blockSource, ticks.rebaseAudio (rate));
+            engine.submit ("engine", "audio.settingsReady",
+                { wfg::osc::Value::string (error), wfg::osc::Value::int32 (rate),
+                  wfg::osc::Value::int32 (buffer), wfg::osc::Value::int32 (inputs),
+                  wfg::osc::Value::int32 (outputs), wfg::osc::Value::string (
+                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->inputLatency() : 0),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->outputLatency() : 0) });
+
+            if (deviceDriver)
+                engine.submit ("engine", "audio.editBuilt",
+                    { wfg::osc::Value::string (deviceDriver->deviceName()),
+                      wfg::osc::Value::int32 (activeDeviceRequest.edit.tracks),
+                      wfg::osc::Value::int32 (deviceDriver->settings().outputChannels),
+                      wfg::osc::Value::int32 (deviceDriver->host().inspectNodeIds().nodes) });
+
+            ticks.start();
+        };
+        audioState.requestRebuild = [&settingsPump] { settingsPump.postRebuild(); };
 
         bool connectionLost = false;
         std::atomic<bool> reconnectRequested { false };
@@ -4168,8 +4618,26 @@ namespace
 
             if (wantWindow)
             {
-                client = makeClient ({ engine, parameters, &mediaInfo,
-                                       [] { interrupted = 1; }, themePath, launchAnother });
+                wfg::ClientHost clientHost { engine, parameters, &mediaInfo,
+                                             [] { interrupted = 1; }, themePath, launchAnother, {}, {} };
+
+                /*  A PLUGIN'S DESCRIPTION, for its editing helper: off this
+                    machine's scan, the same list the voices' children are
+                    made from, whatever the audio is doing. */
+                clientHost.describePlugin = [&knownList] (const std::string& identifier)
+                {
+                    return knownList.describe (identifier);
+                };
+
+                clientHost.pluginWorkFolder = engineCacheFolder().getChildFile ("editor")
+                                                                 .getFullPathName().toStdString();
+
+                /*  THE TAKES' PICTURES, off whichever audio host is current:
+                    asked on the window's thread, which is the one an interface
+                    is changed on, so the host cannot go from under it. */
+                clientHost.takes = &takePictures;
+
+                client = makeClient (clientHost);
 
                 if (client == nullptr)
                     return 2;   // the factory has already said why
@@ -4277,6 +4745,13 @@ namespace
 //==============================================================================
 int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
 {
+    /*  BEFORE ANYTHING MAKES AN LV2 FORMAT (plugin/PluginScan.h): on Windows
+        a set LV2_PATH crashes JUCE's LV2 host, so it is forgotten here - and
+        by every child launched from here - and said so once, on stderr. */
+    if (const auto setAside = wfg::plugin::setAsideLv2PathOnWindows(); ! setAside.empty())
+        std::cerr << "wfg: LV2_PATH (" << setAside << ") is set aside: JUCE reads it with Unix separators,"
+                     " which a Windows drive letter breaks; scan an LV2 folder by name instead" << std::endl;
+
     /*  TRACKTION'S SCAN CHILD, dispatched before any verb is read (Phase 9a,
         §17.7): a plugin scan launches this same binary with a pipe option,
         and that process is the scan and nothing else. */
@@ -4287,6 +4762,12 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
         one plugin's sandbox and nothing else, dispatched before the locale
         and the verbs for the same reason. */
     if (int childExit = 0; wfg::plugin::runPluginHostIfAsked (argc, argv, childExit))
+        return childExit;
+
+    /*  AND A PLUGIN'S EDITING HELPER (author, 2026-09-25): `wfg plugin-editor
+        …` is one plugin's own window, in a process of its own so a crash in
+        it takes down a window and never a voice. */
+    if (int childExit = 0; wfg::plugin::runPluginEditorIfAsked (argc, argv, childExit))
         return childExit;
 
     if (const auto localeFailure = applyLocaleAndStrip (argc, argv); localeFailure != 0)
@@ -4392,7 +4873,9 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
         `--device` alone opens the default device, and `--device-type` takes
         the heading `wfg devices` prints above each group of names. */
     app.addCommand ({ "plugins",
-                      "plugins [--scan[=vst3|au|lv2]] [--path=<dir>] [--retry-skipped] [--list] [--catalogue=<identifier>]",
+                      "plugins [--scan[=vst3|au|lv2]] [--path=<dir>] [--retry-skipped] [--retry=<file>]"
+                      " [--progress=<file>] [--stop-file=<file>] [--list] [--catalogue=<identifier>]"
+                      " [--engine-folder=<dir>]",
                       "Scans this machine for plugins, out of process, or lists what the last scan found",
                       {},
                       [] (const juce::ArgumentList& args)
@@ -4403,10 +4886,10 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
 
     app.addCommand ({ "serve",
                       "serve <bundle> --sample-rate=N --buffer=N [--proxy-deadline-us=N]"
-                      " [--hosted [--render=<wav>] | --device[=<name>] [--device-type=<type>]]"
+                      " [--hosted [--render=<wav>] [--input-wav=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
-                      " [--window [--theme=<file>]]",
+                      " [--window [--theme=<file>]] [--engine-folder=<dir>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [&makeClient] (const juce::ArgumentList& args)

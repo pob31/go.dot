@@ -42,6 +42,7 @@
     round-trips under every locale and a diff of two shows reads.
 */
 
+#include <wfg/engine/cue/FxValues.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -56,16 +57,17 @@ namespace wfg::cue
     /** `/godot/fx/<id>/p<n>`, and nothing else. */
     bool isFxParameterAddress (const std::string& address);
 
-    /*  The sparse row, parsed: index to normalised value, sorted. Doubles,
-        as the document holds numbers, so what was written is what is spelled
-        back; the audio side takes a float at its own boundary. */
-    std::map<int, double> parseFxValues (const std::string& text);
+    /*  The door. `catalogues` may be null: then any index is accepted.
 
-    /** The row's spelling for a map, canonical. */
-    std::string formatFxValues (const std::map<int, double>& values);
-
-    /** The door. `catalogues` may be null: then any index is accepted. */
-    doc::LiveWrite fxWriteFor (doc::ShowDocument& document, const plugin::CatalogueStore* catalogues);
+        UNDER THE LOCK A PARAMETER RIDES LIVE (2026-09-26, the author's
+        decision for the FX page, as for EQ and sends): with `live` given, a
+        write while the show is locked is held in the layer - heard, saved
+        nowhere, kept or dropped once unlocked - and one made unlocked writes
+        the show and lets go of what rode live at that parameter. A value the
+        show already has is no change, and drops what rode live there. */
+    class LiveEdits;
+    doc::LiveWrite fxWriteFor (doc::ShowDocument& document, const plugin::CatalogueStore* catalogues,
+                               LiveEdits* live = nullptr);
 
     /*  Two doors as one: the first that answers, answers. What `node.set`'s
         one live slot is handed when a session has a fader door and an FX

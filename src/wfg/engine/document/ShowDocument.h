@@ -84,6 +84,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace wfg::doc
@@ -178,13 +179,24 @@ namespace wfg::doc
             logs the identifier it produced, and replaying the log supplies it. */
         EditResult createList (const std::string& name, const std::string& id = {});
 
+        /** Settings a cue is born with: each row's name and its value as text. */
+        using Attributes = std::vector<std::pair<std::string, std::string>>;
+
         /** `kind` is "memo" or "group"; a group is a cue that holds cues.
 
             `index` is a MEMBER position, the same number `move` takes and the
-            same one `order` publishes - see `document/Sequence.h`. */
+            same one `order` publishes - see `document/Sequence.h`.
+
+            `attributes` are settings the cue is BORN with (2026-09-27): a
+            timeline group, a stop aimed at a cue, a program change - what one
+            click on the window's new-cue lists chose, made in the same step as
+            the cue so one Undo takes back what one click made. Only a row
+            somebody could write afterwards is accepted; the name has its own
+            argument and is refused here. */
         EditResult createCue (const std::string& parentId, int index,
                               const std::string& kind, const std::string& name,
-                              const std::string& id = {});
+                              const std::string& id = {},
+                              const Attributes& attributes = {});
 
         /*  Adds a destination to a media cue: which bus it feeds, and nothing
             else. The coefficients are written afterwards through the ordinary
@@ -196,7 +208,13 @@ namespace wfg::doc
             that does not exist. */
         EditResult createRoute (const std::string& cueId, const std::string& busId,
                                 const std::string& id = {});
-        EditResult groupSelection (const std::vector<std::string>& ids, const std::string& id = {});
+        /*  A new group holding the cues named, in show order, where the first
+            of them stood - one step. `attributes` are the new group's, as
+            `createCue` takes them: its mode is written before any cue moves
+            in, so a cue moved into a sampler is treated as a sampler member
+            from the start. */
+        EditResult groupSelection (const std::vector<std::string>& ids, const std::string& id = {},
+                                   const Attributes& attributes = {});
         /** Import convenience: explicitly route an unassigned cue to the first
             output bus. Existing routes and processor feeds are preserved. */
         EditResult defaultMediaRoute (const std::string& cueId, int channels,
@@ -295,21 +313,40 @@ namespace wfg::doc
 
             So a new show starts with a list, somewhere for sound to go, and
             room for some of it: one stereo direct out on the first two
-            interface channels, and eight cues able to sound at once. Eight is
-            a judgement and not a law - it is more than most shows need at any
-            one instant and cheap to carry - and it is one number in a box on
-            the Outputs tab the moment anybody disagrees.
+            interface channels, and THIRTY-TWO cues able to sound at once
+            (author, 2026-09-25: "Can we default to 32 voices when starting a
+            new project so people don't have a broken app until they figure
+            out the polyphony?"). It was eight, and eight runs out sooner than
+            it looks: a sampler bank holds a track for every member it arms,
+            and the next standby cue holds one ready for GO, so one bank and a
+            scene already crowd it - and a member with no track plays nothing.
+            Thirty-two is what M11 measured affordable (a third of a 96 kHz,
+            64-frame block), and it is still one number in a box on the
+            Outputs tab the moment anybody disagrees.
 
             Both halves or neither: tracks with no output is worse than no
             tracks at all, because the engine refuses to start a show that has
             somewhere to play from and nowhere to play to. */
-        EditResult startNewShow (int tracks = 8);
+        EditResult startNewShow (int tracks = 32);
 
         EditResult removeBus (const std::string& id);
 
         EditResult moveBus (const std::string& id, int index);
 
         EditResult resizeBus (const std::string& id, int width);
+
+        /*  THE NAMED INPUTS (Phase 9b, namespace draft §18.2): the buses' four
+            for the other side of the interface. A name and a width, packed onto
+            the logical inputs the input patch maps to hardware, and kept in the
+            `<Audio><Inputs>` container, made on demand at a fixed place after
+            the buses. The same arithmetic as the outputs (`OutputLayout.h`),
+            the same patch rule with `inputPatch` and `inputPatchSettled`, and
+            the same answers: a width outside one to eight is `bad-value`, an
+            input the show does not have is `unknown-id`. */
+        EditResult createInput (int width, int index = -1, const std::string& id = {});
+        EditResult removeInput (const std::string& id);
+        EditResult moveInput (const std::string& id, int index);
+        EditResult resizeInput (const std::string& id, int width);
 
         EditResult createFeed (const std::string& cueId, const std::string& slotId,
                                const std::string& id = {});
@@ -339,8 +376,10 @@ namespace wfg::doc
         EditResult createFx (const std::string& cueId, const std::string& pluginId,
                              const std::string& id);
 
+        /*  `level` empty is the row's default; otherwise the send is born at
+            it, checked like any written value (2026-09-25). */
         EditResult createSend (const std::string& cueId, const std::string& busId,
-                               const std::string& id = {});
+                               const std::string& id = {}, const std::string& level = {});
 
         /*  CUTS A RANGE IN TWO where the playhead is (author, 2026-09-21:
             *"even if the ranges amount to the full file, pressing the [+]
@@ -407,10 +446,19 @@ namespace wfg::doc
             machine that has never scanned needs no known list. <Plugins> is
             made on demand under <Audio>, after the last <Bus> and before
             <Rack>, so the canonical bytes do not depend on which of the two
-            containers was asked for first. */
+            containers was asked for first. A format other than VST3, AU or
+            LV2 (or none) is refused `bad-value`. */
         EditResult createPlugin (const std::string& name, const std::string& identifier,
                                  const std::string& format, const std::string& path,
                                  const std::string& id = {});
+
+        /*  PHASE 9b: a plugin at the end of a rack channel's chain - the same
+            four words as an entry of the set, the same `Plugin` element, under
+            the channel instead of the set. `unknown-id` for a channel the show
+            does not have, `bad-value` for a format it does not know. */
+        EditResult createChannelPlugin (const std::string& channelId, const std::string& name,
+                                        const std::string& identifier, const std::string& format,
+                                        const std::string& path, const std::string& id = {});
 
         /** How many strips a fresh surface of this profile is made with, or
             -1 for a word that is not a profile. */
@@ -553,6 +601,12 @@ namespace wfg::doc
 
         /** Half a second at 50 Hz. See `beginTransaction`. */
         static constexpr std::int64_t coalescingWindowTicks = 25;
+
+        /*  Two and a half seconds at 50 Hz: how long after a turn of an
+            insert's parameters its captured state still joins the turn's
+            step - the helper's quiet moment (a second and a half) and the
+            round trip, with room. A default the author may overturn. */
+        static constexpr std::int64_t captureJoinWindowTicks = 125;
 
         /*  Takes back, or puts back, one transaction - and answers with its
             NAME, which the command logs as an applied argument so that a replay
@@ -791,12 +845,28 @@ namespace wfg::doc
             `firstChannel` order, ties broken by document order. */
         std::vector<juce::ValueTree> busNodes() const;
 
+        /*  Every named input, read the same way: first logical input, ties
+            broken by document order. */
+        std::vector<juce::ValueTree> inputNodes() const;
+
+        /*  The `<Inputs>` container, made when `make` asks and there is none:
+            at a fixed place, after the last bus, so the canonical bytes do not
+            depend on whether the inputs or the plugin set were asked for first
+            (`createPlugin` places its own after the last bus and after this). */
+        juce::ValueTree inputsContainer (bool make);
+
+        /*  WHICH LIST A LAYOUT EDIT IS ABOUT. The arithmetic is one; what the
+            two sides differ in is the element, where it lives, the patch kept
+            in step and the flag that says the patch has settled. */
+        enum class LayoutSide { outputs, inputs };
+
         /*  Applies a layout edit and writes everything that came out of it: the
             structural change, every repacked `firstChannel`, the document order
-            and the patch. The four layout commands are this and a
+            and the patch. The eight layout commands are this and a
             `doc::LayoutEdit`. */
         EditResult applyLayout (const LayoutEdit& edit, const std::string& id,
-                                const std::string& kind);
+                                const std::string& kind,
+                                LayoutSide side = LayoutSide::outputs);
 
         /*  The histories, built empty. Called by the constructor and by the
             move, which is why it is a function rather than two loops that could

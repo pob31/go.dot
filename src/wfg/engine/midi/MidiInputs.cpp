@@ -18,6 +18,8 @@
 
 #include <wfg/engine/Engine.h>
 
+#include <algorithm>
+
 namespace wfg::midi
 {
     namespace
@@ -214,6 +216,49 @@ namespace wfg::midi
     }
 
     //==========================================================================
+    void MidiInputs::close (const std::string& portId)
+    {
+        if (portId.empty())
+            return;
+
+        std::vector<std::string> devices;
+
+        {
+            const std::lock_guard<std::mutex> lock { triggerMutex };
+
+            for (auto at = portOfDevice.begin(); at != portOfDevice.end();)
+            {
+                if (at->second == portId)
+                {
+                    devices.push_back (at->first);
+                    at = portOfDevice.erase (at);
+                }
+                else
+                {
+                    ++at;
+                }
+            }
+        }
+
+        /*  STOPPED BEFORE IT IS LET GO, as `closeAll` does: a message already
+            in flight is finished by the callback, which stamps it with the
+            device's own name now that the port has let go of it. */
+        for (auto at = open_.begin(); at != open_.end();)
+        {
+            const auto name = *at != nullptr ? (*at)->getName().toStdString() : std::string {};
+
+            if (std::find (devices.begin(), devices.end(), name) != devices.end())
+            {
+                (*at)->stop();
+                at = open_.erase (at);
+            }
+            else
+            {
+                ++at;
+            }
+        }
+    }
+
     void MidiInputs::handleIncomingMidiMessage (juce::MidiInput* source,
                                                 const juce::MidiMessage& message)
     {

@@ -81,6 +81,7 @@ add_executable(wfg_tests
     AudioTests.cpp
     CueMatrixTests.cpp
     CueEqTests.cpp
+    LooperTests.cpp
     MountTests.cpp
     NetworkCueTests.cpp
     VerifiedCueTests.cpp
@@ -91,19 +92,25 @@ add_executable(wfg_tests
     GoTests.cpp
     TriggerTests.cpp
     RangeTests.cpp
+    LevelLaneTests.cpp
     AnalysisTests.cpp
     SolverTests.cpp
     SlotTests.cpp
     MidiTests.cpp
     SurfaceTests.cpp
     PluginSetTests.cpp
+    MicTests.cpp
+    TakeTests.cpp
     PluginCatalogueTests.cpp
+    PluginScanTests.cpp
     ProxyTests.cpp
+    EditorHelperTests.cpp
     FxRowsTests.cpp
     McuCodecTests.cpp
     DcaTests.cpp
     SamplerTests.cpp
     SurfaceBridgeTests.cpp
+    SurfacePagesTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp
@@ -125,6 +132,39 @@ target_compile_definitions(wfg_tests PRIVATE
 # wfg::client_model and not wfg::client_ui: the model half is what a test can
 # hold (ClientTests.cpp); the window is tested by opening it.
 target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::client_model wfg::warnings)
+
+# -----------------------------------------------------------------------------
+# A REAL LV2 PLUGIN, FOR THE TESTS ONLY (2026-09-26). A CI runner has no plugin
+# of its own, so without this every hosting test there goes through the built-in
+# `godot:test-gain`, which bypasses JUCE's formats altogether. This bundle is
+# two plugins in plain C against the LV2 core header JUCE vendors: a stereo gain
+# and a mono-to-stereo widener (tests/fixtures/lv2/godot_test_lv2.c says what
+# each does). It is built into a bundle folder beside the tests, never installed
+# and never on an LV2 path; the scan finds it through --path, and the unit case
+# through WFG_TEST_LV2_BUNDLE. The manifest names the binary, whose suffix is
+# the platform's, so it is configured rather than copied.
+# -----------------------------------------------------------------------------
+set(GODOT_TEST_LV2_FOLDER "${CMAKE_CURRENT_BINARY_DIR}/lv2")
+set(GODOT_TEST_LV2_BUNDLE "${GODOT_TEST_LV2_FOLDER}/godot-test.lv2")
+set(GODOT_TEST_LV2_BINARY "godot_test_lv2${CMAKE_SHARED_MODULE_SUFFIX}")
+
+add_library(godot_test_lv2 MODULE fixtures/lv2/godot_test_lv2.c)
+target_include_directories(godot_test_lv2 PRIVATE
+    "${CMAKE_SOURCE_DIR}/ThirdParty/JUCE/modules/juce_audio_processors_headless/format_types/LV2_SDK/lv2")
+
+# `$<1:...>` keeps a multi-config generator from adding its Debug/Release
+# folder: the binary must sit inside the bundle, beside its manifest.
+set_target_properties(godot_test_lv2 PROPERTIES
+    PREFIX ""
+    C_VISIBILITY_PRESET hidden
+    LIBRARY_OUTPUT_DIRECTORY "$<1:${GODOT_TEST_LV2_BUNDLE}>"
+    RUNTIME_OUTPUT_DIRECTORY "$<1:${GODOT_TEST_LV2_BUNDLE}>")
+
+configure_file(fixtures/lv2/manifest.ttl.in "${GODOT_TEST_LV2_BUNDLE}/manifest.ttl" @ONLY)
+configure_file(fixtures/lv2/plugin.ttl "${GODOT_TEST_LV2_BUNDLE}/plugin.ttl" COPYONLY)
+
+add_dependencies(wfg_tests godot_test_lv2)
+target_compile_definitions(wfg_tests PRIVATE WFG_TEST_LV2_BUNDLE="${GODOT_TEST_LV2_BUNDLE}")
 
 # These native-window checks need a Windows desktop and exercise the actual
 # settings panel with a live device; keep the ordinary unit runner headless.
@@ -188,6 +228,38 @@ add_test(NAME wfg.selftest COMMAND wfg selftest)
 # and that is what makes the verb testable at all. A port list is a fact about
 # the machine; an empty one is a fact too.
 add_test(NAME wfg.midi COMMAND wfg midi)
+
+# `wfg plugins` reads the machine's known list from Go.dot's own known.xml
+# (2026-09-26) - here a committed one, through --engine-folder, so the run
+# never touches the developer's real list. The AU in it must read as the show's
+# word, AU, and not JUCE's AudioUnit.
+add_test(NAME wfg.plugins.known
+         COMMAND wfg plugins "--engine-folder=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/engine")
+set_tests_properties(wfg.plugins.known PROPERTIES
+                     PASS_REGULAR_EXPRESSION "Fixture Delay [|] AU [|] Go[.]dot tests")
+
+# A real scan, out of process as always, of the in-tree LV2 bundle (built with
+# the tests, above) through --path, into an engine folder of the build's own:
+# both plugins of the bundle must come back as LV2, the second one proving the
+# bundle's path was not scanned twice into one entry.
+add_test(NAME wfg.plugins.scan-lv2
+         COMMAND wfg plugins --scan=lv2 "--path=${GODOT_TEST_LV2_FOLDER}"
+                 "--engine-folder=${CMAKE_CURRENT_BINARY_DIR}/lv2-scan-engine")
+set_tests_properties(wfg.plugins.scan-lv2 PROPERTIES
+                     TIMEOUT 120
+                     PASS_REGULAR_EXPRESSION "Go[.]dot test LV2 gain [|] LV2 [|] Go[.]dot tests.*Go[.]dot test LV2 widen [|] LV2 [|] Go[.]dot tests")
+
+if(APPLE)
+    # And a real AU scan on the macOS runner (2026-09-26): Apple's AUBandpass,
+    # which every Mac has, scanned alone by its identifier - an AU has no folder,
+    # the system lists its components.
+    add_test(NAME wfg.plugins.scan-au
+             COMMAND wfg plugins --scan=au "--retry=AudioUnit:Effects/aufx,bpas,appl"
+                     "--engine-folder=${CMAKE_CURRENT_BINARY_DIR}/au-scan-engine")
+    set_tests_properties(wfg.plugins.scan-au PROPERTIES
+                         TIMEOUT 120
+                         PASS_REGULAR_EXPRESSION "AUBandpass [|] AU [|] Apple")
+endif()
 
 add_test(NAME wfg.commands.C     COMMAND wfg commands --wfg-locale=C)
 add_test(NAME wfg.commands.fr_FR COMMAND wfg commands --wfg-locale=${WFG_LOCALE_FR})
@@ -456,6 +528,30 @@ add_test(NAME wfg.replay.eq.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/eq.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/eq
                  --wfg-locale=${WFG_LOCALE_FR})
+# A MEDIA CUE'S LEVEL LANE AS RECORDS (namespace draft §20): a lane redrawn in
+# one node.set, three drawings refused with the reason each deserves, a lane
+# cleared and put back by undo, and a lane refused on a memo - replayed through
+# the document door under both locales.
+add_test(NAME wfg.replay.lane.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/lane.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/lane
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.lane.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/lane.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/lane
+                 --wfg-locale=${WFG_LOCALE_FR})
+# A LOCKED SHOW'S EQ AND SENDS RIDDEN LIVE (2026-09-25): rides refused by the
+# document and taken by the live layer in front of it, a send made live with
+# its drawn identifier, then unlocked, kept as one transaction and undone -
+# reproduced through the same doors serve installs, under both locales.
+add_test(NAME wfg.replay.live.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/live.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/live
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.live.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/live.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/live
+                 --wfg-locale=${WFG_LOCALE_FR})
 # PHASE 9a'S PLUGIN SET AS RECORDS: an entry declared with its four words and
 # its drawn identifier, renamed, deleted and the delete undone - the set made
 # on demand under Audio, reproduced exactly under both locales (§17.9).
@@ -466,6 +562,52 @@ add_test(NAME wfg.replay.plugins.C
 add_test(NAME wfg.replay.plugins.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/plugins.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fx
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# The persistent section through a double Esc and a jump (2026-09-26, namespace
+# draft 18.8): asserted at a step, silenced but not suspended by a double Esc and
+# back at the next GO, and left sounding by a jump whose own cue is relaunched.
+# A mic cue's life (stage 9b.5, namespace draft 18.5): GO on its rack channel, Esc
+# ringing out, fired again, its plugin's child killed and the failure in words, and a
+# double Esc - recorded from a hosted session with an input WAV, replayed with no child.
+# The plugin's parameter write left the show unsaved long enough to autosave, so the
+# replay is given somewhere to save to, never the fixture itself.
+add_test(NAME wfg.replay.mic.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/mic.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/mic
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/mic-C
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.mic.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/mic.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/mic
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/mic-fr_FR
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# A take's life (stages 9c.3 and 9c.6, namespace draft 19.6 and 19.8): recorded and
+# looped by transport cues, its points ridden through the tree's door, a layer laid
+# and undone, kept as a file and as a cue, held by Esc, looped again by a later mic cue
+# whose GO loops what it finds, cleared, and a double Esc - recorded from a hosted
+# session with an input WAV, replayed with no recorder and no disk: the take's close
+# and the file's name are the audio side's take.closed and take.kept, re-injected. Keep
+# as cue edits the show, which autosaves, so the replay is given somewhere to save to.
+add_test(NAME wfg.replay.take.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/take.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/take
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/take-C
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.take.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/take.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/take
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/take-fr_FR
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+add_test(NAME wfg.replay.persistent.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/persistent.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/persistent
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.persistent.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/persistent.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/persistent
                  --wfg-locale=${WFG_LOCALE_FR})
 
 # A cue's insert made, turned, switched off and a turn undone (Phase 9a, PR 9a.8):
@@ -1011,10 +1153,27 @@ add_test(NAME blackbox.phase9a-eq.fr_FR
 set_tests_properties(blackbox.phase9a-eq.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# A MEDIA CUE'S LEVEL LANE, HEARD (namespace draft §20.6): a tone through a
+# cue whose lane ramps, holds and steps, then a looping slice hearing the same
+# stretch of its lane on every pass and a new lane written while it loops,
+# served with a real Tracktion graph and rendered; M45 is printed. Then the
+# session replays.
+add_test(NAME blackbox.lane-level.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_level.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.lane-level.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.lane-level.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_level.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.lane-level.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # A cue's insert, heard (Phase 9a, PR 9a.8): the test-gain child on a voice through
 # the sandbox - the render at a half, a value written through the p<n> door moving it,
-# the kill switch taking the child down and the voice playing dry with the entry
-# reading failed in words, and the session replaying with no child at all.
+# the kill switch taking the child down and the voice silent, never dry, through the
+# relaunch it kills again (namespace draft 18.13), the entry reading failed in words,
+# and the session replaying with no child at all.
 add_test(NAME blackbox.phase9a-fx.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9a_fx.py"
                  --wfg-locale=C)
@@ -1024,6 +1183,80 @@ add_test(NAME blackbox.phase9a-fx.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9a_fx.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase9a-fx.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# Finishing plugin hosting, stage 3 (the author's decision of 2026-09-26: a Scan
+# button in the app): `plugin.scan lv2 <folder>` runs the command line's own scan
+# as a child of a serve with an engine folder of its own, /godot/plugin/scan/...
+# says where it is, the known list read again offers the in-tree test bundle's
+# two plugins as LV2, a locked show refuses the scan in the log, and the session
+# replays with no scan launched.
+add_test(NAME blackbox.phase9b-plugins.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_plugins.py"
+                 --wfg-locale=C "--lv2-folder=${GODOT_TEST_LV2_FOLDER}")
+set_tests_properties(blackbox.phase9b-plugins.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9b-plugins.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_plugins.py"
+                 --wfg-locale=${WFG_LOCALE_FR} "--lv2-folder=${GODOT_TEST_LV2_FOLDER}")
+set_tests_properties(blackbox.phase9b-plugins.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# Stage 8 (the author's decision of 2026-09-26: a plugin can make a mono cue
+# stereo), heard: a mono cue through the widening test child on a stereo direct
+# out comes out as two different sides; switched out, the mono cue on both at
+# full as ever; on a mono bus, the two sides summed at a half each; and the
+# session replays with no child.
+add_test(NAME blackbox.phase9b-width.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_width.py" --wfg-locale=C)
+set_tests_properties(blackbox.phase9b-width.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9b-width.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_width.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9b-width.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# The live rack, stage 9b.2 (namespace draft 18.10): named inputs made over OSC
+# on a hosted interface fed from a WAV, one meter reading a tone and one
+# silence with nothing listening, one input past the interface saying so, and
+# the session replayed.
+add_test(NAME blackbox.phase9b-inputs.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_inputs.py" --wfg-locale=C)
+set_tests_properties(blackbox.phase9b-inputs.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9b-inputs.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_inputs.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9b-inputs.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# The live rack, stage 9b.5 (namespace draft 18.5 and 18.10): the `mic` fixture on
+# a hosted interface fed a steady input, its mic cue heard through Vox 1's own
+# test-gain child after rising over its fade-in, Esc ringing out and freeing the
+# channel, the child killed mid-cue and the voice silent through its relaunch, never
+# dry (namespace draft 18.13), with the failure in words, a double Esc ending it at
+# once, and the session replayed with no child.
+add_test(NAME blackbox.phase9b-mic.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_mic.py" --wfg-locale=C)
+set_tests_properties(blackbox.phase9b-mic.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9b-mic.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_mic.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9b-mic.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# Live sampling, stage 9c.3 (namespace draft 19.3 and 19.6): the `take` fixture on a
+# hosted interface fed a steady input - a mic cue whose take waits, Rec and Loop it
+# from transport cues, silent while it records, the take looping at a half through
+# the plugin before the recorder, the points ridden, a layer laid a pass at a time and
+# undone, the take held by Esc and looped again by a later mic cue with its input
+# heard through, cleared, a double Esc, and the session replayed with no audio.
+add_test(NAME blackbox.phase9c-take.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9c_take.py" --wfg-locale=C)
+set_tests_properties(blackbox.phase9c-take.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9c-take.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9c_take.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9c-take.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # The client the engine serves at /ui: the page, its files as bytes, and since

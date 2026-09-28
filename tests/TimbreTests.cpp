@@ -40,6 +40,7 @@
 
 #include <wfg/engine/audio/MediaAnalyser.h>
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/audio/Peaks.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/document/ShowDocument.h>
 
@@ -253,6 +254,11 @@ namespace
         return media.getChildFile (".timbre").getChildFile (juce::String (hash) + ".tpy");
     }
 
+    juce::File peaksFileFor (const juce::File& media, const std::string& hash)
+    {
+        return media.getChildFile (".timbre").getChildFile (juce::String (hash) + ".tpk");
+    }
+
     bool isHexDigest (const std::string& text)
     {
         return text.size() == 64
@@ -268,14 +274,21 @@ namespace
 }
 
 //==============================================================================
-TEST_CASE ("timbre: the ramp's stops are plan decision 8's, and its lightness climbs the whole band")
+TEST_CASE ("timbre: the ramp's stops are the author's, and its lightness climbs the whole band")
 {
+    /*  Blue held to 250 Hz and red not before 800 (author, 2026-09-25: "I
+        would bias a bit towards the blues"); plan decision 8 had them at 150
+        and 500. */
     CHECK (timbre::rampHue (40.0) == doctest::Approx (280.0));
-    CHECK (timbre::rampHue (150.0) == doctest::Approx (240.0));
-    CHECK (timbre::rampHue (500.0) == doctest::Approx (0.0));
-    CHECK (timbre::rampHue (1500.0) == doctest::Approx (30.0));
-    CHECK (timbre::rampHue (4000.0) == doctest::Approx (60.0));
+    CHECK (timbre::rampHue (250.0) == doctest::Approx (240.0));
+    CHECK (timbre::rampHue (800.0) == doctest::Approx (0.0));
+    CHECK (timbre::rampHue (2500.0) == doctest::Approx (30.0));
+    CHECK (timbre::rampHue (6000.0) == doctest::Approx (60.0));
     CHECK (timbre::rampHue (12000.0) == doctest::Approx (120.0));
+
+    //  And the body of most material is violet and blue now, not red: 500 Hz is past magenta's 300.
+    CHECK (timbre::rampHue (500.0) > 300.0);
+    CHECK (timbre::rampHue (500.0) < 330.0);
 
     /*  Held at the ends, including a centroid nobody could have. */
     CHECK (timbre::rampHue (20.0) == doctest::Approx (280.0));
@@ -283,15 +296,15 @@ TEST_CASE ("timbre: the ramp's stops are plan decision 8's, and its lightness cl
     CHECK (timbre::rampHue (std::nan ("")) == doctest::Approx (280.0));
 
     /*  Between red and orange, the log of the frequency and not the frequency:
-        1 kHz is 63 % of the way from 500 Hz to 1.5 kHz in octaves. */
-    CHECK (timbre::rampHue (1000.0) == doctest::Approx (30.0 * std::log (2.0) / std::log (3.0)));
+        1 kHz is a fifth of the way from 800 Hz to 2.5 kHz in octaves. */
+    CHECK (timbre::rampHue (1000.0) == doctest::Approx (30.0 * std::log (1.25) / std::log (3.125)));
 
     /*  THE HUE TURNS BACK, and this pins it so a palette change is seen: from
-        purple at 40 Hz it falls to deep blue at 150 Hz, then climbs the other
+        purple at 40 Hz it falls to deep blue at 250 Hz, then climbs the other
         way round the wheel. What the sweep check below asserts is therefore
         the lightness, which never turns back. */
-    CHECK (timbre::rampHue (100.0) > timbre::rampHue (150.0));
-    CHECK (timbre::rampHue (300.0) > timbre::rampHue (150.0));
+    CHECK (timbre::rampHue (100.0) > timbre::rampHue (250.0));
+    CHECK (timbre::rampHue (300.0) > timbre::rampHue (250.0));
 
     CHECK (timbre::rampLightness (40.0) == doctest::Approx (0.15));
     CHECK (timbre::rampLightness (16000.0) == doctest::Approx (0.85));
@@ -361,15 +374,111 @@ TEST_CASE ("timbre: white noise is grey, and still a reading")
 
     REQUIRE (frames > 100);
 
-    /*  Flatness on MAGNITUDE: a Rayleigh-distributed spectrum's geometric mean
-        over its arithmetic is about 0.85, so noise reads about 0.15. On power
-        it would read 0.44 at every level of noise, and could never be grey. */
+    /*  Noise set against its own neighbourhood scatters around it - a
+        geometric mean over an arithmetic near 0.6, past `noisyAt` - so it
+        reads grey, and not only when it is white (the next case). */
     CHECK (saturation / frames < 0.2);
 
     /*  A reading, not the silence a missing pyramid would be - and a bright
         one, since white noise's power is where the bins are, at the top. */
     CHECK (silent == 0);
     CHECK (lightness / frames > 0.6);
+}
+
+TEST_CASE ("timbre: noise is grey wherever it sits in the spectrum, and a harmonic tone is vivid")
+{
+    /*  The author, 2026-09-25: the colours "don't desaturate on a broader,
+        noisier signal". White noise always read grey; noise with a slope or in
+        part of the band - pink, a hi-hat's top octaves - read as vivid as a
+        sine, because the flatness was over the whole band. Now each bin is
+        set against its own neighbourhood, where the energy is. */
+    constexpr double rate = 48000.0;
+
+    const auto meanSaturation = [] (const std::vector<float>& samples)
+    {
+        const auto pyramid = analyseMono (samples, rate);
+        double sum = 0.0;
+        int frames = 0;
+
+        forEachSteadyFrame (pyramid.levels.front(), [&] (std::size_t, const timbre::Frame& frame)
+        {
+            sum += timbre::saturationOf (frame);
+            ++frames;
+        });
+
+        REQUIRE (frames > 50);
+        return sum / frames;
+    };
+
+    //  Pink: white noise through Paul Kellet's filter, a slope of 3 dB an octave.
+    auto pink = whiteNoise (2.0, rate);
+    {
+        double b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+
+        for (auto& sample : pink)
+        {
+            const auto white = static_cast<double> (sample);
+            b0 = 0.99886 * b0 + white * 0.0555179;
+            b1 = 0.99332 * b1 + white * 0.0750759;
+            b2 = 0.96900 * b2 + white * 0.1538520;
+            b3 = 0.86650 * b3 + white * 0.3104856;
+            b4 = 0.55000 * b4 + white * 0.5329522;
+            b5 = -0.7616 * b5 - white * 0.0168980;
+            sample = static_cast<float> ((b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11);
+            b6 = white * 0.115926;
+        }
+    }
+
+    //  A hi-hat's band: white noise high-passed at 6 kHz, four poles.
+    auto hat = whiteNoise (2.0, rate);
+    {
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            juce::IIRFilter filter;
+            filter.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 6000.0));
+            filter.processSamples (hat.data(), static_cast<int> (hat.size()));
+        }
+    }
+
+    //  A sawtooth at 220 Hz: every harmonic, each a peak over its neighbourhood.
+    std::vector<float> saw (static_cast<std::size_t> (2.0 * rate));
+    {
+        for (std::size_t n = 0; n < saw.size(); ++n)
+        {
+            double value = 0.0;
+
+            for (int harmonic = 1; 220.0 * harmonic < 16000.0; ++harmonic)
+                value += std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * harmonic
+                                   * static_cast<double> (n) / rate) / harmonic;
+
+            saw[n] = static_cast<float> (0.3 * value);
+        }
+    }
+
+    CHECK (meanSaturation (pink) < 0.2);
+    CHECK (meanSaturation (hat) < 0.25);
+    CHECK (meanSaturation (saw) > 0.8);
+
+    /*  AND A BASS DRUM IS COLOURED (author, 2026-09-25, of a sub-bass pulse
+        that came out grey: "It's like pulsating bass drum"): a pitch falling
+        from 85 to 45 Hz twice a second, each hit decaying. Under
+        `pitchedBelowHertz` sound reads by its pitch - the window cannot tell
+        a tone from noise there, and the ear hears a thump. */
+    std::vector<float> kick (static_cast<std::size_t> (2.0 * rate));
+    {
+        double phase = 0.0;
+
+        for (std::size_t n = 0; n < kick.size(); ++n)
+        {
+            const auto since = std::fmod (static_cast<double> (n) / rate, 0.5);
+            const auto hertz = 45.0 + 40.0 * std::exp (-since * 30.0);
+
+            phase += 2.0 * juce::MathConstants<double>::pi * hertz / rate;
+            kick[n] = static_cast<float> (0.8 * std::sin (phase) * std::exp (-since * 6.0));
+        }
+    }
+
+    CHECK (meanSaturation (kick) > 0.8);
 }
 
 TEST_CASE ("timbre: a sweep walks the ramp, and its lightness never falls")
@@ -713,7 +822,14 @@ TEST_CASE ("timbre cache: a file is analysed once, keyed by its bytes, and a sec
 
     const auto cache = cacheFileFor (media, built.contentHash);
     REQUIRE (cache.existsAsFile());
-    CHECK (built.bytesOnDisk == cache.getSize());
+
+    /*  AND THE FINER LEVEL BESIDE IT (2026-09-25), from the same pass: a pair
+        per 64 samples of the two seconds. */
+    const auto level = peaksFileFor (media, built.contentHash);
+    REQUIRE (level.existsAsFile());
+    REQUIRE (built.peaks != nullptr);
+    CHECK (built.peaks->pairs() == (96000u + 63u) / 64u);
+    CHECK (built.bytesOnDisk == cache.getSize() + level.getSize());
     CHECK (juce::String (audio::describe (built.outcome)) == "built");
 
     /*  THE FILE'S ANALYSIS IS THE SAMPLES' ANALYSIS: the reader hands the
@@ -732,6 +848,15 @@ TEST_CASE ("timbre cache: a file is analysed once, keyed by its bytes, and a sec
     CHECK (second.contentHash == built.contentHash);
     REQUIRE (second.pyramid != nullptr);
     CHECK (samePyramid (*second.pyramid, *built.pyramid));
+    REQUIRE (second.peaks != nullptr);
+    CHECK (second.peaks->levels == built.peaks->levels);
+
+    /*  A CACHE WITH THE COLOURS AND NOT THE LEVEL is built again - one pass
+        makes both - and then has both. */
+    REQUIRE (level.deleteFile());
+    const auto partial = audio::analyseMediaFile (mediaFolder, "tone.wav", false);
+    CHECK (partial.outcome == audio::MediaAnalysis::Outcome::built);
+    CHECK (level.existsAsFile());
 
     /*  The same bytes under another name: the same key, and no work. */
     REQUIRE (media.getChildFile ("elsewhere").createDirectory().wasOk());
@@ -759,8 +884,71 @@ TEST_CASE ("timbre cache: a file is analysed once, keyed by its bytes, and a sec
     REQUIRE (cache.loadFileAsData (mendedBytes));
     CHECK (mendedBytes == firstBytes);
 
-    /*  And no temp is left beside it. */
-    CHECK (media.getChildFile (".timbre").getNumberOfChildFiles (juce::File::findFiles) == 1);
+    /*  And no temp is left beside them: the colours and the level, two files. */
+    CHECK (media.getChildFile (".timbre").getNumberOfChildFiles (juce::File::findFiles) == 2);
+}
+
+TEST_CASE ("peaks: every 64 samples' lowest and highest, in sixteen bits, halved, written and read back")
+{
+    /*  The author, 2026-09-25: "Can the waveform be more precise in level,
+        not colour when zooming in." A frame's peak was a byte a thousand
+        samples; this is the plain answer beside it. */
+    constexpr int length = 1000;
+
+    std::vector<float> left (static_cast<std::size_t> (length));
+    std::vector<float> right (static_cast<std::size_t> (length));
+
+    for (int n = 0; n < length; ++n)
+    {
+        left[static_cast<std::size_t> (n)] = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                              * static_cast<float> (n) / 100.0f);
+        right[static_cast<std::size_t> (n)] = 0.0f;
+    }
+
+    //  A spike on the second channel in the second stretch: the pair holds every channel.
+    right[70] = 0.9f;
+
+    const float* channels[] { left.data(), right.data() };
+
+    audio::peaks::Collector collector;
+    collector.add (channels, 2, 600);
+    const float* rest[] { left.data() + 600, right.data() + 600 };
+    collector.add (rest, 2, length - 600);
+
+    const auto track = collector.finish (48000u);
+
+    REQUIRE (track.levels.size() == 1u);                        // sixteen pairs: already a Gogo bar
+    CHECK (track.pairs() == 16u);                               // the last one short
+    CHECK (track.samples == static_cast<std::uint64_t> (length));
+    CHECK (track.levels.front()[1].high == audio::peaks::toShort (0.9f));
+    CHECK (audio::peaks::toUnit (track.levels.front()[0].high) > 0.45);      // the crest, at sample 25
+    CHECK (audio::peaks::toUnit (track.levels.front()[1].low) < -0.45);      // the trough, at sample 75
+
+    //  Sixteen bits: a level a byte could not tell from its neighbour.
+    CHECK (audio::peaks::toShort (0.0021f) != audio::peaks::toShort (0.0025f));
+
+    //  Halved as the pyramid is, the lower low and the higher high, down to 64.
+    std::vector<audio::PeakPair> many (200);
+    many[150] = { -1000, 2000 };
+    const auto halved = audio::peaks::trackOf (many, 48000u, 200u * 64u);
+    REQUIRE (halved.levels.size() == 3u);                       // 200, 100, 50
+    CHECK (halved.levels[2].size() == 50u);
+    CHECK (halved.levels[2][37] == audio::PeakPair { -1000, 2000 });
+
+    //  Written and read back, whole; anything else refused.
+    const auto bytes = audio::peaks::write (track);
+    audio::PeakTrack back;
+    REQUIRE (audio::peaks::read (bytes.data(), bytes.size(), back));
+    CHECK (back.levels == track.levels);
+    CHECK (back.sampleRate == 48000u);
+
+    audio::PeakTrack untouched;
+    CHECK_FALSE (audio::peaks::read (bytes.data(), bytes.size() - 1, untouched));
+
+    auto wrong = bytes;
+    wrong[0] = 'X';
+    CHECK_FALSE (audio::peaks::read (wrong.data(), wrong.size(), untouched));
+    CHECK (untouched.levels.empty());
 }
 
 TEST_CASE ("timbre cache: a folder that cannot be written costs the cache and not the colours")

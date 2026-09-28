@@ -17,8 +17,10 @@
 #include <wfg/client/ui/NewCueBarComponent.h>
 
 #include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/ui/Look.h>
 
+#include <cstddef>
 #include <utility>
 
 namespace wfg::client::ui
@@ -32,16 +34,28 @@ namespace wfg::client::ui
             the word the list's own column shows for it. */
         for (const auto& kind : model::cueKinds())
         {
-            auto button = std::make_unique<juce::TextButton> ("+ " + juce::String (kind));
+            /*  A BUTTON THAT OPENS A LIST SAYS SO with the small triangle a
+                list under a button carries everywhere else (2026-09-27): the
+                click that used to make a cue now asks which one. */
+            const auto opens = model::opensList (kind);
+            auto label = "+ " + juce::String (kind);
+
+            if (opens)
+                label << " " << juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"));
+
+            auto button = std::make_unique<juce::TextButton> (label);
             button->setWantsKeyboardFocus (false);
-            button->onClick = [this, kind]
+            button->onClick = [this, kind, opens, pressed = button.get()]
             {
-                if (actions.create)
+                if (opens && actions.choose)
+                    actions.choose (kind, *pressed);
+                else if (actions.create)
                     actions.create (kind);
             };
 
             addAndMakeVisible (*button);
             buttons.push_back (std::move (button));
+            kinds.push_back (kind);
         }
 
         setWantsKeyboardFocus (false);
@@ -62,9 +76,20 @@ namespace wfg::client::ui
 
         destination = sentence;
 
-        for (auto& button : buttons)
-            button->setTooltip ("a new " + button->getButtonText().fromFirstOccurrenceOf ("+ ", false, false)
-                                  + " cue, " + destination);
+        for (std::size_t at = 0; at < buttons.size(); ++at)
+            buttons[at]->setTooltip (tooltipFor (kinds[at]));
+    }
+
+    juce::String NewCueBarComponent::tooltipFor (const std::string& kind) const
+    {
+        /*  The list's own first line says the rest - where it lands, what it
+            is aimed at - so the tooltip says what the list is for. */
+        if (kind == "group")      return "a new group, " + destination + ": choose its kind";
+        if (kind == "transport")  return "a cue that stops, advances or starts another: choose which";
+        if (kind == "midi")       return "a new MIDI cue, " + destination + ": choose what it sends";
+        if (kind == "mic")        return "a new mic cue, " + destination + ": choose its input";
+
+        return "a new " + juce::String (kind) + " cue, " + destination;
     }
 
     int NewCueBarComponent::rowHeight() const noexcept

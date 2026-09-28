@@ -77,8 +77,8 @@ namespace wfg::cue
     inline bool isCueElement (const juce::String& element) noexcept
     {
         return element == "Cue"  || element == "Group" || element == "Media"
-            || element == "Fade" || element == "Transport"  || element == "Osc"
-            || element == "Midi" || element == "Start";
+            || element == "Mic"  || element == "Fade" || element == "Transport"
+            || element == "Osc"  || element == "Midi" || element == "Start";
     }
 
     //======================================================================
@@ -108,7 +108,7 @@ namespace wfg::cue
                 every feed in it as `bad-route`. Found on a recovered show,
                 which is the same writer. The defaults come from here now, as
                 every cue's do. */
-            for (const auto* owner : { "cue", "group", "media", "range", "fx", "plugin", "fade",
+            for (const auto* owner : { "cue", "group", "sound", "media", "mic", "input", "range", "fx", "plugin", "fade",
                                        "transport", "feed", "insert", "send",
                                        "bus", "processorInput", "rackChannel" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
@@ -163,6 +163,16 @@ namespace wfg::cue
     private:
         std::map<std::string, std::string> defaults;
     };
+
+    /*  A TRANSPORT CUE THAT STOPS NOTHING (Phase 9c, namespace draft §19.6):
+        record, loop, overdub and clear press a take on the sampling channel
+        their target sounds through, and the target plays on - so a walk that
+        counts what a transport cue has stopped passes these by. */
+    inline bool isTakePress (const Reader& read, const juce::ValueTree& transport)
+    {
+        const auto verb = read.text (transport, "transport", "verb");
+        return verb == "record" || verb == "loop" || verb == "overdub" || verb == "clear";
+    }
 
     //======================================================================
     /** Where in the list a cue sits, and when - if when is knowable. */
@@ -632,6 +642,12 @@ namespace wfg::cue
                 return true;
 
             const auto element = node.getType().toString();
+
+            /*  A LIVE INPUT RUNS UNTIL SOMEBODY STOPS IT (Phase 9b): nothing in
+                a microphone ends, so a mic cue fired before an instant is still
+                sounding at it unless a stop came between. */
+            if (element == "Mic")
+                return false;
 
             if (element == "Media")
             {

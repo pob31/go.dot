@@ -49,6 +49,7 @@
 #include <juce_events/juce_events.h>
 
 #include <mutex>
+#include <variant>
 #include <vector>
 
 namespace wfg
@@ -86,8 +87,37 @@ namespace wfg::audio
         void setEq (int track, const EqSettings&) override;
         void setFxEnabled (int track, int slot, bool enabled) override;
         void setFxParameter (int track, int slot, int parameter, float normalised) override;
+        void setFxShape (int track, int slot, int feed, int back) override;
+        void requestFxState (int track, int slot, const std::string& path) override;
+
+        /*  THE LIVE RACK (Phase 9b): a rack channel's track is played through
+            its gate - opened at the launch's sample over the cue's fade-in,
+            shut over a stop's fade or five milliseconds, and its tail left to
+            ring out - and a kill is silence at once. On a voice, `kill` is the
+            stop it always was. */
+        int rackTrackOf (const std::string& channelId) const override;
+        bool openLive (int track, std::int64_t sample, double fadeInSeconds) override;
+        void shutLive (int track, double seconds) override;
+        bool kill (int track) override;
         bool isPlaying (int track) const override;
         bool isArmReady (int track) const override;
+        float takeOutputPeak (int track) override;
+        int inputCount() const override;
+        float takeInputPeak (int channel) override;
+
+        /*  A SAMPLING CHANNEL'S TAKE (Phase 9c): a press handed to the channel's
+            recorder at its sample, the points turned into samples at the rate;
+            `through`; what the recorder did by itself, its lengths in seconds;
+            and where its loop is. A stop or a kill of a rack track holds its
+            take as well, as the gate shuts - the loop does not play on under a
+            tail ringing out. */
+        bool postTake (const std::string& channel, cue::TakeVerb verb, std::int64_t sample,
+                       double inSeconds, double outSeconds) override;
+        void setTakeThrough (const std::string& channel, bool through) override;
+        std::vector<TakeReport> takeReports (const std::vector<std::string>& channels) override;
+        double takePlayhead (const std::string& channel) const override;
+        bool keepTake (const std::string& channel, const std::string& stem, const std::string& mediaFolder) override;
+        std::vector<KeptReport> keptTakes() override;
 
         /*  Performs every queued arm. MESSAGE THREAD - it writes a Tracktion
             ValueTree, which every one of those writes asserts.
@@ -111,7 +141,20 @@ namespace wfg::audio
             what this class exists to prevent. */
         int trackChannels = 2;
 
+        /*  States asked for between an arm and its launch, for the message
+            thread: the lane was already told one is coming. */
+        struct StateWanted { int track = 0, slot = 0; std::string path; };
+
+        /*  EVERYTHING THE MESSAGE THREAD IS ASKED FOR, IN ONE QUEUE, in the
+            order the tick thread asked it. An arm snaps its cue's whole states
+            onto the voice, and a state asked for after it - an undo in
+            standby - has to land after it. Two queues, the states applied
+            first, let an arm and a newer state in one ten-millisecond batch end
+            on the arm's older state (handoff 2026-09-26, finding 3). */
         std::mutex queueMutex;
-        std::vector<cue::ArmRequest> queued;
+        std::vector<std::variant<cue::ArmRequest, StateWanted>> queued;
+
+        /** One arm, on the message thread: the file, the routing, the EQ, the inserts. */
+        void serviceArm (const cue::ArmRequest& request);
     };
 }

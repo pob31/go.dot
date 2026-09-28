@@ -15,10 +15,14 @@
 */
 
 #include <wfg/engine/tree/ParameterTree.h>
+
+#include <wfg/engine/cue/TakeTable.h>
+#include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/ShowWalk.h>
 
 #include <wfg/engine/midi/PortTable.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/cue/DcaTable.h>
 
@@ -47,6 +51,14 @@ namespace wfg::tree
 
         constexpr std::string_view rootAddress = "/";
         constexpr std::string_view godot = "/godot";
+
+        /*  The rows a surface's page publishes (2026-09-25), which the runtime
+            half carries and the document half must therefore skip: two halves
+            publishing one address is a duplicate `find` answers arbitrarily. */
+        bool isPageRow (const std::string& name) noexcept
+        {
+            return name == "page" || name == "pageIndex" || name == "pageCount" || name == "edited";
+        }
 
         Access accessFor (doc::Access access) noexcept
         {
@@ -360,6 +372,23 @@ namespace wfg::tree
             one cue, which the document says by containment, and it has no
             position anybody can act on. What it needs is a bus and a run of
             coefficients. */
+        /*  WHAT THE WALK NEEDS TO SAY HOW WIDE A CUE IS AFTER ITS INSERTS
+            (2026-09-26, cue/InsertChain.h): the plugin table and the voice's
+            width. Set around a rebuild of the document half, on the one thread
+            that rebuilds it - held here rather than passed down every call of
+            the walk, which knows nothing else about the machine. */
+        struct WalkPlugins
+        {
+            const plugin::PluginTable* table = nullptr;
+            int trackChannels = 2;
+        };
+
+        WalkPlugins& walkPlugins()
+        {
+            static thread_local WalkPlugins held;
+            return held;
+        }
+
         /*  The set entry a cue's Fx names, and where it sits in the chain: read
             off the document root, which every node can reach. */
         struct SetEntry
@@ -368,9 +397,35 @@ namespace wfg::tree
             int index = -1;
         };
 
-        SetEntry setEntryFor (const juce::ValueTree& anyNode, const std::string& pluginId)
+        /*  THE CHAIN A CUE'S INSERTS NAME: the show's set for a media cue, and
+            for a mic cue the rack channel it plays through (Phase 9b, namespace
+            draft 18.2) - whose plugins are the same element in its own order.
+            Invalid for a mic cue that names no channel, or one the show does
+            not have: its inserts then name nothing. */
+        juce::ValueTree insertChainOf (const juce::ValueTree& cue)
         {
-            const auto plugins = anyNode.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins");
+            const auto audio = cue.getRoot().getChildWithName ("Audio");
+
+            if (! cue.hasType ("Mic"))
+                return audio.getChildWithName ("Plugins");
+
+            const auto channelId = cue["channel"].toString();
+
+            if (channelId.isEmpty())
+                return {};
+
+            for (const auto rack : audio)
+                if (rack.hasType ("Rack"))
+                    for (const auto channel : rack)
+                        if (channel.hasType ("Channel") && channel[idProperty].toString() == channelId)
+                            return channel;
+
+            return {};
+        }
+
+        SetEntry setEntryFor (const juce::ValueTree& cue, const std::string& pluginId)
+        {
+            const auto plugins = insertChainOf (cue);
             auto index = 0;
 
             for (const auto entry : plugins)
@@ -428,15 +483,21 @@ namespace wfg::tree
         }
 
         /*  One insert of one media cue, at an address of its own (Phase 9a). */
-        void collectFx (const juce::ValueTree& fx, const std::string& cueId, std::vector<Node>& out)
+        void collectFx (const juce::ValueTree& fx, const std::string& cueId, std::vector<Node>& out,
+                        const cue::LiveEdits* live)
         {
             const auto fxId = fx[idProperty].toString().toStdString();
 
             if (fxId.empty())
                 return;
 
-            const auto entry = setEntryFor (fx, fx["plugin"].toString().toStdString());
+            const auto entry = setEntryFor (fx.getParent(), fx["plugin"].toString().toStdString());
             const auto base = std::string (godot) + "/fx/" + fxId;
+
+            /*  WHAT A LOCKED SHOW IS RIDING on this insert (2026-09-26, the FX
+                page): the row publishes the values heard, as a cue's EQ rows
+                do, so the plugin's own window and the panel follow a turn. */
+            const auto* riding = live != nullptr ? live->fxValuesOf (fxId) : nullptr;
 
             for (const auto* row : doc::Schema::rowsForOwner ("fx"))
             {
@@ -447,6 +508,35 @@ namespace wfg::tree
                 if (name == "cue")        text = cueId;
                 else if (name == "name")  text = entry.element.isValid() ? entry.element["name"].toString().toStdString() : std::string {};
                 else if (name == "index") text = std::to_string (std::max (0, entry.index));
+                else if (name == "problem" && fx.getParent().hasType ("Media"))
+                {
+                    /*  Why this insert plays its cue dry, off the chain. A mic
+                        cue's chain is its channel's, worked out when it sounds
+                        (Phase 9b); until then it says nothing here. */
+                    const auto cue = fx.getParent();
+                    const auto slots = cue::slotIdsOf (cue.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins"),
+                                                       walkPlugins().table);
+                    const auto chain = cue::chainOfCue (cue, walkPlugins().table, walkPlugins().trackChannels);
+                    const auto at = std::find (slots.begin(), slots.end(), fx["plugin"].toString().toStdString());
+
+                    if (at != slots.end())
+                        text = chain.steps[static_cast<std::size_t> (at - slots.begin())].dryWhy;
+                }
+                else if (name == "live")
+                {
+                    if (riding != nullptr)
+                        for (const auto& [index, value] : *riding)
+                            text += (text.empty() ? "" : " ") + std::to_string (index);
+                }
+                else if (name == "values" && riding != nullptr)
+                {
+                    auto values = cue::parseFxValues (storedText (attribute, fx));
+
+                    for (const auto& [index, value] : *riding)
+                        values[index] = value;
+
+                    text = cue::formatFxValues (values);
+                }
                 else                      text = storedText (attribute, fx);
 
                 out.push_back (makeLeaf (base + "/" + name, *row, text));
@@ -595,6 +685,12 @@ namespace wfg::tree
                 if (name == "holder" || name == "pending")
                     continue;
 
+                /*  A TAKE'S PLAYHEAD (Phase 9c), the same way: it moves every
+                    block while the loop plays and nothing about the show
+                    does. The runtime half emits it. */
+                if (name == "playhead")
+                    continue;
+
                 /*  A STRIP'S LIVE ROWS, for the same reason (Phase 6): what it
                     is riding, the word its display shows and the cue on it
                     change with every press and every handover while nothing
@@ -670,17 +766,83 @@ namespace wfg::tree
             because this walk is already the one place that knows which cue it
             is at, and a second lookup would be a second thing to keep in step
             with the first. */
+        /*  THE SHOW'S MIX CHANNELS, by identifier, in the order the outputs
+            list them - by first channel, then identifier, as the window's
+            send mixer draws its strips - so the rotaries of a Send page and
+            the faders on the screen stand in the same order. */
+        std::string mixesOf (const juce::ValueTree& audio)
+        {
+            std::vector<std::pair<int, std::string>> mixes;
+
+            for (const auto& bus : audio)
+            {
+                if (! bus.hasType ("Bus") || ! bus.hasProperty (idProperty))
+                    continue;
+
+                //  An absent kind is the row's default, a direct out.
+                if (bus.getProperty ("kind").toString() != "mix")
+                    continue;
+
+                mixes.emplace_back (static_cast<int> (bus.getProperty ("firstChannel", 0)),
+                                    bus[idProperty].toString().toStdString());
+            }
+
+            std::sort (mixes.begin(), mixes.end());
+
+            std::string out;
+
+            for (const auto& [first, id] : mixes)
+            {
+                if (! out.empty())
+                    out.push_back (' ');
+
+                out += id;
+            }
+
+            return out;
+        }
+
+        /*  A MEDIA CUE'S SENDS, by identifier: its Send children in document
+            order, then the ones a locked show made live, in identifier order
+            (2026-09-25) - the index a page or a surface walks rather than
+            scanning every send in the tree. */
+        std::string sendsOf (const juce::ValueTree& cue, const std::string& cueId, const cue::LiveEdits* live)
+        {
+            std::string out;
+
+            const auto add = [&out] (const std::string& sendId)
+            {
+                if (! out.empty())
+                    out.push_back (' ');
+
+                out += sendId;
+            };
+
+            for (const auto& child : cue)
+                if (child.hasType ("Send") && child.hasProperty (idProperty))
+                    add (child[idProperty].toString().toStdString());
+
+            if (live != nullptr)
+                for (const auto& sendId : live->createdSendsOf (cueId))
+                    add (sendId);
+
+            return out;
+        }
+
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
                          std::vector<Node>& out,
                          const std::map<std::string, double>* durations,
                          std::vector<std::string>& roster,
                          std::vector<std::pair<std::string, std::string>>& mediaRoster,
                          const cue::SlotAnalysis& analysis,
+                         const cue::SamplerLayout& layout,
+                         const cue::LiveEdits* live,
                          const char* role = "member")
         {
             const auto element = node.getType().toString().toStdString();
             const auto isGroup = element == "Group";
             const auto isMedia = element == "Media";
+            const auto isMic = element == "Mic";
             const auto isFade = element == "Fade";
             const auto isStop = element == "Transport";
             const auto isOsc = element == "Osc";
@@ -716,9 +878,28 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("group"))
                     rows.push_back (row);
 
+            /*  A MEDIA CUE IS A CUE, THEN A SOUND, THEN A FILE (Phase 9b):
+                what a cue that sounds carries whatever its source is the
+                `sound` owner's, and what is about its file is `media`'s. */
             if (isMedia)
+            {
+                for (auto* row : doc::Schema::rowsForOwner ("sound"))
+                    rows.push_back (row);
+
                 for (auto* row : doc::Schema::rowsForOwner ("media"))
                     rows.push_back (row);
+            }
+
+            /*  A MIC CUE IS A CUE, THEN A SOUND, THEN A LIVE INPUT (Phase 9b):
+                the same rows as a media cue's sound, and its own three. */
+            if (isMic)
+            {
+                for (auto* row : doc::Schema::rowsForOwner ("sound"))
+                    rows.push_back (row);
+
+                for (auto* row : doc::Schema::rowsForOwner ("mic"))
+                    rows.push_back (row);
+            }
 
             if (isFade)
                 for (auto* row : doc::Schema::rowsForOwner ("fade"))
@@ -772,6 +953,7 @@ namespace wfg::tree
                     it read-only in a way a client cannot argue with. */
                 if (name == "kind")        text = isGroup ? "group"
                                                   : isMedia ? "media"
+                                                  : isMic   ? "mic"
                                                   : isFade  ? "fade"
                                                   : isStop  ? "transport"
                                                   : isOsc   ? "osc"
@@ -781,7 +963,11 @@ namespace wfg::tree
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "role")   text = role;
-                else if (name == "fx" && isMedia) text = enabledFxInChainOrder (node);
+                else if (name == "fx" && (isMedia || isMic)) text = enabledFxInChainOrder (node);
+                else if (name == "chainChannels" && (isMedia || isMic))
+                    text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).channels);
+                else if (name == "insertLatency" && (isMedia || isMic))
+                    text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).latencySamples);
                 else if (name == "duration" && isMedia)
                 {
                     /*  READ ONCE WHEN THE SHOW WAS OPENED, and nought when
@@ -825,6 +1011,35 @@ namespace wfg::tree
                 else if (name == "outsMaybe" && isMedia)
                 {
                     text = analysis.maybeOutsOf (id);
+                }
+                /*  AND WHICH STRIP A SAMPLER MEMBER IS PLAYED FROM, with what
+                    the list put on each strip before it (author, 2026-09-25),
+                    from a cache keyed like the analysis above - the menu's
+                    words, computed where the placement rule lives. */
+                else if (name == "stripNow" && isMedia)
+                {
+                    text = layout.stripOf (id);
+                }
+                else if (name == "stripsBefore" && isMedia)
+                {
+                    text = layout.stripsBeforeOf (id);
+                }
+                /*  WHAT A LOCKED SHOW IS RIDING on this cue (2026-09-25): the
+                    rows held live, and the value each is heard at in place of
+                    the saved one - at the same address, so a client reading a
+                    cue's EQ reads what plays. */
+                else if (name == "live" && isMedia)
+                {
+                    text = live != nullptr ? live->rowsOf (id) : std::string {};
+                }
+                else if (name == "sends" && isMedia)
+                {
+                    text = sendsOf (node, id, live);
+                }
+                else if (isMedia && live != nullptr && name.rfind ("eq", 0) == 0
+                           && live->rowOf (id, name) != nullptr)
+                {
+                    text = *live->rowOf (id, name);
                 }
                 else if (name == "headerDerived")
                 {
@@ -905,7 +1120,7 @@ namespace wfg::tree
                     catalogue and this walk has no reach to it. */
                 if (childElement == "Fx")
                 {
-                    collectFx (child, id, out);
+                    collectFx (child, id, out, live);
                     continue;
                 }
 
@@ -934,12 +1149,24 @@ namespace wfg::tree
                         const auto childBase = std::string (godot) + "/"
                                                  + std::string (owner) + "/" + childId;
 
+                        /*  A SEND A LOCKED SHOW IS RIDING (2026-09-25):
+                            its level and its switch as they are heard. */
+                        const auto* riding = childElement == "Send" && live != nullptr
+                                               ? live->sendOf (childId) : nullptr;
+
                         for (const auto* row : doc::Schema::rowsForOwner (owner))
                         {
                             const doc::Attribute attribute { elementName, row };
                             const auto name = std::string (row->name);
-                            const auto text = name == "cue" ? id
-                                                            : storedText (attribute, child);
+                            auto text = name == "cue" ? id
+                                                      : storedText (attribute, child);
+
+                            if (riding != nullptr && name == "level" && riding->level.has_value())
+                                text = *riding->level;
+                            else if (riding != nullptr && name == "on" && riding->on.has_value())
+                                text = *riding->on;
+                            else if (childElement == "Send" && name == "live")
+                                text = riding != nullptr ? "true" : "false";
 
                             out.push_back (makeLeaf (childBase + "/" + name, *row, text));
                         }
@@ -992,13 +1219,41 @@ namespace wfg::tree
                     for (const auto& roleChild : child)
                         if (roleChild.hasProperty (idProperty))
                             collectCue (roleChild, id, roleIndex++, out, durations, roster,
-                                        mediaRoster, analysis, childRole);
+                                        mediaRoster, analysis, layout, live, childRole);
 
                     continue;
                 }
 
                 collectCue (child, id, childIndex++, out, durations, roster, mediaRoster,
-                            analysis);
+                            analysis, layout, live);
+            }
+
+            /*  AND THE SENDS A LOCKED SHOW MADE LIVE on this cue, published
+                where a real one would be - /godot/send/<id> - so the mixer, the
+                page and a surface ride them with the verbs they already have.
+                `live` says what they are. */
+            if (isMedia && live != nullptr)
+            {
+                for (const auto& sendId : live->createdSendsOf (id))
+                {
+                    const auto* send = live->sendOf (sendId);
+                    const auto sendBase = std::string (godot) + "/send/" + sendId + "/";
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("send"))
+                    {
+                        const auto name = std::string (row->name);
+                        std::string text;
+
+                        if (name == "bus")          text = send->bus;
+                        else if (name == "cue")     text = id;
+                        else if (name == "live")    text = "true";
+                        else if (name == "level")   text = send->level.value_or (std::string (row->defaultText));
+                        else if (name == "on")      text = send->on.value_or (std::string (row->defaultText));
+                        else                        text = std::string (row->defaultText);
+
+                        out.push_back (makeLeaf (sendBase + name, *row, text));
+                    }
+                }
             }
         }
     }
@@ -1026,10 +1281,15 @@ namespace wfg::tree
             read `loading` for the rest of the session. */
         const auto pluginRevisionSeen = pluginTable != nullptr ? pluginTable->revision() : 0;
         const auto catalogueRevisionSeen = catalogues != nullptr ? catalogues->revision() : 0;
+        const auto liveRevisionSeen = liveEdits != nullptr ? liveEdits->revision() : 0;
+        const auto knownRevisionSeen = knownList != nullptr ? knownList->revision() : 0;
 
         std::vector<Node> nodes;
 
         const auto showNode = document.root();
+
+        walkPlugins() = { pluginTable,
+                          std::max (1, static_cast<int> (showNode.getChildWithName ("Audio").getProperty ("channelsPerTrack", 2))) };
 
         //----------------------------------------------------------------------
         // /godot/document — the rows that persist, read off the root: the
@@ -1055,6 +1315,7 @@ namespace wfg::tree
             section, then the rack's channels. Gathered while the containers are
             walked rather than by a second traversal. */
         std::vector<std::string> slotOrder;
+        std::vector<std::string> rackOrder;
 
         /*  And every cue, for the same reason and out of the same walk: the
             runtime half publishes `prepare` against it. See
@@ -1073,9 +1334,13 @@ namespace wfg::tree
             the runtime half publishes. */
         std::vector<std::string> dcaOrder;
         std::vector<std::string> pluginOrder;
+        std::vector<DeclaredInput> inputOrder;
 
         /*  And every strip, for what it is riding and its word. */
         std::vector<DeclaredStrip> stripOrder;
+
+        /*  And every surface, for the page its rotaries show (2026-09-25). */
+        std::vector<std::string> surfaceOrder;
 
         for (const auto& container : showNode)
         {
@@ -1160,7 +1425,7 @@ namespace wfg::tree
 
                         if (cue.hasProperty (idProperty))
                             collectCue (cue, id, index++, nodes, durations, cueOrder, mediaOrder,
-                                        analysis);
+                                        analysis, samplerLayout, liveEdits);
                     }
 
                     if (const auto section = list.getChildWithName ("Persistent");
@@ -1171,7 +1436,8 @@ namespace wfg::tree
                         for (const auto& cue : section)
                             if (cue.hasProperty (idProperty))
                                 collectCue (cue, id, persistentIndex++, nodes, durations,
-                                            cueOrder, mediaOrder, analysis, "persistent");
+                                            cueOrder, mediaOrder, analysis, samplerLayout,
+                                            liveEdits, "persistent");
                     }
                 }
             }
@@ -1310,7 +1576,26 @@ namespace wfg::tree
                 for (const auto* row : doc::Schema::rowsForOwner ("surfaces"))
                 {
                     const auto name = std::string (row->name);
-                    const auto text = name == "order" ? orderOf (container, "Surface") : std::string {};
+                    std::string text;
+
+                    if (name == "order")
+                        text = orderOf (container, "Surface");
+
+                    /*  THE AIM, from the table `surface.aim` writes - cached
+                        here safely because every applied command rebuilds
+                        this half, and that includes the aim's own. A cue
+                        deleted since is no aim: empty, and an Undo of the
+                        delete brings it back, since the table still names it. */
+                    if (name == "aim" && surfaces != nullptr && ! surfaces->aim().empty()
+                          && document.findById (surfaces->aim()).isValid())
+                        text = surfaces->aim();
+
+                    /*  THE MASTER DIAL'S NUMBER, the same way: an address that
+                        names nothing any more - its cue deleted, its send
+                        removed - is no dial, and an Undo brings it back. */
+                    if (name == "dial" && surfaces != nullptr && ! surfaces->dial().address.empty()
+                          && document.resolve (surfaces->dial().address).isValid())
+                        text = surfaces->dial().address;
 
                     nodes.push_back (makeLeaf (std::string (godot) + "/surface/" + name,
                                                *row, text));
@@ -1335,10 +1620,17 @@ namespace wfg::tree
                         if (strip.getType().toString() == "Strip")
                             ++stripCount;
 
+                    surfaceOrder.push_back (id);
+
                     for (const auto* row : doc::Schema::rowsForOwner ("surface"))
                     {
                         const doc::Attribute attribute { "Surface", row };
                         const auto name = std::string (row->name);
+
+                        /*  THE PAGE ROWS ARE THE RUNTIME HALF'S: a page moves
+                            with no command, so a cached copy would freeze. */
+                        if (isPageRow (name))
+                            continue;
 
                         std::string text;
 
@@ -1444,13 +1736,25 @@ namespace wfg::tree
                     the lateness, exactly like /godot/document's runtime half. */
                 for (const auto* row : doc::Schema::rowsForOwner ("audio"))
                 {
+                    const auto name = std::string (row->name);
+
+                    /*  THE MIX CHANNELS, IN OUTPUT ORDER (2026-09-25): a
+                        reading of the show and nothing the machine is doing,
+                        so from this half although nothing stores it - what a
+                        surface's Send page walks, one rotary a channel. */
+                    if (name == "mixes")
+                    {
+                        nodes.push_back (makeLeaf (std::string (godot) + "/audio/mixes", *row,
+                                                   mixesOf (container)));
+                        continue;
+                    }
+
                     if (row->persist == doc::Persist::none)
                         continue;
 
                     const doc::Attribute attribute { "Audio", row };
 
-                    nodes.push_back (makeLeaf (std::string (godot) + "/audio/"
-                                                 + std::string (row->name),
+                    nodes.push_back (makeLeaf (std::string (godot) + "/audio/" + name,
                                                *row, storedText (attribute, container)));
                 }
 
@@ -1460,10 +1764,14 @@ namespace wfg::tree
                         than by a name test: `Rack` is a container element and
                         carries no identifier, exactly like `Mounts`. Had it
                         carried one, `/godot/bus` would have grown a bus with a
-                        default width and stopped being the show's buses. */
+                        default width and stopped being the show's buses.
+
+                        AND BY ITS TYPE AS WELL, since the named inputs (Phase
+                        9b): anything identified under <Audio> that is not a
+                        bus must never be published as one. */
                     const auto id = bus[idProperty].toString().toStdString();
 
-                    if (id.empty())
+                    if (id.empty() || ! bus.hasType ("Bus"))
                         continue;
 
                     const auto base = std::string (godot) + "/bus/" + id;
@@ -1488,6 +1796,67 @@ namespace wfg::tree
                     }
                 }
 
+                /*  THE NAMED INPUTS (Phase 9b, namespace draft §18.2): the
+                    order a menu offers them in - by first logical input, then
+                    identifier, as the outputs are read - and each one's rows
+                    from the show. `meter` and `problem` are the runtime
+                    half's, against the roster kept below. */
+                {
+                    std::vector<DeclaredInput> found;
+                    const auto inputs = container.getChildWithName ("Inputs");
+
+                    if (inputs.isValid())
+                        for (const auto& input : inputs)
+                        {
+                            const auto id = input[idProperty].toString().toStdString();
+
+                            if (id.empty() || ! input.hasType ("Input"))
+                                continue;
+
+                            /*  Through the schema's defaults, for the reason a
+                                bus's width is: the canonical writer leaves out a
+                                width of one and a first channel of nought. */
+                            DeclaredInput shape;
+                            shape.id = id;
+                            shape.firstChannel = static_cast<int> (input.getProperty ("firstChannel", 0));
+                            shape.width = std::max (1, static_cast<int> (input.getProperty ("width", 1)));
+                            found.push_back (shape);
+
+                            const auto base = std::string (godot) + "/input/" + id;
+
+                            for (const auto* row : doc::Schema::rowsForOwner ("input"))
+                            {
+                                if (row->persist == doc::Persist::none)
+                                    continue;
+
+                                const doc::Attribute attribute { "Input", row };
+                                nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
+                                                           storedText (attribute, input)));
+                            }
+                        }
+
+                    std::stable_sort (found.begin(), found.end(),
+                                      [] (const DeclaredInput& a, const DeclaredInput& b)
+                                      {
+                                          if (a.firstChannel != b.firstChannel)
+                                              return a.firstChannel < b.firstChannel;
+
+                                          return a.id < b.id;
+                                      });
+
+                    std::string order;
+
+                    for (const auto& shape : found)
+                        order += (order.empty() ? "" : " ") + shape.id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("inputs"))
+                        nodes.push_back (makeLeaf (std::string (godot) + "/input/" + std::string (row->name),
+                                                   *row, std::string (row->name) == "order" ? order
+                                                                                            : std::string {}));
+
+                    inputOrder = std::move (found);
+                }
+
                 /*  The rack's channels, which are slots of the second kind
                     (§3.9e). The pool is declared here and Phase 9 puts the
                     tracks, the sends and the plugins inside a channel. */
@@ -1501,12 +1870,67 @@ namespace wfg::tree
                         if (channel.getType().toString() != "Channel")
                             continue;
 
+                        /*  ITS CHAIN, AND WHAT THE CHAIN DECLARES (Phase 9b): the
+                            plugins in the order they process, and the worst
+                            case of their delays - every plugin in - read off the
+                            plugin table as each entry's own `latencySamples`
+                            is, so it is shown the moment somebody adds one. */
+                        std::map<std::string, std::string> chain;
+                        std::string ids;
+                        auto worst = 0;
+
+                        for (const auto& entry : channel)
+                        {
+                            if (! entry.hasType ("Plugin"))
+                                continue;
+
+                            const auto entryId = entry[idProperty].toString().toStdString();
+                            ids += (ids.empty() ? "" : " ") + entryId;
+
+                            if (pluginTable != nullptr)
+                                worst += std::max (0, pluginTable->statusOf (entryId).latencySamples);
+                        }
+
+                        chain["plugins"] = ids;
+                        chain["latencySamples"] = std::to_string (worst);
+
+                        /*  ITS TAKE AS TONIGHT'S GRAPH HOLDS IT (Phase 9c, §19.2):
+                            the memory set aside, which moves at Load now and not
+                            when the rows do, and a take a rebuild let go of. */
+                        if (pluginTable != nullptr)
+                        {
+                            const auto built = pluginTable->builtTakeOf (channel[idProperty].toString().toStdString());
+                            chain["takeMemory"] = osc::formatDouble (std::round (static_cast<double> (built.bytes) / 1.0e5) / 10.0);
+                            chain["takeProblem"] = built.problem;
+                        }
+
+                        /*  WHAT THE TAKE IS DOING, off the account the take verbs
+                            and the log move (9c.3): a thing it refused or did
+                            by itself tonight says more than what a rebuild did. */
+                        if (takes != nullptr)
+                        {
+                            const auto& take = takes->of (channel[idProperty].toString().toStdString());
+                            chain["take"] = take.state;
+                            chain["takeLength"] = osc::formatDouble (take.length);
+                            chain["takeLayers"] = std::to_string (take.layers);
+                            chain["loopIn"] = osc::formatDouble (take.loopIn);
+                            chain["loopOut"] = osc::formatDouble (take.loopOut);
+                            chain["keeping"] = take.keeping ? "true" : "false";
+                            chain["kept"] = take.kept;
+
+                            if (! take.problem.empty())
+                                chain["takeProblem"] = take.problem;
+                        }
+
                         collectSlot (channel, "Channel", "rackChannel", "rackChannel",
-                                     analysis, nodes);
+                                     analysis, nodes, &chain);
 
                         if (const auto channelId = channel[idProperty].toString().toStdString();
                             ! channelId.empty())
+                        {
                             slotOrder.push_back (channelId);
+                            rackOrder.push_back (channelId);
+                        }
                     }
                 }
 
@@ -1521,18 +1945,96 @@ namespace wfg::tree
                 {
                     const auto plugins = container.getChildWithName ("Plugins");
 
+                    /*  WHETHER THE SET DIFFERS FROM THE GRAPH (2026-09-26): an
+                        entry added, taken out or moved since the graph was
+                        built. The graph is fixed when it is built, so this is
+                        what Load now is for; with no graph there is nothing to
+                        differ from. */
+                    const auto order = plugins.isValid() ? orderOf (plugins, "Plugin") : std::string {};
+                    auto setChanged = false;
+
+                    if (pluginTable != nullptr && pluginTable->hasGraph())
+                    {
+                        std::string builtOrder;
+
+                        for (const auto& id : pluginTable->built())
+                            builtOrder += (builtOrder.empty() ? "" : " ") + id;
+
+                        setChanged = builtOrder != order;
+
+                        /*  AND THE RACK (Phase 9b): a channel added, taken out,
+                            or its chain changed since the graph was built is
+                            as much a thing Load now is for. */
+                        std::map<std::string, std::vector<std::string>> declaredRack;
+
+                        for (const auto& channel : container.getChildWithName ("Rack"))
+                        {
+                            if (! channel.hasType ("Channel"))
+                                continue;
+
+                            const auto channelId = channel[idProperty].toString().toStdString();
+                            auto& chainIds = declaredRack[channelId];
+
+                            /*  AND ITS RECORDER (Phase 9c, §19.2): the take's
+                                length, its layers and which plugins sit before
+                                it are the graph's shape as much as the chain is. */
+                            const auto seconds = static_cast<double> (channel.getProperty ("takeSeconds", 0.0));
+                            const auto layers = static_cast<int> (channel.getProperty ("layers", 4));
+                            std::vector<std::string> before;
+
+                            for (const auto& entry : channel)
+                                if (entry.hasType ("Plugin"))
+                                {
+                                    chainIds.push_back (entry[idProperty].toString().toStdString());
+
+                                    if (seconds > 0.0 && entry.getProperty ("side", "after").toString() == "before")
+                                        before.push_back (entry[idProperty].toString().toStdString());
+                                }
+
+                            const auto built = pluginTable->builtTakeOf (channelId);
+
+                            setChanged = setChanged || std::abs (seconds - built.seconds) > 1.0e-9
+                                           || (seconds > 0.0 && layers != built.layers) || before != built.before;
+                        }
+
+                        setChanged = setChanged || declaredRack != pluginTable->builtRackAll();
+                    }
+
+                    /*  WHICH OF THE RACK'S PLUGINS THE GRAPH HOLDS, asked once
+                        for the loop below. */
+                    std::vector<std::string> builtRackIds;
+
+                    if (pluginTable != nullptr)
+                        for (const auto& [channelId, chainIds] : pluginTable->builtRackAll())
+                            builtRackIds.insert (builtRackIds.end(), chainIds.begin(), chainIds.end());
+
                     for (const auto* row : doc::Schema::rowsForOwner ("plugins"))
                     {
                         const auto name = std::string (row->name);
-                        const auto text = name == "order" && plugins.isValid()
-                                            ? orderOf (plugins, "Plugin") : std::string {};
+                        const auto text = name == "order"   ? order
+                                        : name == "changed" ? std::string (setChanged ? "true" : "false")
+                                                            : std::string {};
 
                         nodes.push_back (makeLeaf (std::string (godot) + "/plugin/" + name, *row, text));
                     }
 
-                    if (plugins.isValid())
+                    /*  THE SET'S ENTRIES, AND THE RACK'S (Phase 9b): a rack
+                        channel's plugins are the same element with the same
+                        rows, published at /godot/plugin/<id> beside the set's so
+                        the window, the editor and the FX page take them as they
+                        are - while `order` above stays the set's alone, which is
+                        the chain on every voice. */
+                    std::vector<juce::ValueTree> entries;
+
+                    for (const auto& entry : plugins)
+                        entries.push_back (entry);
+
+                    for (const auto& channel : container.getChildWithName ("Rack"))
+                        for (const auto& entry : channel)
+                            entries.push_back (entry);
+
                     {
-                        for (const auto& entry : plugins)
+                        for (const auto& entry : entries)
                         {
                             if (entry.getType().toString() != "Plugin")
                                 continue;
@@ -1543,8 +2045,18 @@ namespace wfg::tree
                                 continue;
 
                             const auto base = std::string (godot) + "/plugin/" + id;
-                            const auto status = pluginTable != nullptr ? pluginTable->statusOf (id)
-                                                                       : plugin::PluginTable::Status {};
+                            auto status = pluginTable != nullptr ? pluginTable->statusOf (id)
+                                                                 : plugin::PluginTable::Status {};
+
+                            /*  AN ENTRY THE GRAPH WAS BUILT WITHOUT (2026-09-26):
+                                added since it was built, it has no slot and no
+                                child, and says what brings it in. */
+                            if (pluginTable != nullptr && pluginTable->hasGraph() && pluginTable->builtSlotOf (id) < 0
+                                  && std::find (builtRackIds.begin(), builtRackIds.end(), id) == builtRackIds.end())
+                            {
+                                status.state = "unloaded";
+                                status.problem = "added since the audio graph was built; Load now rebuilds it";
+                            }
 
                             /*  THE CATALOGUE, by the entry's identifier: what this
                                 machine knows of the plugin's parameters without an
@@ -1565,6 +2077,11 @@ namespace wfg::tree
                                 if (name == "state")               text = status.state;
                                 else if (name == "problem")        text = status.problem;
                                 else if (name == "latencySamples") text = std::to_string (status.latencySamples);
+                                else if (name == "stateLoadMs")    text = osc::formatDouble (status.stateLoadMs);
+                                else if (name == "stateProblem")   text = status.stateProblem;
+                                else if (name == "inputs")         text = std::to_string (status.inputs);
+                                else if (name == "outputs")        text = std::to_string (status.outputs);
+                                else if (name == "layout")         text = status.layout;
                                 else if (name == "paramCount")     text = std::to_string (status.paramCount > 0 ? status.paramCount : knownCount);
                                 else                               text = storedText (attribute, entry);
 
@@ -1611,35 +2128,58 @@ namespace wfg::tree
                         }
                     }
 
-                    /*  AND WHAT THIS MACHINE'S SCAN FOUND, beside the set, so a client
-                        can offer them: not the show's, and stored nowhere in it. */
-                    if (knownPlugins != nullptr)
-                    {
-                        for (std::size_t n = 0; n < knownPlugins->size(); ++n)
-                        {
-                            const auto& known = (*knownPlugins)[n];
-                            const auto at = std::string (godot) + "/plugin/known/" + std::to_string (n) + "/";
-
-                            const auto leaf = [&nodes, &at] (const char* name, const char* description, const std::string& value)
-                            {
-                                Node node;
-                                node.address = at + name;
-                                node.kind = Kind::state;
-                                node.access = Access::read;
-                                node.typeTags = "s";
-                                node.description = description;
-                                node.values.push_back (osc::Value::string (value));
-                                nodes.push_back (std::move (node));
-                            };
-
-                            leaf ("name", "A plugin this machine has, by the name its file gives", known.name);
-                            leaf ("identifier", "The identifier plugin.create takes for it", known.identifier);
-                            leaf ("format", "Its format: VST3, AudioUnit", known.format);
-                            leaf ("manufacturer", "Who made it, as the file says", known.manufacturer);
-                            leaf ("path", "Where its file is on this machine - plugin.create's fourth word", known.path);
-                        }
-                    }
                 }
+            }
+        }
+
+        //----------------------------------------------------------------------
+        /*  AND WHAT THIS MACHINE'S SCAN FOUND, so a client can offer them: not
+            the show's, and stored nowhere in it - published whatever the show
+            holds (2026-09-26), since a show with no audio section yet is the
+            one most in need of a plugin list, and whatever the audio is doing,
+            since the list is read from known.xml and not off an engine. */
+        if (knownList != nullptr)
+        {
+            const auto known = knownList->all();
+
+            for (std::size_t n = 0; n < known.size(); ++n)
+            {
+                const auto at = std::string (godot) + "/plugin/known/" + std::to_string (n) + "/";
+
+                const auto leaf = [&nodes, &at] (const char* name, const char* description, const std::string& value)
+                {
+                    Node node;
+                    node.address = at + name;
+                    node.kind = Kind::state;
+                    node.access = Access::read;
+                    node.typeTags = "s";
+                    node.description = description;
+                    node.values.push_back (osc::Value::string (value));
+                    nodes.push_back (std::move (node));
+                };
+
+                leaf ("name", "A plugin this machine has, by the name its file gives", known[n].name);
+                leaf ("identifier", "The identifier plugin.create takes for it", known[n].identifier);
+                leaf ("format", "Its format: VST3, AU or LV2 - plugin.create's third word", known[n].format);
+                leaf ("manufacturer", "Who made it, as the file says", known[n].manufacturer);
+                leaf ("path", "Where its file is on this machine - plugin.create's fourth word", known[n].path);
+            }
+
+            /*  THE FILES A SCAN GAVE UP ON, which every scan skips until one
+                is tried again - plugin.scanRetry's one word. */
+            const auto skipped = knownList->skippedFiles();
+
+            for (std::size_t n = 0; n < skipped.size(); ++n)
+            {
+                Node node;
+                node.address = std::string (godot) + "/plugin/skipped/" + std::to_string (n);
+                node.kind = Kind::state;
+                node.access = Access::read;
+                node.typeTags = "s";
+                node.description = "A file a scan gave up on - it hung past the deadline or took the scan down"
+                                   " - skipped until plugin.scanRetry names it";
+                node.values.push_back (osc::Value::string (skipped[n]));
+                nodes.push_back (std::move (node));
             }
         }
 
@@ -1671,6 +2211,7 @@ namespace wfg::tree
                 running and not being edited means for ever. Same reason
                 `/godot/audio/status` is not published here either. */
             declaredSlots = slotOrder;
+            declaredRackChannels = rackOrder;
         }
 
         declaredCues = std::move (cueOrder);
@@ -1678,7 +2219,9 @@ namespace wfg::tree
         declaredLists = std::move (listOrder);
         declaredDcas = std::move (dcaOrder);
         declaredPlugins = std::move (pluginOrder);
+        declaredInputs = std::move (inputOrder);
         declaredStrips = std::move (stripOrder);
+        declaredSurfaces = std::move (surfaceOrder);
 
         //----------------------------------------------------------------------
         /*  Commands, as write-only method nodes. `node.set` is deliberately
@@ -1718,7 +2261,7 @@ namespace wfg::tree
                 if (element.hasType ("Fx"))
                 {
                     const auto fxId = element[idProperty].toString().toStdString();
-                    const auto entry = setEntryFor (element, element["plugin"].toString().toStdString());
+                    const auto entry = setEntryFor (element.getParent(), element["plugin"].toString().toStdString());
 
                     if (fxId.empty() || ! entry.element.isValid() || catalogues == nullptr)
                         return;
@@ -1728,8 +2271,16 @@ namespace wfg::tree
                     if (catalogue == nullptr)
                         return;
 
-                    const auto stored = cue::parseFxValues (element["values"].toString().toStdString());
+                    auto stored = cue::parseFxValues (element["values"].toString().toStdString());
                     const auto base = std::string (godot) + "/fx/" + fxId + "/";
+
+                    /*  WHAT RIDES LIVE OVER THEM, under the lock (2026-09-26): at
+                        the address the saved value is published at, as an EQ
+                        row's is. */
+                    if (liveEdits != nullptr)
+                        if (const auto* riding = liveEdits->fxValuesOf (fxId))
+                            for (const auto& [index, value] : *riding)
+                                stored[index] = value;
 
                     for (std::size_t n = 0; n < catalogue->params.size(); ++n)
                     {
@@ -1804,6 +2355,8 @@ namespace wfg::tree
         documentPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
         pluginRevision = pluginRevisionSeen;
         catalogueRevision = catalogueRevisionSeen;
+        liveRevision = liveRevisionSeen;
+        knownRevision = knownRevisionSeen;
         stale = false;
     }
 
@@ -1915,6 +2468,38 @@ namespace wfg::tree
                  + rounded (audio::timbre::saturationOf (*frame), 1000.0) + " "
                  + rounded (audio::timbre::lightnessOf (*frame), 1000.0);
         }
+
+        /*  `/godot/run/<id>/envelope`: the frame's peak at the run's position,
+            in decibels below full scale, to a tenth - or empty, for every case
+            `timbre` is empty. A silent frame is -120.
+
+            BELOW FULL SCALE, NOT BELOW THE FILE'S OWN LOUDEST MOMENT, since
+            the author asked for part of a strip's light to be the music's
+            level (2026-09-25: "make part of the LED level match the long term
+            level of the music"): a quiet recording glows low. How it MOVES is
+            taken from the same numbers by the surface. */
+        std::string envelopeText (const cue::Run& run, const audio::MediaRecords* records)
+        {
+            if (records == nullptr || run.media.empty())
+                return {};
+
+            const auto found = records->find (run.media);
+
+            if (found == records->end() || found->second.pyramid == nullptr)
+                return {};
+
+            const auto* frame = audio::timbre::frameAt (*found->second.pyramid, run.position);
+
+            if (frame == nullptr)
+                return {};
+
+            if (frame->peak == 0)
+                return osc::formatDouble (-120.0);
+
+            const auto below = 20.0 * std::log10 (audio::timbre::peakOf (*frame));
+
+            return osc::formatDouble (std::max (-120.0, std::round (below * 10.0) / 10.0));
+        }
     }
 
     //==============================================================================
@@ -1943,13 +2528,16 @@ namespace wfg::tree
         }
 
         analysis.ensureBuilt (document, durations);
+        samplerLayout.ensureBuilt (document);
 
         /*  AND THE PLUGIN TABLE ASKED THE SAME WAY (Phase 9a): the sandbox
             writes it from the message thread, and its `state` rows are on
             this cached half. */
         if (stale || documentPart == nullptr
              || (pluginTable != nullptr && pluginTable->revision() != pluginRevision)
-             || (catalogues != nullptr && catalogues->revision() != catalogueRevision))
+             || (catalogues != nullptr && catalogues->revision() != catalogueRevision)
+             || (liveEdits != nullptr && liveEdits->revision() != liveRevision)
+             || (knownList != nullptr && knownList->revision() != knownRevision))
             rebuildDocumentPart();
 
         /*  ASKED RATHER THAN TOLD. The mount table bumps its own revision on
@@ -1960,6 +2548,40 @@ namespace wfg::tree
             rebuildMountPart();
 
         std::vector<Node> runtime;
+
+        /*  WHERE THE APP'S PLUGIN SCAN IS (2026-09-26): on this half, because
+            it moves file by file while nothing in the show changes. Hand-built,
+            as the known list is: machine state about plugins, never stored. */
+        if (scans != nullptr)
+        {
+            const auto scan = scans->reading();
+
+            const auto scanLeaf = [&runtime] (const char* name, const char* tags, const char* description,
+                                              osc::Value value)
+            {
+                Node node;
+                node.address = std::string (godot) + "/plugin/scan/" + name;
+                node.kind = Kind::state;
+                node.access = Access::read;
+                node.typeTags = tags;
+                node.description = description;
+                node.values.push_back (std::move (value));
+                runtime.push_back (std::move (node));
+            };
+
+            scanLeaf ("state", "s", "The app's plugin scan: idle, scanning, finished or failed",
+                      osc::Value::string (scan.state));
+            scanLeaf ("format", "s", "The format asked for - vst3, au, lv2 - or empty for every format",
+                      osc::Value::string (scan.format));
+            scanLeaf ("file", "s", "The file under scan, empty between scans", osc::Value::string (scan.file));
+            scanLeaf ("done", "i", "Files looked at so far, of total", osc::Value::int32 (scan.done));
+            scanLeaf ("total", "i", "Files this scan will look at", osc::Value::int32 (scan.total));
+            scanLeaf ("found", "i", "Plugins this machine knows, so far or once the scan is over",
+                      osc::Value::int32 (scan.found));
+            scanLeaf ("skipped", "i", "Files this scan gave up on", osc::Value::int32 (scan.skipped));
+            scanLeaf ("problem", "s", "Why the scan failed, in one sentence; empty when it did not",
+                      osc::Value::string (scan.problem));
+        }
 
         /*  The engine's own numbers, and the three that say which bundle is
             open. Both are runtime: PRD §4.10 keeps "what the machine happened
@@ -2052,6 +2674,11 @@ namespace wfg::tree
             else if (name == "recovery") text = state.documentRecovery ? "true" : "false";
             else if (name == "recording") text = lists != nullptr && lists->isRecording() ? "true" : "false";
 
+            /*  HOW MANY CHANGES A LOCKED SHOW IS RIDING LIVE (2026-09-25): what
+                the window's Keep / Discard bar counts, and shows while it is
+                more than nought and the show is unlocked. */
+            else if (name == "live") text = std::to_string (liveEdits != nullptr ? liveEdits->size() : 0);
+
             /*  And why the last write handed to the writer thread did not land,
                 beside it: a sentence, because it is the writer's own - which
                 file, and what became of it - and empty when nothing is
@@ -2081,6 +2708,11 @@ namespace wfg::tree
                 continue;
 
             const auto name = std::string (row->name);
+
+            //  The show's own, and so the document half's (2026-09-25).
+            if (name == "mixes")
+                continue;
+
             std::string text;
 
             if (name == "device")        text = state.audioDevice;
@@ -2099,9 +2731,48 @@ namespace wfg::tree
             else if (name == "testHold") text = state.audioTest.hold ? "true" : "false";
             else if (name == "hardwareInputs") text = std::to_string (state.hardwareInputs);
             else if (name == "hardwareOutputs") text = std::to_string (state.hardwareOutputs);
+            else if (name == "inputLatency") text = std::to_string (state.inputLatency);
+            else if (name == "outputLatency") text = std::to_string (state.outputLatency);
             else                         text = std::string (row->defaultText);
 
             engineValue (*row, "audio", text);
+        }
+
+        /*  EACH NAMED INPUT'S METER AND PROBLEM (Phase 9b): the loudest of its
+            channels over the last tick, whether or not anything listens - the
+            soundcheck's question - and why it is not arriving, in words. Here
+            and not in the cached half, because a meter moves every tick. */
+        for (const auto& input : declaredInputs)
+        {
+            const auto base = std::string (godot) + "/input/" + input.id;
+
+            auto loudest = -120.0;
+
+            for (int channel = input.firstChannel; channel < input.firstChannel + input.width; ++channel)
+                if (channel >= 0 && channel < static_cast<int> (state.inputMetersDb.size()))
+                    loudest = std::max (loudest, state.inputMetersDb[static_cast<std::size_t> (channel)]);
+
+            std::string problem;
+
+            if (state.logicalInputs <= 0)
+                problem = "no input interface is open";
+            else if (input.firstChannel + input.width > state.logicalInputs)
+                problem = "input " + std::to_string (input.firstChannel + input.width)
+                        + " is past the last of the " + std::to_string (state.logicalInputs)
+                        + " the interface gives";
+
+            for (const auto* row : doc::Schema::rowsForOwner ("input"))
+            {
+                if (row->persist != doc::Persist::none)
+                    continue;
+
+                const auto name = std::string (row->name);
+                const auto text = name == "meter"   ? osc::formatDouble (loudest)
+                                : name == "problem" ? problem
+                                                    : std::string (row->defaultText);
+
+                runtime.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
         }
 
         /*  WHAT THIS MACHINE HAS TO PLUG A PORT INTO.
@@ -2385,9 +3056,46 @@ namespace wfg::tree
             }
         }
 
+        /*  WHERE EACH RACK CHANNEL'S LOOP IS PLAYING (Phase 9c): off the
+            account, which the Runner's hook sets from the audio side a tick at
+            a time - so every publish, as `holder` is. A replay has no audio
+            and reads nought. */
+        if (const auto* playheadRow = rowNamed ("rackChannel", "playhead"))
+            for (const auto& channelId : declaredRackChannels)
+                runtime.push_back (makeLeaf (std::string (godot) + "/slot/" + channelId + "/playhead",
+                                             *playheadRow,
+                                             osc::formatDouble (takes != nullptr ? takes->of (channelId).playhead
+                                                                                 : 0.0)));
+
         for (const auto* row : doc::Schema::rowsForOwner ("runs"))
             runtime.push_back (makeLeaf (std::string (godot) + "/run/" + std::string (row->name),
                                          *row, runOrder));
+
+        /*  WHAT EACH SURFACE'S ROTARIES ARE SHOWING (author, 2026-09-25): its
+            page, which of them, how many, and what it last wrote. Every
+            publish, because a page moves with no command - the surface's own
+            buttons - and the cached half would freeze it. */
+        for (const auto& surfaceId : declaredSurfaces)
+        {
+            const auto page = surfaces != nullptr ? surfaces->pageOf (surfaceId)
+                                                  : surface::SurfaceTable::Page {};
+            const auto base = std::string (godot) + "/surface/" + surfaceId + "/";
+
+            for (const auto* row : doc::Schema::rowsForOwner ("surface"))
+            {
+                const auto name = std::string (row->name);
+
+                if (! isPageRow (name))
+                    continue;
+
+                const auto text = name == "page"      ? page.word
+                                : name == "pageIndex" ? std::to_string (page.index)
+                                : name == "pageCount" ? std::to_string (page.count)
+                                                      : page.edited;
+
+                runtime.push_back (makeLeaf (base + name, *row, text));
+            }
+        }
 
         /*  WHAT EACH STRIP IS DOING (PRD §3.16, §3.27), read off the run table
             the way a slot's holder is: the node its fader rides now, the word
@@ -2513,6 +3221,10 @@ namespace wfg::tree
                     the row is what a surface is told to draw it at, and nothing
                     here throttles it (§14.5). */
                 else if (name == "timbre")    text = timbreText (run, mediaRecords.get());
+                else if (name == "envelope")  text = envelopeText (run, mediaRecords.get());
+
+                //  What left the track after the fader, to a tenth, as the envelope is.
+                else if (name == "meter")     text = osc::formatDouble (std::round (run.meter * 10.0) / 10.0);
                 else if (name == "level")     text = osc::formatDouble (run.level);
                 else if (name == "trim")      text = osc::formatDouble (run.trim);
                 else if (name == "late")      text = std::to_string (run.late);
@@ -2525,6 +3237,7 @@ namespace wfg::tree
                 else if (name == "asserted")  text = run.asserted ? "true" : "false";
                 else if (name == "strip")     text = run.strip;
                 else if (name == "held")      text = run.held ? "true" : "false";
+                else if (name == "solo")      text = run.solo ? "true" : "false";
                 else if (name == "error")     text = run.error;
                 else if (name == "iteration")  text = std::to_string (run.iteration);
                 else if (name == "iterations") text = std::to_string (run.iterations);
@@ -2561,6 +3274,11 @@ namespace wfg::tree
             std::string (godot) + "/document",
             std::string (godot) + "/audio",
 
+            /*  `/godot/input` for the reason `/godot/dca` is below: both
+                halves publish under it - an input's name from the show, its
+                meter from the interface. */
+            std::string (godot) + "/input",
+
             /*  `/godot/network` belongs to the document half for the reason
                 `/godot/audio` does: both halves publish rows under it -
                 `strictSenders` is a decision and `refused` is a count - and
@@ -2594,6 +3312,9 @@ namespace wfg::tree
         for (const auto& id : declaredPlugins)
             ownedByTheDocument.push_back (std::string (godot) + "/plugin/" + id);
 
+        for (const auto& input : declaredInputs)
+            ownedByTheDocument.push_back (std::string (godot) + "/input/" + input.id);
+
         for (const auto& id : declaredLists)
             ownedByTheDocument.push_back (std::string (godot) + "/list/" + id);
 
@@ -2602,6 +3323,15 @@ namespace wfg::tree
 
         for (const auto& id : declaredSlots)
             ownedByTheDocument.push_back (std::string (godot) + "/slot/" + id);
+
+        /*  `/godot/surface` and each surface's container, since 2026-09-25:
+            the show's half publishes what a surface is, this half the page
+            its rotaries show. A show with no surface publishes neither. */
+        if (! declaredSurfaces.empty())
+            ownedByTheDocument.push_back (std::string (godot) + "/surface");
+
+        for (const auto& id : declaredSurfaces)
+            ownedByTheDocument.push_back (std::string (godot) + "/surface/" + id);
 
         addContainers (runtime, ownedByTheDocument, false);
         sortByAddress (runtime);

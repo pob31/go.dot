@@ -46,7 +46,7 @@ namespace wfg::client::ui
     {
         for (auto* label : { &showLabel, &tickLabel, &clockLabel, &rateLabel,
                              &listLabel, &standbyLabel, &notesLabel, &statusLabel, &errorLabel,
-                             &noticeLabel })
+                             &noticeLabel, &dialLabel })
         {
             label->setJustificationType (juce::Justification::centredLeft);
             label->setMinimumHorizontalScale (1.0f);
@@ -128,10 +128,16 @@ namespace wfg::client::ui
         panicButton.setColour (juce::TextButton::buttonColourId, Look::colour (theme, "failed"));
         panicButton.setTooltip ("Esc: every cue stops and the footers run. "
                                 "Esc again within a second: everything is dropped, no footers.");
-        goButton.setTooltip ("Space: fires the standby cue");
 
         statusLabel.setFont (Look::font (theme, 13.0f));
         statusLabel.setColour (juce::Label::textColourId, dim);
+
+        dialLabel.setFont (Look::font (theme, 13.0f));
+        dialLabel.setColour (juce::Label::textColourId, dim);
+        dialLabel.setJustificationType (juce::Justification::centredRight);
+        dialLabel.setTooltip ("What the surface's master dial turns: the number last clicked or "
+                              "touched here. The dial's click lets go; its double click puts the "
+                              "number back to its default.");
 
         errorLabel.setFont (Look::font (theme, 13.0f));
         errorLabel.setColour (juce::Label::textColourId, Look::colour (theme, "failed"));
@@ -139,6 +145,7 @@ namespace wfg::client::ui
         noticeLabel.setFont (Look::font (theme, 13.0f));
         noticeLabel.setColour (juce::Label::textColourId, Look::colour (theme, "waiting"));
 
+        dressGo();
         resized();
         repaint();
     }
@@ -165,6 +172,12 @@ namespace wfg::client::ui
 
         statusLabel.setText (text (reading.lockLine()), juce::dontSendNotification);
 
+        /*  WHAT THE MASTER DIAL TURNS (2026-09-26), said wherever that number
+            is on screen or not: it stays on its cue when the pick moves. */
+        dialLabel.setText (reading.dial.empty() ? juce::String()
+                                                : juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89 ")) + text (reading.dial),
+                           juce::dontSendNotification);
+
         /*  THE WRITER'S OWN SENTENCE COMES FIRST when there is one: a write
             that failed belongs to a command that was APPLIED, so it is not
             `lastError` and the operator needs it more - the show they think is
@@ -186,9 +199,14 @@ namespace wfg::client::ui
         if (reading.warningLine() != last.warningLine() || ! shownOnce)
             noticeLabel.setText (text (reading.warningLine()), juce::dontSendNotification);
 
+        const auto audioMoved = ! shownOnce || reading.status != last.status;
+
         last = reading;
         shownOnce = true;
         settleFoot();
+
+        if (audioMoved)
+            dressGo();
 
         if (bannerShowing != wasShowing)
         {
@@ -233,6 +251,24 @@ namespace wfg::client::ui
         noticeLabel.setVisible (noticing);
         errorLabel.setVisible (! noticing);
         resized();
+    }
+
+    void TransportComponent::dressGo()
+    {
+        /*  BRIGHT YELLOW AND BLACK WHILE THE AUDIO RUNS, GREY WHILE IT DOES
+            NOT (author, 2026-09-25), and the grey says why under the word
+            (§4.8). Grey is not disabled: GO still fires. */
+        const auto running = last.audioRunning();
+
+        goButton.setColour (juce::TextButton::buttonColourId,
+                            Look::colour (theme, running ? "go" : "go-idle"));
+        goButton.setColour (juce::TextButton::textColourOffId,
+                            Look::colour (theme, running ? "go-ink" : "ink-dim"));
+        goButton.getProperties().set (Look::caption(), juce::String (last.goLine()));
+        goButton.setTooltip (running ? "Space: fires the standby cue"
+                                     : "Space: fires the standby cue. The audio is not running, "
+                                       "so a media cue will not be heard - Show settings, Audio.");
+        goButton.repaint();
     }
 
     int TransportComponent::preferredHeight() const noexcept
@@ -366,6 +402,12 @@ namespace wfg::client::ui
             statusLabel.setBounds (bottom.removeFromLeft (row * 4));
         else
             statusLabel.setBounds ({});
+
+        /*  THE DIAL'S LINE AT THE FAR RIGHT, while it has one. */
+        if (dialLabel.getText().isNotEmpty())
+            dialLabel.setBounds (bottom.removeFromRight (juce::jmin (row * 14, bottom.getWidth() / 2)));
+        else
+            dialLabel.setBounds ({});
 
         errorLabel.setBounds (bottom);
         noticeLabel.setBounds (bottom);

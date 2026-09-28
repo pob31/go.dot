@@ -25,10 +25,12 @@ CMake property to have stayed edited.
       a vector of the whole tree, and per row that is quadratic
   (b) nothing the tick thread owns is named: ShowDocument, doc::, ValueTree,
       EngineState, UndoManager, ChangeListener
-  (c) exactly one call site per published snapshot, both in the root timer:
-      the parameter tree's, and the analyser's media table - which is the same
+  (c) exactly one call site per published snapshot, all in the root timer:
+      the parameter tree's; the analyser's media table - which is the same
       immutable snapshot the HTTP route serves the page's waveforms from, and
-      is not anything the tick thread owns
+      is not anything the tick thread owns; and since Phase 9c the takes'
+      pictures, built from the recorders' peaks, which the audio thread writes
+      as atomics any thread may read
   (d) the model half and the public header name no JUCE type at all - they are
       std only, as Engine.h is, so they can be tested with no window
 
@@ -97,12 +99,14 @@ def main():
 
     # (c)
     #
-    # Two doors now, one call site each, and every call has to name which door
-    # it went through: a bare snapshot() on something else is a third reader
+    # Three doors now, one call site each, and every call has to name which
+    # door it went through: a bare snapshot() on something else is a reader
     # nobody argued for, and the point of this check is that the argument
-    # happens before the reader does.
+    # happens before the reader does. The third was argued in Console.h
+    # (ClientHost::takes) and namespace draft 19.7.
     doors = {"host.parameters.": "the parameter tree",
-             "host.media->": "the analyser's media table"}
+             "host.media->": "the analyser's media table",
+             "host.takes->": "the takes' pictures"}
     sites = {door: [] for door in doors.values()}
     unnamed = []
 

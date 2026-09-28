@@ -20,6 +20,8 @@
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <spatcore/ui/TypedValue.h>
+
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -56,13 +58,19 @@ namespace wfg::client::ui
             value.setJustificationType (juce::Justification::centred);
             addAndMakeVisible (value);
 
+            /*  A PRESS ON THE VALUE COUNTS AS ONE ON THE STRIP for the master
+                dial (2026-09-26) - and for nothing else: the drags, the double
+                click and the wheel stay the throw's. */
+            value.addMouseListener (this, false);
+
             value.onTextChange = [this]
             {
-                /*  TYPED IS AS GOOD AS DRAGGED, and it goes through the same
-                    parse the rest of this client uses so that a French locale
-                    reads a comma. A refusal leaves the number where it was
-                    rather than writing nought, which is what `value_or` would
-                    have done to a mistyped level. */
+                /*  TYPED IS AS GOOD AS DRAGGED, and it is read the way a
+                    person types it (spatcore's typed reader, WFS-DIY's): a
+                    comma is a decimal point, "-6 dB" is -6 and the unit is not
+                    a mistake. A refusal leaves the number where it was rather
+                    than writing nought, which is what `value_or` would have
+                    done to a mistyped level - nought is full level. */
                 const auto typed = value.getText().trim();
 
                 if (typed.equalsIgnoreCase ("-inf") || typed.equalsIgnoreCase ("inf"))
@@ -71,8 +79,8 @@ namespace wfg::client::ui
                     return;
                 }
 
-                if (const auto parsed = osc::parseDouble (typed.toStdString()))
-                    owner.levelWanted (at, *parsed);
+                if (const auto parsed = spatcore::ui::typed::number (typed))
+                    owner.levelWanted (at, static_cast<double> (*parsed));
                 else
                     owner.refresh();
             };
@@ -84,6 +92,14 @@ namespace wfg::client::ui
                 drop.setTooltip ("Takes this send away. The mix channel stays; this cue stops "
                                  "arriving at it.");
                 drop.onClick = [this] { owner.removeAt (at); };
+
+                /*  THE SEND'S SWITCH (2026-09-25): off keeps its level and
+                    takes it out of the mix - the press of its rotary on a
+                    surface's Send page. */
+                onSwitch.setButtonText ("on");
+                onSwitch.setWantsKeyboardFocus (false);
+                onSwitch.setTooltip ("Whether this send is in the mix - off keeps its level");
+                onSwitch.onClick = [this] { owner.switchAt (at, onSwitch.getToggleState()); };
             }
         }
 
@@ -102,6 +118,22 @@ namespace wfg::client::ui
                 addAndMakeVisible (drop);
             else
                 removeChildComponent (&drop);
+
+            resized();
+        }
+
+        /*  AND THE SWITCH WHERE THERE IS A SEND TO SWITCH, beside the cross -
+            a send riding live has the switch and no cross, since it is not in
+            the show to be taken away yet. */
+        void showSwitch (bool wanted)
+        {
+            if (wanted == (onSwitch.getParentComponent() != nullptr))
+                return;
+
+            if (wanted)
+                addAndMakeVisible (onSwitch);
+            else
+                removeChildComponent (&onSwitch);
 
             resized();
         }
@@ -136,14 +168,22 @@ namespace wfg::client::ui
 
         void mouseDown (const juce::MouseEvent& event) override
         {
+            owner.dialAt (at);
+
+            if (event.eventComponent != this)
+                return;
+
             held = levelHere();
             shown = held;
             dragging = true;
             dragFrom = event.position.y;
         }
 
-        void mouseUp (const juce::MouseEvent&) override
+        void mouseUp (const juce::MouseEvent& event) override
         {
+            if (event.eventComponent != this)
+                return;
+
             /*  AND THE READING TAKES OVER AGAIN. By now the level that was
                 asked for has been applied and published; if it has not, the
                 next pass corrects the cap rather than this holding a number
@@ -154,6 +194,9 @@ namespace wfg::client::ui
 
         void mouseDrag (const juce::MouseEvent& event) override
         {
+            if (event.eventComponent != this)
+                return;
+
             const auto area = throwArea();
 
             if (area.getHeight() <= 0)
@@ -174,8 +217,12 @@ namespace wfg::client::ui
             owner.refresh();
         }
 
-        void mouseDoubleClick (const juce::MouseEvent&) override
+        void mouseDoubleClick (const juce::MouseEvent& event) override
         {
+            //  The value's own double click is its editor's.
+            if (event.eventComponent != this)
+                return;
+
             //  Unity, which is where a strip is when nobody has decided otherwise.
             owner.levelWanted (at, 0.0);
         }
@@ -183,6 +230,9 @@ namespace wfg::client::ui
         void mouseWheelMove (const juce::MouseEvent& event,
                              const juce::MouseWheelDetails& wheel) override
         {
+            if (event.eventComponent != this)
+                return;
+
             const auto clicks = juce::roundToInt (wheel.deltaY * 10.0f);
 
             if (clicks != 0)
@@ -208,14 +258,23 @@ namespace wfg::client::ui
 
             g.setColour (Look::colour (look, "ink"));
             g.setFont (Look::font (look, 12.0f));
-            g.drawFittedText (isMaster ? juce::String ("Cue level")
-                                       : juce::String (send().name),
+            /*  THE DIAL'S MARK before the name of the strip whose level the
+                master dial turns (2026-09-26). */
+            const auto dialHere = ! owner.dialed.empty() && owner.levelAddressAt (at) == owner.dialed;
+
+            g.drawFittedText ((dialHere ? juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89 ")) : juce::String())
+                                + (isMaster ? juce::String ("Cue level")
+                                            : juce::String (send().name)),
                               head.removeFromTop (scaled (14, look)), juce::Justification::centred, 1);
 
             g.setColour (Look::colour (look, "ink-faint"));
             g.setFont (Look::font (look, 10.0f));
+
+            /*  "live" beside what the output is, while a locked show rides
+                this send (2026-09-25): heard, and not saved until kept. */
             g.drawFittedText (isMaster ? juce::String ("a DCA over everything below")
-                                       : juce::String (send().widthWord + " " + send().channelWord),
+                                       : juce::String (send().widthWord + " " + send().channelWord
+                                                         + (send().live ? " - live" : "")),
                               head, juce::Justification::centred, 1);
 
             //  The throw: a groove, a mark at unity, and the cap where the level is.
@@ -246,7 +305,9 @@ namespace wfg::client::ui
                 word under it says which it is - a send at silence and no send
                 at all sound the same, and what differs is only whether there
                 is an object to delete. */
-            const auto live = isMaster || send().present();
+            /*  AND A SEND SWITCHED OUT is dimmed the same way - the switch
+                under it says which. */
+            const auto live = isMaster || (send().present() && send().on);
 
             g.setColour (Look::colour (look, live ? "accent" : "ink-off"));
             g.fillRect (juce::Rectangle<int> (track.getX(), cap - 3, track.getWidth(), 6));
@@ -260,8 +321,16 @@ namespace wfg::client::ui
                 a strip with a send to remove has one, and `throwArea` takes
                 the same row back whether it is there or not so the throws all
                 end at the same height. */
-            if (drop.getParentComponent() != nullptr)
-                drop.setBounds (area.removeFromBottom (scaled (18, owner.theme)));
+            if (drop.getParentComponent() != nullptr || onSwitch.getParentComponent() != nullptr)
+            {
+                auto row = area.removeFromBottom (scaled (18, owner.theme));
+
+                if (drop.getParentComponent() != nullptr)
+                    drop.setBounds (row.removeFromRight (scaled (20, owner.theme)));
+
+                if (onSwitch.getParentComponent() != nullptr)
+                    onSwitch.setBounds (row);
+            }
 
             value.setBounds (area.removeFromBottom (scaled (18, owner.theme)));
         }
@@ -272,12 +341,47 @@ namespace wfg::client::ui
 
         juce::Label value;
         juce::TextButton drop;
+        juce::ToggleButton onSwitch;
 
         double held = 0.0;      ///< where the level was when the hand went down
         double shown = 0.0;     ///< where the hand has asked for it to be
         bool dragging = false;
         float dragFrom = 0.0f;
     };
+
+    //==============================================================================
+    std::string SendMixerComponent::levelAddressAt (std::size_t at) const
+    {
+        if (reading.subject.objectId.empty())
+            return {};
+
+        if (at == 0)
+            return "/godot/cue/" + reading.subject.objectId + "/level";
+
+        //  A silent strip with no send behind it has no level to turn yet.
+        if (at - 1 >= reading.sends.size() || reading.sends[at - 1].sendId.empty())
+            return {};
+
+        return "/godot/send/" + reading.sends[at - 1].sendId + "/level";
+    }
+
+    void SendMixerComponent::dialAt (std::size_t at)
+    {
+        if (actions.dial)
+            if (const auto address = levelAddressAt (at); ! address.empty())
+                actions.dial (address);
+    }
+
+    void SendMixerComponent::showDial (const std::string& address)
+    {
+        if (address == dialed)
+            return;
+
+        dialed = address;
+
+        for (auto& strip : strips)
+            strip->repaint();
+    }
 
     //==============================================================================
     SendMixerComponent::SendMixerComponent (const model::Theme& themeToUse, Actions actionsToUse)
@@ -384,7 +488,11 @@ namespace wfg::client::ui
                 here rather than in the constructor because a send arriving is
                 no longer a rebuild: there is something to delete now, so there
                 is a cross, and the strip it belongs to has not moved. */
-            strip->showCross (! strip->isMaster && strip->send().present());
+            strip->showCross (! strip->isMaster && strip->send().present() && ! strip->send().live);
+            strip->showSwitch (! strip->isMaster && strip->send().present());
+
+            if (! strip->isMaster)
+                strip->onSwitch.setToggleState (strip->send().on, juce::dontSendNotification);
 
             if (strip->value.isBeingEdited())
                 continue;
@@ -393,6 +501,14 @@ namespace wfg::client::ui
                                   juce::dontSendNotification);
             strip->repaint();
         }
+    }
+
+    void SendMixerComponent::switchAt (std::size_t at, bool on)
+    {
+        if (at == 0 || at - 1 >= reading.sends.size() || ! reading.sends[at - 1].present() || ! actions.set)
+            return;
+
+        actions.set ("/godot/send/" + reading.sends[at - 1].sendId + "/on", on ? "true" : "false");
     }
 
     void SendMixerComponent::levelWanted (std::size_t at, double decibels)
@@ -435,8 +551,14 @@ namespace wfg::client::ui
                 awaitingBus = strip.busId;
                 awaitingLevel = level;
 
+                /*  BORN AT THE LEVEL ASKED FOR, rounded as every level
+                    here is, so the voice never passes through the row's
+                    default of nought on its way (2026-09-25). The write
+                    below, once the send exists, carries the hand on from
+                    wherever it has got to since. */
                 if (! asked)
-                    actions.createSend (reading.subject.objectId, strip.busId);
+                    actions.createSend (reading.subject.objectId, strip.busId,
+                                        std::round (level * 10.0) / 10.0);
             }
 
             return;

@@ -40,6 +40,12 @@ namespace wfg::client::ui
         return id;
     }
 
+    const juce::Identifier& Look::caption()
+    {
+        static const juce::Identifier id { "wfgCaption" };
+        return id;
+    }
+
     juce::Font Look::getTextButtonFont (juce::TextButton& button, int buttonHeight)
     {
         auto font = LookAndFeel_V4::getTextButtonFont (button, buttonHeight);
@@ -54,6 +60,33 @@ namespace wfg::client::ui
     void Look::drawButtonText (juce::Graphics& g, juce::TextButton& button,
                                bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown)
     {
+        if (const auto line = button.getProperties()[caption()].toString(); line.isNotEmpty())
+        {
+            /*  THE TEXT ABOVE, THE CAPTION UNDER IT, centred as a pair: the
+                button still reads as its word first. */
+            const auto big = getTextButtonFont (button, button.getHeight());
+            const auto small = LookAndFeel_V4::getTextButtonFont (button, button.getHeight())
+                                   .withHeight (12.0f * type);
+
+            const auto bigHeight = juce::roundToInt (big.getHeight());
+            const auto smallHeight = juce::roundToInt (small.getHeight());
+
+            auto area = button.getLocalBounds().reduced (2);
+            area = area.withSizeKeepingCentre (area.getWidth(),
+                                               juce::jmin (area.getHeight(), bigHeight + smallHeight));
+
+            g.setColour (button.findColour (juce::TextButton::textColourOffId)
+                            .withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
+
+            g.setFont (big);
+            g.drawText (button.getButtonText(), area.removeFromTop (bigHeight),
+                        juce::Justification::centred, false);
+
+            g.setFont (small);
+            g.drawFittedText (line, area, juce::Justification::centred, 1, 1.0f);
+            return;
+        }
+
         if (! button.getProperties().contains (glyphButton()))
         {
             LookAndFeel_V4::drawButtonText (g, button, shouldDrawButtonAsHighlighted,
@@ -124,5 +157,16 @@ namespace wfg::client::ui
         setColour (juce::AlertWindow::backgroundColourId, panel);
         setColour (juce::AlertWindow::textColourId, ink);
         setColour (juce::AlertWindow::outlineColourId, rule);
+
+        /*  THE LISTS A BUTTON OPENS (2026-09-27: the new-cue lists, and the
+            settings window's menus, which drew in JUCE's own grey until now)
+            wear the show's colours: a list is a panel, its headings the dim
+            ink the cue list's derived lines use, the line under the pointer
+            the raised panel a picked row is drawn on. */
+        setColour (juce::PopupMenu::backgroundColourId, panel);
+        setColour (juce::PopupMenu::textColourId, ink);
+        setColour (juce::PopupMenu::headerTextColourId, colour (theme, "ink-dim"));
+        setColour (juce::PopupMenu::highlightedBackgroundColourId, high);
+        setColour (juce::PopupMenu::highlightedTextColourId, ink);
     }
 }

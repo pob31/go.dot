@@ -37,8 +37,16 @@ namespace wfg::audio::timbre
         static_assert (windowSize == 2 * hopSize && hopSize % 2 == 0,
                        "a frame's window is its own stretch and half of each neighbour's");
 
-        /*  PLAN DECISION 8'S SIX STOPS, a starting point and not a palette
-            (§14.12). The hue is UNWRAPPED - 360 is red, 480 is green - so the
+        /*  SIX STOPS, THE AUTHOR'S SINCE 2026-09-25 ("I would bias a bit
+            towards the blues"): plan decision 8 put deep blue at 150 Hz, red
+            at 500, orange at 1.5 kHz and yellow at 4 kHz, so the body of most
+            material - two hundred hertz to a few thousand - came out red,
+            orange and yellow, and blue was a narrow band under 250 Hz. Blue
+            now holds to 250 Hz and turns through violet to red at 800,
+            orange at 2.5 kHz, yellow at 6 kHz; purple at the bottom and green
+            at the top as they were.
+
+            The hue is UNWRAPPED - 360 is red, 480 is green - so the
             interpolation from deep blue to red goes through magenta and not
             back through cyan; it is wrapped into [0, 360) only at the end.
 
@@ -53,10 +61,10 @@ namespace wfg::audio::timbre
 
         constexpr std::array<RampStop, 6> ramp { {
             {    40.0, 280.0 },     // near-black purple
-            {   150.0, 240.0 },     // deep blue
-            {   500.0, 360.0 },     // red
-            {  1500.0, 390.0 },     // orange
-            {  4000.0, 420.0 },     // yellow
+            {   250.0, 240.0 },     // deep blue
+            {   800.0, 360.0 },     // red, through violet
+            {  2500.0, 390.0 },     // orange
+            {  6000.0, 420.0 },     // yellow
             { 12000.0, 480.0 },     // green
         } };
 
@@ -327,7 +335,20 @@ namespace wfg::audio::timbre
                                     static_cast<int> (std::floor (highestHertz * windowSize / sampleRate)));
 
                 for (auto bin = firstBin; bin <= lastBin; ++bin)
+                {
                     logHertz.push_back (std::log (bin * sampleRate / windowSize));
+
+                    //  Each bin's neighbourhood, a ninth of an octave either side.
+                    halfWidth.push_back (std::max (envelopeMinimumBins,
+                                                   static_cast<int> (std::lround (bin * (std::exp2 (envelopeOctaves) - 1.0)))));
+                }
+
+                binPower.resize (logHertz.size());
+                runningPower.resize (logHertz.size() + 1);
+
+                //  The first bin judged for noise: every one under it is pitched (Timbre.h).
+                judgedFrom = std::max (0, static_cast<int> (std::ceil (pitchedBelowHertz * windowSize / sampleRate))
+                                            - firstBin);
             }
         }
 
@@ -353,18 +374,16 @@ namespace wfg::audio::timbre
 
             double power = 0.0;
             double weightedLogHertz = 0.0;
-            double magnitudeSum = 0.0;
-            double logMagnitudeSum = 0.0;
 
             for (auto bin = firstBin; bin <= lastBin; ++bin)
             {
+                const auto at = static_cast<std::size_t> (bin - firstBin);
                 const auto magnitude = static_cast<double> (scratch[static_cast<std::size_t> (bin)]);
-                const auto binPower = magnitude * magnitude;
 
-                power += binPower;
-                weightedLogHertz += binPower * logHertz[static_cast<std::size_t> (bin - firstBin)];
-                magnitudeSum += magnitude;
-                logMagnitudeSum += std::log (std::max (magnitude, smallestMagnitude));
+                binPower[at] = magnitude * magnitude;
+                runningPower[at + 1] = runningPower[at] + binPower[at];
+                power += binPower[at];
+                weightedLogHertz += binPower[at] * logHertz[at];
             }
 
             Frame frame;
@@ -373,14 +392,64 @@ namespace wfg::audio::timbre
             if (lastBin < firstBin || ! (power > silentPower))
                 return frame;
 
-            const auto binCount = static_cast<double> (lastBin - firstBin + 1);
             const auto centroid = std::exp (weightedLogHertz / power);
-            const auto flatness = std::exp (logMagnitudeSum / binCount) / (magnitudeSum / binCount);
 
             frame.hue = hueToByte (rampHue (centroid));
-            frame.saturation = unitToByte (1.0 - flatness);
+            frame.saturation = unitToByte (1.0 - greyness());
             frame.lightness = unitToByte (rampLightness (centroid));
             return frame;
+        }
+
+        /*  HOW NOISY THE FRAME IS WHERE ITS ENERGY IS, as nought (a tone) to
+            one (noise): each bin's power over its neighbourhood's mean, the
+            ratios' geometric mean over their arithmetic, both weighted by the
+            neighbourhood's power - so a band nothing sounds in weighs nothing
+            (Timbre.h, `noisyAt`) - over the bins from `pitchedBelowHertz` up;
+            the power under it counts as tonal, and the two are mixed by power.
+            Reads `binPower` and `runningPower` as the frame above left them. */
+        double greyness() const noexcept
+        {
+            const auto count = static_cast<int> (binPower.size());
+
+            double weight = 0.0;
+            double logRatio = 0.0;
+            double ratio = 0.0;
+            double pitched = 0.0;
+
+            for (auto at = 0; at < std::min (judgedFrom, count); ++at)
+                pitched += binPower[static_cast<std::size_t> (at)];
+
+            for (auto at = std::min (judgedFrom, count); at < count; ++at)
+            {
+                const auto reach = halfWidth[static_cast<std::size_t> (at)];
+                const auto low = std::max (0, at - reach);
+                const auto high = std::min (count - 1, at + reach);
+
+                const auto around = (runningPower[static_cast<std::size_t> (high + 1)]
+                                       - runningPower[static_cast<std::size_t> (low)])
+                                    / static_cast<double> (high - low + 1);
+
+                if (! (around > 0.0))
+                    continue;
+
+                const auto share = binPower[static_cast<std::size_t> (at)] / around;
+
+                weight += around;
+                logRatio += around * std::log (std::max (share, smallestMagnitude));
+                ratio += around * share;
+            }
+
+            /*  `ratio` is the judged bins' power: a neighbourhood times its
+                share is the bin's own. */
+            const auto judged = weight > 0.0 && ratio > 0.0 ? std::exp (logRatio / weight) / (ratio / weight)
+                                                            : 0.0;
+
+            if (! (ratio + pitched > 0.0))
+                return 0.0;
+
+            const auto noisiness = (ratio * judged + pitched * tonalAt) / (ratio + pitched);
+
+            return std::clamp ((noisiness - tonalAt) / (noisyAt - tonalAt), 0.0, 1.0);
         }
 
         /*  Moves the three stretches along by one, leaving `after` to be
@@ -411,6 +480,12 @@ namespace wfg::audio::timbre
         int firstBin = 1;
         int lastBin = 0;
         std::vector<double> logHertz;
+
+        //  For `greyness`: each bin's reach, its power this frame, and their running sum.
+        std::vector<int> halfWidth;
+        std::vector<double> binPower;
+        std::vector<double> runningPower;
+        int judgedFrom = 0;
 
         /*  The in-band power a -100 dBFS sine puts in the spectrum. A
             bin-centred sine of amplitude A through a periodic Hann window of N

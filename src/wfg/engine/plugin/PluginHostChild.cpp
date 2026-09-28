@@ -16,8 +16,11 @@
 
 #include <wfg/engine/plugin/PluginHostChild.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/LaneMapping.h>
+#include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/plugin/SharedRegion.h>
+#include <wfg/engine/plugin/TestGainState.h>
 
 #include <spatcore/rt/RtThreadPriority.h>
 
@@ -26,12 +29,15 @@
 #include <juce_events/juce_events.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <memory>
+#include <string>
 #include <thread>
 
 #if JUCE_MAC
@@ -102,6 +108,22 @@ namespace wfg::plugin
             int ticks = 0;
         };
 
+        /*  A LANE'S STATE LOAD, between the message thread that loads it and
+            the worker that plays the lane (the author's decision of
+            2026-09-25: a cue's whole state loaded onto its voice). `gate` is
+            nought while the worker owns the instance; the loader sets one to
+            ask for it, and the worker answers two - after which it never
+            touches that instance, answering its blocks DRY (the audio left as
+            it came) so no block is missed, until the loader sets nought.
+            `epoch` moves after each load: the worker then sets every value on
+            top again. Atomics and nothing else - the worker is the child's
+            real-time thread. */
+        struct LaneControl
+        {
+            std::atomic<int> gate { 0 };
+            std::atomic<std::uint32_t> epoch { 0 };
+        };
+
         /** The lanes of a region, resolved once. */
         struct Lanes
         {
@@ -109,12 +131,36 @@ namespace wfg::plugin
                 : header (headerToUse),
                   channels (static_cast<int> (header.channels.load (std::memory_order_relaxed))),
                   maxSamples (static_cast<int> (header.maxSamples.load (std::memory_order_relaxed))),
-                  count (static_cast<int> (header.lanes.load (std::memory_order_relaxed)))
+                  count (static_cast<int> (header.lanes.load (std::memory_order_relaxed))),
+                  control (std::make_unique<LaneControl[]> (static_cast<std::size_t> (std::max (1, count))))
             {
                 laneOf.reserve (static_cast<std::size_t> (count));
 
                 for (int i = 0; i < count; ++i)
                     laneOf.push_back (region::laneAt (base, channels, maxSamples, i));
+            }
+
+            /*  The worker's side of the gate, before anything else about a
+                lane: grants a load that asks, and while one runs answers the
+                lane's blocks dry. True when the lane is parked this pass. */
+            bool parked (int i, std::uint64_t request, std::uint64_t& answered) const
+            {
+                auto& gate = control[static_cast<std::size_t> (i)].gate;
+                const auto g = gate.load (std::memory_order_acquire);
+
+                if (g == 0)
+                    return false;
+
+                if (g == 1)
+                    gate.store (2, std::memory_order_release);
+
+                if (request > answered)
+                {
+                    answered = request;
+                    laneOf[static_cast<std::size_t> (i)]->responseSeq.store (request, std::memory_order_release);
+                }
+
+                return true;
             }
 
             /*  Real-time priority for the answering thread, the same class the
@@ -138,7 +184,30 @@ namespace wfg::plugin
             region::Header& header;
             int channels, maxSamples, count;
             std::vector<region::Lane*> laneOf;
+            std::unique_ptr<LaneControl[]> control;
         };
+
+        /*  THE LAYOUT, for the header: the widths, and the words the entry
+            says them in, written before ready. */
+        void reportLayout (region::Header& header, int inputs, int outputs, const std::string& words)
+        {
+            header.inputs.store (static_cast<std::uint32_t> (std::max (0, inputs)), std::memory_order_relaxed);
+            header.outputs.store (static_cast<std::uint32_t> (std::max (0, outputs)), std::memory_order_relaxed);
+            std::memset (header.layout, 0, sizeof (header.layout));
+            std::snprintf (header.layout, sizeof (header.layout), "%s", words.c_str());
+        }
+
+        /** The lane's channels as pointers: the region is channel-major. */
+        constexpr int maxLaneChannels = 64;
+
+        void pointersOf (region::Lane* lane, int channels, int maxSamples,
+                         std::array<float*, maxLaneChannels>& into) noexcept
+        {
+            auto* audio = region::audioOf (lane);
+
+            for (int channel = 0; channel < std::min (channels, maxLaneChannels); ++channel)
+                into[static_cast<std::size_t> (channel)] = audio + channel * maxSamples;
+        }
 
         //======================================================================
         /*  THE TEST GAIN, spike 07's child grown up: one instance per lane,
@@ -149,19 +218,68 @@ namespace wfg::plugin
             float gain = 0.5f;
             std::uint32_t paramsSeen = 0;
             std::uint64_t answered = 0;
+            std::uint32_t epochSeen = 0;
+
+            /*  WHAT ITS STATE SAYS (TestGainState): where Gain rests when the
+                cue does not say, and Pad, which is no parameter. Written by
+                the loader while the lane is parked, read by the worker after
+                the epoch moves. */
+            float restingGain = 0.5f;
+            float padFactor = 1.0f;
         };
 
         struct TestGainWorker
         {
-            explicit TestGainWorker (Lanes& lanesToUse) : lanes (lanesToUse)
+            /*  THE THREE TEST PLUGINS (2026-09-26): the gain as wide as the
+                voice; the mono, one in and one out; the widener, one in and
+                two out - left the input times the gain, right that at a
+                half. The last two take a block only when the cue is mono
+                (LaneMapping.h), and pass it dry otherwise. */
+            TestGainWorker (Lanes& lanesToUse, const std::string& identifier)
+                : lanes (lanesToUse),
+                  inputs (identifier == Catalogue::testGainIdentifier() ? lanesToUse.channels : 1),
+                  outputs (identifier == Catalogue::testWidenIdentifier() ? 2
+                             : identifier == Catalogue::testMonoIdentifier() ? 1 : lanesToUse.channels),
+                  work (static_cast<std::size_t> (2 * std::max (1, lanesToUse.maxSamples)), 0.0f)
             {
                 instances.resize (static_cast<std::size_t> (lanes.count));
+
+                const auto baseline0 = lanes.header.baseline[0].load (std::memory_order_relaxed);
+
+                for (auto& instance : instances)
+                    instance.restingGain = baseline0;
+            }
+
+            /*  THE MESSAGE THREAD'S LOAD, with the lane parked: the file's
+                words, or the preset's own for an empty path. A delay in the
+                file is slept here - which is how a test makes a slow plugin. */
+            std::string loadState (int i, const std::string& path)
+            {
+                TestGainState state;
+                std::string problem;
+
+                if (! path.empty())
+                {
+                    const juce::File file { juce::String::fromUTF8 (path.c_str()) };
+
+                    if (file.existsAsFile())
+                        state = TestGainState::fromText (file.loadFileAsString().toStdString());
+                    else
+                        problem = "the cue's state file is not in the bundle: " + path;
+                }
+
+                if (state.loadDelayMs > 0)
+                    juce::Thread::sleep (state.loadDelayMs);
+
+                auto& instance = instances[static_cast<std::size_t> (i)];
+                instance.restingGain = problem.empty() ? state.gain : lanes.header.baseline[0].load (std::memory_order_relaxed);
+                instance.padFactor = problem.empty() ? state.padFactor() : 1.0f;
+                return problem;
             }
 
             void run (const std::atomic<bool>& stop)
             {
                 lanes.takePriority();
-                const auto baseline0 = lanes.header.baseline[0].load (std::memory_order_relaxed);
 
                 while (! stop.load (std::memory_order_relaxed))
                 {
@@ -173,10 +291,24 @@ namespace wfg::plugin
                         auto& instance = instances[static_cast<std::size_t> (i)];
                         const auto request = lane->requestSeq.load (std::memory_order_acquire);
 
+                        if (lanes.parked (i, request, instance.answered))
+                        {
+                            any = true;
+                            continue;
+                        }
+
                         if (request <= instance.answered)
                             continue;
 
                         any = true;
+
+                        //  A STATE LOADED UNDER IT: every value again, on top.
+                        if (const auto epoch = lanes.control[static_cast<std::size_t> (i)].epoch.load (std::memory_order_acquire);
+                            epoch != instance.epochSeen)
+                        {
+                            instance.epochSeen = epoch;
+                            instance.paramsSeen = lane->paramRevision.load (std::memory_order_acquire) - 1u;
+                        }
 
                         if (const auto revision = lane->paramRevision.load (std::memory_order_acquire);
                             revision != instance.paramsSeen)
@@ -184,7 +316,7 @@ namespace wfg::plugin
                             instance.paramsSeen = revision;
 
                             const auto p0 = lane->params[0].load (std::memory_order_relaxed);
-                            instance.gain = p0 < 0.0f ? baseline0 : std::clamp (p0, 0.0f, 1.0f);
+                            instance.gain = p0 < 0.0f ? instance.restingGain : std::clamp (p0, 0.0f, 1.0f);
 
                             /*  THE KILL SWITCH (plan decision 15). */
                             if (lane->params[1].load (std::memory_order_relaxed) >= 0.5f)
@@ -195,12 +327,41 @@ namespace wfg::plugin
                         const auto numSamples = std::min<int> (lanes.maxSamples, static_cast<int> (lane->numSamples.load (std::memory_order_relaxed)));
                         auto* audio = region::audioOf (lane);
 
-                        for (int channel = 0; channel < numChannels; ++channel)
+                        const auto factor = instance.gain * instance.padFactor;
+                        const lanemap::Shape shape { numChannels, inputs, outputs, lanes.channels };
+
+                        if (inputs == lanes.channels && outputs == lanes.channels)
                         {
-                            auto* samples = audio + channel * lanes.maxSamples;
+                            for (int channel = 0; channel < numChannels; ++channel)
+                            {
+                                auto* samples = audio + channel * lanes.maxSamples;
+
+                                for (int n = 0; n < numSamples; ++n)
+                                    samples[n] *= factor;
+                            }
+
+                            /*  A mono cue goes into every input (LaneMapping.h),
+                                so every output is it at the gain. */
+                            if (numChannels == 1)
+                                for (int channel = 1; channel < lanes.channels; ++channel)
+                                    std::copy_n (audio, numSamples, audio + channel * lanes.maxSamples);
+                        }
+                        else if (lanemap::takes (shape))
+                        {
+                            /*  One in: the mono side of the cue. Out: itself
+                                times the gain, and for the widener a second side
+                                at a half - back into the lane by the rules. */
+                            float* sides[2] = { work.data(), work.data() + lanes.maxSamples };
 
                             for (int n = 0; n < numSamples; ++n)
-                                samples[n] *= instance.gain;
+                            {
+                                const auto x = audio[n];
+                                sides[0][n] = x * factor;
+                                sides[1][n] = x * factor * 0.5f;
+                            }
+
+                            pointersOf (lane, lanes.channels, lanes.maxSamples, lanePointers);
+                            lanemap::backInto (sides, shape, lanePointers.data(), numSamples);
                         }
 
                         instance.answered = request;
@@ -212,6 +373,9 @@ namespace wfg::plugin
             }
 
             Lanes& lanes;
+            int inputs, outputs;
+            std::vector<float> work;
+            std::array<float*, maxLaneChannels> lanePointers {};
             std::vector<TestGainInstance> instances;
         };
 
@@ -270,73 +434,23 @@ namespace wfg::plugin
         struct RealHost
         {
             /** Message thread. False with a sentence when the plugin will not come up. */
-            bool create (const juce::PluginDescription& description, int instanceCount, int channels,
-                         double sampleRate, int blockSize, const juce::File& preset, std::string& problem)
+            bool create (const juce::PluginDescription& description, const juce::String& bundle,
+                         int instanceCount, int channels, double sampleRate, int blockSize,
+                         const juce::File& preset, std::string& problem)
             {
-                juce::addDefaultFormatsToManager (manager);
+                addFormatFor (manager, description, bundle);
 
                 for (int i = 0; i < instanceCount; ++i)
                 {
-                    juce::String error;
-                    auto instance = manager.createPluginInstance (description, sampleRate, blockSize, error);
+                    /*  THE SAME MAKING AS THE EDITING HELPER'S (PluginLoad.h):
+                        the layout ladder, the preparation, the preset - so a
+                        cue edited in the plugin's own window starts where a
+                        voice starts. */
+                    auto instance = makeInsertInstance (manager, description, channels, sampleRate,
+                                                        blockSize, preset, layout, problem);
 
                     if (instance == nullptr)
-                    {
-                        problem = "could not create " + description.name.toStdString() + ": "
-                                    + (error.isEmpty() ? std::string ("no reason given") : error.toStdString());
                         return false;
-                    }
-
-                    /*  THE VOICE'S WIDTH, asked for on the main buses. A plugin
-                        that answers with another width is not argued with: the
-                        scratch buffer is as wide as it wants, and the voice's
-                        channels are the first of them. One that has no main
-                        input at all - an instrument - is refused: an insert on
-                        a voice must take audio. */
-                    const auto wanted = juce::AudioChannelSet::canonicalChannelSet (channels);
-                    auto layout = instance->getBusesLayout();
-
-                    if (! layout.inputBuses.isEmpty())  layout.inputBuses.getReference (0) = wanted;
-                    if (! layout.outputBuses.isEmpty()) layout.outputBuses.getReference (0) = wanted;
-
-                    if (! instance->setBusesLayout (layout))
-                        instance->enableAllBuses();
-
-                    if (instance->getTotalNumInputChannels() <= 0 || instance->getTotalNumOutputChannels() <= 0)
-                    {
-                        problem = description.name.toStdString() + " takes no audio in or gives none out, so it"
-                                  " cannot be an insert on a voice";
-                        return false;
-                    }
-
-                    instance->setNonRealtime (false);
-                    instance->prepareToPlay (sampleRate, blockSize);
-
-                    if (preset.existsAsFile())
-                    {
-                        juce::MemoryBlock bytes;
-
-                        if (! preset.loadFileAsData (bytes))
-                        {
-                            problem = "could not read the preset " + preset.getFullPathName().toStdString();
-                            return false;
-                        }
-
-                        /*  A .vstpreset goes to the VST3 client, whose loader is
-                            the SDK's own; any other state goes the JUCE way. */
-                        auto applied = false;
-
-                        if (auto* vst3 = instance->getVST3Client())
-                            applied = vst3->setPreset (bytes);
-
-                        if (! applied)
-                        {
-                            instance->setStateInformation (bytes.getData(), static_cast<int> (bytes.getSize()));
-                            applied = true;
-                        }
-
-                        juce::ignoreUnused (applied);
-                    }
 
                     width = std::max ({ width, channels, instance->getTotalNumInputChannels(),
                                         instance->getTotalNumOutputChannels() });
@@ -352,6 +466,7 @@ namespace wfg::plugin
             {
                 juce::ignoreUnused (channels);
                 auto& first = *instances.front();
+                reportLayout (header, layout.inputs, layout.outputs, layout.words);
                 const auto& parameters = first.getParameters();
                 const auto count = std::min (parameters.size(), region::maxParams);
 
@@ -367,6 +482,40 @@ namespace wfg::plugin
 
                 for (int i = 0; i < count; ++i)
                     baseline[static_cast<std::size_t> (i)] = header.baseline[i].load (std::memory_order_relaxed);
+
+                /*  EVERY LANE RESTS WHERE THE PRESET LEFT IT, until a cue's
+                    whole state puts it elsewhere; and the preset's own state
+                    is kept, for a cue with none of its own after one with -
+                    no state is a state too. */
+                laneBaseline.assign (instances.size(), baseline);
+                first.getStateInformation (initialState);
+            }
+
+            /*  A CUE'S WHOLE STATE onto one lane's instance: MESSAGE THREAD,
+                where a VST3 takes its state, with the lane parked so the
+                worker is not in it. The file, or the preset's own state for an
+                empty path or one that is not there - and then every value it
+                left is where that lane's unmentioned parameters rest. */
+            std::string loadState (int i, const std::string& path)
+            {
+                auto& instance = *instances[static_cast<std::size_t> (i)];
+                std::string problem;
+                juce::MemoryBlock bytes;
+
+                if (! path.empty() && ! juce::File (juce::String::fromUTF8 (path.c_str())).loadFileAsData (bytes))
+                    problem = "the cue's state file is not in the bundle: " + path;
+
+                const auto& chosen = (path.empty() || ! problem.empty()) ? initialState : bytes;
+                instance.setStateInformation (chosen.getData(), static_cast<int> (chosen.getSize()));
+
+                const auto& parameters = instance.getParameters();
+                auto& resting = laneBaseline[static_cast<std::size_t> (i)];
+
+                for (std::size_t p = 0; p < resting.size(); ++p)
+                    if (auto* parameter = parameters[static_cast<int> (p)])
+                        resting[p] = std::clamp (parameter->getValue(), 0.0f, 1.0f);
+
+                return problem;
             }
 
             /** Message thread, before the worker: releases in reverse. */
@@ -384,6 +533,7 @@ namespace wfg::plugin
                 std::uint32_t paramsSeen = 0;
                 std::uint32_t resetSeen = 0;
                 std::uint64_t answered = 0;
+                std::uint32_t epochSeen = 0;
                 std::vector<float> applied;
             };
 
@@ -410,10 +560,27 @@ namespace wfg::plugin
                         auto& instance = *instances[static_cast<std::size_t> (i)];
                         const auto request = lane->requestSeq.load (std::memory_order_acquire);
 
+                        if (lanes.parked (i, request, s.answered))
+                        {
+                            any = true;
+                            continue;
+                        }
+
                         if (request <= s.answered)
                             continue;
 
                         any = true;
+
+                        /*  A STATE LOADED UNDER IT: forget what was set, and set
+                            every value again on top - preallocated, a fill and
+                            nothing more on this thread. */
+                        if (const auto epoch = lanes.control[static_cast<std::size_t> (i)].epoch.load (std::memory_order_acquire);
+                            epoch != s.epochSeen)
+                        {
+                            s.epochSeen = epoch;
+                            std::fill (s.applied.begin(), s.applied.end(), -2.0f);
+                            s.paramsSeen = lane->paramRevision.load (std::memory_order_acquire) - 1u;
+                        }
 
                         /*  Values first, so the block is processed with what
                             the tick thread last wrote; only what moved is set,
@@ -427,7 +594,8 @@ namespace wfg::plugin
                             for (std::size_t p = 0; p < baseline.size(); ++p)
                             {
                                 const auto value = lane->params[p].load (std::memory_order_relaxed);
-                                const auto target = value < 0.0f ? baseline[p] : std::clamp (value, 0.0f, 1.0f);
+                                const auto target = value < 0.0f ? laneBaseline[static_cast<std::size_t> (i)][p]
+                                                                 : std::clamp (value, 0.0f, 1.0f);
 
                                 if (std::abs (target - s.applied[p]) > 1.0e-7f && parameters[static_cast<int> (p)] != nullptr)
                                 {
@@ -447,22 +615,29 @@ namespace wfg::plugin
                         const auto numChannels = std::min<int> (lanes.channels, static_cast<int> (lane->numChannels.load (std::memory_order_relaxed)));
                         const auto numSamples = std::min<int> ({ lanes.maxSamples, scratch.getNumSamples(),
                                                                  static_cast<int> (lane->numSamples.load (std::memory_order_relaxed)) });
-                        auto* audio = region::audioOf (lane);
 
-                        scratch.clear();
+                        /*  BY THE RULES OF LaneMapping.h (2026-09-26): the cue's
+                            channels into the main inputs - a mono cue into all
+                            of them - every other input fed silence, the main
+                            outputs back; a cue wider than the plugin takes, or
+                            one it would make narrower, passes dry and whole. */
+                        const lanemap::Shape shape { numChannels, layout.inputs, layout.outputs, lanes.channels };
 
-                        for (int channel = 0; channel < numChannels; ++channel)
-                            scratch.copyFrom (channel, 0, audio + channel * lanes.maxSamples, numSamples);
+                        if (lanemap::takes (shape))
+                        {
+                            pointersOf (lane, lanes.channels, lanes.maxSamples, lanePointers);
+                            scratch.clear();
+                            lanemap::feedInto (lanePointers.data(), shape, scratch.getArrayOfWritePointers(), numSamples);
 
-                        /*  A view of the scratch at the block's length: the
-                            plugin sees the width it asked for and the length
-                            the parent sent. */
-                        juce::AudioBuffer<float> block (scratch.getArrayOfWritePointers(), scratch.getNumChannels(), numSamples);
-                        midi.clear();
-                        instance.processBlock (block, midi);
+                            /*  A view of the scratch at the block's length: the
+                                plugin sees the width it asked for and the length
+                                the parent sent. */
+                            juce::AudioBuffer<float> block (scratch.getArrayOfWritePointers(), scratch.getNumChannels(), numSamples);
+                            midi.clear();
+                            instance.processBlock (block, midi);
 
-                        for (int channel = 0; channel < numChannels; ++channel)
-                            std::copy_n (scratch.getReadPointer (channel), numSamples, audio + channel * lanes.maxSamples);
+                            lanemap::backInto (scratch.getArrayOfReadPointers(), shape, lanePointers.data(), numSamples);
+                        }
 
                         s.answered = request;
                         lane->responseSeq.store (request, std::memory_order_release);
@@ -474,24 +649,89 @@ namespace wfg::plugin
 
             juce::AudioPluginFormatManager manager;
             std::vector<std::unique_ptr<juce::AudioPluginInstance>> instances;
+            InsertLayout layout;
+            std::array<float*, maxLaneChannels> lanePointers {};
             std::vector<float> baseline;
+            std::vector<std::vector<float>> laneBaseline;
+            juce::MemoryBlock initialState;
             juce::AudioBuffer<float> scratch;
             int width = 0;
         };
 
-        bool readDescription (const std::string& path, juce::PluginDescription& description, std::string& problem)
+        /*  A CUE'S WHOLE STATE, LOADED (the author's decision of 2026-09-25).
+            On the message thread, because that is where a VST3 takes its
+            state, every five milliseconds: a lane whose request moved asks
+            the worker for its instance (the gate), and once the worker has
+            let go - answering that lane dry, missing nothing - the state goes
+            in, the epoch moves so every value is set again on top, the lane
+            is given back, and the parent is answered with how it went. Lanes
+            load one after another; that is the honest cost. */
+        struct StateLoader final : juce::Timer
         {
-            const juce::File file { juce::String (path) };
-            const auto xml = juce::parseXML (file);
+            using Load = std::function<std::string (int lane, const std::string& path)>;
 
-            if (xml == nullptr || ! description.loadFromXml (*xml))
+            StateLoader (Lanes& lanesToUse, Load loadToUse)
+                : lanes (lanesToUse), load (std::move (loadToUse)),
+                  pending (static_cast<std::size_t> (std::max (1, lanes.count)))
             {
-                problem = "no plugin description at " + path;
-                return false;
             }
 
-            return true;
-        }
+            void timerCallback() override
+            {
+                for (int i = 0; i < lanes.count; ++i)
+                    service (i);
+            }
+
+            void service (int i)
+            {
+                auto* lane = lanes.laneOf[static_cast<std::size_t> (i)];
+                auto& control = lanes.control[static_cast<std::size_t> (i)];
+                auto& wait = pending[static_cast<std::size_t> (i)];
+
+                if (! wait.active)
+                {
+                    const auto request = lane->stateRequestSeq.load (std::memory_order_acquire);
+
+                    if (request <= lane->stateDoneSeq.load (std::memory_order_relaxed))
+                        return;
+
+                    lane->statePath[region::pathChars - 1] = 0;
+                    wait = { true, request, std::string (lane->statePath) };
+                    control.gate.store (1, std::memory_order_release);
+                    return;
+                }
+
+                //  Not let go yet: the worker grants within a pass, idle or not.
+                if (control.gate.load (std::memory_order_acquire) != 2)
+                    return;
+
+                const auto began = std::chrono::steady_clock::now();
+                const auto problem = load (i, wait.path);
+                const auto micros = std::chrono::duration_cast<std::chrono::microseconds> (std::chrono::steady_clock::now() - began);
+
+                control.epoch.fetch_add (1, std::memory_order_release);
+                control.gate.store (0, std::memory_order_release);
+
+                std::memset (lane->stateProblem, 0, sizeof (lane->stateProblem));
+                std::snprintf (lane->stateProblem, sizeof (lane->stateProblem), "%s", problem.c_str());
+                lane->stateFailed.store (problem.empty() ? 0u : 1u, std::memory_order_relaxed);
+                lane->stateLoadMicros.store (static_cast<std::uint32_t> (std::min<long long> (micros.count(), 0xffffffffLL)),
+                                             std::memory_order_relaxed);
+                lane->stateDoneSeq.store (wait.seq, std::memory_order_release);
+                wait.active = false;
+            }
+
+            struct Waiting
+            {
+                bool active = false;
+                std::uint64_t seq = 0;
+                std::string path;
+            };
+
+            Lanes& lanes;
+            Load load;
+            std::vector<Waiting> pending;
+        };
 
         /*  `wfg plugin-host --catalogue-only --description=<file>`: one
             instance, the catalogue on stdout as JSON, and out. No region, no
@@ -500,9 +740,9 @@ namespace wfg::plugin
         {
             /*  The test child's is built in, and answers with no JUCE at all -
                 which is what lets a test drive this verb on a CI runner. */
-            if (optionFrom (args, "--plugin") == Catalogue::testGainIdentifier())
+            if (Catalogue::isTestIdentifier (optionFrom (args, "--plugin")))
             {
-                std::printf ("%s\n", Catalogue::testGain().toJson().c_str());
+                std::printf ("%s\n", Catalogue::testFor (optionFrom (args, "--plugin")).toJson().c_str());
                 std::fflush (stdout);
                 return 0;
             }
@@ -510,9 +750,10 @@ namespace wfg::plugin
             juce::ScopedJuceInitialiser_GUI juceForTheChild;
 
             juce::PluginDescription description;
+            juce::String bundle;
             std::string problem;
 
-            if (! readDescription (optionFrom (args, "--description"), description, problem))
+            if (! readDescription (optionFrom (args, "--description"), description, bundle, problem))
             {
                 std::fprintf (stderr, "wfg plugin-host: %s\n", problem.c_str());
                 return 2;
@@ -520,7 +761,7 @@ namespace wfg::plugin
 
             RealHost host;
 
-            if (! host.create (description, 1, 2, 48000.0, 256, {}, problem))
+            if (! host.create (description, bundle, 1, 2, 48000.0, 256, {}, problem))
             {
                 std::fprintf (stderr, "wfg plugin-host: %s\n", problem.c_str());
                 return 4;
@@ -593,11 +834,11 @@ namespace wfg::plugin
         std::unique_ptr<TestGainWorker> testGain;
         std::unique_ptr<RealHost> real;
 
-        if (identifier == Catalogue::testGainIdentifier())
+        if (Catalogue::isTestIdentifier (identifier))
         {
             /*  THE REPORT, before ready: what the parent reads into the table
                 and what a value nobody set rests at. */
-            const auto catalogue = Catalogue::testGain();
+            const auto catalogue = Catalogue::testFor (identifier);
             header.latencySamples.store (static_cast<std::uint32_t> (catalogue.latencySamples), std::memory_order_relaxed);
             header.paramCount.store (static_cast<std::uint32_t> (catalogue.params.size()), std::memory_order_relaxed);
 
@@ -611,15 +852,22 @@ namespace wfg::plugin
                 header.catalogueReady.store (1, std::memory_order_release);
             }
 
-            testGain = std::make_unique<TestGainWorker> (lanes);
+            testGain = std::make_unique<TestGainWorker> (lanes, identifier);
+
+            const auto width = [] (int n) { return n == 1 ? std::string ("mono") : n == 2 ? std::string ("stereo")
+                                                                              : std::to_string (n) + " channels"; };
+            reportLayout (header, testGain->inputs, testGain->outputs,
+                          width (testGain->inputs) + " in, " + width (testGain->outputs) + " out");
+
             answering = std::thread ([&testGain, &stop] { testGain->run (stop); });
         }
         else
         {
             juce::PluginDescription description;
+            juce::String bundle;
             std::string problem;
 
-            if (! readDescription (optionFrom (args, "--description"), description, problem))
+            if (! readDescription (optionFrom (args, "--description"), description, bundle, problem))
             {
                 reportFailure (header, problem);
                 return 4;
@@ -634,7 +882,7 @@ namespace wfg::plugin
             real = std::make_unique<RealHost>();
             const auto preset = optionFrom (args, "--preset");
 
-            if (! real->create (description, laneCount, channels,
+            if (! real->create (description, bundle, laneCount, channels,
                                 static_cast<double> (std::max<std::uint32_t> (1, header.sampleRate.load (std::memory_order_relaxed))),
                                 maxSamples, preset.empty() ? juce::File() : juce::File (juce::String (preset)), problem))
             {
@@ -656,6 +904,24 @@ namespace wfg::plugin
             answering = std::thread ([&real, &lanes, &stop] { real->run (lanes, stop); });
         }
 
+        /*  THE CUES' WHOLE STATES, loaded on this thread for whichever kind
+            of child this is - made before ready, so a request can never
+            arrive with nobody to take it. */
+        StateLoader loader (lanes, [&testGain, &real, &lanes] (int lane, const std::string& path)
+        {
+            auto problem = testGain != nullptr ? testGain->loadState (lane, path) : real->loadState (lane, path);
+
+            /*  AND WHAT THE PLUGIN DECLARES NOW (2026-09-26): a state can move
+                a look-ahead, and the entry's latency is the largest a voice
+                reports. Stored before the loader answers. */
+            if (real != nullptr)
+                lanes.laneOf[static_cast<std::size_t> (lane)]->latencySamples.store (
+                    static_cast<std::uint32_t> (std::max (0, real->instances[static_cast<std::size_t> (lane)]->getLatencySamples())),
+                    std::memory_order_relaxed);
+
+            return problem;
+        });
+
         header.childReady.store (1, std::memory_order_release);
 
        #if JUCE_MAC
@@ -664,7 +930,9 @@ namespace wfg::plugin
 
         ExitWatch watch (&header, parentPid);
         watch.startTimer (100);
+        loader.startTimer (5);
         juce::MessageManager::getInstance()->runDispatchLoop();
+        loader.stopTimer();
         watch.stopTimer();
 
         /*  A READY CHILD NEVER LEAVES BEFORE IT IS TOLD. Should the dispatch

@@ -1,0 +1,22 @@
+<Show>
+  <Lists>
+    <List id="VC000001" name="Sound">
+      <Media id="VC000002" file="tone.wav" levelLane="1 0 3 -20 5.5 -20 6 -25 6.001 -5 7 0" name="Ramp and step" number="1">
+        <Route id="VC000003" bus="VC000004" gains="1 0 0 1"/>
+      </Media>
+      <Media id="VC000005" file="tone.wav" levelLane="2 0 4 -20" name="Loop" number="2">
+        <Route id="VC000006" bus="VC000004" gains="1 0 0 1"/>
+        <Range id="VC000007" in="2" loops="0" name="slice" out="4"/>
+      </Media>
+      <Cue id="VC000008" name="Clear" number="3"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="VC000004" name="Main L/R" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

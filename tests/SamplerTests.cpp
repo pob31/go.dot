@@ -34,6 +34,7 @@
 #include "TestSupport.h"
 
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/RunModel.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
@@ -95,6 +96,13 @@ namespace
         bool isPlaying (int track) const override               { return playing.count (track) > 0; }
         bool isArmReady (int track) const override              { return ready.count (track) > 0; }
 
+        //  What left each track since the last take, as the output stage's peak: taken, so nought after.
+        float takeOutputPeak (int track) override
+        {
+            const auto found = peaks.find (track);
+            return found != peaks.end() ? std::exchange (found->second, 0.0f) : 0.0f;
+        }
+
         void completeArms (Engine& engine)
         {
             for (const auto& arm : arms)
@@ -113,6 +121,7 @@ namespace
         std::vector<int> stopped;
         std::set<int> playing;
         std::set<int> ready;
+        std::map<int, float> peaks;
     };
 
     struct Rig
@@ -351,6 +360,20 @@ TEST_CASE ("sampler: a member that finds no voice waits for one, and takes the n
     CHECK (std::find (third->pending.begin(), third->pending.end(), "voice") != third->pending.end());
     CHECK (rig.published ("/godot/slot/" + rig.strips[2] + "/word") == "pending");
 
+    /*  AND THE RUNNING PANE SAYS WHY NOTHING WILL SOUND, and what number to
+        raise (author, 2026-09-25: "Sampler show 'on 2 - pending voice' No
+        sound" - on a show of one track). */
+    rig.set ("/godot/audio/tracks", "2");
+    rig.published ("/godot/audio/tracks");
+
+    std::string said;
+
+    for (const auto& row : client::model::readRuns (*rig.snapshot))
+        if (row.id == third->id)
+            said = row.samplerWords;
+
+    CHECK (said == "on 3 \xc2\xb7 no free track \xc2\xb7 the show has 2");
+
     /*  A clip plays and ends; its track frees, and the member that was waiting
         takes it before the finished member is armed again. */
     rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
@@ -394,6 +417,99 @@ TEST_CASE ("sampler: a press launches the clip on its strip, at the level its ve
 
     /*  And the press is a step, letter p, which the live recorder keeps. */
     CHECK (rig.published ("/godot/list/" + rig.listId + "/history").find (":p") != std::string::npos);
+}
+
+TEST_CASE ("sampler: a strip's run says how loud it left its track, after the fader, and nothing once it ends")
+{
+    /*  The author, 2026-09-25: "On the sampler fader displays of the D700 can
+        we have a post fader level meter too?" The output stage's peak is
+        taken once a tick, so each tick reads its own. */
+    Rig rig;
+    const auto& members = rig.membersOf[rig.bankA];
+    rig.arm (rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]), osc::Value::int32 (100) });
+    rig.sound (members[0]);
+
+    const auto* run = rig.liveRunOf (members[0]);
+    REQUIRE (run != nullptr);
+    const auto runId = run->id;
+    const auto track = run->track;
+
+    //  Half of full scale left the track in a tick: -6 dB, published to a tenth.
+    rig.audio.peaks[track] = 0.5f;
+    rig.tickOnce();
+    CHECK (rig.runs.find (runId)->meter == doctest::Approx (-6.0206).epsilon (1e-3));
+    CHECK (std::stod (rig.published ("/godot/run/" + runId + "/meter")) == doctest::Approx (-6.0));
+
+    //  Taken and not kept: a tick with nothing out of it is silence again.
+    rig.tickOnce();
+    CHECK (rig.runs.find (runId)->meter == doctest::Approx (cue::Run::silentDb));
+
+    //  And a run that has ended is silent, whatever was taken last.
+    rig.audio.peaks[track] = 0.9f;
+    rig.silence (members[0]);
+
+    REQUIRE (rig.tickUntil ([&rig, &runId]
+                            {
+                                const auto* ended = rig.runs.find (runId);
+                                return ended != nullptr && ended->isFinished();
+                            }));
+
+    rig.tickOnce();
+    CHECK (rig.runs.find (runId)->meter == doctest::Approx (cue::Run::silentDb));
+}
+
+TEST_CASE ("sampler: a soloed clip holds its bank - the other strips start nothing until it stops")
+{
+    /*  The author, 2026-09-25: "The solo switch could be engaged on a track
+        to prevent other faders in the bank to trigger ... turned off once the
+        sample has finished playing or is stopped." */
+    Rig rig;
+    const auto& members = rig.membersOf[rig.bankA];
+    rig.arm (rig.bankA);
+
+    const auto* first = rig.liveRunOf (members[0]);
+    REQUIRE (first != nullptr);
+    const auto soloed = first->id;
+
+    //  A TOGGLE, and the value it came to is what is applied: on, off, on again.
+    CHECK (rig.send ("run.solo", { osc::Value::string (soloed) }).applied == 1);
+    CHECK (rig.runs.find (soloed)->solo);
+    CHECK (rig.send ("run.solo", { osc::Value::string (soloed) }).applied == 1);
+    CHECK_FALSE (rig.runs.find (soloed)->solo);
+    rig.send ("run.solo", { osc::Value::string (soloed), osc::Value::boolean (true) });
+    CHECK (rig.runs.find (soloed)->solo);
+    CHECK (rig.published ("/godot/run/" + soloed + "/solo") == "true");
+
+    //  ANOTHER STRIP OF THE BANK starts nothing: the press is applied and launches nothing.
+    CHECK (rig.send ("strip.press", { osc::Value::string (rig.strips[1]), osc::Value::int32 (100) })
+             .applied == 1);
+    CHECK_FALSE (rig.liveRunOf (members[1])->launchRequested);
+
+    //  Nor a member fired by name, which is a press on its strip.
+    rig.send ("cue.fire", { osc::Value::string (members[2]) });
+    CHECK_FALSE (rig.liveRunOf (members[2])->launchRequested);
+
+    //  THE SOLOED STRIP ITSELF starts, and keeps its solo while it sounds.
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]), osc::Value::int32 (100) });
+    rig.sound (members[0]);
+    CHECK (rig.runs.find (soloed)->solo);
+
+    //  IT LETS GO WHEN THE CLIP STOPS, and the bank is free again.
+    rig.silence (members[0]);
+    REQUIRE (rig.tickUntil ([&rig, &soloed] { return ! rig.runs.find (soloed)->solo; }));
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[1]), osc::Value::int32 (100) });
+    CHECK (rig.liveRunOf (members[1])->launchRequested);
+
+    //  A clip that has stopped takes no solo, and a run that is no sampler clip is refused one.
+    CHECK (rig.send ("run.solo", { osc::Value::string (soloed), osc::Value::boolean (true) }).rejected == 0);
+    CHECK_FALSE (rig.runs.find (soloed)->solo);
+
+    const auto* bank = rig.runs.find (rig.liveRunOf (members[1])->parent);
+    REQUIRE (bank != nullptr);
+    CHECK (rig.send ("run.solo", { osc::Value::string (bank->id) }).rejected == 1);
 }
 
 TEST_CASE ("sampler: a second press does what the clip says it does")
@@ -764,6 +880,40 @@ TEST_CASE ("sampler: a pad's clip starts at its initial level too")
     CHECK_FALSE (rig.liveRunOf (members[1])->launchRequested);
 }
 
+TEST_CASE ("sampler: a clip's level lane rides under its strip's fader, each its own term")
+{
+    /*  THE AUTHOR'S "SAMPLES" (namespace draft §20.1, decision CX): a sampler
+        member is a media cue, so it has a lane like any other, and the lane is
+        a term of its level beside the hand's trim - the fader moves the trim
+        and not the lane, the lane moves neither. This rig's clock stands at
+        nought, so the lane is read where the clip starts. */
+    Rig rig;
+    const auto& members = rig.membersOf[rig.bankA];
+    rig.set ("/godot/cue/" + members[0] + "/initialLevel", "-6");
+    rig.set ("/godot/cue/" + members[0] + "/levelLane", "0 -10 4 -30");
+    rig.arm (rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.sound (members[0]);
+
+    const auto* run = rig.liveRunOf (members[0]);
+    REQUIRE (run != nullptr);
+
+    CHECK (std::abs (run->trim - (-6.0)) < 1.0e-9);
+    CHECK (std::abs (run->laneDb - (-10.0)) < 1.0e-9);
+    CHECK (std::abs (run->level - (-16.0)) < 1.0e-9);
+
+    //  The hand on the fader moves its own term, and the lane stays where it was drawn.
+    const auto trim = "/godot/run/" + run->id + "/trim";
+    rig.send ("node.set", { osc::Value::string (trim), osc::Value::float64 (-3.0) }, "window");
+    rig.tickOnce();
+
+    run = rig.liveRunOf (members[0]);
+    REQUIRE (run != nullptr);
+    CHECK (std::abs (run->laneDb - (-10.0)) < 1.0e-9);
+    CHECK (std::abs (run->level - (-13.0)) < 1.0e-9);
+}
+
 TEST_CASE ("sampler: a sequence that plays itself arms a bank and goes on, and lasts until the bank is stopped")
 {
     /*  A SAMPLER GROUP IS A WINDOW ON THE SIDE OF THE CUES (author,
@@ -837,16 +987,31 @@ TEST_CASE ("sampler: a member fired by name is a press on its strip, and without
     CHECK (rig.runsOf (members[0]) == 1u);
 }
 
-TEST_CASE ("sampler: a member is not a place for the pointer, and the group is")
+TEST_CASE ("sampler: a member is not a place for the pointer, and parking on one lands on the group")
 {
+    /*  Refused `not-a-stop` until 2026-09-26, when the author asked for a cue
+        the pointer cannot stand on to "move the pointer to the group instead
+        of showing an error". The member is still not a stop - the walk never
+        enters a bank - but the gesture lands on the bank that holds it. */
     Rig rig;
     const auto& members = rig.membersOf[rig.bankA];
+    const auto standby = [&rig]
+    {
+        return rig.document.findById (rig.listId)["standby"].toString().toStdString();
+    };
 
-    const auto refused = rig.send ("standby.set", { osc::Value::string (members[0]) });
-    CHECK (refused.rejected == 1);
-    CHECK (rig.engine.lastError().find ("not-a-stop") != std::string::npos);
+    CHECK (rig.send ("standby.set", { osc::Value::string (members[0]) }).applied >= 1);
+    CHECK (standby() == rig.bankA);
 
     CHECK (rig.send ("standby.set", { osc::Value::string (rig.bankA) }).applied >= 1);
+    CHECK (standby() == rig.bankA);
+
+    /*  THE DOCUMENT'S OWN DOOR stays strict: a value written to the node is a
+        value, and a door that stored a different one would be a lie. */
+    CHECK (rig.send ("node.set", { osc::Value::string ("/godot/list/" + rig.listId + "/standby"),
+                                   osc::Value::string (members[0]) }).rejected == 1);
+    CHECK (rig.engine.lastError().find ("not-a-stop") != std::string::npos);
+    CHECK (standby() == rig.bankA);
 }
 
 TEST_CASE ("sampler: a stop cue aimed at the bank disarms it, footer and all")
@@ -903,4 +1068,114 @@ TEST_CASE ("sampler: each strip says what it rides, what it is doing and whose i
     rig.set ("/godot/slot/" + rig.strips[7] + "/dca", band);
     CHECK (rig.published ("/godot/slot/" + rig.strips[7] + "/word") == "dca");
     CHECK (rig.published ("/godot/slot/" + rig.strips[7] + "/target") == "/godot/dca/" + band + "/trim");
+}
+
+//==============================================================================
+/*  A MEMBER NAMES ITS STRIP (author, 2026-09-25: "I need to specify which
+    track goes where"). The pin first; everybody else on what is left, in
+    member order - the placement that was the whole rule until today. */
+#include <wfg/client/model/Surfaces.h>
+
+TEST_CASE ("sampler: a member names its strip, and the others fill what is left in order")
+{
+    Rig rig;
+    const auto& a = rig.membersOf[rig.bankA];
+
+    rig.set ("/godot/cue/" + a[2] + "/strip", rig.strips[0]);
+    rig.arm (rig.bankA);
+
+    CHECK (rig.holds (rig.liveRunOf (a[2]), rig.strips[0]));
+    CHECK (rig.holds (rig.liveRunOf (a[0]), rig.strips[1]));
+    CHECK (rig.holds (rig.liveRunOf (a[1]), rig.strips[2]));
+    CHECK (rig.holds (rig.liveRunOf (a[3]), rig.strips[3]));
+
+    //  And the tree says the same strips, so the menu cannot disagree with the arm.
+    CHECK (rig.published ("/godot/cue/" + a[2] + "/stripNow") == rig.strips[0]);
+    CHECK (rig.published ("/godot/cue/" + a[0] + "/stripNow") == rig.strips[1]);
+    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/cue") == a[2]);
+
+    /*  A PRESS ON THE PINNED STRIP PLAYS THE PINNED CLIP, which is the point
+        of the pin: the hand goes to the fader somebody wrote down. */
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    CHECK (rig.liveRunOf (a[2])->launchRequested);
+    CHECK_FALSE (rig.liveRunOf (a[0])->launchRequested);
+}
+
+TEST_CASE ("sampler: two members naming one strip - the first has it, the other is placed as if it named none")
+{
+    Rig rig;
+    const auto& a = rig.membersOf[rig.bankA];
+
+    rig.set ("/godot/cue/" + a[1] + "/strip", rig.strips[5]);
+    rig.set ("/godot/cue/" + a[3] + "/strip", rig.strips[5]);
+    rig.arm (rig.bankA);
+
+    CHECK (rig.holds (rig.liveRunOf (a[1]), rig.strips[5]));
+    CHECK (rig.holds (rig.liveRunOf (a[0]), rig.strips[0]));
+    CHECK (rig.holds (rig.liveRunOf (a[2]), rig.strips[1]));
+    CHECK (rig.holds (rig.liveRunOf (a[3]), rig.strips[2]));
+}
+
+TEST_CASE ("sampler: a strip that is not a sampler strip is no pin, and the member still plays")
+{
+    Rig rig;
+    const auto& a = rig.membersOf[rig.bankA];
+
+    /*  A DCA STRIP rides its DCA and never a clip: a member naming one is
+        placed automatically rather than left silent, and the strip goes on
+        riding the DCA. */
+    rig.set ("/godot/slot/" + rig.strips[6] + "/role", "dca");
+    rig.set ("/godot/cue/" + a[0] + "/strip", rig.strips[6]);
+    rig.arm (rig.bankA);
+
+    CHECK (rig.holds (rig.liveRunOf (a[0]), rig.strips[0]));
+    CHECK (rig.published ("/godot/cue/" + a[0] + "/stripNow") == rig.strips[0]);
+    CHECK (rig.published ("/godot/slot/" + rig.strips[6] + "/cue").empty());
+}
+
+TEST_CASE ("sampler: the strip menu says what each strip carries - this group, the list before it, or free")
+{
+    /*  Bank A, first in the list, takes strips one to four in order. Bank B
+        pins its first member to strip three and lets the second fall where
+        automatic puts it - strip one. The menu of Bank B's second member must
+        say so strip by strip, in words (author, 2026-09-25: "it should state
+        what is the previous assignment in chronological order of the cuelist
+        unless it's free"). */
+    Rig rig;
+    const auto& a = rig.membersOf[rig.bankA];
+    const auto& b = rig.membersOf[rig.bankB];
+
+    rig.set ("/godot/cue/" + b[0] + "/strip", rig.strips[2]);
+
+    const auto before = rig.published ("/godot/cue/" + b[1] + "/stripsBefore");
+    CHECK (before == rig.strips[0] + " " + a[0] + " " + rig.strips[1] + " " + a[1] + " "
+                       + rig.strips[2] + " " + a[2] + " " + rig.strips[3] + " " + a[3]);
+    CHECK (rig.published ("/godot/cue/" + a[0] + "/stripsBefore").empty());
+    CHECK (rig.published ("/godot/cue/" + b[0] + "/stripNow") == rig.strips[2]);
+    CHECK (rig.published ("/godot/cue/" + b[1] + "/stripNow") == rig.strips[0]);
+
+    const auto choices = client::model::stripChoices (*rig.snapshot, b[1]);
+    REQUIRE (choices.size() == 9u);             // automatic, and the eight faders
+
+    const std::string dash = "\xe2\x80\x94";
+
+    CHECK (choices[0].first.empty());
+    CHECK (choices[0].second == "automatic " + dash + " Panel · fader 1");
+
+    CHECK (choices[1].first == rig.strips[0]);
+    CHECK (choices[1].second == "Panel · fader 1 " + dash + " previously \"Bank A 0\"");
+    CHECK (choices[3].first == rig.strips[2]);
+    CHECK (choices[3].second == "Panel · fader 3 " + dash + " \"Bank B 0\" in this group");
+    CHECK (choices[5].second == "Panel · fader 5 " + dash + " free");
+
+    /*  PINNED, "automatic" says what choosing it would do rather than where it
+        would land: that depends on the other members, and the menu does not
+        guess. */
+    const auto pinned = client::model::stripChoices (*rig.snapshot, b[0]);
+    CHECK (pinned[0].second == "automatic, on the next strip free");
+
+    /*  A DCA STRIP IS NOT OFFERED: it rides its DCA. */
+    rig.set ("/godot/slot/" + rig.strips[7] + "/role", "dca");
+    rig.published ("/godot/cue/" + b[1] + "/stripNow");
+    CHECK (client::model::stripChoices (*rig.snapshot, b[1]).size() == 8u);
 }

@@ -276,6 +276,10 @@ may not stand on is a cue that is not one of the list's stops: a header cue, a
 footer cue or a cue of the persistent section (§3.29), which are a group's own
 preparation, its release and a list's standing assertion rather than rows an
 operator steps through; or a cue of another list, which has its own pointer.
+*(2026-09-26, at the author's direction:)* parking on a header's, a footer's or a
+sampler group's cue puts the pointer on **the group that holds it** instead of
+refusing; only a persistent cue, a disabled cue and another list's cue are
+refused (§3.27).
 Inside an automatic or a timeline group the pointer sits on one member, GO
 fires **that member**, and stepping standby forward or back walks that group's
 members and climbs out at its ends — which is how an operator tries the cues of
@@ -632,7 +636,11 @@ Rules:
 - A stereo cue may occupy one stereo slot
   *or* two mono slots *(proposed)* — two independently positionable objects is a
   legitimate and often better choice in WFS. Offer both; refuse silent downmix or
-  upmix.
+  upmix. *(Amended 2026-09-26, at the author's direction:* an insert may make a
+  mono cue stereo - a widening somebody switched in, and said on screen, not a
+  silent one. The routing reads the cue's width after its inserts; where a
+  destination has room for fewer sides than the cue now has, they are summed
+  into it, which returns the cue to its file's width and never below it. §3.18.)
 - **The show declares the processor's inputs as slots** — a name, an address
   prefix, a width and the bus that feeds each *(amended in 0.8, at the author's
   direction, 2026-09-10 — decision P of 2026-09-07,
@@ -790,11 +798,16 @@ of its own kind**. Four instances:
 |---|---|---|---|---|
 | **voice** — a track (§3.25) | `Show/Audio/@tracks` | width | clip end; footer for anything with a tail | fails at entry, visibly (Phase 3); a sampler group's claim **waits** (§3.27) |
 | **strip** — a fader or pad (§3.16) | the layout | role: DCA or sampler | the clip's run ends, however it ends | **waits**, or **evicts** when the arming sampler group says so (§3.27) |
-| **rack channel**, exclusive kind (§3.18) | `Show/Audio/Rack` | in→out width class | footer-timed — a tail may still be running | **degrades**: the cue plays dry and says so; §3.9c's edit-time analysis is what keeps it from happening in the show |
+| **rack channel**, exclusive kind (§3.18) | `Show/Audio/Rack` | in→out width class | footer-timed — a tail may still be running: a mic cue's rings out until the channel is quiet, ten seconds at most | a mic cue **waits** for the release; ~~**degrades**: the cue plays dry and says so~~ — a media cue's `Insert` is bookkeeping and claims nothing (§3.18) |
 | **processor input** (§3.9b) | the show, as `Slot` rows under the processor's mount (decision P); checked against the mounted namespace | width | **at run end** | waits for the release rather than racing it (§3.9b) |
 
 *The processor-input row amended in 0.8, at the author's direction (2026-09-10)
 — decision P and PR 4.3, `docs/godot-namespace-draft-0.1.md` §9 and §13.2.*
+
+*The rack-channel row amended in 0.8, at the author's direction (2026-09-26) — decisions BX
+and CG, `docs/godot-namespace-draft-0.1.md` §18.1.* A mic cue (§3.18) waits for a held channel
+rather than playing dry: a mic cue has no other track to play on, and its tail rings out before
+the channel is given on.
 
 **Buses are not slots** — a summing point is shared by construction. A rack
 channel of the *shared* kind, a reverb or a delay that many cues send into, is
@@ -876,6 +889,16 @@ curve (two breakpoints and a shape). Two authoring surfaces:
 Curves that must follow a media transport live with that clip; transport-free
 fades are wall-clock interpolators in the control graph, hundreds concurrent,
 no audio engine involvement.
+
+*Added in 0.8, at the author's direction (2026-09-27).* **The first lane built
+is a media cue's level lane** — a volume curve drawn over its waveform
+(`media/levelLane`, `docs/godot-namespace-draft-0.1.md` §20). It lives on the
+cue, and it runs on the **file's** clock, so a looping range hears the same
+stretch of it on every pass and a jump or a scrub takes it along. Its decibels
+are an **offset** on the cue's level — one more term beside the fades, the
+hand's trim and the DCAs, never a second writer of the level. Media cues only:
+a sampler clip and a kept take are media cues and have one; a live take is
+tonight's and has none.
 
 **Curve editor:** breakpoint lists with numeric entry, not only draggable
 pixels.
@@ -1087,6 +1110,37 @@ down. In the author's words, *a pad is a fader without a motor*. What stays out
 is the rest of what the struck words were written against, WFS-DIY's MPE-shaped
 Sampler: XY, and per-note pitch. One of that Sampler's mappings, the level one,
 comes in; the instrument does not.
+
+*Amended in 0.8, at the author's direction (2026-09-25).* **A strip's level is
+its fader's, and its rotary does not repeat it.** *"The rotaries don't have to
+move with the faders. It's either or. We'll find other uses for the rotaries."*
+Until this date an encoder detent was half a decibel on the strip's target and
+the LED ring drew the fader's level. Now a turn writes nothing and the ring is
+dark. The encoders (the *relative* class above) wait for a use of their own;
+the per-cue EQ and plugin pages of `docs/godot-surface-pages-draft-0.1.md` are
+the candidate.
+
+*Amended in 0.8, at the author's direction (2026-09-25, later the same day).*
+**The rotaries' use is a cue's EQ and its sends.** SELECT on a sample strip
+aims them at its cue; so does a click on a running cue's name in the window,
+and nothing else does - the cue list's pick does not move them. **EQ** puts
+the aimed cue's EQ on the rotaries in the author's order, sixteen controls: the
+high-pass's frequency, band one's shape, frequency, gain and width, band two's
+frequency, gain and width, band three's, band four's shape, frequency, gain and
+width, and the low-pass's frequency. Sixteen rotaries show them at once; eight
+show the first eight, and a second press the rest. **Send** puts its send
+levels on them, one a mix channel, paging the same way. A further press after
+the last page, or `*` at any time, returns the surface to its own page. A turn
+writes the cue's row (one undo step per control per hand); a press switches -
+the filters on their frequency, a band on its gain, a send on its own rotary -
+and a shape's press moves it between its peak and its shelf. Each rotary wears
+its band's colour, dimmed while the band is out, its ring stands at the value,
+and the screen names the control and says its value, with "off" beside a band
+that is out. A page button with more than one page blinks once, twice... every
+second and a half to say which. While a surface adjusts a cue, the window shows
+that cue's EQ panel or send mixer at its foot. Edits reach a sample that is
+not playing. Each EQ band and each send gained its own saved switch for this,
+so off keeps the number. How a locked show takes these edits is §3.27's.
 
 A 6DOF controller driving a WFS source position is better than two faders —
 three axes plus orientation is what the parameter actually is.
@@ -1311,7 +1365,9 @@ process per third-party plugin under the out-of-process default; and, because
 the bypassed delay line keeps timing constant, **a channel's latency is the sum
 of every plugin in its stack whether on or off**. For playback effects that is a
 number Go.dot reads and compensates in prepare; for the live rack it is the
-budget itself. The summed latency is shown at the moment somebody adds a plugin
+budget itself. *(Corrected 2026-09-26 for the voice inserts as built: the number
+is read and shown - "sounds 21 ms late through its inserts" - and never
+compensated; PDC is off and a cue is not started early for it. See below.)* The summed latency is shown at the moment somebody adds a plugin
 to a channel, never discovered on the night.
 
 Choosing the deadline follows from the same table — the smallest value that
@@ -1349,6 +1405,115 @@ questions are answered, and the answers pull most of Phase 9 forward as Phase
   behind the proxy has no Tracktion parameter at all, its parameters travel
   tick thread → shared memory → child: §3.4's message-thread handover applies
   only to a plugin hosted inline, which Phase 9a does not build.
+
+*Amended in 0.8, at the author's direction (2026-09-25) — decisions AH and AI,
+`docs/godot-namespace-draft-0.1.md` §17.13, overriding this section's earlier
+"no editor":*
+
+- **A plugin's own window, in a process of its own.** The desktop shows a media
+  cue's signal chain at its foot - the EQ, then the set, then out - and *Edit…*
+  on a plugin opens that plugin's native window in an **editing helper**: a
+  separate process with its own copy of the plugin, never in the audio path, so
+  a crash in a plugin's window takes down a window and never a voice. The window
+  **follows the pick**, greys when the picked cue does not have the insert, and
+  what it moves is written to the cue as ordinary `node.set`s - saved, undoable,
+  heard within two ticks. Space and Esc pressed in it come back to Go.dot.
+- **The whole state of a plugin is kept per cue**, not only its parameters: what
+  its window changes that is not a parameter is saved as a content-addressed
+  file under the bundle's `plugins/`, named on the cue's insert by `fx.capture`
+  with every parameter's value, automatically a moment after the hand stops -
+  **the turn and its state one Undo**. It is loaded onto the voice at the arm and
+  the cue does not launch until it is in: a cue in standby is always ready, and a
+  cue fired cold is late by the load rather than wrong. The cost is stated in
+  §17.13 and measured by M35 (§6.11).
+
+*Amended in 0.8, at the author's direction (2026-09-26) — decisions AQ-AY,
+`docs/godot-namespace-draft-0.1.md` §17.15.* Plugin hosting finished for the
+voice inserts, in three decisions and what they pulled after them:
+
+- **All three formats are built.** VST3 and LV2 on every platform, AU on macOS
+  (AUv2; AUv3 is refused, with a sentence, and `.aupreset` files are not read -
+  a cue's whole saved state does their work). Each plugin's child registers only
+  its own format.
+- **The app scans.** Show settings, Plugins, has a Scan button - every format or
+  one, and a folder of one's own - running the same out-of-process scan as the
+  command line: a plugin that does not answer in thirty seconds is skipped and
+  listed, each with Retry; the progress is said in words; nothing scans by
+  itself, and a locked show refuses. The machine's list lives in a file of
+  Go.dot's own that only the scan writes, and every session reads it, whatever
+  its audio. A plugin added to the set mid-session says so, and **Load now**
+  rebuilds the graph with the set as it stands (§3.25).
+- **A plugin can make a mono cue stereo.** A mono cue through a stereo reverb is
+  fed into both of its inputs and comes out with both of its sides; where it is
+  sent somewhere with room for two sides it plays them apart, where there is
+  room for one they are summed at a half each; a cue is never made narrower than
+  its file, and with the insert switched out it sounds exactly as before.
+- **A plugin's buses are asked, not assumed.** The voice's width, then stereo,
+  then mono in and stereo out, then mono - never every bus switched on without a
+  word; a sidechain is fed silence. A cue wider than a plugin takes passes it
+  dry, whole, and the insert says why - never half wet.
+
+*Amended in 0.8, at the author's direction (2026-09-26) — decisions BW, BX, BY, CE and CG, and
+the implementer's calls CH to CP, `docs/godot-namespace-draft-0.1.md` §18.* The live rack, drawn
+before it is built (devplan Phase 9b):
+
+- **A live input is a cue — a mic cue**, QLab's word for any input, a microphone or a line. It
+  names an input and a rack channel; GO opens the input through the channel with the cue's level
+  and fade-in, EQ, inserts, outputs and sends; it runs until a stop, Esc, a fade that stops or its
+  group's footer ends it, and one that must run all show sits in the persistent section (§3.29).
+  LiveProfessor's shape — standing channels passing sound whenever the show is open — was offered
+  and declined: the persistent section already gives a mic cue that behaviour.
+- **Rack channels are named, each with its own chain**, as this section drew them on 2026-09-07: a
+  name, a width class, and plugins of its own, loaded when the show opens and switched off; a mic
+  cue switches in what it wants and carries its values and whole state, as a media cue does on a
+  voice. Each channel is a track of its own beside the voices, so a live input never waits behind
+  playback. **A cue wanting a channel another holds waits and says so**: to move a sounding
+  microphone to new processing without a gap, give it a second channel on the same input and
+  crossfade — an input is not a slot, and two channels may read it.
+- **The show names its inputs** as it names its outputs, each with a meter whether or not a cue
+  listens; the input patch maps them to hardware as it did.
+- **The input reaches the channel through a stage of Go.dot's own**, in the same block it arrives:
+  nothing adds a block. Tracktion's own input devices are not used — they take locks and allocate
+  on the audio thread (§4.2).
+- **The rack's plugins are hosted as the set's are**, out of process, one child per distinct plugin
+  and preset across the rack; a plugin that dies leaves every channel that has it silent until it is
+  back, and says which (the amendment below; *dry* as first drawn).
+- **The latency budget is five milliseconds of plugins**, a setting of the show. The whole delay from
+  the microphone to the output — the interface's own, both ways, and what the switched-in plugins
+  declare — is always said in words, and going over is said on the cue, the channel and the plugin
+  that did it; never refused, never compensated. *Corrected for the proxy:* the paragraph above
+  says a channel's latency is its whole stack's, on or off, because Tracktion's own bypass keeps a
+  delay line running. The proxy keeps none for a plugin that is out, so a channel's delay is what
+  is switched in, and it moves when a latent plugin is switched.
+- **A stopped mic cue rings out**: its input shut, its plugins' tail heard until the channel is
+  quiet, ten seconds at most, then the channel is free. A double Esc cuts it at once and leaves it
+  silent, never dry (§4.4).
+- **Live sampling** — a recorder on a rack channel, between plugins before it and after it — is
+  §3.31.
+
+*Amended in 0.8, at the author's direction (2026-09-26) — decisions CU and CV, and the implementer's
+call CW, `docs/godot-namespace-draft-0.1.md` §18.13.* **A plugin that cannot play a cue leaves it
+silent, never dry.** This section's first answer was "last buffer or silence"; spike 07 and Phase 9a
+built a passthrough instead, and the author withdrew it: a plugin's dry side can be much louder than
+its output and in the wrong place — a wet-only reverb's dry side is the original signal, a second out
+of step — where a hole is only a hole.
+
+- **A failed plugin** — its child dead, or eight blocks late in a row — leaves every voice and
+  channel that has it switched in silent, and says so: *"… Vox 1 is silent until it is back"*. The
+  cue runs on silently. The relaunch two seconds later gives each voice back the whole state it held,
+  and once the new child holds it the voice fades back in **where the cue has got to**, not from its
+  start. The state that was loading when the child died is not sent again — it may be what killed
+  it — and one asked for while the plugin was down is sent instead of the one held. A relaunch that
+  fails again stays silent until `plugin.restart`, and says so.
+- **A single late block** is silent from where it failed, over a one-millisecond fade from the last
+  sample the plugin gave back, and the next block answered fades in over the same: a dip, never a
+  click, never dry.
+- **A plugin this machine does not have, or one still loading**, is silent the same way for a cue
+  that switches it in, and the cue's foot says *"this cue is silent while it has it switched in"* —
+  found at the soundcheck, and the insert switched out to hear the cue plain *(implementer's call
+  CW: the same rule; overrule at review)*.
+- **A cue wider than a plugin takes still passes it dry, whole**: that is a configuration, said on
+  the insert when it is made, and not a failure.
 
 ### 3.19 Video
 
@@ -1823,6 +1988,12 @@ Both halves are now measured rather than assumed.
 - **The fixed-track-set discipline extends to routing.** Changing a track's
   output device is a structural edit and does rebuild the graph, so destinations
   are assigned at show load along with the track set, not per cue.
+- **And to the plugin set** *(amended 2026-09-26)*. A plugin added to the set,
+  taken out or moved after the graph was built changes nothing until **Load
+  now** (`plugin.load`) rebuilds it - on the same interface, rate and block, only
+  while nothing plays, the clock gapped for the moment it takes as for an audio
+  settings change. Until then the entry says so, and a cue's inserts go by the
+  slots the graph was built with.
 
 #### Ranges are looping clips, and Go.dot places the boundaries
 
@@ -1917,7 +2088,8 @@ answer and is published as `plugin/latencySamples`.
 The proxy plugin itself is **feasible and cheap**: a custom TE plugin type
 wrapping a shared-memory round trip to a second process measured **0.9 µs** at
 p50, held a hard deadline inside the audio callback, and survived the child being
-killed mid-playback — degrading to passthrough exactly as §3.18 describes. It
+killed mid-playback — degrading to passthrough exactly as §3.18 then described
+(silence since 2026-09-26, §3.18's last amendment). It
 declares **zero** latency deliberately, since by the paragraph above any latency
 it declared would delay the whole show.
 
@@ -2060,10 +2232,27 @@ bulk-edit view over its members, never a property of the group.
 **Strips.** §3.16's word for a fader or a pad. Each strip's role is the
 layout's (§3.9a): a **DCA strip** is pinned; a **sampler strip** is filled by
 whichever sampler group is armed, in member order, left to right. A member may
-pin its strip *(proposed)* — "the gunshot is always the rightmost fader" is a
+pin its strip ~~*(proposed)*~~ — "the gunshot is always the rightmost fader" is a
 decision somebody may want to write down; derived from order is the half that
 exists first. **A pad is a fader-start fader without a motor**: the same
 binding at one bit, a *gate* endpoint (§3.16). ~~No pressure,~~ no XY.
+
+*Amended in 0.8, at the author's direction (2026-09-25).* **A member names its
+strip.** The author, with the D700 on the desk: *"I need to specify which track
+goes where."* The member carries a `strip` row naming a fader or a pad; empty is
+automatic. Placement is one rule, used by the arm, the re-arm and the menu
+alike: members that name a sampler strip have it, the first in member order
+when two name the same one; every other member takes the next sampler strip
+nobody in its group has named, in member order. A name that is no sampler strip
+of this layout — deleted since, or made a DCA strip — is no pin, and the member
+is placed automatically rather than left silent. It is chosen from a menu on
+the member that, like the direct-out menu (§3.9b), says what each strip carries,
+*"what is the previous assignment in chronological order of the cuelist unless
+it's free"*: another member of the same group, the member the nearest earlier
+sampler group in the list put there, or free. Faders and pads are one menu. The
+engine publishes both halves — `stripNow`, where the member is played from, and
+`stripsBefore`, what the list put on each strip before its group — so the words
+are computed where the rule lives.
 
 *Amended in 0.8, at the author's direction (2026-09-23) — decision AA,
 `docs/godot-namespace-draft-0.1.md` §9.* **Pressure yes, XY no.** Per clip and
@@ -2088,6 +2277,69 @@ let go. The same clip pressed from a second surface while held *(proposed)*: the
 origin that started it owns it, a press from elsewhere is a no-op and so is that
 origin's release — origin tagging exists for exactly this. Layering is absent
 (§3.8).
+
+*Amended in 0.8, at the author's direction (2026-09-25).* **MUTE on a sampler
+strip is its kill switch**, not a temporary mute: *"kill as the X in the active
+cue list panel"*. On a Mackie surface or a D700, a strip's MUTE sends `run.kill`
+for the run holding the strip while something sounds there. That is the
+running pane's cross, under the hand already on the surface. The member is
+armed on its fader again for the next touch, as after any end. On a DCA strip,
+and on a member armed and waiting, MUTE does nothing. **Its red light flashes
+for half a second when it kills** (*"to have feedback on the killed sample"*).
+A press with nothing to kill lights nothing, which is its own answer.
+
+*Amended in 0.8, at the author's direction (2026-09-25).* **A sampler strip
+meters what it plays, after the fader** (*"On the sampler fader displays of the
+D700 can we have a post fader level meter too?"*). The level is measured, not
+estimated: the loudest sample the voice's output stage sent, after its EQ, its
+inserts, the level and the fader, taken once a tick and published as the run's
+`meter`. A Mackie surface or a D700 draws it on the strip that holds the run, as
+Mackie's own meter, about sixteen times a second while the strip sounds,
+the loudest since the last message. It goes dark when the strip stops, and the
+peak hold is cleared for each new run. DCA strips have no meter.
+
+*Amended in 0.8, at the author's direction (2026-09-25).* **SOLO on a sampler
+strip locks its bank to it** (*"The solo switch could be engaged on a track to
+prevent other faders in the bank to trigger. The solo switch blink before the
+sample is triggered. Stays on while it plays and is turned off once the sample
+has finished playing or is stopped."*). The button sends `run.solo` for the clip
+on its strip, as a toggle. While that solo holds, a press on any other strip of
+the same bank starts nothing: a fader's touch, a pad, a member fired by name.
+Several strips of one bank may be soloed at once. The solo belongs to the clip
+and lets go by itself when the clip stops - its end, a stop, a kill, a release -
+so a solo left on never outlives what it protected. Its light flashes while the
+soloed clip waits for its start, is lit while it sounds, and goes out with it.
+A performance and not an edit: nothing is written to the show.
+
+**REC on a sampler strip sets where its fader starts** (*"Pressing Rec on a
+sampler fader sets the starting level. Confirm with a LED pulse."*). The level
+the fader is at is written as the member's `initialLevel` - an edit to the show,
+one undo step - and the REC light is lit for half a second to say so. A locked
+show takes no edit, and then nothing is lit.
+
+**A sampler strip's ring is its clip's progress** (*"So use the rotary LED ring
+then"*): filled from the left as far as the clip has got through the span it
+plays, and empty when nothing sounds. The thin white bar at the top of a D700
+screen, first asked for, is the D700's own mark of a lit SELECT - on while the
+strip sounds - and cannot show a length. Turning the knob still does nothing.
+
+*Amended later the same day (2026-09-25).* **SELECT picks the strip's sample
+for the rotaries** (§3.16's EQ and Send pages), and **its light - the thin
+white bar - is the pick**, on the one strip whose cue the rotaries are aimed
+at, and no longer says the strip sounds: the ring's progress and the pulsing
+colour say that. The strip's third row reads "picked". A lit SELECT pressed
+again lets go. On an EQ or Send page the strips' faders, MUTE, SOLO and REC
+keep their meaning; the rotary's press switches the control under it and never
+starts a clip.
+
+**Under the show lock, EQ and sends ride live and unsaved** (the author's
+decision, against a recommendation to close the pages under the lock): a turn
+on a locked show is heard at once and is written to nothing, like a fader's
+trim, and so is a send added to a mix channel the cue did not send to. The live
+values last until the show is unlocked; then the window asks, in one bar,
+whether to keep them in the show - one undo step - or discard them, returning
+the cues to their saved sound. The window's EQ panel and send mixer, and the
+page, ride live under the lock the same way.
 
 **Takeover.** Two modes, one attribute on the group that arms — the scene change
 is where the designer is thinking about it, and §4.10 wants the decision in the
@@ -2145,6 +2397,14 @@ yet.
 *Added 2026-09-23:* Phase 6 is that phase, and it builds the refusal as written
 — `standby.set` on a member of a sampler group answers `not-a-stop` — which
 remains the author's to overturn (`docs/godot-namespace-draft-0.1.md` §16.5).
+
+*Answered 2026-09-26, at the author's direction:* a member is still not a stop —
+the walk never enters a bank — but **parking on one lands on the sampler group
+that holds it** rather than being refused (*"move the pointer to the group
+instead of showing an error"*). A header's or a footer's cue lands on its group
+the same way (§3.5); a persistent cue and a disabled one are still refused. The
+document's own write of the standby stays strict — only the gesture is lifted
+(`docs/godot-namespace-draft-0.1.md` §17.17, BH-BL).
 
 **Voices.** Each playing member is a track (§3.25), and a full bank as one
 track per cell is the wrong price; the group declares its voices, and the claim
@@ -2251,6 +2511,13 @@ and the same solver as any other cue. A sampler bank, a rack chain and a state
 machine differ only in what starts them. That is what keeps them from being
 panels bolted onto the side of a cue list.
 
+*Amended in 0.8 (2026-09-26), with the live rack (§3.18, `docs/godot-namespace-draft-0.1.md`
+§18.8).* A mic cue is asserted as a media cue is, and its resume is a relaunch: an input has no
+position to remember. Drawing it found two places where the code did not do what this section
+says, both fixed with it: a **double Esc suspended every persistent cue** for the session — it
+marked runs killed, which is how the running pane's kill suspends — and a **load-to-time ended the
+section's runs**, which the solver does not plan, leaving them silent until the next GO.
+
 ### 3.30 Spectral colour — timbre on the waveform, in Gogo, and on the strip
 
 *Added in 0.8, at the author's direction (2026-09-09).*
@@ -2316,11 +2583,116 @@ profile says so rather than approximating
 sounding**, with timbre a layout option that can be off, so a desk that uses
 colour for provenance keeps it.
 
+*Amended in 0.8, at the author's direction (2026-09-25).* **While it sounds,
+the strip's colour pulses with how the sound moves, not with how loud it is.**
+*"Can the brightness of the RGB LEDs be modulated by the sound level or
+variations of it? … Don't use the full 16 or 24 bit resolution. It can be
+squashed, but variation/modulation is a better clue."* The hue and saturation
+stay the timbre's. The brightness follows the clip's own envelope: the engine
+publishes, for each run, the analysed peak where it has got to, in dB below the
+file's loudest moment (`run/envelope`, before the fader and any DCA). The
+profile keeps a slow average of it over about 0.6 s: a steady sound rests at a
+middle glow whatever its level, a rise above the average flashes towards full,
+and a dip dims towards a floor, never dark, because dark is silence. A flash is
+held and released over a few hundred milliseconds, so the ten-a-second colour
+limit above cannot skip it. The resting glow, the dB range, the floor, the
+average and the release are the bench's to tune (`SurfaceProfile.h`).
+**Half of the light is the level, half the movement** (*"The low level sounds
+with a little variation come out with as much variation in the lights as a
+more dynamic sound. Maybe make part of the LED level match the long term level
+of the music and the other 'half' the shorter term variations"*). The
+envelope is in dB below full scale. Its average over about three seconds,
+squashed between -48 and -6 dBFS, is half of the brightness, so quiet material
+glows low. The other half is the rise above a 0.6 s average, measured against
+how far the sound has strayed lately. That measure adapts, so a dense loud
+passage still shows its movement (*"at louder volume the modulation gets a bit
+lost"*), but it never counts less than 4 dB as a full swing, so a quiet sound
+that barely moves stays nearly still. **What the LEDs are sent is shaped for
+their light** (*"The white 'looks' louder. I think the LED's of the D700 are
+not super linear and not all channels match totally"*): the total light is
+held to one and a half channels' worth, since white lights all three; each
+channel has its trim; and the response is straightened by a gamma of 2. All of
+these are the bench's numbers.
+
+**And noise is grey wherever it sits** (*"the colours … don't desaturate on a
+broader, noisier signal which I find quite a telling visual cue"*). The
+saturation was one minus the spectral flatness of the whole band, which reads
+only white noise as grey: a hi-hat, breath, rain or rumble is noise in part of
+the band, and the near-silent rest made it vivid. It is now how tonal the
+sound is where its energy is: each bin against its own neighbourhood, a ninth
+of an octave either side, weighted by that neighbourhood's power. Noise of any
+colour or bandwidth reads grey, a tone or a harmonic sound vivid. **Below 200
+Hz sound reads by its pitch**, never as noise: the analysis window cannot tell a
+tone from noise there, and the ear hears a thump or a note rather than hiss.
+A sub-bass pulse had come out grey beside Samplitude's dark blue (*"It's like
+pulsating bass drum"*). A rumble reads coloured too; that is the price. The
+stops lean blue as well (*"I would bias a bit towards the blues"*): deep blue
+to 250 Hz, red not before 800 (the analysis's format version 4; every file is
+analysed again once).
+
+**The waveform's height is finer than its colour** (*"Can the waveform be more
+precise in level, not colour when zooming in"*). The same pass keeps, for every
+64 samples, the lowest and the highest sample, in sixteen bits. It is halved
+into coarser levels as the colour frames are, and cached beside them
+(`<hash>.tpk`, beside the `.tpy`, which the page reads unchanged). A zoomed-in
+waveform takes its shape from that trace, lowest to highest rather than
+mirrored, and its colour from the colour frames. Before, the height was a frame
+of 1024 samples and eight bits: a staircase when zoomed.
+
 **A test exists before the UI does.** A 1 kHz sine must come out saturated at
 1 kHz's hue, white noise grey, and a sweep must walk the ramp — a black-box
 check on the cache alone, in the style of the routing spike, and where the work
 starts when it is scheduled: Phase 5 for the cache, the editor and Gogo; Phase 6
 for the strip.
+
+### 3.31 Live sampling channels — a take, its layers and its loop
+
+*Added in 0.8, at the author's direction (2026-09-26) — decisions BZ, CA, CB, CC, CD and CF, and the
+implementer's calls CQ to CT, `docs/godot-namespace-draft-0.1.md` §19.* The author's words: *"live
+sampling channels that can take in an input, loop with continuously variable in and out points with
+pre-recording and post-looping/playback effects."*
+
+A rack channel (§3.18) may carry a **recorder**, and a mic cue on it becomes a sampler of what it
+hears. The channel's plugins sit on either side of the recorder: **before** it, printed into what is
+recorded, and **after the player**, heard as the loop plays and changeable without recording again.
+Go.dot's own EQ is after the player.
+
+- **A take, and layers on it.** *Rec* records; *Rec* again — or *Loop* — closes the take and loops it
+  between an **in** and an **out** point; *Rec* while it loops lays a new pass on top, a **layer**,
+  and *Undo* takes the top layer off. *Clear* empties the channel. Rec never destroys a take: only
+  Clear empties, and Undo takes one layer at a time. The longest take and how many layers a channel
+  keeps are declared on the channel, and their memory is set aside when the show opens, never
+  during it. *(A single take, replaced by the next Rec, was recommended; the author chose layers.)*
+- **The loop moves while it plays.** The in and out points are ridden continuously — from the D700's
+  **Loop page** (in, out, a rotary sliding both and keeping the length, and the level), the take's
+  picture in the window, the master dial — and the loop plays on through every move, every wrap
+  crossfaded so that no move clicks. The points are the channel's for the night, like the take, and
+  not rows of the show.
+- **Cues and hands drive it.** GO opens the sampling cue — its input and both chains live — and does
+  with a take already on the channel what the cue says: wait for a hand (the default), loop it, or
+  clear it for a fresh one. Record, loop, overdub and clear come from transport cues aimed at it
+  (§3.8) and from the hands — the D700's Rec, the window. Esc ends it through its footer; a double
+  Esc stops everything that sounds and unmakes nothing recorded.
+- **A take is tonight's** (§4.10): it lives in memory for the session and belongs to the channel, so a
+  later sampling cue on the channel finds it; **Keep** writes it into the show's media as a file,
+  which a media cue can play — and *Keep as cue* makes that cue, looping at the take's points. The
+  Keep is the decision; the take never was.
+- **Not a DAW** (§1): one take a channel with its layers — no editing, no arrangement, no second take
+  beside the first.
+
+What it costs: a take's memory is its length times the rate times the layers kept plus one — sixty
+seconds and four layers at 48 kHz is 115 MB a channel — held for the session whether or not anything
+is recorded, and a channel that has used every layer refuses another pass until one is undone.
+
+*As built, 2026-09-27 (namespace draft §19.11):* all of the above, in seven stages - the recorder, its
+place in the graph, the take verbs and transport cues, the take's picture at the foot of the window,
+the Loop page on the D700 (on its Pan button), and Keep, which writes a take and its layers into
+`media/takes` as a float WAV and, as a cue, adds a media cue looping it at the take's points. Rec and
+a layer are not refused while Keep writes the file; Undo and Clear wait for it. Measured (§6.11,
+M41–M44): a minute and four layers is 115.7 MB at 48 kHz, set aside in 33 ms when the show opens; a
+block of a loop with sixteen layers costs 56 µs of its 2667; a wrap on a sine steps no further than
+the sine does; and a take starts on the sample Rec was placed at. What waits for the bench is the
+D700's own buttons and the page's law for a point.
 
 ---
 
@@ -2541,6 +2913,13 @@ section's: the state is a first-class one, it is distinct from both "running" an
 validation, the dropped GO and the resume. *Not yet built:* the rate-change stop,
 the resampling, and the operator-facing indication that reconnection is under way.
 
+*Amended 2026-09-26 — live input handling answered* (§3.18, `docs/godot-namespace-draft-0.1.md`
+§18). A live input is a **named input** of the show — packed onto the logical inputs the input patch
+already maps to hardware, with a meter whether or not anything listens — and is heard only through a
+mic cue on a rack channel. Tracktion's input devices stay unused: they lock and allocate on the
+audio thread. The interface's input and output delays are read when it opens and published, since
+§3.18's budget is said against them.
+
 ### 6.3 Video — DeckLink vs GPU
 
 ### 6.4 Asparion — remaining asks
@@ -2610,6 +2989,12 @@ persistent media (§3.29).
 Added 2026-09-09: authored colour at idle and timbre while sounding, as a
 layout option (§3.30).
 
+*Answered 2026-09-26* (the author's decisions, `docs/godot-namespace-draft-0.1.md`
+§17.15): scanning from the app, yes (decision AQ); AU and LV2, yes (AS); a plugin
+making a mono cue stereo, yes, with the routing reading the width after the
+inserts (AT). The width class mono→stereo that §3.18 drew for rack channels is
+built on the voice inserts; the rack channels themselves stay Phase 9b's.
+
 Added 2026-09-22, with the network devices (§3.3, §3.11, §3.22):
 
 - **Two of the same desk in one rig.** A cue is aimed by the root its address
@@ -2676,6 +3061,50 @@ its own; a preset as a file under the bundle's `plugins/`; the failed-strip
 threshold, the deadline and the automatic relaunch; the child's worker
 spinning hot while a plugin is in use.
 
+*Answered 2026-09-25, at the author's direction* (decisions AH and AI,
+`docs/godot-namespace-draft-0.1.md` §17.13, the PRD overridden where it said no
+editor is ever opened): the FX panel at the foot is the signal chain with a
+switch a plugin and *Edit…*, which opens the plugin's own window in a separate
+editing helper that follows the pick (§3.18); and a plugin's **whole state** is
+kept per cue - chosen against the recommendation of parameters only - saved
+automatically a moment after the hand stops, the turn and its state one Undo,
+and loaded onto the voice before the cue may launch (§3.18). Built as defaults
+and the author's to overturn once seen working: the 1.5 s quiet moment, the
+125-tick join, greying by hiding the editor, the window above Go.dot only while
+Go.dot is in front, and Space and Esc as the only keys handed back.
+
+*Answered 2026-09-26, at the author's direction* (decisions BW to CG,
+`docs/godot-namespace-draft-0.1.md` §18.1 and §19.1): the live rack is **mic cues on named rack
+channels**, each channel with its own chain (§3.18), a held channel waited for; the rack's latency
+budget is five milliseconds of plugins; a stopped mic cue rings out; and live sampling is §3.31 — a
+take with layers, loop points ridden live, cues and hands, Keep to a file. Built as defaults and the
+author's to overturn once seen working (namespace draft §18.1 and §19.1): named inputs as show
+objects; one child per distinct rack plugin; the ten-second cap on a tail and the quarter-second of
+quiet that ends it; `through` off; Rec never destroying a take; a Rec refused when every layer is in
+use rather than the oldest folded in.
+
+Added 2026-09-26 *(proposed)*, with §3.18 and §3.31:
+
+- **A cue taking over a held rack channel**: the first cue ending, the second moving the sounding
+  channel to its own level and values in its fade time — values only, a saved whole state never
+  loaded under a sounding microphone. Waiting is what is built.
+- **Loop points written in the show**, a cue saying *loop the first two seconds*.
+- **Overdub feedback**, each pass decaying the layers under it.
+- **Varispeed and reverse on a loop** — the conversation about varispeed on files (2026-09-21) is the
+  same one.
+- **A mic cue as a sampler member**: fader-start for a microphone.
+- **The shared rack channel** — a reverb return cues send into, §3.9e's *"bus with a chain"* — and a
+  media cue's `Insert` made to sound, both still Phase 9b's.
+
+Added 2026-09-27 *(proposed)*, with §3.10's level lane:
+
+- **A lane recorded from a fader** — §3.10's read, touch, latch and write, riding a cue's level on
+  the D700 and keeping the ride as its lane.
+- **The master dial on a lane point's level**, which §17.18's rule against a handle's two numbers
+  keeps out today.
+- **Lanes on other numbers** — pan, a send, a plugin's parameter — each a row beside the number it
+  rides.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -2702,6 +3131,21 @@ Mackie vs HUI first — first week with the D700.
   three misses of 252 µs each, and costs nothing after; a parameter write
   reaches the sound in two ticks, 41 ms; a real plugin's child is 36 MB plus
   1.2 MB a voice and every entry of the set loads in about a second.
+- **A cue's whole plugin state, loaded onto its voice** (§3.18, decision AI,
+  2026-09-25): how long a load takes - a cue fired cold is late by that much -
+  and whether it makes another voice miss. *Taken 2026-09-25 as **M35**
+  (`docs/godot-namespace-draft-0.1.md` §17.9):* the author's own plugin loads a
+  cue's state in about half a millisecond (0.32-1.16 ms over three runs of
+  twenty), and no other voice missed a block while it loaded. A plugin with a
+  large state (a sampler, a convolution reverb) is still to measure.
+- **What LV2 costs a session's start** (§3.18, 2026-09-26, **M36**): JUCE's LV2
+  format reads every bundle on the default folders the moment it is made, and
+  Tracktion makes one when the engine starts. The engine's start, before and
+  after, on the author's machine and on one with many LV2 bundles.
+- **A scan during a rehearsal** (§3.18, 2026-09-26, **M37**): the tick's lateness
+  (p95) and the proxies' misses while the app scans a full plugin folder with a
+  show open and playing - whether "never while locked" is enough or a scan should
+  also wait for nothing to be playing.
 - **Pause and resume at an offset** (§3.29): whether a relaunch at a remembered
   position is clean when the offset is set in prepare, and when a playing clip
   is nudged instead — the same question load-to-time asks. *Half answered*
@@ -2731,6 +3175,30 @@ Mackie vs HUI first — first week with the D700.
   re-asserts an idle colour every two seconds until then. The instrument is
   `tests/blackbox/m28_d700_idle_resume.py`; not yet taken.
 
+- **The live rack's cost and its delay** (§3.18, 2026-09-26): **M38** — the audio callback's cost
+  with 0, 4 and 8 rack channels open: the input copy, the input stages and the chains; **M39** —
+  microphone to output on the author's MADIface through a loopback cable, against the words: the
+  rack must add nothing beyond the interface and what the plugins declare; **M40** — the cores the
+  rack's children spin with 1, 2 and 4 channels, each with a plugin switched in. *Taken
+  2026-09-26 on a Debug build:* M38 at 0, 8 and 32 channels open beside eight idle voices, 48 kHz
+  and 128 samples - about 40 µs a channel a block, thirty-two channels 62 % of real time, the same
+  per-track cost as a media voice (M11); Release at the bench. M40 as eight channels carrying ten
+  slots of two plugins - two children, so at most two cores, whatever the number of channels
+  (decision CL). M39 waits for the bench.
+- **A sampling channel** (§3.31, 2026-09-26): **M41** — a take's memory and the time to set it aside
+  and touch it at open (sixty seconds and four layers, at 48 and 96 kHz); **M42** — a block's cost by
+  layers, 1 to 16; **M43** — the largest step at a wrap on a sine, against the sine unbroken; **M44**
+  — where a take starts against where Rec was pressed. *Taken 2026-09-27 on a Debug build:* M41 -
+  115.7 MB touched in 33 ms at 48 kHz, 231.3 MB in 65 ms at 96 kHz; M42 - 5.7 µs a block of 128 with
+  no layer, 22.4 with four, 55.9 with sixteen, against the block's 2667 µs; M43 - a step of 0.02886
+  against the sine's own 0.02886, where a hard join steps 0.382; M44 - out by 0 samples through the
+  host, the interface's own delay the bench's to measure.
+- **A level lane** (§3.10, 2026-09-27): **M45** — how closely the rendered level follows the lane
+  drawn: the largest error away from its corners, and how late a step lands. *Taken 2026-09-27 on a
+  Debug build:* within 0.014-0.022 dB of the lane away from its corners, and a step's midpoint -8.0
+  to -5.3 ms from where it was drawn - inside a tick, read one slew ahead. A runner that stalls the
+  tick thread holds the level still, as it holds a fade; the driver voids what a stall moved.
+
 ---
 
 ## 7. Vocabulary
@@ -2757,6 +3225,12 @@ notice nothing; the designer should notice everything.
 | **DCA** | a trim object that cues and groups are assigned to; nestable (§3.28) |
 | **persistent cue** | a cue asserted at every trigger and relaunched if it is not running (§3.29) |
 | **timbre** | a run's spectral colour at its current position — hue from the centroid, saturation from flatness (§3.30) |
+| **mic cue** | a cue whose sound is a live input, through a rack channel (§3.18) |
+| **named input** | an input of the show, by name, packed onto the logical inputs (§3.18, §6.2) |
+| **rack channel** | a track of the live rack with a name, a width class and its own plugins; a slot (§3.9e, §3.18) |
+| **sampling channel** | a rack channel with a recorder between its plugins (§3.31) |
+| **take** | what a sampling channel recorded tonight, in memory for the session until kept (§3.31) |
+| **layer** | a pass laid on a take while it loops, undone one at a time (§3.31) |
 
 ---
 

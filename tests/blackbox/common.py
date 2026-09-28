@@ -487,7 +487,10 @@ class Server:
                  ui: "Path | None" = None, device: "str | None" = None,
                  window: bool = False, theme: "Path | None" = None,
                  device_type: "str | None" = None,
-                 proxy_deadline_us: "int | None" = None):
+                 proxy_deadline_us: "int | None" = None,
+                 engine_folder: "Path | None" = None,
+                 input_wav: "Path | None" = None,
+                 env: "dict | None" = None):
         argv = [str(find_binary()), "serve", str(bundle), "--http-port=0", "--osc-port=0"]
         if sample_rate is not None:
             argv.append(f"--sample-rate={sample_rate}")
@@ -503,6 +506,11 @@ class Server:
             argv.append("--hosted")
         if render is not None:
             argv.append(f"--render={render}")
+
+        # --input-wav feeds the hosted interface's logical inputs from a file,
+        # looped (Phase 9b): how a runner with no interface hears a live one.
+        if input_wav is not None:
+            argv.append(f"--input-wav={input_wav}")
 
         # --ui serves a client from /ui on this same HTTP port. Same origin as
         # the tree it reads, so there is no CORS anywhere and a tablet reaches
@@ -521,6 +529,12 @@ class Server:
         if proxy_deadline_us is not None:
             argv.append(f"--proxy-deadline-us={proxy_deadline_us}")
 
+        # --engine-folder keeps the machine's own folder - the known plugin
+        # list above all - out of the developer's real one (2026-09-26). A
+        # driver that scans must pass one: a scan WRITES the list.
+        if engine_folder is not None:
+            argv.append(f"--engine-folder={engine_folder}")
+
         # --window opens the compiled client over this same engine, in this
         # same process (namespace draft section 14.16). Off by default here as
         # it is in the verb, and for the same reason: every driver in this
@@ -538,8 +552,16 @@ class Server:
             argv.append(f"--wfg-locale={locale}")
 
         self.argv = argv
+
+        # Extra environment for the engine and every child it launches - the
+        # plugin scan reads LV2_PATH, for one.
+        environment = None
+        if env:
+            environment = dict(os.environ)
+            environment.update(env)
+
         self.process = subprocess.Popen(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment)
 
         self.http_port = 0
         self.osc_port = 0
@@ -616,6 +638,7 @@ class Report:
     def __init__(self, title: str):
         self.title = title
         self.failures: "list[str]" = []
+        self.voided: "list[str]" = []
         self.checks = 0
         print(f"=== {title} ===")
 
@@ -630,6 +653,15 @@ class Report:
         print(f"  FAIL {line}")
         self.failures.append(line)
         return False
+
+    def void(self, description: str, reason: str) -> None:
+        """A CHECK THIS RUN COULD NOT MAKE, and why - never a pass, never a
+        failure. For a level the runner's own starvation took away while the
+        engine did what it promises then (a plugin that cannot keep up is
+        silent, and says so): the proof is left to a run on a machine that
+        keeps up, and every other platform's job makes it."""
+        self.voided.append(description)
+        print(f"  void {description}\n         {reason}")
 
     def equal(self, actual, expected, description: str, detail: str = "") -> bool:
         note = f"expected {expected!r}, got {actual!r}"
@@ -647,8 +679,81 @@ class Report:
                   f"{len(self.failures)} of {self.checks} checks")
             return 1
 
-        print(f"{self.title}: ok — {self.checks} checks")
+        voided = f", {len(self.voided)} void" if self.voided else ""
+        print(f"{self.title}: ok — {self.checks} checks{voided}")
         return 0
+
+
+def logged_before(log: Path, verb: str, until: "str | None" = None, containing: "str | None" = None) -> int:
+    """How many `verb` records a session's log holds before the first line with
+    `until` in it - every one, with no `until` - and, with `containing`, only
+    those that say it. How a driver tells the engine failing a plugin on its
+    own for lateness (a starved runner: "stopped answering") from the kill it
+    asked for, or from a child that died, which is never the runner's doing."""
+    try:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return 0
+    count = 0
+    for line in lines:
+        if until is not None and until in line:
+            break
+        if f" {verb} " in line and (containing is None or containing in line):
+            count += 1
+    return count
+
+
+# A window read from fewer answered blocks than this reads nothing.
+ANSWERED_ENOUGH = 5
+
+
+def answered_level(samples: "list[float]", start_frame: int, end_frame: int,
+                   block: int) -> "tuple[float | None, int, int]":
+    """WHAT THE BLOCKS A PLUGIN ANSWERED IN TIME ARE AT, between two frames.
+
+    A constant source through a plugin that answers in time is level, block
+    after block. A block it is late for is silent, and the blocks either side
+    of the silence fade (decision CV, 2026-09-26), so neither says anything
+    about what the plugin does to the sound - and a starved CI runner makes a
+    great many of them (a quarter of a window on Windows at e20beff, which slid
+    a plain median off the level into the fades). The level is the median of
+    the blocks that are flat and not silent; with it, how many there were and
+    how many blocks the window held. The window starts on a block boundary, so
+    each block read is one the engine rendered - a render drops whole blocks,
+    if any, and a block read across two holds whatever changed between them."""
+    first = -(-max(0, start_frame) // block) * block
+    part = samples[first:max(0, end_frame)]
+    means = []
+    seen = 0
+    for i in range(0, len(part) - block + 1, block):
+        piece = [abs(s) for s in part[i:i + block]]
+        seen += 1
+        mean = sum(piece) / block
+        if max(piece) - min(piece) <= 0.002 and mean > 0.002:
+            means.append(mean)
+    if not means:
+        return None, 0, seen
+    means.sort()
+    return means[len(means) // 2], len(means), seen
+
+
+def check_level(report: Report, reading: "tuple[float | None, int, int]", expected: float,
+                tolerance: float, starved: int, description: str, detail: str = "") -> None:
+    """A level read from the answered blocks - or VOID when the runner took the
+    whole window away: fewer than a handful answered in time while the engine
+    failed the plugin on its own for lateness, which is what it owes then (the
+    silence and the words are proved elsewhere). With no such failure said, a
+    window with nothing answered in it is a failure: a path that never answers."""
+    value, counted, seen = reading
+    note = f"{counted} of {seen} blocks answered in time" + (f"; {detail}" if detail else "")
+    if counted < ANSWERED_ENOUGH or value is None:
+        if starved:
+            report.void(description, f"the runner starved the child: {note}; the engine failed it for"
+                                     f" lateness {starved} time(s) on its own")
+        else:
+            report.check(False, description, note)
+        return
+    report.check(abs(value - expected) <= tolerance, description, f"{value:.4f} against {expected:.4f}; {note}")
 
 
 def copy_bundle(source: Path, destination: Path) -> Path:

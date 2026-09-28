@@ -41,10 +41,12 @@
     having to remember to mark the tree stale from a thread that must not.
 */
 
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace wfg::plugin
 {
@@ -64,6 +66,20 @@ namespace wfg::plugin
 
             /** How many parameters the catalogue knows for it. */
             int paramCount = 0;
+
+            /*  How long the last cue's whole state took to load onto a voice,
+                in milliseconds, and why the last one could not (author's
+                decision of 2026-09-25: the whole state per cue). */
+            double stateLoadMs = 0.0;
+            std::string stateProblem;
+
+            /*  THE BUSES IT TOOK (2026-09-26): its main input and output
+                widths, and the two in words - "stereo in, stereo out". A cue
+                wider than `inputs`, or one it would make narrower, passes it
+                dry. Nought before the child has said. */
+            int inputs = 0;
+            int outputs = 0;
+            std::string layout;
         };
 
         /** Replaces what is known about one entry. Answers whether anything a
@@ -77,7 +93,11 @@ namespace wfg::plugin
             const auto changed = held.state != status.state
                                    || held.problem != status.problem
                                    || held.latencySamples != status.latencySamples
-                                   || held.paramCount != status.paramCount;
+                                   || held.paramCount != status.paramCount
+                                   || held.stateProblem != status.stateProblem
+                                   || held.inputs != status.inputs || held.outputs != status.outputs
+                                   || held.layout != status.layout
+                                   || std::abs (held.stateLoadMs - status.stateLoadMs) > 1.0e-9;
             held = status;
 
             if (changed)
@@ -117,9 +137,134 @@ namespace wfg::plugin
             return revisionCount;
         }
 
+        /*  THE ENTRIES THE AUDIO GRAPH WAS BUILT WITH, in slot order
+            (2026-09-26). The graph is fixed when it is built (PRD §3.25) and
+            the set can change after: an entry added since has no slot, and
+            one taken out or moved ahead of another has moved every slot after
+            it. A cue's inserts are sent by slot, so the slots are read from
+            here - never counted off the document as it stands now, which is
+            how a set edited mid-session came to send one plugin's settings to
+            another. Written by the audio host when it builds and cleared when
+            it stops; no graph at all is `hasGraph` false. */
+        void setBuilt (std::vector<std::string> ids)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            builtIds = std::move (ids);
+            graphBuilt = true;
+            ++revisionCount;
+        }
+
+        void clearBuilt()
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+
+            if (! graphBuilt && builtIds.empty() && builtRack.empty() && builtTakes.empty())
+                return;
+
+            builtIds.clear();
+            builtRack.clear();
+            builtTakes.clear();
+            graphBuilt = false;
+            ++revisionCount;
+        }
+
+        bool hasGraph() const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return graphBuilt;
+        }
+
+        /** The entry's slot in the graph, or -1 for one the graph was built without. */
+        int builtSlotOf (const std::string& pluginId) const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+
+            for (std::size_t slot = 0; slot < builtIds.size(); ++slot)
+                if (builtIds[slot] == pluginId)
+                    return static_cast<int> (slot);
+
+            return -1;
+        }
+
+        std::vector<std::string> built() const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return builtIds;
+        }
+
+        /*  THE RACK THE GRAPH WAS BUILT WITH (Phase 9b, namespace draft
+            §18.6): each rack channel's plugins, by id, in the order of its
+            chain. A channel is a track fixed with the graph and so is its chain,
+            so a mic cue's inserts are sent by a plugin's place in it, read from
+            here for the reason the set's slots are - never counted off the
+            document as it stands now. Written with `setBuilt`, cleared with it. */
+        void setBuiltRack (std::map<std::string, std::vector<std::string>> channels)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            builtRack = std::move (channels);
+            ++revisionCount;
+        }
+
+        /** Whether the graph was built with this rack channel at all. */
+        bool rackBuilt (const std::string& channelId) const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return builtRack.count (channelId) > 0;
+        }
+
+        /** A rack channel's plugins as the graph has them, in chain order. */
+        std::vector<std::string> builtRackOf (const std::string& channelId) const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            const auto found = builtRack.find (channelId);
+            return found != builtRack.end() ? found->second : std::vector<std::string> {};
+        }
+
+        std::map<std::string, std::vector<std::string>> builtRackAll() const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return builtRack;
+        }
+
+        /*  THE TAKES THE GRAPH SET ASIDE (Phase 9c, namespace draft §19.2):
+            for each sampling channel, the longest take and the layers its
+            memory was set aside for, how many bytes that is, and what became
+            of a take a rebuild could not keep. What the document says is the
+            decision; this is what tonight's graph holds, so the Rack tab can
+            tell a change still waiting for Load now. Written with `setBuilt`. */
+        struct BuiltTake
+        {
+            double seconds = 0.0;
+            int layers = 0;
+            std::uint64_t bytes = 0;
+            std::string problem;
+
+            /** The channel's plugins built before the recorder, in chain order. */
+            std::vector<std::string> before;
+        };
+
+        void setBuiltTakes (std::map<std::string, BuiltTake> takes)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            builtTakes = std::move (takes);
+            ++revisionCount;
+        }
+
+        /** A channel's take as the graph holds it; nothing set aside for one with none. */
+        BuiltTake builtTakeOf (const std::string& channelId) const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            const auto found = builtTakes.find (channelId);
+            return found != builtTakes.end() ? found->second : BuiltTake {};
+        }
+
     private:
         mutable std::mutex mutex;
         std::map<std::string, Status> table;
         std::uint64_t revisionCount = 0;
+        std::vector<std::string> builtIds;
+        std::map<std::string, std::vector<std::string>> builtRack;
+        std::map<std::string, BuiltTake> builtTakes;
+        bool graphBuilt = false;
     };
 }

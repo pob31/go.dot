@@ -43,7 +43,8 @@
     calling, the table told, and one `plugin.failed` handed to whoever asked
     to hear of it. So the cost of a failure is bounded: eight deadlines once,
     and nothing after. Then ONE RESTART ON ITS OWN, two seconds later, with a
-    fresh child on the same region and the lanes' shadowed values re-sent; a
+    fresh child on the same region, the lanes' shadowed values re-sent and each
+    lane given back the whole state it held (CU), silent until it holds it; a
     second failure inside a minute stays failed until restart() is asked for.
 
     THE REGION OUTLIVES THE CHILD. A relaunch maps nothing anew: the lanes stay
@@ -69,6 +70,20 @@ namespace wfg::plugin
         /** The document's Plugin id: what the table is keyed by. */
         std::string pluginId;
 
+        /*  THE OTHER ENTRIES ONE CHILD SERVES (Phase 9b, decision CL): the
+            rack's plugins are hosted one child per distinct plugin and preset,
+            a lane for each channel that has one, so a child can stand for
+            several of the document's entries. Each is written the same status
+            and hears of the same failure. Empty for an entry of the set. */
+        std::vector<std::string> alsoIds;
+
+        /*  WHAT A LANE IS CALLED in a sentence - "channel Vox 1" - and what
+            failing costs, said the same way: "Vox 1 and Vox 2 are silent until
+            it is back". Empty for the set's, which are voices by number and
+            "every voice using it is silent until it is back" (CU). */
+        std::vector<std::string> laneWords;
+        std::string silentWords;
+
         /** JUCE's identifier, or `godot:test-gain`. */
         std::string identifier;
         std::string name;
@@ -81,6 +96,12 @@ namespace wfg::plugin
             empty for anything else means this machine's scan does not know
             the identifier, and the entry reads `missing`. */
         std::string descriptionXml;
+
+        /*  Asked for the description again at each start when the one above
+            is empty (2026-09-26): so an entry that read `missing` comes up
+            after a scan finds its plugin, without the show being reopened.
+            May be empty; then `descriptionXml` is all there is. */
+        std::function<std::string (const std::string& identifier)> describe;
 
         /** Where a child's catalogue report goes once it arrives; may be null. */
         CatalogueStore* catalogues = nullptr;
@@ -151,6 +172,10 @@ namespace wfg::plugin
 
         //======================================================================
         const std::string& pluginId() const noexcept;
+
+        /*  Whether this child stands for the entry: its own id, or one of the
+            others it serves (Phase 9b). */
+        bool serves (const std::string& id) const noexcept;
 
         /** What the table holds for this entry. */
         PluginTable::Status status() const;

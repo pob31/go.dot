@@ -61,6 +61,14 @@ namespace wfg::client::model
             differs is only whether there is an object to delete. */
         double levelDb = -120.0;
 
+        /*  Whether the send is in the mix (send/on, 2026-09-25): off keeps its
+            level and contributes nothing. */
+        bool on = true;
+
+        /*  Whether a locked show is riding it live - its level or switch held,
+            or the whole send made under the lock - and not saved until kept. */
+        bool live = false;
+
         bool present() const noexcept { return ! sendId.empty(); }
     };
 

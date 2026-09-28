@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<KNOWNPLUGINS>
+  <PLUGIN name="Fixture Verb" format="VST3" category="Fx" manufacturer="Go.dot tests"
+          version="1.0" file="C:\fixtures\verb.vst3" uniqueId="0badf00d" isInstrument="0"
+          fileTime="0" infoUpdateTime="0" numInputs="2" numOutputs="2" isShell="0"
+          hasARAExtension="0" uid="0badf00d"/>
+  <PLUGIN name="Fixture Delay" format="AudioUnit" category="Effect" manufacturer="Go.dot tests"
+          version="1.0" file="AudioUnit:Effects/aufx,dely,gdot" uniqueId="1234abcd"
+          isInstrument="0" fileTime="0" infoUpdateTime="0" numInputs="2" numOutputs="2"
+          isShell="0" hasARAExtension="0" uid="1234abcd"/>
+  <BLACKLISTED id="C:\fixtures\hangs.vst3"/>
+</KNOWNPLUGINS>

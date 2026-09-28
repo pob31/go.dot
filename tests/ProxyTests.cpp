@@ -16,7 +16,7 @@
 
 /*
     THE PROXY TRANSPORT (Phase 9a, PR 9a.6, §17.6): the region, a lane's spin
-    and passthrough with no child at all, the test child answering through a
+    and its silence with no child at all, the test child answering through a
     real region and a real second process, a child killed mid-flight and the
     entry marked failed within a poll, the restart, the commands, and the
     whole thing inside a Tracktion graph with three plugins on sixteen voices.
@@ -30,11 +30,18 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/clock/AudioClockSource.h>
+#include <wfg/engine/audio/CueMatrix.h>
+#include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/PluginScan.h>
+#include <wfg/engine/plugin/EditorHost.h>
+#include <wfg/engine/cue/InsertChain.h>
+#include <wfg/engine/plugin/LaneMapping.h>
+#include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/plugin/SharedRegion.h>
@@ -44,12 +51,16 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <new>
+#include <optional>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 using namespace wfg;
@@ -205,38 +216,42 @@ TEST_CASE ("proxy: the region's layout is what both sides compute, and every lan
     CHECK (reinterpret_cast<char*> (audioOf (region.lane (0))) - reinterpret_cast<char*> (region.lane (0)) == static_cast<std::ptrdiff_t> (sizeof (Lane)));
 }
 
-TEST_CASE ("proxy: a lane that is off, unbound or not to be called leaves the block untouched and signals nothing")
+TEST_CASE ("proxy: a lane that is off leaves the block untouched; unbound or not to be called it is silent; none of them signals")
 {
     plugin::ProxyLane lane;
-    Block block (2, 64, 0.25f);
 
-    /*  Unbound: nothing to talk to. */
+    /*  Unbound - a plugin this machine does not have: nothing to talk to, and
+        the cue that has it switched in is silent, never dry (the author's
+        decision of 2026-09-26, CU). */
+    Block missing (2, 64, 0.25f);
     lane.setEnabled (true);
-    lane.process (block.data(), 2, 64);
-    CHECK (block.allEqual (0.25f));
+    lane.process (missing.data(), 2, 64);
+    CHECK (missing.allEqual (0.0f));
     CHECK (lane.blocks() == 0);
 
     VectorRegion region (2, 64, 1);
     region.bind (lane, 0);
     CHECK (lane.isBound());
 
-    /*  Off: bound, but the cue does not switch it in. */
+    /*  Off: bound, but the cue does not switch it in - the block as it came. */
+    Block off (2, 64, 0.25f);
     lane.setEnabled (false);
-    lane.process (block.data(), 2, 64);
-    CHECK (block.allEqual (0.25f));
+    lane.process (off.data(), 2, 64);
+    CHECK (off.allEqual (0.25f));
     CHECK (lane.blocks() == 0);
     CHECK (region.lane (0)->requestSeq.load() == 0);
 
-    /*  Failed: the host cleared the call. */
+    /*  Failed: the host cleared the call - silent, and not called. */
+    Block failed (2, 64, 0.25f);
     lane.setEnabled (true);
     lane.setCallEnabled (false);
-    lane.process (block.data(), 2, 64);
-    CHECK (block.allEqual (0.25f));
+    lane.process (failed.data(), 2, 64);
+    CHECK (failed.allEqual (0.0f));
     CHECK (lane.blocks() == 0);
     CHECK (region.lane (0)->requestSeq.load() == 0);
 }
 
-TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, passes the block through, and counts")
+TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, is silent for it, and counts")
 {
     plugin::ProxyLane lane;
     VectorRegion region (2, 64, 1);
@@ -258,7 +273,7 @@ TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, passes 
 
     const auto took = std::chrono::steady_clock::now() - started;
 
-    CHECK (block.allEqual (0.5f));
+    CHECK (block.allEqual (0.0f));      // never the dry block (CV)
     CHECK (lane.blocks() == 10);
     CHECK (lane.misses() == 10);
     CHECK (lane.consecutiveMisses() == 10);
@@ -277,6 +292,84 @@ TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, passes 
     region.lane (0)->responseSeq.store (region.lane (0)->requestSeq.load());
     lane.clearMisses();
     CHECK (lane.consecutiveMisses() == 0);
+}
+
+TEST_CASE ("proxy: a late block fades to silence from where the last answer left it, and the next answer fades back in")
+{
+    /*  The author's decision of 2026-09-26 (CV): a late block is never the
+        dry block and never a click. The rest of it falls from the last sample
+        the plugin gave back to nothing over the quick fade, and the first
+        block answered after silence rises over the same. A child is stood in
+        for by the response count: set ahead, every request is answered at
+        once with what was sent; left behind, every one is late. */
+    constexpr auto fade = plugin::ProxyLane::fadeSamples;
+    static_assert (fade < 64);
+
+    plugin::ProxyLane lane;
+    VectorRegion region (1, 64, 1);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    lane.setDeadlineMicroseconds (200);
+
+    auto* shared = region.lane (0);
+    const auto answering = [shared] (bool yes) { shared->responseSeq.store (yes ? (1u << 30) : 0u); };
+
+    rt::resetCounts();
+
+    const auto play = [&lane] (Block& block)
+    {
+        const rt::ScopedRealtimeCheck ours { rt::Region::ours };
+        lane.process (block.data(), 1, 64);
+    };
+
+    //  Answered: what was sent comes back, and the lane knows where it left off.
+    answering (true);
+    Block first (1, 64, 0.5f);
+    play (first);
+    CHECK (first.allEqual (0.5f));
+    CHECK (lane.misses() == 0);
+
+    //  Late: down from 0.5 to nothing over the fade, never rising, then nothing.
+    answering (false);
+    Block late (1, 64, 0.5f);
+    play (late);
+    CHECK (lane.misses() == 1);
+    CHECK (late.storage[0] == doctest::Approx (0.5f * (1.0f - 1.0f / static_cast<float> (fade))));
+    CHECK (late.storage[static_cast<std::size_t> (fade / 2 - 1)] == doctest::Approx (0.25f));
+
+    for (int n = 1; n < 64; ++n)
+        CHECK (late.storage[static_cast<std::size_t> (n)] <= late.storage[static_cast<std::size_t> (n - 1)]);
+
+    for (int n = fade - 1; n < 64; ++n)
+        CHECK (late.storage[static_cast<std::size_t> (n)] == doctest::Approx (0.0f));
+
+    //  Late again: silence throughout, with nothing left to fall from.
+    Block still (1, 64, 0.5f);
+    play (still);
+    CHECK (still.allEqual (0.0f));
+
+    //  Answered again: up from nothing over the fade, then the answer as it came.
+    answering (true);
+    Block back (1, 64, 0.5f);
+    play (back);
+    CHECK (back.storage[0] == doctest::Approx (0.5f / static_cast<float> (fade)));
+    CHECK (back.storage[static_cast<std::size_t> (fade - 1)] == doctest::Approx (0.5f));
+
+    for (int n = 1; n < fade; ++n)
+        CHECK (back.storage[static_cast<std::size_t> (n)] >= back.storage[static_cast<std::size_t> (n - 1)]);
+
+    for (int n = fade; n < 64; ++n)
+        CHECK (back.storage[static_cast<std::size_t> (n)] == doctest::Approx (0.5f));
+
+    //  And a new cue on the voice falls from nothing of the last one's.
+    lane.requestReset();
+    answering (false);
+    Block fresh (1, 64, 0.5f);
+    play (fresh);
+    CHECK (fresh.allEqual (0.0f));
+
+    if (rt::isCounting())
+        CHECK (rt::violations() == 0);
 }
 
 TEST_CASE ("proxy: a value written before the child is up is in the region once the lane is bound")
@@ -356,16 +449,24 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     Block first (2, 64, 0.8f);
     Block second (2, 64, 0.8f);
 
-    /*  The first block may wake the worker from its millisecond poll; the
-        deadline above covers it. Warm up rather than measure. */
-    for (int i = 0; i < 4; ++i)
+    /*  WARM UP RATHER THAN MEASURE. The first blocks wake the worker from its
+        millisecond poll, and a child on a busy box can take longer than even
+        the deadline above to answer them - two of them on the Windows runner
+        at 7dfeb6c, which a count of every miss since the start then held
+        against the child. So it is fed until a block comes back whole, and
+        what is measured starts there: every block after it, in time. */
+    for (int i = 0; i < 64; ++i)
     {
         std::fill (first.storage.begin(), first.storage.end(), 0.8f);
         lanes[0].process (first.data(), 2, 64);
+
+        if (first.allEqual (0.4f))
+            break;
     }
 
     CHECK (first.allEqual (0.4f));
     CHECK (lanes[0].answered() >= 1);
+    const auto missedWarmingUp = lanes[0].misses();
 
     lanes[1].process (second.data(), 2, 64);
     CHECK (second.allEqual (0.8f));
@@ -383,7 +484,7 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     lanes[0].process (first.data(), 2, 64);
     CHECK (first.allEqual (0.4f));
 
-    CHECK (lanes[0].misses() == 0);
+    CHECK (lanes[0].misses() == missedWarmingUp);
 
     host.stop();
     CHECK_FALSE (host.childIsRunning());
@@ -392,7 +493,501 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     CHECK (table.statusOf ("PG7N0001").state == "unloaded");
 }
 
-TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked failed with a sentence, stops being called, and comes back")
+//==============================================================================
+TEST_CASE ("chain: how wide a cue is after its inserts, and why one passes it dry")
+{
+    using cue::InsertShape;
+
+    const InsertShape stereo { true, 2, 2, 64 };
+    const InsertShape mono { true, 1, 1, 0 };
+    const InsertShape widen { true, 1, 2, 0 };
+    const InsertShape narrow { true, 2, 1, 0 };
+    const InsertShape eight { true, 8, 8, 0 };
+
+    //  No insert: the file's width.
+    CHECK (cue::chainOf (1, 2, {}, {}).channels == 1);
+
+    //  A mono cue through a stereo plugin comes out stereo; the latency is counted.
+    auto chain = cue::chainOf (1, 2, { true }, { stereo });
+    CHECK (chain.channels == 2);
+    CHECK (chain.steps[0].feed == 1);
+    CHECK (chain.steps[0].back == 2);
+    CHECK (chain.latencySamples == 64);
+
+    //  Through a widener too.
+    CHECK (cue::chainOf (1, 2, { true }, { widen }).channels == 2);
+
+    //  Switched out changes nothing.
+    chain = cue::chainOf (1, 2, { false }, { stereo });
+    CHECK (chain.channels == 1);
+    CHECK (chain.steps[0].feed == 0);
+    CHECK (chain.latencySamples == 0);
+
+    //  A stereo cue on a mono plugin, or one that would come out narrower: dry, and said.
+    chain = cue::chainOf (2, 2, { true }, { mono });
+    CHECK (chain.channels == 2);
+    CHECK (chain.steps[0].feed == 0);
+    CHECK_FALSE (chain.steps[0].dryWhy.empty());
+    CHECK (cue::chainOf (2, 2, { true }, { narrow }).steps[0].feed == 0);
+
+    //  A stereo cue in the first two inputs of a plugin as wide as an eight-channel voice stays stereo;
+    //  a mono cue fed into all eight comes out eight.
+    CHECK (cue::chainOf (2, 8, { true }, { eight }).channels == 2);
+    CHECK (cue::chainOf (1, 8, { true }, { eight }).channels == 8);
+
+    //  Never wider than the voice: a widener on a mono voice leaves it mono.
+    CHECK (cue::chainOf (1, 1, { true }, { widen }).channels == 1);
+
+    //  A plugin that has not said what it takes is counted as taking the cue at its width.
+    chain = cue::chainOf (1, 2, { true }, { InsertShape {} });
+    CHECK (chain.channels == 1);
+    CHECK (chain.steps[0].feed == 1);
+
+    //  In the set's order: mono through a widener, then the stereo cue through a stereo plugin.
+    chain = cue::chainOf (1, 2, { true, true }, { widen, stereo });
+    CHECK (chain.channels == 2);
+    CHECK (chain.steps[1].feed == 2);
+}
+
+TEST_CASE ("proxy: a lane sends the cue's width, takes the widened sides back, and silences both sides when it could not send")
+{
+    plugin::ProxyLane lane;
+    VectorRegion region (2, 64, 1);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    lane.setDeadlineMicroseconds (200);
+
+    //  A mono cue into a widening insert: one channel sent, two taken back.
+    lane.setShape (1, 2);
+
+    SUBCASE ("with nobody answering, both sides are silent - never the mono side dry")
+    {
+        Block block (2, 64, 0.0f);
+        std::fill (block.storage.begin(), block.storage.begin() + 64, 0.5f);
+        lane.process (block.data(), 2, 64);
+        CHECK (region.lane (0)->numChannels.load() == 1u);
+        CHECK (block.allEqual (0.0f));
+    }
+
+    SUBCASE ("switched out of the chain for this cue, the block is left whole")
+    {
+        lane.setShape (0, 0);
+        Block block (2, 64, 0.0f);
+        std::fill (block.storage.begin(), block.storage.begin() + 64, 0.5f);
+        lane.process (block.data(), 2, 64);
+        CHECK (lane.blocks() == 0);
+        CHECK (block.storage[64] == doctest::Approx (0.0f));
+    }
+
+    SUBCASE ("a block longer than the region is sent in pieces")
+    {
+        lane.setShape (-1, -1);
+        Block block (2, 150, 0.25f);
+        lane.process (block.data(), 2, 150);
+        CHECK (lane.blocks() == 1);   // late on the first piece: the rest is silent
+        CHECK (lane.misses() == 1);
+        CHECK (block.allEqual (0.0f));
+    }
+}
+
+TEST_CASE ("lanes: a voice's channels meet a plugin's by the rules - mono into every input, dry when it will not fit, folded when it gives more")
+{
+    using plugin::lanemap::Shape;
+
+    //  Who takes what.
+    CHECK (plugin::lanemap::takes (Shape { 2, 2, 2, 2 }));
+    CHECK (plugin::lanemap::takes (Shape { 1, 2, 2, 2 }));     // a mono cue into a stereo plugin
+    CHECK (plugin::lanemap::takes (Shape { 1, 1, 2, 2 }));     // into a widener
+    CHECK_FALSE (plugin::lanemap::takes (Shape { 2, 1, 1, 2 }));   // a stereo cue, a mono plugin: dry
+    CHECK_FALSE (plugin::lanemap::takes (Shape { 6, 2, 2, 8 }));   // wider than the plugin's inputs
+    CHECK_FALSE (plugin::lanemap::takes (Shape { 2, 2, 1, 2 }));   // it would come out narrower
+    CHECK_FALSE (plugin::lanemap::takes (Shape { 0, 2, 2, 2 }));
+
+    constexpr int n = 4;
+    float laneL[n] = { 1, 2, 3, 4 }, laneR[n] = { 10, 20, 30, 40 };
+    float* lane[2] = { laneL, laneR };
+    float bufA[n] = {}, bufB[n] = {};
+    float* buffer[2] = { bufA, bufB };
+
+    SUBCASE ("a mono feed goes into both inputs of a stereo plugin")
+    {
+        const Shape shape { 1, 2, 2, 2 };
+        plugin::lanemap::feedInto (lane, shape, buffer, n);
+        CHECK (bufA[2] == doctest::Approx (3.0f));
+        CHECK (bufB[2] == doctest::Approx (3.0f));   // the left, not the lane's right
+    }
+
+    SUBCASE ("a stereo feed goes one to one")
+    {
+        const Shape shape { 2, 2, 2, 2 };
+        plugin::lanemap::feedInto (lane, shape, buffer, n);
+        CHECK (bufA[1] == doctest::Approx (2.0f));
+        CHECK (bufB[1] == doctest::Approx (20.0f));
+    }
+
+    SUBCASE ("outputs as wide as the lane come back channel to channel")
+    {
+        bufA[0] = 0.5f;
+        bufB[0] = 0.25f;
+        plugin::lanemap::backInto (buffer, Shape { 1, 1, 2, 2 }, lane, n);
+        CHECK (laneL[0] == doctest::Approx (0.5f));
+        CHECK (laneR[0] == doctest::Approx (0.25f));
+    }
+
+    SUBCASE ("two outputs onto a one-channel lane are summed at a half each")
+    {
+        bufA[0] = 0.5f;
+        bufB[0] = 0.25f;
+        float* mono[1] = { laneL };
+        plugin::lanemap::backInto (buffer, Shape { 1, 1, 2, 1 }, mono, n);
+        CHECK (laneL[0] == doctest::Approx (0.375f));
+    }
+}
+
+namespace
+{
+    /*  A PLUGIN THAT TAKES WHAT IT IS TOLD TO: its buses, and which layouts
+        it agrees to, are the test's. What the ladder is asked against. It
+        starts in a layout it accepts, as every real plugin does - JUCE takes
+        a layout equal to the one a plugin has without asking it. */
+    struct PickyProcessor final : juce::AudioProcessor
+    {
+        PickyProcessor (bool sidechain, std::function<bool (const BusesLayout&)> acceptsToUse,
+                        juce::AudioChannelSet in = juce::AudioChannelSet::stereo(),
+                        juce::AudioChannelSet out = juce::AudioChannelSet::stereo())
+            : juce::AudioProcessor (sidechain
+                                      ? BusesProperties().withInput ("In", in)
+                                                         .withInput ("Sidechain", juce::AudioChannelSet::stereo())
+                                                         .withOutput ("Out", out)
+                                      : BusesProperties().withInput ("In", in).withOutput ("Out", out)),
+              accepts (std::move (acceptsToUse))
+        {
+        }
+
+        bool isBusesLayoutSupported (const BusesLayout& layout) const override { return accepts (layout); }
+
+        const juce::String getName() const override { return "picky"; }
+        void prepareToPlay (double, int) override {}
+        void releaseResources() override {}
+        void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+        double getTailLengthSeconds() const override { return 0.0; }
+        bool acceptsMidi() const override { return false; }
+        bool producesMidi() const override { return false; }
+        juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+        bool hasEditor() const override { return false; }
+        int getNumPrograms() override { return 1; }
+        int getCurrentProgram() override { return 0; }
+        void setCurrentProgram (int) override {}
+        const juce::String getProgramName (int) override { return {}; }
+        void changeProgramName (int, const juce::String&) override {}
+        void getStateInformation (juce::MemoryBlock&) override {}
+        void setStateInformation (const void*, int) override {}
+
+        std::function<bool (const BusesLayout&)> accepts;
+    };
+}
+
+TEST_CASE ("layout: the ladder asks the voice's width, then stereo, then mono in and stereo out, then mono - never every bus on")
+{
+    using Set = juce::AudioChannelSet;
+    plugin::InsertLayout layout;
+    std::string problem;
+
+    SUBCASE ("a plugin that takes anything takes the voice's width")
+    {
+        PickyProcessor any (false, [] (const auto& l) { return l.getMainInputChannels() == l.getMainOutputChannels(); });
+        REQUIRE (plugin::chooseLayout (any, 2, layout, problem));
+        CHECK (layout.inputs == 2);
+        CHECK (layout.outputs == 2);
+        CHECK (layout.words == "stereo in, stereo out");
+    }
+
+    SUBCASE ("a mono-only plugin on a stereo voice is taken mono, and says so")
+    {
+        PickyProcessor mono (false, [] (const auto& l) { return l.getMainInputChannelSet() == Set::mono()
+                                                                && l.getMainOutputChannelSet() == Set::mono(); },
+                             Set::mono(), Set::mono());
+        REQUIRE (plugin::chooseLayout (mono, 2, layout, problem));
+        CHECK (layout.inputs == 1);
+        CHECK (layout.outputs == 1);
+        CHECK (layout.words == "mono in, mono out");
+    }
+
+    SUBCASE ("a widener is taken one in, two out")
+    {
+        PickyProcessor widen (false, [] (const auto& l) { return l.getMainInputChannelSet() == Set::mono()
+                                                                 && l.getMainOutputChannelSet() == Set::stereo(); },
+                              Set::mono(), Set::stereo());
+        REQUIRE (plugin::chooseLayout (widen, 2, layout, problem));
+        CHECK (layout.inputs == 1);
+        CHECK (layout.outputs == 2);
+    }
+
+    SUBCASE ("a sidechain it will not give up is left on, and the main buses are still the voice's")
+    {
+        PickyProcessor keyed (true, [] (const auto& l) { return l.inputBuses.size() == 2 && ! l.inputBuses[1].isDisabled()
+                                                                && l.getMainInputChannelSet() == Set::stereo()
+                                                                && l.getMainOutputChannelSet() == Set::stereo(); });
+        REQUIRE (plugin::chooseLayout (keyed, 2, layout, problem));
+        CHECK (layout.inputs == 2);
+        CHECK (keyed.getBus (true, 1)->isEnabled());
+    }
+
+    SUBCASE ("a sidechain it lets go of is switched off")
+    {
+        PickyProcessor keyed (true, [] (const auto& l) { return l.getMainInputChannelSet() == Set::stereo()
+                                                                && l.getMainOutputChannelSet() == Set::stereo(); });
+        REQUIRE (plugin::chooseLayout (keyed, 2, layout, problem));
+        CHECK_FALSE (keyed.getBus (true, 1)->isEnabled());
+    }
+
+    SUBCASE ("one that takes nothing it is offered is refused, with the sentence the entry reads")
+    {
+        PickyProcessor none (false, [] (const auto& l) { return l.getMainInputChannels() == 6; },
+                             Set::create5point1(), Set::create5point1());
+        CHECK_FALSE (plugin::chooseLayout (none, 2, layout, problem));
+        CHECK (problem.find ("stereo nor mono") != std::string::npos);
+    }
+}
+
+TEST_CASE ("proxy: the mono and widening test children say their buses, take a mono cue, and pass a stereo one dry")
+{
+    SUBCASE ("the widener on a mono voice: its two sides folded back into the one")
+    {
+        Folder folder;
+        plugin::PluginTable table;
+        plugin::ProxyLane lanes[1];
+
+        auto spec = testGainSpec (folder, 1, 1, 64);
+        spec.identifier = plugin::Catalogue::testWidenIdentifier();
+        plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        CHECK (host.status().inputs == 1);
+        CHECK (host.status().outputs == 2);
+        CHECK (host.status().layout == "mono in, stereo out");
+
+        lanes[0].setDeadlineMicroseconds (200000);
+        lanes[0].setEnabled (true);
+        host.poll();
+
+        Block block (1, 64, 0.25f);
+
+        for (int i = 0; i < 4; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.25f);
+            lanes[0].process (block.data(), 1, 64);
+        }
+
+        //  Left x.g, right x.g/2, summed at a half each: 0.25 x 0.5 x 0.75.
+        CHECK (block.allEqual (0.09375f));
+        host.stop();
+    }
+
+    SUBCASE ("the mono plugin on a stereo voice passes a stereo cue dry, whole")
+    {
+        Folder folder;
+        plugin::PluginTable table;
+        plugin::ProxyLane lanes[1];
+
+        auto spec = testGainSpec (folder, 1, 2, 64);
+        spec.identifier = plugin::Catalogue::testMonoIdentifier();
+        plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        CHECK (host.status().layout == "mono in, mono out");
+
+        lanes[0].setDeadlineMicroseconds (200000);
+        lanes[0].setEnabled (true);
+        host.poll();
+
+        Block block (2, 64, 0.25f);
+
+        for (int i = 0; i < 4; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.25f);
+            lanes[0].process (block.data(), 2, 64);
+        }
+
+        CHECK (block.allEqual (0.25f));
+        CHECK (lanes[0].answered() >= 1);
+        host.stop();
+    }
+
+    SUBCASE ("the gain as wide as the voice, as ever")
+    {
+        Folder folder;
+        plugin::PluginTable table;
+        plugin::ProxyLane lanes[1];
+        plugin::ProxyHost host (testGainSpec (folder, 1), { &lanes[0] }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        CHECK (host.status().inputs == 2);
+        CHECK (host.status().outputs == 2);
+        CHECK (host.status().layout == "stereo in, stereo out");
+        host.stop();
+    }
+}
+
+TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may launch, the lane silent meanwhile")
+{
+    /*  The author's decision of 2026-09-25: a plugin's whole state kept per
+        cue and loaded onto the voice at the arm. The test gain's Pad - no
+        parameter, only state - is what makes it audible: a quarter of the
+        gain. What is pinned: the arm waits (`stateSettled`) until the child
+        has loaded it; the lane is SILENT and not called while it loads (CU,
+        2026-09-26) and misses nothing; the other voice plays on; the cue's
+        values sit on top; the same state
+        twice loads nothing; no state after one is the preset's again; a file
+        that is not there is the preset with a sentence. */
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lanes[2];
+    plugin::ProxyHost host (testGainSpec (folder, 2), { &lanes[0], &lanes[1] }, &table);
+
+    std::string problem;
+    INFO ("start: " << problem);
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    for (auto& lane : lanes)
+    {
+        lane.setDeadlineMicroseconds (200000);
+        lane.setEnabled (true);
+    }
+
+    host.poll();
+
+    const auto stateFile = [&folder] (const char* name, const char* text)
+    {
+        const auto file = folder.path.getChildFile (name);
+        REQUIRE (file.replaceWithText (text));
+        return file.getFullPathName().toStdString();
+    };
+
+    const auto settled = [&host] (plugin::ProxyLane& lane, int milliseconds)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            host.poll();
+
+            if (lane.stateSettled())
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        }
+
+        return lane.stateSettled();
+    };
+
+    //  What a block of 0.8 comes back as, a few blocks in so any warm-up is past.
+    const auto play = [] (plugin::ProxyLane& lane)
+    {
+        Block block (2, 64, 0.8f);
+
+        for (int i = 0; i < 3; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.8f);
+            lane.process (block.data(), 2, 64);
+        }
+
+        return block.storage.front();
+    };
+
+    const auto padded = stateFile ("padded.state", "gain=0.5\ndie=0\npad=1\n");
+
+    SUBCASE ("Pad in the state: the voice is a quarter as loud, the other voice is not, and the table says so")
+    {
+        lanes[0].wantState (padded);
+        CHECK_FALSE (lanes[0].stateSettled());
+        REQUIRE (settled (lanes[0], 3000));
+
+        CHECK (play (lanes[0]) == doctest::Approx (0.1f));      // 0.8 x 0.5 x 0.25
+        CHECK (play (lanes[1]) == doctest::Approx (0.4f));
+        CHECK (table.statusOf ("PG7N0001").stateProblem.empty());
+
+        SUBCASE ("the same state again loads nothing, and waits for nothing")
+        {
+            lanes[0].wantState (padded);
+            host.poll();
+            CHECK (lanes[0].stateSettled());
+        }
+
+        SUBCASE ("no state after one is the preset's again - or the last cue's would be heard")
+        {
+            lanes[0].wantState ({});
+            REQUIRE (settled (lanes[0], 3000));
+            CHECK (play (lanes[0]) == doctest::Approx (0.4f));
+        }
+
+        SUBCASE ("the cue's own values sit on top of its state")
+        {
+            lanes[0].setParameter (0, 1.0f);
+            CHECK (play (lanes[0]) == doctest::Approx (0.2f));  // 0.8 x 1 x 0.25
+        }
+    }
+
+    SUBCASE ("a slow state: the voice waits, silent and not called, misses nothing, and the other voice plays on")
+    {
+        /*  NEVER DRY WHILE IT LOADS (CU): from the moment the state is asked
+            for until the parent has read that the child holds it, the lane is
+            not called and gives silence. The child's loader parks the lane on
+            its own timer all the same; it is never asked to answer it. */
+        const auto slow = stateFile ("slow.state", "gain=0.5\ndie=0\npad=1\nloadDelayMs=1500\n");
+        lanes[0].wantState (slow);
+        host.poll();
+
+        const auto sent = lanes[0].blocks();
+        CHECK (play (lanes[0]) == doctest::Approx (0.0f));
+        CHECK (lanes[0].blocks() == sent);
+        CHECK_FALSE (lanes[0].stateSettled());
+        CHECK (play (lanes[1]) == doctest::Approx (0.4f));
+
+        REQUIRE (settled (lanes[0], 5000));
+        CHECK (lanes[0].misses() == 0);
+        CHECK (play (lanes[0]) == doctest::Approx (0.1f));
+        CHECK (table.statusOf ("PG7N0001").stateLoadMs >= 1400.0);
+    }
+
+    SUBCASE ("a file that is not there: the preset, and a sentence that says so")
+    {
+        lanes[0].wantState (folder.path.getChildFile ("nowhere.state").getFullPathName().toStdString());
+        REQUIRE (settled (lanes[0], 3000));
+        CHECK (table.statusOf ("PG7N0001").stateProblem.find ("not in the bundle") != std::string::npos);
+        CHECK (play (lanes[0]) == doctest::Approx (0.4f));
+    }
+
+    SUBCASE ("a lane the cue does not switch in has nothing to wait for")
+    {
+        lanes[1].setEnabled (false);
+        lanes[1].wantState (padded);
+        CHECK (lanes[1].stateSettled());
+    }
+
+    SUBCASE ("a state announced before its path settles nothing until the path arrives")
+    {
+        lanes[0].expectState();
+        host.poll();
+        host.poll();
+        CHECK_FALSE (lanes[0].stateSettled());
+
+        lanes[0].wantState (padded);
+        REQUIRE (settled (lanes[0], 3000));
+        CHECK (play (lanes[0]) == doctest::Approx (0.1f));
+    }
+
+    host.stop();
+}
+
+TEST_CASE ("proxy: a child killed mid-flight leaves the block silent, is marked failed with a sentence, stops being called, and comes back")
 {
     Folder folder;
     plugin::PluginTable table;
@@ -428,8 +1023,9 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked fai
 
     REQUIRE_FALSE (host.childIsRunning());
 
-    /*  Every block from here passes dry and counts a miss, until the host
-        looks: eight misses, or the dead child, trip it within one poll. */
+    /*  Every block from here is silent and counts a miss, until the host
+        looks: eight misses, or the dead child, trip it within one poll. The
+        first falls from the last answer; never the dry block (CV). */
     lane.setDeadlineMicroseconds (500);
     const auto sentBefore = lane.blocks();
 
@@ -437,14 +1033,18 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked fai
     {
         std::fill (block.storage.begin(), block.storage.end(), 0.8f);
         lane.process (block.data(), 2, 64);
-        CHECK (block.allEqual (0.8f));
+        CHECK (block.storage.front() <= 0.4f);
+        CHECK (block.storage.back() == doctest::Approx (0.0f));
+
+        if (i > 0)
+            CHECK (block.allEqual (0.0f));
     }
 
     CHECK (lane.consecutiveMisses() == static_cast<std::uint32_t> (plugin::ProxyLane::missesBeforeFailure));
 
     host.poll();
     CHECK (host.status().state == "failed");
-    CHECK_FALSE (host.status().problem.empty());
+    CHECK (host.status().problem.find ("every voice using it is silent until it is back") != std::string::npos);
     CHECK (table.statusOf ("PG7N0001").state == "failed");
     REQUIRE (failures.size() == 1);
     CHECK (failures[0].rfind ("PG7N0001: ", 0) == 0);
@@ -452,8 +1052,10 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked fai
     /*  Not called any more: the request sequence stops moving. */
     const auto sentAfter = lane.blocks();
     CHECK (sentAfter == sentBefore + static_cast<std::uint64_t> (plugin::ProxyLane::missesBeforeFailure));
+    std::fill (block.storage.begin(), block.storage.end(), 0.8f);
     lane.process (block.data(), 2, 64);
     CHECK (lane.blocks() == sentAfter);
+    CHECK (block.allEqual (0.0f));
     CHECK_FALSE (lane.isCallEnabled());
 
     /*  The one automatic restart, two seconds on. */
@@ -495,6 +1097,132 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked fai
     host.stop();
 }
 
+TEST_CASE ("proxy: a relaunched child is given the state its voice held, and the voice is silent until it holds it")
+{
+    /*  The author's decisions of 2026-09-26 (CU): a failed plugin's voices
+        are silent, never dry; the relaunch gives each lane back the whole
+        state it held, and a voice that was sounding comes back where its cue
+        has got to, faded in, once the new child holds it. Not the state that
+        was loading when the child died - that may be what killed it - and not
+        the old one over a newer one asked for while the plugin was down. */
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lane;
+    plugin::ProxyHost host (testGainSpec (folder, 1), { &lane }, &table);
+
+    std::string problem;
+    INFO ("start: " << problem);
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    lane.setDeadlineMicroseconds (200000);
+    lane.setEnabled (true);
+    host.poll();
+
+    const auto stateFile = [&folder] (const char* name, const char* text)
+    {
+        const auto file = folder.path.getChildFile (name);
+        REQUIRE (file.replaceWithText (text));
+        return file.getFullPathName().toStdString();
+    };
+
+    const auto settled = [&host, &lane] (int milliseconds)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            host.poll();
+
+            if (lane.stateSettled())
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        }
+
+        return lane.stateSettled();
+    };
+
+    //  What a block of 0.8 comes back as, a few blocks in so any fade is past.
+    const auto play = [&lane]
+    {
+        Block block (2, 64, 0.8f);
+
+        for (int i = 0; i < 3; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.8f);
+            lane.process (block.data(), 2, 64);
+        }
+
+        return block.storage.front();
+    };
+
+    const auto kill = [&host]
+    {
+        host.killChild();
+
+        for (int waited = 0; waited < 200 && host.childIsRunning(); ++waited)
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+
+        host.poll();
+    };
+
+    //  The cue's state held: the Pad, a quarter of the half.
+    lane.wantState (stateFile ("padded.state", "gain=0.5\ndie=0\npad=1\n"));
+    REQUIRE (settled (3000));
+    REQUIRE (play() == doctest::Approx (0.1f));
+
+    kill();
+    REQUIRE (host.status().state == "failed");
+    CHECK (play() == doctest::Approx (0.0f));       // down: silent, never the 0.8 it was sent
+
+    SUBCASE ("relaunched, silent until the new child holds the state, then heard with it")
+    {
+        REQUIRE (waitForState (host, "loaded", plugin::ProxyHost::restartDelayMs + 5000));
+
+        //  Counted before the lane is called: not settled, not called, silent.
+        CHECK_FALSE (lane.stateSettled());
+        const auto sent = lane.blocks();
+        CHECK (play() == doctest::Approx (0.0f));
+        CHECK (lane.blocks() == sent);
+
+        REQUIRE (settled (3000));
+        CHECK (play() == doctest::Approx (0.1f));   // the Pad is back
+        CHECK (table.statusOf ("PG7N0001").stateProblem.empty());
+    }
+
+    SUBCASE ("a state asked for while it was down is the one the new child is given")
+    {
+        //  An arm on the voice while the plugin is down.
+        const auto quieter = stateFile ("quieter.state", "gain=0.25\ndie=0\npad=0\n");
+        lane.wantState (quieter);
+
+        REQUIRE (waitForState (host, "loaded", plugin::ProxyHost::restartDelayMs + 5000));
+        REQUIRE (settled (3000));
+        CHECK (lane.wantedState() == quieter);
+        CHECK (play() == doctest::Approx (0.2f));   // 0.8 x 0.25: the newer state, not the Pad
+    }
+
+    SUBCASE ("the state that was loading when the child died is not given again")
+    {
+        REQUIRE (waitForState (host, "loaded", plugin::ProxyHost::restartDelayMs + 5000));
+        REQUIRE (settled (3000));
+
+        lane.wantState (stateFile ("slow.state", "gain=0.5\ndie=0\npad=0\nloadDelayMs=1500\n"));
+        host.poll();                                // sent: the child is loading it
+        kill();                                     // the second death inside the minute
+        CHECK (host.status().problem.find ("plugin.restart") != std::string::npos);
+        CHECK (play() == doctest::Approx (0.0f));
+
+        REQUIRE (host.restart (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        REQUIRE (settled (3000));
+        CHECK (play() == doctest::Approx (0.4f));   // the preset's own: neither the slow one nor the Pad
+    }
+
+    host.stop();
+}
+
 TEST_CASE ("proxy: a plugin the scan describes but the child cannot make reads failed, with the child's sentence")
 {
     Folder folder;
@@ -530,7 +1258,7 @@ TEST_CASE ("proxy: plugin.failed writes the table and plugin.restart reaches the
 {
     CommandRegistry registry;
     plugin::PluginTable table;
-    table.set ("PG7N0001", { "loaded", "", 12, 3 });
+    table.set ("PG7N0001", { "loaded", "", 12, 3, 0.0, {}, 0, 0, {} });
 
     std::vector<std::string> restarted;
     plugin::PluginCommandHooks hooks;
@@ -588,12 +1316,18 @@ TEST_CASE ("proxy: a plugin this machine's scan does not know reads missing, wit
     auto spec = testGainSpec (folder, 1);
     spec.identifier = "VST3-Nowhere-00000000-00000000";
     spec.descriptionXml.clear();
+
+    /*  Asked once more at the start (2026-09-26), since a scan may have found
+        it since the graph was built - and this machine's list still says no. */
+    std::vector<std::string> asked;
+    spec.describe = [&asked] (const std::string& identifier) { asked.push_back (identifier); return std::string(); };
     plugin::ProxyHost host (spec, { &lane }, &table);
 
     std::string problem;
     CHECK_FALSE (host.start (problem));
+    CHECK (asked == std::vector<std::string> { "VST3-Nowhere-00000000-00000000" });
     CHECK (host.status().state == "missing");
-    CHECK (host.status().problem.find ("wfg plugins --scan") != std::string::npos);
+    CHECK (host.status().problem.find ("Show settings, Plugins") != std::string::npos);
     CHECK_FALSE (host.childIsRunning());
     CHECK (table.statusOf ("PG7N0001").state == "missing");
     host.stop();
@@ -732,6 +1466,144 @@ TEST_CASE ("proxy: a real VST3 from this machine's scan comes up, reports its ca
 
     host.stop();
 }
+
+/*  A REAL LV2, ON EVERY RUNNER (2026-09-26): the in-tree test bundle, built
+    with the tests, described by JUCE's own LV2 format as a scan would, handed
+    to a child that registers the LV2 format alone and loads the bundle from
+    the folder the description names - so a plugin found through --path,
+    outside every folder an LV2 world reads by itself, still comes up. A block
+    goes through at the plugin's default gain of a half, and a value written
+    to its one parameter reaches it. */
+TEST_CASE ("proxy: the in-tree LV2 comes up in the child through JUCE's real LV2 host, and processes a block at its gain")
+{
+    const juce::File bundle { juce::String (WFG_TEST_LV2_BUNDLE) };
+    REQUIRE (bundle.getChildFile ("manifest.ttl").existsAsFile());
+
+    juce::LV2PluginFormat format;
+    juce::OwnedArray<juce::PluginDescription> found;
+    format.findAllTypesForFile (found, bundle.getFullPathName());
+
+    const juce::PluginDescription* gain = nullptr;
+
+    for (const auto* description : found)
+        if (description->fileOrIdentifier == "urn:godot:test-lv2-gain")
+            gain = description;
+
+    REQUIRE (gain != nullptr);
+    CHECK (gain->pluginFormatName == "LV2");
+    CHECK (gain->name == "Go.dot test LV2 gain");
+    CHECK (gain->numInputChannels == 2);
+    CHECK (gain->numOutputChannels == 2);
+
+    auto xml = gain->createXml();
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("bundle", bundle.getFullPathName());
+
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::CatalogueStore store { folder.path.getChildFile ("catalogue").getFullPathName().toStdString() };
+    plugin::ProxyLane lanes[1];
+
+    auto spec = testGainSpec (folder, 1, 2, 64);
+    spec.identifier = gain->createIdentifierString().toStdString();
+    spec.name = "LV2 gain";
+    spec.descriptionXml = xml->toString().toStdString();
+    spec.catalogues = &store;
+    plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    const auto up = waitForState (host, "loaded", 20000);
+    INFO ("state " << host.status().state << ": " << host.status().problem);
+    REQUIRE (up);
+    CHECK (host.status().paramCount >= 1);
+
+    //  Its two ports name no speaker: taken as two numbered channels, in and out.
+    CHECK (host.status().inputs == 2);
+    CHECK (host.status().outputs == 2);
+
+    lanes[0].setDeadlineMicroseconds (200000);
+    lanes[0].setEnabled (true);
+    host.poll();
+
+    Block block (2, 64, 0.25f);
+
+    const auto blocksAt = [&] (float in)
+    {
+        for (int i = 0; i < 10; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), in);
+            lanes[0].process (block.data(), 2, 64);
+        }
+    };
+
+    blocksAt (0.25f);
+    CHECK (lanes[0].answered() >= 1);
+    CHECK (block.allEqual (0.125f));
+
+    lanes[0].setParameter (0, 1.0f);
+    blocksAt (0.25f);
+    CHECK (block.allEqual (0.25f));
+    CHECK (lanes[0].misses() == 0);
+
+    host.stop();
+}
+
+#if JUCE_MAC
+/*  A REAL AU, ON THE macOS RUNNER (2026-09-26): Apple's own AUBandpass, which
+    every Mac has, described by JUCE's AU format as a scan would and hosted in
+    the child through that format alone. A band-pass takes a constant away:
+    a block of DC goes in and, once the filter has settled, next to nothing
+    comes back - which proves the AU both came up and sounds. */
+TEST_CASE ("proxy: Apple's AUBandpass comes up in the child through JUCE's AU host, and takes a constant away")
+{
+    juce::AudioUnitPluginFormat format;
+    juce::OwnedArray<juce::PluginDescription> found;
+    format.findAllTypesForFile (found, "AudioUnit:Effects/aufx,bpas,appl");
+    REQUIRE (found.size() >= 1);
+    CHECK (found[0]->pluginFormatName == "AudioUnit");
+
+    auto xml = found[0]->createXml();
+    REQUIRE (xml != nullptr);
+
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lanes[1];
+
+    auto spec = testGainSpec (folder, 1, 2, 256);
+    spec.identifier = found[0]->createIdentifierString().toStdString();
+    spec.name = "AUBandpass";
+    spec.descriptionXml = xml->toString().toStdString();
+    plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    const auto up = waitForState (host, "loaded", 20000);
+    INFO ("state " << host.status().state << ": " << host.status().problem);
+    REQUIRE (up);
+
+    lanes[0].setDeadlineMicroseconds (200000);
+    lanes[0].setEnabled (true);
+    host.poll();
+
+    Block block (2, 256, 0.5f);
+
+    for (int i = 0; i < 200; ++i)
+    {
+        std::fill (block.storage.begin(), block.storage.end(), 0.5f);
+        lanes[0].process (block.data(), 2, 256);
+    }
+
+    auto loudest = 0.0f;
+
+    for (const auto sample : block.storage)
+        loudest = std::max (loudest, std::fabs (sample));
+
+    CHECK (lanes[0].answered() >= 1);
+    CHECK (loudest < 0.05f);
+    host.stop();
+}
+#endif
 
 //==============================================================================
 namespace
@@ -1009,6 +1881,188 @@ namespace
     }
 }
 
+TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, and whether the other voices miss while it loads"
+           * doctest::skip())
+{
+    /*  THE COST OF THE AUTHOR'S CHOICE (decision AI, 2026-09-25, §17.13): a
+        plugin's whole state kept per cue and loaded onto the voice before the
+        cue launches. Two questions. How long a load takes - a cue fired cold
+        is late by that much, and `run.late` says so. And whether a load makes
+        the OTHER voices miss: the loading lane is silent and not called, but
+        a plugin whose setState takes a lock its process() also takes on other
+        instances would stall them - which only a real plugin can answer.
+
+        The states are made the way the product makes them: the editing
+        helper, headless, a parameter moved as a hand would and the state
+        captured. Then a two-voice child: voice one plays a block every block
+        period at the default deadline, voice two is loaded with the two states
+        in turn, twenty times; and the same length again with no loads, for
+        the misses a busy box has anyway. Run with
+        `WFG_REAL_VST3=<identifier> wfg_tests --test-case="M35*" --no-skip`. */
+    const auto realIdentifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
+    const auto storage = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                            .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
+
+    MESSAGE ("M35 on " << juce::SystemStats::getOperatingSystemName() << ", "
+             << juce::SystemStats::getCpuModel() << ", " << juce::SystemStats::getNumCpus() << " cores");
+    MESSAGE ("plugin | state bytes | load min ms | median ms | max ms | voice-one misses while loading | the same time idle");
+
+    for (const auto& identifier : std::vector<std::string> { plugin::Catalogue::testGainIdentifier(), realIdentifier })
+    {
+        if (identifier.empty())
+            continue;
+
+        std::string xml;
+
+        if (identifier != plugin::Catalogue::testGainIdentifier())
+        {
+            xml = plugin::describePlugin (storage, identifier);
+
+            if (xml.empty())
+            {
+                MESSAGE ("the scan does not know " << identifier << "; skipped");
+                continue;
+            }
+        }
+
+        Folder folder;
+        const auto stateFolder = folder.path.getChildFile ("state");
+
+        //  TWO STATES, as a hand makes them in the plugin's own window.
+        std::vector<std::string> states;
+        {
+            plugin::EditorSpec edit;
+            edit.pluginId = "PG7N0001";
+            edit.identifier = identifier;
+            edit.descriptionXml = xml;
+            edit.workFolder = folder.string();
+            edit.stateFolder = stateFolder.getFullPathName().toStdString();
+            edit.headless = true;
+            edit.launch.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                         .getFullPathName().toStdString();
+
+            plugin::EditorHost helper (std::move (edit));
+            std::string why;
+            REQUIRE_MESSAGE (helper.start (why), why);
+
+            const auto until = [&helper] (auto done, int milliseconds)
+            {
+                const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+                while (std::chrono::steady_clock::now() < end)
+                {
+                    helper.poll();
+
+                    if (done())
+                        return true;
+
+                    std::this_thread::sleep_for (std::chrono::milliseconds (10));
+                }
+
+                return done();
+            };
+
+            REQUIRE (until ([&] { return helper.status() == plugin::EditorHost::Status::open; }, 30000));
+            const auto count = std::max (1, helper.paramCount());
+            std::uint32_t seq = 0;
+
+            for (const auto value : { 0.2f, 0.8f })
+            {
+                std::vector<float> values (static_cast<std::size_t> (count), plugin::editor::restsAtPreset);
+                helper.setSubject ({ "CUE00001", "FX000001", "M35", {}, false, values, {} });
+                ++seq;
+                REQUIRE (until ([&] { return helper.subjectTaken() == seq; }, 5000));
+
+                helper.poke (0, value);
+                values[0] = value;
+                helper.setLive (values);
+
+                std::optional<plugin::EditorHost::Capture> kept;
+                REQUIRE (until ([&] { kept = helper.takeCapture(); return kept.has_value(); }, 8000));
+                states.push_back (folder.path.getChildFile (juce::String (kept->stateFile)).getFullPathName().toStdString());
+            }
+
+            helper.leave (false);
+        }
+
+        REQUIRE (states.size() == 2);
+        const auto bytes = juce::File (juce::String (states.front())).getSize();
+
+        //  A TWO-VOICE CHILD: voice one plays, voice two is loaded.
+        plugin::PluginTable table;
+        plugin::ProxyLane lanes[2];
+        auto spec = testGainSpec (folder, 2, 2, 64);
+        spec.identifier = identifier;
+        spec.descriptionXml = xml;
+        plugin::ProxyHost host (spec, { &lanes[0], &lanes[1] }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        const auto up = waitForState (host, "loaded", 20000);
+        INFO (host.status().state << ": " << host.status().problem);
+        REQUIRE (up);
+
+        lanes[0].setEnabled (true);
+        lanes[1].setEnabled (true);
+        host.poll();
+
+        std::atomic<bool> playing { true };
+        std::thread voiceOne ([&lanes, &playing]
+        {
+            Block block (2, 64, 0.5f);
+            auto next = std::chrono::steady_clock::now();
+
+            while (playing.load())
+            {
+                lanes[0].process (block.data(), 2, 64);
+                next += std::chrono::microseconds (1333);
+                std::this_thread::sleep_until (next);
+            }
+        });
+
+        /*  WARMED UP FIRST: voice one's first block may find the worker in
+            its idle sleep, which is M31's "first after idle" and not a load's
+            doing - so the count starts once voice one has been playing. */
+        std::this_thread::sleep_for (std::chrono::milliseconds (200));
+
+        std::vector<double> loads;
+        const auto missesBefore = lanes[0].misses();
+        const auto loadingBegan = std::chrono::steady_clock::now();
+
+        for (int i = 0; i < 20; ++i)
+        {
+            lanes[1].wantState (states[static_cast<std::size_t> (i % 2)]);
+            const auto end = std::chrono::steady_clock::now() + std::chrono::seconds (10);
+
+            while (! lanes[1].stateSettled() && std::chrono::steady_clock::now() < end)
+            {
+                host.poll();
+                std::this_thread::sleep_for (std::chrono::milliseconds (1));
+            }
+
+            REQUIRE (lanes[1].stateSettled());
+            loads.push_back (table.statusOf ("PG7N0001").stateLoadMs);
+        }
+
+        const auto loadingTook = std::chrono::steady_clock::now() - loadingBegan;
+        const auto missesLoading = lanes[0].misses() - missesBefore;
+
+        //  The same length again with no loads: what this box misses anyway.
+        const auto idleBefore = lanes[0].misses();
+        std::this_thread::sleep_for (loadingTook);
+        const auto missesIdle = lanes[0].misses() - idleBefore;
+
+        playing.store (false);
+        voiceOne.join();
+        host.stop();
+
+        std::sort (loads.begin(), loads.end());
+        MESSAGE ((identifier == plugin::Catalogue::testGainIdentifier() ? std::string ("test-gain") : identifier) << " | "
+                 << bytes << " | " << loads.front() << " | " << loads[loads.size() / 2] << " | " << loads.back()
+                 << " | " << missesLoading << " | " << missesIdle);
+    }
+}
+
 TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its ids stay unique, and stop removes every region")
 {
     ScopedStorage storage;
@@ -1096,4 +2150,612 @@ TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its
         CHECK_FALSE (juce::File (region).existsAsFile());
 
     CHECK (failures == 0);
+}
+
+//==============================================================================
+namespace
+{
+    /*  The last sample of each output channel of every block: enough to read a
+        constant input's level once the gates have settled. The audio thread
+        writes it, so fixed storage and nothing allocated. */
+    struct LastSamples final : audio::BlockSink
+    {
+        std::array<std::atomic<float>, 2> last {};
+
+        void blockProduced (const float* const* channels, int numChannels, int numSamples) noexcept override
+        {
+            for (int channel = 0; channel < std::min (numChannels, 2); ++channel)
+                last[static_cast<std::size_t> (channel)].store (channels[channel][numSamples - 1],
+                                                                std::memory_order_relaxed);
+        }
+    };
+}
+
+TEST_CASE ("rack: each channel is a track after the voices, its chain one child per distinct plugin, and its input comes out through it")
+{
+    /*  Phase 9b (namespace draft 18.4 and 18.6, decisions CH, CK and CL). Two
+        rack channels, each with the test-gain plugin in its chain: two tracks
+        after the one voice, which is still the polyphony; ONE child for the
+        two entries, a lane each, both entries loaded; and each channel's input
+        heard at its own output once its gate opens - through its plugin where
+        that is switched in, dry where it is not - SILENT, never dry, where it
+        is switched in and the child is killed (CU), and gone again on a shut. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    int failures = 0;
+    services.onFailed = [&failures] (const std::string&, const std::string&) { ++failures; };
+    host.setProxyServices (services);
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+    spec.proxyDeadlineMicroseconds = 200000;
+
+    for (const auto& [channelId, name, pluginId] : { std::tuple<const char*, const char*, const char*> { "CH000001", "Vox 1", "PG7N0011" },
+                                                     std::tuple<const char*, const char*, const char*> { "CH000002", "Vox 2", "PG7N0012" } })
+    {
+        audio::RackChannelSpec channel;
+        channel.id = channelId;
+        channel.name = name;
+
+        audio::PluginSpec entry;
+        entry.id = pluginId;
+        entry.identifier = plugin::Catalogue::testGainIdentifier();
+        entry.name = "Test gain";
+        channel.plugins.push_back (entry);
+
+        spec.rack.push_back (channel);
+    }
+
+    REQUIRE (host.buildEdit (spec));
+
+    CHECK (host.trackCount() == 1);
+    CHECK (host.allTrackCount() == 3);
+    CHECK (host.rackTrackOf ("CH000001") == 1);
+    CHECK (host.rackTrackOf ("CH000002") == 2);
+    CHECK (host.rackTrackOf ("NQNQNQNQ") == -1);
+    CHECK (host.inspectNodeIds().ok());
+    CHECK (table.builtRackOf ("CH000001") == std::vector<std::string> { "PG7N0011" });
+
+    /*  One child stands for both entries of the one plugin. */
+    REQUIRE (host.proxy (0) != nullptr);
+    CHECK (host.proxy (0)->serves ("PG7N0011"));
+    CHECK (host.proxy (0)->serves ("PG7N0012"));
+    CHECK (host.proxy (1) == nullptr);
+
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (10);
+
+    while (! (table.statusOf ("PG7N0011").state == "loaded" && table.statusOf ("PG7N0012").state == "loaded")
+             && std::chrono::steady_clock::now() < until)
+    {
+        host.pollProxies();
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+
+    REQUIRE (table.statusOf ("PG7N0011").state == "loaded");
+    REQUIRE (table.statusOf ("PG7N0012").state == "loaded");
+
+    /*  Each channel takes an input of its own and sends it to an output of its
+        own; the first channel's plugin switched in, the second's left out. */
+    for (int rack = 1; rack <= 2; ++rack)
+    {
+        auto* matrix = host.trackMatrix (rack);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, rack - 1, 1.0f);
+        matrix->snapToTargets();
+        host.setRackSource (rack, rack - 1, 1);
+        host.setTrackFxShape (rack, 0, 1, 1);
+    }
+
+    host.setTrackFxEnabled (1, 0, true);
+    host.pollProxies();
+
+    LastSamples sink;
+    host.setBlockSink (&sink);
+
+    const std::vector<float> one (64, 0.8f), two (64, 0.6f);
+    const float* inputs[] { one.data(), two.data() };
+
+    /*  SHUT: a channel no cue has opened is silent. */
+    for (int i = 0; i < 4; ++i)
+        host.processBlock (inputs, 2);
+
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK (sink.last[1].load() == doctest::Approx (0.0f));
+
+    /*  OPEN, past the ramp: the first through its plugin at half, the second
+        dry. */
+    host.openRackGate (1, -1);
+    host.openRackGate (2, -1);
+
+    for (int i = 0; i < 20; ++i)
+        host.processBlock (inputs, 2);
+
+    CHECK (sink.last[0].load() == doctest::Approx (0.4f).epsilon (0.001));
+    CHECK (sink.last[1].load() == doctest::Approx (0.6f).epsilon (0.001));
+    CHECK (host.isRackPassing (1));
+
+    /*  THE CHILD KILLED, through the graph (the author's decision of
+        2026-09-26, CU): the channel that has the plugin in is silent - never
+        its dry 0.8 - and the one that has it switched out plays on. The graph
+        is where it matters: the Tracktion plugin around the lane once returned
+        before the lane was asked, and a failed plugin's block went out dry. */
+    host.proxy (0)->killChild();
+
+    for (int waited = 0; waited < 200 && host.proxy (0)->childIsRunning(); ++waited)
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+
+    host.pollProxies();
+    REQUIRE (table.statusOf ("PG7N0011").state == "failed");
+    CHECK (table.statusOf ("PG7N0011").problem.find ("Vox 1 and Vox 2 are silent until it is back") != std::string::npos);
+
+    for (int i = 0; i < 20; ++i)
+        host.processBlock (inputs, 2);
+
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK (sink.last[1].load() == doctest::Approx (0.6f).epsilon (0.001));
+
+    /*  A fast shut on the first: silent inside a block or two, the second
+        untouched. */
+    host.killRack (1);
+
+    for (int i = 0; i < 4; ++i)
+        host.processBlock (inputs, 2);
+
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK (sink.last[1].load() == doctest::Approx (0.6f).epsilon (0.001));
+    CHECK_FALSE (host.isRackPassing (1));
+    CHECK (host.isRackPassing (2));
+
+    host.setBlockSink (nullptr);
+    host.stop();
+    CHECK (failures == 2);      // the one child, heard of by both entries it stands for
+}
+
+TEST_CASE ("rack: a gate opens over its fade-in, a stop rings until the output is quiet, and a kill leaves nothing")
+{
+    /*  Phase 9b (namespace draft 18.5, decisions CG and CN), at the host and
+        with no plugin on the channel, so no child is needed. The fade-in is
+        equal power: half way through it the gain is the sine of an eighth of
+        a turn, 0.707, not a half. A stop is heard as sounding - the run is not
+        over - until what reaches the output stage has been quiet for a
+        quarter of a second. A kill is silent inside a block and leaves nothing
+        ringing. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::RackChannelSpec channel;
+    channel.id = "CH000001";
+    channel.name = "Vox 1";
+    spec.rack.push_back (channel);
+
+    REQUIRE (host.buildEdit (spec));
+
+    const auto rack = host.rackTrackOf ("CH000001");
+    REQUIRE (rack == 1);
+    CHECK (host.isRackTrack (rack));
+    CHECK_FALSE (host.isRackTrack (0));
+    CHECK_FALSE (host.isRackSounding (rack));
+
+    auto* matrix = host.trackMatrix (rack);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+    host.setRackSource (rack, 0, 1);
+
+    LastSamples sink;
+    host.setBlockSink (&sink);
+
+    const std::vector<float> steady (64, 0.5f), silent (64, 0.0f);
+    const float* inputs[] { steady.data(), silent.data() };
+
+    const auto run = [&host, &inputs] (double seconds)
+    {
+        const auto blocks = static_cast<int> (std::lround (seconds * 48000.0 / 64.0));
+
+        for (int i = 0; i < blocks; ++i)
+            host.processBlock (inputs, 2);
+    };
+
+    /*  THE FADE-IN, over a fifth of a second: equal power at its middle. */
+    host.openRackGate (rack, -1, 0.2);
+    run (0.1);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5 * std::sin (juce::MathConstants<double>::pi / 4.0)).epsilon (0.02));
+
+    run (0.15);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5f).epsilon (0.001));
+    CHECK (host.isRackSounding (rack));
+
+    /*  A STOP: the input shut in five milliseconds, and the channel still
+        sounding while the output stage has been quiet for less than a quarter
+        of a second - the tail a reverb would be ringing - and not after. */
+    host.shutRackGate (rack);
+    run (0.1);
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK (host.isRackSounding (rack));
+
+    run (0.2);
+    CHECK_FALSE (host.isRackSounding (rack));
+
+    /*  A KILL: open again at once, then killed - silent inside two blocks, and
+        not sounding at all, with no quarter of a second to wait out. */
+    host.openRackGate (rack, -1);
+    run (0.05);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5f).epsilon (0.001));
+
+    host.killRack (rack);
+    host.processBlock (inputs, 2);
+    host.processBlock (inputs, 2);
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK_FALSE (host.isRackSounding (rack));
+
+    host.setBlockSink (nullptr);
+    host.stop();
+}
+
+TEST_CASE ("rack: a gap in the blocks brings the input back over the de-click ramp, and never starts a fade-in again")
+{
+    /*  The mic driver on macOS CI (a6952dd): a voice that went silent while
+        Tracktion muted blocks under a late plugin came back over its cue's
+        whole half-second fade-in - the gate saw the gap, started again from
+        nought, and ramped over the last length it had been given. The fade-in
+        is the cue's entrance, made once: a gap brings the input back over
+        five milliseconds of its own, and the gate's ramp goes on from where it
+        was - through a fade-in under way, and after one that has arrived. A
+        block skipped is made here as the gate sees one: Go.dot's count moved
+        on with no block run through the graph. A fresh open after a shut
+        takes its own fade-in again. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::RackChannelSpec channel;
+    channel.id = "CH000001";
+    channel.name = "Vox 1";
+    spec.rack.push_back (channel);
+    REQUIRE (host.buildEdit (spec));
+
+    const auto rack = host.rackTrackOf ("CH000001");
+    REQUIRE (rack == 1);
+
+    auto* matrix = host.trackMatrix (rack);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+    host.setRackSource (rack, 0, 1);
+
+    LastSamples sink;
+    host.setBlockSink (&sink);
+
+    const std::vector<float> steady (64, 0.5f), silent (64, 0.0f);
+    const float* inputs[] { steady.data(), silent.data() };
+
+    const auto run = [&host, &inputs] (double seconds)
+    {
+        const auto blocks = static_cast<int> (std::lround (seconds * 48000.0 / 64.0));
+
+        for (int i = 0; i < blocks; ++i)
+            host.processBlock (inputs, 2);
+    };
+
+    /*  A BLOCK SKIPPED, as Tracktion skips one: the count moves on, no block
+        runs. The host's clock is the audio side's own counter, reached here as
+        a test reaches nothing else. */
+    const auto skipBlock = [&host]
+    {
+        const_cast<AudioClockSource&> (static_cast<const AudioClockSource&> (host.clock())).advance (64);
+    };
+
+    //  A fifth of a second's fade-in - 9600 samples - half made: equal power at its middle.
+    host.openRackGate (rack, -1, 0.2);
+    run (0.1);
+    REQUIRE (sink.last[0].load() == doctest::Approx (0.5 * std::sin (juce::MathConstants<double>::pi / 4.0)).epsilon (0.01));
+
+    /*  A GAP HALFWAY: the fade goes on from where it was once the input is
+        back, 4800 + 64 + 960 samples along - not from nought again, which
+        would read 0.083 here. */
+    skipBlock();
+    host.processBlock (inputs, 2);
+    run (0.02);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5 * std::sin (juce::MathConstants<double>::halfPi * 5824.0 / 9600.0))
+                                      .epsilon (0.01));
+
+    //  ARRIVED, and a gap then: back at once, over five milliseconds.
+    run (0.2);
+    REQUIRE (sink.last[0].load() == doctest::Approx (0.5f).epsilon (0.001));
+    skipBlock();
+    host.processBlock (inputs, 2);
+    run (0.01);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5f).epsilon (0.001));
+
+    //  A FRESH OPEN after a shut is an entrance again: equal power at its middle.
+    host.shutRackGate (rack);
+    run (0.1);
+    REQUIRE (sink.last[0].load() == doctest::Approx (0.0f));
+    host.openRackGate (rack, -1, 0.2);
+    run (0.1);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5 * std::sin (juce::MathConstants<double>::pi / 4.0)).epsilon (0.02));
+
+    host.setBlockSink (nullptr);
+    host.stop();
+}
+
+TEST_CASE ("sampling: a take recorded through the plugin before the recorder loops through the plugin after, and a rebuild keeps it")
+{
+    /*  Phase 9c, stage 9c.2 (namespace draft 19.2, decision BZ). A rack
+        channel with a recorder of a second and two test-gain plugins, the first
+        BEFORE the recorder and the second AFTER the player. A steady 0.8 at
+        its input is recorded at a half - the first plugin printed into the
+        take - and loops at a quarter through the second. The second switched
+        out is heard at once, since it is after the player; the first switched
+        out changes nothing, since the take already has it. The graph built
+        again with the same shape keeps the take and plays it on; built with a
+        longer take it empties it and says why; built with no recorder it lets
+        it go. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    host.setProxyServices (services);
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+    spec.proxyDeadlineMicroseconds = 200000;
+
+    audio::RackChannelSpec channel;
+    channel.id = "SM000001";
+    channel.name = "Loops";
+    channel.takeSeconds = 1.0;
+    channel.layers = 2;
+
+    for (const auto& [pluginId, before] : { std::pair<const char*, bool> { "SM000011", true },
+                                            std::pair<const char*, bool> { "SM000012", false } })
+    {
+        audio::PluginSpec entry;
+        entry.id = pluginId;
+        entry.identifier = plugin::Catalogue::testGainIdentifier();
+        entry.name = "Test gain";
+        entry.beforeRecorder = before;
+        channel.plugins.push_back (entry);
+    }
+
+    spec.rack.push_back (channel);
+    REQUIRE (host.buildEdit (spec));
+    CHECK (host.inspectNodeIds().ok());
+
+    auto take = host.takeOf ("SM000001");
+    REQUIRE (take != nullptr);
+    CHECK (host.takeOfTrack (host.rackTrackOf ("SM000001")) == take);
+    CHECK (take->capacity() == 48000);
+    CHECK (table.builtTakeOf ("SM000001").bytes == take->bytes());
+    CHECK (table.builtTakeOf ("SM000001").layers == 2);
+    CHECK (host.takeOf ("NQNQNQNQ") == nullptr);
+
+    const auto loaded = [&host, &table]
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (10);
+
+        while (! (table.statusOf ("SM000011").state == "loaded" && table.statusOf ("SM000012").state == "loaded")
+                 && std::chrono::steady_clock::now() < until)
+        {
+            host.pollProxies();
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        return table.statusOf ("SM000011").state == "loaded" && table.statusOf ("SM000012").state == "loaded";
+    };
+
+    const auto rack = host.rackTrackOf ("SM000001");
+    REQUIRE (rack == 1);
+
+    //  The input to the first output, both plugins in, the gate open - what a mic cue's arm and launch do.
+    const auto openChannel = [&host, rack]
+    {
+        auto* matrix = host.trackMatrix (rack);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, 0, 1.0f);
+        matrix->snapToTargets();
+        host.setRackSource (rack, 0, 1);
+
+        for (int slot = 0; slot < 2; ++slot)
+        {
+            host.setTrackFxShape (rack, slot, 1, 1);
+            host.setTrackFxEnabled (rack, slot, true);
+        }
+
+        host.pollProxies();
+        host.openRackGate (rack, -1);
+    };
+
+    REQUIRE (loaded());
+    openChannel();
+
+    LastSamples sink;
+    host.setBlockSink (&sink);
+
+    const std::vector<float> steady (64, 0.8f), silent (64, 0.0f);
+    const float* input[] { steady.data(), silent.data() };
+    const float* quiet[] { silent.data(), silent.data() };
+    const auto run = [&host] (const float* const* inputs, int blocks)
+    {
+        for (int i = 0; i < blocks; ++i)
+            host.processBlock (inputs, 2);
+    };
+
+    //  Open and answering, and silent: the take is empty and `through` is off.
+    run (input, 20);
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+
+    //  Rec, a quarter of a second of the steady input, Rec: the take closes and loops.
+    REQUIRE (take->post ({ audio::Looper::Verb::record, -1, 0, 0 }));
+    run (input, 188);
+    REQUIRE (take->post ({ audio::Looper::Verb::loop, -1, 0, 0 }));
+    run (quiet, 40);
+
+    CHECK (take->state() == audio::TakeState::looping);
+    CHECK (take->length() == 188 * 64);
+    CHECK (sink.last[0].load() == doctest::Approx (0.2f).epsilon (0.001));    // a half printed, a half heard
+
+    //  The plugin after the player out: heard at once - the loop at the half it was recorded at.
+    host.setTrackFxEnabled (rack, 1, false);
+    run (quiet, 20);
+    CHECK (sink.last[0].load() == doctest::Approx (0.4f).epsilon (0.001));
+
+    //  The plugin before the recorder out: nothing moves - the take already has it.
+    host.setTrackFxEnabled (rack, 0, false);
+    run (quiet, 20);
+    CHECK (sink.last[0].load() == doctest::Approx (0.4f).epsilon (0.001));
+
+    //  BUILT AGAIN WITH THE SAME SHAPE - Load now: the same take, still looping, through the new graph.
+    host.setBlockSink (nullptr);
+    REQUIRE (host.buildEdit (spec));
+    CHECK (host.takeOf ("SM000001") == take);
+    CHECK (take->length() == 188 * 64);
+    CHECK (take->state() == audio::TakeState::looping);
+    CHECK (table.builtTakeOf ("SM000001").problem.empty());
+
+    REQUIRE (loaded());
+    openChannel();
+    host.setBlockSink (&sink);
+    run (quiet, 40);
+    CHECK (sink.last[0].load() == doctest::Approx (0.2f).epsilon (0.001));
+
+    //  A longer take asked for: set aside afresh, which empties it, and said.
+    host.setBlockSink (nullptr);
+    spec.rack[0].takeSeconds = 2.0;
+    REQUIRE (host.buildEdit (spec));
+
+    auto longer = host.takeOf ("SM000001");
+    REQUIRE (longer != nullptr);
+    CHECK (longer->capacity() == 96000);
+    CHECK (longer->state() == audio::TakeState::empty);
+    CHECK (table.builtTakeOf ("SM000001").problem == "the take was cleared: its longest take or its layers changed");
+
+    //  And a channel that no longer samples lets its take go.
+    spec.rack[0].takeSeconds = 0.0;
+    REQUIRE (host.buildEdit (spec));
+    CHECK (host.takeOf ("SM000001") == nullptr);
+    CHECK (table.builtTakeOf ("SM000001").bytes == 0);
+
+    host.stop();
+}
+
+TEST_CASE ("M40: the rack's children are its distinct plugins, not its channel slots")
+{
+    /*  Phase 9b (namespace draft 18.6 and 18.10, decision CL). A child spins
+        a core while any lane of it is switched in, so what the rack costs in
+        cores is how many children it has. Eight channels: four carry the test
+        gain, four the mono test plugin, and two of them carry both - ten
+        plugin slots, two plugins. Two children, every lane of each one its
+        channel's, whatever the number of channels. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    host.setProxyServices (services);
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+    spec.proxyDeadlineMicroseconds = 200000;
+
+    auto slots = 0;
+    auto made = 0;
+
+    for (int n = 0; n < 8; ++n)
+    {
+        audio::RackChannelSpec channel;
+        channel.id = "CH00000" + std::to_string (n);
+        channel.name = "Mic " + std::to_string (n + 1);
+
+        const auto add = [&channel, &made] (const char* identifier)
+        {
+            audio::PluginSpec entry;
+            entry.id = "PG9Q" + juce::String (made++).paddedLeft ('0', 4).toStdString();
+            entry.identifier = identifier;
+            entry.name = identifier;
+            channel.plugins.push_back (entry);
+        };
+
+        add (n < 4 ? plugin::Catalogue::testGainIdentifier() : plugin::Catalogue::testMonoIdentifier());
+
+        if (n == 1 || n == 6)
+            add (n < 4 ? plugin::Catalogue::testMonoIdentifier() : plugin::Catalogue::testGainIdentifier());
+
+        slots += static_cast<int> (channel.plugins.size());
+        spec.rack.push_back (channel);
+    }
+
+    REQUIRE (host.buildEdit (spec));
+    CHECK (slots == 10);
+
+    auto children = 0;
+
+    for (int k = 0; host.proxy (k) != nullptr; ++k)
+        ++children;
+
+    MESSAGE ("M40: 8 rack channels, " << slots << " plugin slots, 2 distinct plugins: " << children
+             << " children, so at most " << children << " cores spinning");
+
+    CHECK (children == 2);
+
+    host.stop();
 }

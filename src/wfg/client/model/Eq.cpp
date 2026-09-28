@@ -21,6 +21,7 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -72,7 +73,7 @@ namespace wfg::client::model
 
         if (on == Flag::unsaid)
         {
-            out.notice = "Only a media cue has an EQ.";
+            out.notice = "Only a media or a mic cue has an EQ.";
             return out;
         }
 
@@ -103,12 +104,40 @@ namespace wfg::client::model
             b.freq = number (eqBandRow (band, "Freq"), b.freq);
             b.gain = number (eqBandRow (band, "Gain"), b.gain);
             b.q = number (eqBandRow (band, "Q"), b.q);
+
+            /*  A BAND'S SWITCH is on unless the tree says off: a switch it
+                has not published is the default, which is in. */
+            b.on = flag (snapshot, eqAddress (cueId, eqBandRow (band, "On"))) != Flag::no;
         }
 
         s.band[0].shape = eqShapeFor (text (snapshot, eqAddress (cueId, "eqB1Shape")));
         s.band[3].shape = eqShapeFor (text (snapshot, eqAddress (cueId, "eqB4Shape")));
 
+        out.live = text (snapshot, eqAddress (cueId, "live"));
+
         return out;
+    }
+
+    int eqHandleForAddress (const std::string& cueId, const std::string& address)
+    {
+        const auto base = eqAddress (cueId, "eq");
+
+        if (cueId.empty() || address.rfind (base, 0) != 0)
+            return -1;
+
+        const auto row = address.substr (base.size() - 2);
+
+        if (row.rfind ("eqHpf", 0) == 0)
+            return 4;
+
+        if (row.rfind ("eqLpf", 0) == 0)
+            return 5;
+
+        //  eqB<n>...: the band's own number, from one.
+        if (row.size() > 3 && row.rfind ("eqB", 0) == 0 && row[3] >= '1' && row[3] <= '4')
+            return row[3] - '1';
+
+        return -1;
     }
 
     std::vector<EqPoint> eqCurve (const audio::EqSettings& settings, double sampleRate, int points)
@@ -136,5 +165,29 @@ namespace wfg::client::model
         }
 
         return out;
+    }
+
+    double pinchedQ (double fromQ, double fromDistance, double distance)
+    {
+        if (! (fromDistance > 0.0) || ! (distance > 0.0))
+            return std::clamp (fromQ, eqQLowest, eqQHighest);
+
+        return std::clamp (fromQ * fromDistance / distance, eqQLowest, eqQHighest);
+    }
+
+    double turnedQ (double q, double wheel, bool pinch, bool fine)
+    {
+        const auto step = fine ? 1.01 : 1.1;
+        const auto tenths = (pinch ? -wheel : wheel) * 10.0;
+
+        return std::clamp (q * std::pow (step, tenths), eqQLowest, eqQHighest);
+    }
+
+    double magnifiedQ (double q, double scale)
+    {
+        if (! (scale > 0.0))
+            return std::clamp (q, eqQLowest, eqQHighest);
+
+        return std::clamp (q / scale, eqQLowest, eqQHighest);
     }
 }

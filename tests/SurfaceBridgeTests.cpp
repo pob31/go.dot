@@ -47,12 +47,15 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
+#include <wfg/engine/document/Schema.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/midi/MidiSink.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/surface/McuCodec.h>
+#include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
+#include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/tree/Mount.h>
@@ -535,6 +538,33 @@ namespace
             put (address, osc::Value::float64 (value), 'd');
         }
 
+        void flag (const std::string& address, bool value)
+        {
+            put (address, osc::Value::boolean (value), value ? 'T' : 'F');
+        }
+
+        /*  A MEDIA CUE'S EQ as the tree publishes it, every row at the
+            table's default - what a cue nobody has shaped reads. */
+        void eqOf (const std::string& cue)
+        {
+            const auto base = "/godot/cue/" + cue + "/";
+
+            for (const auto* row : doc::Schema::rowsForOwner ("sound"))
+            {
+                const std::string name { row->name };
+
+                if (name.rfind ("eq", 0) != 0)
+                    continue;
+
+                if (row->type == doc::ValueType::boolean)
+                    flag (base + name, row->defaultText == "true");
+                else if (row->type == doc::ValueType::string)
+                    text (base + name, std::string (row->defaultText));
+                else
+                    number (base + name, osc::parseDouble (row->defaultText).value_or (0.0));
+            }
+        }
+
         std::shared_ptr<const tree::TreeSnapshot> publish (std::int64_t at) const
         {
             auto nodes = std::make_shared<std::vector<tree::Node>> (leaves);
@@ -608,6 +638,70 @@ TEST_CASE ("surface bridge: the engine's fader curve is the client's, point for 
     CHECK (strays == 0);
 }
 
+TEST_CASE ("surface bridge: a D700 fader lands on its engraving - +7 at the top, and 0, -24 and -48 where they are engraved")
+{
+    /*  Measured on the author's unit, 2026-09-25 ("The maximum I see engraved
+        is +7dB. When set at 0dB (engraved) it reads -6dB on the screen"): the
+        positions the fader sent while it was stopped on each engraved mark.
+        Each one reads what is engraved beside it. */
+    const auto law = surface::FaderLaw::d700;
+
+    CHECK (near (surface::dbForFourteenBit (16383, law), 7.0));
+    CHECK (std::abs (surface::dbForFourteenBit (13040, law) - 0.0) < 0.05);
+    CHECK (std::abs (surface::dbForFourteenBit (5600, law) + 24.0) < 0.05);
+    CHECK (std::abs (surface::dbForFourteenBit (2095, law) + 48.0) < 0.05);
+    CHECK (near (surface::dbForFourteenBit (0, law), -120.0));
+
+    //  Above the engraving's top is the top: a trim at +12 puts a D700 fader as high as it goes.
+    CHECK (surface::fourteenBitForDb (12.0, law) == 16383);
+    CHECK (surface::fourteenBitForDb (7.0, law) == 16383);
+    CHECK (surface::fourteenBitForDb (-120.0, law) == 0);
+
+    //  The generic curve is untouched: unity where the virtual panel draws it.
+    CHECK (surface::fourteenBitForDb (0.0) == 13926);
+    CHECK (surface::topologyOf (surface::Profile::d700).faderLaw == law);
+    CHECK (surface::topologyOf (surface::Profile::mcu).faderLaw == surface::FaderLaw::generic);
+
+    //  A position to decibels and back is the same position under this law too: the echo rule.
+    auto strays = 0;
+
+    for (auto position = 0; position <= surface::faderTop; ++position)
+        if (surface::fourteenBitForDb (surface::dbForFourteenBit (position, law), law) != position)
+            ++strays;
+
+    CHECK (strays == 0);
+
+    //  AND THE BRIDGE USES IT: a D700 fader on its engraved 0 writes nought.
+    Desk desk;
+    const auto d700 = desk.makeSurface ("d700", "The D700");
+    const auto band = desk.makeDca ("Band");
+    desk.pin (desk.strips[d700][0], band);
+
+    desk.declare ({ desk.spec (d700, "d700", { "PORTBNK1", "PORTBNK2" }) },
+                  { { "PORTBNK1", plugged ("D700 bank 1") }, { "PORTBNK2", plugged ("D700 bank 2") } });
+    desk.ticks (3);
+    desk.clear();
+
+    desk.arrive ("PORTBNK1", { 0x90, 0x68, 0x7f });     // a finger on fader one
+    desk.arrive ("PORTBNK1", { 0xe0, 0x70, 0x65 });     // 13040: (0x65 << 7) | 0x70
+    desk.tickOnce();
+
+    REQUIRE (desk.submitted.size() == 2u);              // the touch, then the write
+    CHECK (desk.submitted[1].args[0].getString() == "/godot/dca/" + band + "/trim");
+    CHECK (std::abs (desk.submitted[1].args[1].getFloat64()) < 0.05);
+
+    //  And the motor goes where the engraving says: a DCA written to -24 flies to its mark.
+    desk.arrive ("PORTBNK1", { 0x90, 0x68, 0x00 });     // the finger lifted
+    desk.tickOnce();
+    desk.clear();
+    desk.write ("/godot/dca/" + band + "/trim", -24.0);
+    desk.ticks (30);
+
+    const auto moves = motorMoves (desk.sink, "PORTBNK1", 0);
+    REQUIRE_FALSE (moves.empty());
+    CHECK (std::abs (moves.back() - 5600) <= 4);
+}
+
 TEST_CASE ("surface bridge: the profiles say what each surface has and what its buttons mean")
 {
     CHECK (surface::profileFor ("mcu") == surface::Profile::mcu);
@@ -630,10 +724,40 @@ TEST_CASE ("surface bridge: the profiles say what each surface has and what its 
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5b)) == surface::Action::rewind);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5c)) == surface::Action::forward);
 
-    //  SELECT is reserved (plan decision 12); banking is decided in hand (§3.9d).
-    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x18)) == surface::Action::none);
+    /*  SELECT aims the rotaries, EQ and Send are pages and `*` leaves them
+        (author, 2026-09-25) - both of `*`'s notes, the second being its double
+        press when the D700's Configurator asks for one. Banking is decided in
+        hand (§3.9d). */
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x18)) == surface::Action::aim);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2c)) == surface::Action::eqPage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x29)) == surface::Action::sendPage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x36)) == surface::Action::leavePage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x37)) == surface::Action::leavePage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x38)) == surface::Action::none);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2e)) == surface::Action::none);
-    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5f)) == surface::Action::none);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2f)) == surface::Action::none);
+
+    /*  THE D700'S TWO ARROWS ARE THE BANK NOTES, and it has no rewind or
+        forward: on it they move the standby (author, 2026-09-26). */
+    const auto d700 = surface::Profile::d700;
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x2e)) == surface::Action::rewind);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x2f)) == surface::Action::forward);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x30)) == surface::Action::none);
+
+    /*  THE MASTER DIAL'S CLICK LETS GO AND ITS DOUBLE CLICK RESTS (author,
+        2026-09-26): F3 and F4 on a D700, and a Mackie's own function keys
+        elsewhere. */
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x38)) == surface::Action::dialLetGo);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x39)) == surface::Action::dialRest);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x38)) == surface::Action::none);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x39)) == surface::Action::none);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5f)) == surface::Action::record);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x5f)) == surface::Action::record);
+
+    //  Phase 9c: Pan is the Loop page, and Loop - Mackie's Cycle - is take.loop.
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x2a)) == surface::Action::loopPage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2a)) == surface::Action::loopPage);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x56)) == surface::Action::loop);
     CHECK (surface::actionFor (surface::Profile::midiPads, surface::buttonForNote (0x5e))
              == surface::Action::none);
 
@@ -695,6 +819,7 @@ TEST_CASE ("surface bridge: a fader's positions in one tick are one write, the l
     /*  THREE POSITIONS IN ONE TICK - a hand moving - and one write: the tree
         shows one value a tick, and the log would otherwise fill with positions
         nobody could have seen. */
+    desk.arrive ("PORTMCU1", { 0x90, 0x68, 0x7f });     // a finger on fader one
     desk.arrive ("PORTMCU1", { 0xe0, 0x00, 0x20 });
     desk.arrive ("PORTMCU1", { 0xe0, 0x00, 0x40 });
     desk.arrive ("PORTMCU1", { 0xe0, 0x7f, 0x5f });
@@ -702,8 +827,8 @@ TEST_CASE ("surface bridge: a fader's positions in one tick are one write, the l
 
     const auto last = surface::dbForFourteenBit ((0x5f << 7) | 0x7f);
 
-    REQUIRE (desk.submitted.size() == 1u);
-    const auto& write = desk.submitted.front();
+    REQUIRE (desk.submitted.size() == 2u);              // the touch, and one write
+    const auto& write = desk.submitted.back();
     CHECK (write.origin == "surface:" + mcu);
     CHECK (write.command == "node.set");
     REQUIRE (write.args.size() == 2u);
@@ -815,7 +940,7 @@ TEST_CASE ("surface bridge: the V-Pot press is a sampler strip's gate, and puts 
     CHECK (desk.submitted[0].args[0].getString() == "/godot/dca/" + band + "/trim");
     CHECK (near (desk.submitted[0].args[1].getFloat64(), 0.0));
 
-    //  SELECT is left alone (plan decision 12).
+    //  SELECT on a dca strip aims at nothing: there is no cue on it.
     desk.clear();
     desk.arrive ("PORTMCU1", { 0x90, 0x18, 0x7f });
     desk.arrive ("PORTMCU1", { 0x90, 0x18, 0x00 });
@@ -865,7 +990,7 @@ TEST_CASE ("surface bridge: STOP is Esc, STOP again inside the window is double 
     CHECK (pressing (0x5b) == "standby.previous");
     CHECK (pressing (0x5c) == "standby.next");
 
-    //  The bank and channel arrows, and REC: nothing (§3.9d; §16.6).
+    //  The bank and channel arrows: nothing (§3.9d; §16.6). REC with no mic cue aimed: nothing.
     CHECK (pressing (0x2e).empty());
     CHECK (pressing (0x2f).empty());
     CHECK (pressing (0x30).empty());
@@ -873,8 +998,12 @@ TEST_CASE ("surface bridge: STOP is Esc, STOP again inside the window is double 
     CHECK (pressing (0x5f).empty());
 }
 
-TEST_CASE ("surface bridge: an encoder detent is half a decibel on the strip's target, sign and magnitude")
+TEST_CASE ("surface bridge: a turn of a rotary moves nothing - the level is the fader's")
 {
+    /*  The author, 2026-09-25: "The rotaries don't have to move with the
+        faders. It's either or. We'll find other uses for the rotaries." Until
+        this date a detent was half a decibel on the strip's target; now a
+        turn, either way and however many, writes nothing at all. */
     Desk desk;
     const auto mcu = desk.makeSurface ("mcu", "Desk");
     const auto band = desk.makeDca ("Band");
@@ -889,41 +1018,9 @@ TEST_CASE ("surface bridge: an encoder detent is half a decibel on the strip's t
     desk.clear();
 
     desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x02 });     // strip two, two detents clockwise
+    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x41 });     // and one back
     desk.tickOnce();
 
-    REQUIRE (desk.submitted.size() == 1u);
-    CHECK (desk.submitted[0].command == "node.set");
-    CHECK (desk.submitted[0].args[0].getString() == trim);
-    CHECK (near (desk.submitted[0].args[1].getFloat64(), -5.0));
-
-    //  65 IS ONE STEP BACK, not sixty-three (control guide §3.2).
-    desk.clear();
-    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x41 });
-    desk.tickOnce();
-
-    REQUIRE (desk.submitted.size() == 1u);
-    CHECK (near (desk.submitted[0].args[1].getFloat64(), -6.5));
-
-    //  Two messages in one tick are both counted, in one write.
-    desk.clear();
-    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x01 });
-    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x01 });
-    desk.tickOnce();
-
-    REQUIRE (desk.submitted.size() == 1u);
-    CHECK (near (desk.submitted[0].args[1].getFloat64(), -5.0));
-
-    //  Turned against the top, the value stays where it is and nothing is written.
-    desk.write (trim, 12.0, "cli");
-    desk.tickOnce();
-    desk.clear();
-    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x03 });
-    desk.tickOnce();
-    CHECK (desk.submitted.empty());
-
-    //  And a strip riding nothing is turned for nothing.
-    desk.arrive ("PORTMCU1", { 0xb0, 0x10, 0x01 });
-    desk.tickOnce();
     CHECK (desk.submitted.empty());
 }
 
@@ -1161,8 +1258,9 @@ TEST_CASE ("surface bridge: an MCU strip shows its name and its word in seven ch
     CHECK (contains (sent, surface::lcdCell (0x14, 0, 1, "free")));
     CHECK (contains (sent, surface::lcdCell (0x14, 1, 1, "free")));
 
-    //  Its ring shows the trim - unity, most of the way round - and SELECT is dark.
-    CHECK (contains (sent, surface::ringMcu (0, 9, 2, false)));
+    /*  Its ring is dark - it does not repeat the fader (author, 2026-09-25) -
+        and SELECT is dark. */
+    CHECK (contains (sent, surface::ringMcu (0, 0, 2, false)));
     CHECK (contains (sent, surface::led (0x18, surface::Led::off)));
 
     //  MCU's display only: no native D700 row reaches a generic surface.
@@ -1228,10 +1326,9 @@ TEST_CASE ("surface bridge: a D700 strip shows three native rows and a number, a
     CHECK (contains (first, surface::d700TrackNumbers ({ 1, 2, 3, 4, 5, 6, 7, 8 })));
     CHECK (contains (second, surface::d700TrackNumbers ({ 9, 10, 11, 12, 13, 14, 15, 16 })));
 
-    //  The fine ring, filled from the left.
-    const auto ring = static_cast<int> (std::lround (127.0 * surface::fractionForDb (-6.2)));
-    CHECK (contains (first, surface::d700Ring (0, ring, 2)));
-    CHECK (contains (second, surface::d700Ring (1, ring, 2)));
+    //  The ring dark: it does not repeat the fader (author, 2026-09-25).
+    CHECK (contains (first, surface::d700Ring (0, 0, 2)));
+    CHECK (contains (second, surface::d700Ring (1, 0, 2)));
 
     //  NEVER 0x12 ON A D700, and every SysEx one it survives.
     for (const auto& message : sysexOf (desk.sink))
@@ -1270,9 +1367,15 @@ TEST_CASE ("surface bridge: a D700 strip wears its cue's colour, blue last, re-a
     stage.bridge.declare ({ spec }, [] (const std::string& port) { return plugged (port); });
     stage.tickOnce();
 
-    //  THREE MESSAGES, red, green, then blue - the one that refreshes the ring.
+    /*  THREE MESSAGES, red, green, then blue - the one that refreshes the
+        ring - carrying #FF8000 as the LEDs are sent it: the 127, 64, 0 it is,
+        shaped for their light (2026-09-25, `forTheLeds`). */
+    const auto orange = surface::forTheLeds (surface::Rgb { 127, 64, 0 });
+    CHECK (orange.green < 64);
     CHECK (colourOf (stage.sink, "PORTBNK1", 0x20)
-             == std::vector<midi::Bytes> { { 0x91, 0x20, 127 }, { 0x92, 0x20, 64 }, { 0x93, 0x20, 0 } });
+             == std::vector<midi::Bytes> { { 0x91, 0x20, static_cast<std::uint8_t> (orange.red) },
+                                           { 0x92, 0x20, static_cast<std::uint8_t> (orange.green) },
+                                           { 0x93, 0x20, static_cast<std::uint8_t> (orange.blue) } });
 
     //  A clip with no colour authored is dark, and so is a free strip.
     CHECK (colourOf (stage.sink, "PORTBNK1", 0x21)
@@ -1281,7 +1384,7 @@ TEST_CASE ("surface bridge: a D700 strip wears its cue's colour, blue last, re-a
 
     //  And the display says what is on the strip.
     CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Clip 0")));
-    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "pads")));
+    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "sampler")));
 
     /*  RE-ASSERTED EVERY TWO SECONDS, unchanged, because the firmware's idle
         animation takes an undriven LED back. */
@@ -1364,6 +1467,719 @@ TEST_CASE ("surface bridge: a sounding strip wears what it sounds like, and its 
         bridge.afterTick (fake.publish (tick), touches, tick);
 
     CHECK (colourOf (sink, "PORTBNK1", 0x20).empty());
+}
+
+TEST_CASE ("surface bridge: a sounding strip's light is half its level and half how it moves, shaped for the LEDs")
+{
+    /*  The author, 2026-09-25, in three steps: the brightness modulated by
+        the sound's variation; then more adaptive; then "The low level sounds
+        with a little variation come out with as much variation in the lights
+        as a more dynamic sound. Maybe make part of the LED level match the
+        long term level of the music and the other 'half' the shorter term
+        variations" - and "The white 'looks' louder". */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+    fake.text ("/godot/run/RUN00001/timbre", "0 1 0.5");           // pure red
+    fake.text ("/godot/cue/CUE00001/name", "Rain");
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    //  The red of the LAST colour written since the sink was cleared: three notes a write.
+    const auto redNow = [&sink]
+    {
+        const auto colour = colourOf (sink, "PORTBNK1", 0x20);
+        return colour.size() >= 3u ? static_cast<int> (colour[colour.size() - 3][2]) : -1;
+    };
+
+    std::int64_t tick = 0;
+    std::string run = "RUN00001";
+
+    //  Some seconds of an envelope given tick by tick, to the run on the strip; the reds sent while it ran.
+    const auto play = [&] (int ticks, const std::function<double (int)>& envelopeAt)
+    {
+        std::vector<int> reds;
+
+        for (int n = 0; n < ticks; ++n)
+        {
+            ++tick;
+            fake.text ("/godot/run/" + run + "/envelope", osc::formatDouble (envelopeAt (n)));
+            sink.sent.clear();
+            bridge.afterTick (fake.publish (tick), touches, tick);
+
+            if (const auto red = redNow(); red >= 0)
+                reds.push_back (red);
+        }
+
+        return reds;
+    };
+
+    const auto swing = [] (const std::vector<int>& reds)
+    {
+        return reds.empty() ? 0 : *std::max_element (reds.begin(), reds.end())
+                                    - *std::min_element (reds.begin(), reds.end());
+    };
+
+    //  STEADY, THE LEVEL DECIDES: a loud bed glows well above a quiet one.
+    auto loud = play (400, [] (int) { return -8.0; });
+    REQUIRE_FALSE (loud.empty());
+    const auto loudRest = loud.back();
+
+    const auto onStrip = [&] (const std::string& id, const std::string& timbre)
+    {
+        run = id;
+        fake.text ("/godot/slot/STRIP001/holder", id);                 // a new run starts afresh
+        fake.text ("/godot/run/" + id + "/timbre", timbre);
+    };
+
+    onStrip ("RUN00002", "0 1 0.5");
+    auto quiet = play (400, [] (int) { return -40.0; });
+    onStrip ("RUN00001", "0 1 0.5");
+    REQUIRE_FALSE (quiet.empty());
+    const auto quietRest = quiet.back();
+
+    CHECK (quietRest > 0);                                          // a glow, never dark
+    CHECK (loudRest > quietRest + 30);
+
+    //  A HIT on the loud bed flashes towards full.
+    play (300, [] (int) { return -8.0; });
+    const auto hit = play (6, [] (int) { return -2.0; });
+    REQUIRE_FALSE (hit.empty());
+    CHECK (hit.back() > loudRest + 20);
+
+    /*  A QUIET SOUND THAT BARELY MOVES BARELY CHANGES, and a dynamic one
+        swings: half a decibel of wobble is under the least that counts as a
+        flash, six decibels is well over it. */
+    onStrip ("RUN00003", "0 1 0.5");
+    const auto still = play (600, [] (int n) { return -36.0 + ((n / 5) % 2 == 0 ? 0.5 : -0.5); });
+
+    onStrip ("RUN00004", "0 1 0.5");
+    const auto lively = play (600, [] (int n) { return -12.0 + ((n / 5) % 2 == 0 ? 6.0 : -6.0); });
+
+    const auto late = [] (const std::vector<int>& reds)
+    {
+        return std::vector<int> (reds.begin() + static_cast<std::ptrdiff_t> (reds.size() / 2), reds.end());
+    };
+
+    CHECK (swing (late (still)) <= 8);
+    CHECK (swing (late (lively)) >= 20);
+    CHECK (swing (late (lively)) >= 3 * swing (late (still)));
+
+    /*  WHITE IS HELD TO THE LIGHT BUDGET: a grey timbre lights all three
+        channels, and each is sent far below what a pure colour of the same
+        brightness gets - "the white looks louder". */
+    onStrip ("RUN00005", "0 0 0.5");                                // no saturation: white
+    play (400, [] (int) { return -8.0; });
+    sink.sent.clear();
+    play (6, [] (int) { return -8.0; });
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    const auto white = colourOf (sink, "PORTBNK1", 0x20);
+
+    if (white.size() >= 3u)
+    {
+        const auto whiteRed = static_cast<int> (white[white.size() - 3][2]);
+        CHECK (whiteRed < loudRest);
+    }
+
+    //  With no envelope yet, the colour is the timbre's, at full: a pure red is a full red.
+    onStrip ("RUN00006", "0 1 0.5");
+    fake.text ("/godot/run/RUN00006/envelope", "");
+    sink.sent.clear();
+
+    for (const auto end = tick + 18; tick <= end; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    CHECK (redNow() == 127);
+}
+
+TEST_CASE ("surface bridge: MUTE on a sampler strip kills what it plays, like the running pane's cross")
+{
+    /*  The author, 2026-09-25: "Can the mute switch of a sampler fader be a
+        kill switch for it? Not temporary muting, kill as the X in the active
+        cue list panel." */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+    fake.text ("/godot/cue/CUE00001/name", "Rain");
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    std::vector<Event> submitted;
+    const auto collect = [&submitted] (Event event)
+    {
+        submitted.push_back (std::move (event));
+        return true;
+    };
+
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    //  MUTE on strip one, pressed and let go: one kill, of the run on it.
+    bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x00 });
+    bridge.beforeTick (collect, ++tick);
+
+    REQUIRE (submitted.size() == 1u);
+    CHECK (submitted[0].command == "run.kill");
+    REQUIRE (submitted[0].args.size() == 1u);
+    CHECK (submitted[0].args[0].getString() == "RUN00001");
+    CHECK (submitted[0].origin == "surface:SURF0001");
+
+    /*  AND THE RED LIGHT SAYS SO for half a second (author, 2026-09-25:
+        "Can you flash for 0.5s the red mute switch to have feedback on the
+        killed sample?"), then goes out. */
+    const auto muteOn = midi::Bytes { 0x90, 0x10, 0x7f };
+    const auto muteOff = midi::Bytes { 0x90, 0x10, 0x00 };
+
+    sink.sent.clear();
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), muteOn));
+
+    const auto killedAt = tick;
+    sink.sent.clear();
+
+    while (tick < killedAt + surface::killFlashTicks - 1)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK_FALSE (contains (sentOn (sink, "PORTBNK1"), muteOff));
+
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), muteOff));
+
+    //  A member armed and waiting has nothing to kill: its fader is ready for the next touch.
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    submitted.clear();
+
+    bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x7f });
+    bridge.beforeTick (collect, ++tick);
+    CHECK (submitted.empty());
+
+    //  And nothing killed lights nothing.
+    sink.sent.clear();
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK_FALSE (contains (sentOn (sink, "PORTBNK1"), muteOn));
+
+    //  Nor has a DCA strip: MUTE there is no temporary mute either, it is nothing.
+    fake.text ("/godot/slot/STRIP001/word", "dca");
+    fake.text ("/godot/slot/STRIP001/role", "dca");
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    submitted.clear();
+
+    bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x7f });
+    bridge.beforeTick (collect, ++tick);
+    CHECK (submitted.empty());
+}
+
+TEST_CASE ("surface bridge: a sampler strip's meter is what left its run after the fader, the loudest since the last message")
+{
+    /*  The author, 2026-09-25: "On the sampler fader displays of the D700 can
+        we have a post fader level meter too?" MCU's channel pressure, D0 and
+        (strip << 4) | step, the step from `meterStepsDb`. */
+    CHECK (surface::meterStepFor (-65.0) == 0);
+    CHECK (surface::meterStepFor (-60.0) == 1);
+    CHECK (surface::meterStepFor (-8.0) == 8);
+    CHECK (surface::meterStepFor (-2.5) == 10);
+    CHECK (surface::meterStepFor (0.0) == 11);
+    CHECK (surface::meterStepFor (6.0) == 11);
+
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+    fake.number ("/godot/run/RUN00001/meter", -8.0);
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    //  The steps strip one was sent, in order; 15 is the peak hold cleared.
+    const auto stepsSent = [&sink]
+    {
+        std::vector<int> steps;
+
+        for (const auto& message : sentOn (sink, "PORTBNK1"))
+            if (message.size() == 2u && message[0] == 0xd0 && (message[1] >> 4) == 0)
+                steps.push_back (message[1] & 0x0f);
+
+        return steps;
+    };
+
+    //  A NEW RUN: its peak hold cleared, then its level - -8 dB lights eight steps of eleven.
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent() == std::vector<int> { 15, 8 });
+
+    /*  THE LOUDEST OF THE TICKS BETWEEN TWO MESSAGES, not the last: a
+        transient between two sends still reaches the display. */
+    sink.sent.clear();
+    fake.number ("/godot/run/RUN00001/meter", -2.5);
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    fake.number ("/godot/run/RUN00001/meter", -20.0);
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent().empty());
+
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent() == std::vector<int> { 10 });
+
+    //  Sent again at the rate while it sounds, even unchanged: a Mackie meter falls by itself.
+    sink.sent.clear();
+
+    for (int i = 0; i < surface::meterEveryTicks; ++i)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK (stepsSent() == std::vector<int> { 5 });     // -20 dB: past -24, short of -18
+
+    //  STOPPED: dark once, the hold cleared, and then nothing more.
+    sink.sent.clear();
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent() == std::vector<int> { 0, 15 });
+
+    sink.sent.clear();
+
+    for (int i = 0; i < 2 * surface::meterEveryTicks; ++i)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK (stepsSent().empty());
+
+    //  A DCA strip has no meter: it holds no run.
+    fake.text ("/godot/slot/STRIP001/role", "dca");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    sink.sent.clear();
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent().empty());
+}
+
+TEST_CASE ("surface bridge: SOLO solos the strip's clip and says where the solo is; REC sets where its fader starts")
+{
+    /*  The author, 2026-09-25: "The solo switch blink before the sample is
+        triggered. Stays on while it plays and is turned off once the sample
+        has finished playing or is stopped." And: "Pressing Rec on a sampler
+        fader sets the starting level. Confirm with a LED pulse." */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", -6.5);
+    fake.put ("/godot/run/RUN00001/solo", osc::Value::boolean (false), 'T');
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    std::vector<Event> submitted;
+    const auto collect = [&submitted] (Event event)
+    {
+        submitted.push_back (std::move (event));
+        return true;
+    };
+
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    //  SOLO on strip one: `run.solo` on the run it holds, as a toggle.
+    bridge.arrived ("PORTBNK1", { 0x90, 0x08, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0x90, 0x08, 0x00 });
+    bridge.beforeTick (collect, ++tick);
+
+    REQUIRE (submitted.size() == 1u);
+    CHECK (submitted[0].command == "run.solo");
+    REQUIRE (submitted[0].args.size() == 1u);
+    CHECK (submitted[0].args[0].getString() == "RUN00001");
+
+    /*  ITS LIGHT: blinking while the soloed clip waits for its start - on
+        and off by the bridge, never MCU's own flash, which a D700 shows lit
+        ("Solo could be blinking before the sample is started") ... */
+    const auto soloOn = midi::Bytes { 0x90, 0x08, 0x7f };
+    const auto soloOff = midi::Bytes { 0x90, 0x08, 0x00 };
+
+    const auto soloSent = [&sink]
+    {
+        std::vector<midi::Bytes> messages;
+
+        for (const auto& message : sentOn (sink, "PORTBNK1"))
+            if (message.size() == 3u && message[0] == 0x90 && message[1] == 0x08)
+                messages.push_back (message);
+
+        return messages;
+    };
+
+    fake.put ("/godot/run/RUN00001/solo", osc::Value::boolean (true), 'T');
+    sink.sent.clear();
+
+    for (std::int64_t i = 0; i < 2 * surface::blinkHalfTicks; ++i)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK (contains (soloSent(), soloOn));
+    CHECK (contains (soloSent(), soloOff));
+    CHECK_FALSE (contains (soloSent(), midi::Bytes { 0x90, 0x08, 0x01 }));
+
+    //  ... lit, steadily, while it sounds ...
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    sink.sent.clear();
+
+    for (std::int64_t i = 0; i < 2 * surface::blinkHalfTicks; ++i)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK_FALSE (contains (soloSent(), soloOff));
+    CHECK ((soloSent().empty() || soloSent().back() == soloOn));
+
+    //  ... and dark once the engine has let the solo go with the clip.
+    fake.put ("/godot/run/RUN00001/solo", osc::Value::boolean (false), 'T');
+    fake.text ("/godot/slot/STRIP001/word", "stopping");
+    sink.sent.clear();
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), soloOff));
+
+    /*  REC: the fader's level becomes the member's starting level - one
+        write to the show - and its light is on for a moment. */
+    submitted.clear();
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x00 });
+    bridge.beforeTick (collect, ++tick);
+
+    REQUIRE (submitted.size() == 1u);
+    CHECK (submitted[0].command == "node.set");
+    REQUIRE (submitted[0].args.size() == 2u);
+    CHECK (submitted[0].args[0].getString() == "/godot/cue/CUE00001/initialLevel");
+    CHECK (submitted[0].args[1].asDouble() == doctest::Approx (-6.5));
+
+    const auto recOn = midi::Bytes { 0x90, 0x00, 0x7f };
+    const auto recOff = midi::Bytes { 0x90, 0x00, 0x00 };
+
+    sink.sent.clear();
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), recOn));
+
+    const auto setAt = tick;
+    sink.sent.clear();
+
+    while (tick < setAt + surface::startLevelFlashTicks)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK (contains (sentOn (sink, "PORTBNK1"), recOff));
+
+    //  A LOCKED SHOW takes no edit, so REC writes nothing and lights nothing.
+    fake.put ("/godot/document/locked", osc::Value::boolean (true), 'T');
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    submitted.clear();
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x7f });
+    bridge.beforeTick (collect, ++tick);
+    CHECK (submitted.empty());
+
+    sink.sent.clear();
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK_FALSE (contains (sentOn (sink, "PORTBNK1"), recOn));
+
+    //  And a DCA strip has no clip to solo and no start to set.
+    fake.put ("/godot/document/locked", osc::Value::boolean (false), 'T');
+    fake.text ("/godot/slot/STRIP001/role", "dca");
+    fake.text ("/godot/slot/STRIP001/word", "dca");
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    submitted.clear();
+    bridge.arrived ("PORTBNK1", { 0x90, 0x08, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x7f });
+    bridge.beforeTick (collect, ++tick);
+    CHECK (submitted.empty());
+}
+
+TEST_CASE ("surface bridge: a sampler strip's ring is its clip's progress, and empty when nothing sounds")
+{
+    /*  The author, 2026-09-25, of a progress bar for a playing clip: "So use
+        the rotary LED ring then" - the white bar at the top of the D700's
+        screen being its SELECT mark, which is on or off and nothing between. */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+    fake.number ("/godot/cue/CUE00001/duration", 70.0);
+    fake.number ("/godot/cue/CUE00001/startOffset", 10.0);
+    fake.number ("/godot/run/RUN00001/position", 40.0);
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    //  HALF WAY through what it plays - ten seconds in to seventy - is half the ring.
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), surface::d700Ring (0, 64, 2)));
+
+    //  At its end, the whole ring.
+    sink.sent.clear();
+    fake.number ("/godot/run/RUN00001/position", 70.0);
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), surface::d700Ring (0, 127, 2)));
+
+    //  NOTHING SOUNDING, nothing drawn: armed and waiting for its touch, the ring is empty.
+    sink.sent.clear();
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), surface::d700Ring (0, 0, 2)));
+}
+
+TEST_CASE ("surface bridge: a clip re-armed after REC flies its fader to the new start, and stays there")
+{
+    /*  The author, 2026-09-25: "After using the Rec track button, the fader
+        reverts to the old initial level and jumps to the new one when
+        triggered." The session log's sequence: a clip playing at 0 dB, the
+        fader ridden down to -10.7 and let go, REC, MUTE, the member armed
+        again at -10.7. */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    std::vector<Event> submitted;
+    const auto collect = [&submitted] (Event event)
+    {
+        submitted.push_back (std::move (event));
+        return true;
+    };
+
+    std::int64_t tick = 1;
+    const auto settle = [&] (int ticks)
+    {
+        for (int i = 0; i < ticks; ++i)
+        {
+            ++tick;
+            bridge.beforeTick (collect, tick);
+
+            for (const auto& event : submitted)
+                if (event.command == "node.touch")
+                    touches.touch (event.origin, event.args[0].getString());
+                else if (event.command == "node.release")
+                    touches.release (event.origin, event.args[0].getString());
+                else if (event.command == "node.set")
+                    if (event.args[0].getString().find ("/trim") != std::string::npos)
+                        fake.number (event.args[0].getString(), event.args[1].asDouble());
+
+            submitted.clear();
+            bridge.afterTick (fake.publish (tick), touches, tick);
+        }
+    };
+
+    settle (30);                                                //  the fader at 0 dB, armed
+    const auto zeroAt = surface::fourteenBitForDb (0.0, surface::FaderLaw::d700);
+    const auto newAt = surface::fourteenBitForDb (-10.7, surface::FaderLaw::d700);
+
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    settle (2);
+
+    //  THE RIDE: a finger on it, down to -10.7, let go.
+    bridge.arrived ("PORTBNK1", { 0x90, 0x68, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0xe0, static_cast<std::uint8_t> (newAt & 0x7f),
+                                  static_cast<std::uint8_t> (newAt >> 7) });
+    settle (2);
+    bridge.arrived ("PORTBNK1", { 0x90, 0x68, 0x00 });
+    sink.sent.clear();
+    settle (40);
+
+    /*  LET GO, THE LEVEL GOES AT ONCE AND THREE TIMES MORE, a fifth of a
+        second apart: the first can reach a D700 too soon to count. */
+    {
+        const auto sent = motorMoves (sink, "PORTBNK1", 0);
+        CHECK (sent.size() == 1u + static_cast<std::size_t> (surface::motorReasserts));
+
+        for (const auto position : sent)
+            CHECK (std::abs (position - newAt) <= 2);
+    }
+
+    /*  AND THE D700 PUTS THE FADER BACK where the host last put it before -
+        the old start - and says so, untouched. Believed, and the fader is
+        flown back to the level the engine has. */
+    sink.sent.clear();
+    bridge.arrived ("PORTBNK1", { 0xe0, static_cast<std::uint8_t> (zeroAt & 0x7f),
+                                  static_cast<std::uint8_t> (zeroAt >> 7) });
+    settle (10);
+    {
+        const auto back = motorMoves (sink, "PORTBNK1", 0);
+        REQUIRE_FALSE (back.empty());
+        CHECK (std::abs (back.back() - newAt) <= 2);
+    }
+
+    //  A report close to where it was sent is the motor settling: nothing chases it.
+    sink.sent.clear();
+    bridge.arrived ("PORTBNK1", { 0xe0, static_cast<std::uint8_t> ((newAt - 20) & 0x7f),
+                                  static_cast<std::uint8_t> ((newAt - 20) >> 7) });
+    settle (5);
+    CHECK (motorMoves (sink, "PORTBNK1", 0).empty());
+
+    //  REC, then MUTE: the run ends, the strip is free a tick, and the member comes back at -10.7.
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x7f });
+    settle (2);
+    fake.text ("/godot/slot/STRIP001/word", "stopping");
+    settle (2);
+    fake.text ("/godot/slot/STRIP001/word", "free");
+    fake.text ("/godot/slot/STRIP001/target", "");
+    fake.text ("/godot/slot/STRIP001/holder", "");
+    settle (1);
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00002/trim");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00002");
+    fake.number ("/godot/run/RUN00002/trim", surface::dbForFourteenBit (newAt, surface::FaderLaw::d700));
+
+    sink.sent.clear();
+    settle (40);
+
+    const auto moves = motorMoves (sink, "PORTBNK1", 0);
+    MESSAGE ("zero " << zeroAt << " new " << newAt << " moves " << moves.size()
+                     << " last " << (moves.empty() ? -1 : moves.back()));
+
+    //  THE FADER ENDS WHERE THE ENGINE SAYS: the new start, not the old one.
+    REQUIRE_FALSE (moves.empty());
+    CHECK (std::abs (moves.back() - newAt) <= 2);
+}
+
+TEST_CASE ("surface bridge: only a touched fader writes a level - the motor's own report is no hand")
+{
+    /*  The author, 2026-09-25: "The rec is using the wrong fader curve. Each
+        press lowers the level from where it was recorded." The session log
+        said why: a clip re-armed at -8.75 dB was written -11.08 by the D700
+        reporting its motor on the way up, with no touch, and REC kept that. */
+    Desk desk;
+    const auto d700 = desk.makeSurface ("d700", "The D700");
+    const auto band = desk.makeDca ("Band");
+    desk.pin (desk.strips[d700][0], band);
+
+    desk.declare ({ desk.spec (d700, "d700", { "PORTBNK1", "PORTBNK2" }) },
+                  { { "PORTBNK1", plugged ("D700 bank 1") }, { "PORTBNK2", plugged ("D700 bank 2") } });
+    desk.ticks (3);
+    desk.clear();
+
+    //  THE MOTOR'S REPORT: a position and no touch - nothing written.
+    desk.arrive ("PORTBNK1", { 0xe0, 0x70, 0x45 });
+    desk.tickOnce();
+    CHECK (desk.submitted.empty());
+
+    //  THE HAND'S: touched, then moved - written.
+    desk.arrive ("PORTBNK1", { 0x90, 0x68, 0x7f });
+    desk.arrive ("PORTBNK1", { 0xe0, 0x70, 0x45 });
+    desk.tickOnce();
+
+    REQUIRE (desk.submitted.size() == 2u);
+    CHECK (desk.submitted[0].command == "node.touch");
+    CHECK (desk.submitted[1].command == "node.set");
+
+    //  Lifted, the fader's reports are the motor's again.
+    desk.arrive ("PORTBNK1", { 0x90, 0x68, 0x00 });
+    desk.tickOnce();
+    desk.clear();
+
+    desk.arrive ("PORTBNK1", { 0xe0, 0x00, 0x30 });
+    desk.tickOnce();
+    CHECK (desk.submitted.empty());
 }
 
 TEST_CASE ("surface bridge: a hand resting through a handover lets go of the old node, and touches the new one only by landing again")
@@ -1880,4 +2696,1003 @@ TEST_CASE ("m29: what a full refresh of a sixteen-strip D700 costs the tick thre
     });
 
     CHECK (stage.bridge.refusedSysEx() == 0u);
+}
+
+//==============================================================================
+//  The EQ and Send pages (author, 2026-09-25).
+
+namespace
+{
+    /*  A number to a tenth, as a case reads it - digit by digit, so the
+        fr_FR run reads the same. */
+    std::string tenths (double value)
+    {
+        const auto scaled = std::llround (value * 10.0);
+        const auto magnitude = scaled < 0 ? -scaled : scaled;
+        return (scaled < 0 ? "-" : "") + std::to_string (magnitude / 10) + "."
+             + std::to_string (magnitude % 10);
+    }
+
+    /*  A D700 OF SIXTEEN STRIPS ON TWO PORTS, a snapshot written by hand: strip
+        n holds cue CUE0000n, armed, and the tree says which cue the rotaries
+        are aimed at. Presses go in as bytes, and what the bridge asked for
+        comes out in `submitted`. */
+    struct PageDesk
+    {
+        explicit PageDesk (const std::string& profile = "d700", int stripCount = 16)
+        {
+            surface::SurfaceSpec spec;
+            spec.id = "SURF0001";
+            spec.profile = profile;
+            spec.ports = stripCount > 8 ? std::vector<std::string> { "PORTBNK1", "PORTBNK2" }
+                                        : std::vector<std::string> { "PORTBNK1" };
+
+            for (int n = 1; n <= stripCount; ++n)
+            {
+                const auto strip = "STRIP" + std::string (n < 10 ? "00" : "0") + std::to_string (n);
+                const auto cue = "CUE000" + std::string (n < 10 ? "0" : "") + std::to_string (n);
+                spec.strips.push_back (strip);
+
+                fake.text ("/godot/slot/" + strip + "/role", "sampler");
+                fake.text ("/godot/slot/" + strip + "/word", "armed");
+                fake.text ("/godot/slot/" + strip + "/cue", cue);
+                fake.text ("/godot/cue/" + cue + "/name", "Clip " + std::to_string (n));
+                fake.eqOf (cue);
+            }
+
+            fake.text ("/godot/cue/CUE00001/shortName", "Kick");
+            fake.text ("/godot/surface/aim", "");
+
+            specs = { spec };
+            declare();
+            publish();
+        }
+
+        void declare()
+        {
+            bridge.declare (specs, [] (const std::string&) { return plugged ("D700"); });
+        }
+
+        void publish()
+        {
+            bridge.afterTick (fake.publish (tick), touches, tick);
+        }
+
+        /*  Ticks with nothing in the hands: long enough for a colour, which
+            is written at most every `colourIntervalTicks`. */
+        void settle (int count = 6)
+        {
+            for (int n = 0; n < count; ++n)
+            {
+                ++tick;
+                publish();
+            }
+        }
+
+        /*  A tick's worth of hands: the bytes, the bridge's hook, then what the
+            tree says after it - which a case has set on the fake. */
+        void hands (std::vector<std::pair<std::string, midi::Bytes>> bytes)
+        {
+            for (auto& [port, message] : bytes)
+                REQUIRE (bridge.arrived (port, message));
+
+            ++tick;
+            bridge.beforeTick (collect, tick);
+        }
+
+        void press (const std::string& port, int note)
+        {
+            hands ({ { port, { 0x90, static_cast<std::uint8_t> (note), 0x7f } },
+                     { port, { 0x90, static_cast<std::uint8_t> (note), 0x00 } } });
+        }
+
+        void aimAt (const std::string& cue)
+        {
+            fake.text ("/godot/surface/aim", cue);
+            publish();
+        }
+
+        surface::SurfaceTable::Page page() const { return table.pageOf ("SURF0001"); }
+
+        std::vector<std::string> writes() const
+        {
+            std::vector<std::string> out;
+
+            for (const auto& event : submitted)
+            {
+                std::string one = event.command;
+
+                for (const auto& arg : event.args)
+                {
+                    one += " ";
+
+                    if (arg.isString())
+                        one += arg.getString();
+                    else if (arg.isBool())
+                        one += arg.getBool() ? "true" : "false";
+                    else if (arg.isNumber())
+                        one += tenths (arg.asDouble());
+                }
+
+                out.push_back (one);
+            }
+
+            return out;
+        }
+
+        RecordingSink sink;
+        surface::SurfaceTable table;
+        surface::SurfaceBridge bridge { sink, table };
+        tree::TouchTable touches;
+        FakeTree fake;
+        std::vector<surface::SurfaceSpec> specs;
+        std::vector<Event> submitted;
+        std::int64_t tick = 1;
+
+        surface::SurfaceBridge::Submit collect = [this] (Event event)
+        {
+            submitted.push_back (std::move (event));
+            return true;
+        };
+    };
+
+    /*  THE BAND'S COLOUR AS THE LEDS ARE SENT IT, at a share of its light:
+        whether all three of its messages went out. */
+    bool hasBandColour (const std::vector<midi::Bytes>& sent, int note, std::uint32_t argb, double share)
+    {
+        const auto half = [share] (std::uint32_t eight)
+        {
+            return static_cast<int> (std::lround (static_cast<double> (eight >> 1) * share));
+        };
+
+        const auto shaped = surface::forTheLeds ({ half ((argb >> 16) & 0xffu), half ((argb >> 8) & 0xffu),
+                                                   half (argb & 0xffu) });
+        const auto three = surface::d700Colour (note, shaped.red, shaped.green, shaped.blue);
+
+        for (std::size_t start = 0; start + 3 <= three.size(); start += 3)
+            if (! contains (sent, midi::Bytes (three.begin() + static_cast<std::ptrdiff_t> (start),
+                                               three.begin() + static_cast<std::ptrdiff_t> (start + 3))))
+                return false;
+
+        return ! three.empty();
+    }
+}
+
+TEST_CASE ("surface bridge: SELECT aims the rotaries at its strip's cue, lights for it, and lets go again")
+{
+    /*  The author, 2026-09-25: "while a sample is selected (select button)".
+        SELECT's light is the pick now - on a D700 the thin white bar at the
+        top of the screen - and the screen says "picked" too. */
+    PageDesk desk;
+
+    desk.press ("PORTBNK1", 0x18 + 2);
+    REQUIRE (desk.writes() == std::vector<std::string> { "surface.aim CUE00003" });
+    CHECK (desk.submitted[0].origin == "surface:SURF0001");
+
+    desk.sink.sent.clear();
+    desk.aimAt ("CUE00003");
+
+    const auto sent = sentOn (desk.sink, "PORTBNK1");
+    CHECK (contains (sent, surface::led (0x18 + 2, surface::Led::on)));
+    CHECK (contains (sent, surface::d700DisplayRow3 (2, "picked")));
+
+    //  Only the picked strip: the others stay dark and say "sampler".
+    CHECK_FALSE (contains (sent, surface::led (0x18, surface::Led::on)));
+
+    //  A lit SELECT lets go.
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x18 + 2);
+    CHECK (desk.writes() == std::vector<std::string> { "surface.aim " });
+
+    //  Another strip's SELECT aims there instead.
+    desk.submitted.clear();
+    desk.press ("PORTBNK2", 0x18 + 0);
+    CHECK (desk.writes() == std::vector<std::string> { "surface.aim CUE00009" });
+}
+
+TEST_CASE ("surface bridge: the transport's REC presses the take on the aimed mic cue's channel, and nothing else")
+{
+    /*  Phase 9c, decision CS: REC is `take.record` on the rack channel the
+        aimed mic cue plays through, each press the next of record, loop, a
+        layer and loop - which the engine's account decides, so the bridge
+        sends the same command every time. A media cue aimed, or none, has no
+        take to press. */
+    PageDesk desk;
+
+    //  Nothing aimed: nothing.
+    desk.press ("PORTBNK1", 0x5f);
+    CHECK (desk.submitted.empty());
+
+    //  A media cue aimed, which has no channel: nothing.
+    desk.aimAt ("CUE00001");
+    desk.press ("PORTBNK1", 0x5f);
+    CHECK (desk.submitted.empty());
+
+    //  A mic cue aimed, on its channel: its take pressed, once a press, and only on the way down.
+    desk.fake.text ("/godot/cue/MIC00001/channel", "CHAN0001");
+    desk.aimAt ("MIC00001");
+    desk.press ("PORTBNK1", 0x5f);
+    desk.press ("PORTBNK1", 0x5f);
+    CHECK (desk.writes() == std::vector<std::string> { "take.record CHAN0001", "take.record CHAN0001" });
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted[0].origin == "surface:SURF0001");
+
+    //  A mic cue that plays through no channel: nothing.
+    desk.submitted.clear();
+    desk.fake.text ("/godot/cue/MIC00002/channel", "");
+    desk.aimAt ("MIC00002");
+    desk.press ("PORTBNK1", 0x5f);
+    CHECK (desk.submitted.empty());
+}
+
+TEST_CASE ("surface bridge: EQ puts the aimed cue's EQ on sixteen rotaries at once, and EQ again leaves")
+{
+    PageDesk desk;
+
+    //  Nothing aimed at, nothing to show: EQ does nothing.
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "show");
+
+    desk.aimAt ("CUE00001");
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+
+    CHECK (desk.page().word == "eq");
+    CHECK (desk.page().index == 0);
+    CHECK (desk.page().count == 1);
+
+    desk.settle();
+
+    const auto first = sentOn (desk.sink, "PORTBNK1");
+    const auto second = sentOn (desk.sink, "PORTBNK2");
+
+    /*  THE AUTHOR'S MAP across both banks: the high-pass first - out, as a
+        cue's high-pass rests - and band one's shape, frequency, gain, width;
+        the low-pass last, on the second bank's eighth rotary. */
+    CHECK (contains (first, surface::d700DisplayRow (0, 0, "HP freq off")));
+    CHECK (contains (first, surface::d700DisplayRow (0, 1, "80 Hz")));
+    CHECK (contains (first, surface::d700DisplayRow3 (0, "EQ")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 0, "B1 shape")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 1, "Peak")));
+    CHECK (contains (first, surface::d700DisplayRow (3, 0, "B1 gain")));
+    CHECK (contains (first, surface::d700DisplayRow (3, 1, "0.0 dB")));
+    CHECK (contains (first, surface::d700DisplayRow3 (3, "Kick")));
+    CHECK (contains (second, surface::d700DisplayRow (0, 0, "B3 freq")));
+    CHECK (contains (second, surface::d700DisplayRow (0, 1, "2.00 kHz")));
+    CHECK (contains (second, surface::d700DisplayRow (7, 0, "LP freq off")));
+    CHECK (contains (second, surface::d700DisplayRow (7, 1, "12.0 kHz")));
+
+    //  THE RINGS: a gain from the centre, at nought; a frequency from the left.
+    CHECK (contains (first, surface::d700Ring (3, 64, 1)));
+    CHECK (contains (first, surface::d700Ring (0, surface::d700RingFor (surface::Law::frequency, 80.0, 20.0,
+                                                                         2000.0, surface::FaderLaw::d700).value, 2)));
+
+    /*  THE BANDS' COLOURS on the surrounds: band one's orange at full, the
+        high-pass's red dimmed - it is out - and the low-pass's purple too. */
+    CHECK (hasBandColour (first, 0x23, audio::eqBand1Colour, 1.0));
+    CHECK (hasBandColour (first, 0x20, audio::eqHighPassColour, surface::pageOffLight));
+    CHECK (hasBandColour (second, 0x27, audio::eqLowPassColour, surface::pageOffLight));
+
+    //  EQ SAYS SO: lit steadily, one page of it, on the bank that asked.
+    CHECK (contains (first, surface::led (0x2c, surface::Led::on)));
+    CHECK_FALSE (contains (second, surface::led (0x2c, surface::Led::on)));
+
+    //  EQ AGAIN, and the surface is back on its own page, EQ dark.
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "show");
+    desk.publish();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x2c, surface::Led::off)));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Kick")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "picked")));
+}
+
+TEST_CASE ("surface bridge: on eight rotaries the EQ is two pages, then the surface's own; * leaves at once")
+{
+    PageDesk desk ("mcu", 8);
+    desk.aimAt ("CUE00001");
+
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "eq");
+    CHECK (desk.page().index == 0);
+    CHECK (desk.page().count == 2);
+
+    //  "the second press open the higher bands": band three's frequency first.
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().index == 1);
+    desk.publish();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::lcdCell (0x14, 0, 0, "B3 Frq")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::lcdCell (0x14, 0, 7, "LP Frq")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::lcdCell (0x14, 1, 7, "off")));
+
+    //  And a third is the surface's own page again.
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "show");
+
+    //  `*` leaves from any page.
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "eq");
+    desk.press ("PORTBNK1", 0x36);
+    CHECK (desk.page().word == "show");
+
+    /*  PAGE TWO OF TWO BLINKS TWICE every second and a half: the EQ light
+        goes on twice in one cycle. */
+    desk.press ("PORTBNK1", 0x2c);
+    desk.press ("PORTBNK1", 0x2c);
+    REQUIRE (desk.page().index == 1);
+
+    //  From a dark moment of the cycle, one whole cycle.
+    const auto start = desk.tick - desk.tick % surface::pageBlinkCycleTicks + surface::pageBlinkCycleTicks;
+    desk.tick = start - 1;
+    desk.publish();
+    desk.sink.sent.clear();
+
+    for (desk.tick = start; desk.tick < start + surface::pageBlinkCycleTicks; ++desk.tick)
+        desk.publish();
+
+    auto lit = 0;
+
+    for (const auto& message : sentOn (desk.sink, "PORTBNK1"))
+        if (message == surface::led (0x2c, surface::Led::on))
+            ++lit;
+
+    CHECK (lit == 2);
+}
+
+TEST_CASE ("surface bridge: a turn on the EQ page writes the aimed cue's row by its law, a tick's detents folded")
+{
+    PageDesk desk;
+    desk.aimAt ("CUE00001");
+    desk.press ("PORTBNK1", 0x2c);
+    desk.submitted.clear();
+
+    /*  TWO DETENTS ON BAND ONE'S FREQUENCY in one tick are one write, two
+        sixteenths of an octave up from 100 Hz; one back on its gain is half a
+        decibel down. */
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } },
+                  { "PORTBNK1", { 0xb0, 0x12, 0x01 } },
+                  { "PORTBNK1", { 0xb0, 0x13, 0x41 } } });
+
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/cue/CUE00001/eqB1Freq 109.1",
+                                                       "node.set /godot/cue/CUE00001/eqB1Gain -0.5" });
+    CHECK (desk.submitted[0].origin == "surface:SURF0001");
+    CHECK (desk.page().edited == "/godot/cue/CUE00001/eqB1Gain");
+
+    /*  A PRESS SWITCHES, and never fires the pad: band one out on its gain's
+        rotary, the high-pass in on its frequency's, band one's shape to its
+        shelf, and a press on a width does nothing. */
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x23);
+    desk.press ("PORTBNK1", 0x20);
+    desk.press ("PORTBNK1", 0x21);
+    desk.press ("PORTBNK1", 0x24);
+
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/cue/CUE00001/eqB1On false",
+                                                       "node.set /godot/cue/CUE00001/eqHpf true",
+                                                       "node.set /godot/cue/CUE00001/eqB1Shape lowShelf" });
+
+    //  Turned against an end, nothing is written.
+    desk.submitted.clear();
+    desk.fake.number ("/godot/cue/CUE00001/eqB2Gain", 24.0);
+    desk.publish();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x16, 0x01 } } });
+    CHECK (desk.submitted.empty());
+
+    //  On the surface's own page, a turn moves nothing and a press is the pad.
+    desk.press ("PORTBNK1", 0x36);
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    CHECK (desk.submitted.empty());
+    desk.press ("PORTBNK1", 0x23);
+    CHECK (desk.writes() == std::vector<std::string> { "strip.press STRIP004", "strip.release STRIP004" });
+}
+
+namespace
+{
+    /*  TWO INSERTS ON CUE00001, as the tree publishes them (2026-09-26): a
+        reverb of twenty parameters - the second a bipolar one - and a delay
+        of two, the first stepped in three. */
+    void insertsOn (PageDesk& desk)
+    {
+        auto& fake = desk.fake;
+        fake.text ("/godot/cue/CUE00001/fx", "FXAA0001 FXAA0002");
+
+        const auto plugin = [&fake] (const std::string& fx, const std::string& id, const std::string& name, int params)
+        {
+            fake.text ("/godot/fx/" + fx + "/plugin", id);
+            fake.text ("/godot/fx/" + fx + "/name", name);
+            fake.number ("/godot/plugin/" + id + "/paramCount", params);
+
+            for (int n = 0; n < params; ++n)
+            {
+                const auto param = "/godot/plugin/" + id + "/param/" + std::to_string (n) + "/";
+                fake.text (param + "name", name + " knob " + std::to_string (n));
+                fake.text (param + "shortName", "K" + std::to_string (n));
+                fake.number (param + "default", 0.5);
+                fake.number (param + "steps", 0.0);
+                fake.flag (param + "bipolar", n == 1);
+                fake.number ("/godot/fx/" + fx + "/p" + std::to_string (n), 0.5);
+                fake.text ("/godot/fx/" + fx + "/t" + std::to_string (n), std::to_string (n) + " units");
+            }
+        };
+
+        plugin ("FXAA0001", "PG7N0001", "Verb", 20);
+        plugin ("FXAA0002", "PG7N0002", "Delay", 2);
+        fake.number ("/godot/plugin/PG7N0002/param/0/steps", 3.0);
+        desk.publish();
+    }
+
+    double lastValue (const PageDesk& desk)
+    {
+        REQUIRE_FALSE (desk.submitted.empty());
+        return desk.submitted.back().args.at (1).asDouble();
+    }
+
+    /*  A MIC CUE ON A SAMPLING CHANNEL (Phase 9c): MIC00001 on CHAN0001, whose
+        take of four seconds loops between one and three, at -6 dB. */
+    void takeOn (PageDesk& desk)
+    {
+        auto& fake = desk.fake;
+        fake.text ("/godot/cue/MIC00001/name", "Loop voice");
+        fake.text ("/godot/cue/MIC00001/channel", "CHAN0001");
+        fake.number ("/godot/cue/MIC00001/level", -6.0);
+        fake.number ("/godot/slot/CHAN0001/takeSeconds", 10.0);
+        fake.number ("/godot/slot/CHAN0001/takeLength", 4.0);
+        fake.number ("/godot/slot/CHAN0001/loopIn", 1.0);
+        fake.number ("/godot/slot/CHAN0001/loopOut", 3.0);
+        fake.text ("/godot/slot/CHAN0001/take", "looping");
+        desk.publish();
+    }
+}
+
+TEST_CASE ("surface bridge: Pan puts the aimed mic cue's take on the rotaries - in, out, a slide of both, and its level")
+{
+    /*  Phase 9c, stage 9c.5 (namespace draft 19.7, decision CD): the Loop
+        page, whose points are written through the take's door. */
+    PageDesk desk;
+    takeOn (desk);
+    desk.aimAt ("MIC00001");
+    desk.sink.sent.clear();
+
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "loop");
+    CHECK (desk.page().count == 1);
+    desk.settle();
+
+    const auto sent = sentOn (desk.sink, "PORTBNK1");
+    CHECK (contains (sent, surface::d700DisplayRow (0, 0, "Loop in")));
+    CHECK (contains (sent, surface::d700DisplayRow (0, 1, "1.000 s")));
+    CHECK (contains (sent, surface::d700DisplayRow (1, 1, "3.000 s")));
+    CHECK (contains (sent, surface::d700DisplayRow (2, 1, "2.000 s")));       // the slide says the loop's length
+    CHECK (contains (sent, surface::d700DisplayRow (3, 1, "-6.0 dB")));
+    CHECK (contains (sent, surface::d700DisplayRow3 (0, "Loop")));
+    CHECK (contains (sent, surface::d700Ring (0, 32, 2)));                    // in, a quarter into the take
+    CHECK (contains (sent, surface::led (0x2a, surface::Led::on)));
+
+    //  IN, three detents on: thirty milliseconds, through the take's door.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x03 } } });
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].command == "node.set");
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/slot/CHAN0001/loopIn");
+    CHECK (lastValue (desk) == doctest::Approx (1.03));
+    CHECK (desk.page().edited == "/godot/slot/CHAN0001/loopIn");
+
+    //  OUT, spun back five: fifty milliseconds a detent.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x11, 0x45 } } });
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/slot/CHAN0001/loopOut");
+    CHECK (lastValue (desk) == doctest::Approx (2.75));
+
+    //  THE SLIDE: both by the same amount, the point moving away from the other first.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x02 } } });
+    REQUIRE (desk.submitted.size() == 2u);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/slot/CHAN0001/loopOut");
+    CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (3.02));
+    CHECK (desk.submitted[1].args[0].getString() == "/godot/slot/CHAN0001/loopIn");
+    CHECK (desk.submitted[1].args[1].asDouble() == doctest::Approx (1.02));
+
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x41 } } });
+    REQUIRE (desk.submitted.size() == 2u);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/slot/CHAN0001/loopIn");
+    CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (0.99));
+    CHECK (desk.submitted[1].args[0].getString() == "/godot/slot/CHAN0001/loopOut");
+    CHECK (desk.submitted[1].args[1].asDouble() == doctest::Approx (2.99));
+
+    //  Held within the take: a loop whose out is the take's end slides no further on.
+    desk.fake.number ("/godot/slot/CHAN0001/loopOut", 4.0);
+    desk.publish();
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    CHECK (desk.submitted.empty());
+
+    //  A PRESS puts a point at its end of the take, and the level at nought.
+    desk.press ("PORTBNK1", 0x20);
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted.back().args[0].getString() == "/godot/slot/CHAN0001/loopIn");
+    CHECK (lastValue (desk) == doctest::Approx (0.0));
+
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x23);
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted.back().args[0].getString() == "/godot/cue/MIC00001/level");
+    CHECK (lastValue (desk) == doctest::Approx (0.0));
+
+    //  Pan again leaves.
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "show");
+}
+
+TEST_CASE ("surface bridge: the Loop page on a cue with no take says so, and turns nothing")
+{
+    PageDesk desk;
+    desk.aimAt ("CUE00001");
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "loop");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "no take")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "Loop")));
+
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x01 } } });
+    CHECK (desk.submitted.empty());
+
+    //  A take still recording has no loop to move yet, and its points say so.
+    takeOn (desk);
+    desk.fake.number ("/godot/slot/CHAN0001/takeLength", 0.0);
+    desk.fake.text ("/godot/slot/CHAN0001/take", "recording");
+    desk.sink.sent.clear();
+    desk.aimAt ("MIC00001");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 1, "no loop yet")));
+}
+
+TEST_CASE ("surface bridge: Rec is lit while the aimed take records, blinks while a layer is laid, and Loop presses take.loop")
+{
+    /*  Phase 9c, stage 9c.5: the transport's Rec says what the aimed mic
+        cue's take is doing, on the first port, where the transport is. */
+    PageDesk desk;
+    takeOn (desk);
+    desk.fake.text ("/godot/slot/CHAN0001/take", "recording");
+    desk.aimAt ("MIC00001");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::on)));
+    CHECK_FALSE (contains (sentOn (desk.sink, "PORTBNK2"), surface::led (0x5f, surface::Led::on)));
+
+    desk.sink.sent.clear();
+    desk.fake.text ("/godot/slot/CHAN0001/take", "looping");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::off)));
+
+    //  A layer being laid: blinking, lit and dark in turn.
+    desk.sink.sent.clear();
+    desk.fake.text ("/godot/slot/CHAN0001/take", "overdubbing");
+    desk.settle (40);
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::on)));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::off)));
+
+    //  LOOP - Mackie's Cycle - is take.loop on the aimed cue's channel.
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x56);
+    CHECK (desk.writes() == std::vector<std::string> { "take.loop CHAN0001" });
+
+    //  Nothing aimed: nothing pressed.
+    desk.aimAt ("");
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x56);
+    CHECK (desk.submitted.empty());
+}
+
+TEST_CASE ("surface bridge: FX puts the aimed cue's inserts on the rotaries, a plugin's own order, walked in chain order")
+{
+    /*  The author's decisions of 2026-09-26: the first sixteen parameters of
+        the first insert in the plugin's own order; further presses page
+        through the rest, then the next insert's; after the last, the
+        surface's own page. The first rotary's third row says which. */
+    PageDesk desk;
+    insertsOn (desk);
+    desk.aimAt ("CUE00001");
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2b);
+
+    CHECK (desk.page().word == "fx");
+    CHECK (desk.page().index == 0);
+    CHECK (desk.page().count == 3);     // Verb 1/2, Verb 2/2, Delay
+
+    desk.settle();
+    const auto first = sentOn (desk.sink, "PORTBNK1");
+    const auto second = sentOn (desk.sink, "PORTBNK2");
+
+    CHECK (contains (first, surface::d700DisplayRow (0, 0, "Verb knob 0")));
+    CHECK (contains (first, surface::d700DisplayRow (0, 1, "0 units")));
+    CHECK (contains (first, surface::d700DisplayRow3 (0, "Verb 1/2")));
+    CHECK (contains (first, surface::d700DisplayRow3 (1, "Kick")));
+    CHECK (contains (second, surface::d700DisplayRow (7, 0, "Verb knob 15")));
+
+    //  A bipolar parameter's ring fills from the centre, the others from the left.
+    CHECK (contains (first, surface::d700Ring (1, 64, 1)));
+    CHECK (contains (first, surface::d700Ring (0, 64, 2)));
+
+    //  THE SECOND PAGE: the reverb's last four, the other rotaries dark.
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().index == 1);
+    desk.sink.sent.clear();
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Verb knob 16")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "Verb 2/2")));
+
+    //  THE NEXT INSERT, and then the surface's own page.
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().index == 2);
+    desk.sink.sent.clear();
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Delay knob 0")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "Delay")));
+
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().word == "show");
+}
+
+TEST_CASE ("surface bridge: on the FX page a turn moves a parameter along its travel, a step at a time when it has steps, and a press puts it back")
+{
+    PageDesk desk;
+    insertsOn (desk);
+    desk.aimAt ("CUE00001");
+    desk.press ("PORTBNK1", 0x2b);
+    desk.submitted.clear();
+
+    //  Two detents up on the reverb's first parameter: two hundred-and-twenty-eighths.
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x02 } } });
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].command == "node.set");
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/fx/FXAA0001/p0");
+    CHECK (lastValue (desk) == doctest::Approx (0.5 + 2.0 / 128.0));
+    CHECK (desk.page().edited == "/godot/fx/FXAA0001/p0");
+
+    //  A press puts it back where the preset leaves it.
+    desk.fake.number ("/godot/fx/FXAA0001/p0", 0.8);
+    desk.publish();
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x20);
+    CHECK (lastValue (desk) == doctest::Approx (0.5));
+
+    //  At its rest, a press writes nothing; against an end, a turn neither.
+    desk.fake.number ("/godot/fx/FXAA0001/p0", 0.5);
+    desk.fake.number ("/godot/fx/FXAA0001/p2", 1.0);
+    desk.publish();
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x20);
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    CHECK (desk.submitted.empty());
+
+    //  THE DELAY'S STEPPED PARAMETER: one step a detent, of three - from the middle to the top.
+    desk.press ("PORTBNK1", 0x2b);
+    desk.press ("PORTBNK1", 0x2b);
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x01 } } });
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/fx/FXAA0002/p0");
+    CHECK (lastValue (desk) == doctest::Approx (1.0));
+}
+
+TEST_CASE ("surface bridge: a cue with no insert in shows the FX page saying so, and an MCU names its knobs in seven")
+{
+    PageDesk desk;
+    desk.aimAt ("CUE00002");
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().word == "fx");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "no FX in")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "FX")));
+
+    //  A turn on nothing writes nothing; FX again leaves.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x01 } } });
+    CHECK (desk.submitted.empty());
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().word == "show");
+
+    PageDesk mcu ("mcu", 8);
+    insertsOn (mcu);
+    mcu.aimAt ("CUE00001");
+    mcu.press ("PORTBNK1", 0x2b);
+    CHECK (mcu.page().count == 4);      // Verb in three pages of eight, and the delay
+}
+
+TEST_CASE ("surface bridge: a page moves no fader, outlives a show edit, and closes when its cue is let go")
+{
+    PageDesk desk;
+    desk.aimAt ("CUE00001");
+
+    //  The faders have landed where the tree says.
+    for (int n = 0; n < 30; ++n)
+    {
+        ++desk.tick;
+        desk.publish();
+    }
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    desk.publish();
+
+    //  No fader message (0xE0 + strip) on either bank: the faders stay put.
+    for (const auto& message : desk.sink.sent)
+        CHECK ((message.bytes.front() & 0xf0) != 0xe0);
+
+    //  A SHOW EDIT DECLARES AGAIN - every unlocked turn is one - and the page stays.
+    desk.declare();
+    CHECK (desk.page().word == "eq");
+    desk.publish();
+    CHECK (desk.page().word == "eq");
+
+    //  Its cue let go of: the surface's own page again.
+    desk.aimAt ("");
+    CHECK (desk.page().word == "show");
+}
+
+namespace
+{
+    /*  THE SHOW'S MIX CHANNELS AND THE AIMED CUE'S SENDS, as the tree
+        publishes them: channels in output order, each named, and the cue
+        sending to the first only, at -6 dB. */
+    void fakeSends (FakeTree& fake, int channels)
+    {
+        std::string mixes;
+
+        for (int n = 1; n <= channels; ++n)
+        {
+            const auto bus = "BUS000" + std::string (n < 10 ? "0" : "") + std::to_string (n);
+            mixes += (mixes.empty() ? "" : " ") + bus;
+            fake.text ("/godot/bus/" + bus + "/name", n == 1 ? "Foldback" : "Mix " + std::to_string (n));
+        }
+
+        fake.text ("/godot/audio/mixes", mixes);
+        fake.text ("/godot/cue/CUE00001/sends", "SND00001");
+        fake.text ("/godot/send/SND00001/bus", "BUS00001");
+        fake.number ("/godot/send/SND00001/level", -6.0);
+        fake.flag ("/godot/send/SND00001/on", true);
+        fake.text ("/godot/cue/CUE00001/colour", "#C04040");
+    }
+}
+
+TEST_CASE ("surface bridge: Send puts the aimed cue's sends on the rotaries, one a mix channel, and makes a missing one")
+{
+    /*  The author, 2026-09-25: "Can the selected sample or media cue have its
+        send levels displayed on the rotaries? ... Click the rotaries to toggle
+        on and off." */
+    PageDesk desk;
+    fakeSends (desk.fake, 3);
+    desk.aimAt ("CUE00001");
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "send");
+    CHECK (desk.page().count == 1);
+    desk.settle();
+
+    const auto first = sentOn (desk.sink, "PORTBNK1");
+
+    //  ONE ROTARY A MIX CHANNEL, in output order: the send's level, or "no send".
+    CHECK (contains (first, surface::d700DisplayRow (0, 0, "Foldback")));
+    CHECK (contains (first, surface::d700DisplayRow (0, 1, "-6.0 dB")));
+    CHECK (contains (first, surface::d700DisplayRow3 (0, "Send")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 0, "Mix 2")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 1, "no send")));
+
+    //  Past the last channel, dark and blank.
+    CHECK (contains (first, surface::d700DisplayRow (3, 0, "")));
+
+    //  The ring where a fader would stand; Send lit.
+    CHECK (contains (first, surface::d700Ring (0, surface::d700RingFor (surface::Law::level, -6.0, -120.0, 12.0,
+                                                                         surface::FaderLaw::d700).value, 2)));
+    CHECK (contains (first, surface::led (0x29, surface::Led::on)));
+
+    //  A TURN rides the level along the fader's law; a PRESS switches the send.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x01 } } });
+    desk.press ("PORTBNK1", 0x20);
+
+    const auto up = surface::turned (surface::Law::level, -6.0, 1, -120.0, 12.0, surface::FaderLaw::d700);
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/send/SND00001/level " + tenths (up),
+                                                       "node.set /godot/send/SND00001/on false" });
+
+    /*  A CHANNEL THE CUE DOES NOT REACH is made one by the hand: turned up
+        from silence, or pressed - at nought. Turned down, nothing. */
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x11, 0x02 } } });
+    desk.press ("PORTBNK1", 0x22);
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x41 } } });
+
+    const auto fromSilence = surface::turned (surface::Law::level, -120.0, 2, -120.0, 12.0, surface::FaderLaw::d700);
+    CHECK (desk.writes() == std::vector<std::string> {
+                                "send.create CUE00001 BUS00002  " + tenths (fromSilence),
+                                "send.create CUE00001 BUS00003  0.0" });
+
+    //  Send again: one page, so the surface's own page.
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "show");
+}
+
+TEST_CASE ("surface bridge: seventeen mix channels on sixteen rotaries are two Send pages; none is no page")
+{
+    PageDesk desk;
+    fakeSends (desk.fake, 17);
+    desk.aimAt ("CUE00001");
+
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().count == 2);
+    CHECK (desk.page().index == 0);
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().index == 1);
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Mix 17")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "Send 2/2")));
+
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "show");
+
+    //  A show with no mix channel has no Send page.
+    desk.fake.text ("/godot/audio/mixes", "");
+    desk.publish();
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "show");
+
+    //  And EQ goes straight from a Send page to its own.
+    desk.fake.text ("/godot/audio/mixes", "BUS00001");
+    desk.publish();
+    desk.press ("PORTBNK1", 0x29);
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "eq");
+}
+
+TEST_CASE ("surface bridge: the master dial turns the number last clicked, its click lets go and its double click rests")
+{
+    /*  The author, 2026-09-26: "Can selecting a parameter in the inspector or
+        foot panel on-screen via mouse or touch assign it to the master rotary
+        encoder on the D700?" - and "click could be deselect and double click
+        back to default". The window's click is `surface.dial`; here the table
+        holds what it chose and the tree says it, as the engine would. */
+    PageDesk desk;
+
+    const std::string level = "/godot/cue/CUE00001/level";
+
+    const auto dialOn = [&desk, &level]
+    {
+        surface::SurfaceTable::Dial dial;
+        dial.address = level;
+        dial.hasMinimum = true;
+        dial.minimum = -120.0;
+        dial.hasMaximum = true;
+        dial.maximum = 12.0;
+        dial.unit = "dB";
+        dial.hasRest = true;
+        dial.rest = 0.0;
+        desk.table.setDial (dial);
+        desk.fake.text ("/godot/surface/dial", level);
+    };
+
+    const auto jog = [] (int value) -> midi::Bytes
+    {
+        return { 0xb0, 0x3c, static_cast<std::uint8_t> (value) };
+    };
+
+    desk.fake.number (level, -6.0);
+    desk.fake.text ("/godot/surface/dial", "");
+    desk.publish();
+
+    SUBCASE ("a free dial turns nothing, and its click sends nothing")
+    {
+        desk.hands ({ { "PORTBNK1", jog (1) } });
+        desk.press ("PORTBNK1", 0x38);
+        CHECK (desk.submitted.empty());
+    }
+
+    SUBCASE ("a turn is one write a tick, the detents folded, by the row's law")
+    {
+        dialOn();
+        desk.publish();
+
+        desk.hands ({ { "PORTBNK1", jog (1) }, { "PORTBNK1", jog (2) } });
+        REQUIRE (desk.submitted.size() == 1u);
+        CHECK (desk.submitted[0].command == "node.set");
+        CHECK (desk.submitted[0].origin == "surface:SURF0001");
+        CHECK (desk.submitted[0].args[0].getString() == level);
+        CHECK (desk.submitted[0].args[1].asDouble()
+                 == doctest::Approx (surface::turned (surface::Law::level, -6.0, 3, -120.0, 12.0,
+                                                      surface::FaderLaw::d700)));
+
+        //  Sign and magnitude: 0x41 is one detent down.
+        desk.submitted.clear();
+        desk.hands ({ { "PORTBNK2", jog (0x41) } });
+        REQUIRE (desk.submitted.size() == 1u);
+        CHECK (desk.submitted[0].args[1].asDouble() < -6.0);
+    }
+
+    SUBCASE ("the double click puts it back to its rest, and at its rest writes nothing")
+    {
+        dialOn();
+        desk.publish();
+
+        desk.press ("PORTBNK1", 0x39);
+        REQUIRE (desk.submitted.size() == 1u);
+        CHECK (desk.submitted[0].args[0].getString() == level);
+        CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (0.0));
+
+        desk.submitted.clear();
+        desk.fake.number (level, 0.0);
+        desk.publish();
+        desk.press ("PORTBNK1", 0x39);
+        CHECK (desk.submitted.empty());
+    }
+
+    SUBCASE ("the click lets go")
+    {
+        dialOn();
+        desk.publish();
+
+        desk.press ("PORTBNK1", 0x38);
+        CHECK (desk.writes() == std::vector<std::string> { "surface.dial " });
+    }
+
+    SUBCASE ("a number the tree no longer has - its cue gone - is not turned")
+    {
+        dialOn();
+        desk.fake.text ("/godot/surface/dial", "");
+        desk.publish();
+
+        desk.hands ({ { "PORTBNK1", jog (1) } });
+        CHECK (desk.submitted.empty());
+    }
+
+    SUBCASE ("the dial is dark while free and wears its cue's colour while it turns something")
+    {
+        //  Painted dark from the first paint on.
+        const auto dark = surface::d700Colour (0x38, 0, 0, 0);
+        const auto sentDark = colourOf (desk.sink, "PORTBNK1", 0x38);
+        REQUIRE (sentDark.size() == 3u);
+        CHECK (sentDark[0] == midi::Bytes (dark.begin(), dark.begin() + 3));
+
+        dialOn();
+        desk.fake.text ("/godot/cue/CUE00001/colour", "#FF0000");
+        desk.sink.sent.clear();
+        desk.settle();
+
+        const auto red = surface::forTheLeds (*surface::colourFromHex ("#FF0000"));
+        const auto three = surface::d700Colour (0x38, red.red, red.green, red.blue);
+        const auto sentRed = colourOf (desk.sink, "PORTBNK1", 0x38);
+        REQUIRE (sentRed.size() == 3u);
+        CHECK (sentRed[0] == midi::Bytes (three.begin(), three.begin() + 3));
+    }
+}
+
+TEST_CASE ("surface bridge: a Mackie's jog wheel turns the dial's number, and its F3 is its own")
+{
+    PageDesk desk { "mcu", 8 };
+
+    const std::string wait = "/godot/cue/CUE00001/preWait";
+    surface::SurfaceTable::Dial dial;
+    dial.address = wait;
+    dial.hasMinimum = true;
+    dial.unit = "s";
+    dial.hasRest = true;
+    desk.table.setDial (dial);
+    desk.fake.text ("/godot/surface/dial", wait);
+    desk.fake.number (wait, 1.0);
+    desk.publish();
+
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x3c, 0x02 } } });
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (1.2));
+
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x38);
+    desk.press ("PORTBNK1", 0x39);
+    CHECK (desk.submitted.empty());
 }

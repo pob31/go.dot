@@ -20,6 +20,7 @@
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/FadePoints.h>
+#include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/OutputLayout.h>
 #include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -275,11 +276,26 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    namespace
+    {
+        /*  A CUE THAT SOUNDS: a media cue, or a mic cue (Phase 9b). The two
+            carry the `sound` rows - level, routing, EQ, inserts, sends - and so
+            take the children that are made of them: a route, a feed, a send,
+            an insert of a plugin. What names a file - a range, a split, a
+            media cue's Insert - stays the media cue's. */
+        bool isSoundingCue (const juce::ValueTree& cue)
+        {
+            return cue.hasType ("Media") || cue.hasType ("Mic");
+        }
+    }
+
+    //==============================================================================
     std::string_view ShowDocument::elementForKind (std::string_view kind)
     {
         if (kind == "memo")  return "Cue";
         if (kind == "group") return "Group";
         if (kind == "media") return "Media";
+        if (kind == "mic")   return "Mic";
         if (kind == "fade")  return "Fade";
         if (kind == "transport") return "Transport";
         if (kind == "osc")   return "Osc";
@@ -323,6 +339,9 @@ namespace wfg::doc
 
         /*  And Phase 9a's: `/godot/plugin/order` beside `/godot/plugin/<id>/name`. */
         if (element == "Plugins")  return "plugin";
+
+        /*  And Phase 9b's: `/godot/input/order` beside `/godot/input/<id>/name`. */
+        if (element == "Inputs")   return "input";
         return {};
     }
 
@@ -332,7 +351,7 @@ namespace wfg::doc
             client that has an identifier does not have to know which it got,
             and a cue that becomes a group keeps its address. */
         if (element == "Cue" || element == "Group" || element == "Media"
-              || element == "Fade" || element == "Transport"
+              || element == "Mic" || element == "Fade" || element == "Transport"
               || element == "Osc" || element == "Midi"
               || element == "Start")                                return "cue";
         if (element == "Lists")                     return "lists";
@@ -391,6 +410,10 @@ namespace wfg::doc
         /*  PHASE 9a. The plugin set and its entries, under Audio. */
         if (element == "Plugins")                   return "plugins";
         if (element == "Plugin")                    return "plugin";
+
+        /*  PHASE 9b. The named inputs and their container, under Audio. */
+        if (element == "Inputs")                    return "inputs";
+        if (element == "Input")                     return "input";
 
         return {};
     }
@@ -806,7 +829,30 @@ namespace wfg::doc
                                             && tick >= lastWriteTick
                                             && tick - lastWriteTick <= coalescingWindowTicks;
 
-        if (! joinsOpenTransaction)
+        /*  A PLUGIN'S STATE JOINS THE TURN THAT LEFT IT (the author's decision
+            of 2026-09-25: "one Undo"). The editing helper keeps a plugin's
+            whole state with the cue a moment after the hand stops, as
+            `fx.capture` - and when the last write was a turn of THAT insert's
+            parameters, from the same origin, within the window, the capture
+            is part of the same thing somebody did and joins its step. Keyed on
+            logged ticks and origins, so a replay splits exactly as the session
+            did. A capture after anything else - an impulse response loaded,
+            which moves no parameter - is a step of its own. */
+        const auto captured = (commandName == "fx.capture" && ! args.empty() && args[0].isString())
+                                ? args[0].getString()
+                                : std::string {};
+        const auto turnPrefix = "/godot/fx/" + captured + "/p";
+
+        const auto joinsTurn = ! captured.empty()
+                                 && lastWriteAddress.size() > turnPrefix.size()
+                                 && lastWriteAddress.compare (0, turnPrefix.size(), turnPrefix) == 0
+                                 && lastWriteAddress[turnPrefix.size()] >= '0'
+                                 && lastWriteAddress[turnPrefix.size()] <= '9'
+                                 && writeOrigin == lastWriteOrigin
+                                 && tick >= lastWriteTick
+                                 && tick - lastWriteTick <= captureJoinWindowTicks;
+
+        if (! joinsOpenTransaction && ! joinsTurn)
         {
             /*  EVERY DOMAIN, because which one a command writes to is the
                 command's business and not this hook's, and naming a transaction
@@ -979,6 +1025,12 @@ namespace wfg::doc
 
             if (target.attribute->element == "Fade" && name == "points"
                 && ! readFadePoints (canonical).problem.empty())
+                return EditResult::failed (reason::badValue);
+
+            /*  And a media cue's level lane as a lane (namespace §20.3): pairs,
+                seconds climbing from the file's start, levels a cue may take. */
+            if (target.attribute->element == "Media" && name == "levelLane"
+                && ! readLevelLane (canonical).problem.empty())
                 return EditResult::failed (reason::badValue);
 
             if (name == "gains"
@@ -1216,7 +1268,7 @@ namespace wfg::doc
 
     EditResult ShowDocument::createCue (const std::string& parentId, int index,
                                         const std::string& kind, const std::string& name,
-                                        const std::string& id)
+                                        const std::string& id, const Attributes& attributes)
     {
         const auto elementName = elementForKind (kind);
 
@@ -1231,11 +1283,36 @@ namespace wfg::doc
         /*  `kind` is a read-only attribute derived from the element, so it is
             not written: /godot/cue/<id>/kind reports "group" because the element
             is a Group, and a client cannot turn one into the other by writing
-            to it. */
-        return insertObject (parent, index, elementName, id, { { "name", name } });
+            to it.
+
+            AND NEITHER IS ANY OTHER ROW NOBODY COULD WRITE AFTERWARDS: a cue
+            born with a setting is the create and the write it saves, never a
+            second door past `setAttribute`'s read-only check. Asked here,
+            before `insertObject` draws an identifier, so a refusal leaves the
+            registry as it found it. An unknown row and a bad value are
+            `insertObject`'s to refuse, as they are for every create. */
+        const auto* element = Schema::instance().element (elementName);
+        std::vector<std::pair<std::string_view, std::string>> born { { "name", name } };
+
+        for (const auto& [attributeName, text] : attributes)
+        {
+            if (attributeName == "name" || attributeName == "id")
+                return EditResult::failed (reason::badValue);
+
+            if (element != nullptr)
+                if (const auto* attribute = element->attribute (attributeName);
+                    attribute != nullptr
+                      && (attribute->access() == Access::read || attribute->persist() == Persist::none))
+                    return EditResult::failed (reason::readOnly);
+
+            born.emplace_back (attributeName, text);
+        }
+
+        return insertObject (parent, index, elementName, id, born);
     }
 
-    EditResult ShowDocument::groupSelection (const std::vector<std::string>& ids, const std::string& id)
+    EditResult ShowDocument::groupSelection (const std::vector<std::string>& ids, const std::string& id,
+                                             const Attributes& attributes)
     {
         if (auto refusal = refuseIfLocked()) return *refusal;
         if (ids.empty()) return EditResult::failed (reason::badValue);
@@ -1287,7 +1364,8 @@ namespace wfg::doc
             if (isSequenceChild (sibling)) ++position;
         }
         // All sources and the destination are validated before the first edit.
-        const auto created = createCue (parent[idProperty].toString().toStdString(), position, "group", "", id);
+        const auto created = createCue (parent[idProperty].toString().toStdString(), position, "group", "", id,
+                                        attributes);
         if (! created.ok) return created;
         for (const auto& node : ordered)
             move (node[idProperty].toString().toStdString(), created.id, endOfSequence);
@@ -1306,7 +1384,7 @@ namespace wfg::doc
         /*  Only a media cue has anywhere for a sound to go. Refusing here
             rather than in the grammar means the client is told which of its two
             identifiers was wrong, and told it at the moment it asked. */
-        if (cue.getType().toString() != "Media")
+        if (! isSoundingCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         return insertObject (cue, endOfSequence, "Route", id,
@@ -1465,8 +1543,68 @@ namespace wfg::doc
         return buses;
     }
 
+    std::vector<juce::ValueTree> ShowDocument::inputNodes() const
+    {
+        std::vector<juce::ValueTree> inputs;
+
+        const auto container = showNode.getChildWithName ("Audio").getChildWithName ("Inputs");
+
+        if (! container.isValid())
+            return inputs;
+
+        for (const auto& child : container)
+            if (child.hasType ("Input"))
+                inputs.push_back (child);
+
+        /*  READ ORDER IS CHANNEL ORDER, as the buses' is and for their reason:
+            the list is read beside an interface, not beside a file. The default
+            first channel is nought, which is what the table says. */
+        const auto channelOf = [] (const juce::ValueTree& input)
+        {
+            static const juce::Identifier property { "firstChannel" };
+
+            return input.hasProperty (property) ? static_cast<int> (input[property]) : 0;
+        };
+
+        std::stable_sort (inputs.begin(), inputs.end(),
+                          [&channelOf] (const juce::ValueTree& a, const juce::ValueTree& b)
+                          { return channelOf (a) < channelOf (b); });
+
+        return inputs;
+    }
+
+    juce::ValueTree ShowDocument::inputsContainer (bool make)
+    {
+        auto audio = showNode.getChildWithName ("Audio");
+
+        if (! audio.isValid())
+            return {};
+
+        auto inputs = audio.getChildWithName ("Inputs");
+
+        if (! inputs.isValid() && make)
+        {
+            /*  AT A FIXED PLACE - after the last bus - whichever container was
+                asked for first, so the canonical bytes of a show do not depend
+                on the order two creates happened in: `createPlugin` puts the
+                plugin set after the last bus AND after this. Outside the
+                history, as the plugin set's container is: it carries nothing,
+                and the input that made it is the step Undo takes back. */
+            int at = 0;
+
+            for (int i = 0; i < audio.getNumChildren(); ++i)
+                if (audio.getChild (i).hasType ("Bus"))
+                    at = i + 1;
+
+            inputs = juce::ValueTree ("Inputs");
+            audio.addChild (inputs, at, nullptr);
+        }
+
+        return inputs;
+    }
+
     EditResult ShowDocument::applyLayout (const LayoutEdit& edit, const std::string& id,
-                                          const std::string& kind)
+                                          const std::string& kind, LayoutSide side)
     {
         /*  ASKED HERE, not only at `insertObject`'s door, for the reason
             `createRackChannel` gives: everything below changes the document
@@ -1481,7 +1619,19 @@ namespace wfg::doc
         if (! audio.isValid())
             return EditResult::failed (reason::unknownId);
 
-        const auto nodes = busNodes();
+        /*  THE TWO SIDES OF THE INTERFACE (2026-09-26, namespace draft §18.2).
+            The buses are the outputs and live in <Audio> itself; the named
+            inputs are the other side and live in its <Inputs>. One arithmetic,
+            and these are everything that differs. */
+        const auto outputs = side == LayoutSide::outputs;
+        const std::string element = outputs ? "Bus" : "Input";
+        const juce::Identifier elementType { element.c_str() };
+        const std::string prefix = outputs ? "/godot/bus/" : "/godot/input/";
+        const std::string patchRow = outputs ? "/godot/audio/outputPatch" : "/godot/audio/inputPatch";
+        const std::string settledRow = outputs ? "/godot/audio/patchSettled"
+                                               : "/godot/audio/inputPatchSettled";
+
+        const auto nodes = outputs ? busNodes() : inputNodes();
 
         std::vector<BusShape> before;
         before.reserve (nodes.size());
@@ -1497,8 +1647,8 @@ namespace wfg::doc
                 saved-and-reopened show refuse its feeds as `bad-route`
                 (`cue/ShowWalk.h` records it), and it is the same tree and the
                 same omission here. */
-            const auto width = getAttribute ("/godot/bus/" + shape.id + "/width");
-            const auto first = getAttribute ("/godot/bus/" + shape.id + "/firstChannel");
+            const auto width = getAttribute (prefix + shape.id + "/width");
+            const auto first = getAttribute (prefix + shape.id + "/firstChannel");
 
             /*  `getIntValue` rather than `std::stoi`, which throws: every value
                 here has been through the schema, so a number is what is there -
@@ -1509,8 +1659,8 @@ namespace wfg::doc
             before.push_back (std::move (shape));
         }
 
-        const auto settledText = getAttribute ("/godot/audio/patchSettled");
-        const auto patchText = getAttribute ("/godot/audio/outputPatch");
+        const auto settledText = getAttribute (settledRow);
+        const auto patchText = getAttribute (patchRow);
 
         std::vector<int> patch;
 
@@ -1525,6 +1675,22 @@ namespace wfg::doc
                                          || edit.kind == LayoutEdit::Kind::resize
                                        ? reason::badValue : reason::unknownId);
 
+        /*  AN INPUT IS ONE TO EIGHT CHANNELS - a microphone, a stereo line, a
+            small multichannel feed - where a bus may be as wide as a processor
+            send. Said here rather than by the arithmetic, which knows nothing
+            of either side. */
+        if (! outputs && (edit.kind == LayoutEdit::Kind::create || edit.kind == LayoutEdit::Kind::resize)
+              && (edit.width < 1 || edit.width > 8))
+            return EditResult::failed (reason::badValue);
+
+        /*  WHERE THE LIST LIVES: <Audio> for the buses, its <Inputs> for the
+            named inputs - made by the first input, after every check above has
+            passed, so a refused create leaves no container behind. */
+        auto parent = outputs ? audio : inputsContainer (edit.kind == LayoutEdit::Kind::create);
+
+        if (! parent.isValid())
+            return EditResult::failed (reason::unknownId);
+
         /*  THE STRUCTURAL STEP FIRST, so that a refusal inside it - an
             identifier already taken, a lock that arrived between two lines -
             leaves the channels as they were rather than repacked around a bus
@@ -1535,6 +1701,21 @@ namespace wfg::doc
         {
             case LayoutEdit::Kind::create:
             {
+                /*  AN INPUT IS NAMED AS AN OUTPUT IS, by how many there are:
+                    "Input 3", renamed when somebody knows it is Voix solo. */
+                if (! outputs)
+                {
+                    const auto created = insertObject (parent, edit.index < 0 ? endOfSequence : edit.index,
+                                                       element, id,
+                                                       { { "name", "Input " + std::to_string (nodes.size() + 1) } });
+
+                    if (! created.ok)
+                        return created;
+
+                    made = created.id;
+                    break;
+                }
+
                 /*  A NAME IT CAN BE CALLED BY AT ONCE. An output with no name
                     is a row reading "Bus" in a menu of them, and the first
                     thing anybody would do is type one - so it arrives with
@@ -1571,8 +1752,22 @@ namespace wfg::doc
             {
                 auto node = findById (id);
 
-                if (! node.isValid() || ! node.hasType ("Bus"))
+                if (! node.isValid() || ! node.hasType (elementType))
                     return EditResult::failed (reason::unknownId);
+
+                /*  AN INPUT TAKES NOTHING WITH IT today: no cue names one until
+                    the mic cue does (namespace draft §18.2). */
+                if (! outputs)
+                {
+                    std::vector<std::string> released;
+                    collectIds (node, released);
+                    parent.removeChild (node, structuralHistory());
+
+                    for (const auto& gone : released)
+                        registry.release (gone);
+
+                    break;
+                }
 
                 /*  EVERY DESTINATION THAT NAMED IT GOES WITH IT, in this same
                     transaction. A route left naming a bus that has gone is a
@@ -1597,7 +1792,7 @@ namespace wfg::doc
                             orphans.push_back (child);
                         else if (child.hasType ("Slot") && child["bus"].toString().toStdString() == id)
                             clear.push_back (child);
-                        else if (child.hasType ("Media")
+                        else if (isSoundingCue (child)
                                    && child["directOut"].toString().toStdString() == id)
                             unpoint.push_back (child);
 
@@ -1648,7 +1843,7 @@ namespace wfg::doc
             {
                 const auto node = findById (id);
 
-                if (! node.isValid() || ! node.hasType ("Bus"))
+                if (! node.isValid() || ! node.hasType (elementType))
                     return EditResult::failed (reason::unknownId);
 
                 break;
@@ -1668,11 +1863,11 @@ namespace wfg::doc
             if (! node.isValid())
                 continue;
 
-            if (const auto raw = audio.indexOf (node);
-                raw >= 0 && raw != rawIndexForPosition (audio, static_cast<int> (at)))
-                audio.moveChild (raw, std::min (rawIndexForPosition (audio, static_cast<int> (at)),
-                                                audio.getNumChildren() - 1),
-                                 structuralHistory());
+            if (const auto raw = parent.indexOf (node);
+                raw >= 0 && raw != rawIndexForPosition (parent, static_cast<int> (at)))
+                parent.moveChild (raw, std::min (rawIndexForPosition (parent, static_cast<int> (at)),
+                                                 parent.getNumChildren() - 1),
+                                  structuralHistory());
         }
 
         for (const auto& wanted : layout.buses)
@@ -1682,12 +1877,12 @@ namespace wfg::doc
             if (! node.isValid())
                 continue;
 
-            if (const auto result = writeOwned (node, "Bus", "firstChannel",
+            if (const auto result = writeOwned (node, element, "firstChannel",
                                                 std::to_string (wanted.firstChannel));
                 ! result.ok)
                 return result;
 
-            if (const auto result = writeOwned (node, "Bus", "width",
+            if (const auto result = writeOwned (node, element, "width",
                                                 std::to_string (wanted.width));
                 ! result.ok)
                 return result;
@@ -1698,8 +1893,7 @@ namespace wfg::doc
             stays empty and the outputs follow the order, and an edit that
             moved nothing the patch could see. */
         if (layout.patchChanged)
-            if (const auto result = setAttribute ("/godot/audio/outputPatch",
-                                                  audio::writePatch (layout.outputPatch));
+            if (const auto result = setAttribute (patchRow, audio::writePatch (layout.outputPatch));
                 ! result.ok)
                 return result;
 
@@ -1777,6 +1971,45 @@ namespace wfg::doc
         return applyLayout (edit, id, {});
     }
 
+    EditResult ShowDocument::createInput (int width, int index, const std::string& id)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::create;
+        edit.index = index;
+        edit.width = width;
+
+        return applyLayout (edit, id, {}, LayoutSide::inputs);
+    }
+
+    EditResult ShowDocument::removeInput (const std::string& id)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::remove;
+        edit.id = id;
+
+        return applyLayout (edit, id, {}, LayoutSide::inputs);
+    }
+
+    EditResult ShowDocument::moveInput (const std::string& id, int index)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::move;
+        edit.id = id;
+        edit.index = index;
+
+        return applyLayout (edit, id, {}, LayoutSide::inputs);
+    }
+
+    EditResult ShowDocument::resizeInput (const std::string& id, int width)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::resize;
+        edit.id = id;
+        edit.width = width;
+
+        return applyLayout (edit, id, {}, LayoutSide::inputs);
+    }
+
     EditResult ShowDocument::createFeed (const std::string& cueId,
                                          const std::string& slotId,
                                          const std::string& id)
@@ -1786,7 +2019,7 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (cue.getType().toString() != "Media")
+        if (! isSoundingCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         return insertObject (cue, endOfSequence, "Feed", id,
@@ -1811,14 +2044,15 @@ namespace wfg::doc
 
     EditResult ShowDocument::createSend (const std::string& cueId,
                                          const std::string& busId,
-                                         const std::string& id)
+                                         const std::string& id,
+                                         const std::string& level)
     {
         auto cue = findById (cueId);
 
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (cue.getType().toString() != "Media")
+        if (! isSoundingCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         /*  ONE SEND PER BUS PER CUE, refused here rather than tolerated.
@@ -1835,8 +2069,15 @@ namespace wfg::doc
                  && child.getProperty ("bus").toString().toStdString() == busId)
                 return EditResult::failed (reason::badValue);
 
-        return insertObject (cue, endOfSequence, "Send", id,
-                             { { "bus", busId } });
+        /*  BORN AT ITS LEVEL WHEN ONE IS GIVEN: in the object before it is
+            added, so no tick ever routes it at the default (see the command's
+            own note in DocumentCommands.cpp). */
+        std::vector<std::pair<std::string_view, std::string>> attributes { { "bus", busId } };
+
+        if (! level.empty())
+            attributes.push_back ({ "level", level });
+
+        return insertObject (cue, endOfSequence, "Send", id, attributes);
     }
 
     EditResult ShowDocument::createFx (const std::string& cueId,
@@ -1848,7 +2089,7 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (cue.getType().toString() != "Media")
+        if (! isSoundingCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         /*  AN ENTRY OF THE SET, by its id: a plugin the show declared, whether
@@ -1857,6 +2098,22 @@ namespace wfg::doc
 
         if (! entry.isValid() || entry.getType().toString() != "Plugin")
             return EditResult::failed (reason::unknownId);
+
+        /*  AND OF THE RIGHT LIST (Phase 9b, namespace draft 18.3): a media cue
+            switches in an entry of the set, which every voice carries; a mic
+            cue a plugin of the rack channel it plays through, which only that
+            channel's track carries. A plugin of the other list is the wrong
+            kind of plugin for this cue - `bad-value`, as a second Fx for one
+            entry is - and not an unknown one. Both answers are the document's,
+            so a replay refuses what the session refused. */
+        const auto list = entry.getParent();
+        const auto rightList = cue.hasType ("Media")
+                                 ? list.hasType ("Plugins")
+                                 : list.hasType ("Channel")
+                                     && list[idProperty].toString() == cue["channel"].toString();
+
+        if (! rightList)
+            return EditResult::failed (reason::badValue);
 
         /*  ONE FX PER ENTRY PER CUE, for createSend's reason: the entry is on
             the voice once, and two children switching it in would be two
@@ -2226,6 +2483,14 @@ namespace wfg::doc
         if (auto refusal = refuseIfLocked())
             return *refusal;
 
+        /*  THE SHOW'S THREE WORDS FOR A FORMAT, and nothing else (2026-09-26):
+            the schema allows `VST3 | AU | LV2`, and JUCE calls an AU
+            `AudioUnit` - a client passing the scan's own name through would
+            write a show that no longer validates. The known list publishes
+            the show's words; this is the door that holds them to it. */
+        if (! format.empty() && format != "VST3" && format != "AU" && format != "LV2")
+            return EditResult::failed (reason::badValue);
+
         auto audio = showNode.getChildWithName ("Audio");
 
         if (! audio.isValid())
@@ -2235,15 +2500,15 @@ namespace wfg::doc
 
         if (! plugins.isValid())
         {
-            /*  AT A FIXED PLACE - after the last bus, before the rack -
-                whichever container was asked for first, so the canonical
-                bytes of a show do not depend on the order two creates
-                happened in. The rack appends itself at the end; a bus made
-                afterwards lands among the buses through its own create. */
+            /*  AT A FIXED PLACE - after the last bus and the named inputs,
+                before the rack - whichever container was asked for first, so
+                the canonical bytes of a show do not depend on the order two
+                creates happened in. The rack appends itself at the end; a bus
+                made afterwards lands among the buses through its own create. */
             int at = 0;
 
             for (int i = 0; i < audio.getNumChildren(); ++i)
-                if (audio.getChild (i).hasType ("Bus"))
+                if (audio.getChild (i).hasType ("Bus") || audio.getChild (i).hasType ("Inputs"))
                     at = i + 1;
 
             plugins = juce::ValueTree ("Plugins");
@@ -2264,6 +2529,34 @@ namespace wfg::doc
             attributes.push_back ({ "path", path });
 
         return insertObject (plugins, endOfSequence, "Plugin", id, attributes);
+    }
+
+    EditResult ShowDocument::createChannelPlugin (const std::string& channelId, const std::string& name,
+                                                  const std::string& identifier, const std::string& format,
+                                                  const std::string& path, const std::string& id)
+    {
+        if (! format.empty() && format != "VST3" && format != "AU" && format != "LV2")
+            return EditResult::failed (reason::badValue);
+
+        auto channel = findById (channelId);
+
+        if (! channel.isValid() || ! channel.hasType ("Channel"))
+            return EditResult::failed (reason::unknownId);
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        attributes.push_back ({ "identifier", identifier });
+
+        if (! format.empty())
+            attributes.push_back ({ "format", format });
+
+        if (! path.empty())
+            attributes.push_back ({ "path", path });
+
+        return insertObject (channel, endOfSequence, "Plugin", id, attributes);
     }
 
     //==============================================================================
@@ -2703,7 +2996,8 @@ namespace wfg::doc
 
                     /*  A list element by element, as the reader takes one - and
                         a fade's points as a curve besides, by the same function
-                        the write door and the Runner ask (FadePoints.h). */
+                        the write door and the Runner ask (FadePoints.h), and a
+                        media cue's level lane as a lane (LevelLane.h). */
                     if (attribute->isList())
                     {
                         std::string canonical;
@@ -2719,6 +3013,13 @@ namespace wfg::doc
 
                             if (! curve.problem.empty())
                                 problems.push_back (here + ": \"points\" " + curve.problem);
+                        }
+                        else if (elementName == "Media" && attributeName == "levelLane")
+                        {
+                            const auto lane = readLevelLane (canonical);
+
+                            if (! lane.problem.empty())
+                                problems.push_back (here + ": \"levelLane\" " + lane.problem);
                         }
 
                         continue;
@@ -3306,7 +3607,8 @@ namespace wfg::doc
             {
                 if (node.getType().toString() == "Persistent")
                 {
-                    /*  MEDIA, OSC AND MIDI ARE WHAT A SECTION CAN ASSERT (§13.11).
+                    /*  MEDIA, MIC, OSC AND MIDI ARE WHAT A SECTION CAN ASSERT (§13.11; mic
+                        since Phase 9b).
                         A fade asserts nothing, a stop is the thing that
                         SUSPENDS an assertion, and a group is a lifetime rather
                         than a state. Each is left where it is and ignored, and
@@ -3322,7 +3624,7 @@ namespace wfg::doc
                         problems.push_back (
                             "/Show/.../Persistent/" + element + "["
                               + child[idProperty].toString().toStdString()
-                              + "]: a persistent section asserts media, osc and midi cues and"
+                              + "]: a persistent section asserts media, mic, osc and midi cues and"
                                 " nothing else - a fade asserts nothing, a stop is what suspends"
                                 " an assertion, a group is a lifetime rather than a state - so"
                                 " this one is ignored");
@@ -3378,12 +3680,12 @@ namespace wfg::doc
                 const auto element = node.getType().toString().toStdString();
                 const auto id = node[idProperty].toString().toStdString();
 
-                if (element == "Media")
+                if (element == "Media" || element == "Mic")
                 {
                     const auto out = node[juce::Identifier ("directOut")].toString().toStdString();
 
                     if (! out.empty())
-                        say ("/Show/.../Media[" + id + "]/@directOut", out, "direct out", "mix");
+                        say ("/Show/.../" + element + "[" + id + "]/@directOut", out, "direct out", "mix");
                 }
                 else if (element == "Send")
                 {
@@ -3431,7 +3733,7 @@ namespace wfg::doc
 
             void visit (const juce::ValueTree& node)
             {
-                if (node.hasType ("Media"))
+                if (isSoundingCue (node))
                 {
                     const auto out = node[juce::Identifier ("directOut")].toString().toStdString();
 
@@ -3440,7 +3742,8 @@ namespace wfg::doc
                             if ((child.hasType ("Route") || child.hasType ("Send"))
                                   && child[juce::Identifier ("bus")].toString().toStdString() == out)
                                 problems.push_back (
-                                    "/Show/.../Media[" + node[idProperty].toString().toStdString()
+                                    "/Show/.../" + node.getType().toString().toStdString() + "["
+                                      + node[idProperty].toString().toStdString()
                                       + "]: its direct out and its "
                                       + child.getType().toString().toStdString()
                                       + " both name \"" + out + "\", so the cue arrives there"
@@ -3492,6 +3795,92 @@ namespace wfg::doc
         };
 
         Presets { problems, {} }.visit (showNode);
+
+        /*  A MIC CUE THAT CANNOT PLAY (Phase 9b, namespace draft 18.5), said
+            before the show rather than at GO: one that takes no input, one
+            that plays through no rack channel, one whose channel is shared - a
+            mic cue holds its channel alone - and one whose input is not as
+            wide as its channel takes. An input or a channel that is not in the
+            show, or is the wrong kind of thing, is the `refers` check's above.
+
+            WARNINGS AND NEVER A REFUSAL, as every mistake here is: the repair
+            is somebody picking something from a menu, and the show has to
+            open to be repaired. A run fired all the same fails with the same
+            words (`no-input`, `bad-channel`, `bad-width`). */
+        struct Mics
+        {
+            std::vector<std::string>& problems;
+            const ShowDocument& document;
+
+            static std::string calledOf (const juce::ValueTree& node, const std::string& id)
+            {
+                const auto name = node["name"].toString().toStdString();
+                return name.empty() ? id : name;
+            }
+
+            static std::string widthWords (int width)
+            {
+                return width == 1 ? std::string ("mono")
+                     : width == 2 ? std::string ("stereo")
+                                  : std::to_string (width) + " channels wide";
+            }
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.hasType ("Mic"))
+                    check (node);
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+
+            void check (const juce::ValueTree& mic) const
+            {
+                const auto here = "/Show/.../Mic[" + mic[idProperty].toString().toStdString() + "]";
+                const auto inputId = mic["input"].toString().toStdString();
+                const auto channelId = mic["channel"].toString().toStdString();
+
+                if (inputId.empty())
+                    problems.push_back (here + ": takes no input - pick one of the show's named inputs,"
+                                               " or it plays nothing");
+
+                if (channelId.empty())
+                    problems.push_back (here + ": plays through no rack channel - pick one, or it plays"
+                                               " nothing");
+
+                const auto channel = channelId.empty() ? juce::ValueTree() : document.findById (channelId);
+
+                if (! channel.isValid() || ! channel.hasType ("Channel"))
+                    return;
+
+                const auto called = calledOf (channel, channelId);
+
+                if (channel.getProperty ("access", "exclusive").toString() == "shared")
+                    problems.push_back (here + ": plays through " + called + ", a shared channel - a mic"
+                                               " cue holds its channel alone, so it fails when it is"
+                                               " fired (bad-channel)");
+
+                const auto input = inputId.empty() ? juce::ValueTree() : document.findById (inputId);
+
+                if (! input.isValid() || ! input.hasType ("Input"))
+                    return;
+
+                /*  WHAT A CLASS TAKES IN, which is the first half of its name:
+                    mono and mono-to-stereo take one channel, stereo takes two
+                    (PRD §3.9e). */
+                const auto width = static_cast<int> (input.getProperty ("width", 1));
+                const auto channelClass = channel.getProperty ("class", "mono").toString().toStdString();
+                const auto takes = channelClass == "stereo" ? 2 : 1;
+
+                if (width != takes)
+                    problems.push_back (here + ": takes " + calledOf (input, inputId) + ", "
+                                          + widthWords (width) + ", through " + called + ", which"
+                                            " takes " + widthWords (takes) + " - so it fails when it"
+                                            " is fired (bad-width)");
+            }
+        };
+
+        Mics { problems, *this }.visit (showNode);
 
         /*  AND A MOUNT THAT SAYS ITS NODES MAY BE WRITTEN EARLY BUT CANNOT BE
             ASKED WHAT THEY HELD.

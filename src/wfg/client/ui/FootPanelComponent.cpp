@@ -36,6 +36,15 @@ namespace wfg::client::ui
         if (curve != nullptr)
             curve->applyTheme (theme);
 
+        if (eq != nullptr)
+            eq->applyTheme (theme);
+
+        if (fx != nullptr)
+            fx->applyTheme (theme);
+
+        if (takePanel != nullptr)
+            takePanel->applyTheme (theme);
+
         repaint();
     }
 
@@ -70,9 +79,85 @@ namespace wfg::client::ui
         timeline.reset();
         curve.reset();
         eq.reset();
+        fx.reset();
+        takePanel.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::take:
+            {
+                /*  THE TAKE (Phase 9c): its presses are the take verbs, a
+                    dragged edge is the take's door, and a press on an edge
+                    puts it on the master dial. */
+                TakePanelComponent::Actions taking;
+                taking.set = actions.set;
+                taking.press = actions.pressTake;
+                taking.keep = actions.keepTake;
+                taking.dial = actions.dial;
+                taking.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                takePanel = std::make_unique<TakePanelComponent> (theme, std::move (taking));
+                addAndMakeVisible (*takePanel);
+                break;
+            }
+
+            case model::Subject::Kind::fx:
+            {
+                /*  THE CHAIN (author, 2026-09-25). Its EQ box opens the EQ in
+                    this same foot, on the same cue - one editor at a time,
+                    so asking for the EQ is asking the host for another
+                    subject, never a second panel. */
+                FxPanelComponent::Actions chaining;
+                chaining.set = actions.set;
+                chaining.createFx = actions.createFx;
+                chaining.edit = [this] (const std::string& cueId, const std::string& pluginId)
+                {
+                    if (actions.editPlugin)
+                        actions.editPlugin (cueId, pluginId);
+                    else
+                    {
+                        note = "The plugin's own window is not built yet.";
+                        repaint();
+                    }
+                };
+                chaining.openEq = [this] (const std::string& cueId)
+                {
+                    /*  ON THE NEXT MESSAGE, not inside the click: opening
+                        another subject destroys this chain, and the button
+                        that asked is one of its children. */
+                    juce::MessageManager::callAsync ([self = juce::Component::SafePointer<FootPanelComponent> (this),
+                                                      cueId]
+                    {
+                        if (self != nullptr && self->actions.openEqOn)
+                            self->actions.openEqOn (cueId);
+                    });
+                };
+                chaining.openTake = [this] (const std::string& cueId)
+                {
+                    //  On the next message, for the EQ box's reason.
+                    juce::MessageManager::callAsync ([self = juce::Component::SafePointer<FootPanelComponent> (this),
+                                                      cueId]
+                    {
+                        if (self != nullptr && self->actions.openTakeOn)
+                            self->actions.openTakeOn (cueId);
+                    });
+                };
+                chaining.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                fx = std::make_unique<FxPanelComponent> (theme, std::move (chaining));
+                fx->setEditorWords (editorWords);
+                addAndMakeVisible (*fx);
+                break;
+            }
+
             case model::Subject::Kind::eq:
             {
                 EqPanelComponent::Actions shaping;
@@ -84,7 +169,10 @@ namespace wfg::client::ui
                     repaint();
                 };
 
+                shaping.dial = actions.dial;
+
                 eq = std::make_unique<EqPanelComponent> (theme, std::move (shaping));
+                eq->showDial (dialed);
                 addAndMakeVisible (*eq);
                 break;
             }
@@ -132,7 +220,10 @@ namespace wfg::client::ui
                     repaint();
                 };
 
+                mixing.dial = actions.dial;
+
                 sends = std::make_unique<SendMixerComponent> (theme, std::move (mixing));
+                sends->showDial (dialed);
                 addAndMakeVisible (*sends);
                 break;
             }
@@ -163,8 +254,26 @@ namespace wfg::client::ui
         }
     }
 
+    void FootPanelComponent::showEditedEqHandle (int handle)
+    {
+        if (eq != nullptr)
+            eq->setEditedHandle (handle);
+    }
+
+    void FootPanelComponent::showDial (const std::string& address)
+    {
+        dialed = address;
+
+        if (eq != nullptr)
+            eq->showDial (address);
+
+        if (sends != nullptr)
+            sends->showDial (address);
+    }
+
     void FootPanelComponent::show (const model::FootReading& reading,
-                                   std::shared_ptr<const audio::MediaRecords> media)
+                                   std::shared_ptr<const audio::MediaRecords> media,
+                                   std::shared_ptr<const audio::TakePictureSet> takes)
     {
         /*  WHAT IT IS SHOWING AND WHAT THAT THING IS CALLED. Said in the title
             rather than left to the drawing, because a panel that opens on one
@@ -192,6 +301,14 @@ namespace wfg::client::ui
 
             case model::Subject::Kind::eq:
                 wanted = "EQ";
+                break;
+
+            case model::Subject::Kind::fx:
+                wanted = "FX";
+                break;
+
+            case model::Subject::Kind::take:
+                wanted = "Take";
                 break;
 
             case model::Subject::Kind::none:
@@ -226,6 +343,23 @@ namespace wfg::client::ui
 
         if (eq != nullptr)
             eq->show (reading);
+
+        if (fx != nullptr)
+            fx->show (reading);
+
+        if (takePanel != nullptr)
+            takePanel->show (reading, std::move (takes));
+    }
+
+    void FootPanelComponent::setEditorWords (std::map<std::string, std::string> words)
+    {
+        /*  KEPT HERE AS WELL, so a chain built after the words arrived - the
+            panel reopened, or pointed at another cue - starts with them
+            rather than blank for a pass. */
+        editorWords = std::move (words);
+
+        if (fx != nullptr)
+            fx->setEditorWords (editorWords);
     }
 
     bool FootPanelComponent::overGrip (juce::Point<int> where) const
@@ -291,6 +425,12 @@ namespace wfg::client::ui
 
         if (eq != nullptr)
             eq->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (fx != nullptr)
+            fx->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (takePanel != nullptr)
+            takePanel->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
     }
 
     void FootPanelComponent::mouseMove (const juce::MouseEvent& event)

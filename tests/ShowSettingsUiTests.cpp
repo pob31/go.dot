@@ -174,7 +174,10 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
         lands rather than after: the engine's layout rule materialises the patch
         it had before repacking, so it has to already know the show has stopped
         following its list. */
-    tabs->setCurrentTabIndex (3);   // the output patch
+    /*  BY NAME since the Inputs tab (Phase 9b): the strip has grown a tab
+        between Outputs and the patches, and a number would now open the input
+        patch - whose first edit settles the inputs, not the outputs. */
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Output patch"));
     auto* matrix = component<spatcore::ui::patch::PatchMatrixComponent> (panel);
     REQUIRE (matrix != nullptr);
 
@@ -201,6 +204,315 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
 
     REQUIRE (rig.sent.back().command == "audio.setup");
     CHECK_FALSE (rig.sent.back().args[6].getString().empty());
+}
+
+TEST_CASE ("show settings UI: the Inputs tab makes named inputs, and a hand patch of the inputs settles them")
+{
+    /*  Phase 9b (namespace draft 18.9): the output list's twin, beside it. Two
+        named inputs to look at, made through the commands, and the engine's
+        readings of them - one loud, one quiet - as a running interface would
+        publish them. */
+    Rig rig;
+
+    REQUIRE (rig.document.createInput (1).ok);
+    const auto keys = rig.document.createInput (2);
+    REQUIRE (keys.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/input/" + keys.id + "/name", "Keys").ok);
+
+    rig.state.logicalInputs = 3;
+    rig.state.inputMetersDb = { -18.0, -3.0, -42.0 };
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    const auto names = tabs->getTabNames();
+    CHECK (names.indexOf ("Inputs") == names.indexOf ("Outputs") + 1);
+    tabs->setCurrentTabIndex (names.indexOf ("Inputs"));
+
+    for (const auto& [label, width] : { std::pair<const char*, int> { "+ mono input", 1 },
+                                        std::pair<const char*, int> { "+ stereo input", 2 } })
+    {
+        INFO (label);
+
+        auto* add = button (panel, label);
+        REQUIRE (add != nullptr);
+
+        const auto before = rig.sent.size();
+        add->onClick();
+
+        REQUIRE (rig.sent.size() == before + 1);
+        CHECK (rig.sent.back().command == "input.create");
+        CHECK (rig.sent.back().args[0].getInt32() == width);
+        CHECK (rig.sent.back().args[1].getInt32() == -1);
+    }
+
+    /*  A LOOK, with no screen: the tab painted into a PNG when WFG_SNAPSHOT_DIR
+        is set - the meters lit, the stereo one hot - and skipped otherwise. */
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.setSize (880, 610);
+        panel.refresh (*rig.publish());
+
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("inputs-tab.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    /*  UNTOUCHED, THE INPUT PATCH FOLLOWS THE LIST and Apply sends none of it:
+        writing the diagonal out would settle the inputs, and somebody
+        applying a buffer size did not ask for that. */
+    auto* apply = button (panel, "Apply while stopped");
+    REQUIRE (apply != nullptr);
+    apply->onClick();
+    REQUIRE (rig.sent.back().command == "audio.setup");
+    CHECK (rig.sent.back().args[5].getString().empty());
+
+    //  Apply is waiting for its answer; complete it, as the engine would.
+    rig.state.audioSettingsRevision++;
+    panel.refresh (*rig.publish());
+
+    /*  AND THE FIRST HAND EDIT OF THE INPUT PATCH SETTLES THE INPUTS - its own
+        flag, never the outputs' - once. */
+    tabs->setCurrentTabIndex (names.indexOf ("Input patch"));
+    auto* matrix = component<spatcore::ui::patch::PatchMatrixComponent> (*tabs->getCurrentContentComponent());
+    REQUIRE (matrix != nullptr);
+    REQUIRE (matrix->onBeforeUserPatchEdit != nullptr);
+
+    const auto before = rig.sent.size();
+    matrix->onBeforeUserPatchEdit();
+
+    REQUIRE (rig.sent.size() == before + 1);
+    CHECK (rig.sent.back().command == "node.set");
+    CHECK (rig.sent.back().args[0].getString() == "/godot/audio/inputPatchSettled");
+    CHECK (rig.sent.back().args[1].getBool());
+
+    matrix->onBeforeUserPatchEdit();
+    CHECK (rig.sent.size() == before + 1);
+}
+
+TEST_CASE ("show settings UI: the Rack tab offers a recorder, says what it sets aside, and puts a plugin before or after it")
+{
+    /*  Phase 9c, stage 9c.2 (namespace draft 19.2): a sampling channel, one
+        plugin before its recorder and one after, and the graph's record of
+        what it set aside as serve's host would write it. The channel's row
+        says its recorder as a menu, each plugin says its side, and the foot
+        says the memory - set aside, or still to set aside at Load now. */
+    Rig rig;
+    plugin::PluginTable table;
+    rig.parameters.setPlugins (&table);
+    rig.state.sampleRate = 48000;
+
+    const auto loops = rig.document.createRackChannel ("mono");
+    REQUIRE (loops.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + loops.id + "/name", "Loops").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + loops.id + "/takeSeconds", "60").ok);
+
+    const auto drive = rig.document.createChannelPlugin (loops.id, "Drive", "VST3-0badf00d-drve", "VST3", "C:/plugins/drive.vst3");
+    const auto delay = rig.document.createChannelPlugin (loops.id, "Delay", "VST3-0badf00d-dlay", "VST3", "C:/plugins/delay.vst3");
+    REQUIRE (drive.ok);
+    REQUIRE (delay.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/plugin/" + drive.id + "/side", "before").ok);
+
+    plugin::PluginTable::BuiltTake built;
+    built.seconds = 60.0;
+    built.layers = 4;
+    built.bytes = 115219200;
+    built.before = { drive.id };
+    table.setBuiltTakes ({ { loops.id, built } });
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Rack"));
+
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    const auto saying = [] (juce::Component& root, const juce::String& words)
+    {
+        std::function<bool (juce::Component&)> find = [&] (juce::Component& at)
+        {
+            if (auto* label = dynamic_cast<juce::Label*> (&at); label != nullptr && label->getText().contains (words))
+                return true;
+
+            for (auto* child : at.getChildren())
+                if (find (*child))
+                    return true;
+
+            return false;
+        };
+
+        return find (root);
+    };
+
+    CHECK (saying (*page, "It records up to 1 min with 4 layers on top: 115.2 MB set aside."));
+
+    //  The picture first, while the graph agrees with the show.
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.setSize (880, 610);
+        panel.refresh (*rig.publish());
+
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("rack-tab-sampling.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    //  A longer take asked for: the graph still holds the old one, and the foot says Load now.
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + loops.id + "/takeSeconds", "120").ok);
+    panel.refresh (*rig.publish());
+    CHECK (saying (*page, "It records up to 2 min with 4 layers on top: 230.4 MB to set aside at Load now."));
+}
+
+TEST_CASE ("show settings UI: the Rack tab makes channels, and says each chain's worst case against the budget")
+{
+    /*  Phase 9b (namespace draft 18.3): two channels to look at, made through
+        the document, and their plugins' states as a sandbox would write them
+        tonight - one chain over the budget, one plugin down. */
+    Rig rig;
+    plugin::PluginTable table;
+    rig.parameters.setPlugins (&table);
+    rig.state.sampleRate = 48000;
+
+    const auto vox = rig.document.createRackChannel ("mono");
+    REQUIRE (vox.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + vox.id + "/name", "Vox 1").ok);
+
+    const auto room = rig.document.createChannelPlugin (vox.id, "Room", "VST3-0badf00d-room", "VST3", "C:/plugins/room.vst3");
+    const auto deEss = rig.document.createChannelPlugin (vox.id, "De-esser", "VST3-0badf00d-dess", "VST3", "C:/plugins/dess.vst3");
+    REQUIRE (room.ok);
+    REQUIRE (deEss.ok);
+
+    const auto band = rig.document.createRackChannel ("stereo");
+    REQUIRE (band.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + band.id + "/name", "Band").ok);
+
+    const auto eq = rig.document.createChannelPlugin (band.id, "Bus EQ", "VST3-0badf00d-beq", "VST3", "C:/plugins/beq.vst3");
+    REQUIRE (eq.ok);
+
+    plugin::PluginTable::Status loaded;
+    loaded.state = "loaded";
+    loaded.inputs = 2;
+    loaded.outputs = 2;
+    loaded.layout = "stereo in, stereo out";
+
+    auto roomStatus = loaded;
+    roomStatus.latencySamples = 256;
+    auto deEssStatus = loaded;
+    deEssStatus.latencySamples = 64;
+    table.set (room.id, roomStatus);
+    table.set (deEss.id, deEssStatus);
+
+    plugin::PluginTable::Status failed;
+    failed.state = "failed";
+    failed.problem = "its child process stopped answering; Band is silent until it is back";
+    table.set (eq.id, failed);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    const auto names = tabs->getTabNames();
+    CHECK (names.indexOf ("Rack") == names.indexOf ("Plugins") + 1);
+    tabs->setCurrentTabIndex (names.indexOf ("Rack"));
+
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    for (const auto& [label, channelClass] : { std::pair<const char*, const char*> { "+ Mono", "mono" },
+                                               std::pair<const char*, const char*> { "+ Mono to stereo", "monoToStereo" },
+                                               std::pair<const char*, const char*> { "+ Stereo", "stereo" } })
+    {
+        INFO (label);
+
+        auto* add = button (*page, label);
+        REQUIRE (add != nullptr);
+
+        const auto before = rig.sent.size();
+        add->onClick();
+
+        REQUIRE (rig.sent.size() == before + 1);
+        CHECK (rig.sent.back().command == "channel.create");
+        CHECK (rig.sent.back().args[0].getString() == channelClass);
+    }
+
+    /*  THE FIRST CHANNEL IS PICKED, so its chain is what the right side shows
+        and Add... has somewhere to put a plugin. */
+    auto* addPlugin = button (*page, "Add...");
+    REQUIRE (addPlugin != nullptr);
+    CHECK (addPlugin->isEnabled());
+
+    /*  THE WORST CASE IS SAID: 320 samples at 48 kHz is 6.7 ms, over the 5 ms
+        the show allows - in words at the foot, never a colour alone. */
+    const auto saying = [] (juce::Component& root, const juce::String& words)
+    {
+        std::function<bool (juce::Component&)> find = [&] (juce::Component& at)
+        {
+            if (auto* label = dynamic_cast<juce::Label*> (&at); label != nullptr && label->getText().contains (words))
+                return true;
+
+            for (auto* child : at.getChildren())
+                if (find (*child))
+                    return true;
+
+            return false;
+        };
+
+        return find (root);
+    };
+
+    CHECK (saying (*page, "Vox 1: 6.7 ms at worst, with every plugin in - over the 5 ms budget."));
+
+    /*  A LOOK, with no screen: the tab painted into a PNG when WFG_SNAPSHOT_DIR
+        is set, and skipped otherwise. */
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.setSize (880, 610);
+        panel.refresh (*rig.publish());
+
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("rack-tab.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    /*  LOCKED, NOTHING IS OFFERED THAT WOULD EDIT THE SHOW - and a failed
+        plugin can still be restarted, which is not an edit. */
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (button (*page, "+ Mono")->isVisible());
+    CHECK_FALSE (addPlugin->isVisible());
+    CHECK (button (*page, "Restart")->isVisible());
 }
 
 //==============================================================================
@@ -307,9 +619,9 @@ TEST_CASE ("show settings UI: the Network tab declares devices and switches the 
         configures rather than after "Interface", which the network tab could
         equally have claimed. */
     CHECK (tabs->getTabNames()[0] == "Audio");
-    CHECK (tabs->getTabNames()[4] == "Network");
+    CHECK (tabs->getTabNames().indexOf ("Network") > tabs->getTabNames().indexOf ("Output patch"));
 
-    tabs->setCurrentTabIndex (4);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
 
     /*  A TAB'S CONTENT IS ONLY A LIVE CHILD WHILE IT SHOWS - juce::
         TabbedComponent's own arrangement - so nothing below can be found until
@@ -365,9 +677,9 @@ TEST_CASE ("show settings UI: the MIDI tab declares ports and offers this machin
 
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
-    CHECK (tabs->getTabNames()[5] == "MIDI");
+    CHECK (tabs->getTabNames().indexOf ("MIDI") == tabs->getTabNames().indexOf ("Network") + 1);
 
-    tabs->setCurrentTabIndex (5);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("MIDI"));
 
     /*  ADD DECLARES A PORT, and nothing about a cable: the name is the show's
         and which socket it is on is said afterwards, because the two are
@@ -547,7 +859,7 @@ TEST_CASE ("audio settings UI: held output tests clear on tab exit and window cl
     REQUIRE (tabs != nullptr);
     for (bool close : { false, true })
     {
-        tabs->setCurrentTabIndex (3);   // the output patch, after Interface and Outputs
+        tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Output patch"));
         auto* page = tabs->getCurrentContentComponent();
         REQUIRE (page != nullptr);
         auto* test = button (*page, "Test");

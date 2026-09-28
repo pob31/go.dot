@@ -17,6 +17,7 @@
 #include <wfg/client/ui/CueListComponent.h>
 
 #include <wfg/client/model/LoadToTime.h>
+#include <wfg/client/model/NewCueMenus.h>
 
 #include <wfg/client/ui/Look.h>
 
@@ -52,20 +53,12 @@ namespace wfg::client::ui
         constexpr int timeChars = 6;
         constexpr int kindChars = 8;
 
-        /*  WHETHER LETTING GO ON THIS ROW REALLY DOES INSERT AFTER IT. Only a
-            member can be pointed at: `cue.create` speaks in member positions,
-            and a group's header and footer are separate orders that a role
-            decides rather than places an index can reach. Asked in one spot
-            because the answer has to be the same in the drawing and in the
-            dropping, and drawing a promise the drop then breaks is the exact
-            failure the feedback exists to prevent. */
-        bool insertAfter (const model::Row& row)
+        /*  ONE FILE ONTO ONE MEDIA CUE NAMES ITS FILE, which is asked before
+            anything else a dropped file could mean. More than one file could
+            not, and a cue of another kind has no file to name. */
+        bool namesItsFile (const juce::StringArray& files, const model::Row& entry)
         {
-            /*  ANY CUE ROW THAT IS ITS OWN, since 2026-09-18: a header, footer
-                or persistent row is in a section the tree now names, so a
-                drop after it has a container to go into. A derived header
-                line is a reading of a cue elsewhere and is not a place. */
-            return row.rowKind == model::RowKind::cue && ! row.derived;
+            return files.size() == 1 && entry.rowKind == model::RowKind::cue && entry.kind == "media";
         }
 
         /*  HOW A GROUP BEHAVES, AS SHAPES. Two questions and two marks,
@@ -100,14 +93,16 @@ namespace wfg::client::ui
                 marks << (marks.isEmpty() ? "" : "  ")
                       << juce::String (juce::CharPointer_UTF8 ("\xe2\x88\xa5"));
 
-            /*  pads  a SAMPLER group (PRD §3.27): GO arms its members onto
-                strips and a hand plays them, in any order, any number of
+            /*  sampler  a SAMPLER group (PRD §3.27): GO arms its members
+                onto strips and a hand plays them, in any order, any number of
                 times, so the order on screen is not an order at all. A WORD
                 where the timeline has a shape, because there is no shape that
                 already means "played from a surface" - and colour is never the
-                one carrier (§4.8). */
+                one carrier (§4.8). The mode's own word, and no longer "pads"
+                (2026-09-25): the author read that as a setting a fader could
+                not have. */
             if (row.mode == "sampler")
-                marks << (marks.isEmpty() ? "" : "  ") << "pads";
+                marks << (marks.isEmpty() ? "" : "  ") << "sampler";
 
             return marks;
         }
@@ -751,7 +746,15 @@ namespace wfg::client::ui
             }
             else if (dropWouldInsert)
             {
-                g.fillRect (0, height - 2, width, 2);
+                /*  STARTING WHERE THE CUE WOULD LAND: at the indent of its
+                    depth, so a line reaching further left than the row is a
+                    cue leaving the groups that row ends (2026-09-25). */
+                const auto from = dropDepth < 0
+                                    ? 0
+                                    : juce::jlimit (0, width - 2,
+                                                    railsOrigin() + dropDepth * juce::roundToInt (theme.type * 7.0) * 2);
+
+                g.fillRect (from, height - 2, width - from, 2);
             }
         }
 
@@ -799,9 +802,14 @@ namespace wfg::client::ui
             g.drawText (*when, cell.reduced (pad / 2, 0), juce::Justification::centredRight, false);
         }
 
+        /*  WHAT THE ROW IS, IN A WORD: a group's mode, a transport cue's
+            verb (2026-09-27: "stop", "round", "rec" - the list that made it
+            told them apart, so the row does too), else the kind. */
         auto kindCell = area.removeFromRight (kindChars * unit);
         g.setColour (faint);
-        g.drawText (entry.isGroup && ! entry.mode.empty() ? entry.mode : entry.kind,
+        g.drawText (entry.isGroup && ! entry.mode.empty() ? juce::String (entry.mode)
+                      : ! entry.verb.empty()               ? juce::String (model::verbWord (entry.verb))
+                                                           : juce::String (entry.kind),
                     kindCell, juce::Justification::centredRight, true);
 
         //  The number, then the name, indented by how deep the cue sits.
@@ -1099,38 +1107,31 @@ namespace wfg::client::ui
         }
 
         /*  AND A ROW THAT CANNOT TAKE THE POINTER SAYS SO rather than being
-            sent and refused. The engine answers `standby.set` on a header, a
-            footer or a persistent cue with `not-a-stop`, which is right -
-            those run with their group or from the top of the show, and none is
-            a place anybody waits. What was wrong was this client offering the
-            gesture anyway: the first thing the author did with the cue list
-            was click two such rows and get `error: 5411 26 window not-a-stop
-            standby.set` where an answer should have been.
+            sent and refused - or, since 2026-09-26, sends its GROUP. The first
+            thing the author did with the cue list was click a footer's row and
+            a persistent one and get `error: 5411 26 window not-a-stop
+            standby.set` where an answer should have been; this client answered
+            with a sentence for all three sections. Now a header's or a footer's
+            line parks on the group it runs with, which is what the author asked
+            for ("move the pointer to the group instead of showing an error"),
+            and only a persistent bed - which has no group - is still told.
 
-            A CLIENT THAT KNOWS THE RULE ASKS IT FIRST. `Row::mayPark` is that
-            rule, in the model where a test can reach it, and the sentence
-            below says which of the three reasons applies - because "nothing
-            happened" and "this is not that kind of row" look identical from a
-            chair. */
-        if (! entry.mayPark())
+            A CLIENT THAT KNOWS THE RULE ASKS IT FIRST. `Row::parksOn` is that
+            rule, in the model where a test can reach it. */
+        const auto target = entry.parksOn();
+
+        if (target.empty())
         {
-            if (actions.say)
-            {
-                const auto why = entry.section == model::Section::persistent
-                                   ? "runs from the moment the show starts"
-                                   : entry.section == model::Section::header
-                                       ? "runs before its group, with it"
-                                       : "runs after its group, with it";
-
+            if (actions.say && entry.section == model::Section::persistent)
                 actions.say (juce::String (entry.name.empty() ? entry.id : entry.name)
-                               + " " + why + ", so the pointer cannot stand there");
-            }
+                               + " runs from the moment the show starts, so the pointer cannot"
+                                 " stand there");
 
             return;
         }
 
         if (actions.park)
-            actions.park (entry.id);
+            actions.park (target);
     }
 
     //==========================================================================
@@ -1142,15 +1143,23 @@ namespace wfg::client::ui
         TWO GESTURES, TOLD APART BY WHAT IS UNDER THE POINTER. On a media cue,
         letting go NAMES that cue's file - which is what somebody means when
         they drag a replacement onto a cue that already has one. Anywhere else,
-        it MAKES cues, one per file, after whatever row the hand was over. The
-        difference is drawn while the drag is in the air rather than explained
-        afterwards. */
+        it MAKES cues, one per file, where `model::fileDropAt` says: into a
+        group, first in an open one, or after a row. The difference is drawn
+        while the drag is in the air rather than explained afterwards. */
     int CueListComponent::rowUnder (int y) const
     {
         const auto inList = y - list.getY() + list.getViewport()->getViewPositionY();
         const auto at = inList / juce::jmax (1, rowHeight());
 
         return at >= 0 && at < static_cast<int> (rows.size()) ? at : -1;
+    }
+
+    double CueListComponent::fractionDown (int y) const
+    {
+        const auto inList = y - list.getY() + list.getViewport()->getViewPositionY();
+        const auto height = juce::jmax (1, rowHeight());
+
+        return static_cast<double> (((inList % height) + height) % height) / static_cast<double> (height);
     }
 
     bool CueListComponent::isInterestedInFileDrag (const juce::StringArray& files)
@@ -1174,34 +1183,51 @@ namespace wfg::client::ui
         fileDragMove (files, x, y);
     }
 
-    void CueListComponent::fileDragMove (const juce::StringArray& files, int, int y)
+    void CueListComponent::fileDragMove (const juce::StringArray& files, int x, int y)
     {
         const auto was = dropRow;
         const auto wasLink = dropWouldLink;
+        const auto wasInsert = dropWouldInsert;
+        const auto wasDepth = dropDepth;
 
         dropRow = rowUnder (y);
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
+
+        std::string words;
 
         if (dropRow >= 0)
         {
             const auto& entry = rows[static_cast<std::size_t> (dropRow)];
 
-            /*  ONE FILE ONTO ONE MEDIA CUE NAMES IT. More than one could not,
-                and a cue of another kind has no file to name. */
-            dropWouldLink = files.size() == 1
-                         && entry.rowKind == model::RowKind::cue
-                         && entry.kind == "media";
-
-            //  Drawn only where letting go really does insert there.
-            dropWouldInsert = ! dropWouldLink && insertAfter (entry);
+            if (namesItsFile (files, entry))
+            {
+                dropWouldLink = true;
+                words = "becomes the file of " + (entry.name.empty() ? entry.id : entry.name);
+            }
+            else
+            {
+                /*  Drawn as it will land: the row lit for into a group, a line
+                    from the depth the cues land at, and nothing where the
+                    line would promise a place a create cannot reach. */
+                const auto drop = model::fileDropAt (rows, static_cast<std::size_t> (dropRow),
+                                                     fractionDown (y), depthUnder (x));
+                dropWouldLink = drop.lit;
+                dropWouldInsert = ! drop.lit && drop.depth >= 0;
+                dropDepth = drop.depth;
+                words = drop.words;
+            }
         }
 
-        if (dropRow != was || dropWouldLink != wasLink)
+        if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert || dropDepth != wasDepth)
         {
             if (was >= 0)      list.repaintRow (was);
             if (dropRow >= 0)  list.repaintRow (dropRow);
+
+            if (actions.say && ! words.empty())
+                actions.say (juce::String (words));
         }
     }
 
@@ -1212,19 +1238,21 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
 
         if (was >= 0)
             list.repaintRow (was);
     }
 
-    void CueListComponent::filesDropped (const juce::StringArray& files, int, int y)
+    void CueListComponent::filesDropped (const juce::StringArray& files, int x, int y)
     {
         const auto at = rowUnder (y);
 
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
         repaint();
 
@@ -1235,8 +1263,7 @@ namespace wfg::client::ui
         {
             const auto& entry = rows[static_cast<std::size_t> (at)];
 
-            if (files.size() == 1 && entry.rowKind == model::RowKind::cue
-                  && entry.kind == "media")
+            if (namesItsFile (files, entry))
             {
                 if (actions.linkMedia)
                     actions.linkMedia (entry.id, files[0]);
@@ -1244,21 +1271,15 @@ namespace wfg::client::ui
                 return;
             }
 
-            /*  AFTER THE ROW THE HAND WAS OVER, in that row's own container,
-                by its MEMBER index - which is the only index a create speaks
-                in, and the reason the other rows cannot be pointed at.
+            /*  WHERE THE DRAWING SAID (model::fileDropAt): into a group, first
+                in an open one, after a row - by MEMBER position, the only one
+                a create speaks in. A row with no container to name falls to
+                the end of the list, as a drop on nothing does. */
+            const auto drop = model::fileDropAt (rows, static_cast<std::size_t> (at),
+                                                 fractionDown (y), depthUnder (x));
 
-                A HEADER, A FOOTER, A PERSISTENT CUE AND A BAND ALL ANSWER THE
-                END INSTEAD. `cue.create` puts a cue among its parent's
-                MEMBERS; the header and footer of a group are separate orders
-                that a role decides, not positions an index can reach. So a
-                drop on one of those rows says which container was meant and
-                nothing about where, and the end of its members is the honest
-                reading of that. The line under the row is not drawn for them,
-                so nothing is promised that will not happen. */
             if (actions.importMedia)
-                actions.importMedia (entry.parent, insertAfter (entry) ? entry.indexInParent + 1 : -1,
-                                     files);
+                actions.importMedia (drop.parent.empty() ? drawnList : drop.parent, drop.index, files);
 
             return;
         }
@@ -1340,9 +1361,39 @@ namespace wfg::client::ui
             && rowById (draggedIdOf (details)) != nullptr;
     }
 
-    model::Drop CueListComponent::dropAt (const SourceDetails& details, int& rowOut) const
+    int CueListComponent::depthUnder (int x) const noexcept
+    {
+        const auto indent = juce::jmax (1, juce::roundToInt (theme.type * 7.0) * 2);
+        const auto inRow = x - list.getX() - railsOrigin();
+
+        return inRow < 0 ? 0 : inRow / indent;
+    }
+
+    model::Drop CueListComponent::dropAt (const SourceDetails& details, int& rowOut, int* depthOut) const
     {
         rowOut = rowUnder (details.localPosition.y);
+
+        if (depthOut != nullptr)
+            *depthOut = -1;
+
+        /*  BELOW THE LAST ROW IS THE BOTTOM OF THE LAST ROW (2026-09-25), so a
+            group at the end of the list can be left too: dropped there, the
+            hand's x says how far out - into the last group, or after it at the
+            end of the list. Before, nothing was under the hand and nothing
+            happened. */
+        auto pastTheEnd = false;
+
+        if (rowOut < 0 && ! rows.empty())
+        {
+            const auto inList = details.localPosition.y - list.getY()
+                                  + list.getViewport()->getViewPositionY();
+
+            if (inList >= static_cast<int> (rows.size()) * juce::jmax (1, rowHeight()))
+            {
+                rowOut = static_cast<int> (rows.size()) - 1;
+                pastTheEnd = true;
+            }
+        }
 
         const auto draggedId = draggedIdOf (details);
 
@@ -1361,11 +1412,8 @@ namespace wfg::client::ui
             return {};
 
         /*  How far down the row the pointer is, which is what tells "on"
-            from "after": the same arithmetic `rowUnder` uses, kept beside it. */
-        const auto inList = details.localPosition.y - list.getY()
-                              + list.getViewport()->getViewPositionY();
-        const auto height = juce::jmax (1, rowHeight());
-        const auto fraction = static_cast<double> (inList % height) / static_cast<double> (height);
+            from "after" - asked as a dropped file asks it. */
+        const auto fraction = pastTheEnd ? 1.0 : fractionDown (details.localPosition.y);
 
         /*  ALT HELD MEANS THE PRESET, not a move (author, 2026-09-18: "drag
             and drop with alt onto a group label adds this cue to the header").
@@ -1383,7 +1431,17 @@ namespace wfg::client::ui
         if (rows[static_cast<std::size_t> (rowOut)].rowKind == model::RowKind::step)
             return {};
 
-        return model::dropFor (rows[static_cast<std::size_t> (rowOut)], *dragged, fraction);
+        /*  AND HOW FAR LEFT THE HAND IS says how far out of the groups this
+            row ends the cue lands (author, 2026-09-25: "It's hard to move a
+            cue out of group to place it right below it"). */
+        int landed = -1;
+        const auto drop = model::dropAtDepth (rows, static_cast<std::size_t> (rowOut), *dragged, fraction,
+                                              depthUnder (details.localPosition.x), &landed);
+
+        if (depthOut != nullptr)
+            *depthOut = landed;
+
+        return drop;
     }
 
     void CueListComponent::itemDragEnter (const SourceDetails& details)
@@ -1415,6 +1473,7 @@ namespace wfg::client::ui
         const auto wasLink = dropWouldLink;
         const auto wasInsert = dropWouldInsert;
         const auto wasTone = dropTone;
+        const auto wasDepth = dropDepth;
 
         //  Kept so the timer can ask the same question again without the hand moving.
         lastDrag = details;
@@ -1437,7 +1496,9 @@ namespace wfg::client::ui
         }
 
         auto at = -1;
-        const auto drop = dropAt (details, at);
+        auto depth = -1;
+        const auto drop = dropAt (details, at, &depth);
+        dropDepth = drop.kind == model::DropKind::after ? depth : -1;
 
         /*  THE SAME TWO SHAPES A FILE GETS: a line under the row for "after",
             the whole row lit for "on" - into a group, or aimed at a fade. */
@@ -1453,7 +1514,7 @@ namespace wfg::client::ui
             actions.say (juce::String (model::describe (drop, model::Row {}, false)));
 
         if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert
-              || dropTone != wasTone)
+              || dropTone != wasTone || dropDepth != wasDepth)
         {
             if (was >= 0)      list.repaintRow (was);
             if (dropRow >= 0)  list.repaintRow (dropRow);
@@ -1578,6 +1639,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
 
         if (was >= 0)
@@ -1599,6 +1661,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
 
         //  The bands were the hand's, and the hand has gone.

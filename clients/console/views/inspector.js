@@ -106,16 +106,17 @@ const SAID_LAST = ["enabled", "preset"];
     happens. A group's `takeover` sits beside `mode`, the answer that makes it a
     question; a fade's `dca` beside `target`, the other thing it can move. */
 const KIND_ORDER = {
-  media:   ["file", "level", "startOffset", "dca", "initialLevel", "release", "secondPress",
+  media:   ["file", "level", "startOffset", "levelLane", "dca", "initialLevel", "release", "secondPress",
             "velocity", "velocityFloor", "pressure", "releaseFade",
-            // The EQ (Phase 9a): the switch, the two filters, then four bands - frequency,
-            // gain and width each, the outer two with a shape. The desktop draws these
-            // as a curve at the foot; here they are rows, in the order a hand reads them.
+            // The EQ (Phase 9a): the switch, the two filters, then four bands - each its
+            // own switch (2026-09-25), then frequency, gain and width, the outer two with a
+            // shape. The desktop draws these as a curve at the foot; here they are rows, in
+            // the order a hand reads them.
             "eqOn", "eqHpf", "eqHpfFreq", "eqLpf", "eqLpfFreq",
-            "eqB1Shape", "eqB1Freq", "eqB1Gain", "eqB1Q",
-            "eqB2Freq", "eqB2Gain", "eqB2Q",
-            "eqB3Freq", "eqB3Gain", "eqB3Q",
-            "eqB4Shape", "eqB4Freq", "eqB4Gain", "eqB4Q"],
+            "eqB1On", "eqB1Shape", "eqB1Freq", "eqB1Gain", "eqB1Q",
+            "eqB2On", "eqB2Freq", "eqB2Gain", "eqB2Q",
+            "eqB3On", "eqB3Freq", "eqB3Gain", "eqB3Q",
+            "eqB4On", "eqB4Shape", "eqB4Freq", "eqB4Gain", "eqB4Q"],
   fade:    ["target", "dca", "level", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],
   start:   ["target"],
@@ -128,9 +129,11 @@ const KIND_ORDER = {
   // A cue's insert and an entry of the show's plugin set (Phase 9a): the row a hand
   // reads first is the one that says which plugin, then the switch, then the values -
   // one sparse row here; the p<n> nodes beneath it are the door a rotary takes.
-  fx:      ["plugin", "enabled", "values", "name", "index"],
+  fx:      ["plugin", "enabled", "values", "stateFile", "name", "index"],
   plugin:  ["name", "identifier", "format", "path", "preset", "state", "problem",
-            "latencySamples", "paramCount"],
+            "latencySamples", "paramCount", "stateLoadMs", "stateProblem"],
+  // A media cue's send into one mix channel: which, how loud, whether it is in (2026-09-25).
+  send:    ["bus", "level", "on", "live", "cue"],
 };
 
 /*  THE NAMES A KIND CLAIMS - or, when several cues are chosen at once, the
@@ -391,7 +394,7 @@ function controlFor(field) {
 /*  Every word `cue.create` takes. `midi` was missing until the desktop's
     new-cue row was built from the same list (2026-09-18) and the two clients
     were held to one answer: the engine has made MIDI cues since Phase 4. */
-const KINDS = ["memo", "media", "fade", "transport", "osc", "midi", "group", "start"];
+const KINDS = ["memo", "media", "mic", "fade", "transport", "osc", "midi", "group", "start"];
 
 /*  ─────────────────────────────────────────────── several cues at once ──
 
@@ -779,6 +782,36 @@ function renderInspector() {
       anything else: the fields come from `/godot/trigger/<id>/*` through the
       same lookup that reads a cue's. What it needs of its own is a way back to
       the cue it belongs to. */
+  /*  A SEND IS INSPECTED THE SAME WAY (2026-09-25): its fields from
+      `/godot/send/<id>/*` - level and switch - and a way back to its cue. Under
+      the show lock a write to either rides live, as the desk's does. */
+  if (selection.picked && tree.node("/godot/send/" + selection.picked + "/bus")) {
+    const owner = String(tree.get("/godot/send/" + selection.picked + "/cue", ""));
+    const kind = "send";
+    const fields = fieldsFor(selection.picked, kind);
+    const signature = "send|" + selection.picked + "|" + (panel.details ? "open" : "shut")
+                        + "|" + fields.map((f) => f.address).join(",");
+
+    if (pane.dataset.showing !== signature) {
+      pane.dataset.showing = signature;
+
+      const bus = String(tree.get("/godot/send/" + selection.picked + "/bus", ""));
+
+      pane.innerHTML =
+        '<div class="who"><span class="text">' +
+        esc(String(tree.get("/godot/bus/" + bus + "/name", "") || bus)) +
+        '</span><span class="kind">send</span></div>' +
+        '<div class="back" data-pick="' + esc(owner) + '">\u2190 ' +
+        esc(tree.cue(owner, "name", "") || owner) + "</div>" +
+        fieldsMarkup (fields.filter(decided), kind, true) +
+        detailsMarkup ([selection.picked], fields.filter((f) => !decided(f)), kind);
+      return;
+    }
+
+    refreshFields(pane);
+    return;
+  }
+
   if (selection.picked && tree.node("/godot/trigger/" + selection.picked + "/kind")) {
     const owner = tree.trigger(selection.picked, "cue", "");
     const kind = "trigger";
@@ -877,6 +910,43 @@ function renderInspector() {
     }
 
     out += "</div>";
+
+    /*  A MEDIA CUE'S SENDS (2026-09-25), listed as its triggers are: each an
+        object of its own, picked to be edited, and a `+` for every mix
+        channel the cue does not reach yet. What rides live under the lock
+        says so. */
+    if (kind === "media") {
+      out += '<div class="group-head">sends</div>';
+
+      const reached = new Set();
+
+      for (const send of tree.ids("/godot/cue/" + selection.picked + "/sends")) {
+        const bus = String(tree.get("/godot/send/" + send + "/bus", ""));
+        const on = tree.get("/godot/send/" + send + "/on", true);
+        const off = on === false || on === "false";
+        const riding = tree.get("/godot/send/" + send + "/live", false);
+        const level = Number(tree.get("/godot/send/" + send + "/level", 0));
+
+        reached.add(bus);
+
+        out += '<div class="trigger-row" data-pick="' + esc(send) + '">' +
+               '<span class="kind">' + esc(String(tree.get("/godot/bus/" + bus + "/name", "") || bus)) + "</span>" +
+               '<span class="what' + (off ? " off" : "") + '">' +
+               esc((level <= -120 ? "-inf" : level.toFixed(1)) + " dB" + (off ? " · off" : "") +
+                   (riding === true || riding === "true" ? " · live" : "")) + "</span></div>";
+      }
+
+      out += '<div class="actions">';
+
+      for (const bus of tree.ids("/godot/audio/mixes")) {
+        if (!reached.has(bus)) {
+          out += '<button data-send="' + esc(bus) + '">+ ' +
+                 esc(String(tree.get("/godot/bus/" + bus + "/name", "") || bus)) + "</button>";
+        }
+      }
+
+      out += "</div>";
+    }
 
     /*  UP AND DOWN, which is `object.move` at one index either way. Dragging
         is what a desktop UI will do and is not what a first pass should try

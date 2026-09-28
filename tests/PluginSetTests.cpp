@@ -272,20 +272,78 @@ TEST_CASE ("plugin set: the four rows the machine fills read off the table, and 
     /*  THE HOST'S REPORT: loaded, sixty-four samples late, twelve parameters.
         `set` answers whether a reader could tell, which is what the host asks
         before it marks the tree stale. */
-    CHECK (table.set (id, { "loaded", "", 64, 12 }));
-    CHECK_FALSE (table.set (id, { "loaded", "", 64, 12 }));
+    CHECK (table.set (id, { "loaded", "", 64, 12, 0.0, {}, 0, 0, {} }));
+    CHECK_FALSE (table.set (id, { "loaded", "", 64, 12, 0.0, {}, 0, 0, {} }));
 
     CHECK (rig.at (base + "state") == "loaded");
     CHECK (rig.at (base + "problem") == "");
     CHECK (rig.at (base + "latencySamples") == "64");
     CHECK (rig.at (base + "paramCount") == "12");
 
-    CHECK (table.set (id, { "failed", "the child died after 8 misses", 64, 12 }));
+    CHECK (table.set (id, { "failed", "the child died after 8 misses", 64, 12, 0.0, {}, 0, 0, {} }));
     CHECK (rig.at (base + "state") == "failed");
     CHECK (rig.at (base + "problem") == "the child died after 8 misses");
 
     //  An entry nobody has looked at reads the default, whatever the table holds for others.
     CHECK (table.statusOf ("NOPE0001").state == "unloaded");
+}
+
+TEST_CASE ("plugin set: an entry the graph was built without says what brings it in, and the set reads changed")
+{
+    Rig rig;
+    plugin::PluginTable table;
+    rig.parameters.setPlugins (&table);
+
+    REQUIRE (rig.apply ("plugin.create", entry ("Test gain", "godot:test-gain", "VST3", "")).applied == 1);
+    const auto first = rig.lastApplied().at (4);
+
+    //  No graph: nothing to differ from, and nothing said.
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+    CHECK (rig.at ("/godot/plugin/" + first + "/problem") == "");
+
+    //  The graph built with the one entry.
+    table.setBuilt ({ first });
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+
+    REQUIRE (rig.apply ("plugin.create", entry ("Verb", "VST3-abcd1234-verb", "VST3", "")).applied == 1);
+    const auto second = rig.lastApplied().at (4);
+
+    CHECK (rig.at ("/godot/plugin/changed") == "true");
+    CHECK (rig.at ("/godot/plugin/" + second + "/state") == "unloaded");
+    CHECK (rig.at ("/godot/plugin/" + second + "/problem").find ("Load now") != std::string::npos);
+    CHECK (rig.at ("/godot/plugin/" + first + "/problem") == "");
+
+    //  Rebuilt with both: the same again.
+    table.setBuilt ({ first, second });
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+    CHECK (rig.at ("/godot/plugin/" + second + "/problem") == "");
+
+    //  And no graph at all again - the host stopped - is no change either.
+    table.clearBuilt();
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+}
+
+TEST_CASE ("plugin set: a format word the show cannot store is refused bad-value, and makes nothing")
+{
+    Rig rig;
+
+    /*  JUCE calls an AU `AudioUnit`; the schema says `AU` (2026-09-26). A
+        client passing the scan's own name through would write a show that
+        no longer validates, so the door refuses it. */
+    const auto result = rig.apply ("plugin.create", entry ("Delay", "AudioUnit:Effects/aufx,dely,appl",
+                                                           "AudioUnit", ""));
+    CHECK (result.rejected == 1);
+    CHECK (rig.audioChildren().empty());
+
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (! parsed.records.empty());
+    CHECK (parsed.records.back().kind == LogRecord::Kind::rejected);
+    CHECK (parsed.records.back().reason == reason::badValue);
+
+    //  The three words, and none at all, are the show's.
+    CHECK (rig.apply ("plugin.create", entry ("Delay", "AudioUnit:Effects/aufx,dely,appl", "AU", "")).applied == 1);
+    CHECK (rig.apply ("plugin.create", entry ("Amp", "LV2-amp-00000000-00000000", "LV2", "")).applied == 1);
+    CHECK (rig.apply ("plugin.create", entry ("Test gain", "godot:test-gain", "", "")).applied == 1);
 }
 
 TEST_CASE ("plugin set: a locked show refuses the create, and gains no empty container")
@@ -364,4 +422,69 @@ TEST_CASE ("plugin set: an Fx is one entry switched in on one media cue, made on
     CHECK (rig.at ("/godot/cue/" + mediaId + "/fx") == "FX7N0002");
     REQUIRE (rig.apply ("undo").applied == 1);
     CHECK (rig.at ("/godot/fx/" + fxId + "/plugin") == gainId);
+}
+
+//==============================================================================
+TEST_CASE ("rack: a channel's plugins are its own chain, published beside the set's and never in its order")
+{
+    /*  Phase 9b (namespace draft 18.2 and 18.3, decision BX). `channel.plugin`
+        puts a Plugin under a rack channel, in chain order; it is published at
+        /godot/plugin/<id> with the set's rows, so the window, the editor and
+        the FX page take it as they take an entry of the set - and it is never
+        in /godot/plugin/order, which is the chain on every voice. */
+    Rig rig;
+    plugin::PluginTable table;
+    rig.parameters.setPlugins (&table);
+
+    REQUIRE (rig.apply ("channel.create", { osc::Value::string ("mono"), osc::Value::string ("CH000001") }).applied == 1);
+    REQUIRE (rig.apply ("node.set", { osc::Value::string ("/godot/slot/CH000001/name"),
+                                      osc::Value::string ("Vox 1") }).applied == 1);
+
+    std::vector<osc::Value> comp { osc::Value::string ("CH000001") };
+    for (auto& word : entry ("Comp", "godot:test-gain", "VST3", "", "PG7N0011"))
+        comp.push_back (word);
+
+    std::vector<osc::Value> verb { osc::Value::string ("CH000001") };
+    for (auto& word : entry ("Verb", "VST3-abcd1234-verb", "VST3", "", "PG7N0012"))
+        verb.push_back (word);
+
+    REQUIRE (rig.apply ("channel.plugin", comp).applied == 1);
+    REQUIRE (rig.apply ("channel.plugin", verb).applied == 1);
+
+    CHECK (rig.at ("/godot/slot/CH000001/plugins") == "PG7N0011 PG7N0012");
+    CHECK (rig.at ("/godot/plugin/PG7N0011/name") == "Comp");
+    CHECK (rig.at ("/godot/plugin/PG7N0012/identifier") == "VST3-abcd1234-verb");
+    CHECK (rig.at ("/godot/plugin/order").empty());
+
+    /*  THE WORST CASE, every plugin in, read off the table. */
+    plugin::PluginTable::Status verbStatus;
+    verbStatus.state = "loaded";
+    verbStatus.latencySamples = 240;
+    table.set ("PG7N0012", verbStatus);
+    CHECK (rig.at ("/godot/slot/CH000001/latencySamples") == "240");
+
+    /*  A graph built with the channel and its first plugin: the second reads
+        "added since", and the set reads changed until it is rebuilt. */
+    table.setBuilt ({});
+    table.setBuiltRack ({ { "CH000001", { "PG7N0011" } } });
+    CHECK (rig.at ("/godot/plugin/changed") == "true");
+    CHECK (rig.at ("/godot/plugin/PG7N0011/problem") == "");
+    CHECK (rig.at ("/godot/plugin/PG7N0012/problem").find ("Load now") != std::string::npos);
+
+    table.setBuiltRack ({ { "CH000001", { "PG7N0011", "PG7N0012" } } });
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+
+    /*  Refused: a channel the show does not have, and a format word it cannot
+        store - each making nothing. */
+    std::vector<osc::Value> nowhere { osc::Value::string ("NQNQNQNQ") };
+    for (auto& word : entry ("Comp", "godot:test-gain", "VST3", ""))
+        nowhere.push_back (word);
+    CHECK (rig.apply ("channel.plugin", nowhere).rejected == 1);
+
+    std::vector<osc::Value> badFormat { osc::Value::string ("CH000001") };
+    for (auto& word : entry ("Comp", "godot:test-gain", "AudioUnit", ""))
+        badFormat.push_back (word);
+    CHECK (rig.apply ("channel.plugin", badFormat).rejected == 1);
+
+    CHECK (rig.at ("/godot/slot/CH000001/plugins") == "PG7N0011 PG7N0012");
 }

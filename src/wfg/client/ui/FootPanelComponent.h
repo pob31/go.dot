@@ -30,13 +30,16 @@
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CurveEditorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
+#include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/SendMixerComponent.h>
+#include <wfg/client/ui/TakePanelComponent.h>
 #include <wfg/client/ui/TimelineComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -59,13 +62,25 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId, double at)> splitRange;
 
             /** `send.create`, when a silent fader in the mixer is raised. */
-            std::function<void (const std::string& cueId, const std::string& busId)> createSend;
+            std::function<void (const std::string& cueId, const std::string& busId, double level)> createSend;
 
             /** `eq.reset` on a media cue, from the EQ panel's Flat button. */
             std::function<void (const std::string& cueId)> resetEq;
 
+            /** `fx.create`, when an entry of the set is first switched in on a cue. */
+            std::function<void (const std::string& cueId, const std::string& pluginId)> createFx;
+
+            /** Open the plugin's own window for this cue, from the chain's Edit... */
+            std::function<void (const std::string& cueId, const std::string& pluginId)> editPlugin;
+
             /** Point the panel at another group, from the timeline's own gestures. */
             std::function<void (const std::string& groupId)> openTimelineOn;
+
+            /** Show a cue's EQ, from the chain's EQ box. */
+            std::function<void (const std::string& cueId)> openEqOn;
+
+            /** Show the take a mic cue's channel records, from the chain's recorder (Phase 9c). */
+            std::function<void (const std::string& cueId)> openTakeOn;
 
             /** The transport of whatever the panel is showing: fire, kill, seek. */
             std::function<void (const std::string& cueId)> play;
@@ -76,6 +91,16 @@ namespace wfg::client::ui
 
             /** The height changed by a drag on the top edge, in pixels. */
             std::function<void (int)> resizeBy;
+
+            /*  A CLICK OR A TOUCH ON A NUMBER in the EQ or the send mixer: that
+                number on the surfaces' master dial (2026-09-26). */
+            std::function<void (const std::string& address)> dial;
+
+            /** `take.<verb> <channel>`, from the take panel's buttons (Phase 9c). */
+            std::function<void (const std::string& verb, const std::string& channelId)> pressTake;
+
+            /** `take.keep`, from the take panel's Keep and Keep as cue (Phase 9c). */
+            std::function<void (const std::string& channelId, bool asCue, const std::string& afterCue)> keepTake;
         };
 
         FootPanelComponent (const model::Theme&, Actions);
@@ -92,7 +117,21 @@ namespace wfg::client::ui
         void open (const model::Subject&);
         const model::Subject& subject() const noexcept { return showing; }
 
-        void show (const model::FootReading&, std::shared_ptr<const audio::MediaRecords>);
+        /*  The reading for this pass, and the doors' tables taken with it:
+            the analyser's, and the takes' pictures - null unless the take
+            panel is the one open, since nothing else draws them. */
+        void show (const model::FootReading&, std::shared_ptr<const audio::MediaRecords>,
+                   std::shared_ptr<const audio::TakePictureSet> takes = {});
+
+        /** What the client knows of each plugin's own window, for the chain to say. */
+        void setEditorWords (std::map<std::string, std::string>);
+
+        /*  The EQ band a surface's rotary last turned, ringed on the EQ panel
+            while it is the one open (2026-09-25); -1 lets it go. */
+        void showEditedEqHandle (int handle);
+
+        /** The number the master dial turns, marked in whichever panel draws it. */
+        void showDial (const std::string& address);
 
         void paint (juce::Graphics&) override;
         void resized() override;
@@ -119,6 +158,11 @@ namespace wfg::client::ui
         std::unique_ptr<TimelineComponent> timeline;
         std::unique_ptr<CurveEditorComponent> curve;
         std::unique_ptr<EqPanelComponent> eq;
+
+        std::string dialed;
+        std::unique_ptr<FxPanelComponent> fx;
+        std::unique_ptr<TakePanelComponent> takePanel;
+        std::map<std::string, std::string> editorWords;
         juce::TextButton shut { "x" };
         int columnWidth = 0, columnGap = 0;
 

@@ -20,6 +20,9 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <vector>
 
 namespace wfg::audio
 {
@@ -119,6 +122,43 @@ namespace wfg::audio
     };
 
     //==============================================================================
+    /*  THE INPUT FILE (Phase 9b): read whole at open, and handed to every block
+        from where the last one left off, wrapping at its end - so a tone of a
+        few seconds is an input that never stops. The block is set aside at
+        open; the pump only copies into it. */
+    struct HostedAudioDriver::Input
+    {
+        juce::AudioBuffer<float> audio;
+        juce::AudioBuffer<float> block;
+        std::vector<const float*> pointers;
+        std::int64_t position = 0;
+
+        int channels() const noexcept { return audio.getNumChannels(); }
+
+        const float* const* next (int blockSize)
+        {
+            const auto length = static_cast<std::int64_t> (audio.getNumSamples());
+
+            for (int channel = 0; channel < channels(); ++channel)
+            {
+                auto written = 0;
+                auto at = position;
+
+                while (written < blockSize)
+                {
+                    const auto chunk = static_cast<int> (std::min<std::int64_t> (blockSize - written, length - at));
+                    block.copyFrom (channel, written, audio, channel, static_cast<int> (at), chunk);
+                    written += chunk;
+                    at = (at + chunk) % length;
+                }
+            }
+
+            position = (position + blockSize) % length;
+            return pointers.data();
+        }
+    };
+
+    //==============================================================================
     HostedAudioDriver::HostedAudioDriver (std::string storageFolder)
         : audioHost (std::move (storageFolder))
     {
@@ -144,6 +184,47 @@ namespace wfg::audio
         hostSettings.sampleRate = requested.sampleRate;
         hostSettings.blockSize = requested.blockSize;
         hostSettings.outputChannels = requested.outputChannels;
+
+        input.reset();
+
+        if (! requested.inputFile.empty())
+        {
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+
+            const std::unique_ptr<juce::AudioFormatReader> reader (
+                formats.createReaderFor (juce::File (juce::String (requested.inputFile))));
+
+            if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0)
+            {
+                error = "cannot read the input file " + requested.inputFile;
+                return false;
+            }
+
+            /*  AT THE SESSION'S RATE OR NOT AT ALL: a file read at another rate
+                would be heard repitched, which is exactly the kind of sound
+                nobody decided (PRD §6.2's own rule). */
+            if (static_cast<int> (reader->sampleRate) != requested.sampleRate)
+            {
+                error = "the input file is at " + std::to_string (static_cast<int> (reader->sampleRate))
+                      + " Hz and the session at " + std::to_string (requested.sampleRate);
+                return false;
+            }
+
+            auto made = std::make_unique<Input>();
+            const auto channels = static_cast<int> (reader->numChannels);
+            const auto length = static_cast<int> (reader->lengthInSamples);
+
+            made->audio.setSize (channels, length);
+            reader->read (&made->audio, 0, length, 0, true, true);
+            made->block.setSize (channels, requested.blockSize);
+
+            for (int channel = 0; channel < channels; ++channel)
+                made->pointers.push_back (made->block.getReadPointer (channel));
+
+            hostSettings.inputChannels = channels;
+            input = std::move (made);
+        }
 
         if (! audioHost.start (hostSettings))
         {
@@ -252,7 +333,10 @@ namespace wfg::audio
                 this mutex. */
             lock.unlock();
 
-            audioHost.processBlock();
+            if (input != nullptr)
+                audioHost.processBlock (input->next (current.blockSize), input->channels());
+            else
+                audioHost.processBlock();
 
             const auto late = durationToSamples (
                 std::chrono::duration_cast<std::chrono::nanoseconds> (Clock::now() - due),

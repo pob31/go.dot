@@ -16,9 +16,12 @@
 
 #include <wfg/client/model/Gestures.h>
 
+#include <wfg/engine/osc/OscValue.h>
+
 #include <cstddef>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::client::gesture
@@ -65,16 +68,73 @@ namespace wfg::client::gesture
                    osc::Value::string (kind), osc::Value::string (name) } };
     }
 
-    Event createSend (const std::string& cueId, const std::string& busId)
+    Event createCue (const std::string& parent, int index,
+                     const std::string& kind, const std::string& name,
+                     const std::vector<std::pair<std::string, std::string>>& settings)
     {
+        auto event = createCue (parent, index, kind, name);
+
+        if (settings.empty())
+            return event;
+
+        event.args.push_back (osc::Value::string (""));     // the identifier: the engine's to draw
+
+        for (const auto& [attribute, value] : settings)
+        {
+            event.args.push_back (osc::Value::string (attribute));
+            event.args.push_back (osc::Value::string (value));
+        }
+
+        return event;
+    }
+
+    Event wrapGroup (const std::vector<std::string>& cueIds,
+                     const std::vector<std::pair<std::string, std::string>>& settings)
+    {
+        std::string ids;
+
+        for (const auto& id : cueIds)
+            ids += (ids.empty() ? "" : " ") + id;
+
+        Event event { origin::window, "group.wrap", { osc::Value::string (ids) } };
+
+        if (settings.empty())
+            return event;
+
+        event.args.push_back (osc::Value::string (""));     // the identifier: the engine's to draw
+
+        for (const auto& [attribute, value] : settings)
+        {
+            event.args.push_back (osc::Value::string (attribute));
+            event.args.push_back (osc::Value::string (value));
+        }
+
+        return event;
+    }
+
+    Event createSend (const std::string& cueId, const std::string& busId,
+                      std::optional<double> level)
+    {
+        if (! level.has_value())
+            return { origin::window, "send.create",
+                     { osc::Value::string (cueId), osc::Value::string (busId) } };
+
+        //  The identifier left empty for the engine to draw; the level after it.
         return { origin::window, "send.create",
-                 { osc::Value::string (cueId), osc::Value::string (busId) } };
+                 { osc::Value::string (cueId), osc::Value::string (busId), osc::Value::string ({}),
+                   osc::Value::string (osc::formatDouble (*level)) } };
     }
 
     Event createFx (const std::string& cueId, const std::string& pluginId)
     {
         return { origin::window, "fx.create",
                  { osc::Value::string (cueId), osc::Value::string (pluginId) } };
+    }
+
+    Event captureFx (const std::string& fxId, const std::string& stateFile, const std::string& values)
+    {
+        return { origin::window, "fx.capture",
+                 { osc::Value::string (fxId), osc::Value::string (stateFile), osc::Value::string (values) } };
     }
 
     Event createPlugin (const std::string& name, const std::string& identifier,
@@ -90,9 +150,73 @@ namespace wfg::client::gesture
         return { origin::window, "plugin.restart", { osc::Value::string (pluginId) } };
     }
 
+    Event scanPlugins (const std::string& formatWord, const std::string& folder)
+    {
+        if (folder.empty())
+            return { origin::window, "plugin.scan", { osc::Value::string (formatWord) } };
+
+        return { origin::window, "plugin.scan", { osc::Value::string (formatWord), osc::Value::string (folder) } };
+    }
+
+    Event retryScan (const std::string& file)
+    {
+        return { origin::window, "plugin.scanRetry", { osc::Value::string (file) } };
+    }
+
+    Event loadPlugins()
+    {
+        return { origin::window, "plugin.load", {} };
+    }
+
+    Event createRackChannel (const std::string& channelClass)
+    {
+        return { origin::window, "channel.create", { osc::Value::string (channelClass) } };
+    }
+
+    Event createChannelPlugin (const std::string& channelId, const std::string& name,
+                               const std::string& identifier, const std::string& format,
+                               const std::string& path)
+    {
+        return { origin::window, "channel.plugin",
+                 { osc::Value::string (channelId), osc::Value::string (name),
+                   osc::Value::string (identifier), osc::Value::string (format),
+                   osc::Value::string (path) } };
+    }
+
     Event eqReset (const std::string& cueId)
     {
         return { origin::window, "eq.reset", { osc::Value::string (cueId) } };
+    }
+
+    Event takePress (const std::string& verb, const std::string& channelId)
+    {
+        return { origin::window, "take." + verb, { osc::Value::string (channelId) } };
+    }
+
+    Event takeKeep (const std::string& channelId, bool asCue, const std::string& afterCue)
+    {
+        return { origin::window, "take.keep",
+                 { osc::Value::string (channelId), osc::Value::boolean (asCue), osc::Value::string (afterCue) } };
+    }
+
+    Event aimSurfaces (const std::string& cueId)
+    {
+        return { origin::window, "surface.aim", { osc::Value::string (cueId) } };
+    }
+
+    Event dial (const std::string& address)
+    {
+        return { origin::window, "surface.dial", { osc::Value::string (address) } };
+    }
+
+    Event keepLive()
+    {
+        return { origin::window, "live.keep", {} };
+    }
+
+    Event dropLive()
+    {
+        return { origin::window, "live.drop", {} };
     }
 
     Event splitRange (const std::string& cueId, double at)
@@ -277,6 +401,30 @@ namespace wfg::client::gesture
     {
         return { origin::window, "bus.width",
                  { osc::Value::string (busId), osc::Value::int32 (width) } };
+    }
+
+    Event createInput (int width, int index)
+    {
+        return { origin::window, "input.create",
+                 { osc::Value::int32 (width), osc::Value::int32 (index) } };
+    }
+
+    Event deleteInput (const std::string& inputId)
+    {
+        return { origin::window, "input.delete", { osc::Value::string (inputId) } };
+    }
+
+    Event moveInput (const std::string& inputId, int index)
+    {
+        return { origin::window, "input.move",
+                 { osc::Value::string (inputId), osc::Value::int32 (index) } };
+    }
+
+    Event setInputPatchSettled (bool settled)
+    {
+        return { origin::window, "node.set",
+                 { osc::Value::string ("/godot/audio/inputPatchSettled"),
+                   osc::Value::boolean (settled) } };
     }
 
     Event setPatchSettled (bool settled)

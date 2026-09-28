@@ -105,6 +105,9 @@ namespace wfg::audio
             std::atomic<float> freq { 1000.0f };
             std::atomic<float> gain { 0.0f };
             std::atomic<float> q { 0.7f };
+
+            /** A band's own switch; the filters say theirs in flagOrShape. */
+            std::atomic<int> bandOn { 1 };
         };
 
         struct SectionState

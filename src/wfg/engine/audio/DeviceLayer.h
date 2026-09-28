@@ -151,6 +151,11 @@ namespace wfg::audio
         const std::string& deviceName() const noexcept;
         int inputChannels() const noexcept;
         int outputChannels() const noexcept;
+
+        /*  The interface's own input and output delays in samples, as its
+            driver reported them when it opened; nought when closed. */
+        int inputLatency() const noexcept;
+        int outputLatency() const noexcept;
         /** Supported buffer sizes captured from the owned device at open. */
         const std::string& availableBufferSizes() const noexcept;
         void setOutputTest (const OutputTestSettings&) noexcept;

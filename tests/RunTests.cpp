@@ -774,3 +774,68 @@ TEST_CASE ("run: a run playing a range reads a position inside that range, and w
         CHECK (sounding->position < 12.0);
     }
 }
+
+//==============================================================================
+TEST_CASE ("run: a cue nobody has shaped arms with every sound row at the table's default")
+{
+    /*  THE OWNER SPLIT'S TRIPWIRE (Phase 9b, namespace draft 18.2). The
+        thirty-five rows a cue that sounds carries whatever its source - its
+        level, routing, EQ, inserts and sends - moved from the `media` owner
+        to `sound`, and the Reader keys a row's DEFAULT by owner and name: a
+        read left asking `media` for a row that moved gets an empty string -
+        a band at nought hertz, a filter at nought - with no error anywhere,
+        because a stored value is found whatever owner is asked. A fresh cue
+        stores none of those rows, so its arm reads every one of them from
+        the defaults; this compares the arm with the table. */
+    PlayheadRig rig;
+
+    REQUIRE (rig.model.engine.submit ("cli", "audio.arm", { osc::Value::string (rig.model.mediaId) }));
+    rig.tickOnce();
+    REQUIRE (rig.audio.arms.size() == 1u);
+
+    const auto& arm = rig.audio.arms.back();
+
+    const auto defaultOf = [] (const std::string& name)
+    {
+        for (const auto* row : doc::Schema::rowsForOwner ("sound"))
+            if (row->name == name)
+                return std::string (row->defaultText);
+
+        return std::string ("(no sound row called ") + name + ")";
+    };
+
+    const auto number = [&] (const std::string& name)
+    {
+        INFO (name << " defaults to " << defaultOf (name));
+        const auto parsed = osc::parseDouble (defaultOf (name));
+        REQUIRE (parsed.has_value());
+        return static_cast<float> (*parsed);
+    };
+
+    const auto flag = [&] (const std::string& name) { return defaultOf (name) == "true"; };
+
+    CHECK (arm.eq.on == flag ("eqOn"));
+    CHECK (arm.eq.hpf == flag ("eqHpf"));
+    CHECK (arm.eq.lpf == flag ("eqLpf"));
+    CHECK (arm.eq.hpfFreq == doctest::Approx (number ("eqHpfFreq")));
+    CHECK (arm.eq.lpfFreq == doctest::Approx (number ("eqLpfFreq")));
+
+    for (int band = 0; band < audio::EqSettings::numBands; ++band)
+    {
+        const auto row = "eqB" + std::to_string (band + 1);
+        INFO ("band " << band + 1);
+
+        CHECK (arm.eq.band[band].on == flag (row + "On"));
+        CHECK (arm.eq.band[band].freq == doctest::Approx (number (row + "Freq")));
+        CHECK (arm.eq.band[band].gain == doctest::Approx (number (row + "Gain")));
+        CHECK (arm.eq.band[band].q == doctest::Approx (number (row + "Q")));
+
+        /*  What a missed default would read as, said outright: no band
+            of a cue nobody shaped sits at nought hertz. */
+        CHECK (arm.eq.band[band].freq > 0.0f);
+    }
+
+    CHECK ((arm.eq.band[0].shape == audio::EqSettings::Shape::lowShelf) == (defaultOf ("eqB1Shape") == "lowShelf"));
+    CHECK ((arm.eq.band[3].shape == audio::EqSettings::Shape::highShelf) == (defaultOf ("eqB4Shape") == "highShelf"));
+    CHECK (arm.levelDb == doctest::Approx (number ("level")));
+}

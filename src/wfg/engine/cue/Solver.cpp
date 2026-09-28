@@ -313,6 +313,11 @@ namespace wfg::cue
                             placeInRanges (read, entry.node, at - entry.from, beside, plan.confused);
                         else if (entry.element == "Group")
                             beside.offset = at - entry.from;
+                        else if (entry.element == "Mic")
+                        {
+                            /*  A LIVE INPUT BESIDE THE TARGET IS SOUNDING
+                                (Phase 9b), with no offset to be at. */
+                        }
                         else
                             beside.when = planned::finished;
 
@@ -490,7 +495,7 @@ namespace wfg::cue
             if (! cue.isValid())
                 continue;
 
-            const auto trim = level - read.number (cue, "media", "level");
+            const auto trim = level - read.number (cue, "sound", "level");
 
             const auto seen = trimmedAt.find (targetCue);
 
@@ -517,7 +522,8 @@ namespace wfg::cue
             if (entry.row > target->row)
                 break;
 
-            if (entry.element == "Transport" && read.flag (entry.node, "cue", "enabled"))
+            if (entry.element == "Transport" && read.flag (entry.node, "cue", "enabled")
+                  && ! isTakePress (read, entry.node))
                 stopped.push_back (read.text (entry.node, "transport", "target"));
         }
 
@@ -531,18 +537,23 @@ namespace wfg::cue
             if (entry.row >= target->row)
                 break;
 
-            if (entry.element != "Media" || ! read.flag (entry.node, "cue", "enabled"))
+            if ((entry.element != "Media" && entry.element != "Mic")
+                  || ! read.flag (entry.node, "cue", "enabled"))
                 continue;
 
             if (! stillGoing (walk, entry) || wasStopped (entry.id))
                 continue;
 
             /*  Still going, and where in it is operator-timed. `placeInRanges`
-                lands it at the start of its endless range and says so. */
+                lands it at the start of its endless range and says so. A mic
+                cue has no range and nothing to place: it is sounding (Phase 9b). */
             PlannedRun run;
             run.cue = entry.id;
             run.ancestors = entry.ancestors;
-            placeInRanges (read, entry.node, 0.0, run, plan.confused);
+
+            if (entry.element == "Media")
+                placeInRanges (read, entry.node, 0.0, run, plan.confused);
+
             plan.runs.push_back (run);
         }
 
@@ -676,7 +687,7 @@ namespace wfg::cue
             {
                 const auto targetCue = read.text (entry->node, "transport", "target");
 
-                if (! targetCue.empty())
+                if (! targetCue.empty() && ! isTakePress (read, entry->node))
                 {
                     stopped.push_back (targetCue);
                     unplan (targetCue);
@@ -727,7 +738,7 @@ namespace wfg::cue
                     continue;
 
                 const auto whole = read.number (entry->node, "fade", "level")
-                                     - read.number (cue, "media", "level");
+                                     - read.number (cue, "sound", "level");
                 const auto duration = read.number (entry->node, "fade", "duration");
                 const auto part = duration > 0.0 && seconds < duration ? seconds / duration : 1.0;
                 const auto trim = whole * part;
@@ -743,7 +754,7 @@ namespace wfg::cue
                 continue;
             }
 
-            if (entry->element != "Media" && entry->element != "Group")
+            if (entry->element != "Media" && entry->element != "Group" && entry->element != "Mic")
                 continue;
 
             /*  A SOUND THAT HAS RUN OUT BY THE INSTANT IS OVER, and is left
@@ -879,7 +890,7 @@ namespace wfg::cue
 
         for (const auto& entry : walk.placed)
             if (entry.row < standbyRow && entry.element == "Transport"
-                 && read.flag (entry.node, "cue", "enabled"))
+                 && read.flag (entry.node, "cue", "enabled") && ! isTakePress (read, entry.node))
                 stopped.push_back (read.text (entry.node, "transport", "target"));
 
         for (const auto& cue : section)
@@ -893,7 +904,7 @@ namespace wfg::cue
             if (std::find (stopped.begin(), stopped.end(), id) != stopped.end())
                 continue;
 
-            if (element == "Media" || element == "Midi")
+            if (element == "Media" || element == "Midi" || element == "Mic")
             {
                 PlannedRun run;
                 run.cue = id;

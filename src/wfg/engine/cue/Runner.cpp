@@ -15,9 +15,12 @@
 */
 
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/FxRows.h>
 
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LiveEdits.h>
+#include <wfg/engine/cue/SamplerLayout.h>
 #include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
@@ -38,6 +41,9 @@
     libstdc++, where a transitive include that happens to work here is exactly
     the kind of thing that does not there. */
 #include <juce_audio_basics/juce_audio_basics.h>
+
+#include <wfg/engine/cue/InsertChain.h>
+#include <wfg/engine/document/LevelLane.h>
 
 #include <algorithm>
 #include <bit>
@@ -68,6 +74,7 @@ namespace wfg::cue
             if (element == "Cue")   return "memo";
             if (element == "Group") return "group";
             if (element == "Media") return "media";
+            if (element == "Mic")   return "mic";
             if (element == "Fade")  return "fade";
             if (element == "Transport") return "transport";
             if (element == "Osc")   return "osc";
@@ -137,6 +144,17 @@ namespace wfg::cue
                     doc::IdRegistry& runIds, Focus& focusToUse)
         : document (documentToRead), runs (runsToDrive), ids (runIds), focus (focusToUse)
     {
+        /*  A SAMPLING CHANNEL LET GO (Phase 9c): said by the run table's own
+            release, which the handlers that end a run make live and on replay. */
+        runs.onRelease = [this] (const std::string& slotId, const std::string&, const std::string& toRun)
+        {
+            takeReleased (slotId, toRun);
+        };
+    }
+
+    Runner::~Runner()
+    {
+        runs.onRelease = nullptr;
     }
 
     int Runner::latencyTicks() const noexcept
@@ -228,19 +246,39 @@ namespace wfg::cue
         /*  THROUGH THE SCHEMA, for the reason resolveRouting gives: the
             canonical writer omits every attribute at its default, so a cue
             whose EQ nobody touched has no eq* attribute at all, and a raw read
-            would make a flat EQ into nineteen noughts - a high-pass at 0 Hz, a
+            would make a flat EQ into a row of noughts - a high-pass at 0 Hz, a
             width of nought. The defaults are the table's and do not change
             under a running show. */
         static const Reader schema;
 
-        const auto flag = [&] (const char* name) { return schema.flag (cue, "media", name); };
+        /*  AND WHAT A LOCKED SHOW IS RIDING, first (2026-09-25): a row held
+            live is the value the voice plays until somebody keeps it or lets
+            it go. */
+        const auto cueId = cue.getProperty ("id").toString().toStdString();
+        const auto riding = [&] (const char* name) -> const std::string*
+        {
+            return liveLayer != nullptr ? liveLayer->rowOf (cueId, name) : nullptr;
+        };
+
+        const auto flag = [&] (const char* name)
+        {
+            if (const auto* held = riding (name))
+                return *held == "true";
+
+            return schema.flag (cue, "sound", name);
+        };
         const auto number = [&] (const char* name)
         {
-            return static_cast<float> (schema.number (cue, "media", name));
+            if (const auto* held = riding (name))
+                if (const auto value = osc::parseDouble (*held))
+                    return static_cast<float> (*value);
+
+            return static_cast<float> (schema.number (cue, "sound", name));
         };
         const auto shape = [&] (const char* name)
         {
-            const auto word = schema.text (cue, "media", name);
+            const auto* held = riding (name);
+            const auto word = held != nullptr ? *held : schema.text (cue, "sound", name);
 
             if (word == "lowShelf")  return audio::EqSettings::Shape::lowShelf;
             if (word == "highShelf") return audio::EqSettings::Shape::highShelf;
@@ -254,10 +292,14 @@ namespace wfg::cue
         out.lpf = flag ("eqLpf");
         out.hpfFreq = number ("eqHpfFreq");
         out.lpfFreq = number ("eqLpfFreq");
-        out.band[0] = { shape ("eqB1Shape"), number ("eqB1Freq"), number ("eqB1Gain"), number ("eqB1Q") };
-        out.band[1] = { audio::EqSettings::Shape::peak, number ("eqB2Freq"), number ("eqB2Gain"), number ("eqB2Q") };
-        out.band[2] = { audio::EqSettings::Shape::peak, number ("eqB3Freq"), number ("eqB3Gain"), number ("eqB3Q") };
-        out.band[3] = { shape ("eqB4Shape"), number ("eqB4Freq"), number ("eqB4Gain"), number ("eqB4Q") };
+        out.band[0] = { shape ("eqB1Shape"), number ("eqB1Freq"), number ("eqB1Gain"), number ("eqB1Q"),
+                        flag ("eqB1On") };
+        out.band[1] = { audio::EqSettings::Shape::peak, number ("eqB2Freq"), number ("eqB2Gain"),
+                        number ("eqB2Q"), flag ("eqB2On") };
+        out.band[2] = { audio::EqSettings::Shape::peak, number ("eqB3Freq"), number ("eqB3Gain"),
+                        number ("eqB3Q"), flag ("eqB3On") };
+        out.band[3] = { shape ("eqB4Shape"), number ("eqB4Freq"), number ("eqB4Gain"), number ("eqB4Q"),
+                        flag ("eqB4On") };
 
         return out;
     }
@@ -295,7 +337,7 @@ namespace wfg::cue
             run left sitting in `armed` would look like progress that was not
             happening. `audio.arm` refuses them at the command; this is the same
             answer for the standby path. */
-        if (! fireAtOnce && kind != "media")
+        if (! fireAtOnce && kind != "media" && kind != "mic")
             return {};
 
         /*  DECISION N, 2026-09-06: a refire is decided per kind, and this is
@@ -316,7 +358,7 @@ namespace wfg::cue
             one where GO does nothing at all. A cue in its PRE-WAIT is the same
             case one step earlier, and is left alone for the same reason: it is
             already on its way. */
-        if (kind == "media")
+        if (kind == "media" || kind == "mic")
             if (const auto* live = runs.liveRunOf (cueId))
             {
                 if (fireAtOnce && live->state == runState::armed)
@@ -423,7 +465,12 @@ namespace wfg::cue
                 assignment and is the difference between an operator seeing that
                 the next cue is ready and having to know that it always is. */
             run->prepare = preparedness::armed;
-            armMedia (engine, cue, id);
+
+            if (kind == "mic")
+                armMic (engine, cue, id);
+            else
+                armMedia (engine, cue, id);
+
             return id;
         }
 
@@ -443,6 +490,8 @@ namespace wfg::cue
 
             if (kind == "media")
                 armMedia (engine, cue, id);
+            else if (kind == "mic")
+                armMic (engine, cue, id);
 
             return id;
         }
@@ -586,7 +635,10 @@ namespace wfg::cue
         /*  A MEDIA CUE ALWAYS, because an arm is revocable by construction:
             a voice reserved and a file made ready are undone by letting go of
             them, and nothing outside this machine heard anything. */
-        if (element == "Media")
+        /*  A MIC CUE TOO (Phase 9b): its channel claimed and its plugins set
+            ahead, the gate shut - undone by letting go of the claim, and
+            nothing outside this machine heard anything. */
+        if (element == "Media" || element == "Mic")
             return true;
 
         if (element != "Osc")
@@ -1075,7 +1127,7 @@ namespace wfg::cue
                 const auto cue = document.findById (planned.cue);
                 const auto kind = kindOfCue (cue);
 
-                if (kind == "media")
+                if (kind == "media" || kind == "mic")
                 {
                     if (runs.liveRunOf (planned.cue) != nullptr)
                         continue;
@@ -1186,16 +1238,42 @@ namespace wfg::cue
             side), so this is what tells the sweep below what it may end. */
         const auto listOf = [this] (const std::string& cueId) { return listOfCue (cueId); };
 
+        /*  WHETHER A CUE SITS IN THE LIST'S PERSISTENT SECTION, at any depth.
+            The section is outside the jump (§3.29): the solver never plans
+            it, so a sweep that asked only "is this run in the list" ended every
+            sounding bed - and a jump is not a step, so nothing asserted it again
+            until the next GO (2026-09-26, namespace draft §18.8). What the
+            section should be doing after a jump is the assertion's question at
+            the next step, never this sweep's. */
+        const auto inPersistent = [this] (const std::string& cueId)
+        {
+            for (auto node = document.findById (cueId); node.isValid(); node = node.getParent())
+                if (node.getType().toString() == "Persistent")
+                    return true;
+
+            return false;
+        };
+
         //----------------------------------------------------------------------
         /*  WHAT THE JUMP ABANDONS, ENDED BEFORE ANYTHING IS BUILT.
 
-            Every run of THIS list the plan does not name: the group runs and
-            their jobs, the members under them, the armed run at the old
-            standby. Ended the way `run.kill` ends one - the whole descent, and
-            NO FOOTER, because a footer is arbitrary and need not be an inverse.
-            Running one here would be arbitrary work fighting the values this is
-            about to send, and one that blocks on a fade would make the jump
-            wait for it.
+            Every run of THIS list outside its persistent section: the group
+            runs and their jobs, the members under them, the armed run at the
+            old standby. Ended the way `run.kill` ends one - the whole descent,
+            and NO FOOTER, because a footer is arbitrary and need not be an
+            inverse. Running one here would be arbitrary work fighting the
+            values this is about to send, and one that blocks on a fade would
+            make the jump wait for it.
+
+            THE PLAN'S OWN CUES INCLUDED (2026-09-26). The build below makes
+            every planned cue afresh - a jump hands `seatPlan` an empty map -
+            so a run of a planned cue left standing here was the same cue
+            twice: a playing one sounding on under its own relaunch, where
+            §3.25 says a cue at the wrong offset is stopped and relaunched, or
+            the old standby's armed run holding a voice the relaunch needed,
+            which failed it `no-track` once the persistent section began
+            keeping its voices through a jump. This asked "does the plan name
+            it" until then, and the build never adopted what it kept.
 
             THE HANDLER DOES IT ITSELF rather than submitting, exactly as a
             revocation does (§13.6): the jump is one record, and a replay
@@ -1205,17 +1283,37 @@ namespace wfg::cue
             is before the build rather than after: a claim released a tick later
             would leave the plan's runs queued behind runs the jump had already
             ended. */
-        std::vector<std::string> wanted;
-
-        for (const auto& wants : plan.runs)
-            wanted.push_back (wants.cue);
+        /*  A MIC CUE THE PLAN STILL NAMES KEEPS SOUNDING (Phase 9b, namespace
+            draft 18.5): a live input has no offset to be relaunched at, and
+            ending it would shut its gate and ring its channel out under the
+            relaunch that has to wait for the channel. So a sounding one at the
+            top of the list, which the plan names, is kept - and handed to the
+            build, which adopts it rather than making it again. */
+        std::map<std::string, std::string> runFor;
 
         for (const auto& snapshot : runs.all())
         {
-            if (snapshot.isFinished() || listOf (snapshot.cue) != listId)
+            if (snapshot.kind != "mic" || snapshot.isFinished() || snapshot.parent.length() > 0
+                  || snapshot.state != runState::playing || listOf (snapshot.cue) != listId)
                 continue;
 
-            if (std::find (wanted.begin(), wanted.end(), snapshot.cue) != wanted.end())
+            const auto stillPlanned = std::any_of (plan.runs.begin(), plan.runs.end(),
+                                              [&snapshot] (const PlannedRun& wants)
+                                              {
+                                                  return wants.cue == snapshot.cue && wants.ancestors.empty()
+                                                           && wants.when == planned::sounding;
+                                              });
+
+            if (stillPlanned)
+                runFor[snapshot.cue] = snapshot.id;
+        }
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.isFinished() || listOf (snapshot.cue) != listId || inPersistent (snapshot.cue))
+                continue;
+
+            if (runFor.count (snapshot.cue) > 0 && runFor[snapshot.cue] == snapshot.id)
                 continue;
 
             if (auto* run = runs.find (snapshot.id))
@@ -1248,7 +1346,6 @@ namespace wfg::cue
         /*  AND THE TREE, OUTERMOST FIRST - shared with a group re-seated at a
             second of its own timeline, which is the same building with the
             scene's run already standing. */
-        std::map<std::string, std::string> runFor;
         seatPlan (engine, tick, plan.runs, runFor, nextId);
 
         //----------------------------------------------------------------------
@@ -1397,6 +1494,11 @@ namespace wfg::cue
             if (! cue.isValid() || cue.getType().toString() == "Group")
                 continue;
 
+            /*  A RUN ALREADY STANDING FOR IT - a mic cue kept sounding through
+                a jump - is adopted as it is. */
+            if (runFor.count (wants.cue) > 0)
+                continue;
+
             const auto id = nextId();
             const auto parent = wants.ancestors.empty()
                                   ? std::string {}
@@ -1448,7 +1550,10 @@ namespace wfg::cue
             run->launchRequested = true;
             run->launchRequestedAtTick = tick;
 
-            armMedia (engine, cue, id);
+            if (cue.hasType ("Mic"))
+                armMic (engine, cue, id);
+            else
+                armMedia (engine, cue, id);
         }
 
         //----------------------------------------------------------------------
@@ -1711,12 +1816,15 @@ namespace wfg::cue
     }
 
     void Runner::requestArmOn (Engine& engine, const juce::ValueTree& cue, Run& run,
-                               double levelDb)
+                               double levelDb, int liveFirstInput, int liveWidth)
     {
         /*  Where it goes, resolved through the buses the show declares, so the
-            audio side never has to know what a bus is. */
+            audio side never has to know what a bus is. A rack channel's track
+            is two channels wide whatever the voices are. */
+        const auto live = liveFirstInput >= 0;
         std::string problem;
-        const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem);
+        const auto routing = resolveRouting (cue, live ? rackTrackChannels : audio->channelsPerTrack(),
+                                             problem, chainChannelsOf (cue));
 
         if (! problem.empty())
         {
@@ -1750,6 +1858,12 @@ namespace wfg::cue
         run.eq = request.eq;
         request.fx = fxOf (cue);
         run.fx = request.fx;
+
+        /*  A LIVE INPUT (Phase 9b): no file, no ranges - the logical inputs its
+            channel's stage takes. */
+        request.live = live;
+        request.firstInput = liveFirstInput;
+        request.inputWidth = liveWidth;
 
         /*  READ THE SAME WAY THE LEVEL IS, and the reason it is worth a line of
             its own: this row has existed since Phase 2, the grammar has always
@@ -1789,12 +1903,36 @@ namespace wfg::cue
             return;
         }
 
+        /*  THE CUE'S LEVEL LANE (namespace draft §20.4), read here as the EQ
+            is, for a voice with a file; a live input has no file to be bound
+            to. Where the lane is read until the voice is launched is where the
+            voice will START - the offset, or the in-point of the slice it
+            enters - and a boundary pending from an earlier arm is forgotten,
+            since a re-arm is a jump and the slice it was leaving is gone. */
+        run.lane = live ? std::vector<doc::LanePoint> {}
+                        : doc::readLevelLane (textOf (cue, "levelLane")).points;
+        run.laneStart = request.ranges.empty()
+                          ? request.startOffset
+                          : request.ranges[static_cast<std::size_t> (
+                                std::clamp (run.startRange, 0,
+                                            static_cast<int> (request.ranges.size()) - 1))].in;
+        run.laneOutgoingAt = 0;
+        run.laneDb = doc::laneLevelDb (run.lane, run.laneStart);
+
         /*  THE CUE'S AUTHORED LEVEL IS THE RUN'S OWN, which is what a fade
             aimed at this cue moves and what a trim from a group above it is
             added TO. `level` itself is left for applyLevels to compute on the
             next tick, so there is one place that decides what a run is heard
-            at rather than two that could disagree. */
+            at rather than two that could disagree.
+
+            AND THE VOICE IS SNAPPED WITH ITS LANE'S FIRST WORD IN IT (DC). The
+            arm's level is set while the voice is silent, with no slew; a lane
+            drawn up from silence would otherwise start its voice at the cue's
+            level and slide down to where the lane says over the first tick -
+            a burst at the top of a cue the designer drew as a fade-in. The
+            lane is its own term, so the run's own level stays the cue's. */
         run.ownLevel = request.levelDb;
+        request.levelDb += run.laneDb;
         run.level = request.levelDb;
 
         audio->requestArm (request);
@@ -2344,6 +2482,43 @@ namespace wfg::cue
             return;
         }
 
+        /*  A MIC CUE (Phase 9b, namespace draft §18.5): a launch asked for, as
+            a media cue's is, and the arm for one fired cold - its channel
+            claimed, or waited for, and its plugins set as the cue says. */
+        if (kind == "mic")
+        {
+            auto* run = runs.find (runId);
+
+            if (run == nullptr)
+                return;
+
+            run->launchRequested = true;
+            run->launchRequestedAtTick = tick;
+            run->prepare.clear();
+
+            if (run->track < 0)
+                armMic (engine, cue, runId);
+
+            /*  ITS TAKE, AS ITS ROW SAYS (decision CF): now if the channel is
+                the cue's already - claimed at GO, or ahead in standby - and when
+                the claim lands otherwise, which the release says. */
+            if (takes != nullptr)
+            {
+                const auto channelId = textOf (cue, "channel");
+
+                if (samplingChannelOf (document, channelId).samples())
+                    if (auto* armed = runs.find (runId))
+                    {
+                        if (std::find (armed->claims.begin(), armed->claims.end(), channelId) != armed->claims.end())
+                            takeOnGo (runId, channelId);
+                        else
+                            armed->takeOnGoPending = true;
+                    }
+            }
+
+            return;
+        }
+
         if (kind == "memo")
         {
             /*  A MEMO IS A LINE IN THE BOOK, and now it is a line with a run.
@@ -2392,6 +2567,33 @@ namespace wfg::cue
 
         if (run == nullptr)
             return;
+
+        /*  A MIC CUE'S CHANNEL IS A CLAIM (Phase 9b, decision BX): held alone,
+            and queued behind another run that holds it - a processor input's
+            policy and not an insert's, because a live voice played dry without
+            the plugins it was given is not the cue somebody fired. A shared
+            channel is refused at the arm, in words. */
+        if (cue.hasType ("Mic"))
+        {
+            const auto channelId = textOf (cue, "channel");
+            const auto channel = channelId.empty() ? juce::ValueTree() : document.findById (channelId);
+
+            if (channel.isValid() && channel.hasType ("Channel")
+                  && channel.getProperty ("access", "exclusive").toString() != "shared")
+            {
+                const auto* holder = runs.holderOf (channelId);
+                const auto queued = std::find (run->pending.begin(), run->pending.end(), channelId)
+                                      != run->pending.end();
+
+                if (holder != run && ! queued)
+                {
+                    if (holder == nullptr)
+                        run->claims.push_back (channelId);
+                    else
+                        run->pending.push_back (channelId);
+                }
+            }
+        }
 
         for (const auto& destination : cue)
         {
@@ -2569,6 +2771,211 @@ namespace wfg::cue
         requestArmOn (engine, cue, *run, numberOf (cue, "level"));
     }
 
+    void Runner::armMic (Engine& engine, const juce::ValueTree& cue, const std::string& runId)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr || run->track >= 0)
+            return;
+
+        /*  THE CHANNEL'S CLAIM FIRST, above the return below, for armMedia's
+            reason: which channel a cue holds is a fact about the document and
+            the run table, so a replay takes the same one (§13.4). */
+        claimSlotsFor (cue, runId);
+
+        run->fadeIn = std::max (0.0, numberOf (cue, "fadeIn"));
+
+        if (audio == nullptr)
+            return;
+
+        /*  WHAT WOULD FAIL IT, each in its own word, and `wfg validate` says
+            the first three before the show. Reported from below the return,
+            as every run report is, so a replay has the log's copy only. */
+        const auto fail = [&engine, &runId] (const char* why)
+        {
+            engine.submit (origin::engine, "run.failed",
+                           { osc::Value::string (runId), osc::Value::string (why) });
+        };
+
+        const auto inputId = textOf (cue, "input");
+        const auto channelId = textOf (cue, "channel");
+        const auto input = inputId.empty() ? juce::ValueTree() : document.findById (inputId);
+        const auto channel = channelId.empty() ? juce::ValueTree() : document.findById (channelId);
+
+        if (! input.isValid() || ! input.hasType ("Input"))
+            return fail (runError::noInput);
+
+        if (! channel.isValid() || ! channel.hasType ("Channel")
+              || channel.getProperty ("access", "exclusive").toString() == "shared")
+            return fail (runError::badChannel);
+
+        /*  WHAT A CLASS TAKES IN, the first half of its name: mono and
+            mono-to-stereo take one channel, stereo two (PRD §3.9e). */
+        const auto width = sourceChannelsOf (cue);
+        const auto classTakes = channel.getProperty ("class", "mono").toString() == "stereo" ? 2 : 1;
+
+        if (width != classTakes)
+            return fail (runError::badWidth);
+
+        /*  WAITING FOR ITS CHANNEL, armed with no track (decision CM): a run
+            holding a track would receive every live push the Runner makes and
+            move the sounding cue's matrix, EQ and plugins. `armWaitingMics`
+            asks again when the claim lands; the row says `pending` meanwhile. */
+        if (std::find (run->pending.begin(), run->pending.end(), channelId) != run->pending.end())
+        {
+            run->waitsForChannel = true;
+            return;
+        }
+
+        /*  A CHANNEL THE GRAPH WAS BUILT WITHOUT - declared since the show
+            opened - until Load now builds it. */
+        const auto track = audio->rackTrackOf (channelId);
+
+        if (track < 0)
+            return fail (runError::notBuilt);
+
+        run->track = track;
+
+        static const Reader schema;
+        const auto first = static_cast<int> (schema.integer (input, "input", "firstChannel"));
+
+        requestArmOn (engine, cue, *run, numberOf (cue, "level"), first, width);
+    }
+
+    void Runner::takeOnGo (const std::string& runId, const std::string& channelId)
+    {
+        const auto* run = runs.find (runId);
+
+        if (run == nullptr || takes == nullptr)
+            return;
+
+        /*  WAIT MAKES NO SOUND NOBODY ASKED FOR; loop plays the take it finds,
+            and with none waits for Rec; clear empties the channel for a fresh
+            one (§19.6). */
+        const auto word = textOf (document.findById (run->cue), "onGo");
+        const auto channel = samplingChannelOf (document, channelId);
+
+        if (word == "loop")
+            takes->press (channelId, TakeVerb::loop, channel.layers);
+        else if (word == "clear")
+            takes->press (channelId, TakeVerb::clear, channel.layers);
+    }
+
+    void Runner::takeReleased (const std::string& slotId, const std::string& toRun)
+    {
+        if (takes == nullptr || ! samplingChannelOf (document, slotId).samples())
+            return;
+
+        /*  THE TAKE OUTLIVES ITS CUE (§19.3): held silent, a first pass or a
+            layer closed as it stood - never lost. The audio side held it at the
+            stop already; this is the account catching up, in a place a replay
+            reaches too. */
+        takes->release (slotId);
+
+        //  AND THE CUE THAT WAS WAITING FOR IT, if its GO has come.
+        if (auto* next = runs.find (toRun); next != nullptr && next->takeOnGoPending)
+        {
+            next->takeOnGoPending = false;
+            takeOnGo (toRun, slotId);
+        }
+    }
+
+    void Runner::serviceTakes (Engine& engine)
+    {
+        if (takes == nullptr)
+            return;
+
+        /*  THE PRESSES, in the order they were asked for, each placed where a
+            launch asked for now would be (§19.6), so a press and a cue land on
+            a sample the log can name. */
+        const auto at = audio->samplesElapsed()
+                          + static_cast<std::int64_t> (latencyTicks()) * static_cast<std::int64_t> (samplesPerTick);
+
+        for (const auto& press : takes->takePresses())
+            audio->postTake (press.channel, press.verb, at, press.in, press.out);
+
+        /*  KEEP (§19.8): each asked for handed to the writer beside the takes
+            - a channel the audio side holds no take for answered at once, as
+            the writer would answer it - and what the writer has finished, for
+            the log, which is where a replay learns the file's name. */
+        for (const auto& request : takes->keepRequests())
+            if (! audio->keepTake (request.channel, request.stem, mediaFolder))
+                engine.submit (origin::engine, "take.kept",
+                               { osc::Value::string (request.channel), osc::Value::string (std::string {}),
+                                 osc::Value::string ("there is no take on this channel") });
+
+        for (const auto& kept : audio->keptTakes())
+            engine.submit (origin::engine, "take.kept",
+                           { osc::Value::string (kept.channel), osc::Value::string (kept.file),
+                             osc::Value::string (kept.error) });
+
+        /*  WHAT THE AUDIO THREAD DID BY ITSELF - a take closed, and at what
+            length - for the log, and every channel the account knows is asked,
+            emptied ones too: a report left unread would reach a take recorded
+            later. */
+        const auto channels = takes->channels();
+
+        for (const auto& report : audio->takeReports (channels))
+            engine.submit (origin::engine, "take.closed",
+                           { osc::Value::string (report.channel), osc::Value::float64 (report.seconds),
+                             osc::Value::string (report.how) });
+
+        //  WHERE EACH LOOP IS PLAYING, for the picture; not in the log.
+        for (const auto& channel : channels)
+            takes->setPlayhead (channel, audio->takePlayhead (channel));
+
+        /*  AND WHETHER EACH CHANNEL SOUNDS ITS INPUT AS WELL (§19.3): as the
+            mic cue holding it says, told when it changes. */
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.kind != "mic" || snapshot.isFinished() || snapshot.claims.empty())
+                continue;
+
+            const auto cue = document.findById (snapshot.cue);
+            const auto channelId = textOf (cue, "channel");
+            const auto through = textOf (cue, "through") == "true" ? 1 : 0;
+
+            if (snapshot.throughSent == through || ! samplingChannelOf (document, channelId).samples())
+                continue;
+
+            audio->setTakeThrough (channelId, through != 0);
+
+            if (auto* run = runs.find (snapshot.id))
+                run->throughSent = through;
+        }
+    }
+
+    void Runner::armWaitingMics (Engine& engine)
+    {
+        for (const auto& snapshot : runs.all())
+        {
+            if (! snapshot.waitsForChannel || snapshot.isFinished() || snapshot.track >= 0
+                  || ! snapshot.pending.empty())
+                continue;
+
+            if (auto* run = runs.find (snapshot.id))
+                run->waitsForChannel = false;
+
+            engine.submit (origin::engine, "run.arm", one (snapshot.id));
+        }
+    }
+
+    std::string Runner::statePathOf (const std::string& named) const
+    {
+        if (named.empty() || pluginsFolder.empty())
+            return {};
+
+        /*  NOTHING OUTSIDE plugins/: `fx.capture` refuses such a name, but a
+            script may write the row whole, and a state is bytes a plugin is
+            made to believe. */
+        const auto climbs = named.find ("..") != std::string::npos || named.find (':') != std::string::npos
+                              || named.front() == '/' || named.front() == '\\';
+
+        return juce::File (juce::String (pluginsFolder))
+                   .getChildFile (climbs ? juce::String ("not-a-state-in-this-bundle") : juce::String (named))
+                   .getFullPathName().toStdString();
+    }
+
     std::string Runner::mediaPathOf (const std::string& named) const
     {
         /*  RESOLVED AGAINST THE BUNDLE. A run's copy of the file name is
@@ -2586,7 +2993,8 @@ namespace wfg::cue
     //==============================================================================
     std::vector<Coefficient> Runner::resolveRouting (const juce::ValueTree& cue,
                                                      int trackChannels,
-                                                     std::string& problem) const
+                                                     std::string& problem,
+                                                     int chainChannels) const
     {
         std::vector<Coefficient> out;
         problem.clear();
@@ -2643,18 +3051,27 @@ namespace wfg::cue
                 return false;
             }
 
-            const auto inputs = static_cast<int> (gains.size()) / width;
+            const auto written = static_cast<int> (gains.size()) / width;
 
-            if (inputs > trackChannels)
+            if (written > trackChannels)
             {
                 problem = "the cue is wider than a track";
                 return false;
             }
 
+            /*  A CUE ITS INSERTS MADE WIDER THAN THE ROWS WRITTEN FOR IT
+                (2026-09-26): a mono cue through a stereo reverb, routed by a
+                one-row matrix. The route has room for one side, so the two
+                are summed into it - side `i` takes row `i mod rows`, at
+                rows / sides - and the cue is never narrower than it was
+                written for. As many rows as sides, and it is as written. */
+            const auto inputs = chainChannels > written && written > 0 ? std::min (chainChannels, trackChannels) : written;
+            const auto share = inputs > written ? static_cast<double> (written) / static_cast<double> (inputs) : 1.0;
+
             for (int input = 0; input < inputs; ++input)
                 for (int channel = 0; channel < width; ++channel)
                 {
-                    const auto gain = gains[static_cast<std::size_t> (input * width + channel)];
+                    const auto gain = gains[static_cast<std::size_t> ((input % written) * width + channel)] * share;
 
                     /*  Zero coefficients are dropped rather than written. The
                         matrix starts silent, so a zero says nothing new - and a
@@ -2717,18 +3134,45 @@ namespace wfg::cue
                                    double gain, const char* what,
                                    std::string& why) -> std::vector<double>
         {
-            const auto channels = schema.integer (mediaCue, "media", "channels");
+            const auto fileChannels = sourceChannelsOf (mediaCue);
 
-            if (channels <= 0)
+            if (fileChannels <= 0)
             {
                 why = "the cue's channel count is not known";
                 return { 0.0 };   // a non-empty list, so `emit` reports rather than passes
             }
 
+            /*  A CUE ITS INSERTS MADE WIDER (2026-09-26, the author's decision:
+                a plugin can make a mono cue stereo). Where the destination has
+                room for every side, side to channel; where it has fewer, side
+                `i` onto channel `i mod width` at width / sides - two sides onto
+                a mono speaker at a half each. Never refused for its width: the
+                cue is no wider than it was, only than its file. */
+            const auto widened = chainChannels > fileChannels;
+
+            if (widened)
+            {
+                const auto sides = chainChannels;
+                std::vector<double> gains (static_cast<std::size_t> (sides) * static_cast<std::size_t> (width), 0.0);
+                const auto share = sides > width ? static_cast<double> (width) / static_cast<double> (sides) : 1.0;
+
+                for (auto input = 0; input < sides; ++input)
+                {
+                    if (sides <= width)
+                        gains[static_cast<std::size_t> (input * width + input)] = gain;
+                    else
+                        gains[static_cast<std::size_t> (input * width + input % width)] = gain * share;
+                }
+
+                return gains;
+            }
+
+            const auto channels = fileChannels;
+
             /*  `flag` and not `text(...) == "true"`: a stored `T` reads back
                 as "1" through `var::toString`, so the text comparison is
                 silently always false. The Reader knows both spellings. */
-            const auto fold = channels == 2 && schema.flag (mediaCue, "media", "stereoToMono");
+            const auto fold = channels == 2 && schema.flag (mediaCue, "sound", "stereoToMono");
 
             if (! fold && channels > width)
             {
@@ -2758,10 +3202,48 @@ namespace wfg::cue
             return gains;
         };
 
+        /*  A SEND INTO A MIX CHANNEL: the spread a direct out would get,
+            scaled by the send's level - shared by the show's sends and the
+            ones a locked show made live. False when the run cannot be routed,
+            with `problem` saying why. */
+        const auto sendInto = [&] (const juce::ValueTree& bus, double level, bool on) -> bool
+        {
+            /*  SILENCE CONTRIBUTES NOTHING AT ALL rather than a very small
+                number: -120 dB is how this document spells silence
+                everywhere else, and a track with nothing to add should
+                cost nothing to mix. `emit` drops exact zeroes anyway; this
+                saves building the matrix. */
+            if (level <= -120.0)
+                return true;
+
+            /*  AND A SEND SWITCHED OFF is out of the mix the same way, its
+                level kept for when it comes back on (send/on). */
+            if (! on)
+                return true;
+
+            std::string why;
+            const auto width = schema.integer (bus, "bus", "width");
+            const auto gain = juce::Decibels::decibelsToGain (level, -120.0);
+            const auto gains = spreadOf (cue, width, gain, "mix channel", why);
+
+            /*  ASKED HERE rather than left to `emit`, which cannot always
+                tell: a refused spread answers with one zero, and against a
+                mono destination that is a legal matrix of one silent
+                coefficient - so the send would be dropped quietly instead
+                of failing the run with a reason somebody can read. */
+            if (! why.empty())
+            {
+                problem = why;
+                return false;
+            }
+
+            return emit (schema.integer (bus, "bus", "firstChannel"), width, gains);
+        };
+
         /*  THE DIRECT OUT, where this cue's own channels land. Empty is every
             cue until somebody chooses one, and is silent rather than wrong -
             the same reading `emit` gives an empty gains list. */
-        if (const auto directOut = schema.text (cue, "media", "directOut"); ! directOut.empty())
+        if (const auto directOut = schema.text (cue, "sound", "directOut"); ! directOut.empty())
         {
             const auto bus = busNamed (directOut);
 
@@ -2835,33 +3317,21 @@ namespace wfg::cue
                     return {};
                 }
 
-                const auto level = schema.number (destination, "send", "level");
+                /*  A LOCKED SHOW RIDES ITS SENDS LIVE (2026-09-25): a level or
+                    a switch held in the layer is the one heard. */
+                const auto sendId = destination.getProperty ("id").toString().toStdString();
+                const auto* riding = liveLayer != nullptr ? liveLayer->sendOf (sendId) : nullptr;
 
-                /*  SILENCE CONTRIBUTES NOTHING AT ALL rather than a very small
-                    number: -120 dB is how this document spells silence
-                    everywhere else, and a track with nothing to add should
-                    cost nothing to mix. `emit` drops exact zeroes anyway; this
-                    saves building the matrix. */
-                if (level <= -120.0)
-                    continue;
+                auto level = schema.number (destination, "send", "level");
+                auto on = schema.flag (destination, "send", "on");
 
-                std::string why;
-                const auto width = schema.integer (bus, "bus", "width");
-                const auto gain = juce::Decibels::decibelsToGain (level, -120.0);
-                const auto gains = spreadOf (cue, width, gain, "mix channel", why);
+                if (riding != nullptr && riding->level.has_value())
+                    level = osc::parseDouble (*riding->level).value_or (level);
 
-                /*  ASKED HERE rather than left to `emit`, which cannot always
-                    tell: a refused spread answers with one zero, and against a
-                    mono destination that is a legal matrix of one silent
-                    coefficient - so the send would be dropped quietly instead
-                    of failing the run with a reason somebody can read. */
-                if (! why.empty())
-                {
-                    problem = why;
-                    return {};
-                }
+                if (riding != nullptr && riding->on.has_value())
+                    on = *riding->on == "true";
 
-                if (! emit (schema.integer (bus, "bus", "firstChannel"), width, gains))
+                if (! sendInto (bus, level, on))
                     return {};
 
                 continue;
@@ -2911,6 +3381,30 @@ namespace wfg::cue
                     return {};
 
                 continue;
+            }
+        }
+
+        /*  AND THE SENDS A LOCKED SHOW MADE LIVE (2026-09-25): mix channels
+            this cue did not send to, turned up under the lock. A bus deleted
+            since is simply not there - a live send is a ride, and a ride on a
+            fader that has gone fails nothing. */
+        if (liveLayer != nullptr)
+        {
+            const auto cueId = cue.getProperty ("id").toString().toStdString();
+
+            for (const auto& sendId : liveLayer->createdSendsOf (cueId))
+            {
+                const auto* send = liveLayer->sendOf (sendId);
+                const auto bus = send != nullptr ? busNamed (send->bus) : juce::ValueTree {};
+
+                if (! bus.isValid())
+                    continue;
+
+                const auto level = osc::parseDouble (send->level.value_or ("0")).value_or (0.0);
+                const auto on = send->on.value_or ("true") == "true";
+
+                if (! sendInto (bus, level, on))
+                    return {};
             }
         }
 
@@ -3043,6 +3537,32 @@ namespace wfg::cue
                         ignored is worse than one honoured plainly. */
                     run->state = runState::stopping;
                 }
+
+            finishing.push_back (runId);
+            return;
+        }
+
+        /*  FOUR ARE NOT STOPS AT ALL (Phase 9c, namespace draft §19.6):
+            record, loop, overdub and clear are the press of that name on the
+            take of the sampling channel the target is sounding through. A
+            target that is not a sounding mic cue on a sampling channel is the
+            transport cue's own rule for a target that is not running: applied,
+            and nothing done - and so is a layer with every one in use. */
+        if (auto press = TakeVerb::record; verb != "undo" && takeVerbOf (verb, press))
+        {
+            const auto* target = runs.liveRunOf (textOf (cue, "target"));
+
+            if (target != nullptr && takes != nullptr && target->kind == "mic"
+                  && target->state == runState::playing)
+            {
+                const auto channelId = textOf (document.findById (target->cue), "channel");
+                const auto channel = samplingChannelOf (document, channelId);
+                const auto full = takes->wouldStartLayer (channelId, press)
+                                    && takes->of (channelId).layers >= channel.layers;
+
+                if (channel.samples() && ! full)
+                    takes->press (channelId, press, channel.layers);
+            }
 
             finishing.push_back (runId);
             return;
@@ -3302,6 +3822,20 @@ namespace wfg::cue
             job.stopsAtTick = currentTick + job.ticksTotal;
         }
 
+        /*  A MIC CUE FADED OUT IS ITS INPUT FADED (Phase 9b, namespace draft
+            §18.5): the level moves into the chain rather than out of it, so
+            the channel's reverb rings on at the cue's level after the voice
+            has gone. The output stays where it is - here and on a replay, which
+            publishes the same level - and the stop at the end lets the tail
+            ring out. */
+        if (stopWhenDone && target->kind == "mic")
+        {
+            job.toDb = fromDb;
+
+            if (audio != nullptr && target->track >= 0)
+                audio->shutLive (target->track, seconds);
+        }
+
         /*  A cue on its way out says so from the moment it is asked, not when
             the sound goes. `done` here would publish a silence that has not
             happened yet. */
@@ -3405,7 +3939,7 @@ namespace wfg::cue
                 /*  ONLY MEDIA AND GROUPS CARRY A MARK (PRD §3.28): audio and
                     video cues, and groups. A fade's `dca` is what it moves and
                     a strip's is what it rides - neither is membership. */
-                if (element == "Media" || element == "Group")
+                if (element == "Media" || element == "Mic" || element == "Group")
                     if (const auto mark = node[dcaProperty].toString().toStdString(); ! mark.empty())
                         if (auto chain = chainFrom (mark); ! chain.empty())
                             dcaChains[node[idProperty].toString().toStdString()] = std::move (chain);
@@ -3479,23 +4013,16 @@ namespace wfg::cue
 
     std::string Runner::stripForMember (const juce::ValueTree& group, const std::string& cueId)
     {
-        /*  POSITIONAL (plan decision 3): the Nth media member of the group is
-            on the Nth sampler strip. Counted over media members only, because
-            a sampler's members are clips (§3.27) and a memo among them would
-            otherwise take a strip nothing could be played from. */
-        const auto& strips = samplerStrips();
-        std::size_t position = 0;
-
-        for (const auto& memberId : membersOf (group))
-        {
-            if (kindOfCue (document.findById (memberId)) != "media")
-                continue;
-
-            if (memberId == cueId)
-                return position < strips.size() ? strips[position] : std::string {};
-
-            ++position;
-        }
+        /*  A MEMBER'S OWN STRIP FIRST, THEN POSITIONAL (plan decision 3, and
+            the pin the author asked for on 2026-09-25): `placeMembers` is the
+            one rule, shared with the re-arm below and with the tree's
+            `stripNow`, so the strip a menu says is the strip that is armed.
+            Counted over media members only, because a sampler's members are
+            clips (§3.27) and a memo among them would otherwise take a strip
+            nothing could be played from. */
+        for (const auto& member : placeMembers (document, group, samplerStrips()))
+            if (member.cue == cueId)
+                return member.strip;
 
         return {};
     }
@@ -3642,29 +4169,20 @@ namespace wfg::cue
             is what makes a clip playable any number of times: the strip frees
             when the run ends, and the member takes it back armed and ready.
             A member past the last strip is left unarmed; the group is then
-            partially armed, and the row says so. */
-        const auto& strips = samplerStrips();
-        std::size_t position = 0;
+            partially armed, and the row says so. The strip each member is on
+            is `placeMembers`' answer - its own pin, or the next one free. */
         bool anyStrip = false;
 
-        for (const auto& memberId : membersOf (group))
+        for (const auto& member : placeMembers (document, group, samplerStrips()))
         {
-            if (kindOfCue (document.findById (memberId)) != "media")
-                continue;
-
-            if (position >= strips.size())
-                break;
-
-            const auto& stripId = strips[position++];
-
-            if (lost (stripId))
+            if (member.strip.empty() || lost (member.strip))
                 continue;
 
             anyStrip = true;
 
-            if (live.count (memberId) == 0)
+            if (live.count (member.cue) == 0)
                 engine.submit (origin::engine, "run.spawn",
-                               { osc::Value::string (job.run), osc::Value::string (memberId) });
+                               { osc::Value::string (job.run), osc::Value::string (member.cue) });
         }
 
         /*  A GROUP WITH NO STRIP LEFT AND NOTHING SOUNDING COMPLETES (PRD
@@ -3829,6 +4347,15 @@ namespace wfg::cue
         if (run->held && run->heldBy != origin)
             return {};
 
+        /*  A SOLO IN THE BANK HOLDS THE OTHERS (author, 2026-09-25: "The solo
+            switch could be engaged on a track to prevent other faders in the
+            bank to trigger"): while a clip of this bank is soloed, a press on
+            another of its strips is applied and starts nothing - a pad, a fire
+            by name, and the fader's own touch, whose edge is spent by it, so a
+            finger resting there starts nothing when the solo lets go either. */
+        if (! run->solo && bankSoloed (run->parent))
+            return {};
+
         const auto cue = document.findById (run->cue);
 
         if (! cue.isValid())
@@ -3910,6 +4437,29 @@ namespace wfg::cue
         return {};
     }
 
+    bool Runner::bankSoloed (const std::string& groupRunId) const
+    {
+        if (groupRunId.empty())
+            return false;
+
+        for (const auto& member : runs.all())
+            if (member.parent == groupRunId && member.solo && member.soloCanHold())
+                return true;
+
+        return false;
+    }
+
+    void Runner::releaseSolos()
+    {
+        /*  A SOLO NEVER OUTLIVES ITS CLIP: at its end, a stop, a kill or a
+            release, the flag goes - and with it the lock on the bank and the
+            light on the button. */
+        for (const auto& snapshot : runs.all())
+            if (snapshot.solo && ! snapshot.soloCanHold())
+                if (auto* run = runs.find (snapshot.id))
+                    run->solo = false;
+    }
+
     std::string Runner::releaseStrip (Engine&, std::int64_t, const std::string& stripId,
                                       const std::string& origin)
     {
@@ -3968,7 +4518,11 @@ namespace wfg::cue
 
         const auto cue = document.findById (run->cue);
 
-        if (cue.isValid())
+        /*  A MIC CUE WHOSE CHANNEL CAME FREE (Phase 9b) takes it through the
+            same door a sampler member takes a voice by. */
+        if (cue.isValid() && cue.hasType ("Mic"))
+            armMic (engine, cue, runId);
+        else if (cue.isValid())
             armMedia (engine, cue, runId);
     }
 
@@ -5954,7 +6508,7 @@ namespace wfg::cue
         /*  ONLY A MEDIA CUE HAS ANYTHING TO MAKE READY. Asking to arm a memo
             would be a rejection every time the pointer passed over one, which
             would fill the log with a refusal about something nobody did wrong. */
-        if (element == "Media")
+        if (element == "Media" || element == "Mic")
         {
             const auto id = cue[idProperty].toString().toStdString();
             return id.empty() ? std::vector<std::string> {} : std::vector<std::string> { id };
@@ -6059,8 +6613,10 @@ namespace wfg::cue
         advanceWaits (engine, tick);
         advanceGroups (engine);
         samplerEdges (engine);
+        releaseSolos();
         armStandby (engine);
         advanceFades (engine, tick);
+        applyLanes();
         applyLevels();
         applyRouting();
         applyEq();
@@ -6069,9 +6625,15 @@ namespace wfg::cue
         observeAfterStep (engine, tick);
         assertPersistent (engine, tick);
 
+        /*  Above the gate too: with no player there are no inputs, and the
+            meters say so rather than holding the last numbers a player left. */
+        takeInputMeters();
+
         if (audio == nullptr)
             return;
 
+        armWaitingMics (engine);
+        serviceTakes (engine);
         launchIfDue (engine, tick);
         advanceRanges (engine);
 
@@ -6083,6 +6645,26 @@ namespace wfg::cue
         updatePositions (tick);
         enforceStops();
         observeEdges (engine);
+    }
+
+    void Runner::takeInputMeters()
+    {
+        /*  THE SOUNDCHECK'S METER (Phase 9b, namespace draft §18.2): each
+            logical input's loudest sample over the last tick, whether or not
+            anything listens, TAKEN so each tick reads its own twenty
+            milliseconds - the output meter's rule. Resized here on the tick
+            thread when the interface changes width, never on the audio one. */
+        const auto count = audio != nullptr ? std::max (0, audio->inputCount()) : 0;
+
+        inputMeters.resize (static_cast<std::size_t> (count), Run::silentDb);
+
+        for (int channel = 0; channel < count; ++channel)
+        {
+            const auto peak = static_cast<double> (audio->takeInputPeak (channel));
+
+            inputMeters[static_cast<std::size_t> (channel)]
+                = peak > 0.0 ? std::max (Run::silentDb, 20.0 * std::log10 (peak)) : Run::silentDb;
+        }
     }
 
     void Runner::launchIfDue (Engine& engine, std::int64_t tick)
@@ -6167,7 +6749,12 @@ namespace wfg::cue
                 which range that is. */
             const auto slot = run->startRange;
 
-            if (audio->launchAtSample (run->track, slot, target))
+            /*  A MIC CUE'S LAUNCH IS ITS GATE (Phase 9b): opened at the same
+                instant a media cue's clip would start, over its fade-in. */
+            const auto launched = run->kind == "mic" ? audio->openLive (run->track, target, run->fadeIn)
+                                                     : audio->launchAtSample (run->track, slot, target);
+
+            if (launched)
             {
                 run->launchRequested = false;
                 run->launchedAtSample = target;
@@ -6320,6 +6907,16 @@ namespace wfg::cue
             if (run->rangesFinished)
                 continue;
 
+            /*  A RUN THE AUDIO WAS TOLD TO STOP PLACES NOTHING MORE (found by
+                the author on 2026-09-25: Esc, panic and the run's cross did
+                not stop a looping cue). A boundary placed after the stop
+                would launch the next range into a voice that was just
+                silenced - the sound coming back after Esc, which §4.4 does
+                not allow. A fade-and-stop still advances while it fades: its
+                stop is not issued until the fade is done. */
+            if (run->stopIssued)
+                continue;
+
             /*  RE-READ AT EVERY BOUNDARY, which is decision L: a `loops` an
                 operator changed while the range played is honoured from here,
                 and a range deleted while it played is not entered again. What
@@ -6437,6 +7034,14 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  THE OUTGOING SLICE'S CLOCK, kept for the lane before it is
+                overwritten below: the sound is in that slice until `placeAt`,
+                and a level read from the incoming one's would arrive early by
+                however far ahead the boundary was placed (§20.4). */
+            run->laneOutgoingOrigin = run->positionOrigin;
+            run->laneOutgoingAt = run->rangeStartedAtSample;
+            run->laneOutgoingPass = run->passSamples;
+
             /*  The next range's clock starts at the boundary, so its first pass
                 is measured from where it will actually begin rather than from
                 the tick that decided it. */
@@ -6506,9 +7111,16 @@ namespace wfg::cue
                 the more useful of the two honest answers: a finished run stays
                 on the tree for its retention (`retentionTicks`) so that what
                 happened can still be read, and where it got to is part of what
-                happened. */
-            if (run == nullptr || run->isFinished())
+                happened. Its meter is silence: nothing leaves a voice it no
+                longer has. */
+            if (run == nullptr)
                 continue;
+
+            if (run->isFinished())
+            {
+                run->meter = Run::silentDb;
+                continue;
+            }
 
             /*  THE GUARD THAT MAKES THIS A READOUT RATHER THAN A LIE.
                 `launchedAtSample` is nought until the launch has been PLACED,
@@ -6541,6 +7153,19 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  HOW LOUD IT LEFT ITS TRACK since the last tick, after the
+                fader (author, 2026-09-25: "On the sampler fader displays of the
+                D700 can we have a post fader level meter too?"). TAKEN, so each
+                tick reads its own twenty milliseconds and a surface can keep
+                the loudest of those it has not drawn yet. */
+            if (run->track >= 0)
+            {
+                const auto peak = static_cast<double> (audio->takeOutputPeak (run->track));
+
+                run->meter = peak > 0.0 ? std::max (Run::silentDb, 20.0 * std::log10 (peak))
+                                        : Run::silentDb;
+            }
+
             /*  MEASURED FROM THE LAUNCH, and clamped at nought because the
                 launch is PLACED a few ticks into the future: between the
                 placement and the instant itself the difference is negative, and
@@ -6563,6 +7188,97 @@ namespace wfg::cue
             }
 
             run->position = run->positionOrigin + static_cast<double> (elapsed) / rate;
+        }
+    }
+
+    namespace
+    {
+        /*  THE SECOND OF THE FILE A VOICE IS AT, AT A SAMPLE - the playhead's
+            arithmetic (`updatePositions`), answered for a level rather than a
+            readout. Two answers differ from the playhead's, both where the
+            voice is not yet where the playhead says (§20.4):
+
+            - before the launch, the second the voice will START at, since
+              that is the level it has to be at when it does;
+            - between a slice boundary's placement and its crossing, the
+              OUTGOING slice, whose clock the placement overwrote early. */
+        double lanePositionAt (const Run& run, std::int64_t sample, double rate) noexcept
+        {
+            if (run.launchedAtSample <= 0 || sample < run.launchedAtSample)
+                return run.laneStart;
+
+            if (run.range >= 0 && run.laneOutgoingAt > 0 && sample < run.rangeStartedAtSample)
+            {
+                auto elapsed = std::max<std::int64_t> (0, sample - run.laneOutgoingAt);
+
+                if (run.laneOutgoingPass > 0)
+                    elapsed %= run.laneOutgoingPass;
+
+                return run.laneOutgoingOrigin + static_cast<double> (elapsed) / rate;
+            }
+
+            auto elapsed = sample - run.launchedAtSample;
+
+            /*  A SLICE WRAPS AT EVERY PASS: the clip loops inside Tracktion, so
+                the file is back at the in-point each time round and the lane
+                with it - the same stretch of the curve on every pass (DA). */
+            if (run.range >= 0 && run.rangeStartedAtSample > 0)
+            {
+                elapsed = std::max<std::int64_t> (0, sample - run.rangeStartedAtSample);
+
+                if (run.passSamples > 0)
+                    elapsed %= run.passSamples;
+            }
+
+            return run.positionOrigin + static_cast<double> (elapsed) / rate;
+        }
+    }
+
+    void Runner::applyLanes()
+    {
+        if (audio == nullptr)
+            return;
+
+        const auto rate = static_cast<double> (audio->sampleRate());
+
+        if (! (rate > 0.0))
+            return;
+
+        /*  THE POINTS FOLLOW THE DOCUMENT, gated as `applyEq` is: a tick with
+            nobody editing compares one number, and an edit - or an undo -
+            reaches every sounding run on the next tick (DB). */
+        const auto revision = document.showRevision();
+        const auto reread = revision != laneRevision;
+        laneRevision = revision;
+
+        /*  ONE SLEW AHEAD (DC). The voice arrives at a level one slew after it
+            is given it, so the lane is read where the file will be by then,
+            and a corner the designer drew lands on the second it was drawn at
+            rather than a slew after it. The slew is one tick by design
+            (`audio::CueMatrix::levelSlewSeconds`: "exactly one control tick"),
+            so one tick of samples is what this reads ahead. */
+        const auto at = audio->samplesElapsed() + static_cast<std::int64_t> (samplesPerTick);
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
+                continue;
+
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr)
+                continue;
+
+            if (reread)
+            {
+                const auto cue = document.findById (run->cue);
+
+                if (cue.isValid())
+                    run->lane = doc::readLevelLane (textOf (cue, "levelLane")).points;
+            }
+
+            run->laneDb = run->lane.empty() ? 0.0
+                                            : doc::laneLevelDb (run->lane, lanePositionAt (*run, at, rate));
         }
     }
 
@@ -6621,7 +7337,10 @@ namespace wfg::cue
             if (run == nullptr || run->isFinished())
                 continue;
 
-            const auto effective = effectiveOf (*run);
+            /*  AND THE CUE'S OWN LANE (namespace draft §20.4), added to this
+                run's sum and walked into nobody else's: a group has none, and
+                a member's lane is the member's. Nought for every run without. */
+            const auto effective = effectiveOf (*run) + run->laneDb;
 
             if (juce::approximatelyEqual (effective, run->level))
                 continue;
@@ -6665,11 +7384,18 @@ namespace wfg::cue
             return;
 
         const auto revision = document.showRevision();
+        const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
 
-        if (revision == routingRevision)
+        /*  AND THE PLUGIN TABLE (2026-09-26): a plugin coming up says what it
+            takes, which can make a sounding cue wider - its routing follows. */
+        const auto plugins = pluginTable != nullptr ? pluginTable->revision() : 0;
+
+        if (revision == routingRevision && layer == routingLiveRevision && plugins == routingPluginRevision)
             return;
 
         routingRevision = revision;
+        routingLiveRevision = layer;
+        routingPluginRevision = plugins;
 
         for (const auto& snapshot : runs.all())
         {
@@ -6680,11 +7406,11 @@ namespace wfg::cue
 
             const auto cue = document.findById (run->cue);
 
-            if (! cue.isValid() || ! cue.hasType ("Media"))
+            if (! cue.isValid() || (! cue.hasType ("Media") && ! cue.hasType ("Mic")))
                 continue;
 
             std::string problem;
-            const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem);
+            const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem, chainChannelsOf (cue));
 
             if (problem.empty())
                 audio->setRouting (run->track, routing);
@@ -6696,27 +7422,70 @@ namespace wfg::cue
         static const Reader schema;
         std::vector<FxSetting> out;
 
-        const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
-        auto slot = 0;
+        /*  THE SLOTS ARE THE GRAPH'S (2026-09-26): one setting for every slot
+            it was built with, in slot order, whatever the set says now. An
+            entry added since has no slot and is not sent; one taken out since
+            keeps its slot, switched out, so the last cue's setting on that
+            voice is not left playing. With no graph to ask, the set's own
+            order is the slots. */
+        std::vector<std::string> inSet;
+        std::vector<std::string> slots;
 
-        for (const auto entry : plugins)
+        if (cue.hasType ("Mic"))
         {
-            if (! entry.hasType ("Plugin"))
-                continue;
+            /*  A MIC CUE'S ARE ITS CHANNEL'S (Phase 9b): the channel's track as
+                the graph built it, its declared chain with no graph. */
+            const auto channelId = textOf (cue, "channel");
 
+            for (const auto rack : document.root().getChildWithName ("Audio"))
+                if (rack.hasType ("Rack"))
+                    for (const auto channel : rack)
+                        if (channel.hasType ("Channel") && channel.getProperty ("id").toString().toStdString() == channelId)
+                            for (const auto entry : channel)
+                                if (entry.hasType ("Plugin"))
+                                    inSet.push_back (entry.getProperty ("id").toString().toStdString());
+
+            slots = pluginTable != nullptr && pluginTable->rackBuilt (channelId) ? pluginTable->builtRackOf (channelId)
+                                                                                  : inSet;
+        }
+        else
+        {
+            for (const auto entry : document.root().getChildWithName ("Audio").getChildWithName ("Plugins"))
+                if (entry.hasType ("Plugin"))
+                    inSet.push_back (entry.getProperty ("id").toString().toStdString());
+
+            slots = pluginTable != nullptr && pluginTable->hasGraph() ? pluginTable->built() : inSet;
+        }
+
+        for (std::size_t slot = 0; slot < slots.size(); ++slot)
+        {
             FxSetting setting;
-            setting.slot = slot++;
-            const auto entryId = entry.getProperty ("id").toString().toStdString();
+            setting.slot = static_cast<int> (slot);
+            const auto& entryId = slots[slot];
+            const auto stillInSet = std::find (inSet.begin(), inSet.end(), entryId) != inSet.end();
 
             for (const auto child : cue)
             {
+                if (! stillInSet)
+                    break;
+
                 if (! child.hasType ("Fx") || child.getProperty ("plugin").toString().toStdString() != entryId)
                     continue;
 
                 setting.fxId = child.getProperty ("id").toString().toStdString();
                 setting.enabled = schema.flag (child, "fx", "enabled");
+                setting.stateFile = schema.text (child, "fx", "stateFile");
+                setting.statePath = statePathOf (setting.stateFile);
 
-                for (const auto& [index, value] : parseFxValues (schema.text (child, "fx", "values")))
+                /*  And what rides live over them, under the lock (2026-09-26). */
+                auto values = parseFxValues (schema.text (child, "fx", "values"));
+
+                if (liveLayer != nullptr)
+                    if (const auto* riding = liveLayer->fxValuesOf (setting.fxId))
+                        for (const auto& [index, value] : *riding)
+                            values[index] = value;
+
+                for (const auto& [index, value] : values)
                     setting.values.emplace_back (index, static_cast<float> (value));
 
                 break;
@@ -6725,7 +7494,24 @@ namespace wfg::cue
             out.push_back (std::move (setting));
         }
 
+        /*  AND HOW WIDE THE CUE IS AT EACH (2026-09-26, cue/InsertChain.h):
+            what the voice sends each insert and takes back. */
+        const auto chain = chainOfCue (cue, pluginTable, audio != nullptr ? audio->channelsPerTrack() : 2);
+
+        for (auto& setting : out)
+            if (setting.slot >= 0 && setting.slot < static_cast<int> (chain.steps.size()))
+            {
+                const auto& step = chain.steps[static_cast<std::size_t> (setting.slot)];
+                setting.feed = step.switchedIn ? step.feed : 0;
+                setting.back = step.switchedIn ? step.back : 0;
+            }
+
         return out;
+    }
+
+    int Runner::chainChannelsOf (const juce::ValueTree& cue) const
+    {
+        return chainOfCue (cue, pluginTable, audio != nullptr ? audio->channelsPerTrack() : 2).channels;
     }
 
     void Runner::applyFx()
@@ -6739,11 +7525,15 @@ namespace wfg::cue
             return;
 
         const auto revision = document.showRevision();
+        const auto plugins = pluginTable != nullptr ? pluginTable->revision() : 0;
+        const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
 
-        if (revision == fxRevision)
+        if (revision == fxRevision && plugins == fxPluginRevision && layer == fxLiveRevision)
             return;
 
         fxRevision = revision;
+        fxPluginRevision = plugins;
+        fxLiveRevision = layer;
 
         for (const auto& snapshot : runs.all())
         {
@@ -6754,7 +7544,7 @@ namespace wfg::cue
 
             const auto cue = document.findById (run->cue);
 
-            if (! cue.isValid() || ! cue.hasType ("Media"))
+            if (! cue.isValid() || (! cue.hasType ("Media") && ! cue.hasType ("Mic")))
                 continue;
 
             auto wanted = fxOf (cue);
@@ -6770,6 +7560,18 @@ namespace wfg::cue
 
                 if (next.enabled != last.enabled)
                     audio->setFxEnabled (run->track, next.slot, next.enabled);
+
+                /*  THE CUE'S WIDTH AT THIS INSERT, when it moved - switched in
+                    or out, or a plugin that came up with its buses (2026-09-26). */
+                if (next.feed != last.feed || next.back != last.back)
+                    audio->setFxShape (run->track, next.slot, next.feed, next.back);
+
+                /*  A NEW STATE ON A CUE THAT HAS NOT LAUNCHED is loaded before
+                    it may (an undo in standby, a capture while it waits); on
+                    one already sounding it is not - the knobs follow live, and
+                    the rest applies the next time the cue plays. */
+                if (next.stateFile != last.stateFile && run->launchedAtSample == 0 && next.enabled)
+                    audio->requestFxState (run->track, next.slot, next.statePath);
 
                 /*  Both sorted by index: one walk finds what moved, what
                     appeared and what went. */
@@ -6817,11 +7619,13 @@ namespace wfg::cue
             return;
 
         const auto revision = document.showRevision();
+        const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
 
-        if (revision == eqRevision)
+        if (revision == eqRevision && layer == eqLiveRevision)
             return;
 
         eqRevision = revision;
+        eqLiveRevision = layer;
 
         for (const auto& snapshot : runs.all())
         {
@@ -6832,7 +7636,7 @@ namespace wfg::cue
 
             const auto cue = document.findById (run->cue);
 
-            if (! cue.isValid() || ! cue.hasType ("Media"))
+            if (! cue.isValid() || (! cue.hasType ("Media") && ! cue.hasType ("Mic")))
                 continue;
 
             const auto wanted = eqOf (cue);
@@ -6897,7 +7701,14 @@ namespace wfg::cue
             if (auto* run = runs.find (snapshot.id))
                 run->stopIssued = true;
 
-            audio->stop (snapshot.track);
+            /*  A KILL IS NOT A STOP ON A RACK CHANNEL (Phase 9b, decision CN):
+                a double Esc, or the pane's own kill, silences a mic cue at once
+                with nothing left ringing, where Esc lets its tail ring out. On a
+                voice the two are the same stop, as they always were. */
+            if (snapshot.skipFooter)
+                audio->kill (snapshot.track);
+            else
+                audio->stop (snapshot.track);
         }
     }
 
@@ -6959,8 +7770,16 @@ namespace wfg::cue
                     without it.
 
                     `rangesFinished` is set when the LAST range's end has been
-                    placed, so the silence after that one is the cue finishing. */
-                if (run->range >= 0 && ! run->rangesFinished)
+                    placed, so the silence after that one is the cue finishing.
+
+                    AND A STOPPED RUN'S SILENCE IS ITS END, boundary or not
+                    (found by the author on 2026-09-25): a range that loops for
+                    ever never finishes, so a killed run on one stayed
+                    `stopping` - holding its voice, and still on the running
+                    pane after Esc, panic and its own cross - until somebody
+                    gave the range a loop count. Once the audio has been told to
+                    stop, there is no boundary left to wait for. */
+                if (run->range >= 0 && ! run->rangesFinished && ! run->stopIssued)
                     continue;
 
                 engine.submit (origin::engine, "run.ended", one (run->id));
@@ -7019,7 +7838,7 @@ namespace wfg::cue
                                 play. Arming a memo would create a run that could
                                 never leave `armed`, which looks like progress
                                 and is not. */
-                            if (cue.getType().toString() != "Media")
+                            if (cue.getType().toString() != "Media" && cue.getType().toString() != "Mic")
                                 return Outcome::rejected (reason::typeMismatch);
 
                             const auto id = args.size() > 1 ? args[1].getString()
@@ -7708,9 +8527,12 @@ namespace wfg::cue
 
         /*  A VOICE FREED, AND A SAMPLER MEMBER WAITING FOR ONE TAKES IT
             (decision Z). What the scheduler sends itself when a track frees;
-            anyone may, as with every engine-origin command. */
+            anyone may, as with every engine-origin command. AND A RACK CHANNEL
+            FREED (Phase 9b): a mic cue waiting for it takes it by the same
+            door. */
         registry.add ({ "run.arm",
-                        "A sampler member waiting for a voice takes the track that has come free.",
+                        "A sampler member waiting for a voice takes the track that has come free;"
+                        " a mic cue waiting for its rack channel takes the channel.",
                         { { "run", 's', false } },
                         true,
                         [&engine, &runner] (CommandContext&, const std::vector<osc::Value>& args)

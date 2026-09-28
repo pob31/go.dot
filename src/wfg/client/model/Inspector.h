@@ -132,6 +132,25 @@ namespace wfg::client::model
             a selection already sends, and nothing new. */
         dcaRef,
 
+        /*  A MENU OF THE SHOW'S SAMPLER STRIPS, faders and pads (author,
+            2026-09-25), the DCA menu's twin: it writes a strip's IDENTIFIER
+            to a sampler member's `strip` row, and each item says what is on
+            that strip - another member of the group, what an earlier group in
+            the list put there, or free. "automatic" is the empty id. */
+        stripRef,
+
+        /*  A MENU OF THE SHOW'S NAMED INPUTS (Phase 9b), the output menu's
+            twin on the other side of the interface: it writes an input's
+            IDENTIFIER to a mic cue's `input` row, and a person reads its name,
+            how wide it is and which logical inputs it takes. */
+        inputRef,
+
+        /*  A MENU OF THE RACK'S CHANNELS (Phase 9b): it writes a channel's
+            IDENTIFIER to a mic cue's `channel` row, and each item says what
+            the channel takes in and puts out - which the cue's input has to
+            fit. */
+        channelRef,
+
         /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
             2026-09-21: "it would be great if the controls to show the
             waveform, the send levels, the EQ, the group timeline were in the
@@ -234,6 +253,17 @@ namespace wfg::client::model
 
     /** Everything published under one cue, sorted into blocks. Empty for no cue. */
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId);
+
+    /*  WHETHER A CLICK ON THIS FIELD PUTS IT ON THE MASTER DIAL (author,
+        2026-09-26): a number somebody decides and may write, one value, not a
+        switch or a menu - the rows `surface.dial` takes. A field over several
+        cues gives the dial its first cue's row. */
+    bool mayDial (const Field& field);
+
+    /*  WHAT THE MASTER DIAL IS ON, in words: "Kick: level -6 dB", "Kick to
+        Reverb: level -12 dB" for a send. Empty while it is free. The row's
+        name is the one the inspector gives it. */
+    std::string dialLine (const tree::TreeSnapshot& snapshot);
 
     /*  WHAT SEVERAL CUES HAVE IN COMMON: the writable rows every one of them
         has, by name, with the value they agree on or `mixed`; the reported

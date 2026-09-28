@@ -53,8 +53,11 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/ListState.h>
+#include <wfg/engine/cue/SamplerLayout.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/KnownList.h>
+#include <wfg/engine/plugin/ScanTable.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/tree/Mount.h>
@@ -77,7 +80,7 @@ namespace wfg::midi { class PortTable; }
 
 namespace wfg::surface { class SurfaceTable; }
 
-namespace wfg::cue { class DcaTable; }
+namespace wfg::cue { class DcaTable; class LiveEdits; class TakeTable; }
 
 namespace wfg::tree
 {
@@ -116,6 +119,16 @@ namespace wfg::tree
         audio::OutputTestSettings audioTest;
         int audioSampleRate = 0, audioBufferSize = 0, hardwareInputs = 0, hardwareOutputs = 0;
         int audioSettingsRevision = 0;
+
+        /*  THE INPUTS' SIDE (Phase 9b, namespace draft §18.2). How many logical
+            inputs the open interface hands the graph, the interface's own two
+            delays as its driver reported them, and the loudest sample on each
+            logical input over the last tick in decibels - the soundcheck's
+            meter, published per named input. Machine facts, so runtime: they
+            read nought, nought, nought and nothing until something opens one. */
+        int logicalInputs = 0;
+        int inputLatency = 0, outputLatency = 0;
+        std::vector<double> inputMetersDb;
 
         std::uint64_t errorCount = 0;
         std::string lastError;
@@ -265,10 +278,24 @@ namespace wfg::tree
             surfaces = surfacesToRead;
         }
 
+        /*  THE EQ AND SENDS A LOCKED SHOW IS RIDING (cue/LiveEdits.h,
+            2026-09-25): published at the addresses the saved values are, in
+            their place, with `media/live`, `send/live` and `document/live`
+            saying what rides. Its revision rebuilds the document half. */
+        void setLiveEdits (const cue::LiveEdits* layer) noexcept
+        {
+            liveEdits = layer;
+        }
+
         /*  What each DCA is trimming by tonight, for `/godot/dca/<id>/trim`.
             Absent - a tree dump, a test that declares no DCAs - every trim
             reads nought, its resting value, which is also the truth. */
         void setDcas (const cue::DcaTable* dcasToRead) noexcept { dcas = dcasToRead; }
+
+        /*  What each sampling channel's take is doing (Phase 9c), for the
+            take's rows under /godot/slot/<id>. Absent - a tree dump - every
+            take reads empty, which is the truth of a show nobody is playing. */
+        void setTakes (const cue::TakeTable* takesToRead) noexcept { takes = takesToRead; }
 
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
@@ -285,8 +312,16 @@ namespace wfg::tree
 
         /*  What this machine's last scan found, for `/godot/plugin/known/<n>`,
             so a client can offer them. Absent - a tree dump, a replay - nothing
-            is listed, which is the truth. */
-        void setKnownPlugins (const std::vector<plugin::KnownPlugin>* listToRead) noexcept { knownPlugins = listToRead; }
+            is listed, which is the truth. Its revision is compared at every
+            publish, as the plugin table's is: a scan finishing on the
+            message thread refills it (2026-09-26). */
+        void setKnownList (const plugin::KnownList* listToRead) noexcept { knownList = listToRead; }
+
+        /*  Where the app's plugin scan is, for `/godot/plugin/scan/...` on
+            the runtime half - read at every publish, since it moves while a
+            scan runs and nothing in the show changes. Absent, a scan that
+            never ran reads idle. */
+        void setScans (const plugin::ScanTable* tableToRead) noexcept { scans = tableToRead; }
 
         /*  How long each media file is, read once when the show was opened, for
             `/godot/cue/<id>/duration`. Keyed by the `file` the document names.
@@ -386,9 +421,11 @@ namespace wfg::tree
         const midi::PortTable* ports = nullptr;
         const surface::SurfaceTable* surfaces = nullptr;
         const cue::DcaTable* dcas = nullptr;
+        const cue::TakeTable* takes = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
-        const std::vector<plugin::KnownPlugin>* knownPlugins = nullptr;
+        const plugin::KnownList* knownList = nullptr;
+        const plugin::ScanTable* scans = nullptr;
         /*  What a test handed in, when one did. Otherwise the lengths come
             from `mediaInfo` at the top of every publish. */
         const std::map<std::string, double>* fixedDurations = nullptr;
@@ -404,6 +441,10 @@ namespace wfg::tree
             this rather than walking the show again: those two change with every
             run and the document half is a cache. */
         std::vector<std::string> declaredSlots;
+
+        /*  The rack channels among them, whose take's playhead the runtime
+            half publishes for the same reason (Phase 9c). */
+        std::vector<std::string> declaredRackChannels;
 
         /*  Every cue the show holds, in document order, as the document half
             last saw them - the same shape and the same reason as the slot
@@ -446,6 +487,19 @@ namespace wfg::tree
         /** Every plugin of the set, in document order - the chain's order. */
         std::vector<std::string> declaredPlugins;
 
+        /*  Every named input, in the order the list reads them, with the logical
+            inputs it takes (Phase 9b): the roster its meter and its problem are
+            published against from the runtime half, because a meter moves fifty
+            times a second while nothing about the show does. */
+        struct DeclaredInput
+        {
+            std::string id;
+            int firstChannel = 0;
+            int width = 1;
+        };
+
+        std::vector<DeclaredInput> declaredInputs;
+
         /*  Every strip, in document order, with the two decisions its live rows
             are read against - its role, and the DCA a dca strip rides. The
             runtime half publishes what the strip is riding, its word and the
@@ -459,12 +513,22 @@ namespace wfg::tree
         };
 
         std::vector<DeclaredStrip> declaredStrips;
+
+        /*  Every surface, in document order: the roster its page rows are
+            published against from the runtime half (2026-09-25), because a
+            page moves with no command and the document half is a cache. */
+        std::vector<std::string> declaredSurfaces;
         const cue::RunTable& runs;
 
         /*  Which cues can be holding one slot at once, and every dangling
             reference the show has - both functions of the document at one
             revision, so both out of one cache asked by that revision. */
         cue::SlotAnalysis analysis;
+
+        /*  Which strip each sampler member is played from, and what the list
+            put on each strip before it - a function of the document at one
+            revision too, cached the same way. */
+        cue::SamplerLayout samplerLayout;
 
         const cue::ListState* lists = nullptr;
 
@@ -503,6 +567,12 @@ namespace wfg::tree
 
         /** The catalogue store's revision the document half was built from. */
         std::uint64_t catalogueRevision = 0;
+
+        const cue::LiveEdits* liveEdits = nullptr;
+        std::uint64_t liveRevision = 0;
+
+        /** The known list's revision the document half was built from. */
+        std::uint64_t knownRevision = 0;
 
         /*  How many times the mounted half has actually been rebuilt.
 

@@ -48,7 +48,7 @@
 #include <string>
 #include <vector>
 
-namespace wfg::audio { struct TimbrePyramid; }
+namespace wfg::audio { struct TimbrePyramid; struct PeakTrack; }
 
 namespace wfg::client::model
 {
@@ -59,6 +59,12 @@ namespace wfg::client::model
         double saturation = 0.0;   ///< [0, 1]; nought is noise, one is a tone
         double lightness = 0.0;    ///< [0, 1]; nought is silence
         double peak = 0.0;         ///< [0, 1]; the column's height
+
+        /*  THE WAVE'S OWN SHAPE, when the finer level is there (Peaks.h,
+            2026-09-25): the lowest and the highest sample the column holds, in
+            [-1, 1]. Without it, the mirror of the peak: -peak and peak. */
+        double low = 0.0;
+        double high = 0.0;
     };
 
     /*  WHICH LEVEL OF THE PYRAMID A BAR THIS WIDE SHOULD READ: the coarsest one
@@ -105,6 +111,20 @@ namespace wfg::client::model
         know a file's length to ask for it. */
     std::vector<Column> waveform (const audio::TimbrePyramid& pyramid, int width,
                                   double fromSeconds, double toSeconds);
+
+    /*  AND THE SAME BAR WITH ITS HEIGHT FROM THE FINER LEVEL (author,
+        2026-09-25: "Can the waveform be more precise in level, not colour
+        when zooming in"). The colour is still the pyramid's frame; the height,
+        and the low and the high, are the peak track's - sixty-four samples a
+        pair and sixteen bits, where a frame was a thousand samples and eight
+        bits - picked, as the pyramid's level is, as the coarsest with a pair
+        per column. `peaks` null is the call above. */
+    std::vector<Column> waveform (const audio::TimbrePyramid& pyramid, const audio::PeakTrack* peaks,
+                                  int width, double fromSeconds, double toSeconds);
+
+    /** The whole file, with its finer level when there is one. */
+    std::vector<Column> waveform (const audio::TimbrePyramid& pyramid, const audio::PeakTrack* peaks,
+                                  int width);
 
     /** How long the pyramid says the file is, in seconds; nought when it cannot say. */
     double lengthOf (const audio::TimbrePyramid& pyramid);

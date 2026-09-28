@@ -1,0 +1,33 @@
+<Show>
+  <Lists>
+    <List id="TK000001" name="Loops">
+      <Mic id="TK000002" channel="TK000011" input="TK000021" name="Loop voice" number="1">
+        <Route id="TK000003" bus="TK000004" gains="1 0 0 1"/>
+        <Fx id="TK000005" plugin="TK000012"/>
+      </Mic>
+      <Transport id="TK000006" name="Rec" number="2" target="TK000002" verb="record"/>
+      <Transport id="TK000007" name="Loop it" number="3" target="TK000002" verb="loop"/>
+      <Mic id="TK000008" channel="TK000011" input="TK000021" name="Scene 5 loop" number="4" onGo="loop" through="true">
+        <Route id="TK000009" bus="TK000004" gains="1 0 0 1"/>
+      </Mic>
+      <Cue id="TK000010" name="End" number="5"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="TK000004" name="Main L/R" width="2"/>
+    <Inputs>
+      <Input id="TK000021" name="Voice"/>
+    </Inputs>
+    <Rack>
+      <Channel id="TK000011" class="monoToStereo" layers="2" name="Looper" takeSeconds="10">
+        <Plugin id="TK000012" format="VST3" identifier="godot:test-gain" name="Test gain" side="before"/>
+      </Channel>
+      <Channel id="TK000013" class="mono" name="Plain"/>
+    </Rack>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

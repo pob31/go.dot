@@ -40,8 +40,10 @@
 */
 
 #include <wfg/engine/clock/TickClock.h>
+#include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/surface/McuCodec.h>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -73,26 +75,99 @@ namespace wfg::surface
         bool hasRgb = false;            // d700: an RGB surround on each encoder
         bool nativeDisplay = false;     // d700: 12 + 12 + 8 and track numbers; mcu: two rows of 7 through 0x12
         bool hasPads = false;           // midiPads: notes with velocity and pressure
+        bool hasMeters = false;         // mcu, d700: a meter per strip, as channel pressure
         bool drivenOverMidi = true;     // false for the virtual panel, which is the client's own
+
+        /*  WHERE A LEVEL SITS ON THE TRAVEL: the law its engraving was drawn
+            for, where somebody has measured it (FaderCurve.h). */
+        FaderLaw faderLaw = FaderLaw::generic;
     };
 
     Topology topologyOf (Profile profile) noexcept;
 
     /*  What a hardware button on a Mackie surface does in Go.dot.
 
-        THE STRIP'S GATE IS THE V-POT PRESS (plan decision 12), and SELECT is
-        left alone: on the D700 an element's identity is its button note, so
-        encoder three's press, ring and colour all key off one number, and the
-        button that presses a strip is the one wearing its colour. On a dca
-        strip the gate resets the DCA's trim to nought.
+        THE STRIP'S GATE IS THE V-POT PRESS (plan decision 12): on the D700 an
+        element's identity is its button note, so encoder three's press, ring
+        and colour all key off one number, and the button that presses a strip
+        is the one wearing its colour. On a dca strip the gate resets the DCA's
+        trim to nought. On an EQ or Send page the same press switches the
+        control under it instead, and never starts a clip.
+
+        SELECT AIMS THE ROTARIES (author, 2026-09-25: "pressing on the EQ
+        button while a sample is selected (select button) assign rotaries to
+        the EQ"): `surface.aim` at the cue on the strip, and again on a lit
+        SELECT lets go. Its light is the pick - the D700 draws it as the thin
+        white bar at the top of the screen - and no longer says the strip
+        sounds; the ring and the colour do.
+
+        EQ AND SEND ARE PAGES (the same day): the aimed cue's EQ, or its send
+        levels, on the rotaries; each press shows the next page, and after the
+        last the surface is back on its normal one. `*` leaves at once - both
+        its notes, since the D700 sends another for a double press when its
+        Configurator asks it to.
 
         THE TRANSPORT (§16.6): PLAY is `go`; STOP is `run.stopAll` and STOP
         again inside `doubleStopTicks` is `run.killAll` - PRD §4.4's first two
         levels under the hand already on the surface; rewind and forward move
-        the standby. The bank and channel arrows do nothing, because banking is
-        §3.9d's decision to take with the hardware in hand, and REC does
-        nothing. */
-    enum class Action { none, gate, go, stop, rewind, forward };
+        the standby. On a Mackie the bank and channel arrows do nothing,
+        because banking is §3.9d's decision to take with the hardware in hand;
+        on the D700, which has no rewind or forward, its two arrows (the bank
+        notes) are rewind and forward (2026-09-26).
+
+        THE TRANSPORT'S REC PRESSES A TAKE (Phase 9c, decision CS): `take.record`
+        on the rack channel the aimed mic cue plays through - record, then
+        loop, then a layer on top, then loop again, each press the next, as the
+        engine's account of the take decides. With no mic cue aimed it sends
+        nothing. Its light says the take records - lit - or lays a layer -
+        blinking. And LOOP, Mackie's Cycle, is `take.loop` there: a take or a
+        layer closed and looped, a held take looped again.
+
+        PAN IS THE LOOP PAGE (Phase 9c, §19.7): Go.dot has no pan, and the
+        button put the aimed mic cue's take on the rotaries - in, out, a slide
+        of both, and the cue's level. Pan again, or `*`, leaves.
+
+        MUTE ON A STRIP KILLS WHAT IT PLAYS (author, 2026-09-25: "Can the mute
+        switch of a sampler fader be a kill switch for it? Not temporary
+        muting, kill as the X in the active cue list panel."): `run.kill` on
+        the run holding the strip, while something sounds on it - the running
+        pane's cross, under the hand already on the surface.
+
+        SOLO ON A STRIP LOCKS ITS BANK TO IT (author, 2026-09-25: "The solo
+        switch could be engaged on a track to prevent other faders in the bank
+        to trigger. The solo switch blink before the sample is triggered.
+        Stays on while it plays and is turned off once the sample has finished
+        playing or is stopped."): `run.solo` on the run holding the strip, as
+        a toggle. Its light flashes while the soloed clip waits for its start,
+        is lit while it sounds, and goes out with the solo, which the engine
+        lets go of when the clip stops.
+
+        REC ON A STRIP SETS WHERE ITS FADER STARTS (author, 2026-09-25:
+        "Pressing Rec on a sampler fader sets the starting level. Confirm with
+        a LED pulse."): the level the fader is at, written as its member's
+        `initialLevel` - an edit to the show and one undo step. */
+    enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel,
+                        record, loop, dialLetGo, dialRest,
+                        aim, eqPage, sendPage, fxPage, loopPage, leavePage };
+
+    /*  AND IT SAYS SO: the red MUTE light is on for half a second after a
+        kill it sent (author, 2026-09-25: "Can you flash for 0.5s the red mute
+        switch to have feedback on the killed sample?"). A press with nothing
+        to kill lights nothing - which is its own answer. */
+    inline constexpr std::int64_t killFlashTicks = TickClock::rateHz / 2;
+
+    /*  AND REC SAYS SO THE SAME WAY: lit for half a second after it wrote the
+        starting level ("Confirm with a LED pulse"). A press that wrote nothing
+        - a free strip, a dca strip, a locked show - lights nothing. */
+    inline constexpr std::int64_t startLevelFlashTicks = TickClock::rateHz / 2;
+
+    /*  A FLASHING LIGHT IS BLINKED BY THE BRIDGE, a quarter of a second on and
+        a quarter off: the D700 takes a light as on or off and nothing else
+        (control guide §4.2), so MCU's own flash - a velocity of one - lit it
+        steadily, and a solo waiting for its clip looked like one already
+        sounding (author, 2026-09-25: "Solo could be blinking before the
+        sample is started to show which one should be triggered"). */
+    inline constexpr std::int64_t blinkHalfTicks = TickClock::rateHz / 4;
 
     /** What a button means on a surface of this profile. `none` for every
         button a profile does not use, and for every button of a profile that
@@ -105,6 +180,60 @@ namespace wfg::surface
     /** An encoder detent moves the strip's target this far. */
     inline constexpr double encoderStepDb = 0.5;
 
+    /*  WHAT ONE DETENT OF A ROTARY MOVES ON AN EQ OR SEND PAGE (2026-09-25),
+        bench guesses to revise with the D700 in hand. A fast turn arrives as
+        several detents at once, so the knob accelerates by itself.
+          - a frequency, a sixteenth of an octave: the ten octaves of a band
+            in 160 detents, a semitone in less than two;
+          - a gain, half a decibel;
+          - a width, an eighth of a doubling: 0.7 to 1.4 in eight detents;
+          - a send, a 127th of the fader's travel, so its ring moves one step
+            a detent and the finer steps are where a fader's are, near nought. */
+    inline constexpr double pageOctavesPerDetent = 1.0 / 16.0;
+    inline constexpr double pageGainStepDb = 0.5;
+    inline constexpr double pageWidthDoublingsPerDetent = 1.0 / 8.0;
+    inline constexpr double pageLevelTravelPerDetent = 1.0 / 127.0;
+
+    /*  A PLUGIN PARAMETER'S DETENT on the FX page (2026-09-26): a hundred and
+        twenty-eighth of its travel, a ring's resolution - a fast turn arrives
+        as several detents at once, so the whole travel is a spin or two. A
+        stepped parameter moves one step a detent whatever this is. */
+    inline constexpr double pageParameterTravelPerDetent = 1.0 / 128.0;
+
+    /*  THE MASTER DIAL'S DETENT on a time (2026-09-26): a tenth of a second
+        under `dialCoarseFromSeconds`, a whole second from there up. A
+        pre-wait is set to the tenth, and a long one is not turned a tenth at
+        a time. Every other kind of number takes the page's law for its unit
+        (SurfacePages.h, `dialTurned`). */
+    inline constexpr double dialFineSeconds = 0.1;
+    inline constexpr double dialCoarseSeconds = 1.0;
+    inline constexpr double dialCoarseFromSeconds = 10.0;
+
+    /*  A LOOP POINT'S DETENT on the Loop page (Phase 9c, namespace draft
+        §19.7): ten milliseconds, fine enough to find a downbeat by ear, and
+        fifty while the hand spins - `loopCoarseFromDetents` or more arriving
+        in one tick - so a minute's take is crossed in seconds rather than a
+        thousand turns. The first numbers the bench will revise. */
+    inline constexpr double loopFineSeconds = 0.010;
+    inline constexpr double loopCoarseSeconds = 0.050;
+    inline constexpr int loopCoarseFromDetents = 5;
+
+    /*  A CONTROL WHOSE BAND IS OUT is lit at this share of its colour - still
+        its band's colour, so the eye finds it, and plainly dimmer. The text
+        says "off" too (§4.8). */
+    inline constexpr double pageOffLight = 0.3;
+
+    /*  WHICH PAGE, BLINKED ON ITS BUTTON (author, 2026-09-25: "If there are
+        more than one page blink the D700 button once, twice or more every
+        second and a half to show which page we're on"): page n blinks n
+        times, `pageBlinkOnTicks` lit and `pageBlinkOffTicks` dark each, at
+        the start of every `pageBlinkCycleTicks`. A kind with one page is lit
+        steadily. Seven blinks fill the cycle; a page past the seventh blinks
+        seven times. */
+    inline constexpr std::int64_t pageBlinkCycleTicks = 3 * TickClock::rateHz / 2;
+    inline constexpr std::int64_t pageBlinkOnTicks = 5;
+    inline constexpr std::int64_t pageBlinkOffTicks = 5;
+
     /*  A MOTOR MOVES AT MOST THIS FAR IN ONE TICK: a twentieth of its travel,
         so a flight from end to end takes twenty ticks, four tenths of a
         second. Driven the whole way in one message a fader hits its end stop at
@@ -112,6 +241,21 @@ namespace wfg::surface
         (docs/D700_CONTROL_GUIDE.md §4.1: never command full travel,
         interpolate over roughly twenty steps). */
     inline constexpr int motorStepPerTick = 819;
+
+    /*  A FADER LET GO IS SENT ITS LEVEL AGAIN, `motorReasserts` times, this
+        many ticks apart (author, 2026-09-25: "After using the Rec track
+        button, the fader reverts to the old initial level and jumps to the new
+        one when triggered"). A D700 puts a released fader back where the host
+        last put it, and the one position sent the moment the hand lifts can
+        reach it too soon to count: the fader went back to the level of an
+        earlier ride, -0.6 dB where the hand had left it at -10.7. */
+    inline constexpr std::int64_t motorReassertTicks = 10;
+    inline constexpr int motorReasserts = 3;
+
+    /*  WHERE AN UNTOUCHED FADER SAYS IT IS counts once it is further than this
+        from where it was sent: the motor goes back there. Closer is the motor
+        settling, and chasing it would keep it twitching. */
+    inline constexpr int motorSlack = 64;
 
     /*  AT MOST THIS MANY COLOUR WRITES A SECOND TO ONE RGB ELEMENT (PRD §3.30:
         "no faster than about ten times a second"). M27 revises it on the
@@ -127,6 +271,84 @@ namespace wfg::surface
         return static_cast<double> (whole) < ticks ? whole + 1
                                                    : (whole > 0 ? whole : std::int64_t { 1 });
     }();
+
+    /*  HOW BRIGHT A SOUNDING STRIP IS: HALF ITS LEVEL, HALF ITS MOVEMENT
+        (author, 2026-09-25, in three steps: "Can the brightness of the RGB LEDs
+        be modulated by the sound level or variations of it? ... Don't use the
+        full 16 or 24 bit resolution. It can be squashed, but
+        variation/modulation is a better clue"; then "at louder volume the
+        modulation gets a bit lost ... Could the system be a bit more
+        adaptive?"; then "The low level sounds with a little variation come
+        out with as much variation in the lights as a more dynamic sound.
+        Maybe make part of the LED level match the long term level of the
+        music and the other 'half' the shorter term variations").
+
+        THE LEVEL: the clip's envelope (its analysed peak, in dB below full
+        scale) averaged over `pulseLevelSeconds`, squashed between
+        `pulseLevelFloorDb` (nothing) and `pulseLevelCeilingDb` (all of its
+        share) - quiet material glows low, loud material high.
+
+        THE MOVEMENT: the envelope's height above a faster average (over
+        `pulseAverageSeconds`), against how far it has strayed lately (a mean
+        over `pulseSpreadSeconds`) times `pulseSpreadsForFull` - so a dense
+        passage that moves a decibel or two still shows it - but never less
+        than `pulseScaleLeastDb`, so a quiet sound that barely moves stays
+        nearly still. Steady is the middle of its share, a hit the top, a dip
+        the bottom.
+
+        `pulseLevelShare` of the light is the level's and the rest the
+        movement's, above `pulseFloor`, which is a glow and never dark (dark is
+        silence). A flash is held and let go by `pulseReleasePerTick`, so the
+        colour's own rate limit, ten writes a second, cannot skip it. These
+        are the eye's brightness; what the LEDs are sent is shaped after, by
+        the `led` numbers below. */
+    inline constexpr double pulseFloor = 0.2;
+    inline constexpr double pulseLevelShare = 0.5;
+    inline constexpr double pulseLevelSeconds = 3.0;
+    inline constexpr double pulseLevelFloorDb = -48.0;
+    inline constexpr double pulseLevelCeilingDb = -6.0;
+    inline constexpr double pulseAverageSeconds = 0.6;
+    inline constexpr double pulseReleasePerTick = 0.04;
+    inline constexpr double pulseSpreadSeconds = 1.5;
+    inline constexpr double pulseSpreadsForFull = 1.5;
+    inline constexpr double pulseScaleLeastDb = 4.0;
+    inline constexpr double pulseScaleMostDb = 12.0;
+
+    /*  WHAT AN RGB SURFACE'S LEDS ARE SENT for a colour the eye should see
+        (author, 2026-09-25: "The white 'looks' louder. I think the LED's of
+        the D700 are not super linear and not all channels match totally").
+        The total light is held to `ledLightBudget` channels' worth - white
+        lights all three and was three times a pure red; each channel has its
+        trim, for LEDs that do not match; and the LEDs' response is
+        straightened by `ledGamma`, since what they are sent is light and what
+        the colour describes is how it looks. */
+    inline constexpr double ledLightBudget = 1.5;
+    inline constexpr double ledGamma = 2.0;
+    inline constexpr double ledRedTrim = 1.0;
+    inline constexpr double ledGreenTrim = 1.0;
+    inline constexpr double ledBlueTrim = 1.0;
+
+    /*  A SAMPLER STRIP'S METER, AFTER THE FADER (author, 2026-09-25: "On the
+        sampler fader displays of the D700 can we have a post fader level
+        meter too?"): the held run's `meter` - what left its track after the
+        EQ, the inserts and the fader - the loudest of the ticks since the
+        last message, as MCU's channel pressure (control guide §4.7).
+
+        Sent every `meterEveryTicks` while the strip sounds, even unchanged,
+        since a Mackie meter falls by itself between messages: every third
+        tick is 16.7 a second, where the guide found 18 smooth and Asparion's
+        own default is 5. Dark once, when it stops.
+
+        `meterStepsDb` is where each of the D700's eleven lit steps begins,
+        bottom to top: the n-th reached lights step n, and nothing below the
+        first. A bench guess on the pattern desks use, closer together near
+        the top, where headroom is read. */
+    inline constexpr int meterEveryTicks = 3;
+    inline constexpr std::array<double, 11> meterStepsDb { { -60.0, -50.0, -40.0, -30.0, -24.0, -18.0,
+                                                             -12.0, -9.0, -6.0, -3.0, -1.0 } };
+
+    /** The step a peak in dB lights, 0 to 11. */
+    int meterStepFor (double db) noexcept;
 
     /*  AN UNCHANGED COLOUR IS WRITTEN AGAIN THIS OFTEN, because the D700's
         firmware takes its LEDs back with an idle animation when nothing

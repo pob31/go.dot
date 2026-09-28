@@ -82,6 +82,7 @@ namespace wfg::audio
         warning off by default, so the build would not catch it - which is why
         the rule is written here rather than trusted to CI. */
     struct TimbrePyramid;
+    struct PeakTrack;
 
     /*  EVERYTHING GO.DOT KNOWS ABOUT ONE MEDIA FILE, keyed elsewhere by the
         bundle-relative path the document writes.
@@ -105,6 +106,11 @@ namespace wfg::audio
         double seconds = 0.0;
         std::string contentHash;
         std::shared_ptr<const TimbrePyramid> pyramid;
+
+        /*  The level finer than the colours (Peaks.h, 2026-09-25): what a
+            zoomed-in waveform takes its height from. Published with the
+            pyramid, from the same pass. */
+        std::shared_ptr<const PeakTrack> peaks;
     };
 
     /*  One record per file the show named when it was opened, by that path. */

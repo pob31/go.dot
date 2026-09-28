@@ -36,6 +36,10 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/FxRows.h>
+#include <wfg/engine/cue/LiveEdits.h>
+#include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/Run.h>
@@ -50,6 +54,7 @@
 #include <wfg/engine/log/Replay.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <iterator>
 #include <set>
@@ -81,6 +86,15 @@ namespace
         /** The EQ the last arm carried (Phase 9a); `completeArms` clears `arms`. */
         audio::EqSettings lastArmEq;
         std::vector<cue::FxSetting> lastArmFx;
+
+        /*  A sounding cue's width at one insert, changed under it (2026-09-26). */
+        struct FxShape { int track, slot, feed, back; };
+        std::vector<FxShape> fxShapes;
+
+        void setFxShape (int track, int slot, int feed, int back) override
+        {
+            fxShapes.push_back ({ track, slot, feed, back });
+        }
 
         int slotCount() const override             { return slots; }
         int sampleRate() const override            { return rate; }
@@ -845,9 +859,24 @@ namespace
         }
 
         std::vector<cue::Coefficient> routingOf (const std::string& cueId,
-                                                 std::string& problem)
+                                                 std::string& problem, int chainChannels = 0)
         {
-            return runner.resolveRouting (document.findById (cueId), 2, problem);
+            return runner.resolveRouting (document.findById (cueId), 2, problem, chainChannels);
+        }
+
+        /** The spelling above, for a cue its inserts made `chainChannels` wide. */
+        std::string widenedSpreadOf (const std::string& cueId, int chainChannels, std::string& problem)
+        {
+            std::string out;
+
+            for (const auto& one : routingOf (cueId, problem, chainChannels))
+            {
+                if (! out.empty()) out += ' ';
+                out += std::to_string (one.input) + ">" + std::to_string (one.output) + "@"
+                         + juce::String (one.gain, 3).toStdString();
+            }
+
+            return out;
         }
 
         std::string main, foldback;
@@ -964,6 +993,21 @@ TEST_CASE ("sends: a mix channel is a destination with a level, and silence cost
         rig.addSend (rig.mediaId, rig.foldback, -120.0);
         CHECK (rig.spreadOf (rig.mediaId, problem).empty());
         CHECK (problem.empty());
+    }
+
+    SUBCASE ("a send switched off contributes nothing, and keeps its level for when it comes back")
+    {
+        /*  send/on (author, 2026-09-25): the press of a rotary on a surface's
+            Send page. */
+        const auto send = rig.addSend (rig.mediaId, rig.foldback, -6.0);
+        REQUIRE (rig.document.setAttribute ("/godot/send/" + send + "/on", "false").ok);
+
+        CHECK (rig.spreadOf (rig.mediaId, problem).empty());
+        CHECK (problem.empty());
+        CHECK (rig.document.getAttribute ("/godot/send/" + send + "/level").value_or ("?") == "-6");
+
+        REQUIRE (rig.document.setAttribute ("/godot/send/" + send + "/on", "true").ok);
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@0.501 1>5@0.501");
     }
 
     SUBCASE ("a cue may hold a direct out and several sends at once")
@@ -4927,6 +4971,43 @@ TEST_CASE ("jump: what it abandons is ended, and its voices come back")
     CHECK (rig.runs.find (abandoned)->claims.empty());
 }
 
+TEST_CASE ("jump: a planned cue that is already running is relaunched at the offset, never doubled")
+{
+    /*  PRD §3.25: load-to-time "stops and relaunches a cue already playing at
+        the wrong offset". Until 2026-09-26 the sweep passed over every run of a
+        cue the plan names, and the build - which makes every planned cue
+        afresh - made a second one beside it: a playing run sounding on under
+        its own relaunch, or an armed standby run holding a voice the relaunch
+        needed. The persistent section keeping its voices through a jump (the
+        same day) is what made the second of those fail `no-track`. */
+    JumpRig rig;
+
+    rig.setStandby (rig.mediaId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.mediaId).empty(); }));
+
+    const auto before = rig.runOf (rig.mediaId);
+    REQUIRE_FALSE (rig.runs.find (before)->isFinished());
+
+    REQUIRE (rig.jumpTo (rig.mediaId, 1.0).applied == 1);
+
+    CHECK (rig.runs.find (before)->isFinished());
+    CHECK_FALSE (rig.runs.find (before)->holdsTrack());
+
+    auto live = 0;
+
+    for (const auto& run : rig.runs.all())
+        if (run.cue == rig.mediaId && ! run.isFinished())
+            ++live;
+
+    CHECK (live == 1);
+
+    const auto* relaunched = rig.liveRunOf (rig.mediaId);
+    REQUIRE (relaunched != nullptr);
+    CHECK (relaunched->id != before);
+    CHECK (relaunched->startOffset == doctest::Approx (1.0));
+}
+
 TEST_CASE ("jump: the record carries every run it drew, and the signature accepts them")
 {
     /*  The `go` guarantee, widened to a jump: a replay never draws a number of
@@ -7123,6 +7204,91 @@ TEST_CASE ("persistent: a kill leaves it silent, and a load-to-time brings it ba
     CHECK (rig.liveBed() != nullptr);
 }
 
+TEST_CASE ("persistent: a double Esc leaves it silent, suspends nothing, and the next GO brings it back")
+{
+    /*  PRD §3.29: "a double Esc does not [suspend]: the next GO restoring the
+        declared world is the point of declaring it". Until 2026-09-26 it did -
+        `run.killAll` marked every root `killed`, which is how the running
+        pane's kill suspends, so one double Esc silenced the section for the
+        rest of the session (namespace draft §18.8). */
+    PersistentRig rig;
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* live = rig.liveBed();
+    REQUIRE (live != nullptr);
+    const auto first = live->id;
+
+    REQUIRE (rig.submitAndTick ("run.killAll").applied == 1);
+
+    const auto* killed = rig.runs.find (first);
+    REQUIRE (killed != nullptr);
+    CHECK (killed->skipFooter);
+    CHECK_FALSE (killed->killed);
+
+    REQUIRE (rig.engine.submit (origin::engine, "run.ended", { osc::Value::string (first) }));
+    rig.tickOnce();
+
+    CHECK (rig.liveBed() == nullptr);
+
+    /*  Silent until somebody presses: ticks alone put nothing back. */
+    rig.settle (60);
+    CHECK (rig.liveBed() == nullptr);
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    CHECK_FALSE (rig.runner.isSuspended (rig.bed));
+
+    const auto* again = rig.liveBed();
+    REQUIRE (again != nullptr);
+    CHECK (again->id != first);
+    CHECK (again->asserted);
+}
+
+TEST_CASE ("persistent: a jump leaves the section sounding")
+{
+    /*  The section is outside the jump: the solver never plans it, so the
+        load-to-time sweep - which ends every run of the list the plan does not
+        name - ended a sounding bed, and a jump is not a step, so nothing put
+        it back until the next GO (2026-09-26, namespace draft §18.8). The same
+        run, still sounding, is the whole answer. */
+    PersistentRig rig;
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* live = rig.liveBed();
+    REQUIRE (live != nullptr);
+    const auto sounding = live->id;
+
+    REQUIRE (rig.engine.submit ("cli", "list.aim",
+                                { osc::Value::string (rig.listId),
+                                  osc::Value::string (rig.mediaId),
+                                  osc::Value::float64 (0.5) }));
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("list.loadToTime",
+                                { osc::Value::string (rig.listId) }).applied >= 1);
+    rig.settle();
+
+    /*  The jump happened - the plan built its cue - so the sweep before it ran
+        and passed the bed by, rather than never running at all. */
+    REQUIRE_FALSE (rig.runOf (rig.mediaId).empty());
+
+    const auto* still = rig.runs.find (sounding);
+    REQUIRE (still != nullptr);
+    CHECK_FALSE (still->isFinished());
+    REQUIRE (rig.liveBed() != nullptr);
+    CHECK (rig.liveBed()->id == sounding);
+}
+
 TEST_CASE ("persistent: a stop before the pointer suspends it, and the solver is what sees that")
 {
     /*  The case that says this is a MODE of the solver rather than a second
@@ -7175,7 +7341,7 @@ TEST_CASE ("persistent: a fade in the section warns and is never asserted")
     auto said = false;
 
     for (const auto& problem : rig.document.warnings())
-        if (problem.find ("asserts media, osc and midi cues") != std::string::npos)
+        if (problem.find ("asserts media, mic, osc and midi cues") != std::string::npos)
             said = true;
 
     CHECK (said);
@@ -7305,9 +7471,159 @@ TEST_CASE ("fx: the arm carries the cue's inserts against the set, an edit pushe
     }
 }
 
+TEST_CASE ("fx: the slots are the graph's - an entry added since has none, one moved ahead keeps its own, one taken out is switched out")
+{
+    /*  2026-09-26: a set edited after the graph was built used to send a
+        cue's settings by the set's order as it stood NOW, so an entry put
+        ahead of another sent that other's switch and values to the wrong
+        plugin. The graph's own slots come from the plugin table. */
+    RoutedRig rig;
+    rig.setMedia (rig.mediaId, 2);
+    rig.aimAt (rig.mediaId, rig.main);
+
+    const auto gain = rig.document.createPlugin ("Test gain", "godot:test-gain", "VST3", "", "");
+    REQUIRE (gain.ok);
+    const auto verb = rig.document.createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "", "");
+    REQUIRE (verb.ok);
+
+    //  The graph was built with the two, in that order.
+    plugin::PluginTable table;
+    table.setBuilt ({ gain.id, verb.id });
+    rig.runner.setPlugins (&table);
+
+    const auto verbFx = rig.document.createFx (rig.mediaId, verb.id, "");
+    REQUIRE (verbFx.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/fx/" + verbFx.id + "/values", "0:0.5").ok);
+
+    SUBCASE ("an entry added since the graph was built is not sent, and the built ones keep their slots")
+    {
+        const auto late = rig.document.createPlugin ("Late", "VST3-00000000-late", "VST3", "", "");
+        REQUIRE (late.ok);
+
+        //  Put at the head of the set, where the document would number it slot 0.
+        auto plugins = rig.document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+        const auto lateNode = rig.document.findById (late.id);
+        plugins.moveChild (plugins.indexOf (lateNode), 0, nullptr);
+
+        const auto lateFx = rig.document.createFx (rig.mediaId, late.id, "");
+        REQUIRE (lateFx.ok);
+
+        rig.play();
+        const auto& armed = rig.audio.lastArmFx;
+        REQUIRE (armed.size() == 2u);
+        CHECK (armed[0].slot == 0);
+        CHECK_FALSE (armed[0].enabled);          // the gain: no Fx on the cue
+        CHECK (armed[1].slot == 1);
+        CHECK (armed[1].enabled);                // the verb, still slot 1
+        CHECK (armed[1].fxId == verbFx.id);
+    }
+
+    SUBCASE ("an entry taken out since keeps its slot, switched out")
+    {
+        const auto gainFx = rig.document.createFx (rig.mediaId, gain.id, "");
+        REQUIRE (gainFx.ok);
+
+        auto plugins = rig.document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+        plugins.removeChild (rig.document.findById (gain.id), nullptr);
+
+        rig.play();
+        const auto& armed = rig.audio.lastArmFx;
+        REQUIRE (armed.size() == 2u);
+        CHECK (armed[0].slot == 0);
+        CHECK_FALSE (armed[0].enabled);          // its Fx is on the cue, its entry is not in the set
+        CHECK (armed[1].slot == 1);
+        CHECK (armed[1].enabled);
+    }
+}
+
+TEST_CASE ("width: a cue its inserts made stereo plays its sides apart where there is room, summed where there is not")
+{
+    /*  The author's decision of 2026-09-26: a mono cue with a stereo insert
+        switched in comes out stereo; where the routing has room for two sides
+        it plays them apart, where it has room for one they are summed at a
+        half each, and a cue is never made narrower than its file. */
+    RoutedRig rig;
+    rig.setMedia (rig.mediaId, 1);
+    std::string problem;
+
+    SUBCASE ("onto a stereo direct out: side to channel")
+    {
+        rig.aimAt (rig.mediaId, rig.main);
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == "0>0@1.000 1>1@1.000");
+        CHECK (problem.empty());
+
+        //  And with no insert widening it, the mono cue onto everything, as ever.
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>0@1.000 0>1@1.000");
+    }
+
+    SUBCASE ("onto a mono direct out: the two sides summed at a half")
+    {
+        const auto mono = rig.addBus ("Centre", 6, 1);
+        rig.aimAt (rig.mediaId, mono);
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == "0>6@0.500 1>6@0.500");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("through a written one-row route: summed into its row")
+    {
+        rig.addRoute (rig.mediaId, rig.main, "1 0.5");
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == "0>0@0.500 0>1@0.250 1>0@0.500 1>1@0.250");
+    }
+
+    SUBCASE ("through a written two-row route: as written")
+    {
+        rig.addRoute (rig.mediaId, rig.main, "1 0 0 1");
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == "0>0@1.000 1>1@1.000");
+    }
+
+    SUBCASE ("a stereo file its inserts leave stereo routes exactly as it did")
+    {
+        rig.setMedia (rig.mediaId, 2);
+        rig.aimAt (rig.mediaId, rig.main);
+        CHECK (rig.widenedSpreadOf (rig.mediaId, 2, problem) == rig.spreadOf (rig.mediaId, problem));
+    }
+}
+
+TEST_CASE ("width: the arm sends each insert the cue's width there, and a plugin coming up widens a sounding cue")
+{
+    RoutedRig rig;
+    rig.setMedia (rig.mediaId, 1);
+    rig.aimAt (rig.mediaId, rig.main);
+
+    const auto verb = rig.document.createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "", "");
+    REQUIRE (verb.ok);
+    REQUIRE (rig.document.createFx (rig.mediaId, verb.id, "").ok);
+
+    plugin::PluginTable table;
+    table.setBuilt ({ verb.id });
+    rig.runner.setPlugins (&table);
+
+    //  Not up yet: counted as taking the cue at its width, which is mono.
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+
+    REQUIRE (rig.audio.lastArmFx.size() == 1u);
+    CHECK (rig.audio.lastArmFx[0].feed == 1);
+    CHECK (rig.audio.lastArmFx[0].back == 1);
+
+    //  The plugin comes up, stereo in and out: the cue is stereo from the next tick.
+    plugin::PluginTable::Status loaded;
+    loaded.state = "loaded";
+    loaded.inputs = 2;
+    loaded.outputs = 2;
+    table.set (verb.id, loaded);
+    rig.tickOnce();
+
+    REQUIRE_FALSE (rig.audio.fxShapes.empty());
+    CHECK (rig.audio.fxShapes.back().track == track);
+    CHECK (rig.audio.fxShapes.back().feed == 1);
+    CHECK (rig.audio.fxShapes.back().back == 2);
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000");
+}
+
 TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a quiet tick not at all")
 {
-    /*  PHASE 9a's parameter path, on the tick thread's side: the nineteen rows
+    /*  PHASE 9a's parameter path, on the tick thread's side: the twenty-three rows
         are read through the schema at the arm and ride the request; while the
         cue sounds, a write to one of them - a rotary, a panel, the page - is
         pushed to that voice on the next tick and to no other; nothing is
@@ -7321,6 +7637,8 @@ TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a 
     //  Shaped before it plays, so the arm has something to carry.
     rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Gain", "6");
     rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Freq", "1000");
+    rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB3Gain", "-4");
+    rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB3On", "false");
 
     const auto run = rig.play();
     REQUIRE (rig.runs.find (run) != nullptr);
@@ -7334,6 +7652,11 @@ TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a 
     CHECK (armed.band[1].freq == doctest::Approx (1000.0f));
     CHECK (armed.band[0].gain == doctest::Approx (0.0f));
     CHECK_FALSE (armed.hpf);
+
+    //  A band switched off rides the arm off, its gain kept (2026-09-25).
+    CHECK (armed.band[1].on);
+    CHECK_FALSE (armed.band[2].on);
+    CHECK (armed.band[2].gain == doctest::Approx (-4.0f));
 
     /*  THE ARM CARRIED IT, so the first ticks push nothing through the live
         door: what the voice holds and what the cue says are already one. */
@@ -7380,9 +7703,682 @@ TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a 
         CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/eqHpf").value_or ("?") == "false");
     }
 
+    SUBCASE ("and a band's switch is pushed with its gain kept, and eq.reset puts it back on")
+    {
+        const auto pushes = rig.audio.eqPushes;
+
+        rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/" + rig.mediaId + "/eqB2On"),
+                                         osc::Value::string ("false") });
+        rig.tickOnce();
+
+        CHECK (rig.audio.eqPushes == pushes + 1);
+        CHECK_FALSE (rig.audio.eqs[track].band[1].on);
+        CHECK (rig.audio.eqs[track].band[1].gain == doctest::Approx (6.0f));
+
+        rig.submitAndTick ("eq.reset", { osc::Value::string (rig.mediaId) });
+        rig.tickOnce();
+
+        CHECK (rig.audio.eqs[track].band[1].on);
+        CHECK (rig.audio.eqs[track].band[2].on);
+        CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/eqB3On").value_or ("?") == "true");
+    }
+
     SUBCASE ("and eq.reset on a cue that is not media is refused")
     {
         const auto outcome = rig.submitAndTick ("eq.reset", { osc::Value::string (rig.memoId) });
         CHECK (outcome.rejected > 0);
     }
+}
+
+//==============================================================================
+//  A locked show's EQ and sends, ridden live (author, 2026-09-25).
+
+namespace
+{
+    /*  A ROUTED RIG WITH THE DOORS SERVE INSTALLS: `node.set` answered by the
+        live layer in front of the document, `send.create` too, `eq.reset`
+        holding flat live under the lock, Keep and Discard, the transaction
+        hook asking `isLiveEdit` - and a tree to read what a client sees. Two
+        mix channels: the foldback, which the cue sends to, and a reverb it
+        does not. */
+    struct LiveRig : RoutedRig
+    {
+        LiveRig()
+        {
+            doc::registerDocumentCommands (engine.commands(), document, {},
+                                           cue::eitherOf (cue::liveWriteFor (runs, dcas, document),
+                                                          cue::eitherOf (cue::liveEditFor (live, document),
+                                                                         cue::fxWriteFor (document, nullptr, &live))),
+                                           cue::liveSendFor (live, document));
+            cue::registerCueCommands (engine.commands(), document, focus, &live);
+            cue::registerLiveCommands (engine.commands(), document, live);
+
+            engine.setBeforeApply ([this] (const Command& appliedCommand, const Event& submitted,
+                                           const std::vector<osc::Value>& coerced, std::int64_t tickIndex)
+                                   {
+                                       if (cue::isLiveWrite (appliedCommand.name, coerced)
+                                             || cue::isLiveEdit (appliedCommand.name, coerced, document, live))
+                                           return;
+
+                                       document.beginTransaction (appliedCommand.name, tickIndex,
+                                                                  submitted.origin, coerced);
+                                   });
+
+            runner.setLiveEdits (&live);
+            parameters.setLiveEdits (&live);
+
+            reverb = addBus ("Reverb", 6, 2);
+            document.findById (foldback).setProperty (juce::Identifier ("kind"), "mix", nullptr);
+            document.findById (reverb).setProperty (juce::Identifier ("kind"), "mix", nullptr);
+
+            setMedia (mediaId, 2);
+            aimAt (mediaId, main);
+        }
+
+        void lock (bool on)
+        {
+            REQUIRE (document.setAttribute ("/godot/document/locked", on ? "true" : "false").ok);
+        }
+
+        Engine::TickResult set (const std::string& address, osc::Value value)
+        {
+            return submitAndTick ("node.set", { osc::Value::string (address), std::move (value) });
+        }
+
+        std::string eq (const std::string& row) const
+        {
+            return "/godot/cue/" + mediaId + "/" + row;
+        }
+
+        std::string saved (const std::string& address) const
+        {
+            return document.getAttribute (address).value_or ("?");
+        }
+
+        /*  What a client reads at an address: the tree published now. */
+        std::string published (const std::string& address)
+        {
+            parameters.markStale();
+            snapshot = parameters.publish (tick, state);
+
+            const auto* node = snapshot->find (address);
+
+            if (node == nullptr || node->values.size() != 1)
+                return "<none>";
+
+            const auto& value = node->values.front();
+
+            if (value.isString())   return value.getString();
+            if (value.isBool())     return value.getBool() ? "true" : "false";
+            if (value.isNumber())   return osc::formatDouble (value.asDouble());
+
+            return "<?>";
+        }
+
+        std::size_t steps() const
+        {
+            return static_cast<std::size_t> (document.history (doc::UndoDomain::document)
+                                                 .getUndoDescriptions().size());
+        }
+
+        cue::LiveEdits live;
+        cue::DcaTable dcas;
+        tree::MountTable mounts;
+        tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+        tree::EngineState state;
+        std::shared_ptr<const tree::TreeSnapshot> snapshot;
+        std::string reverb;
+    };
+}
+
+TEST_CASE ("live: under the lock an EQ turn is heard, written to nothing, and no step of the history")
+{
+    LiveRig rig;
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+    const auto pushes = rig.audio.eqPushes;
+
+    //  A turn on a locked show: applied, and heard on the next tick.
+    CHECK (rig.set (rig.eq ("eqB2Gain"), osc::Value::float64 (6.0)).applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.audio.eqPushes == pushes + 1);
+    CHECK (rig.audio.eqs[track].band[1].gain == doctest::Approx (6.0f));
+
+    //  WRITTEN TO NOTHING: the show still says nought, and nothing is on its history.
+    CHECK (rig.saved (rig.eq ("eqB2Gain")) == "0");
+    CHECK (rig.steps() == steps);
+
+    //  WHAT A CLIENT SEES: the value heard, at the saved value's address, and what rides.
+    CHECK (rig.published (rig.eq ("eqB2Gain")) == "6");
+    CHECK (rig.published (rig.eq ("live")) == "eqB2Gain");
+    CHECK (rig.published ("/godot/document/live") == "1");
+
+    //  A band's switch rides the same way.
+    CHECK (rig.set (rig.eq ("eqB2On"), osc::Value::boolean (false)).applied == 1);
+    rig.tickOnce();
+    CHECK_FALSE (rig.audio.eqs[track].band[1].on);
+    CHECK (rig.published ("/godot/document/live") == "2");
+
+    SUBCASE ("turned back to what the show says, nothing rides")
+    {
+        CHECK (rig.set (rig.eq ("eqB2Gain"), osc::Value::float64 (0.0)).applied == 1);
+        CHECK (rig.live.rowOf (rig.mediaId, "eqB2Gain") == nullptr);
+        CHECK (rig.published ("/godot/document/live") == "1");
+    }
+
+    SUBCASE ("a bad value is refused as the show would refuse it")
+    {
+        CHECK (rig.set (rig.eq ("eqB2Gain"), osc::Value::float64 (99.0)).rejected == 1);
+        CHECK (rig.set (rig.eq ("eqB2Freq"), osc::Value::string ("loud")).rejected == 1);
+    }
+
+    SUBCASE ("Keep is refused under the lock, and once unlocked is one undo step")
+    {
+        CHECK (rig.submitAndTick ("live.keep").rejected == 1);
+
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+
+        CHECK (rig.saved (rig.eq ("eqB2Gain")) == "6");
+        CHECK (rig.saved (rig.eq ("eqB2On")) == "false");
+        CHECK (rig.live.empty());
+        CHECK (rig.published ("/godot/document/live") == "0");
+        CHECK (rig.steps() == steps + 1);
+
+        //  And Undo takes the whole of it back.
+        CHECK (rig.submitAndTick ("undo").applied == 1);
+        CHECK (rig.saved (rig.eq ("eqB2Gain")) == "0");
+        CHECK (rig.saved (rig.eq ("eqB2On")) == "true");
+    }
+
+    SUBCASE ("Discard lets the cue go back to its saved sound")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.live.empty());
+        CHECK (rig.audio.eqs[track].band[1].gain == doctest::Approx (0.0f));
+        CHECK (rig.audio.eqs[track].band[1].on);
+        CHECK (rig.published (rig.eq ("eqB2Gain")) == "0");
+        CHECK (rig.steps() == steps);
+    }
+
+    SUBCASE ("unlocked, an edit to a row that rides writes the show and the live value is gone")
+    {
+        rig.lock (false);
+        CHECK (rig.set (rig.eq ("eqB2Gain"), osc::Value::float64 (3.0)).applied == 1);
+
+        CHECK (rig.saved (rig.eq ("eqB2Gain")) == "3");
+        CHECK (rig.live.rowOf (rig.mediaId, "eqB2Gain") == nullptr);
+        CHECK (rig.live.rowOf (rig.mediaId, "eqB2On") != nullptr);
+        CHECK (rig.steps() == steps + 1);
+    }
+}
+
+TEST_CASE ("live: under the lock a send rides live, a new one is made live, and Keep makes it real")
+{
+    LiveRig rig;
+    const auto foldback = rig.addSend (rig.mediaId, rig.foldback, -6.0);
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+
+    //  The foldback send up to -3: heard, and not written.
+    CHECK (rig.set ("/godot/send/" + foldback + "/level", osc::Value::float64 (-3.0)).applied == 1);
+    rig.tickOnce();
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>4@0.708 1>5@0.708");
+    CHECK (rig.saved ("/godot/send/" + foldback + "/level") == "-6");
+    CHECK (rig.published ("/godot/send/" + foldback + "/level") == "-3");
+    CHECK (rig.published ("/godot/send/" + foldback + "/live") == "true");
+
+    /*  A SEND TO A MIX CHANNEL THE CUE DID NOT SEND TO (author: "new sends
+        ride live too"): made live, its identifier on the applied record. */
+    const auto made = rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                                          osc::Value::string (rig.reverb),
+                                                          osc::Value::string (""),
+                                                          osc::Value::string ("-10") });
+    REQUIRE (made.applied == 1);
+    rig.tickOnce();
+
+    const auto created = rig.live.createdSendsOf (rig.mediaId);
+    REQUIRE (created.size() == 1u);
+    const auto reverb = created.front();
+
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>4@0.708 1>5@0.708 0>6@0.316 1>7@0.316");
+    CHECK (rig.published ("/godot/send/" + reverb + "/bus") == rig.reverb);
+    CHECK (rig.published ("/godot/send/" + reverb + "/live") == "true");
+    CHECK (rig.published ("/godot/cue/" + rig.mediaId + "/sends") == foldback + " " + reverb);
+
+    //  The show's mix channels in output order - a Send page's rotaries.
+    CHECK (rig.published ("/godot/audio/mixes") == rig.foldback + " " + rig.reverb);
+    CHECK_FALSE (rig.document.findById (reverb).isValid());
+
+    //  Its level and its switch ride through the same door as any send's.
+    CHECK (rig.set ("/godot/send/" + reverb + "/level", osc::Value::float64 (-20.0)).applied == 1);
+    CHECK (rig.published ("/godot/send/" + reverb + "/level") == "-20");
+
+    //  One send per bus per cue, across the show and the layer - and only into a mix channel.
+    CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                               osc::Value::string (rig.reverb) }).rejected == 1);
+    CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                               osc::Value::string (rig.foldback) }).rejected == 1);
+    CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                               osc::Value::string (rig.main) }).rejected == 1);
+
+    //  A send switched off under the lock leaves the mix.
+    CHECK (rig.set ("/godot/send/" + foldback + "/on", osc::Value::boolean (false)).applied == 1);
+    rig.tickOnce();
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>6@0.100 1>7@0.100");
+    CHECK (rig.steps() == steps);
+
+    SUBCASE ("Keep writes the levels, the switch and the new send, with the identifier it rode under")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+
+        CHECK (rig.saved ("/godot/send/" + foldback + "/level") == "-3");
+        CHECK (rig.saved ("/godot/send/" + foldback + "/on") == "false");
+        REQUIRE (rig.document.findById (reverb).isValid());
+        CHECK (rig.saved ("/godot/send/" + reverb + "/bus") == rig.reverb);
+        CHECK (rig.saved ("/godot/send/" + reverb + "/level") == "-20");
+        CHECK (rig.live.empty());
+        CHECK (rig.steps() == steps + 1);
+
+        //  And it sounds as it did.
+        rig.tickOnce();
+        CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>6@0.100 1>7@0.100");
+    }
+
+    SUBCASE ("Discard: the saved sends again, and the new one gone")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>4@0.501 1>5@0.501");
+        CHECK (rig.published ("/godot/send/" + reverb + "/bus") == "<none>");
+        CHECK_FALSE (rig.document.ids().isTaken (reverb));
+    }
+
+    SUBCASE ("unlocked, a send into a bus a live one already goes to is refused")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                                   osc::Value::string (rig.reverb) }).rejected == 1);
+    }
+}
+
+TEST_CASE ("live: under the lock a plugin's parameter rides live, heard on the next tick, kept as one step or let go")
+{
+    /*  The FX page's third decision (author, 2026-09-26): a turn on an
+        insert's parameter while the show is locked rides as an EQ turn does -
+        heard, written to nothing, no step of the history, kept or dropped
+        once unlocked. */
+    LiveRig rig;
+    const auto verb = rig.document.createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "", "");
+    REQUIRE (verb.ok);
+    const auto fx = rig.document.createFx (rig.mediaId, verb.id, "");
+    REQUIRE (fx.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/fx/" + fx.id + "/values", "0:0.25").ok);
+
+    const auto row = "/godot/fx/" + fx.id + "/values";
+    const auto p0 = "/godot/fx/" + fx.id + "/p0";
+    const auto p1 = "/godot/fx/" + fx.id + "/p1";
+
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+    rig.tickOnce();
+
+    /*  What the voice was last told a parameter is. */
+    const auto heard = [&rig, track] (int parameter) -> float
+    {
+        for (auto push = rig.audio.fxValues.rbegin(); push != rig.audio.fxValues.rend(); ++push)
+            if (push->track == track && push->slot == 0 && push->parameter == parameter)
+                return push->value;
+
+        return -2.0f;
+    };
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+
+    CHECK (rig.set (p0, osc::Value::float64 (0.75)).applied == 1);
+    CHECK (rig.set (p1, osc::Value::float64 (1.0)).applied == 1);
+    rig.tickOnce();
+
+    //  HEARD.
+    CHECK (heard (0) == doctest::Approx (0.75f));
+    CHECK (heard (1) == doctest::Approx (1.0f));
+
+    //  WRITTEN TO NOTHING, and counted with what else rides.
+    CHECK (rig.saved (row) == "0:0.25");
+    CHECK (rig.steps() == steps);
+    CHECK (rig.live.size() == 2u);
+    CHECK (rig.published ("/godot/document/live") == "2");
+
+    //  A bad value is refused as the show would refuse it.
+    CHECK (rig.set (p0, osc::Value::float64 (1.5)).rejected == 1);
+    CHECK (rig.set ("/godot/fx/FX0NOPE0/p0", osc::Value::float64 (0.5)).rejected == 1);
+
+    SUBCASE ("turned back to what the show says, nothing rides there")
+    {
+        CHECK (rig.set (p0, osc::Value::float64 (0.25)).applied == 1);
+        rig.tickOnce();
+
+        CHECK (heard (0) == doctest::Approx (0.25f));
+        CHECK (rig.live.size() == 1u);
+    }
+
+    SUBCASE ("Keep is refused under the lock; unlocked it is one undo step, and nothing moves in the sound")
+    {
+        CHECK (rig.submitAndTick ("live.keep").rejected == 1);
+
+        rig.lock (false);
+        const auto pushes = rig.audio.fxValues.size();
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.saved (row) == "0:0.75 1:1");
+        CHECK (rig.live.empty());
+        CHECK (rig.steps() == steps + 1);
+        CHECK (rig.audio.fxValues.size() == pushes);
+
+        CHECK (rig.submitAndTick ("undo").applied == 1);
+        CHECK (rig.saved (row) == "0:0.25");
+    }
+
+    SUBCASE ("Discard puts the voice back to the show's value, and one the show never set back to the preset")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.live.empty());
+        CHECK (heard (0) == doctest::Approx (0.25f));
+        CHECK (heard (1) == doctest::Approx (-1.0f));
+        CHECK (rig.saved (row) == "0:0.25");
+        CHECK (rig.steps() == steps);
+    }
+
+    SUBCASE ("a write once unlocked is the show's, and lets go of what rode at that parameter only")
+    {
+        rig.lock (false);
+        CHECK (rig.set (p0, osc::Value::float64 (0.5)).applied == 1);
+
+        CHECK (rig.saved (row) == "0:0.5");
+        CHECK (rig.live.size() == 1u);
+        CHECK (rig.steps() == steps + 1);
+    }
+}
+
+TEST_CASE ("live: eq.reset under the lock holds flat live; unlocked it lets go of what rode first")
+{
+    LiveRig rig;
+    REQUIRE (rig.document.setAttribute (rig.eq ("eqB2Gain"), "6").ok);
+    REQUIRE (rig.document.setAttribute (rig.eq ("eqHpf"), "true").ok);
+
+    rig.lock (true);
+    CHECK (rig.submitAndTick ("eq.reset", { osc::Value::string (rig.mediaId) }).applied == 1);
+
+    //  Only what differs from flat rides: two rows, the show untouched.
+    CHECK (rig.live.rowsOf (rig.mediaId) == "eqB2Gain eqHpf");
+    CHECK (rig.saved (rig.eq ("eqB2Gain")) == "6");
+    CHECK (rig.published (rig.eq ("eqB2Gain")) == "0");
+    CHECK (rig.published (rig.eq ("eqHpf")) == "false");
+
+    //  Unlocked, the reset lets go of what rode and writes the show.
+    CHECK (rig.set (rig.eq ("eqB3Gain"), osc::Value::float64 (-4.0)).applied == 1);
+    rig.lock (false);
+    CHECK (rig.submitAndTick ("eq.reset", { osc::Value::string (rig.mediaId) }).applied == 1);
+
+    CHECK (rig.live.empty());
+    CHECK (rig.saved (rig.eq ("eqB2Gain")) == "0");
+    CHECK (rig.saved (rig.eq ("eqB3Gain")) == "0");
+}
+
+//==============================================================================
+namespace
+{
+    /*  A media cue with a level lane drawn on it (namespace draft §20): the
+        fade rig, whose media cue is the one the lane is drawn over, with the
+        sample clock put where a check wants the file to be. */
+    struct LaneRig : FadeRig
+    {
+        void drawLane (const std::string& text)
+        {
+            REQUIRE (document.setAttribute ("/godot/cue/" + mediaId + "/levelLane", text).ok);
+        }
+
+        /*  Fires the media cue, lets the disk answer, and waits for the launch
+            to be placed, the voice sounding - `startMedia`'s steps, with the
+            arm's request kept for a check on what the voice was snapped to. */
+        std::string launch()
+        {
+            fire (mediaId);
+            REQUIRE_FALSE (audio.arms.empty());
+            armed = audio.arms.back();
+
+            audio.completeArms (engine);
+            tickOnce();
+            tickOnce();
+
+            const auto id = runs.all().front().id;
+            REQUIRE (runs.find (id)->launchedAtSample > 0);
+
+            audio.playing.insert (runs.find (id)->track);
+            tickOnce();
+
+            return id;
+        }
+
+        /*  ONE TICK ON, WITH THE SOUND `seconds` PAST ITS LAUNCH ONE TICK FROM
+            NOW - which is where the lane is read (decision DC), so a check at
+            a second of the file is a check of that second's level. */
+        void hearAt (const std::string& id, double seconds)
+        {
+            const auto launched = runs.find (id)->launchedAtSample;
+
+            audio.samples = launched + static_cast<std::int64_t> (std::llround (seconds * 48000.0)) - 960;
+            tickOnce();
+        }
+
+        cue::ArmRequest armed;
+    };
+}
+
+TEST_CASE ("level lane: the voice follows the lane over the file, read a tick ahead, and starts at its first word")
+{
+    LaneRig rig;
+    rig.drawLane ("0 -40 2 0");             // up from -40 over the first two seconds
+
+    const auto id = rig.launch();
+
+    /*  THE ARM IS SNAPPED WITH THE LANE IN IT (DC): a lane drawn up from
+        silence starts its voice there, not at the cue's level sliding down. */
+    CHECK (rig.armed.levelDb == doctest::Approx (-40.0));
+
+    /*  And the lane is its own term: the run's own level is still the cue's,
+        which is what a fade aimed at it would take over from. */
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (0.0));
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-40.0));
+
+    /*  A second into the file, halfway up - and the voice was told so. */
+    rig.hearAt (id, 1.0);
+    CHECK (rig.runs.find (id)->laneDb == doctest::Approx (-20.0));
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-20.0));
+    REQUIRE_FALSE (rig.audio.levels.empty());
+    CHECK (rig.audio.levels.back().second == doctest::Approx (-20.0));
+
+    /*  Past the last point the lane holds what the last point says. */
+    rig.hearAt (id, 3.5);
+    CHECK (rig.runs.find (id)->level == doctest::Approx (0.0));
+}
+
+TEST_CASE ("level lane: it is read on the file's clock, from the start offset")
+{
+    /*  SECONDS OF THE FILE, not of the cue (§20.2): a cue that starts two
+        seconds into its file starts two seconds into its lane. */
+    LaneRig rig;
+    rig.drawLane ("0 0 4 -40");
+    rig.setCue (rig.mediaId, "startOffset", "2");
+
+    const auto id = rig.launch();
+
+    CHECK (rig.armed.levelDb == doctest::Approx (-20.0));
+
+    rig.hearAt (id, 1.0);                   // the file's third second
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-30.0));
+}
+
+TEST_CASE ("level lane: an offset on the cue's level, which a fade and a hand move beside it")
+{
+    /*  DECISION CZ. The lane is one more term of the sum: a cue written at -6
+        under a lane at -10 plays at -16, a fade aimed at it moves the cue's
+        own level and not the lane's, and a hand on a strip adds to both. */
+    LaneRig rig;
+    rig.setCue (rig.mediaId, "level", "-6");
+    rig.drawLane ("0 -10");
+
+    const auto id = rig.launch();
+
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (-6.0));
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-16.0));
+
+    rig.fire (rig.fadeId);                  // to -20 over a second
+
+    for (int i = 0; i < 60; ++i)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (-20.0));
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-30.0));
+
+    rig.runs.find (id)->trim = -3.0;
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-33.0));
+}
+
+TEST_CASE ("level lane: an edit reaches a sounding cue on the next tick, and clearing it takes it away")
+{
+    /*  DECISION DB: drawing while a loop plays is how a lane gets shaped. */
+    LaneRig rig;
+
+    const auto id = rig.launch();
+    CHECK (rig.runs.find (id)->level == doctest::Approx (0.0));
+
+    rig.drawLane ("0 -12");
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-12.0));
+    REQUIRE_FALSE (rig.audio.levels.empty());
+    CHECK (rig.audio.levels.back().second == doctest::Approx (-12.0));
+
+    rig.drawLane ("");
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->level == doctest::Approx (0.0));
+}
+
+TEST_CASE ("level lane: a jump takes the lane to the second jumped to")
+{
+    /*  §3.10's "scrubs when the clip scrubs" (DA): `run.seek` re-arms the
+        voice at a second of the file, and the lane is read from there. */
+    LaneRig rig;
+    rig.drawLane ("0 0 10 -20");
+
+    const auto id = rig.launch();
+    rig.audio.arms.clear();
+
+    CHECK (rig.submitAndTick ("run.seek", { osc::Value::string (id),
+                                            osc::Value::float64 (5.0) }).applied == 1);
+
+    /*  Snapped at the lane's word for the fifth second. */
+    REQUIRE (rig.audio.arms.size() == 1u);
+    CHECK (rig.audio.arms.front().levelDb == doctest::Approx (-10.0));
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.runs.find (id)->launchedAtSample > 0);
+
+    rig.hearAt (id, 1.0);                   // the file's sixth second
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-12.0));
+}
+
+TEST_CASE ("level lane: a looping slice hears the same stretch of the lane on every pass")
+{
+    /*  DA, and the reason it is the file's clock: a slice that loops plays
+        the same seconds of the file again, and so the same stretch of the
+        lane. Read before the launch at the slice's in-point, not at the
+        file's start, which the lane says something different about. */
+    LaneRig rig;
+
+    const auto range = rig.document.createRange (rig.mediaId, 2.0, 4.0);
+    REQUIRE (range.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + range.id + "/loops", "0").ok);
+
+    rig.drawLane ("0 0 2 -20 4 0");
+
+    const auto id = rig.launch();
+
+    CHECK (rig.armed.levelDb == doctest::Approx (-20.0));
+
+    rig.hearAt (id, 1.0);                   // the first pass, the file's third second
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-10.0));
+
+    rig.hearAt (id, 2.5);                   // the second pass, half a second in
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-15.0));
+
+    rig.hearAt (id, 5.0);                   // the third pass, a second in
+    CHECK (rig.runs.find (id)->level == doctest::Approx (-10.0));
+}
+
+TEST_CASE ("level lane: across a slice boundary it keeps the outgoing slice until the sound crosses")
+{
+    /*  §20.4's second difference from the playhead. The boundary is placed
+        a little ahead and moves the slice's clock when it is placed; the
+        level stays the outgoing slice's until the crossing itself. */
+    LaneRig rig;
+    rig.audio.slots = 2;
+
+    REQUIRE (rig.document.createRange (rig.mediaId, 0.0, 1.0).ok);
+    REQUIRE (rig.document.createRange (rig.mediaId, 5.0, 6.0).ok);
+
+    rig.drawLane ("0 0 1 -20 5 -40 6 -40");
+
+    const auto id = rig.launch();
+    const auto endsAt = rig.runs.find (id)->launchedAtSample + 48000;
+
+    /*  Two ticks before the end: inside the placement horizon, so the
+        boundary is placed on this tick. */
+    rig.audio.samples = endsAt - 1920;
+    rig.tickOnce();
+
+    REQUIRE_FALSE (rig.audio.stopsAt.empty());
+    REQUIRE (rig.audio.stopsAt.back().second == endsAt);
+    REQUIRE (rig.runs.find (id)->rangeStartedAtSample == endsAt);
+
+    /*  Read a tick ahead, still 540 samples short of the crossing: the
+        outgoing slice's last hundredth of a second, not the incoming one. */
+    rig.audio.samples = endsAt - 1500;
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->laneDb == doctest::Approx (-20.0 * (48000.0 - 540.0) / 48000.0));
+
+    /*  And past it, the incoming slice's own second. */
+    rig.audio.samples = endsAt - 480;
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->laneDb == doctest::Approx (-40.0));
 }

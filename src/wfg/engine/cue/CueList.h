@@ -219,6 +219,25 @@ namespace wfg::cue
         somebody somewhere different. */
     bool isInList (const juce::ValueTree& list, const std::string& cueId);
 
+    /*  WHERE A PARK ON THIS CUE LANDS: the cue itself when the pointer may
+        stand on it; otherwise the nearest group holding it that the pointer
+        may stand on; otherwise empty, meaning refuse.
+
+        The author, 2026-09-26: *"Can pointing it at non triggerable cue (like
+        a sample cue in a sampler group) move the pointer to the group instead
+        of showing an error?"* A sampler member, a header's cue and a footer's
+        cue are refused for WHERE they are, and the group that holds them is
+        the place that does stand for them - GO there arms the bank, or runs
+        the header and footer with the scene. A persistent section has no
+        group (its parent is the list), and a disabled cue is refused for what
+        it is, so both still come back empty.
+
+        `standby.set` asks this, a gesture; the document's own door does not,
+        because a value written to the node - a state file restoring, a
+        client's node.set - is a value, and a door that quietly stored a
+        different one would be a door nobody could reason about. */
+    std::string nearestStop (const juce::ValueTree& list, const std::string& cueId);
+
     //==============================================================================
     /*  Which list the argument-less standby commands act on.
 

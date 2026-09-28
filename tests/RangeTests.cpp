@@ -617,6 +617,61 @@ TEST_CASE ("range scheduler: the launch enters range nought and says so")
     CHECK (run->track >= 0);
 }
 
+TEST_CASE ("range scheduler: Esc, panic and the cross stop a cue whose range loops for ever, and nothing comes back")
+{
+    /*  Found by the author on 2026-09-25: a media cue with one range looping
+        for ever (`loops` nought, an ambience bed) could not be stopped - the
+        sound went, but the run stayed `stopping`, holding its voice and
+        sitting on the running pane, because silence at a range boundary is
+        not an ending and a range that never finishes never has a last
+        boundary. And a cue with a range still to come would have had it
+        launched after the stop. §4.4: Esc stops. */
+    for (const auto* command : { "run.kill", "run.killAll", "run.stopAll" })
+    {
+        CAPTURE (command);
+
+        SUBCASE ("one range, looping for ever")
+        {
+            SchedulerRig rig;
+            rig.addRange (0.0, 1.0, 0);
+
+            const auto id = rig.goAndLaunch();
+            rig.ticks (120);
+            REQUIRE_FALSE (rig.run (id)->isFinished());
+
+            if (std::string (command) == "run.kill")
+                rig.submitAndTick (command, { osc::Value::string (id) });
+            else
+                rig.submitAndTick (command);
+
+            rig.ticks (5);
+            CHECK (rig.run (id)->isFinished());
+            CHECK (rig.audio.playing.empty());
+        }
+
+        SUBCASE ("two ranges, stopped before the boundary into the second")
+        {
+            SchedulerRig rig;
+            rig.addRange (0.0, 2.0, 1);
+            rig.addRange (2.0, 4.0, 1);
+
+            const auto id = rig.goAndLaunch();
+            const auto launched = rig.audio.launches.size();
+
+            if (std::string (command) == "run.kill")
+                rig.submitAndTick (command, { osc::Value::string (id) });
+            else
+                rig.submitAndTick (command);
+
+            //  Past where the boundary would have been: nothing is launched.
+            rig.ticks (150);
+            CHECK (rig.audio.launches.size() == launched);
+            CHECK (rig.run (id)->isFinished());
+            CHECK (rig.audio.playing.empty());
+        }
+    }
+}
+
 TEST_CASE ("range scheduler: a loop count of two places the boundary after two passes")
 {
     /*  §3.24's `loops`, and the thing that makes it more than a document row:

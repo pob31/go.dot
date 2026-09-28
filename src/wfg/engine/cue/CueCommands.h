@@ -56,11 +56,17 @@
 
 namespace wfg::cue
 {
+    class LiveEdits;
+
     /*  Adds standby.set, standby.clear, standby.next, standby.previous and
         list.focus, bound to the document and to a Focus the caller owns.
 
         `focus` is runtime state and must outlive the registry. It is not
-        published and not persisted - see the note in CueList.h. */
+        published and not persisted - see the note in CueList.h.
+
+        `live`, when given, is the layer a locked show's EQ rides in
+        (LiveEdits.h): `eq.reset` on a locked show puts the cue's EQ back to
+        flat there, and on an unlocked one lets go of what rode live on it. */
     void registerCueCommands (CommandRegistry& registry, doc::ShowDocument& document,
-                              Focus& focus);
+                              Focus& focus, LiveEdits* live = nullptr);
 }

@@ -48,8 +48,11 @@
 
 #include <wfg/client/model/Curve.h>
 #include <wfg/client/model/Eq.h>
+#include <wfg/client/model/Fx.h>
+#include <wfg/client/model/Lane.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
+#include <wfg/client/model/Take.h>
 #include <wfg/client/model/Timeline.h>
 
 namespace wfg::tree { class TreeSnapshot; }
@@ -60,7 +63,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends, timeline, curve, eq };
+        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -88,6 +91,12 @@ namespace wfg::client::model
 
         std::vector<RangeRow> ranges;
 
+        /*  THE CUE'S LEVEL LANE, drawn over the waveform (namespace draft
+            §20.5), and whether the show is locked - which is when nothing on
+            the lane may be grabbed, the lane being a decision the lock keeps. */
+        std::vector<LanePoint> lane;
+        bool locked = false;
+
         /*  THE MIX CHANNELS AND WHAT THIS CUE SENDS INTO THEM, filled only
             when the sends are what is open. `cueLevel` is the cue's own
             `media/level`, which the mixer draws as its master strip: it is not
@@ -109,9 +118,22 @@ namespace wfg::client::model
         CurveReading curve;
 
         /*  THE CUE'S EQ, filled only when the EQ is what is open (Phase 9a):
-            the nineteen rows as one value, the same value the voice is
+            the twenty-three rows as one value, the same value the voice is
             given, with its own notice for a cue that has none. */
         EqReading eq;
+
+        /*  THE CUE'S SIGNAL CHAIN, filled only when the FX panel is what is
+            open (author, 2026-09-25): the show's plugins in the order the
+            sound goes through them, and what this cue does with each. The
+            chain starts with the EQ, so `eq` above is filled with it - the
+            first box is the EQ's, with its own switch. */
+        FxReading fx;
+
+        /*  THE TAKE OF THE CHANNEL A MIC CUE PLAYS THROUGH, filled only when
+            the take panel is what is open (Phase 9c): its state, length,
+            layers, points and playhead, with its own notice for a cue that has
+            none. The peaks come through their own door, beside this. */
+        TakeReading take;
 
         /*  Where the playhead is, when a run of this cue is sounding, and
             whether there is one at all. A cue with no run has no playhead, and
@@ -130,4 +152,15 @@ namespace wfg::client::model
     };
 
     FootReading readFoot (const tree::TreeSnapshot&, const Subject&);
+
+    /*  WHERE THE FOOT GOES WHILE A SURFACE ADJUSTS A CUE (author, 2026-09-25:
+        "When adjusting either EQ or send levels display the footer on
+        screen"): the aimed cue's EQ panel for an EQ page, its send mixer for
+        a Send page, its chain for an FX page and its take for a Loop page
+        (Phase 9c) - once the page has written something, since a page that
+        is only up has adjusted nothing. Nothing otherwise, and the foot is the
+        window's own again. `page` is `readSurfacePage`'s answer, passed by its
+        parts so this file needs no surface model. */
+    Subject footForSurface (bool pageUp, const std::string& pageWord, const std::string& edited,
+                            const std::string& aim);
 }

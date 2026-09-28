@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/Theme.h>
 
+#include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/json/JsonValue.h>
 
 #include <cstdint>
@@ -137,6 +138,29 @@ namespace wfg::client::model
                 { "drop-aim",      0xFF86A3DB },   // blue: this fade would point here
                 { "drop-header",   0xFFE0685D },   // red: prepared by this group's header
                 { "drop-footer",   0xFF9A95E4 },   // purple: into this group's footer
+
+                /*  GO SAYS WHETHER THE SOUND WILL LEAVE (author, 2026-09-25):
+                    bright yellow with black letters while the audio runs, grey
+                    while it does not - and a word under it then (§4.8). Their
+                    own tokens and not `standby`'s amber: the author asked for
+                    a brighter yellow than the cue it fires. */
+                { "go",            0xFFFFD60A },
+                { "go-ink",        0xFF000000 },
+                { "go-idle",       0xFF4A4A52 },
+
+                /*  AN EQ HANDLE EACH (author, 2026-09-25: "Having different
+                    colours on each handle like on the EQ of the spatcore
+                    library really helps"): spatcore's own first six, red to
+                    purple along the field as the handles stand by default -
+                    the high-pass, the four bands, the low-pass. The numbers
+                    are the engine's (audio/EqColours.h), because a D700's EQ
+                    page lights its rotaries in the same six. */
+                { "eq-hp",         audio::eqHighPassColour },
+                { "eq-1",          audio::eqBand1Colour },
+                { "eq-2",          audio::eqBand2Colour },
+                { "eq-3",          audio::eqBand3Colour },
+                { "eq-4",          audio::eqBand4Colour },
+                { "eq-lp",         audio::eqLowPassColour },
             };
 
             return table;

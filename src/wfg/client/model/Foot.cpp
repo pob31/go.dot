@@ -60,6 +60,16 @@ namespace wfg::client::model
             /*  AND THE EQ FOLLOWS, for the sends' reason: how this cue is
                 shaped is a question about whichever cue is in hand. */
             case Subject::Kind::eq:        return true;
+
+            /*  AND THE CHAIN, for the same reason, and so does the plugin's
+                own window opened from it (author, 2026-09-25): which inserts
+                this cue has is a question about the cue in hand. */
+            case Subject::Kind::fx:        return true;
+
+            /*  AND THE TAKE (Phase 9c): which take a mic cue plays through is
+                a question about the cue in hand, and a later cue on the same
+                channel opens on the same take - which is the point. */
+            case Subject::Kind::take:      return true;
             case Subject::Kind::none:      break;
         }
 
@@ -90,6 +100,8 @@ namespace wfg::client::model
             out.startOffset = osc::parseDouble (at (cue + "startOffset")).value_or (0.0);
             out.fileLength = osc::parseDouble (at (cue + "duration")).value_or (0.0);
             out.ranges = readRanges (snapshot, subject.objectId);
+            out.lane = readLane (snapshot, subject.objectId);
+            out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 
             /*  WHY THERE IS NOTHING TO DRAW, when there is nothing to draw, in
                 the words that say what to do about it. A panel that just sat
@@ -120,13 +132,30 @@ namespace wfg::client::model
                 out.notice = out.eq.notice;
         }
 
+        if (subject.kind == Subject::Kind::fx)
+        {
+            out.fx = readFx (snapshot, subject.objectId);
+            out.eq = readEq (snapshot, subject.objectId);
+
+            if (! out.fx.present)
+                out.notice = out.fx.notice;
+        }
+
+        if (subject.kind == Subject::Kind::take)
+        {
+            out.take = readTake (snapshot, subject.objectId);
+
+            if (! out.take.present)
+                out.notice = out.take.notice;
+        }
+
         if (subject.kind == Subject::Kind::sends)
         {
             out.cueLevel = osc::parseDouble (at (cue + "level")).value_or (0.0);
             out.sends = readSends (snapshot, subject.objectId);
 
-            if (out.cueKind != "media")
-                out.notice = "Only a media cue has send levels.";
+            if (out.cueKind != "media" && out.cueKind != "mic")
+                out.notice = "Only a media or a mic cue has send levels.";
             else if (out.sends.empty())
                 out.notice = "This show declares no mix channels yet - Show, Audio settings, "
                              "Outputs, add a mix channel.";
@@ -164,5 +193,28 @@ namespace wfg::client::model
         }
 
         return out;
+    }
+
+    Subject footForSurface (bool pageUp, const std::string& pageWord, const std::string& edited,
+                            const std::string& aim)
+    {
+        if (! pageUp || edited.empty() || aim.empty())
+            return {};
+
+        if (pageWord == "eq")
+            return { Subject::Kind::eq, aim };
+
+        if (pageWord == "send")
+            return { Subject::Kind::sends, aim };
+
+        //  The FX page (2026-09-26): the cue's chain at the foot.
+        if (pageWord == "fx")
+            return { Subject::Kind::fx, aim };
+
+        //  The Loop page (Phase 9c): the take it rides, at the foot.
+        if (pageWord == "loop")
+            return { Subject::Kind::take, aim };
+
+        return {};
     }
 }

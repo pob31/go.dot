@@ -69,6 +69,7 @@ namespace wfg::audio
 {
     class MediaInfo;
     struct TimbrePyramid;
+    struct PeakTrack;
 
     /*  WHAT ONE FILE CAME TO, and what it cost - every field the verb prints. */
     struct MediaAnalysis
@@ -108,6 +109,10 @@ namespace wfg::audio
 
         /*  Set for `built`, `cached` and `inMemory`, and only for those. */
         std::shared_ptr<const TimbrePyramid> pyramid;
+
+        /*  The finer level beside it (Peaks.h), set whenever the pyramid is:
+            one pass makes both, and a cache missing either is built again. */
+        std::shared_ptr<const PeakTrack> peaks;
     };
 
     /*  One word per outcome, as the verb prints them: built, cached, memory,

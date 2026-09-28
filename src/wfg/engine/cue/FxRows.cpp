@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/FxRows.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -71,59 +72,12 @@ namespace wfg::cue
         return splitFx (address).has_value();
     }
 
-    std::map<int, double> parseFxValues (const std::string& text)
-    {
-        std::map<int, double> out;
-        std::istringstream in (text);
-        std::string pair;
-
-        while (in >> pair)
-        {
-            const auto colon = pair.find (':');
-
-            if (colon == std::string::npos || colon == 0)
-                continue;
-
-            /*  The index is digits and nothing else: atoi reads "x" as nought,
-                which would hand a stray word to parameter nought. */
-            const auto digits = pair.substr (0, colon);
-            const auto numeric = ! digits.empty()
-                                   && std::all_of (digits.begin(), digits.end(),
-                                                   [] (char c) { return c >= '0' && c <= '9'; });
-
-            if (! numeric || digits.size() > 6)
-                continue;
-
-            const auto index = std::atoi (digits.c_str());
-            const auto value = osc::parseDouble (pair.substr (colon + 1));
-
-            if (value.has_value() && std::isfinite (*value))
-                out[index] = std::clamp (*value, 0.0, 1.0);
-        }
-
-        return out;
-    }
-
-    std::string formatFxValues (const std::map<int, double>& values)
-    {
-        std::string out;
-
-        for (const auto& [index, value] : values)
-        {
-            if (! out.empty())
-                out += ' ';
-
-            out += std::to_string (index) + ":" + osc::formatDouble (value);
-        }
-
-        return out;
-    }
-
     //==============================================================================
-    doc::LiveWrite fxWriteFor (doc::ShowDocument& document, const plugin::CatalogueStore* catalogues)
+    doc::LiveWrite fxWriteFor (doc::ShowDocument& document, const plugin::CatalogueStore* catalogues,
+                               LiveEdits* live)
     {
-        return [&document, catalogues] (const std::string& address, const std::string& text,
-                                        const std::vector<osc::Value>& args) -> std::optional<Outcome>
+        return [&document, catalogues, live] (const std::string& address, const std::string& text,
+                                              const std::vector<osc::Value>& args) -> std::optional<Outcome>
         {
             const auto target = splitFx (address);
 
@@ -153,6 +107,23 @@ namespace wfg::cue
             }
 
             auto values = parseFxValues (fx.getProperty ("values").toString().toStdString());
+
+            if (live != nullptr && document.isLocked())
+            {
+                /*  RIDDEN LIVE: heard, written to nothing. The show's own value
+                    back again is no change. */
+                if (const auto saved = values.find (target->index);
+                    saved != values.end() && std::abs (saved->second - *parsed) < 1.0e-12)
+                    live->dropFxValue (target->id, target->index);
+                else
+                    live->setFxValue (target->id, target->index, *parsed);
+
+                return Outcome::ok (args);
+            }
+
+            if (live != nullptr)
+                live->dropFxValue (target->id, target->index);
+
             values[target->index] = *parsed;
 
             /*  Through the ordinary door: the lock, the transaction and the

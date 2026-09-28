@@ -111,6 +111,11 @@ namespace wfg::client::model
 
         std::string mode;
 
+        /*  A TRANSPORT CUE'S VERB, as the tree spells it (hard, afterMember,
+            record...), so the kind column can say what the cue does the way a
+            group's says its mode (2026-09-27). Empty on anything else. */
+        std::string verb;
+
         /*  A GROUP'S BEHAVIOUR, as the tree spells it: `sequential` or
             `shuffle`, and how many rounds it plays - where nought is for ever
             and one is once. Empty on anything that is not a group. */
@@ -170,6 +175,26 @@ namespace wfg::client::model
         bool mayPark() const noexcept
         {
             return rowKind == RowKind::cue && section == Section::member;
+        }
+
+        /*  WHERE A CLICK IN THIS ROW'S GUTTER SENDS THE POINTER, which since
+            2026-09-26 is not always the row: a header's or a footer's line -
+            its band too - parks on the GROUP it belongs to (author: "move the
+            pointer to the group instead of showing an error"). Empty for a
+            persistent bed, which has no group to stand for it, and for a step
+            row, which is a reading and not a cue. A sampler member is a member
+            row and sends itself: the engine knows it is one and lands it on
+            its bank (`cue::nearestStop`). */
+        std::string parksOn() const
+        {
+            if (mayPark())
+                return id;
+
+            if (rowKind != RowKind::step
+                  && (section == Section::header || section == Section::footer))
+                return parent;
+
+            return {};
         }
     };
 

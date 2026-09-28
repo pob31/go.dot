@@ -410,10 +410,11 @@ namespace wfg::client::ui
             which is what every strip was before ranges were drawn and is still
             the right answer for a cue that plays straight through. */
         if (! (to > from))
-            return bars.emplace (key, model::waveform (*found->second.pyramid, width))
+            return bars.emplace (key, model::waveform (*found->second.pyramid, found->second.peaks.get(), width))
                        .first->second;
 
-        return bars.emplace (key, model::waveform (*found->second.pyramid, width, from, to))
+        return bars.emplace (key, model::waveform (*found->second.pyramid, found->second.peaks.get(),
+                                                   width, from, to))
                    .first->second;
     }
 
@@ -811,9 +812,12 @@ namespace wfg::client::ui
             position: a group's count of its members, a member's strip and what
             the strip is doing (§16.7). Measured, and never more than half the
             line, so the name keeps the room it is read by. */
-        if (! entry.samplerWords.empty())
+        /*  AND A MIC RUN'S (Phase 9b): the channel it is on, or that it waits
+            for one or rings out - in the same place, by the same rule. */
+        if (const auto& beside = entry.samplerWords.empty() ? entry.liveWords : entry.samplerWords;
+            ! beside.empty())
         {
-            const auto said = juce::String (entry.samplerWords);
+            const auto said = juce::String (beside);
 
             g.setFont (Look::font (theme, 12.0f));
 
@@ -830,11 +834,24 @@ namespace wfg::client::ui
         g.setColour (Look::colour (theme, entry.error.empty() ? "ink" : "failed"));
         g.setFont (Look::font (theme, 13.0f));
 
-        const auto name = entry.cueName.empty() ? juce::String (entry.cueId)
-                                                : juce::String (entry.cueName);
+        auto name = entry.cueName.empty() ? juce::String (entry.cueId)
+                                          : juce::String (entry.cueName);
+
+        /*  THE CUE THE ROTARIES ARE ON (2026-09-25): a knob before its name,
+            and the name underlined - a mark and a line, never a colour alone
+            (§4.8). A click on the name put it there. */
+        if (entry.aimed)
+            name = juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x8e ")) + name;
 
         g.drawText (entry.error.empty() ? name : name + "  " + juce::String (entry.error),
                     area, juce::Justification::centredLeft, true);
+
+        if (entry.aimed)
+        {
+            const auto wide = juce::jmin (area.getWidth(),
+                                          juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), name));
+            g.fillRect (area.getX(), area.getCentreY() + juce::roundToInt (theme.type * 7.0), wide, 1);
+        }
 
         g.setColour (Look::colour (theme, "rule").withAlpha (0.5f));
         g.fillRect (0, height - 1, width, 1);
@@ -842,18 +859,40 @@ namespace wfg::client::ui
 
     void RunPaneComponent::clicked (const juce::MouseEvent& event)
     {
-        const auto index = rowAt (event.y);
+        clickAt (event.x, event.y);
+    }
 
-        if (index < 0 || ! actions.kill)
+    void RunPaneComponent::clickAt (int x, int y)
+    {
+        const auto index = rowAt (y);
+
+        if (index < 0)
             return;
+
+        const auto& entry = rows[static_cast<std::size_t> (index)];
 
         /*  THE KILL, at the right edge where the cross is drawn. Only a click
             on the cross sends it: a run stopped by a click that landed
             anywhere on the row is a cue an operator did not mean to stop. */
         const auto unit = juce::roundToInt (theme.type * 7.0);
 
-        if (event.x >= canvas.getWidth() - unit * 3)
-            actions.kill (rows[static_cast<std::size_t> (index)].id);
+        if (x >= canvas.getWidth() - unit * 3)
+        {
+            if (actions.kill)
+                actions.kill (entry.id);
+
+            return;
+        }
+
+        /*  THE NAME AIMS A SURFACE'S ROTARIES at the cue (author, 2026-09-25:
+            "a way to edit other running media cues like clicking on the label
+            over the waveform"), and on the one already aimed lets go. The
+            name's line, above the waveform's band - a press on the band is a
+            scrub, and a scrub that did not move is a grab and nothing else. */
+        const auto onNameLine = y < topOf (index) + rowHeight();
+
+        if ((entry.kind == "media" || entry.kind == "mic") && onNameLine && actions.aim)
+            actions.aim (entry.aimed ? std::string {} : entry.cueId);
     }
 
     juce::Rectangle<int> RunPaneComponent::stripFor (const model::RunRow& entry, int width,

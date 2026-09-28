@@ -54,12 +54,14 @@
 #include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Selection.h>
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
@@ -67,14 +69,19 @@
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
 #include <wfg/client/ui/MainWindow.h>
+#include <wfg/client/ui/NewCueMenu.h>
+#include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -268,6 +275,11 @@ namespace wfg::client
                 runActions.seek = [this] (const std::string& id, double seconds)
                                   { send (gesture::seek (id, seconds)); };
 
+                /*  A CLICK ON A RUNNING CUE'S NAME AIMS THE SURFACES' ROTARIES
+                    at it (author, 2026-09-25), and on the aimed one lets go. */
+                runActions.aim = [this] (const std::string& cueId)
+                                 { send (gesture::aimSurfaces (cueId)); };
+
                 ui::InspectorComponent::Actions inspectorActions;
 
                 /*  ONE COMMITTED FIELD IS ONE `node.set`, carrying the address
@@ -280,6 +292,10 @@ namespace wfg::client
                 /*  CLOSING THE PANEL IS PICKING NOTHING, which is client state
                     like the folds and never reaches the engine. */
                 inspectorActions.close = [this] { selection.clear(); };
+
+                /*  A CLICK OR A TOUCH ON A NUMBER PUTS IT ON THE MASTER DIAL
+                    (author, 2026-09-26) - here and at the foot. */
+                inspectorActions.dial = [this] (const std::string& address) { dialTo (address); };
 
                 /*  THE PANEL AT THE FOOT, ASKED FOR FROM THE CUE ITSELF. The
                     inspector hands back a word; the words are the ones
@@ -303,6 +319,10 @@ namespace wfg::client
                         wanted = model::Subject::Kind::curve;
                     else if (subject == "eq")
                         wanted = model::Subject::Kind::eq;
+                    else if (subject == "fx")
+                        wanted = model::Subject::Kind::fx;
+                    else if (subject == "take")
+                        wanted = model::Subject::Kind::take;
 
                     if (wanted == model::Subject::Kind::none)
                         return;
@@ -350,6 +370,10 @@ namespace wfg::client
                 ui::NewCueBarComponent::Actions newCueActions;
 
                 newCueActions.create = [this] (const std::string& kind) { createCue (kind); };
+                newCueActions.choose = [this] (const std::string& kind, juce::Component& button)
+                {
+                    chooseFromList (kind, button);
+                };
 
                 /*  LOAD TO TIME'S OWN TWO GESTURES: the aim, asked on every
                     change, and the jump. Both go to the focused list, which
@@ -390,6 +414,7 @@ namespace wfg::client
                     shell->setFoot ({});
                 };
                 footActions.resizeBy = [this] (int pixels) { shell->growFoot (pixels); };
+                footActions.dial = [this] (const std::string& address) { dialTo (address); };
 
                 footActions.createRange = [this] (const std::string& cueId, double in, double out)
                                           { send (gesture::createRange (cueId, in, out)); };
@@ -400,13 +425,52 @@ namespace wfg::client
                 footActions.splitRange = [this] (const std::string& cueId, double at)
                                          { send (gesture::splitRange (cueId, at)); };
 
-                footActions.createSend = [this] (const std::string& cueId, const std::string& busId)
-                                         { send (gesture::createSend (cueId, busId)); };
+                footActions.createSend = [this] (const std::string& cueId, const std::string& busId,
+                                                 double level)
+                                         { send (gesture::createSend (cueId, busId, level)); };
 
-                /*  FLAT IS ONE COMMAND (Phase 9a): nineteen rows back in one
+                /*  FLAT IS ONE COMMAND (Phase 9a): twenty-three rows back in one
                     transaction, which is one step to undo. */
                 footActions.resetEq = [this] (const std::string& cueId)
                                       { send (gesture::eqReset (cueId)); };
+
+                /*  THE CHAIN'S TWO DOORS (author, 2026-09-25): switching an
+                    entry of the set in for the first time is `fx.create`, and
+                    the EQ box shows the same cue's EQ in this same foot. */
+                footActions.createFx = [this] (const std::string& cueId, const std::string& pluginId)
+                                       { send (gesture::createFx (cueId, pluginId)); };
+
+                /*  THE TAKE PANEL'S FIVE PRESSES (Phase 9c): the take verbs,
+                    as the D700's Rec and a transport cue send them. */
+                footActions.pressTake = [this] (const std::string& verb, const std::string& channelId)
+                                        { send (gesture::takePress (verb, channelId)); };
+
+                footActions.keepTake = [this] (const std::string& channelId, bool asCue, const std::string& afterCue)
+                                       { send (gesture::takeKeep (channelId, asCue, afterCue)); };
+
+                footActions.openEqOn = [this] (const std::string& cueId)
+                {
+                    if (shell != nullptr && ! cueId.empty())
+                        shell->setFoot ({ model::Subject::Kind::eq, cueId });
+                };
+
+                footActions.openTakeOn = [this] (const std::string& cueId)
+                {
+                    if (shell != nullptr && ! cueId.empty())
+                        shell->setFoot ({ model::Subject::Kind::take, cueId });
+                };
+
+                /*  EDIT... OPENS THE PLUGIN'S OWN WINDOW (author, 2026-09-25),
+                    in a helper process the client keeps: a machine-local
+                    thing, like a file chooser, so no command - what the window
+                    then DOES is ordinary writes. Read against the last pass's
+                    snapshot, as every gesture between passes is. */
+                footActions.editPlugin = [this] (const std::string& cueId, const std::string& pluginId)
+                {
+                    if (editors != nullptr && latest != nullptr)
+                        editors->edit (*latest, cueId, pluginId,
+                                       model::isYes (model::flag (*latest, "/godot/document/locked")));
+                };
 
                 footActions.openTimelineOn = [this] (const std::string& groupId)
                 {
@@ -437,6 +501,38 @@ namespace wfg::client
                                                             std::move (undoActions),
                                                             std::move (footActions));
                 shell = content.get();
+
+                /*  THE BAR'S TWO BUTTONS (2026-09-25): what a locked show rode
+                    live, kept in the show as one undo step, or let go of. */
+                shell->liveBar.setActions ({ [this] { send (gesture::keepLive()); },
+                                             [this] { send (gesture::dropLive()); } });
+
+                /*  THE PLUGINS' OWN WINDOWS: what they move is one node.set a
+                    value, with origin window, like a slider; their close
+                    buttons end their helpers; the show's keys pressed in them
+                    come back to this window's own key handling. */
+                ui::PluginEditors::Actions editing;
+                editing.set = [this] (const std::string& address, const std::string& text)
+                              { send (gesture::setNode (address, text)); };
+                editing.createFx = [this] (const std::string& cueId, const std::string& pluginId)
+                                   { send (gesture::createFx (cueId, pluginId)); };
+                editing.capture = [this] (const std::string& fxId, const std::string& stateFile,
+                                          const std::string& values)
+                                  { send (gesture::captureFx (fxId, stateFile, values)); };
+                editing.key = [this] (bool escape)
+                {
+                    if (shell != nullptr)
+                        shell->keyPressed (juce::KeyPress (escape ? juce::KeyPress::escapeKey
+                                                                  : juce::KeyPress::spaceKey));
+                };
+                editing.changed = [this]
+                {
+                    if (shell != nullptr && editors != nullptr)
+                        shell->foot.setEditorWords (editors->words());
+                };
+
+                editors = std::make_unique<ui::PluginEditors> (std::move (editing), host.describePlugin,
+                                                               host.pluginWorkFolder);
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
                                                             ui::Look::colour (theme, "ground"),
@@ -973,6 +1069,23 @@ namespace wfg::client
                                         + juce::String (show);
             }
 
+            /*  A NUMBER ON THE MASTER DIAL, from a click or a touch (author,
+                2026-09-26): sent only where there is a dial to put it on and
+                it is not on it already, so a click in a show with no surface,
+                or a second click on the same box, writes nothing to the log.
+                Read against the last pass's snapshot, as every gesture between
+                passes is. */
+            void dialTo (const std::string& address)
+            {
+                if (latest == nullptr || address.empty() || ! model::hasMasterDial (*latest))
+                    return;
+
+                if (model::text (*latest, "/godot/surface/dial") == address)
+                    return;
+
+                send (gesture::dial (address));
+            }
+
             /*  RULE 2's ONE CALL SITE. A pointer copy, never null, and the
                 snapshot is only ever swapped whole. */
             void pass()
@@ -1130,6 +1243,49 @@ namespace wfg::client
                 if (shutCurveFor != selection.anchor())
                     shutCurveFor.clear();
 
+                /*  A SURFACE ADJUSTING A CUE HOLDS THE FOOT ON IT (author,
+                    2026-09-25: "When adjusting either EQ or send levels
+                    display the footer on screen"): the aimed cue's EQ panel
+                    for an EQ page, its send mixer for a Send page, once the
+                    page has written something - and not the list's pick, which
+                    the rotaries do not follow. When the page comes down the
+                    foot goes back to what it was showing. */
+                const auto page = model::readSurfacePage (*snapshot);
+                const auto held = model::footForSurface (page.up, page.word, page.edited, page.aim);
+
+                if (held.isOpen())
+                {
+                    if (! surfaceHoldsFoot)
+                    {
+                        footBeforeSurface = shell->footSubject();
+                        surfaceHoldsFoot = true;
+                    }
+
+                    if (shell->footSubject() != held)
+                    {
+                        shell->setFoot (held);
+                        menuItemsChanged();
+                    }
+
+                    //  And the band the rotary last turned, ringed on the panel.
+                    if (held.kind == model::Subject::Kind::eq && page.edited != lastSurfaceEdit)
+                        shell->foot.showEditedEqHandle (model::eqHandleForAddress (page.aim, page.edited));
+                }
+                else if (surfaceHoldsFoot && ! page.up)
+                {
+                    surfaceHoldsFoot = false;
+                    shell->setFoot (footBeforeSurface);
+                    menuItemsChanged();
+                }
+
+                lastSurfaceEdit = page.edited;
+
+                /*  AND WHAT A LOCKED SHOW IS RIDING LIVE, in the bar under the
+                    transport: said while locked, Keep or Discard once not. */
+                shell->setLive (static_cast<int> (osc::parseDouble (model::text (*snapshot, "/godot/document/live"))
+                                                     .value_or (0.0)),
+                                model::isYes (reading.locked));
+
                 if (shell->footSubject().isOpen())
                 {
                     auto subject = shell->footSubject();
@@ -1152,7 +1308,7 @@ namespace wfg::client
                         not" - and it is the one a timeline had wrong. */
                     const auto picked = selection.anchor();
 
-                    if (model::followsPick (subject.kind) && ! picked.empty())
+                    if (! surfaceHoldsFoot && model::followsPick (subject.kind) && ! picked.empty())
                     {
                         auto wanted = picked;
 
@@ -1206,8 +1362,21 @@ namespace wfg::client
                         }
                     }
 
-                    shell->foot.show (model::readFoot (*snapshot, subject), mediaTable);
+                    /*  THE THIRD DOOR, read here and only here, and only while
+                        the take panel is what is open: a take's picture is
+                        built on this thread when it is asked for, and nothing
+                        else in the window draws one. */
+                    const auto takePictures = subject.kind == model::Subject::Kind::take && host.takes != nullptr
+                                                  ? host.takes->snapshot()
+                                                  : nullptr;
+
+                    shell->foot.show (model::readFoot (*snapshot, subject), mediaTable, takePictures);
                 }
+
+                /*  AND EVERY OPEN PLUGIN WINDOW FOLLOWS THE PICK, from this
+                    same snapshot; the lock closes them. */
+                if (editors != nullptr)
+                    editors->follow (*snapshot, selection.anchor(), model::isYes (reading.locked));
 
                 //  What a move just did to the moved cue's own output, if anything.
                 sayIfTheMoveClashed (*snapshot, reading.revision);
@@ -1239,6 +1408,11 @@ namespace wfg::client
 
                 if (inspecting && ! loadingToTime && ! browsingUndo)
                     shell->inspector.show (model::inspectMany (*snapshot, selection.ids()));
+
+                /*  THE MASTER DIAL'S NUMBER, marked wherever it is drawn. */
+                const auto dialed = model::text (*snapshot, "/godot/surface/dial");
+                shell->inspector.showDial (dialed);
+                shell->foot.showDial (dialed);
 
                 last = reading;
             }
@@ -1578,6 +1752,13 @@ namespace wfg::client
                 "never again". */
             std::string shutCurveFor;
 
+            /*  A SURFACE HOLDING THE FOOT (2026-09-25): whether one is, what
+                the foot showed before it took it, and the address its page
+                last wrote - so the ringed band moves only when that does. */
+            bool surfaceHoldsFoot = false;
+            model::Subject footBeforeSurface;
+            std::string lastSurfaceEdit;
+
             void rememberOutsOf (const std::string& cueId)
             {
                 watchingMove.reset();
@@ -1831,23 +2012,15 @@ namespace wfg::client
 
             void createCue (const std::string& kind)
             {
+                createCue (kind, {});
+            }
+
+            /*  AND BORN WITH ITS SETTINGS, when a line of a list chose them:
+                one `cue.create`, one record, one Undo. */
+            void createCue (const std::string& kind, const model::Settings& bornWith)
+            {
                 if (refusedWhileLocked())
                     return;
-
-                if (kind == "group" && ! selection.empty() && latest)
-                {
-                    if (! groupingCue.empty()) return;
-                    std::string ids;
-                    for (const auto& id : selection.ids()) { if (! ids.empty()) ids += ' '; ids += id; }
-                    groupingCue = selection.ids().front();
-                    for (auto parent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
-                         ! parent.empty(); parent = model::text (*latest, "/godot/cue/" + parent + "/parent"))
-                        if (selection.contains (parent)) groupingCue = parent;
-                    groupingParent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
-                    groupingWait = 0;
-                    send ({ "window", "group.wrap", { osc::Value::string (ids) } });
-                    return;
-                }
 
                 const auto [parent, index] = destination();
 
@@ -1869,8 +2042,126 @@ namespace wfg::client
                 const auto members = static_cast<int> (model::words (orderOf (parent)).size());
                 const auto at = index < 0 ? members : juce::jlimit (0, members, index);
 
-                send (gesture::createCue (parent, at, kind, ""));
+                send (gesture::createCue (parent, at, kind, "", bornWith));
                 creations.push_back ({ parent, at, kind, last.revision, 0 });
+            }
+
+            /*  THE LISTS FOUR BUTTONS OPEN (the author, 2026-09-27): group,
+                transport, midi and mic stand for several things, and the list
+                under the button is where the one meant is chosen. What each
+                line offers and makes is model/NewCueMenus.h's; this reads the
+                pick, shows the list, and sends what the line clicked makes.
+
+                THE PICK IS READ WHEN THE LIST OPENS, and what it offered is
+                what a click makes: the cues the group list offered to take,
+                the cue the transport list said it would aim at. */
+            void chooseFromList (const std::string& kind, juce::Component& button)
+            {
+                if (refusedWhileLocked() || latest == nullptr)
+                    return;
+
+                const auto where = destinationSentence().toStdString();
+
+                std::vector<model::Choice> offered;
+                std::vector<model::MenuLine> lines;
+                model::Wrap around;
+                std::string aim;
+
+                if (kind == "group")
+                {
+                    if (! groupingCue.empty())      // a group still being made around the last pick
+                        return;
+
+                    offered = model::groupChoices();
+                    around = model::wrapOf (*latest, selection.ids());
+                    lines = model::groupMenu (around, where);
+                }
+                else if (kind == "transport")
+                {
+                    offered = model::transportChoices();
+                    aim = selection.anchor();
+
+                    const auto aimName = aim.empty() ? std::string {}
+                                                     : model::text (*latest, "/godot/cue/" + aim + "/name");
+
+                    lines = model::transportMenu (aim.empty() ? std::string {}
+                                                              : (aimName.empty() ? std::string ("the picked cue") : aimName),
+                                                  where);
+                }
+                else if (kind == "midi")
+                {
+                    offered = model::midiChoices();
+                    lines = model::midiMenu (where);
+                }
+                else if (kind == "mic")
+                {
+                    offered = model::micChoices (*latest);
+                    lines = model::micMenu (*latest, offered, where);
+                }
+                else
+                {
+                    createCue (kind);
+                    return;
+                }
+
+                ui::showNewCueMenu (button, lines,
+                                    [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
+                                     this, offered, cues = around.cues, aim] (int picked, bool wrap)
+                                    {
+                                        if (safe == nullptr || picked < 0
+                                              || static_cast<std::size_t> (picked) >= offered.size())
+                                            return;
+
+                                        createFromChoice (offered[static_cast<std::size_t> (picked)],
+                                                          wrap ? cues : std::vector<std::string> {}, aim);
+                                    });
+            }
+
+            void createFromChoice (const model::Choice& line, const std::vector<std::string>& wrapped,
+                                   const std::string& aim)
+            {
+                if (refusedWhileLocked())
+                    return;
+
+                auto bornWith = line.settings;
+
+                if (! wrapped.empty())
+                {
+                    wrapAround (wrapped, bornWith);
+                    return;
+                }
+
+                /*  A STOP WITH NO TARGET STOPS NOTHING: aimed at the cue picked
+                    when the list opened, and placed after it. */
+                if (line.aimed && ! aim.empty())
+                    bornWith.emplace_back ("target", aim);
+
+                createCue (line.kind, bornWith);
+            }
+
+            /*  A NEW GROUP AROUND THE PICKED CUES, found next pass by watching
+                the outermost of them change parent (finishCreations), then
+                picked so the inspector opens on it. */
+            void wrapAround (const std::vector<std::string>& ids, const model::Settings& bornWith)
+            {
+                if (! groupingCue.empty() || latest == nullptr || ids.empty())
+                    return;
+
+                const auto picked = [&ids] (const std::string& id)
+                {
+                    return std::find (ids.begin(), ids.end(), id) != ids.end();
+                };
+
+                groupingCue = ids.front();
+
+                for (auto parent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
+                     ! parent.empty(); parent = model::text (*latest, "/godot/cue/" + parent + "/parent"))
+                    if (picked (parent))
+                        groupingCue = parent;
+
+                groupingParent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
+                groupingWait = 0;
+                send (gesture::wrapGroup (ids, bornWith));
             }
 
             /*  `+ media` asks for the files first and imports them where the
@@ -2039,6 +2330,11 @@ namespace wfg::client
             std::unique_ptr<ui::ShowSettingsWindow> audioSettings;
             std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
             ui::Shell* shell = nullptr;                     // owned by the window
+
+            /*  The plugins' own windows, each a helper process. Declared after
+                the window, so it goes first: its helpers are told to leave
+                while everything they report to still stands. */
+            std::unique_ptr<ui::PluginEditors> editors;
 
             /*  The rows, cached against the show's revision. Declared after the
                 window only because nothing in it points back: it is plain data

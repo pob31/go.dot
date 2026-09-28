@@ -20,6 +20,7 @@
     "kill":         { "command": "run.kill",         "args": ["s"],                  "where": "a run's kill button" },
     "seek":         { "command": "run.seek",         "args": ["s", "d"],             "where": "a running cue's or scene's seek box, committed" },
     "add-cue":      { "command": "cue.create",       "args": ["s", "i", "s", "s"],   "where": "the inspector's add buttons" },
+    "add-send":     { "command": "send.create",      "args": ["s", "s"],             "where": "the inspector's + buttons under a media cue's sends" },
     "add-trigger":  { "command": "trigger.create",   "args": ["s", "s"],             "where": "the inspector's trigger buttons" },
     "add-role":     { "command": "group.role",       "args": ["s", "s"],             "where": "the inspector's header and footer buttons" },
     "move":         { "command": "object.move",      "args": ["s", "s", "i"],        "where": "a row dragged in the cue list, and the inspector's up and down buttons - which stay, because a drag does not exist under a finger" },
@@ -30,5 +31,6 @@
   },
   "buttons": ["standby.previous", "standby.next", "standby.clear", "undo", "redo",
               "document.save", "document.recover", "document.discardRecovery",
-              "run.stopAll", "run.killAll", "record.start", "record.stop"]
+              "run.stopAll", "run.killAll", "record.start", "record.stop",
+              "live.keep", "live.drop"]
 }

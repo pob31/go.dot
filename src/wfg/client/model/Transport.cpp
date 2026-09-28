@@ -16,6 +16,8 @@
 
 #include <wfg/client/model/Transport.h>
 
+#include <wfg/client/model/Inspector.h>
+
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstddef>
@@ -148,6 +150,17 @@ namespace wfg::client::model
         return locked == Flag::yes ? "locked" : "";
     }
 
+    std::string TransportReading::goLine() const
+    {
+        if (audioRunning())
+            return {};
+
+        if (status == "noClock")
+            return "no clock";
+
+        return status.empty() ? std::string ("audio ") + unsaid : "no audio";
+    }
+
     bool TransportReading::operator== (const TransportReading& other) const noexcept
     {
         const auto tie = [] (const TransportReading& r)
@@ -157,7 +170,7 @@ namespace wfg::client::model
                              r.listId, r.listName, r.standbyId, r.standbyName, r.standbyKind,
                              r.standbyNotes,
                              r.canUndo, r.canRedo, r.undoName, r.redoName,
-                             r.status, r.lastError, r.writeError,
+                             r.status, r.lastError, r.dial, r.writeError,
                              r.warningCount, r.warningFirst, r.revision);
         };
 
@@ -211,6 +224,7 @@ namespace wfg::client::model
         reading.status = text (snapshot, "/godot/audio/status");
         reading.lastError = text (snapshot, "/godot/engine/lastError");
         reading.writeError = text (snapshot, "/godot/document/writeError");
+        reading.dial = dialLine (snapshot);
         /*  READ, SUMMARISED, AND THE LONG STRING DROPPED on the spot: nothing
             downstream of here ever holds it, so nothing downstream can be hung
             by a show with eighteen hundred things wrong with it. */

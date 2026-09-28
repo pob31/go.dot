@@ -83,6 +83,12 @@ namespace wfg::audio
             /** Where to write what comes out. Empty for nowhere, which is what
                 a run nobody is recording uses. */
             std::string renderFile;
+
+            /*  A WAV fed into the logical inputs, looped, one channel an input
+                (Phase 9b, namespace draft §18.10): how a machine with no
+                interface hears a live one. Read whole at open, at the session's
+                own rate or refused. Empty for no inputs at all. */
+            std::string inputFile;
         };
 
         /*  Brings the engine up and opens the hosted interface. Nothing is
@@ -106,6 +112,11 @@ namespace wfg::audio
 
         /** Why open() or start() failed, empty if neither did. */
         const std::string& lastError() const noexcept { return error; }
+
+        /*  What it was last opened with - for a rebuild (2026-09-26, Load
+            now), which stops it, opens it again the same way and builds the
+            graph afresh. The render, if one was asked for, starts again. */
+        const Settings& openedWith() const noexcept { return current; }
 
         //======================================================================
         /** The counter the blocks advance. Hand it to TickThread. */
@@ -144,12 +155,14 @@ namespace wfg::audio
         void run();
 
         struct Render;
+        struct Input;
 
         AudioHost audioHost;
         Settings current;
         std::string error;
 
         std::unique_ptr<Render> render;
+        std::unique_ptr<Input> input;
 
         std::thread worker;
         std::mutex mutex;

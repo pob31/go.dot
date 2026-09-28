@@ -226,6 +226,38 @@ TEST_CASE ("cue eq: a -12 dB peak cuts twelve decibels at its centre")
     CHECK (measureDb (eq, 2000.0) == doctest::Approx (-12.0).epsilon (0.02));
 }
 
+TEST_CASE ("cue eq: a band switched off is out of the signal and keeps its numbers")
+{
+    /*  The press of a gain rotary on a surface page (author, 2026-09-25): off
+        takes the band out, on brings back the same band. A band that is off
+        is not a gain of nought - the gain is still there to come back. */
+    auto settings = withBand (1, audio::EqSettings::Shape::peak, 1000.0f, 6.0f, 1.0f);
+    settings.band[1].on = false;
+
+    CHECK_FALSE (audio::EqSettings::bandIsActive (settings.band[1]));
+    CHECK (settings.isIdentity());
+    CHECK (audio::eqmath::responseDb (settings, 1000.0, rate) == doctest::Approx (0.0));
+
+    audio::CueEq eq;
+    eq.prepare (2, rate, block);
+    eq.set (settings);
+
+    CHECK (eq.isIdentity());
+    CHECK (measureDb (eq, 1000.0) == doctest::Approx (0.0).scale (1.0).epsilon (0.01));
+
+    const auto held = eq.settings();
+    CHECK_FALSE (held.band[1].on);
+    CHECK (sameBits (held.band[1].gain, 6.0f));
+
+    /*  Back on: the same band, heard at once. */
+    settings.band[1].on = true;
+    CHECK_FALSE (settings.sameAs (held));
+    eq.set (settings);
+
+    CHECK (eq.settings().band[1].on);
+    CHECK (measureDb (eq, 1000.0) == doctest::Approx (6.0).epsilon (0.02));
+}
+
 TEST_CASE ("cue eq: the high-pass is -3 dB at its frequency and twelve an octave below")
 {
     audio::CueEq eq;

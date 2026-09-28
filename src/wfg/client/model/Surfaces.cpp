@@ -39,6 +39,7 @@ namespace wfg::client::model
         constexpr std::string_view dcaPrefix = "/godot/dca/";
 
         constexpr std::string_view surfaceOrderAddress = "/godot/surface/order";
+        constexpr std::string_view surfaceAimAddress = "/godot/surface/aim";
         constexpr std::string_view dcaOrderAddress = "/godot/dca/order";
 
         /*  THE FOUR PROFILES, and the words a person reads for each. One table
@@ -262,6 +263,15 @@ namespace wfg::client::model
         return inOrder (found, words (order));
     }
 
+    bool hasMasterDial (const tree::TreeSnapshot& snapshot)
+    {
+        for (const auto& surface : readSurfaces (snapshot))
+            if (surface.enabled && (surface.profile == "d700" || surface.profile == "mcu"))
+                return true;
+
+        return false;
+    }
+
     std::vector<StripRow> readStrips (const tree::TreeSnapshot& snapshot)
     {
         /*  ONE PASS for the strips themselves, which live among the other
@@ -475,8 +485,155 @@ namespace wfg::client::model
         return choices;
     }
 
+    std::vector<std::pair<std::string, std::string>> stripChoices (const tree::TreeSnapshot& snapshot,
+                                                                   const std::string& cueId)
+    {
+        const auto base = "/godot/cue/" + cueId + "/";
+        const auto pin = text (snapshot, base + "strip");
+        const auto now = text (snapshot, base + "stripNow");
+
+        const auto strips = readStrips (snapshot);
+        const auto surfaces = readSurfaces (snapshot);
+
+        /*  "Asparion D700 · fader 3", "Pads · pad 5": the surface, then the
+            strip as its hardware is counted, from one - and fader or pad,
+            since the author asked for both in one menu. */
+        const auto stripWords = [&surfaces] (const StripRow& strip)
+        {
+            std::string surface = strip.surface;
+
+            for (const auto& row : surfaces)
+                if (row.id == strip.surface)
+                    surface = row.label();
+
+            return surface + " · " + (strip.endpoint == "gate" ? "pad " : "fader ")
+                   + std::to_string (strip.index + 1);
+        };
+
+        const auto cueWords = [&snapshot] (const std::string& id)
+        {
+            auto name = text (snapshot, "/godot/cue/" + id + "/name");
+
+            if (name.empty())
+                name = text (snapshot, "/godot/cue/" + id + "/number");
+
+            return "\"" + (name.empty() ? id : name) + "\"";
+        };
+
+        //  What the list put on each strip before this member's group: <strip> <cue> pairs.
+        std::map<std::string, std::string> before;
+        {
+            const auto pairs = words (text (snapshot, base + "stripsBefore"));
+
+            for (std::size_t at = 0; at + 1 < pairs.size(); at += 2)
+                before[pairs[at]] = pairs[at + 1];
+        }
+
+        //  Where the other members of this group are played from now.
+        std::map<std::string, std::string> sibling;
+        {
+            const auto parent = text (snapshot, base + "parent");
+
+            if (! parent.empty())
+                for (const auto& member : words (text (snapshot, "/godot/cue/" + parent + "/order")))
+                    if (member != cueId)
+                        if (const auto on = text (snapshot, "/godot/cue/" + member + "/stripNow");
+                            ! on.empty())
+                            sibling[on] = member;
+        }
+
+        std::vector<std::pair<std::string, std::string>> choices;
+
+        /*  AUTOMATIC FIRST, AND IT SAYS WHERE THAT IS: a member on no pin is
+            on the next strip free in member order, and the menu names it so
+            the choice between "wherever" and "here" is made knowing both. */
+        std::string automatic = "automatic";
+
+        if (! pin.empty())
+            automatic += ", on the next strip free";
+        else if (now.empty())
+            automatic += " \xe2\x80\x94 no strip left";
+        else
+        {
+            for (const auto& strip : strips)
+                if (strip.id == now)
+                    automatic += " \xe2\x80\x94 " + stripWords (strip);
+        }
+
+        choices.push_back ({ "", automatic });
+
+        auto pinListed = pin.empty();
+
+        for (const auto& strip : strips)
+        {
+            if (strip.role != "sampler")
+                continue;
+
+            if (strip.id == pin)
+                pinListed = true;
+
+            auto label = stripWords (strip) + " \xe2\x80\x94 ";
+
+            if (const auto found = sibling.find (strip.id); found != sibling.end())
+                label += cueWords (found->second) + " in this group";
+            else if (const auto earlier = before.find (strip.id); earlier != before.end())
+                label += "previously " + cueWords (earlier->second);
+            else
+                label += "free";
+
+            choices.push_back ({ strip.id, label });
+        }
+
+        /*  A PIN THAT NAMES NO SAMPLER STRIP - deleted since, or made a DCA
+            strip - is still shown as what is written, with what it does:
+            nothing, the member is placed automatically. A menu that could not
+            show the current value would read as an empty one. */
+        if (! pinListed)
+            choices.push_back ({ pin, pin + " \xe2\x80\x94 not a sampler strip: played from the next strip free" });
+
+        return choices;
+    }
+
     std::vector<std::pair<std::string, std::string>> profileChoices()
     {
         return profiles();
+    }
+
+    //==========================================================================
+    SurfacePage readSurfacePage (const tree::TreeSnapshot& snapshot)
+    {
+        SurfacePage out;
+        out.aim = text (snapshot, std::string (surfaceAimAddress));
+
+        const auto order = text (snapshot, std::string (surfaceOrderAddress));
+        std::size_t at = 0;
+
+        while (at < order.size())
+        {
+            const auto start = order.find_first_not_of (' ', at);
+
+            if (start == std::string::npos)
+                break;
+
+            const auto end = order.find (' ', start);
+            const auto id = order.substr (start, end == std::string::npos ? std::string::npos : end - start);
+            at = end == std::string::npos ? order.size() : end;
+
+            const auto base = std::string (surfacePrefix) + id + "/";
+            const auto word = text (snapshot, base + "page");
+
+            if (word != "eq" && word != "send" && word != "fx" && word != "loop")
+                continue;
+
+            out.up = true;
+            out.surface = id;
+            out.word = word;
+            out.index = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageIndex")).value_or (0.0));
+            out.count = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageCount")).value_or (1.0));
+            out.edited = text (snapshot, base + "edited");
+            return out;
+        }
+
+        return out;
     }
 }

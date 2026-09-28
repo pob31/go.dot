@@ -414,6 +414,19 @@ per-cue **EQ and VST inserts are built first, in another session**
 sandbox and the inserts, decisions AD–AG — and two of the draft's eleven
 questions (7, the EQ; 8, where the inserts live) are answered by it.
 
+**Built 2026-09-25: the EQ and Send pages.** SELECT picks a sample strip's cue
+(`surface.aim`, also a click on a running cue's name in the window); EQ puts
+its EQ on the rotaries in the author's order, Send its send levels, paging and
+blinking the page, `*` leaving; band colours on the surrounds, the value on
+the ring, names and values on the screens. Each EQ band and send gained a
+saved switch. Under the edit lock EQ and sends ride live and unsaved
+(`cue/LiveEdits`), kept or discarded from a bar once the show is unlocked; the
+window's EQ panel and send mixer, and the page, ride live too. Decisions AJ-AP,
+namespace draft §17.14; the pages draft's §9 questions 1, 3 and 5 answered.
+**Owed to the bench:** which port the master section's lights answer on, how
+fast a detent should be, whether the colours read at a glance, and the author's
+walk of `make_d700_bench.py`.
+
 ---
 
 ## Phase 7 — Tablet client · M
@@ -471,7 +484,8 @@ list; blend-space choice confirmation.
 **Goal:** third-party processing that cannot take the show down.
 
 *Split on 2026-09-23 into 9a, pulled forward and being built, and 9b, what is
-left. No later phase is renumbered.*
+left. No later phase is renumbered. On 2026-09-26 9b was redrawn as the live rack and 9c
+added, the live sampling channels.*
 
 ### Phase 9a — EQ on media cues, the plugin sandbox, and VST inserts · L
 
@@ -507,6 +521,13 @@ model, the Plugins tab and the gestures are in; the component is the next sessio
 on the author's box once it was quiet and written into §17.9 and PRD §6.11; §17.12, the pages
 draft's §8 and the handoff are written.
 
+*Status, 2026-09-25:* the FX panel at the foot is built, **redesigned by the author** (namespace
+draft §17.13, decisions AH and AI, the PRD overridden): the signal chain with a switch a plugin;
+*Edit…* opens the plugin's own window in a separate editing helper that follows the pick; and a
+plugin's whole state is kept per cue, saved as the hand stops and loaded onto the voice before
+the cue launches. Plugin editor windows therefore leave Phase 9b's list. M35 (a state's load
+time on the author's own plugin) is the measurement it owes.
+
 After 9a.0, four streams run on disjoint files — the DSP, the document object,
 the hosting and the transport — and the FX entries land on top of all four.
 
@@ -515,7 +536,7 @@ and insert parameter is a `node.set`-able node with its name, range, default,
 bipolar flag and value text published beside it, and the insert order is
 readable (the pages draft's §8, all four items); a third-party VST3 plays on a
 cue through the sandbox with its parameters ridden live; a plugin killed
-mid-show leaves the cue dry, the strip marked failed in words and the block
+mid-show leaves the cue dry (silent since 2026-09-26, decision CU), the strip marked failed in words and the block
 cost bounded; M30–M34 recorded; CI green on all six jobs.
 
 **Needs from the author:** what he sees on the desktop once 9a.3 and 9a.9 land
@@ -524,25 +545,132 @@ deadline and the failed-strip budget once M31 and M32 are taken; and whether
 the pages session should start on the EQ page when 9a.3 lands rather than wait
 for the inserts.
 
-### Phase 9b — The live rack, and what 9a leaves · L
+### Phase 9b — The live rack: mic cues on named rack channels · L
 
-- **Live rack** with a stated latency budget; TE PDC behaviour on live tracks
-  understood and controlled (spike #6). Live input through the sandbox.
-- **Rack channels as slots** (PRD §3.18, 2026-09-07): plain tracks with a plugin
-  list, never Tracktion Racks; sends as coefficients fixed at load; width
-  classes mono→mono, mono→stereo, stereo→stereo — the chains behind Phase 4's
-  `Media/Insert` and `Rack/Channel`, and the shared reverb channel.
-- **Inline hosting** (PRD §3.18's opt-in) with §3.4's message-thread handover;
-  **LV2**; AU presets; plugin editor windows; curated per-plugin parameter maps
-  (the pages draft's §7.2); macOS audio workgroups for the child.
+*Redrawn on 2026-09-26 at the author's request* — *"could we add the effects rack for live
+inputs?"* — with **five decisions** of the author's (**BW**, **BX**, **BY**, **CE**, **CG**,
+`godot-namespace-draft-0.1.md` §18.1), all as recommended, and nine of the implementer's (CH–CP)
+written down to be overruled early. A live input is a **mic cue**: it names an input and a rack
+channel and runs until something stops it. The show names its inputs and declares its rack
+channels, each with its own chain of plugins hosted out of process. The latency budget is five
+milliseconds of plugins, always said in words. The phase is drawn before the code as §18 of that
+draft. One commit and push a stage:
 
-**Done when:** live input runs through a sandboxed third-party plugin, the plugin
-is killed mid-show, and the show continues with the strip marked failed; a cue
-claims an exclusive rack channel and enables one plugin of its chain without a
-graph rebuild.
+| Stage | What | Depends on |
+|---|---|---|
+| 9b.0 | Docs first: namespace §18 and §19, the PRD amendments (§3.18, §3.9e, §3.29, §6.2, new §3.31, §6.9, §6.11, §7), this section and 9c's | — |
+| 9b.1 | Two persistent-section faults (a double Esc suspending, a jump cutting) and `isPlaying` on slot 0; `persistent.wfglog` | 9b.0 |
+| 9b.2 | Named inputs, the input tap and its meters, the interface's delays, `--input-wav`, the Inputs list | 9b.0 |
+| 9b.3 | Rack channels become tracks: their plugins, `channel.plugin`, `LiveInputPlugin`, the rack's children, Load now, the Rack tab | 9b.2 |
+| 9b.4 | The owner split (media → sound), then the `Mic` element, its rows, validation, the inspector and the page | 9b.3 |
+| 9b.5 | Mic cues sound: the claim and the wait, arm, launch, stop and its tail, kill, the live pushes, the latency words; `mic.wfglog`, the driver | 9b.4 |
+| 9b.6 | Mic cues in the show's structure: persistent, standby, the horizon, load-to-time, DCAs, the Load now refusal | 9b.5, 9b.1 |
+| 9b.7 | The hands and the window — the EQ, Send and FX pages, the chain at the foot, the running pane — M38–M40, close-out | 9b.6 |
 
-**Needs from the author:** the rest of the built-in plugin list; the rack's
-latency budget.
+*As built, 2026-09-26:* every stage on `main` - 9b.0 `f757cab`, 9b.1 `319bbae`, 9b.2 `f32d43c`,
+9b.3 `b11af15`, 9b.4 `6dcf8a5` and `503cdd9`, 9b.5 `04f8fb1`, 9b.6 `e93a87d`, 9b.7 closing it - with
+CI green on all six jobs at `503cdd9`. Namespace §18.12 says where the build departs from the
+drawing. Of the list below, what the code can show is shown (`blackbox/phase9b_inputs.py`,
+`phase9b_mic.py`, `logs/mic.wfglog`); what waits for the bench is hearing a mic cue through a real
+plugin on the MADIface and M39's loopback against the words.
+
+*Amended after close-out, 2026-09-26 (decisions CU and CV, the implementer's call CW; namespace
+§18.13):* a plugin that cannot play a cue leaves it silent, never dry - failed, late, missing or still
+loading - and a relaunched child is given back the state its voice held, the voice fading back in
+where the cue has got to. The same for the set's voices and the rack's channels.
+
+**Done when:** a named input's meter moves; a mic cue through a real plugin on a rack channel is
+heard on the MADIface; the plugin's child killed mid-cue leaves it silent and saying so (dry as first
+written; §18.13), the show going
+on; Esc lets its tail ring out and frees the channel for a waiting cue; a double Esc is silence at
+once and GO restores a persistent mic; the words match M39's loopback; CI green on all six jobs.
+
+**Still Phase 9b's and not in these stages:** the **shared rack channel** (a reverb return cues send
+into — a return track and Tracktion's aux sends) and a media cue's `Insert` made to sound; **inline
+hosting** (PRD §3.18's opt-in) with §3.4's message-thread handover; AU presets; AUv3; curated
+per-plugin parameter maps (the pages draft's §7.2) for the FX page, which takes a mic cue's inserts
+as it takes a media cue's (namespace §17.16); macOS audio workgroups for the child. *(LV2 left this
+list on 2026-09-26: built on every platform, with AU on macOS, the scan in the app and the
+mono→stereo widening on the voice inserts — namespace §17.15. The width classes are the rack
+channels' own, built in 9b.3.)*
+
+**Needs from the author:** the rest of the built-in plugin list; a loopback cable on the MADIface
+for M39; the D700 on the desk for 9b.7.
+
+### Phase 9c — Live sampling channels · M
+
+*Added on 2026-09-26* — the second half of the same request, *"live sampling channels that can take
+in an input, loop with continuously variable in and out points with pre-recording and
+post-looping/playback effects"*, not in the PRD until then (now §3.31). **Six decisions** of the
+author's (**BZ**, **CA**, **CB**, **CC**, **CD**, **CF**, `godot-namespace-draft-0.1.md` §19.1), one
+against the recommendation — layers with overdub rather than a single take — and four of the
+implementer's (CQ–CT). Built on 9b: a sampling channel is a rack channel with a recorder between its
+plugins.
+
+| Stage | What | Depends on |
+|---|---|---|
+| 9c.1 | The looper, pure: layers, crossfaded wraps and jumps, moving points, peaks; `LooperTests` under rtsan | 9b.0 |
+| 9c.2 | The recorder in the graph: `takeSeconds`, `layers`, a plugin's `side`, `LooperPlugin`, the take store outside the Edit, the memory in words | 9b.7, 9c.1 |
+| 9c.3 | The verbs: `take.*`, the transport verbs, `onGo`, `through`, the loop points' door, the D700's Rec; `take.wfglog`, the driver | 9c.2 |
+| 9c.4 | The take's picture at the foot: edges, playhead, layers, the buttons; the master dial on the points | 9c.3 |
+| 9c.5 | The Loop page on the D700 | 9c.3 |
+| 9c.6 | Keep, and Keep as cue | 9c.3 |
+| 9c.7 | M41–M44 and close-out | 9c.4, 9c.5, 9c.6 |
+
+**Done when:** a take recorded on a mic cue through a plugin before the recorder loops through a
+plugin after it; a layer laid and undone; the in and out points ridden on the D700's Loop page with
+no click; a transport cue records and loops it; Keep leaves a file a media cue loops; CI green.
+
+*As built, 2026-09-27:* every stage on `main` - 9c.1 `19dcf27` (and `0d184ba`), 9c.2 `bc55df6`,
+9c.3 `338d3a0`, 9c.4 `2d73400`, 9c.5 `d129ee2` (and `7c22911` for the strict build), 9c.6 `4d5ab77`,
+9c.7 `2238346` and the close-out - with CI green on all six jobs at `66dac3e`, which also mends a
+fault of the rack's that the close-out's CI runs found: a block Tracktion muted made the input stage
+start its cue's fade-in again. Namespace §19.9 records M41-M44, and §19.11 says where the build
+departs from the drawing. Of the list above, what the code can show is
+shown: a take through a plugin before the recorder looping through one after it (`ProxyTests`, 9c.2);
+a layer laid and undone, the transport cues' Rec and Loop, Keep's file read back and Keep as cue's
+media cue (`blackbox/phase9c_take.py`, `logs/take.wfglog`); the points ridden with no step
+(`LooperTests`) and turned on the Loop page (`SurfaceBridgeTests`). What waits for the bench is the
+D700 itself - its Rec and light, a Loop key if it has one, the page's law - and a take recorded
+through a real plugin on the MADIface.
+
+**Needs from the author:** the D700's Rec (and a Loop key, if it has one) pressed at the bench, and
+the page's law for a loop point.
+
+### Level lanes — a volume curve on a media cue · S
+
+*Added on 2026-09-27*, at the author's request: *"a volume automation curve that's sync'd with the
+media file. This for the media cues and the samples."* PRD §3.10's lane, the first one built.
+**Three decisions** of the author's (**CX**, **CY**, **CZ**, `godot-namespace-draft-0.1.md` §20.1)
+and four of the implementer's (DA–DD). Not a phase: it sits here because it follows 9c in time, and
+no later phase is renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| L.0 | Docs: namespace §20, PRD §3.10, §6.9 and §6.11, this section | — |
+| L.1 | The row `media/levelLane`, `doc::readLevelLane`, the write door and `validate` | L.0 |
+| L.2 | The Runner: the lane's term in the level sum, read one slew ahead on the file's clock, the arm's snap | L.1 |
+| L.3 | The window's model: `model/Lane`, the foot's reading, the two inspectors | L.1 |
+| L.4 | The lane over the waveform: its points, the gestures, the typed numbers | L.3 |
+| L.5 | `lane.wfglog`, `blackbox/lane_level.py`, M45 and close-out | L.2, L.4 |
+
+**Done when:** a lane drawn over a media cue's waveform is heard following the file - from its start
+offset, after a jump, and the same on every pass of a looping slice; a sampler clip's lane rides
+under its strip's fader; one gesture is one undo step; CI green.
+
+*As built, 2026-09-27:* every stage on `main` - L.0 `d39d589`, L.1 `d807e1f`, L.2 `e8fddd0`, L.3
+`5d32619`, L.4 `f5b3d78` and L.5 with the close-out. What the code can show is shown: a lane heard
+following the file through a real Tracktion graph - a ramp, a hold, a step, a looping slice hearing
+the same stretch on each pass and a lane rewritten while it loops (`blackbox/lane_level.py`, both
+locales); M45 within 0.014-0.022 dB away from the corners and a step inside a tick, with the checks a
+starved CI runner's stalled tick moved voided by the render's own witness; one gesture one write
+(`RunPaneUiTests`) and one undo step (`UndoTests`); a hand's trim and a fade beside a lane, each a
+term of the same sum (`GoTests`) - the trim being what a sampler strip's fader writes, though no case
+yet plays a lane through a sampler group itself, which the bench will. Namespace §20.8 says where
+the build departs from the drawing.
+
+**Needs from the author:** judging the vertical law and the gestures by eye (DD), and listening on
+the MADIface.
 
 ---
 

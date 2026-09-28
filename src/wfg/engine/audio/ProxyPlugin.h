@@ -49,8 +49,8 @@
 
     UNBOUND UNTIL THE HOST BINDS IT. The plugin exists from the moment the Edit
     is built; the region it talks through exists once ProxyHost has made it and
-    launched the child. Between the two, and after a failure, the lane passes
-    the block through untouched.
+    launched the child. Between the two, and after a failure, a cue that has
+    it switched in is silent - the lane's doing, never dry (CU, 2026-09-26).
 */
 namespace wfg::audio
 {

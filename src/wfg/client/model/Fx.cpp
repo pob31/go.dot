@@ -15,9 +15,11 @@
 */
 
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <algorithm>
 #include <map>
 #include <sstream>
 
@@ -95,6 +97,100 @@ namespace wfg::client::model
     }
 
     //==============================================================================
+    std::map<std::string, HeldInsert> insertsOf (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+    {
+        std::map<std::string, HeldInsert> out;
+
+        for (const auto& [plugin, held] : fxOfCue (snapshot, cueId))
+            out[plugin] = { held.id, held.enabled };
+
+        return out;
+    }
+
+    std::string stateSentence (const FxStrip& strip)
+    {
+        const auto& word = strip.state;
+
+        std::string out = word.empty()        ? std::string ("-")
+                        : word == "loading"   ? std::string ("loading...")
+                        : word == "unloaded"  ? std::string ("not loaded")
+                        : word;
+
+        if (! strip.problem.empty())
+            out += ": " + strip.problem;
+
+        /*  NEVER DRY (CU): a plugin that is not there leaves a cue that has it
+            switched in silent - said, so it is found before GO. */
+        if (strip.present() && strip.enabled && word == "failed")
+            out += " - this cue is silent until it is back";
+        else if (strip.present() && strip.enabled && word == "missing")
+            out += " - this cue is silent while it has it switched in";
+        else if (strip.present() && strip.enabled && ! strip.dryWhy.empty())
+            out += " - " + strip.dryWhy;
+
+        return out;
+    }
+
+    std::string chainWords (const FxReading& reading)
+    {
+        /*  A MIC CUE'S PATH, always said: a delay a performer hears in their
+            own ears is a fact to know before GO, not only when it is over a
+            line (decision BY). */
+        if (reading.live)
+        {
+            if (reading.sampleRate <= 0)
+                return reading.insertLatency > 0
+                         ? "Its plugins add " + std::to_string (reading.insertLatency) + " samples."
+                         : std::string {};
+
+            const auto ms = [&reading] (int samples) { return 1000.0 * samples / reading.sampleRate; };
+            const auto interface = ms (reading.inputLatency + reading.outputLatency);
+            const auto plugins = ms (reading.insertLatency);
+
+            auto said = millisecondWords (interface + plugins) + " from the microphone to the output: "
+                          + millisecondWords (interface) + " the interface's, "
+                          + millisecondWords (plugins) + " its plugins'";
+
+            said += plugins > reading.budgetMs + 1.0e-9
+                      ? " - over the " + millisecondWords (reading.budgetMs) + " budget."
+                      : " - within the " + millisecondWords (reading.budgetMs) + " budget.";
+
+            return said;
+        }
+
+        std::string out;
+
+        const auto widthWord = [] (int channels)
+        {
+            return channels == 1 ? std::string ("mono") : channels == 2 ? std::string ("stereo")
+                                                        : std::to_string (channels) + " channels";
+        };
+
+        if (reading.chainChannels > reading.fileChannels && reading.fileChannels > 0)
+            out = "Plays as " + widthWord (reading.chainChannels) + " through its inserts";
+
+        if (reading.insertLatency > 0)
+        {
+            const auto late = reading.sampleRate > 0
+                                ? std::to_string (static_cast<int> (1000.0 * reading.insertLatency / reading.sampleRate + 0.5)) + " ms"
+                                : std::to_string (reading.insertLatency) + " samples";
+
+            out += (out.empty() ? std::string ("Sounds ") : std::string (", ")) + late + " late through its inserts";
+        }
+
+        return out.empty() ? out : out + ".";
+    }
+
+    std::string latencyWords (const FxStrip& strip)
+    {
+        if (strip.latencySamples <= 0)
+            return {};
+
+        return std::to_string (strip.latencySamples)
+               + (strip.latencySamples == 1 ? " sample" : " samples") + " late while it is in";
+    }
+
+    //==============================================================================
     std::string fxAddress (const std::string& fxId, const std::string& leaf)
     {
         return std::string (fxPrefix) + fxId + "/" + leaf;
@@ -115,23 +211,81 @@ namespace wfg::client::model
             return out;
         }
 
-        if (text (snapshot, "/godot/cue/" + cueId + "/kind") != "media")
+        const auto kind = text (snapshot, "/godot/cue/" + cueId + "/kind");
+
+        if (kind != "media" && kind != "mic")
         {
-            out.notice = "Inserts belong to media cues; this cue plays no file.";
+            out.notice = "Inserts belong to media and mic cues; this cue plays no sound.";
             return out;
         }
 
         out.present = true;
-        const auto order = words (text (snapshot, "/godot/plugin/order"));
 
-        if (order.empty())
+        /*  WHOSE PLUGINS: the show's set for a media cue, which every voice
+            carries in `plugins/order`; and for a mic cue the rack channel it
+            plays through (Phase 9b, decision BX), in that channel's order. */
+        std::vector<std::string> order;
+
+        if (kind == "mic")
         {
-            out.notice = "The show declares no plugins yet: Show settings, Plugins.";
-            return out;
+            const auto channel = text (snapshot, "/godot/cue/" + cueId + "/channel");
+
+            if (channel.empty())
+            {
+                out.notice = "This mic cue plays through no rack channel yet: pick one in the inspector.";
+                return out;
+            }
+
+            order = words (text (snapshot, "/godot/slot/" + channel + "/plugins"));
+
+            /*  AND ITS RECORDER, read before a chain with no plugins says so:
+                a sampling channel's chain is the recorder and the EQ even
+                with nothing else in it. */
+            out.recorder = osc::parseDouble (text (snapshot, "/godot/slot/" + channel + "/takeSeconds"))
+                               .value_or (0.0) > 0.0;
+            out.takeState = text (snapshot, "/godot/slot/" + channel + "/take");
+
+            if (order.empty())
+            {
+                const auto called = text (snapshot, "/godot/slot/" + channel + "/name");
+                out.notice = (called.empty() ? std::string ("Its channel") : called)
+                               + " carries no plugins yet: Show settings, Rack.";
+                return out;
+            }
+        }
+        else
+        {
+            order = words (text (snapshot, "/godot/plugin/order"));
+
+            if (order.empty())
+            {
+                out.notice = "The show declares no plugins yet: Show settings, Plugins.";
+                return out;
+            }
         }
 
         const auto mine = fxOfCue (snapshot, cueId);
         auto index = 0;
+
+        out.fileChannels = integer (snapshot, "/godot/cue/" + cueId + "/channels");
+        out.chainChannels = integer (snapshot, "/godot/cue/" + cueId + "/chainChannels");
+        out.insertLatency = integer (snapshot, "/godot/cue/" + cueId + "/insertLatency");
+        out.sampleRate = integer (snapshot, "/godot/engine/sampleRate");
+
+        /*  A MIC CUE'S SOURCE IS ITS INPUT, as wide as the input is, and its
+            path is said against the interface's delays and the budget. */
+        if (kind == "mic")
+        {
+            const auto input = text (snapshot, "/godot/cue/" + cueId + "/input");
+            const auto called = text (snapshot, "/godot/input/" + input + "/name");
+
+            out.source = called.empty() ? std::string ("in") : "in \xc2\xb7 " + called;
+            out.fileChannels = std::max (1, integer (snapshot, "/godot/input/" + input + "/width"));
+            out.live = true;
+            out.inputLatency = integer (snapshot, "/godot/audio/inputLatency");
+            out.outputLatency = integer (snapshot, "/godot/audio/outputLatency");
+            out.budgetMs = number (snapshot, "/godot/audio/rackBudget");
+        }
 
         for (const auto& pluginId : order)
         {
@@ -143,6 +297,11 @@ namespace wfg::client::model
             strip.name = text (snapshot, base + "name");
             strip.state = text (snapshot, base + "state");
             strip.problem = text (snapshot, base + "problem");
+            strip.latencySamples = integer (snapshot, base + "latencySamples");
+            strip.layout = text (snapshot, base + "layout");
+
+            if (out.recorder)
+                strip.side = text (snapshot, base + "side") == "before" ? "before" : "after";
 
             if (strip.name.empty())
                 strip.name = pluginId;
@@ -151,6 +310,7 @@ namespace wfg::client::model
             {
                 strip.fxId = found->second.id;
                 strip.enabled = found->second.enabled;
+                strip.dryWhy = text (snapshot, fxAddress (strip.fxId, "problem"));
             }
 
             const auto count = integer (snapshot, base + "paramCount");
@@ -196,29 +356,107 @@ namespace wfg::client::model
     }
 
     //==============================================================================
+    PluginRow readPluginEntry (const tree::TreeSnapshot& snapshot, const std::string& pluginId)
+    {
+        const auto base = "/godot/plugin/" + pluginId + "/";
+
+        PluginRow row;
+        row.id = pluginId;
+        row.name = text (snapshot, base + "name");
+        row.identifier = text (snapshot, base + "identifier");
+        row.format = text (snapshot, base + "format");
+        row.path = text (snapshot, base + "path");
+        row.preset = text (snapshot, base + "preset");
+        row.state = text (snapshot, base + "state");
+        row.problem = text (snapshot, base + "problem");
+        row.latencySamples = integer (snapshot, base + "latencySamples");
+        row.paramCount = integer (snapshot, base + "paramCount");
+        row.layout = text (snapshot, base + "layout");
+
+        if (const auto side = text (snapshot, base + "side"); ! side.empty())
+            row.side = side;
+
+        return row;
+    }
+
     std::vector<PluginRow> readPluginSet (const tree::TreeSnapshot& snapshot)
     {
         std::vector<PluginRow> out;
 
         for (const auto& id : words (text (snapshot, "/godot/plugin/order")))
-        {
-            const auto base = "/godot/plugin/" + id + "/";
+            out.push_back (readPluginEntry (snapshot, id));
 
-            PluginRow row;
-            row.id = id;
-            row.name = text (snapshot, base + "name");
-            row.identifier = text (snapshot, base + "identifier");
-            row.format = text (snapshot, base + "format");
-            row.path = text (snapshot, base + "path");
-            row.preset = text (snapshot, base + "preset");
-            row.state = text (snapshot, base + "state");
-            row.problem = text (snapshot, base + "problem");
-            row.latencySamples = integer (snapshot, base + "latencySamples");
-            row.paramCount = integer (snapshot, base + "paramCount");
-            out.push_back (std::move (row));
+        return out;
+    }
+
+    ScanRow readScan (const tree::TreeSnapshot& snapshot)
+    {
+        ScanRow out;
+        const std::string base = "/godot/plugin/scan/";
+
+        if (snapshot.find (base + "state") == nullptr)
+            return out;
+
+        out.state = text (snapshot, base + "state");
+        out.format = text (snapshot, base + "format");
+        out.file = text (snapshot, base + "file");
+        out.done = integer (snapshot, base + "done");
+        out.total = integer (snapshot, base + "total");
+        out.found = integer (snapshot, base + "found");
+        out.skipped = integer (snapshot, base + "skipped");
+        out.problem = text (snapshot, base + "problem");
+        return out;
+    }
+
+    std::vector<std::string> readSkippedPlugins (const tree::TreeSnapshot& snapshot)
+    {
+        std::vector<std::string> out;
+
+        for (int n = 0;; ++n)
+        {
+            const auto address = "/godot/plugin/skipped/" + std::to_string (n);
+
+            if (snapshot.find (address) == nullptr)
+                break;
+
+            out.push_back (text (snapshot, address));
         }
 
         return out;
+    }
+
+    bool readSetChanged (const tree::TreeSnapshot& snapshot)
+    {
+        return isYes (flag (snapshot, "/godot/plugin/changed"));
+    }
+
+    std::string scanWords (const ScanRow& scan, std::size_t knownCount)
+    {
+        if (scan.state == "scanning")
+        {
+            /*  The file's own name, not its folder: what a person recognises. */
+            const auto slash = scan.file.find_last_of ("/\\");
+            const auto name = slash == std::string::npos ? scan.file : scan.file.substr (slash + 1);
+
+            if (scan.total <= 0)
+                return "Scanning...";
+
+            return "Scanning " + std::to_string (std::min (scan.done + 1, scan.total)) + " of "
+                     + std::to_string (scan.total) + (name.empty() ? std::string {} : " - " + name);
+        }
+
+        if (scan.state == "failed")
+            return "The scan failed: " + scan.problem;
+
+        if (knownCount == 0)
+            return "Nothing scanned yet: press Scan.";
+
+        auto said = std::to_string (knownCount) + " plugin(s) known to this machine.";
+
+        if (scan.state == "finished" && scan.skipped > 0)
+            said += " The scan gave up on " + std::to_string (scan.skipped) + " file(s).";
+
+        return said;
     }
 
     std::vector<KnownPluginRow> readKnownPlugins (const tree::TreeSnapshot& snapshot)

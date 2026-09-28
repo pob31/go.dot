@@ -6,7 +6,9 @@
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -15,6 +17,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
@@ -59,33 +62,25 @@ namespace wfg::client::ui
         class PatchPage final : public juce::Component
         {
         public:
-            PatchPage (const model::Theme& colours, bool input, std::vector<int> initial, int minimumRows,
+            PatchPage (const model::Theme& colours, bool input, std::vector<int> initial,
                        std::function<void (Event)> dispatch = {})
-                : theme (colours), isInput (input), minimum (minimumRows), mapping (std::move (initial)), send (std::move (dispatch))
+                : theme (colours), isInput (input), mapping (std::move (initial)), send (std::move (dispatch))
             {
-                /*  THE OUTPUT SIDE HAS NO CHANNEL COUNT TO TYPE (author,
-                    2026-09-22: "I think we can remove the logical channel.
-                    Adding and removing channels is redundant with this").
+                /*  NEITHER SIDE HAS A CHANNEL COUNT TO TYPE (author,
+                    2026-09-22, for the outputs: "I think we can remove the
+                    logical channel. Adding and removing channels is redundant
+                    with this").
 
-                    The show's OUTPUT LIST is the count: every bus declares a
-                    width, `firstChannel` is the running sum, and the four
-                    `bus.*` commands keep it packed. A second number beside it
-                    was a second answer to one question, and the two could
-                    disagree - a patch row past the last bus went nowhere and
-                    said nothing about it.
+                    The show's OUTPUT LIST is the outputs' count: every bus
+                    declares a width, `firstChannel` is the running sum, and the
+                    four `bus.*` commands keep it packed. A second number beside
+                    it was a second answer to one question, and the two could
+                    disagree.
 
-                    THE INPUT SIDE KEEPS IT, because nothing else declares
-                    inputs. There is no list of them to read a count off, so
-                    the box is the only place the number can come from. */
-                if (isInput)
-                {
-                    addAndMakeVisible (countLabel);
-                    countLabel.setText ("Logical channels", juce::dontSendNotification);
-                    addAndMakeVisible (count); count.setInputRestrictions (3, "0123456789");
-                    count.setText (juce::String (static_cast<int> (mapping.size())));
-                    count.onReturnKey = [this] { changeRows(); };
-                    count.onFocusLost = [this] { changeRows(); };
-                }
+                    AND SINCE THE NAMED INPUTS (Phase 9b, 2026-09-26) THE INPUT
+                    LIST IS THE INPUTS' COUNT, for the same reason. The box the
+                    input side kept "because nothing else declares inputs" had
+                    nothing left to decide once something did. */
                 for (auto* button : { &scroll, &patch, &identity, &clear }) addAndMakeVisible (*button);
                 scroll.onClick = [this] { stopTest(); matrix->setMode (Matrix::Mode::Scrolling); resized(); };
                 patch.onClick = [this] { stopTest(); matrix->setMode (Matrix::Mode::Patching); resized(); };
@@ -139,7 +134,7 @@ namespace wfg::client::ui
                     touched = false;
                     rebuild();
 
-                    if (! isInput && follow)
+                    if (follow)
                         follow();
                 };
                 clear.onClick = [this] { matrix->clearAllPatches(); };
@@ -173,7 +168,6 @@ namespace wfg::client::ui
 
             std::string value()
             {
-                changeRows();
                 readMatrix();
 
                 /*  A SHOW STILL FOLLOWING ITS LIST SENDS NO PATCH AT ALL.
@@ -182,8 +176,9 @@ namespace wfg::client::ui
                     diagonal out in full would settle the show - and somebody
                     who pressed Apply to change a buffer size did not mean to
                     freeze their patch. Only a hand edit does that, and a hand
-                    edit sets `touched`. */
-                if (! isInput && ! touched && ! settled)
+                    edit sets `touched`. The same for the inputs since they
+                    have a list of their own to follow (Phase 9b). */
+                if (! touched && ! settled)
                     return {};
 
                 return audio::writePatch (mapping);
@@ -197,10 +192,10 @@ namespace wfg::client::ui
                 readMatrix(); hardware = channels; rebuild();
             }
 
-            /*  THE OUTPUT LIST, ARRIVING FROM THE DOCUMENT. Two things follow
-                from it: the rows are named after the outputs, and how many
-                there are is the layout's, so the number box on this page has
-                nothing left to decide.
+            /*  THE LIST, ARRIVING FROM THE DOCUMENT - the outputs' for the
+                output patch, the named inputs' for the input patch (Phase 9b).
+                Two things follow from it: the rows are named after the list,
+                and how many there are is the layout's.
 
                 THE TWO MOVE SEPARATELY, and that is the point of the split. A
                 RENAMED output must reach the rows whatever the operator has
@@ -208,7 +203,7 @@ namespace wfg::client::ui
                 the rebuild - while RESIZING the draft to a new output count is
                 held off once they have started patching, because that would
                 move the rows under their hand. */
-            void setOutputs (std::vector<std::string> names, int channelCount)
+            void setListRows (std::vector<std::string> names, int channelCount)
             {
                 /*  THE LAYOUT IS A FLOOR AND NOT THE COUNT. It says how many
                     logical outputs the show's buses need; it does not say how
@@ -245,12 +240,6 @@ namespace wfg::client::ui
                         const auto taken = std::find (mapping.begin(), mapping.end(), wanted) != mapping.end();
                         mapping[row] = taken ? -1 : wanted;
                     }
-
-                    minimum = channelCount;
-
-                    //  Only the input side has one to keep in step.
-                    if (isInput)
-                        count.setText (juce::String (channelCount), false);
                 }
 
                 rebuild();
@@ -269,12 +258,6 @@ namespace wfg::client::ui
             {
                 auto area = getLocalBounds().reduced (10);
                 auto bar = area.removeFromTop (30);
-                if (isInput)
-                {
-                    countLabel.setBounds (bar.removeFromLeft (145));
-                    count.setBounds (bar.removeFromLeft (65));
-                    bar.removeFromLeft (20);
-                }
                 for (auto* button : { &scroll, &patch, &identity, &clear })
                 { button->setBounds (bar.removeFromLeft (80).reduced (3, 0)); }
                 if (! isInput) test.setBounds (bar.removeFromLeft (80).reduced (3, 0));
@@ -309,13 +292,6 @@ namespace wfg::client::ui
                 if (! matrix) return;
                 for (std::size_t row = 0; row < mapping.size(); ++row)
                     mapping[row] = matrix->getHardwareChannelForWFS (static_cast<int> (row));
-            }
-            void changeRows()
-            {
-                const auto rows = juce::jlimit (minimum, audio::maximumPatchChannels, count.getText().getIntValue());
-                count.setText (juce::String (rows), false);
-                if (rows == static_cast<int> (mapping.size())) return;
-                readMatrix(); mapping.resize (static_cast<std::size_t> (rows), -1); rebuild();
             }
             void rebuild()
             {
@@ -354,7 +330,7 @@ namespace wfg::client::ui
                         nobody can patch without counting. The labels come from
                         the output list and fall back to the number for a
                         channel no output claims. */
-                    if (! isInput && row >= 0 && static_cast<std::size_t> (row) < labels.size())
+                    if (row >= 0 && static_cast<std::size_t> (row) < labels.size())
                         return juce::String (labels[static_cast<std::size_t> (row)]);
 
                     return juce::String (isInput ? "Input " : "Output ") + juce::String (row + 1);
@@ -397,7 +373,7 @@ namespace wfg::client::ui
             }
             const model::Theme& theme;
             bool isInput;
-            int minimum, hardware = 0;
+            int hardware = 0;
             bool touched = false, settled = false;
             std::vector<std::string> labels;
             std::vector<int> mapping;
@@ -412,8 +388,6 @@ namespace wfg::client::ui
             juce::ToggleButton hold { "Hold" };
             juce::Slider level, frequency;
             juce::Label hint;
-            juce::Label countLabel;
-            juce::TextEditor count;
             juce::TextButton scroll { "Scroll" }, patch { "Patch" }, identity { "1:1" }, clear { "Unpatch all" };
         };
 
@@ -871,6 +845,364 @@ namespace wfg::client::ui
             juce::Label regime, summary, polyphonyLabel;
             juce::TextEditor polyphony;
         };
+
+        /*  THE INPUT LIST (Phase 9b, namespace draft §18.2): the show's named
+            inputs, the output list's twin for the other side of the interface.
+            "Voix solo" is what somebody wrote down and "input 3" is a fact
+            about a patch (PRD §3.9b), so a mic cue names one of these.
+
+            EVERY ROW IS A COMMAND, as the outputs' are: a rename is a
+            `node.set`, the two add buttons, the cross and a dragged row are
+            `input.create`, `input.delete` and `input.move`, and Ctrl-Z takes
+            any of them back.
+
+            AND EVERY ROW HAS A METER, which the outputs do not: whether the
+            microphone is alive is the soundcheck's first question, and it is
+            answered here before anybody presses GO. Where an input is not
+            arriving at all, the row says why in words instead. */
+        class InputPage final : public juce::Component,
+                                public juce::DragAndDropContainer,
+                                public juce::DragAndDropTarget,
+                                private juce::ListBoxModel
+        {
+        public:
+            InputPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch))
+            {
+                list.setModel (this);
+                list.setRowHeight (34);
+                list.setOutlineThickness (0);
+                list.setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                addAndMakeVisible (list);
+
+                for (auto* button : { &addMono, &addStereo })
+                    addAndMakeVisible (*button);
+
+                addChildComponent (nameEditor);
+                nameEditor.setEditable (false, true, false);
+                nameEditor.setColour (juce::Label::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                nameEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                nameEditor.onEditorHide = [this] { commitName(); };
+
+                addAndMakeVisible (regime);
+                addAndMakeVisible (summary);
+                regime.setJustificationType (juce::Justification::topLeft);
+                summary.setJustificationType (juce::Justification::topLeft);
+
+                addMono.setTooltip ("A microphone or a mono line: one logical input.");
+                addStereo.setTooltip ("A stereo line - a keyboard, another machine: two consecutive logical inputs.");
+
+                addMono.onClick   = [this] { if (send) send (gesture::createInput (1, -1)); };
+                addStereo.onClick = [this] { if (send) send (gesture::createInput (2, -1)); };
+            }
+
+            void show (std::vector<model::InputRow> inputs, bool settled, bool editable)
+            {
+                const auto sameRows = inputs.size() == rows.size()
+                                        && std::equal (inputs.begin(), inputs.end(), rows.begin(),
+                                                       [] (const model::InputRow& a, const model::InputRow& b)
+                                                       {
+                                                           return a.id == b.id && a.name == b.name
+                                                               && a.width == b.width
+                                                               && a.firstChannel == b.firstChannel
+                                                               && a.problem == b.problem;
+                                                       });
+
+                /*  THE METERS MOVE WITHOUT THE ROWS CHANGING, so they are
+                    compared on their own: a repaint when a meter has moved by
+                    more than a sliver, and none for a list of silent inputs. */
+                auto metersMoved = inputs.size() != rows.size();
+
+                for (std::size_t at = 0; ! metersMoved && at < inputs.size(); ++at)
+                    metersMoved = std::abs (inputs[at].meterFill() - rows[at].meterFill()) > 0.01;
+
+                const auto sameLock = locked == ! editable;
+
+                rows = std::move (inputs);
+                locked = ! editable;
+
+                for (auto* button : { &addMono, &addStereo })
+                    button->setVisible (editable);
+
+                regime.setText (juce::String (model::inputRegime (settled)), juce::dontSendNotification);
+
+                const auto wanted = model::inputChannelCount (rows);
+
+                /*  HOW MANY, and nothing about the interface: each row says in
+                    words when it is not arriving, which is where somebody
+                    looking for a dead microphone is looking already. */
+                summary.setText (wanted == 0
+                                   ? juce::String ("No inputs yet. Add one to hear a microphone or a line"
+                                                   " through a mic cue.")
+                                   : juce::String (wanted) + " logical input" + (wanted == 1 ? "" : "s") + ".",
+                                 juce::dontSendNotification);
+
+                if (! sameRows)
+                    list.updateContent();
+
+                if (! sameRows || ! sameLock || metersMoved)
+                    list.repaint();
+            }
+
+            void paintOverChildren (juce::Graphics& g) override
+            {
+                if (dropRow < 0)
+                    return;
+
+                const auto y = list.getY() + dropRow * list.getRowHeight()
+                                 - list.getViewport()->getViewPositionY();
+
+                g.setColour (Look::colour (theme, "picked"));
+                g.fillRect (list.getX(), y - 1, list.getWidth(), 2);
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+                auto bar = area.removeFromTop (30);
+
+                for (auto* button : { &addMono, &addStereo })
+                    button->setBounds (bar.removeFromLeft (128).reduced (3, 0));
+
+                area.removeFromTop (8);
+                regime.setBounds (area.removeFromTop (34));
+                summary.setBounds (area.removeFromBottom (26));
+                area.removeFromTop (4);
+                list.setBounds (area);
+            }
+
+        private:
+            int getNumRows() override { return static_cast<int> (rows.size()); }
+
+            /*  The columns off the right, in one place so the painter and the
+                click carve the same cells: the cross, the channels, the width,
+                then the meter - which is wide, because it is read at a glance
+                from across the booth. */
+            static constexpr int crossWidth = 24, channelsWidth = 64, widthWidth = 80, meterWidth = 190;
+
+            void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return;
+
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                g.setColour (Look::colour (theme, row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                auto area = juce::Rectangle<int> (0, 0, width, height).reduced (8, 0);
+
+                if (! locked)
+                {
+                    g.setColour (Look::colour (theme, "ink-off"));
+                    g.setFont (Look::font (theme, 13.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x89\xa1"), area.removeFromLeft (18),
+                                juce::Justification::centred);
+
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), area.removeFromRight (crossWidth),
+                                juce::Justification::centred);
+                }
+                else
+                {
+                    area.removeFromLeft (18);
+                    area.removeFromRight (crossWidth);
+                }
+
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (entry.channelWord()), area.removeFromRight (channelsWidth),
+                            juce::Justification::centredLeft);
+                g.drawText (juce::String (entry.widthWord()), area.removeFromRight (widthWidth),
+                            juce::Justification::centredLeft);
+
+                /*  THE METER, OR WHY THERE IS NONE. A bar lit in proportion
+                    and its number beside it in dB - never the colour alone
+                    (§4.8) - or, for an input that is not arriving, the reason
+                    in words where the bar would be. */
+                auto meterCell = area.removeFromRight (meterWidth);
+                meterCell.removeFromRight (12);   // air between the number and the width word
+                auto meter = meterCell.reduced (6, 10);
+
+                if (! entry.problem.empty())
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String (entry.problem), meter.expanded (0, 8),
+                                juce::Justification::centredLeft, true);
+                }
+                else
+                {
+                    auto number = meter.removeFromRight (56);
+
+                    g.setColour (Look::colour (theme, "rule"));
+                    g.drawRect (meter);
+
+                    const auto lit = meter.reduced (1).withWidth (juce::roundToInt (entry.meterFill()
+                                                                                      * static_cast<double> (meter.getWidth() - 2)));
+                    g.setColour (Look::colour (theme, entry.meterDb > -6.0 ? "failed" : "live"));
+                    g.fillRect (lit);
+
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (entry.meterDb <= -119.0 ? juce::String ("-inf")
+                                                        : juce::String (entry.meterDb, 1) + " dB",
+                                number, juce::Justification::centredRight);
+                }
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText (juce::String (entry.name), area, juce::Justification::centredLeft, true);
+            }
+
+            void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+            {
+                if (locked || row < 0 || static_cast<std::size_t> (row) >= rows.size() || ! send)
+                    return;
+
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                   : list.getWidth();
+
+                if (event.x > width - 32)
+                    send (gesture::deleteInput (rows[static_cast<std::size_t> (row)].id));
+                else
+                    renameAt (row, event);
+            }
+
+            void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
+
+            static juce::Rectangle<int> nameCellOf (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+                area.removeFromLeft (18);
+                area.removeFromRight (crossWidth + channelsWidth + widthWidth + meterWidth);
+                return area;
+            }
+
+            void renameAt (int row, const juce::MouseEvent& event)
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return;
+
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                   : list.getWidth();
+
+                const auto cell = nameCellOf (juce::Rectangle<int> (0, 0, width, list.getRowHeight()));
+
+                if (event.x < cell.getX() || event.x >= cell.getRight())
+                    return;
+
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                editing = rows[static_cast<std::size_t> (row)].id;
+
+                nameEditor.setBounds (nameCellOf (place));
+                nameEditor.setText (juce::String (rows[static_cast<std::size_t> (row)].name),
+                                    juce::dontSendNotification);
+                nameEditor.setVisible (true);
+                nameEditor.showEditor();
+            }
+
+            bool isInterestedInDragSource (const SourceDetails& details) override
+            {
+                return ! locked && details.description.isString();
+            }
+
+            void itemDragMove (const SourceDetails& details) override
+            {
+                const auto row = rowAt (details.localPosition);
+
+                if (row != dropRow)
+                {
+                    dropRow = row;
+                    list.repaint();
+                }
+            }
+
+            void itemDragExit (const SourceDetails&) override
+            {
+                dropRow = -1;
+                list.repaint();
+            }
+
+            void itemDropped (const SourceDetails& details) override
+            {
+                const auto row = rowAt (details.localPosition);
+                const auto id = details.description.toString().toStdString();
+
+                dropRow = -1;
+                list.repaint();
+
+                if (locked || ! send || id.empty())
+                    return;
+
+                const auto from = indexOf (id);
+
+                if (from < 0 || row < 0)
+                    return;
+
+                const auto to = row > from ? row - 1 : row;
+
+                if (to != from)
+                    send (gesture::moveInput (id, to));
+            }
+
+            juce::var getDragSourceDescription (const juce::SparseSet<int>& selected) override
+            {
+                if (locked || selected.isEmpty())
+                    return {};
+
+                const auto row = selected[0];
+
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return {};
+
+                return juce::var (juce::String (rows[static_cast<std::size_t> (row)].id));
+            }
+
+            int rowAt (juce::Point<int> where) const
+            {
+                const auto inList = where - list.getPosition();
+                const auto height = juce::jmax (1, list.getRowHeight());
+                const auto row = (inList.y + height / 2) / height;
+
+                return juce::jlimit (0, static_cast<int> (rows.size()), row);
+            }
+
+            int indexOf (const std::string& id) const
+            {
+                for (std::size_t at = 0; at < rows.size(); ++at)
+                    if (rows[at].id == id)
+                        return static_cast<int> (at);
+
+                return -1;
+            }
+
+            void commitName()
+            {
+                const auto typed = nameEditor.getText().trim().toStdString();
+                const auto id = editing;
+
+                editing.clear();
+                nameEditor.setVisible (false);
+
+                if (id.empty() || typed.empty() || send == nullptr)
+                    return;
+
+                send (gesture::setNode ("/godot/input/" + id + "/name", typed));
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+            std::vector<model::InputRow> rows;
+            bool locked = false;
+            int dropRow = -1;
+            juce::ListBox list;
+            juce::TextButton addMono { "+ mono input" }, addStereo { "+ stereo input" };
+            juce::Label nameEditor;
+            std::string editing;
+            juce::Label regime, summary;
+        };
+
 
 
         /*  THE PORTS THIS SHOW SENDS ON, AND THE CABLES THEY TURNED OUT TO BE.
@@ -2940,16 +3272,24 @@ namespace wfg::client::ui
             is object.delete; Restart is plugin.restart, for an entry that
             failed; Preset file… copies a .vstpreset into the bundle's plugins/
             folder and names it on the row, the way a media file is named
-            (§17.7). Scanning stays a verb: with nothing scanned the left list
-            says which one. */
+            (§17.7).
+
+            SCANNING IS HERE TOO (2026-09-26, the author's decision): Scan, with
+            a menu of the formats, and Scan a folder… for one outside the
+            formats' own - the command line's scan run as a child, its progress
+            said in words under the list; the files a scan gave up on listed
+            below it, each with Retry; and Load now, lit when the set differs
+            from the audio graph, which rebuilds it. Scanning, adding and
+            loading are refused while the show is locked, and say so. */
         class PluginsPage final : public juce::Component
         {
         public:
             PluginsPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
                 : theme (themeToUse), send (std::move (dispatch)),
-                  knownLister (*this, Which::known), setLister (*this, Which::set)
+                  knownLister (*this, Which::known), setLister (*this, Which::set),
+                  skippedLister (*this, Which::skipped)
             {
-                for (auto* list : { &knownList, &setList })
+                for (auto* list : { &knownList, &setList, &skippedList })
                 {
                     list->setRowHeight (rowHeight);
                     list->setOutlineThickness (0);
@@ -2959,8 +3299,9 @@ namespace wfg::client::ui
 
                 knownList.setModel (&knownLister);
                 setList.setModel (&setLister);
+                skippedList.setModel (&skippedLister);
 
-                for (auto* label : { &knownHeading, &setHeading, &notice })
+                for (auto* label : { &knownHeading, &setHeading, &notice, &skippedHeading })
                 {
                     label->setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
                     addAndMakeVisible (*label);
@@ -2968,11 +3309,31 @@ namespace wfg::client::ui
 
                 knownHeading.setText ("This machine", juce::dontSendNotification);
                 setHeading.setText ("The show's set, in chain order", juce::dontSendNotification);
+                skippedHeading.setText ("Skipped by a scan", juce::dontSendNotification);
                 notice.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
                 notice.setJustificationType (juce::Justification::centredLeft);
 
-                for (auto* button : { &addButton, &removeButton, &restartButton, &presetButton })
+                for (auto* button : { &addButton, &removeButton, &restartButton, &presetButton,
+                                      &scanButton, &folderButton, &retryButton, &loadButton })
                     addAndMakeVisible (*button);
+
+                scanButton.onClick = [this] { chooseFormat(); };
+                folderButton.onClick = [this] { chooseFolder(); };
+
+                retryButton.setTooltip ("Scan the picked file again, alone - one that hung the scan or took"
+                                        " it down. It is skipped by every scan until it is tried again.");
+                retryButton.onClick = [this]
+                {
+                    if (send && ! locked && ! scanning() && pickedSkipped >= 0
+                          && pickedSkipped < static_cast<int> (skipped.size()))
+                        send (gesture::retryScan (skipped[static_cast<std::size_t> (pickedSkipped)]));
+                };
+
+                loadButton.onClick = [this]
+                {
+                    if (send && ! locked && setChanged)
+                        send (gesture::loadPlugins());
+                };
 
                 addButton.setTooltip ("Declare the picked plugin in the show's set: every voice carries"
                                       " it, and a media cue switches it in from its FX.");
@@ -3008,32 +3369,49 @@ namespace wfg::client::ui
             }
 
             void show (std::vector<model::KnownPluginRow> knownNow, std::vector<model::PluginRow> setNow,
-                       std::string bundlePathNow, bool editable)
+                       std::string bundlePathNow, bool editable, model::ScanRow scanNow,
+                       std::vector<std::string> skippedNow, bool setChangedNow, std::string busyNow = {})
             {
+                busy = std::move (busyNow);
                 const auto knownWere = keyOf (known);
                 const auto setWere = keyOf (set);
+                const auto skippedWere = keyOf (skipped);
                 const auto wasLocked = locked;
+                const auto hadSkipped = ! skipped.empty();
 
                 known = std::move (knownNow);
                 set = std::move (setNow);
                 bundlePath = std::move (bundlePathNow);
                 locked = ! editable;
+                scan = std::move (scanNow);
+                skipped = std::move (skippedNow);
+                setChanged = setChangedNow;
 
-                if (pickedKnown >= static_cast<int> (known.size())) pickedKnown = -1;
-                if (pickedSet >= static_cast<int> (set.size()))     pickedSet = -1;
+                if (pickedKnown >= static_cast<int> (known.size()))     pickedKnown = -1;
+                if (pickedSet >= static_cast<int> (set.size()))         pickedSet = -1;
+                if (pickedSkipped >= static_cast<int> (skipped.size())) pickedSkipped = -1;
 
-                notice.setText (known.empty()
-                                  ? "Nothing scanned yet: run  wfg plugins --scan  and reopen the show."
-                                  : juce::String (known.size()) + " plugin(s) known to this machine.",
-                                juce::dontSendNotification);
+                notice.setText (model::scanWords (scan, known.size()), juce::dontSendNotification);
 
-                for (auto* button : { &addButton, &removeButton, &presetButton })
+                for (auto* button : { &addButton, &removeButton, &presetButton, &loadButton })
                     button->setVisible (editable);
 
-                addButton.setEnabled (pickedKnown >= 0);
-                removeButton.setEnabled (pickedSet >= 0);
-                presetButton.setEnabled (pickedSet >= 0 && ! bundlePath.empty());
-                restartButton.setEnabled (pickedSet >= 0);
+                /*  SAID, NOT ONLY GREYED (PRD §4.8): what stops the scan is in
+                    its tooltip, whichever it is. */
+                scanButton.setTooltip (locked     ? juce::String ("The show is locked: unlock it to scan for plugins.")
+                                       : scanning() ? juce::String ("A scan is running - its progress is under the list.")
+                                                    : juce::String ("Scan this machine for plugins, in a process of its own:"
+                                                                    " a plugin that hangs is skipped after 30 seconds."));
+                folderButton.setTooltip ("Scan one folder beside the formats' own - an LV2 folder that is"
+                                         " not a default one, say.");
+                loadButton.setTooltip (! setChanged ? juce::String ("The audio graph holds the set as it stands.")
+                                       : ! busy.empty() ? juce::String (busy) + ": Load now waits for nothing to sound."
+                                                          " Stop it first - Esc."
+                                       : juce::String ("The set differs from the audio graph: rebuild the graph with the"
+                                                       " set as it stands. Only while nothing plays; the sound stops for"
+                                                       " a moment."));
+
+                updateButtons();
 
                 const auto lockMoved = wasLocked != locked;
 
@@ -3041,6 +3419,10 @@ namespace wfg::client::ui
                 if (knownWere != keyOf (known) || lockMoved) knownList.repaint();
                 if (setWere != keyOf (set)) setList.updateContent();
                 if (setWere != keyOf (set) || lockMoved) setList.repaint();
+                if (skippedWere != keyOf (skipped)) { skippedList.updateContent(); skippedList.repaint(); }
+
+                if (hadSkipped != ! skipped.empty())
+                    resized();
             }
 
             void resized() override
@@ -3051,21 +3433,108 @@ namespace wfg::client::ui
 
                 knownHeading.setBounds (left.removeFromTop (22));
                 notice.setBounds (left.removeFromBottom (22));
-                addButton.setBounds (left.removeFromBottom (26).removeFromLeft (120));
+
+                auto machineButtons = left.removeFromBottom (26);
+                addButton.setBounds (machineButtons.removeFromLeft (100));
+                machineButtons.removeFromLeft (6);
+                scanButton.setBounds (machineButtons.removeFromLeft (80));
+                machineButtons.removeFromLeft (6);
+                folderButton.setBounds (machineButtons.removeFromLeft (120));
+
+                /*  The skipped files only when there are some: most machines
+                    have none, and a list of nothing is a question nobody asked. */
+                const auto showSkipped = ! skipped.empty();
+
+                for (auto* part : { static_cast<juce::Component*> (&skippedHeading),
+                                    static_cast<juce::Component*> (&skippedList),
+                                    static_cast<juce::Component*> (&retryButton) })
+                    part->setVisible (showSkipped);
+
+                if (showSkipped)
+                {
+                    auto skippedArea = left.removeFromBottom (22 + rowHeight * 3 + 30);
+                    skippedHeading.setBounds (skippedArea.removeFromTop (22));
+                    retryButton.setBounds (skippedArea.removeFromBottom (26).removeFromLeft (90));
+                    skippedList.setBounds (skippedArea.withTrimmedBottom (4));
+                }
+
                 knownList.setBounds (left.withTrimmedBottom (4));
 
                 setHeading.setBounds (right.removeFromTop (22));
                 auto buttons = right.removeFromBottom (26);
-                removeButton.setBounds (buttons.removeFromLeft (90));
+                removeButton.setBounds (buttons.removeFromLeft (80));
                 buttons.removeFromLeft (6);
-                restartButton.setBounds (buttons.removeFromLeft (90));
+                restartButton.setBounds (buttons.removeFromLeft (80));
                 buttons.removeFromLeft (6);
                 presetButton.setBounds (buttons.removeFromLeft (110));
+                buttons.removeFromLeft (6);
+                loadButton.setBounds (buttons.removeFromLeft (90));
                 setList.setBounds (right.withTrimmedBottom (4));
             }
 
         private:
-            enum class Which { known, set };
+            enum class Which { known, set, skipped };
+
+            bool scanning() const { return scan.state == "scanning"; }
+
+            void updateButtons()
+            {
+                addButton.setEnabled (pickedKnown >= 0 && ! locked);
+                removeButton.setEnabled (pickedSet >= 0 && ! locked);
+                presetButton.setEnabled (pickedSet >= 0 && ! locked && ! bundlePath.empty());
+                restartButton.setEnabled (pickedSet >= 0);
+                scanButton.setEnabled (! locked && ! scanning());
+                folderButton.setEnabled (! locked && ! scanning());
+                retryButton.setEnabled (pickedSkipped >= 0 && ! locked && ! scanning());
+                loadButton.setEnabled (setChanged && ! locked && busy.empty());
+            }
+
+            /*  THE FORMATS, as a menu under the button: every one, or one. AU
+                only where there is such a thing. */
+            void chooseFormat()
+            {
+                if (locked || scanning() || ! send)
+                    return;
+
+                juce::PopupMenu menu;
+                menu.addItem (1, "Every format");
+                menu.addItem (2, "VST3");
+               #if JUCE_MAC
+                menu.addItem (3, "AU");
+               #endif
+                menu.addItem (4, "LV2");
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&scanButton),
+                                    [safe = juce::Component::SafePointer<PluginsPage> (this)] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen == 0 || ! safe->send)
+                                            return;
+
+                                        const char* words[] = { "", "", "vst3", "au", "lv2" };
+                                        safe->send (gesture::scanPlugins (words[chosen]));
+                                    });
+            }
+
+            /*  A FOLDER, for plugins outside the formats' own places; every
+                format is asked about it. A member for launchAsync's reason. */
+            void chooseFolder()
+            {
+                if (locked || scanning() || ! send)
+                    return;
+
+                chooser = std::make_unique<juce::FileChooser> ("A folder to scan for plugins", juce::File());
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                                      [safe = juce::Component::SafePointer<PluginsPage> (this)] (const juce::FileChooser& answered)
+                                      {
+                                          if (safe == nullptr || ! safe->send)
+                                              return;
+
+                                          const auto folder = answered.getResult();
+
+                                          if (folder.isDirectory())
+                                              safe->send (gesture::scanPlugins ({}, folder.getFullPathName().toStdString()));
+                                      });
+            }
 
             struct Lister final : public juce::ListBoxModel
             {
@@ -3089,31 +3558,39 @@ namespace wfg::client::ui
                 return out;
             }
 
+            static std::string keyOf (const std::vector<std::string>& rows)
+            {
+                std::string out;
+                for (const auto& row : rows) out += row + '\n';
+                return out;
+            }
+
             static std::string keyOf (const std::vector<model::PluginRow>& rows)
             {
                 std::string out;
                 for (const auto& row : rows)
                     out += row.id + '|' + row.name + '|' + row.state + '|' + row.problem + '|' + row.preset + '|'
-                             + std::to_string (row.latencySamples) + '\n';
+                             + std::to_string (row.latencySamples) + '|' + row.layout + '\n';
                 return out;
             }
 
             int rowsIn (Which which) const
             {
-                return static_cast<int> (which == Which::known ? known.size() : set.size());
+                return static_cast<int> (which == Which::known ? known.size()
+                                       : which == Which::set   ? set.size()
+                                                               : skipped.size());
             }
 
             void pick (Which which, int row)
             {
-                if (which == Which::known) pickedKnown = row < static_cast<int> (known.size()) ? row : -1;
-                else                       pickedSet = row < static_cast<int> (set.size()) ? row : -1;
+                if (which == Which::known)    pickedKnown = row < static_cast<int> (known.size()) ? row : -1;
+                else if (which == Which::set) pickedSet = row < static_cast<int> (set.size()) ? row : -1;
+                else                          pickedSkipped = row < static_cast<int> (skipped.size()) ? row : -1;
 
-                addButton.setEnabled (pickedKnown >= 0 && ! locked);
-                removeButton.setEnabled (pickedSet >= 0 && ! locked);
-                presetButton.setEnabled (pickedSet >= 0 && ! locked && ! bundlePath.empty());
-                restartButton.setEnabled (pickedSet >= 0);
+                updateButtons();
                 knownList.repaint();
                 setList.repaint();
+                skippedList.repaint();
             }
 
             void paintRow (Which which, int row, juce::Graphics& g, int width, int height)
@@ -3121,13 +3598,22 @@ namespace wfg::client::ui
                 if (row < 0 || row >= rowsIn (which))
                     return;
 
-                const auto picked = which == Which::known ? row == pickedKnown : row == pickedSet;
-                g.setColour (Look::colour (theme, picked ? "panel-raised" : row % 2 == 0 ? "panel" : "panel-in"));
+                const auto picked = which == Which::known ? row == pickedKnown
+                                  : which == Which::set   ? row == pickedSet
+                                                          : row == pickedSkipped;
+                g.setColour (Look::colour (theme, picked ? "panel-high" : row % 2 == 0 ? "panel" : "panel-in"));
                 g.fillRect (0, 0, width, height - 1);
                 g.setColour (Look::colour (theme, "ink"));
                 g.setFont (Look::font (theme, 14.0f));
 
                 auto cell = juce::Rectangle<int> (0, 0, width, height).reduced (6, 0);
+
+                if (which == Which::skipped)
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (skipped[static_cast<std::size_t> (row)], cell, juce::Justification::centredLeft, true);
+                    return;
+                }
 
                 if (which == Which::known)
                 {
@@ -3145,6 +3631,9 @@ namespace wfg::client::ui
                 /*  The state is a WORD, and the sentence follows it: what a
                     person reads at 04:12 when a strip has gone quiet. */
                 juce::String said = entry.state;
+
+                if (! entry.layout.empty())
+                    said += ", " + juce::String (entry.layout);
 
                 if (entry.latencySamples > 0)
                     said += ", " + juce::String (entry.latencySamples) + " samples late";
@@ -3199,14 +3688,902 @@ namespace wfg::client::ui
             std::function<void (Event)> send;
             std::vector<model::KnownPluginRow> known;
             std::vector<model::PluginRow> set;
+            std::vector<std::string> skipped;
+            model::ScanRow scan;
             std::string bundlePath;
             bool locked = false;
-            int pickedKnown = -1, pickedSet = -1;
-            Lister knownLister, setLister;
-            juce::ListBox knownList, setList;
-            juce::Label knownHeading, setHeading, notice;
+            bool setChanged = false;
+            std::string busy;
+            int pickedKnown = -1, pickedSet = -1, pickedSkipped = -1;
+            Lister knownLister, setLister, skippedLister;
+            juce::ListBox knownList, setList, skippedList;
+            juce::Label knownHeading, setHeading, notice, skippedHeading;
             juce::TextButton addButton { "Add to set" }, removeButton { "Remove" }, restartButton { "Restart" },
-                             presetButton { "Preset file..." };
+                             presetButton { "Preset file..." }, scanButton { "Scan" },
+                             folderButton { "Scan a folder..." }, retryButton { "Retry" }, loadButton { "Load now" };
+            std::unique_ptr<juce::FileChooser> chooser;
+        };
+
+        /*  THE RACK TAB (Phase 9b, namespace draft §18.3). The live rack's
+            channels on the left, each a name, what it takes in and puts out,
+            and how many plugins it carries; the picked channel's chain on the
+            right, in the order it processes, each plugin with what became of
+            it tonight in a word and its sentence beside it (PRD §4.8). Under
+            both, what the chain would make a microphone late by with every
+            plugin in, against the show's budget, in words (decision BY) - and
+            Load now, which rebuilds the graph with the rack as it stands.
+
+            EVERY ROW IS A COMMAND, as the Inputs tab's are: the three add
+            buttons are `channel.create`; a double click on a name renames it
+            and the class cell is a menu of the three, both `node.set`; the
+            cross is `object.delete`. In the chain, Add... is `channel.plugin`
+            with a plugin this machine's scan found, a dragged row is
+            `object.move` within the channel, the cross takes a plugin out,
+            Preset file... names a preset as the Plugins tab does, and Restart
+            is `plugin.restart`. Ctrl-Z takes any edit back.
+
+            The channels are not dragged: the rack has no order anybody hears,
+            and a list that moves when dragged says it has one. */
+        class RackPage final : public juce::Component,
+                               public juce::DragAndDropContainer,
+                               public juce::DragAndDropTarget
+        {
+        public:
+            RackPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch)),
+                  channelLister (*this, Which::channels), chainLister (*this, Which::chain)
+            {
+                for (auto* list : { &channelList, &chainList })
+                {
+                    list->setRowHeight (rowHeight);
+                    list->setOutlineThickness (0);
+                    list->setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                    addAndMakeVisible (*list);
+                }
+
+                channelList.setModel (&channelLister);
+                chainList.setModel (&chainLister);
+
+                for (auto* label : { &channelHeading, &chainHeading, &budgetLabel, &budgetUnit, &said })
+                {
+                    label->setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                    addAndMakeVisible (*label);
+                }
+
+                channelHeading.setText ("Channels", juce::dontSendNotification);
+                budgetLabel.setText ("Delay a mic cue's plugins may add", juce::dontSendNotification);
+                budgetLabel.setJustificationType (juce::Justification::centredRight);
+                budgetUnit.setText ("ms", juce::dontSendNotification);
+                said.setJustificationType (juce::Justification::topLeft);
+
+                addAndMakeVisible (budget);
+                budget.setInputRestrictions (6, "0123456789.,");
+                budget.setJustification (juce::Justification::centredRight);
+                budget.setTooltip ("How much delay the plugins a mic cue switches in may add before the cue,"
+                                   " its channel and the plugin that did it say so. Never refused and never"
+                                   " compensated: crossing it is said in words.");
+                budget.onReturnKey = [this] { commitBudget(); };
+                budget.onFocusLost = [this] { commitBudget(); };
+
+                addChildComponent (nameEditor);
+                nameEditor.setEditable (false, true, false);
+                nameEditor.setColour (juce::Label::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                nameEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                nameEditor.onEditorHide = [this] { commitName(); };
+
+                for (auto* button : { &addMono, &addWide, &addStereo, &addPlugin, &presetButton,
+                                      &restartButton, &loadButton })
+                    addAndMakeVisible (*button);
+
+                addMono.setTooltip ("A channel for a microphone: mono in, mono out.");
+                addWide.setTooltip ("A channel for a microphone through a stereo effect - a reverb, a"
+                                    " chorus: mono in, stereo out.");
+                addStereo.setTooltip ("A channel for a stereo line - a keyboard, another machine.");
+                addPlugin.setTooltip ("Put a plugin this machine's scan found at the end of the picked"
+                                      " channel's chain. It loads switched off; a mic cue switches it in.");
+                presetButton.setTooltip ("A .vstpreset file for the picked plugin, copied into the bundle's"
+                                         " plugins/ folder and applied when the show opens.");
+                restartButton.setTooltip ("A fresh child process for the picked plugin - for one that"
+                                          " failed, or that stays down after failing twice.");
+
+                const auto add = [this] (const char* channelClass)
+                {
+                    if (! send || locked)
+                        return;
+
+                    /*  THE NEW CHANNEL IS PICKED when it arrives, so Add... goes
+                        where somebody who just made one expects it to. */
+                    channelsWhenAdded = static_cast<int> (rack.channels.size());
+                    send (gesture::createRackChannel (channelClass));
+                };
+
+                addMono.onClick   = [add] { add ("mono"); };
+                addWide.onClick   = [add] { add ("monoToStereo"); };
+                addStereo.onClick = [add] { add ("stereo"); };
+                addPlugin.onClick = [this] { choosePlugin(); };
+                presetButton.onClick = [this] { choosePreset(); };
+
+                restartButton.onClick = [this]
+                {
+                    if (send && ! pickedPluginId.empty())
+                        send (gesture::restartPlugin (pickedPluginId));
+                };
+
+                loadButton.onClick = [this]
+                {
+                    if (send && ! locked && changed)
+                        send (gesture::loadPlugins());
+                };
+            }
+
+            void show (model::RackReading rackNow, std::string budgetTextNow,
+                       std::vector<model::KnownPluginRow> knownNow, std::string bundlePathNow,
+                       bool editable, bool changedNow, std::string busyNow = {})
+            {
+                busy = std::move (busyNow);
+                const auto keyWas = keyOf (rack) + (locked ? "L" : "U");
+
+                rack = std::move (rackNow);
+                known = std::move (knownNow);
+                bundlePath = std::move (bundlePathNow);
+                locked = ! editable;
+                changed = changedNow;
+
+                /*  WHAT IS PICKED IS AN IDENTIFIER, kept across passes: the rows
+                    are re-read every time, and a channel added above the picked
+                    one must not move the pick onto its neighbour. */
+                if (channelsWhenAdded >= 0 && static_cast<int> (rack.channels.size()) > channelsWhenAdded)
+                {
+                    pickedChannelId = rack.channels.back().id;
+                    channelsWhenAdded = -1;
+                }
+
+                if (channelIndex (pickedChannelId) < 0)
+                    pickedChannelId = rack.channels.empty() ? std::string {} : rack.channels.front().id;
+
+                if (pluginIndex (pickedPluginId) < 0)
+                    pickedPluginId.clear();
+
+                if (! budget.hasKeyboardFocus (true) && budget.getText() != juce::String (budgetTextNow))
+                    budget.setText (juce::String (budgetTextNow), juce::dontSendNotification);
+
+                for (auto* button : { &addMono, &addWide, &addStereo, &addPlugin, &presetButton, &loadButton })
+                    button->setVisible (editable);
+
+                budget.setReadOnly (locked);
+
+                /*  WHAT KEEPS IT WAITING, BY NAME (Phase 9b): the engine
+                    refuses a rebuild while anything sounds, and a persistent
+                    mic cue sounds all show. */
+                loadButton.setTooltip (! changed ? juce::String ("The audio graph holds the rack as it stands.")
+                                       : ! busy.empty() ? juce::String (busy) + ": Load now waits for nothing to sound."
+                                                          " Stop it first - Esc."
+                                       : juce::String ("The rack or the set differs from the audio graph: rebuild the"
+                                                       " graph as they stand. Only while nothing plays; the sound"
+                                                       " stops for a moment."));
+
+                const auto* channel = pickedChannel();
+
+                chainHeading.setText (channel == nullptr
+                                        ? juce::String ("The picked channel's chain")
+                                        : juce::String (channel->name) + "'s chain, in the order it processes",
+                                      juce::dontSendNotification);
+
+                said.setText (channel == nullptr
+                                ? juce::String ("No rack channels yet. Add one for a microphone to pass through"
+                                                " plugins of its own - a mic cue names the channel it plays through.")
+                                : footWords (*channel),
+                              juce::dontSendNotification);
+
+                updateButtons();
+
+                if (keyWas != keyOf (rack) + (locked ? "L" : "U"))
+                {
+                    channelList.updateContent();
+                    chainList.updateContent();
+                    channelList.repaint();
+                    chainList.repaint();
+                }
+            }
+
+            void paintOverChildren (juce::Graphics& g) override
+            {
+                if (dropRow < 0)
+                    return;
+
+                const auto y = chainList.getY() + dropRow * chainList.getRowHeight()
+                                 - chainList.getViewport()->getViewPositionY();
+
+                g.setColour (Look::colour (theme, "picked"));
+                g.fillRect (chainList.getX(), y - 1, chainList.getWidth(), 2);
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+                auto bar = area.removeFromTop (30);
+
+                for (auto* button : { &addMono, &addWide, &addStereo })
+                    button->setBounds (bar.removeFromLeft (button == &addWide ? 150 : 110).reduced (3, 0));
+
+                budgetUnit.setBounds (bar.removeFromRight (30));
+                budget.setBounds (bar.removeFromRight (56).reduced (0, 2));
+                budgetLabel.setBounds (bar.withTrimmedLeft (8));
+
+                area.removeFromTop (8);
+
+                auto foot = area.removeFromBottom (44);
+                loadButton.setBounds (foot.removeFromRight (100).withSizeKeepingCentre (100, 26));
+                said.setBounds (foot.withTrimmedRight (8));
+                area.removeFromBottom (4);
+
+                auto left = area.removeFromLeft (area.getWidth() * 2 / 5).withTrimmedRight (4);
+                auto right = area.withTrimmedLeft (4);
+
+                channelHeading.setBounds (left.removeFromTop (22));
+                channelList.setBounds (left);
+
+                chainHeading.setBounds (right.removeFromTop (22));
+                auto buttons = right.removeFromBottom (26);
+                addPlugin.setBounds (buttons.removeFromLeft (90));
+                buttons.removeFromLeft (6);
+                presetButton.setBounds (buttons.removeFromLeft (110));
+                buttons.removeFromLeft (6);
+                restartButton.setBounds (buttons.removeFromLeft (80));
+                chainList.setBounds (right.withTrimmedBottom (4));
+            }
+
+        private:
+            enum class Which { channels, chain };
+
+            struct Lister final : public juce::ListBoxModel
+            {
+                Lister (RackPage& ownerToUse, Which whichToUse) : owner (ownerToUse), which (whichToUse) {}
+                int getNumRows() override { return owner.rowsIn (which); }
+                void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+                {
+                    owner.paintRow (which, row, g, width, height);
+                }
+                void listBoxItemClicked (int row, const juce::MouseEvent& event) override { owner.clicked (which, row, event); }
+                void listBoxItemDoubleClicked (int row, const juce::MouseEvent& event) override
+                {
+                    owner.doubleClicked (which, row, event);
+                }
+                juce::var getDragSourceDescription (const juce::SparseSet<int>& selected) override
+                {
+                    return owner.dragOf (which, selected);
+                }
+                RackPage& owner;
+                Which which;
+            };
+
+            static constexpr int rowHeight = 42;
+
+            /*  A CHANNEL'S ROW IS TWO LINES, so its name has the column's width:
+                the name above, and under it the class - a menu - and how many
+                plugins the chain carries. Carved in one place so the painter and
+                the click cut the same cells. */
+            static constexpr int crossWidth = 24, markWidth = 14, classWidth = 118, takeWidth = 172, sideWidth = 150;
+
+            /*  The name above, and beside it on the right the recorder (Phase
+                9c) - a menu, on the line with the room; under them the class, a
+                menu too, and how many plugins the chain carries. */
+            struct ChannelCells
+            {
+                juce::Rectangle<int> mark, name, channelClass, take, count, cross;
+            };
+
+            static ChannelCells channelCells (int width, int height)
+            {
+                ChannelCells cells;
+                auto area = juce::Rectangle<int> (0, 0, width, height).reduced (8, 0);
+
+                cells.cross = area.removeFromRight (crossWidth);
+                cells.mark = area.removeFromLeft (markWidth).removeFromTop (height / 2).withTrimmedTop (4);
+
+                auto top = area.removeFromTop (height / 2);
+                cells.take = top.removeFromRight (takeWidth).withTrimmedTop (4);
+                cells.name = top.withTrimmedTop (4);
+                cells.channelClass = area.removeFromLeft (classWidth).withTrimmedBottom (4);
+                cells.count = area.withTrimmedBottom (4);
+                return cells;
+            }
+
+            /*  WHAT THE FOOT SAYS OF THE PICKED CHANNEL: the delay against the
+                budget, and on a sampling channel what its take sets aside. */
+            juce::String footWords (const model::RackChannelRow& channel) const
+            {
+                auto words = juce::String (channel.name) + ": " + juce::String (model::budgetWords (channel, rack));
+
+                if (const auto take = model::takeWords (channel, rack); ! take.empty())
+                    words += " " + juce::String (take);
+
+                return words;
+            }
+
+            /*  A PLUGIN'S SIDE on a sampling channel (Phase 9c, decision BZ): the
+                start of its second line, a menu, where the other rows keep that
+                line for what became of the plugin. */
+            static juce::Rectangle<int> sideCell (int width, int height)
+            {
+                auto area = juce::Rectangle<int> (0, 0, width, height).reduced (8, 0);
+                area.removeFromRight (crossWidth);
+                area.removeFromLeft (18 + markWidth);
+                return area.removeFromBottom (height / 2).withTrimmedBottom (4).removeFromLeft (sideWidth);
+            }
+
+            const model::RackChannelRow* pickedChannel() const
+            {
+                const auto at = channelIndex (pickedChannelId);
+                return at < 0 ? nullptr : &rack.channels[static_cast<std::size_t> (at)];
+            }
+
+            int channelIndex (const std::string& id) const
+            {
+                for (std::size_t at = 0; at < rack.channels.size(); ++at)
+                    if (rack.channels[at].id == id)
+                        return static_cast<int> (at);
+
+                return -1;
+            }
+
+            int pluginIndex (const std::string& id) const
+            {
+                if (const auto* channel = pickedChannel())
+                    for (std::size_t at = 0; at < channel->chain.size(); ++at)
+                        if (channel->chain[at].id == id)
+                            return static_cast<int> (at);
+
+                return -1;
+            }
+
+            int rowsIn (Which which) const
+            {
+                if (which == Which::channels)
+                    return static_cast<int> (rack.channels.size());
+
+                const auto* channel = pickedChannel();
+                return channel == nullptr ? 0 : static_cast<int> (channel->chain.size());
+            }
+
+            void updateButtons()
+            {
+                const auto* channel = pickedChannel();
+
+                addPlugin.setEnabled (channel != nullptr && ! locked);
+                presetButton.setEnabled (! pickedPluginId.empty() && ! locked && ! bundlePath.empty());
+                restartButton.setEnabled (! pickedPluginId.empty());
+                loadButton.setEnabled (changed && ! locked && busy.empty());
+            }
+
+            static std::string keyOf (const model::RackReading& reading)
+            {
+                std::string out = std::to_string (reading.sampleRate) + '|' + std::to_string (reading.budgetMs) + '\n';
+
+                for (const auto& channel : reading.channels)
+                {
+                    out += channel.id + '|' + channel.name + '|' + channel.channelClass + '|'
+                             + std::to_string (channel.latencySamples) + '|' + std::to_string (channel.takeSeconds) + '|'
+                             + std::to_string (channel.layers) + '|' + std::to_string (channel.takeMemoryMb) + '|'
+                             + channel.takeProblem + '\n';
+
+                    for (const auto& entry : channel.chain)
+                        out += ' ' + entry.id + '|' + entry.name + '|' + entry.state + '|' + entry.problem + '|'
+                                 + entry.preset + '|' + std::to_string (entry.latencySamples) + '|' + entry.layout + '|'
+                                 + entry.side + '\n';
+                }
+
+                return out;
+            }
+
+            void paintRow (Which which, int row, juce::Graphics& g, int width, int height)
+            {
+                if (row < 0 || row >= rowsIn (which))
+                    return;
+
+                if (which == Which::channels)
+                    paintChannel (rack.channels[static_cast<std::size_t> (row)], row, g, width, height);
+                else
+                    paintEntry (pickedChannel()->chain[static_cast<std::size_t> (row)], row, g, width, height);
+            }
+
+            void paintChannel (const model::RackChannelRow& channel, int row, juce::Graphics& g, int width, int height)
+            {
+                const auto isPicked = channel.id == pickedChannelId;
+                const auto cells = channelCells (width, height);
+
+                g.setColour (Look::colour (theme, isPicked ? "panel-high" : row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                /*  THE PICKED CHANNEL IS MARKED WITH A SHAPE as well as a shade
+                    (§4.8), as the Surfaces tab marks its surface: the chain on
+                    the right is this one's. */
+                if (isPicked)
+                {
+                    g.setColour (Look::colour (theme, "ink"));
+                    g.setFont (Look::font (theme, 11.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x96\xb8"), cells.mark, juce::Justification::centredLeft);
+                }
+
+                if (! locked)
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.setFont (Look::font (theme, 13.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells.cross, juce::Justification::centred);
+                }
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText (juce::String (channel.name), cells.name, juce::Justification::centredLeft, true);
+
+                /*  THE CLASS IS A MENU, and drawn as one - its word and a small
+                    arrow - so that it is found by looking and not by accident. */
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (channel.classWord()) + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
+                            cells.channelClass, juce::Justification::centredLeft, true);
+
+                /*  THE RECORDER, a menu as the class is (Phase 9c): its word says
+                    whether the channel samples, and a dot marks one that does. */
+                g.drawText ((channel.samples() ? juce::String::fromUTF8 ("\xe2\x97\x8f ") : juce::String())
+                              + juce::String (channel.takeWord())
+                              + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
+                            cells.take, juce::Justification::centredRight, true);
+
+                /*  OVER BUDGET IS SAID, never only coloured (§4.8): the words go
+                    after the count, and the whole sentence is at the foot. */
+                g.drawText (juce::String (channel.chainWord())
+                              + (model::overBudget (channel, rack) ? juce::String::fromUTF8 (" \xc2\xb7 over budget")
+                                                                   : juce::String()),
+                            cells.count, juce::Justification::centredLeft, true);
+            }
+
+            void paintEntry (const model::PluginRow& entry, int row, juce::Graphics& g, int width, int height)
+            {
+                const auto isPicked = entry.id == pickedPluginId;
+
+                g.setColour (Look::colour (theme, isPicked ? "panel-high" : row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                auto area = juce::Rectangle<int> (0, 0, width, height).reduced (8, 0);
+                auto cross = area.removeFromRight (crossWidth);
+
+                if (! locked)
+                {
+                    g.setColour (Look::colour (theme, "ink-off"));
+                    g.setFont (Look::font (theme, 13.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x89\xa1"), area.removeFromLeft (18),
+                                juce::Justification::centred);
+
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cross, juce::Justification::centred);
+                }
+                else
+                {
+                    area.removeFromLeft (18);
+                }
+
+                /*  The picked plugin - the one Preset file... and Restart act
+                    on - marked with a shape as well as the shade. */
+                const auto mark = area.removeFromLeft (markWidth).removeFromTop (height / 2).withTrimmedTop (4);
+
+                g.setColour (Look::colour (theme, "ink"));
+
+                if (isPicked)
+                {
+                    g.setFont (Look::font (theme, 11.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x96\xb8"), mark, juce::Justification::centredLeft);
+                }
+
+                /*  TWO LINES, as a channel's row: the plugin above, and under it
+                    the whole of what became of it - which, for one that failed,
+                    is a sentence that would never fit beside its name. */
+                g.setFont (Look::font (theme, 14.0f));
+                g.drawText (juce::String (row + 1) + ". " + juce::String (entry.name),
+                            area.removeFromTop (height / 2).withTrimmedTop (4), juce::Justification::centredLeft, true);
+                area = area.withTrimmedBottom (4);
+
+                /*  ON A SAMPLING CHANNEL its side comes first, a menu: printed
+                    into the take, or heard as it loops (decision BZ). */
+                if (const auto* channel = pickedChannel(); channel != nullptr && channel->samples())
+                {
+                    g.setFont (Look::font (theme, 12.0f));
+                    g.setColour (Look::colour (theme, "ink"));
+                    g.drawText (juce::String (entry.side == "before" ? "before the recorder" : "after the player")
+                                  + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
+                                area.removeFromLeft (sideWidth), juce::Justification::centredLeft, true);
+                }
+
+                /*  The state is a WORD and the sentence follows it, as on the
+                    Plugins tab: what somebody reads when a voice has gone silent. */
+                juce::String words = entry.state;
+
+                if (! entry.layout.empty())
+                    words += ", " + juce::String (entry.layout);
+
+                if (entry.latencySamples > 0)
+                    words += ", " + juce::String (entry.latencySamples) + " samples late";
+
+                if (! entry.preset.empty())
+                    words += ", preset " + juce::String (entry.preset);
+
+                if (! entry.problem.empty())
+                    words += " - " + juce::String (entry.problem);
+
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, entry.state == "failed" || entry.state == "missing" ? "ink" : "ink-dim"));
+                g.drawText (words, area, juce::Justification::centredLeft, true);
+            }
+
+            static int widthOf (const juce::MouseEvent& event, const juce::ListBox& list)
+            {
+                return event.eventComponent != nullptr ? event.eventComponent->getWidth() : list.getWidth();
+            }
+
+            void clicked (Which which, int row, const juce::MouseEvent& event)
+            {
+                if (row < 0 || row >= rowsIn (which))
+                    return;
+
+                if (which == Which::channels)
+                {
+                    const auto& channel = rack.channels[static_cast<std::size_t> (row)];
+                    const auto cells = channelCells (widthOf (event, channelList), channelList.getRowHeight());
+
+                    if (! locked && send && event.x >= cells.cross.getX())
+                    {
+                        send (gesture::deleteObject (channel.id));
+                        return;
+                    }
+
+                    if (channel.id != pickedChannelId)
+                    {
+                        pickedChannelId = channel.id;
+                        pickedPluginId.clear();
+                        said.setText (footWords (channel), juce::dontSendNotification);
+                        chainHeading.setText (juce::String (channel.name) + "'s chain, in the order it processes",
+                                              juce::dontSendNotification);
+                        chainList.updateContent();
+                    }
+
+                    if (! locked && cells.channelClass.contains (event.x, event.y))
+                        chooseClass (channel);
+                    else if (! locked && cells.take.contains (event.x, event.y))
+                        chooseTake (channel);
+
+                    updateButtons();
+                    channelList.repaint();
+                    chainList.repaint();
+                    return;
+                }
+
+                const auto& entry = pickedChannel()->chain[static_cast<std::size_t> (row)];
+
+                if (! locked && send && event.x >= widthOf (event, chainList) - 8 - crossWidth)
+                {
+                    send (gesture::deleteObject (entry.id));
+                    return;
+                }
+
+                pickedPluginId = entry.id;
+
+                if (! locked && pickedChannel()->samples()
+                      && sideCell (widthOf (event, chainList), chainList.getRowHeight()).contains (event.x, event.y))
+                    chooseSide (entry);
+
+                updateButtons();
+                chainList.repaint();
+            }
+
+            void doubleClicked (Which which, int row, const juce::MouseEvent& event)
+            {
+                if (which != Which::channels || locked || row < 0 || row >= rowsIn (which))
+                    return;
+
+                const auto cells = channelCells (widthOf (event, channelList), channelList.getRowHeight());
+
+                if (! cells.name.contains (event.x, event.y))
+                    return;
+
+                auto place = channelList.getRowPosition (row, true);
+                place.translate (channelList.getX(), channelList.getY());
+
+                editingId = rack.channels[static_cast<std::size_t> (row)].id;
+
+                nameEditor.setBounds (cells.name.translated (place.getX(), place.getY()));
+                nameEditor.setText (juce::String (rack.channels[static_cast<std::size_t> (row)].name),
+                                    juce::dontSendNotification);
+                nameEditor.setVisible (true);
+                nameEditor.showEditor();
+            }
+
+            void commitName()
+            {
+                const auto typed = nameEditor.getText().trim().toStdString();
+                const auto id = editingId;
+
+                editingId.clear();
+                nameEditor.setVisible (false);
+
+                if (id.empty() || typed.empty() || ! send)
+                    return;
+
+                send (gesture::setNode ("/godot/slot/" + id + "/name", typed));
+            }
+
+            void commitBudget()
+            {
+                if (locked || ! send)
+                    return;
+
+                /*  A COMMA IS A DECIMAL POINT HERE: somebody in a French booth
+                    types 2,5 - and the engine reads its own text, never the
+                    locale's, so the comma becomes the point it means. */
+                const auto typed = budget.getText().trim().replaceCharacter (',', '.').toStdString();
+
+                if (typed.empty() || std::abs (osc::parseDouble (typed).value_or (-1.0) - rack.budgetMs) < 1.0e-9)
+                    return;
+
+                send (gesture::setNode ("/godot/audio/rackBudget", typed));
+            }
+
+            void chooseClass (const model::RackChannelRow& channel)
+            {
+                juce::PopupMenu menu;
+                const std::pair<const char*, const char*> classes[] = {
+                    { "mono", "Mono - mono in, mono out" },
+                    { "monoToStereo", "Mono to stereo - mono in, stereo out" },
+                    { "stereo", "Stereo - stereo in, stereo out" } };
+
+                for (int at = 0; at < 3; ++at)
+                    menu.addItem (at + 1, classes[at].second, true, channel.channelClass == classes[at].first);
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&channelList),
+                                    [safe = juce::Component::SafePointer<RackPage> (this), id = channel.id,
+                                     was = channel.channelClass] (int chosen)
+                                    {
+                                        const char* words[] = { "", "mono", "monoToStereo", "stereo" };
+
+                                        if (safe == nullptr || chosen <= 0 || chosen > 3 || ! safe->send
+                                              || was == words[chosen])
+                                            return;
+
+                                        safe->send (gesture::setNode ("/godot/slot/" + id + "/class", words[chosen]));
+                                    });
+            }
+
+            /*  THE RECORDER'S MENU (Phase 9c, namespace draft §19.2): none, or
+                the longest take it records, and how many layers it keeps on
+                top. Both are memory the graph sets aside at Load now. */
+            void chooseTake (const model::RackChannelRow& channel)
+            {
+                static constexpr double lengths[] = { 0.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0 };
+                static constexpr int layerCounts[] = { 1, 2, 4, 8, 16 };
+
+                juce::PopupMenu menu;
+
+                for (int at = 0; at < 7; ++at)
+                    menu.addItem (at + 1, at == 0 ? juce::String ("No recorder")
+                                                  : "Records up to " + juce::String (model::secondsWords (lengths[at])),
+                                  true, std::abs (channel.takeSeconds - lengths[at]) < 1.0e-9);
+
+                juce::PopupMenu layers;
+
+                for (int at = 0; at < 5; ++at)
+                    layers.addItem (100 + at, juce::String (layerCounts[at]) + (layerCounts[at] == 1 ? " layer" : " layers"),
+                                    true, channel.layers == layerCounts[at]);
+
+                menu.addSeparator();
+                menu.addSubMenu ("Layers on top of the take", layers, channel.samples());
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&channelList),
+                                    [safe = juce::Component::SafePointer<RackPage> (this), id = channel.id] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || ! safe->send)
+                                            return;
+
+                                        if (chosen >= 100 && chosen < 105)
+                                            safe->send (gesture::setNode ("/godot/slot/" + id + "/layers",
+                                                                          std::to_string (layerCounts[chosen - 100])));
+                                        else if (chosen <= 7)
+                                            safe->send (gesture::setNode ("/godot/slot/" + id + "/takeSeconds",
+                                                                          std::to_string (std::llround (lengths[chosen - 1]))));
+                                    });
+            }
+
+            /*  A PLUGIN'S SIDE (decision BZ): printed into the take, or heard as
+                it loops and changed without recording again. */
+            void chooseSide (const model::PluginRow& entry)
+            {
+                juce::PopupMenu menu;
+                menu.addItem (1, "Before the recorder - printed into the take", true, entry.side == "before");
+                menu.addItem (2, "After the player - heard as it loops", true, entry.side != "before");
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&chainList),
+                                    [safe = juce::Component::SafePointer<RackPage> (this), id = entry.id,
+                                     was = entry.side] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || ! safe->send)
+                                            return;
+
+                                        const std::string side = chosen == 1 ? "before" : "after";
+
+                                        if (side != was)
+                                            safe->send (gesture::setNode ("/godot/plugin/" + id + "/side", side));
+                                    });
+            }
+
+            /*  THIS MACHINE'S PLUGINS, as a menu under the button: the scan's
+                list, which the Plugins tab keeps. A long list is grouped by
+                maker, which is how somebody looks for one. */
+            void choosePlugin()
+            {
+                const auto* channel = pickedChannel();
+
+                if (channel == nullptr || locked || ! send)
+                    return;
+
+                juce::PopupMenu menu;
+
+                if (known.empty())
+                    menu.addItem (-1, "Nothing scanned yet: scan on the Plugins tab.", false);
+                else if (known.size() <= 24)
+                {
+                    for (std::size_t at = 0; at < known.size(); ++at)
+                        menu.addItem (static_cast<int> (at) + 1,
+                                      juce::String (known[at].name) + "  (" + juce::String (known[at].format) + ")");
+                }
+                else
+                {
+                    std::map<std::string, juce::PopupMenu> makers;
+
+                    for (std::size_t at = 0; at < known.size(); ++at)
+                        makers[known[at].manufacturer.empty() ? std::string ("Unknown maker") : known[at].manufacturer]
+                            .addItem (static_cast<int> (at) + 1,
+                                      juce::String (known[at].name) + "  (" + juce::String (known[at].format) + ")");
+
+                    for (auto& [maker, items] : makers)
+                        menu.addSubMenu (juce::String (maker), items);
+                }
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addPlugin),
+                                    [safe = juce::Component::SafePointer<RackPage> (this), channelId = channel->id] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || ! safe->send
+                                              || chosen > static_cast<int> (safe->known.size()))
+                                            return;
+
+                                        const auto& k = safe->known[static_cast<std::size_t> (chosen - 1)];
+                                        safe->send (gesture::createChannelPlugin (channelId, k.name, k.identifier,
+                                                                                  k.format, k.path));
+                                    });
+            }
+
+            /*  THE CHOOSER IS A MEMBER because launchAsync returns at once; the
+                answer copies the file into the bundle's plugins/ folder and
+                names it on the row, as the Plugins tab does. */
+            void choosePreset()
+            {
+                const auto at = pluginIndex (pickedPluginId);
+
+                if (at < 0 || bundlePath.empty() || locked)
+                    return;
+
+                const auto entry = pickedChannel()->chain[static_cast<std::size_t> (at)];
+                chooser = std::make_unique<juce::FileChooser> ("A preset for " + entry.name, juce::File(),
+                                                               "*.vstpreset;*.preset;*");
+
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                      [safe = juce::Component::SafePointer<RackPage> (this), entry] (const juce::FileChooser& answered)
+                                      {
+                                          if (safe == nullptr)
+                                              return;
+
+                                          const auto file = answered.getResult();
+
+                                          if (! file.existsAsFile())
+                                              return;
+
+                                          const auto folder = juce::File (juce::String (safe->bundlePath)).getChildFile ("plugins");
+                                          folder.createDirectory();
+                                          const auto copy = folder.getChildFile (file.getFileName());
+
+                                          if (! file.copyFileTo (copy) || ! safe->send)
+                                              return;
+
+                                          safe->send (gesture::setNode ("/godot/plugin/" + entry.id + "/preset",
+                                                                        file.getFileName().toStdString()));
+                                      });
+            }
+
+            //==========================================================================
+            /*  A CHAIN IS REORDERED BY DRAGGING, as the inputs are: the row's
+                id, tagged so that nothing else dropped here is mistaken for it. */
+            juce::var dragOf (Which which, const juce::SparseSet<int>& selected) const
+            {
+                if (which != Which::chain || locked || selected.isEmpty())
+                    return {};
+
+                const auto row = selected[0];
+
+                if (row < 0 || row >= rowsIn (Which::chain))
+                    return {};
+
+                return juce::var ("plugin:" + juce::String (pickedChannel()->chain[static_cast<std::size_t> (row)].id));
+            }
+
+            bool isInterestedInDragSource (const SourceDetails& details) override
+            {
+                return ! locked && details.description.toString().startsWith ("plugin:");
+            }
+
+            void itemDragMove (const SourceDetails& details) override
+            {
+                const auto row = dropRowAt (details.localPosition);
+
+                if (row != dropRow)
+                {
+                    dropRow = row;
+                    repaint();
+                }
+            }
+
+            void itemDragExit (const SourceDetails&) override
+            {
+                dropRow = -1;
+                repaint();
+            }
+
+            void itemDropped (const SourceDetails& details) override
+            {
+                const auto row = dropRowAt (details.localPosition);
+                const auto id = details.description.toString().fromFirstOccurrenceOf ("plugin:", false, false).toStdString();
+
+                dropRow = -1;
+                repaint();
+
+                const auto from = pluginIndex (id);
+
+                if (locked || ! send || from < 0 || row < 0)
+                    return;
+
+                /*  WHERE IT ENDS UP, counting the others: `object.move` within
+                    one parent leaves the child at the index it is given. */
+                const auto to = row > from ? row - 1 : row;
+
+                if (to != from)
+                    send (gesture::moveObject (id, pickedChannelId, to));
+            }
+
+            int dropRowAt (juce::Point<int> where) const
+            {
+                if (! chainList.getBounds().expanded (0, rowHeight / 2).contains (where))
+                    return -1;
+
+                const auto inList = where.y - chainList.getY() + chainList.getViewport()->getViewPositionY();
+                const auto height = juce::jmax (1, chainList.getRowHeight());
+
+                return juce::jlimit (0, rowsIn (Which::chain), (inList + height / 2) / height);
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+            model::RackReading rack;
+            std::vector<model::KnownPluginRow> known;
+            std::string bundlePath;
+            bool locked = false;
+            bool changed = false;
+            std::string busy;
+            std::string pickedChannelId, pickedPluginId, editingId;
+            int channelsWhenAdded = -1;
+            int dropRow = -1;
+            Lister channelLister, chainLister;
+            juce::ListBox channelList, chainList;
+            juce::Label channelHeading, chainHeading, budgetLabel, budgetUnit, said, nameEditor;
+            juce::TextEditor budget;
+            juce::TextButton addMono { "+ Mono" }, addWide { "+ Mono to stereo" }, addStereo { "+ Stereo" },
+                             addPlugin { "Add..." }, presetButton { "Preset file..." }, restartButton { "Restart" },
+                             loadButton { "Load now" };
             std::unique_ptr<juce::FileChooser> chooser;
         };
     }
@@ -3220,6 +4597,41 @@ namespace wfg::client::ui
         {
             initial = audio::readAudioSettings ([&] (const std::string& name)
             { return model::text (snapshot, "/godot/audio/" + name); });
+
+            /*  THE DEVICE THAT IS OPEN, WHEN THE SHOW NAMES NONE (author,
+                2026-09-25: "the settings panel show the system default" while
+                the session ran on the MADIface). A device given on the command
+                line (`--device`) is opened without being written into the show,
+                so a show with no settings of its own read back here as the
+                system default with the interface switched off - and Apply, as
+                shown, closed the very device that was playing. The form starts
+                from what is running instead, found by name among the drivers
+                (names only: no second device is opened to look), and the
+                status line says so; Apply and save then keep it with the show. */
+            const auto running = model::text (snapshot, "/godot/audio/device");
+
+            if (! initial.enabled && initial.outputDevice.empty() && ! running.empty()
+                  && model::text (snapshot, "/godot/audio/status") == "running")
+            {
+                for (auto* deviceType : devices.getAvailableDeviceTypes())
+                {
+                    deviceType->scanForDevices();
+
+                    if (deviceType->getDeviceNames (false).contains (juce::String (running)))
+                    {
+                        initial.enabled = true;
+                        initial.deviceType = deviceType->getTypeName().toStdString();
+                        initial.outputDevice = running;
+                        runningNotSaved = true;
+                        break;
+                    }
+                }
+
+                if (const auto granted = juce::String (model::text (snapshot, "/godot/audio/actualBufferSize")).getIntValue();
+                    runningNotSaved && granted > 0)
+                    initial.bufferSize = granted;
+            }
+
             readCapabilities (snapshot);
             std::vector<int> in, out;
             audio::readPatch (initial.inputPatch, in); audio::readPatch (initial.outputPatch, out);
@@ -3235,13 +4647,15 @@ namespace wfg::client::ui
                                                              : audio::identityPatch (2);
             if (out.empty()) out = audio::identityPatch (minimumOutputs);
             out.resize (std::max (out.size(), static_cast<std::size_t> (minimumOutputs)), -1);
-            inputs = std::make_unique<PatchPage> (theme, true, in, 0);
-            outputs = std::make_unique<PatchPage> (theme, false, out, minimumOutputs, send);
+            inputs = std::make_unique<PatchPage> (theme, true, in, send);
+            outputs = std::make_unique<PatchPage> (theme, false, out, send);
             outputList = std::make_unique<OutputPage> (theme, send);
+            inputList = std::make_unique<InputPage> (theme, send);
             network = std::make_unique<NetworkPage> (theme, send);
             midi = std::make_unique<MidiPage> (theme, send);
             surfaces = std::make_unique<SurfacesPage> (theme, send);
             plugins = std::make_unique<PluginsPage> (theme, send);
+            rackPage = std::make_unique<RackPage> (theme, send);
 
             /*  THE FIRST HAND EDIT OF THE OUTPUT PATCH IS WHAT SETTLES IT
                 (PRD §6.2). Sent BEFORE the edit lands, so that the engine's own
@@ -3264,6 +4678,23 @@ namespace wfg::client::ui
                 send (gesture::setPatchSettled (false));
             };
 
+            /*  AND THE INPUT PATCH THE SAME WAY (Phase 9b): it follows the
+                named inputs until the first hand edit, and 1:1 hands it back. */
+            inputs->edited = [this]
+            {
+                if (! inputSettled)
+                {
+                    inputSettled = true;
+                    send (gesture::setInputPatchSettled (true));
+                }
+            };
+
+            inputs->follow = [this]
+            {
+                inputSettled = false;
+                send (gesture::setInputPatchSettled (false));
+            };
+
             addAndMakeVisible (tabs);
             const auto background = Look::colour (theme, "panel");
             /*  "Audio" and not "Interface", since this window stopped being
@@ -3272,6 +4703,10 @@ namespace wfg::client::ui
                 better than one named after a word both could use. */
             tabs.addTab ("Audio", background, &interfacePage, false);
             tabs.addTab ("Outputs", background, outputList.get(), false);
+
+            /*  BESIDE THE OUTPUTS: the other side of the interface, named the
+                same way and read the same way (Phase 9b). */
+            tabs.addTab ("Inputs", background, inputList.get(), false);
             tabs.addTab ("Input patch", background, inputs.get(), false);
             tabs.addTab ("Output patch", background, outputs.get(), false);
             tabs.addTab ("Network", background, network.get(), false);
@@ -3284,6 +4719,10 @@ namespace wfg::client::ui
             /*  AFTER SURFACES: the set is what a cue's FX switches in, and the
                 tab is where a plugin is declared before a cue can (Phase 9a). */
             tabs.addTab ("Plugins", background, plugins.get(), false);
+
+            /*  AFTER PLUGINS: a channel's chain is made of what the machine's
+                scan found, and the scan is on the tab before (Phase 9b). */
+            tabs.addTab ("Rack", background, rackPage.get(), false);
             for (auto* component : std::initializer_list<juce::Component*> { &enabled, &type, &output, &input,
                      &buffer, &typeLabel, &outputLabel, &inputLabel, &bufferLabel, &rate, &explanation, &rescan })
                 interfacePage.addAndMakeVisible (*component);
@@ -3293,7 +4732,7 @@ namespace wfg::client::ui
             inputLabel.setText ("Input interface", juce::dontSendNotification);
             bufferLabel.setText ("Buffer size", juce::dontSendNotification);
             buffer.setTooltip ("Use the device default, a supported size from the active interface, or enter a requested size in samples.");
-            explanation.setText ("Sample rate follows the interface clock.\nInput patching supplies the engine's inputs; live-input monitoring and rack processing are not available yet.", juce::dontSendNotification);
+            explanation.setText ("Sample rate follows the interface clock.\nName the show's inputs on the Inputs tab; the input patch maps them to the interface's channels.", juce::dontSendNotification);
             explanation.setJustificationType (juce::Justification::topLeft);
             type.onChange = [this] { fillDevices ({}, {}); };
             output.onChange = [this] { capabilities(); };
@@ -3309,6 +4748,11 @@ namespace wfg::client::ui
             cancel.onClick = std::move (close);
             setSize (880, 610);
             refresh (snapshot);
+
+            if (runningNotSaved)
+                status.setText ("This session opened " + juce::String (running) + " from the command line; the show's"
+                                " own settings name no interface. Apply and save to keep it with the show.",
+                                juce::dontSendNotification);
         }
 
         void refresh (const tree::TreeSnapshot& snapshot)
@@ -3330,11 +4774,25 @@ namespace wfg::client::ui
                 outputList->show (rows, settled, ! lockedShow, hardware,
                                   juce::String (model::text (snapshot, "/godot/audio/tracks")).getIntValue());
 
-                /*  Unconditional: `setOutputs` reads the draft back before it
+                /*  Unconditional: `setListRows` reads the draft back before it
                     redraws, so a rename reaches the rows without disturbing a
                     patch somebody is halfway through. */
-                outputs->setOutputs (model::channelLabels (rows, 0),
-                                     model::outputChannelCount (rows));
+                outputs->setListRows (model::channelLabels (rows, 0),
+                                      model::outputChannelCount (rows));
+            }
+
+            /*  THE NAMED INPUTS, read every pass like the outputs, with their
+                meters - which is why this list is refreshed with the window
+                rather than when the show changes. The same rows name the input
+                patch's rows and set how many there are (Phase 9b). */
+            {
+                const auto rows = model::readInputs (snapshot);
+                const auto lockedShow = model::isYes (model::flag (snapshot, "/godot/document/locked"));
+
+                inputSettled = model::inputPatchHasSettled (snapshot);
+                inputs->setSettled (inputSettled);
+                inputList->show (rows, inputSettled, ! lockedShow);
+                inputs->setListRows (model::inputChannelLabels (rows, 0), model::inputChannelCount (rows));
             }
             /*  THE DEVICES ARE THE DOCUMENT'S, so they are re-read every pass
                 like the outputs above them rather than held as a draft:
@@ -3372,7 +4830,18 @@ namespace wfg::client::ui
                 comes up or goes down. */
             plugins->show (model::readKnownPlugins (snapshot), model::readPluginSet (snapshot),
                            model::text (snapshot, "/godot/document/path"),
-                           ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+                           ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
+                           model::readScan (snapshot), model::readSkippedPlugins (snapshot),
+                           model::readSetChanged (snapshot), model::busyWords (snapshot));
+
+            /*  THE RACK, re-read every pass for the same reason: its channels
+                and chains are the document's, and its plugins' state words the
+                sandbox's. `changed` is the one flag both tabs' Load now reads -
+                a set or a rack that differs from the graph (Phase 9b). */
+            rackPage->show (model::readRack (snapshot), model::text (snapshot, "/godot/audio/rackBudget"),
+                            model::readKnownPlugins (snapshot), model::text (snapshot, "/godot/document/path"),
+                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
+                            model::readSetChanged (snapshot), model::busyWords (snapshot));
 
             if (readCapabilities (snapshot)) capabilities();
             const auto state = model::text (snapshot, "/godot/audio/settingsStatus");
@@ -3527,7 +4996,7 @@ namespace wfg::client::ui
                         if (size.getIntValue() > 0) buffer.addItem (size, id++);
                 }
             }
-            explanation.setText ("Sample rate follows the interface clock. Channel counts update after applying the interface.\nInput patching supplies the engine's inputs; live-input monitoring and rack processing are not available yet.", juce::dontSendNotification);
+            explanation.setText ("Sample rate follows the interface clock. Channel counts update after applying the interface.\nName the show's inputs on the Inputs tab; the input patch maps them to the interface's channels.", juce::dontSendNotification);
             inputs->setHardware (numInputs); outputs->setHardware (numOutputs);
             buffer.setEditableText (true);
             buffer.setText (previous.isEmpty() ? "Device default" : previous, juce::dontSendNotification);
@@ -3564,11 +5033,16 @@ namespace wfg::client::ui
         juce::Component interfacePage;
         std::unique_ptr<PatchPage> inputs, outputs;
         std::unique_ptr<OutputPage> outputList;
+        std::unique_ptr<InputPage> inputList;
         std::unique_ptr<NetworkPage> network;
         std::unique_ptr<MidiPage> midi;
         std::unique_ptr<SurfacesPage> surfaces;
         std::unique_ptr<PluginsPage> plugins;
+        std::unique_ptr<RackPage> rackPage;
         bool settled = false;
+
+        /*  The input patch's own regime, the twin of `settled` (Phase 9b). */
+        bool inputSettled = false;
         juce::TabbedComponent tabs;
         juce::ComboBox type, output, input, buffer;
         juce::Label typeLabel, outputLabel, inputLabel, bufferLabel, rate, explanation, status;
@@ -3576,6 +5050,9 @@ namespace wfg::client::ui
         juce::TextButton rescan { "Rescan interfaces" }, apply { "Apply while stopped" }, cancel { "Close" };
         bool waiting = false, sawApplying = false, saveAfterApply = false, defaultsAfterApply = false;
         std::string errorCount, errorCountAtApply, sequence, sequenceAtApply;
+
+        /** The form was filled from the device that is open, not from the show's settings. */
+        bool runningNotSaved = false;
     };
 
     ShowSettingsWindow::ShowSettingsWindow (const model::Theme& theme, const tree::TreeSnapshot& snapshot,

@@ -93,16 +93,28 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/Solver.cpp
     wfg/engine/cue/SlotAnalysis.h
     wfg/engine/cue/SlotAnalysis.cpp
+    wfg/engine/cue/SamplerLayout.h
+    wfg/engine/cue/SamplerLayout.cpp
     wfg/engine/cue/RunCommands.h
     wfg/engine/cue/RunCommands.cpp
     wfg/engine/cue/Runner.h
     wfg/engine/cue/Runner.cpp
+    wfg/engine/cue/InsertChain.h
+    wfg/engine/cue/InsertChain.cpp
     wfg/engine/cue/CueList.h
     wfg/engine/cue/TriggerIndex.h
     wfg/engine/cue/TriggerIndex.cpp
     wfg/engine/cue/DcaTable.h
     wfg/engine/cue/LiveRows.h
     wfg/engine/cue/LiveRows.cpp
+    wfg/engine/cue/TakeTable.h
+    wfg/engine/cue/TakeTable.cpp
+    wfg/engine/cue/TakeCommands.h
+    wfg/engine/cue/TakeCommands.cpp
+    wfg/engine/cue/LiveEdits.h
+    wfg/engine/cue/LiveEdits.cpp
+    wfg/engine/cue/FxValues.h
+    wfg/engine/cue/FxValues.cpp
     wfg/engine/cue/FxRows.h
     wfg/engine/cue/FxRows.cpp
     wfg/engine/midi/MidiInputs.h
@@ -113,27 +125,48 @@ add_library(wfg_engine STATIC
     wfg/engine/midi/MidiSender.h
     wfg/engine/midi/PortTable.h
     wfg/engine/midi/MidiSender.cpp
+    wfg/engine/midi/PortBinder.h
+    wfg/engine/midi/PortBinder.cpp
     wfg/engine/surface/McuCodec.h
     wfg/engine/surface/McuCodec.cpp
     wfg/engine/surface/FaderCurve.h
     wfg/engine/surface/SurfaceProfile.h
     wfg/engine/surface/SurfaceProfile.cpp
+    wfg/engine/surface/SurfacePages.h
+    wfg/engine/surface/SurfacePages.cpp
     wfg/engine/surface/SurfaceBridge.h
     wfg/engine/surface/SurfaceBridge.cpp
     wfg/engine/surface/SurfaceTable.h
+    wfg/engine/surface/SurfaceCommands.h
+    wfg/engine/surface/SurfaceCommands.cpp
     wfg/engine/plugin/PluginTable.h
     wfg/engine/plugin/Catalogue.h
     wfg/engine/plugin/Catalogue.cpp
     wfg/engine/plugin/PluginScan.h
     wfg/engine/plugin/PluginScan.cpp
+    wfg/engine/plugin/KnownList.h
+    wfg/engine/plugin/ScanTable.h
+    wfg/engine/plugin/ScanJob.h
+    wfg/engine/plugin/ScanJob.cpp
     wfg/engine/plugin/ProcessUtil.h
+    wfg/engine/plugin/ChildLaunch.h
+    wfg/engine/plugin/ChildLaunch.cpp
     wfg/engine/plugin/SharedRegion.h
+    wfg/engine/plugin/LaneMapping.h
     wfg/engine/plugin/ProxyLane.h
     wfg/engine/plugin/ProxyLane.cpp
     wfg/engine/plugin/ProxyHost.h
     wfg/engine/plugin/ProxyHost.cpp
+    wfg/engine/plugin/TestGainState.h
+    wfg/engine/plugin/PluginLoad.h
+    wfg/engine/plugin/PluginLoad.cpp
     wfg/engine/plugin/PluginHostChild.h
     wfg/engine/plugin/PluginHostChild.cpp
+    wfg/engine/plugin/EditorRegion.h
+    wfg/engine/plugin/EditorHost.h
+    wfg/engine/plugin/EditorHost.cpp
+    wfg/engine/plugin/PluginEditorChild.h
+    wfg/engine/plugin/PluginEditorChild.cpp
     wfg/engine/plugin/PluginCommands.h
     wfg/engine/plugin/PluginCommands.cpp
     wfg/engine/audio/AudioCommands.h
@@ -143,11 +176,22 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/CueMatrix.h
     wfg/engine/audio/CueMatrix.cpp
     wfg/engine/audio/EqSettings.h
+    wfg/engine/audio/EqColours.h
     wfg/engine/audio/EqMath.h
     wfg/engine/audio/CueEq.h
     wfg/engine/audio/CueEq.cpp
     wfg/engine/audio/EqPlugin.h
     wfg/engine/audio/EqPlugin.cpp
+    wfg/engine/audio/LiveInputPlugin.h
+    wfg/engine/audio/LiveInputPlugin.cpp
+    wfg/engine/audio/Looper.h
+    wfg/engine/audio/Looper.cpp
+    wfg/engine/audio/LooperPlugin.h
+    wfg/engine/audio/LooperPlugin.cpp
+    wfg/engine/audio/TakePictures.h
+    wfg/engine/audio/TakePictures.cpp
+    wfg/engine/audio/TakeWriter.h
+    wfg/engine/audio/TakeWriter.cpp
     wfg/engine/audio/ProxyPlugin.h
     wfg/engine/audio/ProxyPlugin.cpp
     wfg/engine/audio/DeviceLayer.h
@@ -156,6 +200,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/MediaInfo.cpp
     wfg/engine/audio/Timbre.h
     wfg/engine/audio/Timbre.cpp
+    wfg/engine/audio/Peaks.h
+    wfg/engine/audio/Peaks.cpp
     wfg/engine/audio/MediaAnalyser.h
     wfg/engine/audio/MediaAnalyser.cpp
     wfg/engine/audio/CueOutputPlugin.h
@@ -191,6 +237,8 @@ add_library(wfg_engine STATIC
     wfg/engine/document/EphemeralState.h
     wfg/engine/document/FadePoints.cpp
     wfg/engine/document/FadePoints.h
+    wfg/engine/document/LevelLane.cpp
+    wfg/engine/document/LevelLane.h
     wfg/engine/document/Ids.cpp
     wfg/engine/document/Ids.h
     wfg/engine/document/OutputLayout.cpp
@@ -300,10 +348,14 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Media.cpp
     wfg/client/model/NewCue.h
     wfg/client/model/NewCue.cpp
+    wfg/client/model/NewCueMenus.h
+    wfg/client/model/NewCueMenus.cpp
     wfg/client/model/Foot.h
     wfg/client/model/Foot.cpp
     wfg/client/model/OutputList.h
     wfg/client/model/OutputList.cpp
+    wfg/client/model/InputList.h
+    wfg/client/model/InputList.cpp
     wfg/client/model/Ranges.h
     wfg/client/model/Ranges.cpp
     wfg/client/model/Curve.h
@@ -318,12 +370,20 @@ add_library(wfg_client_model STATIC
     wfg/client/model/DirectOuts.cpp
     wfg/client/model/Fader.h
     wfg/client/model/Fader.cpp
+    wfg/client/model/Lane.h
+    wfg/client/model/Lane.cpp
     wfg/client/model/Sends.h
     wfg/client/model/Sends.cpp
     wfg/client/model/Eq.h
     wfg/client/model/Eq.cpp
     wfg/client/model/Fx.h
     wfg/client/model/Fx.cpp
+    wfg/client/model/Rack.h
+    wfg/client/model/Rack.cpp
+    wfg/client/model/Take.h
+    wfg/client/model/Take.cpp
+    wfg/client/model/FxEditor.h
+    wfg/client/model/FxEditor.cpp
     wfg/client/model/Timeline.h
     wfg/client/model/Timeline.cpp
     wfg/client/model/View.h
@@ -383,6 +443,10 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/UndoPanelComponent.cpp
     wfg/client/ui/NewCueBarComponent.h
     wfg/client/ui/NewCueBarComponent.cpp
+    wfg/client/ui/NewCueMenu.h
+    wfg/client/ui/NewCueMenu.cpp
+    wfg/client/ui/LiveBarComponent.h
+    wfg/client/ui/LiveBarComponent.cpp
     wfg/client/ui/RangeTableComponent.h
     wfg/client/ui/RangeTableComponent.cpp
     wfg/client/ui/RunPaneComponent.h
@@ -393,6 +457,12 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/SendMixerComponent.cpp
     wfg/client/ui/EqPanelComponent.h
     wfg/client/ui/EqPanelComponent.cpp
+    wfg/client/ui/FxPanelComponent.h
+    wfg/client/ui/FxPanelComponent.cpp
+    wfg/client/ui/TakePanelComponent.h
+    wfg/client/ui/TakePanelComponent.cpp
+    wfg/client/ui/PluginEditors.h
+    wfg/client/ui/PluginEditors.cpp
     wfg/client/ui/TimelineComponent.h
     wfg/client/ui/TimelineComponent.cpp
     wfg/client/ui/Shell.h

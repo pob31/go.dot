@@ -144,6 +144,11 @@ namespace wfg::midi
 
         void closeAll();
 
+        /*  CLOSES WHAT ONE DECLARED PORT LISTENS ON, so it can be opened again
+            on another device while the show runs (2026-09-25). The message
+            thread's, as opening is. */
+        void close (const std::string& portId);
+
     private:
         void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
 

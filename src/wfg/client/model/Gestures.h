@@ -41,7 +41,9 @@
 
 #include <wfg/engine/command/Event.h>
 
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::client::gesture
@@ -102,6 +104,21 @@ namespace wfg::client::gesture
     Event createCue (const std::string& parent, int index,
                      const std::string& kind, const std::string& name);
 
+    /*  AND BORN WITH ITS SETTINGS (2026-09-27): what a line of a new-cue
+        list chose - a timeline group, a stop aimed at a cue - as `attribute
+        value` pairs after an EMPTY identifier, which the engine fills with the
+        one it draws. One record, one Undo. With no settings it is the plain
+        create above, so a log line is the same as it always was. */
+    Event createCue (const std::string& parent, int index,
+                     const std::string& kind, const std::string& name,
+                     const std::vector<std::pair<std::string, std::string>>& settings);
+
+    /*  A NEW GROUP AROUND THE PICKED CUES, born with its settings: the engine
+        puts it where the first of them stood, in their common container, and
+        moves them in in show order - one step (ShowDocument::groupSelection). */
+    Event wrapGroup (const std::vector<std::string>& cueIds,
+                     const std::vector<std::pair<std::string, std::string>>& settings);
+
     /*  Moves a cue or a group: a row dragged in the cue list (model/Reorder.h).
         `index` is a member position in `parent`, or -1 for the end. */
     Event moveObject (const std::string& id, const std::string& parent, int index);
@@ -125,22 +142,71 @@ namespace wfg::client::gesture
         project - so the panel finds what it made on the next pass. */
     Event createRange (const std::string& cueId, double in, double out);
 
-    /*  Gives a media cue a send into one mix channel. The level follows as an
-        ordinary `node.set` once the object exists, which is why this carries
-        none: there is one way values are written. */
-    Event createSend (const std::string& cueId, const std::string& busId);
+    /*  Gives a media cue a send into one mix channel, born at `level` when one
+        is given - the level a hand raising a silent fader asked for, so the
+        voice never passes through the row's default of nought on its way
+        there (2026-09-25). Later moves are ordinary `node.set`s. */
+    Event createSend (const std::string& cueId, const std::string& busId,
+                      std::optional<double> level = std::nullopt);
 
     /*  PHASE 9a, PR 9a.9: an insert on a media cue - one entry of the show's
         set switched in, made by the first switch on the FX panel; an entry
         declared in the set from the machine's known list, with the four words
         a replay needs; and a fresh child for an entry that failed. */
     Event createFx (const std::string& cueId, const std::string& pluginId);
+
+    /*  A plugin's whole state kept with a cue (author, 2026-09-25): the file
+        its editing helper wrote under the bundle's plugins/, and every
+        parameter's value, in one step. */
+    Event captureFx (const std::string& fxId, const std::string& stateFile, const std::string& values);
     Event createPlugin (const std::string& name, const std::string& identifier,
                         const std::string& format, const std::string& path);
     Event restartPlugin (const std::string& pluginId);
 
+    /*  THE APP'S PLUGIN SCAN (2026-09-26): `plugin.scan` - every format for
+        an empty word, or vst3 / au / lv2, and a folder to search too -
+        `plugin.scanRetry` for one skipped file, and `plugin.load`, which
+        rebuilds the audio graph with the set as it stands (Load now). */
+    Event scanPlugins (const std::string& formatWord = {}, const std::string& folder = {});
+    Event retryScan (const std::string& file);
+    Event loadPlugins();
+
+    /*  THE LIVE RACK (Phase 9b, namespace draft §18.3): `channel.create`, a
+        channel of a class - mono, monoToStereo or stereo - and
+        `channel.plugin`, a known plugin at the end of a channel's chain with
+        the four words a replay needs. A chain is reordered with `object.move`
+        into its channel, and emptied with `object.delete`, as anything is. */
+    Event createRackChannel (const std::string& channelClass);
+    Event createChannelPlugin (const std::string& channelId, const std::string& name,
+                               const std::string& identifier, const std::string& format,
+                               const std::string& path);
+
     /** `eq.reset`: a media cue's EQ back to flat, one transaction (Phase 9a). */
     Event eqReset (const std::string& cueId);
+
+    /*  `take.<verb> <channel>`: a press on a sampling channel's take from the
+        take panel (Phase 9c) - record, loop, overdub, undo or clear, the same
+        five the D700's Rec and a transport cue press. */
+    Event takePress (const std::string& verb, const std::string& channelId);
+
+    /*  `take.keep <channel> <asCue> <after>`: the take made a file in the
+        show's media, and with `asCue` a media cue after `afterCue` that loops
+        it (Phase 9c, §19.8). */
+    Event takeKeep (const std::string& channelId, bool asCue, const std::string& afterCue);
+
+    /*  `surface.aim`: the cue a surface's rotaries edit on their EQ and Send
+        pages (author, 2026-09-25) - a click on a running cue's name. Empty
+        lets go. */
+    Event aimSurfaces (const std::string& cueId);
+
+    /*  `surface.dial`: the number a click or a touch put on the surfaces'
+        master dial (author, 2026-09-26), by its address. Empty frees it. */
+    Event dial (const std::string& address);
+
+    /*  What a locked show rode live, kept in the show as one undo step, or
+        let go of (2026-09-25): the two buttons of the window's bar. */
+    Event keepLive();
+    Event dropLive();
 
     /*  Cuts one of a media cue's ranges in two where the playhead is. One
         command rather than a create, a shortening and a reorder, so it is one
@@ -201,6 +267,16 @@ namespace wfg::client::gesture
     Event deleteBus (const std::string& busId);
     Event moveBus (const std::string& busId, int index);
     Event setBusWidth (const std::string& busId, int width);
+
+    /*  THE NAMED INPUTS (Phase 9b): the buses' gestures for the other side of
+        the interface, with the same index convention. */
+    Event createInput (int width, int index);
+    Event deleteInput (const std::string& inputId);
+    Event moveInput (const std::string& inputId, int index);
+
+    /*  The input patch's flag, the output patch's twin: true at the first hand
+        edit, false when the 1:1 button hands the inputs back to the list. */
+    Event setInputPatchSettled (bool settled);
 
     /*  A DEVICE THIS SHOW TALKS TO, declared at a prefix.
 

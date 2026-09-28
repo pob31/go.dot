@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/plugin/ProxyHost.h>
+#include <wfg/engine/plugin/ChildLaunch.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
 
 #include <juce_core/juce_core.h>
@@ -25,115 +26,6 @@
 
 namespace wfg::plugin
 {
-    namespace
-    {
-        /*  THE CHILD, LAUNCHED WITHOUT INHERITING A HANDLE. JUCE's ChildProcess
-            creates a Windows process with handle inheritance ON, and a socket
-            is an inheritable handle: the first hosted serve on this machine
-            handed its HTTP sockets to the plugin child, and every client
-            waiting for the server to close a connection waited for a process
-            that never would. So on Windows the child is created here, with
-            inheritance off and no console window; on the other platforms
-            JUCE's fork-and-exec is used, where the sockets carry
-            close-on-exec. What the host needs of either is three things:
-            whether it is running, its pid, and ending it. */
-        struct ChildHandle
-        {
-            ChildHandle() = default;
-            ~ChildHandle() { close(); }
-
-            ChildHandle (const ChildHandle&) = delete;
-            ChildHandle& operator= (const ChildHandle&) = delete;
-
-            bool start (const juce::StringArray& command)
-            {
-               #if JUCE_WINDOWS
-                juce::String line;
-
-                for (const auto& word : command)
-                {
-                    if (line.isNotEmpty())
-                        line += " ";
-
-                    if (word.isEmpty() || word.containsAnyOf (" \t\""))
-                        line += "\"" + word.replace ("\"", "\\\"") + "\"";
-                    else
-                        line += word;
-                }
-
-                std::vector<wchar_t> mutableLine (line.toWideCharPointer(),
-                                                  line.toWideCharPointer() + line.length() + 1);
-
-                STARTUPINFOW startup {};
-                startup.cb = sizeof (startup);
-                PROCESS_INFORMATION info {};
-
-                if (! ::CreateProcessW (nullptr, mutableLine.data(), nullptr, nullptr, FALSE,
-                                        CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
-                                        nullptr, nullptr, &startup, &info))
-                    return false;
-
-                ::CloseHandle (info.hThread);
-                handle = info.hProcess;
-                pid = static_cast<std::int64_t> (info.dwProcessId);
-                return true;
-               #else
-                process = std::make_unique<juce::ChildProcess>();
-
-                if (! process->start (command, 0))
-                {
-                    process.reset();
-                    return false;
-                }
-
-                pid = 0;
-                return true;
-               #endif
-            }
-
-            bool isRunning() const
-            {
-               #if JUCE_WINDOWS
-                return handle != nullptr && ::WaitForSingleObject (handle, 0) == WAIT_TIMEOUT;
-               #else
-                return process != nullptr && process->isRunning();
-               #endif
-            }
-
-            void kill()
-            {
-               #if JUCE_WINDOWS
-                if (handle != nullptr)
-                    ::TerminateProcess (handle, 1);
-               #else
-                if (process != nullptr)
-                    process->kill();
-               #endif
-            }
-
-            void close()
-            {
-               #if JUCE_WINDOWS
-                if (handle != nullptr)
-                {
-                    ::CloseHandle (handle);
-                    handle = nullptr;
-                }
-               #else
-                process.reset();
-               #endif
-            }
-
-            std::int64_t pid = 0;
-
-           #if JUCE_WINDOWS
-            HANDLE handle = nullptr;
-           #else
-            std::unique_ptr<juce::ChildProcess> process;
-           #endif
-        };
-    }
-
     std::int64_t proxyDeadlineFor (int sampleRate, int blockSize, std::int64_t requestedMicroseconds) noexcept
     {
         if (requestedMicroseconds > 0)
@@ -180,13 +72,29 @@ namespace wfg::plugin
             status.problem = problem;
             status.latencySamples = latencySamples;
             status.paramCount = paramCount;
+            status.stateLoadMs = stateLoadMs;
+            status.stateProblem = stateProblem;
+            status.inputs = inputs;
+            status.outputs = outputs;
+            status.layout = layout;
             return status;
         }
 
         /** Writes the table and tells the tree, when something a reader could see moved. */
         void publish()
         {
-            if (table != nullptr && table->set (spec.pluginId, statusNow()) && changed)
+            if (table == nullptr)
+                return;
+
+            const auto status = statusNow();
+            auto moved = table->set (spec.pluginId, status);
+
+            /*  And every other entry it stands for, each the same: one child,
+                one truth about it (Phase 9b). */
+            for (const auto& id : spec.alsoIds)
+                moved = table->set (id, status) || moved;
+
+            if (moved && changed)
                 changed();
         }
 
@@ -293,6 +201,7 @@ namespace wfg::plugin
                 {
                     lane->setCallEnabled (false);
                     lane->clearMisses();
+                    lane->forgetState();
                 }
 
             juce::StringArray command;
@@ -328,9 +237,14 @@ namespace wfg::plugin
 
             /*  No pipes for its output: nothing reads them, and a full pipe
                 is what hangs a child that prints. */
-            child = std::make_unique<ChildHandle>();
+            std::vector<std::string> words;
 
-            if (! child->start (command))
+            for (const auto& word : command)
+                words.push_back (word.toStdString());
+
+            child = std::make_unique<ChildLaunch>();
+
+            if (! child->start (words))
             {
                 child.reset();
                 why = "could not start the plugin host process " + command[0].toStdString();
@@ -392,31 +306,50 @@ namespace wfg::plugin
             if (failures.size() == 1)
             {
                 restartDueAt = std::max<std::uint32_t> (1, now + static_cast<std::uint32_t> (restartDelayMs));
-                problem += "; every voice plays dry through it; restarting in two seconds";
+                problem += "; " + (spec.silentWords.empty() ? std::string ("every voice using it is silent until it is back")
+                                                            : spec.silentWords)
+                         + "; restarting in two seconds";
             }
             else
             {
                 restartDueAt = 0;
-                problem += "; every voice plays dry through it; failed again inside a minute, so it stays"
-                           " down until plugin.restart";
+                problem += "; " + (spec.silentWords.empty() ? std::string ("every voice using it is silent until it is back")
+                                                            : spec.silentWords)
+                         + "; failed again inside a minute, so it stays down until plugin.restart";
             }
 
             publish();
 
             if (failed)
+            {
                 failed (spec.pluginId, problem);
+
+                for (const auto& id : spec.alsoIds)
+                    failed (id, problem);
+            }
         }
 
         void becomeLoaded()
         {
             latencySamples = static_cast<int> (header->latencySamples.load (std::memory_order_relaxed));
+            reportedLatency = latencySamples;
+            inputs = static_cast<int> (header->inputs.load (std::memory_order_relaxed));
+            outputs = static_cast<int> (header->outputs.load (std::memory_order_relaxed));
+            header->layout[region::problemChars - 1] = 0;
+            layout = header->layout;
+            laneLatency.assign (lanes.size(), 0);
             paramCount = static_cast<int> (std::min<std::uint32_t> (header->paramCount.load (std::memory_order_relaxed),
                                                                     static_cast<std::uint32_t> (region::maxParams)));
 
+            /*  EACH LANE GIVEN BACK THE STATE IT HELD (CU), counted before it
+                is called again: a voice that was sounding stays silent until
+                the new child holds its cue's state, then fades back in where
+                the cue has got to. */
             for (auto* lane : lanes)
                 if (lane != nullptr)
                 {
                     lane->clearMisses();
+                    lane->restoreState();
                     lane->setCallEnabled (true);
                 }
 
@@ -493,7 +426,9 @@ namespace wfg::plugin
                     if (lane->consecutiveMisses() >= static_cast<std::uint32_t> (ProxyLane::missesBeforeFailure))
                     {
                         fail ("the plugin stopped answering: " + std::to_string (ProxyLane::missesBeforeFailure)
-                              + " blocks late in a row on voice " + std::to_string (i + 1));
+                              + " blocks late in a row on "
+                              + (i < spec.laneWords.size() ? spec.laneWords[i]
+                                                           : "voice " + std::to_string (i + 1)));
                         return;
                     }
                 }
@@ -501,7 +436,50 @@ namespace wfg::plugin
                 header->wantSpin.store (anyEnabled ? 1u : 0u, std::memory_order_relaxed);
 
                 if (child == nullptr || ! child->isRunning())
+                {
                     fail ("the plugin host process died");
+                    return;
+                }
+
+                /*  A CUE'S WHOLE STATE onto each voice that is asked for one
+                    (the author's decision of 2026-09-25), one in flight a
+                    lane, the child's answer read back: how long it took, and
+                    why it could not. A child that has been loading one for
+                    five seconds is hung, and failed like any other. */
+                for (std::size_t index = 0; index < lanes.size(); ++index)
+                {
+                    auto* lane = lanes[index];
+
+                    if (lane == nullptr)
+                        continue;
+
+                    const auto news = lane->serviceState (now);
+
+                    if (news.late)
+                    {
+                        fail ("a cue's state has been loading for more than five seconds: the plugin host is stuck");
+                        return;
+                    }
+
+                    if (news.arrived)
+                    {
+                        stateLoadMs = news.loadMs;
+                        stateProblem = news.failed ? news.problem : std::string();
+
+                        /*  THE LATENCY, the largest any voice's instance
+                            declares since its state (2026-09-26): a state can
+                            move a look-ahead. */
+                        if (index < laneLatency.size())
+                            laneLatency[index] = news.latencySamples;
+
+                        latencySamples = reportedLatency;
+
+                        for (const auto each : laneLatency)
+                            latencySamples = std::max (latencySamples, each);
+
+                        publish();
+                    }
+                }
 
                 return;
             }
@@ -559,12 +537,19 @@ namespace wfg::plugin
         bool catalogueRead = false;
         std::unique_ptr<juce::MemoryMappedFile> mapping;
         region::Header* header = nullptr;
-        std::unique_ptr<ChildHandle> child;
+        std::unique_ptr<ChildLaunch> child;
 
         State state = State::unloaded;
         std::string problem;
         int latencySamples = 0;
+        int reportedLatency = 0;
+        std::vector<int> laneLatency;
         int paramCount = 0;
+        int inputs = 0;
+        int outputs = 0;
+        std::string layout;
+        double stateLoadMs = 0.0;
+        std::string stateProblem;
         std::int64_t deadlineUs = ProxyLane::defaultDeadlineMicroseconds;
 
         std::uint32_t launchedAt = 0;
@@ -601,11 +586,16 @@ namespace wfg::plugin
 
         /*  MISSING IS ITS OWN WORD (§17.2): the show names a plugin this
             machine's scan does not know. No child is launched for it; the
-            entry says so, and every voice plays dry through the slot. */
-        if (impl->spec.descriptionXml.empty() && impl->spec.identifier != Catalogue::testGainIdentifier())
+            entry says so, and a cue that switches it in is silent (CU). Asked
+            once more first, since a scan may have found it since. */
+        if (impl->spec.descriptionXml.empty() && impl->spec.describe
+              && ! Catalogue::isTestIdentifier (impl->spec.identifier))
+            impl->spec.descriptionXml = impl->spec.describe (impl->spec.identifier);
+
+        if (impl->spec.descriptionXml.empty() && ! Catalogue::isTestIdentifier (impl->spec.identifier))
         {
             problem = "this machine's scan does not know " + impl->spec.identifier
-                        + "; run wfg plugins --scan, or install it";
+                        + "; scan for it in Show settings, Plugins, or install it";
             impl->state = Impl::State::missing;
             impl->problem = problem;
             impl->publish();
@@ -666,10 +656,16 @@ namespace wfg::plugin
 
     //==============================================================================
     const std::string& ProxyHost::pluginId() const noexcept     { return impl->spec.pluginId; }
+
+    bool ProxyHost::serves (const std::string& id) const noexcept
+    {
+        return id == impl->spec.pluginId
+                 || std::find (impl->spec.alsoIds.begin(), impl->spec.alsoIds.end(), id) != impl->spec.alsoIds.end();
+    }
     PluginTable::Status ProxyHost::status() const               { return impl->statusNow(); }
     std::string ProxyHost::regionPath() const                   { return impl->regionFile.getFullPathName().toStdString(); }
     bool ProxyHost::childIsRunning() const                      { return impl->child != nullptr && impl->child->isRunning(); }
-    std::int64_t ProxyHost::childPid() const noexcept           { return impl->child != nullptr ? impl->child->pid : 0; }
+    std::int64_t ProxyHost::childPid() const noexcept           { return impl->child != nullptr ? impl->child->pid() : 0; }
     std::int64_t ProxyHost::deadlineMicroseconds() const noexcept { return impl->deadlineUs; }
     region::Header* ProxyHost::header() noexcept                { return impl->header; }
 

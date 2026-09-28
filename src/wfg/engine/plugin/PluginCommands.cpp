@@ -16,20 +16,34 @@
 
 #include <wfg/engine/plugin/PluginCommands.h>
 
+#include <memory>
+
 namespace wfg::plugin
 {
     std::function<bool (const std::string& pluginId)> pluginKnownBy (const doc::ShowDocument& document)
     {
         return [&document] (const std::string& id)
         {
-            const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+            const auto audio = document.root().getChildWithName ("Audio");
 
-            for (const auto& entry : plugins)
+            for (const auto& entry : audio.getChildWithName ("Plugins"))
                 if (entry.hasType ("Plugin") && entry.getProperty ("id").toString().toStdString() == id)
                     return true;
 
+            /*  AND THE RACK'S (Phase 9b): a channel's plugins are hosted and
+                fail as the set's are, so their records are as known. */
+            for (const auto& channel : audio.getChildWithName ("Rack"))
+                for (const auto& entry : channel)
+                    if (entry.hasType ("Plugin") && entry.getProperty ("id").toString().toStdString() == id)
+                        return true;
+
             return false;
         };
+    }
+
+    std::function<bool()> showLockedBy (const doc::ShowDocument& document)
+    {
+        return [&document] { return document.isLocked(); };
     }
 
     void registerPluginCommands (CommandRegistry& registry, PluginTable& table, PluginCommandHooks hooks)
@@ -40,8 +54,8 @@ namespace wfg::plugin
         };
 
         registry.add ({ "plugin.failed",
-                        "The plugin's child died or stopped answering; every voice plays dry"
-                        " through it until it is restarted.",
+                        "The plugin's child died or stopped answering; every voice and channel"
+                        " that has it switched in is silent until it is back.",
                         { { "id", 's', false }, { "problem", 's', false } },
                         true,
                         [&table, known] (CommandContext&, const std::vector<osc::Value>& args)
@@ -81,6 +95,88 @@ namespace wfg::plugin
                                     return Outcome::rejected (problem.empty() ? "not-restartable" : problem);
                             }
 
+                            return Outcome::ok (args);
+                        } });
+
+        /*  THE SCAN'S STATE, the caller's or one of the commands' own - held
+            by a shared pointer so the lambdas below can share it whichever. */
+        std::shared_ptr<ScanTable> ownScans;
+        auto* scans = hooks.scans;
+
+        if (scans == nullptr)
+        {
+            ownScans = std::make_shared<ScanTable>();
+            scans = ownScans.get();
+        }
+
+        const auto refusal = [locked = hooks.locked, scans] () -> std::string
+        {
+            if (locked && locked())
+                return reason::locked;
+
+            if (scans->scanning())
+                return "scan-running";
+
+            return {};
+        };
+
+        registry.add ({ "plugin.scan",
+                        "Scans this machine for plugins, out of process: every format, or vst3, au or lv2,"
+                        " and a folder to search too. Refused while the show is locked and while a scan runs.",
+                        { { "format", 's', true }, { "folder", 's', true } },
+                        true,
+                        [refusal, scans, ownScans, scan = hooks.scan] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            (void) ownScans;   // held, so the table outlives the registration
+                            const auto word = args.empty() ? std::string {} : args[0].getString();
+
+                            if (! word.empty() && word != "vst3" && word != "au" && word != "lv2")
+                                return Outcome::rejected (reason::badValue);
+
+                            if (const auto why = refusal(); ! why.empty())
+                                return Outcome::rejected (why);
+
+                            scans->begin (word);
+
+                            if (scan)
+                                scan (word, {}, args.size() > 1 ? args[1].getString() : std::string {});
+
+                            return Outcome::ok (args);
+                        } });
+
+        registry.add ({ "plugin.scanRetry",
+                        "Scans one file an earlier scan gave up on, alone, taking it off the skip list."
+                        " Refused while the show is locked and while a scan runs.",
+                        { { "file", 's', false } },
+                        true,
+                        [refusal, scans, ownScans, scan = hooks.scan] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            (void) ownScans;   // held, so the table outlives the registration
+                            const auto file = args[0].getString();
+
+                            if (file.empty())
+                                return Outcome::rejected (reason::badValue);
+
+                            if (const auto why = refusal(); ! why.empty())
+                                return Outcome::rejected (why);
+
+                            scans->begin ({});
+
+                            if (scan)
+                                scan ({}, file, {});
+
+                            return Outcome::ok (args);
+                        } });
+
+        registry.add ({ "plugin.scanned",
+                        "The scan's child has gone: what the machine knows, how many files it gave up on,"
+                        " and why it failed, empty when it did not.",
+                        { { "found", 'i', false }, { "skipped", 'i', false }, { "problem", 's', false } },
+                        true,
+                        [scans, ownScans] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            (void) ownScans;
+                            scans->end (args[0].getInt32(), args[1].getInt32(), args[2].getString());
                             return Outcome::ok (args);
                         } });
     }

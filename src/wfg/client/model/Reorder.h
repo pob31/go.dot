@@ -30,8 +30,10 @@
     "aim at this one": the fade's target becomes the dragged cue. The middle
     band of a group means "into this one": the dragged cue goes to the end of
     the group's members. Everywhere else means "after this one", in the row's
-    own container - the same reading a dropped file gets, and for the same
-    reason: it is the one that needs no second gesture.
+    own container - the same reading a dropped file gets (`fileDropAt`), and
+    for the same reason: it is the one that needs no second gesture. A file
+    differs on one row: the name of an open group, which for a file is the
+    group's first place, since no header band is grown under it.
 
     THE INDEX IS `object.move`'S, which is a MEMBER POSITION in the list as it
     stands with the dragged cue still in it. Dropped after a member that is
@@ -136,6 +138,63 @@ namespace wfg::client::model
     /*  What letting go of `dragged` over `over` would do, `fraction` being how
         far down the row the pointer is (0 at the top, 1 at the bottom). */
     Drop dropFor (const Row& over, const Row& dragged, double fraction);
+
+    /*  LEAVING A GROUP BY ITS END (author, 2026-09-25: "It's hard to move a
+        cue out of group to place it right below it. It always gets moved back
+        into the group at the last position.").
+
+        The line under the last row drawn inside a group is also the line
+        above whatever follows the group, and how high the hand is cannot tell
+        "after this row" from "after the group this row ends". How far LEFT it
+        is can: the rails stand one indent apart, and `depth` is the level the
+        pointer is over. The answer is the row the drop lands after - the
+        deepest of the rows that end at `rows[at]`, the row itself and each
+        group it is the last row of, that is no deeper than `depth`. Never a
+        group the next row is still inside, so the choice never reaches
+        further out than the line on screen really is. */
+    const Row* endingAt (const std::vector<Row>& rows, std::size_t at, int depth);
+
+    /*  `dropFor` with that choice made: over a cue row's AFTER bands, the drop
+        lands after `endingAt`'s row; on a group's or a fade's middle band, and
+        on anything that is not a cue row, it is `dropFor` over the row itself.
+        `landed`, when given, is the depth the cue lands at - where the line
+        that shows it starts. */
+    Drop dropAtDepth (const std::vector<Row>& rows, std::size_t at, const Row& dragged,
+                      double fraction, int depth, int* landed = nullptr);
+
+    /*  WHERE A FILE DROPPED FROM OUTSIDE THE WINDOW MAKES ITS CUES (author,
+        2026-09-25: "Drag and dropping a media file on a group places the new
+        media cue after the group and requires moving it into the group
+        afterwards"). The file drop asked only which row was under the hand
+        and made the cues after it, in that row's container - so a group's own
+        row put them after the group, however open it was.
+
+        Now the row is read as a dragged row's is, in `cue.create`'s terms: a
+        parent and a MEMBER position, with nothing of the list taken out.
+
+          - The middle band of a group's row is INTO the group, at the end of
+            its members, the row lit - as for a dragged row.
+          - The rest of an OPEN group's row is its FIRST place. The line under
+            its name is drawn above its first member, so that is where the
+            cues go; they used to land after the whole group, out of sight.
+          - The rest of any other cue's row is AFTER it; under the last row of
+            a group, the hand's x says how far out, as `endingAt` says.
+          - A header, footer or persistent row, a band and a header line all
+            answer the end of their group's members, with no line drawn: a
+            create reaches members only, and a line would promise otherwise.
+
+        One file onto one media cue NAMES its file instead - the caller's to
+        tell first, since that needs the count of files. */
+    struct FileDrop
+    {
+        std::string parent;     ///< the list or group the cues are made in; empty makes none here
+        int index = -1;         ///< the member position of the first cue; -1 is the end
+        bool lit = false;       ///< drawn as the row lit rather than a line under it
+        int depth = -1;         ///< the depth the line starts at; -1 draws no line
+        std::string words;      ///< said while the file is in the air
+    };
+
+    FileDrop fileDropAt (const std::vector<Row>& rows, std::size_t at, double fraction, int depth);
 
     /*  The identifier of the one cue `text` names: by identifier, else by
         number, else by name. Empty when none does, or more than one. */

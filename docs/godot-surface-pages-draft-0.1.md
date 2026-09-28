@@ -10,6 +10,24 @@ section yet: what the author said is recorded as said, what is only proposed is 
 in another session**; the surface pages come after, on top of them. §8 is what the pages will need
 from that work, written so that session can provide it without having to guess.
 
+**Built, 2026-09-25: the EQ and Send pages on the D700** (and on a generic Mackie surface),
+specified by the author that evening and recorded as decisions AJ-AP in the namespace draft
+§17.14. What changed from what this draft proposed: the rotaries edit **the cue SELECT picked on a
+sample strip, or a running cue whose name was clicked in the window** - not the window's pick
+(§9 question 1); **under the edit lock the EQ and Send pages ride live and unsaved** until the show
+is unlocked, where a bar offers Keep or Discard - the opposite of §5.5's proposal (§9 question 3);
+each surface keeps its own page, and `*` leaves it (§9 question 5). The EQ map is the author's own
+sixteen controls, not §7.1's three a band; a press switches a band, a filter or a send in and out
+(new saved switches `eqB<n>On` and `send/on`), and SELECT's light is the pick. Pan, the
+shortcuts, the Stream Deck and the Icon are not built.
+
+**Built, 2026-09-26: the FX page**, decisions AZ-BF in the namespace draft §17.16. FX (the Mackie
+"Plug-In" button) puts the aimed cue's switched-in inserts on the rotaries, each plugin's
+parameters in its own order: sixteen a page on a two-unit D700, eight on one unit or a Mackie
+surface. FX again turns to the next page, then to the next insert's; after the last, the surface's
+own page. Under the lock a parameter rides live, as the EQ does. A press puts a parameter back to
+the plugin's own default. §9 question 9 is answered.
+
 This document serves PRD §3.16 (control surfaces) and §3.18 (plugin hosting), and builds on the
 measured protocol (`docs/godot-asparion-d700-protocol-0.1.md`), the byte-level recipe book
 (`docs/D700_CONTROL_GUIDE.md`) and what Phase 6 built (`docs/godot-namespace-draft-0.1.md` §16).
@@ -68,13 +86,13 @@ capture did not tabulate, to be read at the bench (§10).
 |---|---|---|
 | Play | note `0x5E` | GO |
 | Stop | note `0x5D` | Esc; a second press within 750 ms is double Esc |
-| Rec | note `0x5F` | nothing |
-| ↖ / ↘ arrows | notes `0x2E` / `0x2F` (MCU bank left / right) | nothing — banking is undecided |
-| Pan / EQ / Send / FX | notes `0x2A` / `0x2C` / `0x29` / `0x2B` | nothing — the page buttons of §5 |
+| Rec | note `0x5F` | `take.record` on the channel of the aimed mic cue - record, loop, a layer, loop (2026-09-27, namespace draft §19.6); nothing with no mic cue aimed. Lit while that take records, blinking while a layer is laid (§19.7) |
+| ↖ / ↘ arrows | notes `0x2E` / `0x2F` (MCU bank left / right) | the standby back / forward (2026-09-26, §5.7) |
+| Pan / EQ / Send / FX | notes `0x2A` / `0x2C` / `0x29` / `0x2B` | the page buttons of §5 - Pan is the Loop page (Phase 9c, namespace draft §19.7): the aimed mic cue's in, out, a slide of both and its level |
 | `*` | note `0x36` under the Mackie preset (`0x5A` under Reaper's); `0x37` on a double click if enabled | nothing |
 | Metronome | note `0x59`, MCU *Click* — *to confirm* | nothing |
-| Loop | note `0x56`, MCU *Cycle* — *to confirm* | nothing |
-| Master dial | turn: MCU jog, CC `0x3C` — *to confirm*; click: note `0x38` | nothing |
+| Loop | note `0x56`, MCU *Cycle* — *to confirm* | `take.loop` on the aimed mic cue's channel (Phase 9c, namespace draft §19.7) |
+| Master dial | turn: MCU jog, CC `0x3C` — *to confirm*; click: note `0x38`; double click: `0x39` expected | the number last clicked in the window; click lets go, double click back to its default (2026-09-26) |
 | Volume knob | pitch bend on channel 9, 14-bit, absolute, **no touch sense**; a click, if it has one, never captured | nothing |
 
 **Each strip** (16, two banks of 8 by port): a 100 mm touch-sensitive **motor fader** (pitch bend,
@@ -158,6 +176,9 @@ what is being edited. On the surface itself:
 
 - **Select** on a strip picks the cue on it — a sampler strip's member;
 - the **master dial** walks the cue list, and its **click** picks.
+  *Not built, 2026-09-26:* the author gave the dial to the window instead - it turns the number
+  last clicked or touched in the inspector or the foot panel, its click lets go and its double click
+  puts the number back to its default (namespace draft §17.18).
 
 The flow this gives: *Select a strip, press Send, ride its sends, press Send again.*
 
@@ -169,6 +190,10 @@ The two halves of a show's life map onto the **edit lock** Phase 5 built:
   shortcuts are available.
 - **Locked is the show**: the Show page only — pads, DCAs, GO and stop, running items — and
   nothing that edits the show. The editing page buttons go dark under the lock.
+
+*Superseded for EQ and Send by the author's decision of 2026-09-25 (namespace draft §17.14, AM):*
+under the lock those two pages stay, and what they turn rides live - heard, not saved - until the
+show is unlocked and somebody keeps or discards it.
 
 Touch-start (namespace draft §16.5) stays a **Show-page rule**: on an editing page a touch is only
 a ride, because the fader is not over a sample.
@@ -197,6 +222,8 @@ undoes as one step and two faders are two.
 - The **↖ ↘ arrows** move the standby back and forward on the Show page — the D700 has no
   rewind or forward, so today nothing on it moves the standby but GO — and page through
   parameters on the FX page.
+  *As built, 2026-09-26 (namespace draft §17.17):* they move the standby on **every** page,
+  since the FX page turns with FX pressed again (§7.2).
 - The **volume knob** is free; a main level, or a DCA *"Everything"*, are the obvious candidates.
 
 ## 6. The other surfaces
@@ -244,6 +271,16 @@ A VST has tens or hundreds of parameters and cannot be laid out by hand:
 - **Speed:** a D700 detent can arrive as a step of more than one when the encoder turns fast
   (values 1, 2, 3 … — sign and magnitude), so a slow turn is fine and a fast one coarse.
 - A **click resets that parameter** to its default.
+
+*As built, 2026-09-26 (namespace draft §17.16):* the first sixteen in the plugin's own order, as
+proposed, but the pages turn with **FX pressed again**, not the arrows, and **the page walks the
+inserts in chain order** instead of Select choosing one. The D700's third row names the insert and
+the page ("Verb 1/2"). The value text is the plugin's own (`t<n>`), read from the catalogue with no
+instance, so a cue that is not sounding is labelled too: §7.3's third point, answered by the
+catalogue cache. A continuous parameter moves a hundred-and-twenty-eighth of its travel a detent, a
+stepped one a step. The click resets to **the plugin's own default** (what the plugin reports as
+its default), which is not the preset's value when the set entry loads a preset. The curated maps
+wait for Phase 9b.
 
 ### 7.3 What the engine decides — PRD §3.18
 
@@ -313,14 +350,18 @@ flat four-part addresses - the document resolves nothing deeper:*
 Each with the recommendation made in the conversation.
 
 1. **Which cue a page edits** — the client's pick, shared as a live value (*recommended*); the
-   standby cue; or only a pick made on the surface.
+   standby cue; or only a pick made on the surface. **Answered 2026-09-25:** SELECT on a sample
+   strip, or a click on a running cue's name in the window (`surface.aim`); not the window's pick.
 2. **What Pan moves** — the route gains now; a WFS source position later; something else.
 3. **Under the edit lock** — the editing pages unavailable (*recommended*), or allowed.
+   **Answered 2026-09-25, against the recommendation:** EQ and Send ride live and unsaved; Keep or
+   Discard once unlocked.
 4. **Shortcuts** — fixed defaults in the D700 profile first and editable in the Surfaces tab later
    (*recommended*), or editable from the start; and **which commands** deserve a button (new cue,
    record, save, undo, lock).
 5. **Page switching** — each surface keeps its own page and the lock switches all together
-   (*recommended*), or one page for the whole room.
+   (*recommended*), or one page for the whole room. **Answered 2026-09-25:** each surface its own
+   page, left with `*`; the lock switches nothing, since the pages ride live under it.
 6. **Scope** — build the page model and add devices one at a time, the D700 first and the Stream
    Deck next (*recommended*), or draw every device first.
 7. **The EQ** — Go.dot's own built-in (*recommended*: known parameters, in-process, a page designed
@@ -328,7 +369,8 @@ Each with the recommendation made in the conversation.
 8. **Per-cue inserts** — a fixed insert chain on every track, switched per cue, or rack channels the
    cue claims (PRD §3.18 as written). It decides whether the plugin exists before the cue plays.
 9. **VST pages** — automatic, first sixteen and page, with curated maps later (*recommended*), or
-   curated from the start.
+   curated from the start. **Answered 2026-09-26:** automatic, in the plugin's own order, paged by
+   pressing FX again, the inserts walked in chain order; curated maps later (namespace §17.16).
 10. **A DCA's initial level** — a level stored on each DCA that its fader flies to when the show
     opens, or a zero-length fade aimed at the DCA where the scene starts (which works today).
 11. **Carried from Phase 6** — a stop cue aimed at a sampler group cuts its clips rather than fading
@@ -341,7 +383,8 @@ Each with the recommendation made in the conversation.
   clicks.
 - The note an **encoder's double click** sends, with double click enabled on one encoder in the
   Configurator — only `*`'s is known (`0x37`).
-- The **master dial's turn** (CC `0x3C` expected).
+- The **master dial's turn** (CC `0x3C` expected), and its **double click** with double click ticked
+  for it in the Configurator (`0x39` expected, by `*`'s F1/F2 pattern).
 - **M27** (the colour rate the unit takes) and **M28** (how soon its idle animation returns) —
   instruments in `tests/blackbox/`, which need `python-rtmidi`.
 

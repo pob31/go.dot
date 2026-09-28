@@ -19,7 +19,9 @@
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/DirectOuts.h>
+#include <wfg/client/model/InputList.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/Node.h>
@@ -47,8 +49,9 @@ namespace wfg::client::model
             how hard it was struck and pressed, and the fade a release ends in.
             `dca` arrived with them and is not one of them - a DCA trims any
             cue, fired or pressed. */
-        const std::vector<std::string> samplerRows { "initialLevel", "release", "secondPress", "velocity",
-                                                     "velocityFloor", "pressure", "releaseFade" };
+        const std::vector<std::string> samplerRows { "strip", "initialLevel", "release", "secondPress",
+                                                     "velocity", "velocityFloor", "pressure",
+                                                     "releaseFade" };
 
         /*  WHAT A SAMPLER GROUP IS NEVER ASKED: how it advances, how a round is
             drawn and how many rounds it plays. The hand launches its members,
@@ -61,14 +64,21 @@ namespace wfg::client::model
             static const std::map<std::string, std::vector<std::string>> table
             {
                 /*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS
-                    (Phase 6): the DCA it answers to, where its fader waits,
-                    then what a hand on its strip does, in the order a press
-                    happens - it is let go, it is pressed again, it was struck,
-                    it is leant on, it fades. */
+                    (Phase 6): the DCA it answers to, the strip it is played
+                    from (2026-09-25), where its fader waits, then what a hand
+                    on its strip does, in the order a press happens - it is let
+                    go, it is pressed again, it was struck, it is leant on, it
+                    fades. */
                 { "media",   { "file", "channels", "stereoToMono", "directOut",
-                               "level", "startOffset", "dca", "initialLevel", "release",
+                               "level", "startOffset", "dca", "strip", "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
                                "releaseFade" } },
+
+                /*  A MIC CUE (Phase 9b): what it takes and through what, how it
+                    comes in, then where it goes - a media cue's sound rows with
+                    the input and the channel where the file was. */
+                { "mic",     { "input", "channel", "fadeIn", "stereoToMono", "directOut",
+                               "level", "dca" } },
 
                 //  What it moves - a cue, or a DCA instead - then where to and how.
                 { "fade",    { "target", "dca", "level", "curve", "points", "stopWhenDone" } },
@@ -374,6 +384,64 @@ namespace wfg::client::model
             }
         }
 
+        /*  WHICH STRIP A SAMPLER MEMBER IS PLAYED FROM, as a menu of the
+            show's faders and pads that says what each one carries - another
+            member of this group, what the list put there before, or free
+            (author, 2026-09-25). The words are `stripChoices`'; the rows they
+            come from are the engine's. */
+        void offerTheStrips (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                             std::vector<Field>& decided)
+        {
+            for (auto& field : decided)
+            {
+                if (field.name != "strip" || ! field.writable)
+                    continue;
+
+                field.control = Control::stripRef;
+                field.choices = stripChoices (snapshot, cueId);
+                return;
+            }
+        }
+
+        /*  WHAT A MIC CUE TAKES AND WHAT IT PLAYS THROUGH (Phase 9b), as two
+            menus of what the show declares - its named inputs and its rack
+            channels - rather than eight characters typed from memory. The rows
+            store identifiers and a person reads names, as for a DCA: renaming
+            an input must leave every mic cue on it where it was. Each item
+            says the fact the other menu has to agree with - an input's width,
+            a channel's class - since a mono channel cannot take a stereo line
+            and the run would fail saying so. Always menus, even before the
+            show has any, when "(none)" alone says what is true. */
+        void offerTheInputsAndChannels (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
+        {
+            for (auto& field : decided)
+            {
+                if (! field.writable)
+                    continue;
+
+                if (field.name == "input")
+                {
+                    field.control = Control::inputRef;
+                    field.choices = { { "", "(none)" } };
+
+                    for (const auto& input : readInputs (snapshot))
+                        field.choices.push_back ({ input.id, input.name + " \xc2\xb7 "
+                                                                + input.widthWord()
+                                                                + (input.width > 1 ? ", inputs " : ", input ")
+                                                                + input.channelWord() });
+                }
+                else if (field.name == "channel")
+                {
+                    field.control = Control::channelRef;
+                    field.choices = { { "", "(none)" } };
+
+                    for (const auto& channel : readRack (snapshot).channels)
+                        field.choices.push_back ({ channel.id, channel.name + " \xc2\xb7 "
+                                                                  + channel.classWord() });
+                }
+            }
+        }
+
         /*  WHAT ONLY A HAND ON A STRIP ASKS, greyed where no hand can reach it
             (PRD §3.27). A media cue carries the sampler rows whatever group it
             is in, and they mean something only on a MEMBER of a SAMPLER group:
@@ -529,6 +597,16 @@ namespace wfg::client::model
         {
             offer ("Waveform, in and out points", "waveform");
             offer ("EQ, four bands and two filters", "eq");
+            offer ("FX, the signal chain on this cue", "fx");
+        }
+        else if (kind == "mic")
+        {
+            /*  A LIVE INPUT HAS NO WAVEFORM: nothing is recorded to draw - but
+                on a sampling channel it has a take (Phase 9c), and the panel
+                says in its own notice when the channel records nothing. */
+            offer ("EQ, four bands and two filters", "eq");
+            offer ("FX, its channel's plugins on this cue", "fx");
+            offer ("Take, the loop its channel records", "take");
         }
         else if (kind == "fade")
         {
@@ -547,6 +625,71 @@ namespace wfg::client::model
         }
 
         return out;
+    }
+
+    bool mayDial (const Field& field)
+    {
+        return field.writable && field.applies && ! field.boolean
+                 && field.options.empty() && field.choices.empty()
+                 && (field.typeTags == "d" || field.typeTags == "i")
+                 && (field.control == Control::text || field.control == Control::loopCount);
+    }
+
+    std::string dialLine (const tree::TreeSnapshot& snapshot)
+    {
+        const auto address = text (snapshot, "/godot/surface/dial");
+
+        if (address.empty())
+            return {};
+
+        //  /godot/<owner>/<id>/<row>
+        std::vector<std::string> parts;
+        std::string::size_type from = 1;
+
+        while (from <= address.size())
+        {
+            const auto slash = address.find ('/', from);
+            parts.push_back (address.substr (from, slash == std::string::npos ? std::string::npos
+                                                                              : slash - from));
+            if (slash == std::string::npos)
+                break;
+
+            from = slash + 1;
+        }
+
+        if (parts.size() != 4)
+            return address;
+
+        const auto& owner = parts[1];
+        const auto& id = parts[2];
+        const auto& row = parts[3];
+
+        const auto nameOf = [&snapshot] (const std::string& kind, const std::string& objectId)
+        {
+            const auto name = text (snapshot, "/godot/" + kind + "/" + objectId + "/name");
+            return name.empty() ? objectId : name;
+        };
+
+        /*  A SEND IS NAMED BY ITS CUE AND WHERE IT GOES, which is how the
+            send mixer names it; anything else by its own name. */
+        std::string who;
+
+        if (owner == "send")
+            who = nameOf ("cue", text (snapshot, "/godot/send/" + id + "/cue")) + " to "
+                    + nameOf ("bus", text (snapshot, "/godot/send/" + id + "/bus"));
+        else
+            who = nameOf (owner, id);
+
+        const auto found = labels().find (row);
+        auto line = who + ": " + (found != labels().end() ? found->second : row);
+
+        if (const auto* node = snapshot.find (address))
+        {
+            if (const auto value = text (node); ! value.empty())
+                line += " " + value + (node->unit.empty() ? std::string {} : " " + node->unit);
+        }
+
+        return line;
     }
 
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId)
@@ -601,7 +744,18 @@ namespace wfg::client::model
             more linear pass when somebody clicks a media cue, against the same
             human reaction time the comment above weighs. */
         if (out.kind == "media")
+        {
             fitToTheRig (snapshot, cueId, decided);
+            offerTheStrips (snapshot, cueId, decided);
+        }
+
+        /*  A MIC CUE'S OUTPUTS are a media cue's, and its source is two menus
+            of its own (Phase 9b). */
+        if (out.kind == "mic")
+        {
+            fitToTheRig (snapshot, cueId, decided);
+            offerTheInputsAndChannels (snapshot, decided);
+        }
 
         /*  And the same kind of second pass for a network cue, for the same
             reason: which devices exist is a fact about THIS show and cannot
@@ -627,9 +781,16 @@ namespace wfg::client::model
             panel at the foot, and are not listed here - by prefix, so a
             twentieth row joins the panel without a name in this file.
             They stay reachable: the opener below is the door. */
-        if (out.kind == "media")
+        if (out.kind == "media" || out.kind == "mic")
             std::erase_if (decided, [] (const Field& field)
                                     { return field.name.rfind ("eq", 0) == 0; });
+
+        /*  AND THE LEVEL LANE IS DRAWN OVER THE WAVEFORM (namespace draft
+            §20.5), where its points can be seen against the sound they ride;
+            a list of numbers in a text box is not a way to edit a curve. The
+            Waveform opener is the door, and the page keeps the row. */
+        if (out.kind == "media")
+            std::erase_if (decided, [] (const Field& field) { return field.name == "levelLane"; });
 
         //  The four blocks, in the order somebody fills them in.
         const auto kindRows = [&out]

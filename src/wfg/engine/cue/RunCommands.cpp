@@ -552,6 +552,39 @@ namespace wfg::cue
                         } });
 
         //----------------------------------------------------------------------
+        /*  A SAMPLER CLIP SOLOED (author, 2026-09-25: "The solo switch could be
+            engaged on a track to prevent other faders in the bank to
+            trigger"): while it holds, a press on another strip of its bank
+            starts nothing (`Runner::pressStrip`). Without `on` it toggles -
+            the SOLO button's own reading - and the value it came to is what
+            is logged, so a replay sets rather than flips. It lets go by itself
+            when the clip stops (`Run::soloCanHold`); soloing one that has
+            stopped, or is stopping, is applied and changes nothing. */
+        registry.add ({ "run.solo",
+                        "Solos a sampler clip on its strip: while it holds, the other strips of its bank"
+                        " start nothing. Toggles without `on`; lets go by itself when the clip stops.",
+                        { { "run", 's', false }, { "on", 'T', true } },
+                        true,
+                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            auto* run = runs.find (args[0].getString());
+
+                            if (run == nullptr)
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (! run->sampler)
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto wanted = args.size() > 1 ? args[1].getBool() : ! run->solo;
+
+                            if (wanted && ! run->soloCanHold())
+                                return Outcome::ok ({ args[0], osc::Value::boolean (run->solo) });
+
+                            run->solo = wanted;
+                            return Outcome::ok ({ args[0], osc::Value::boolean (wanted) });
+                        } });
+
+        //----------------------------------------------------------------------
         /*  THE FIRST TWO LEVELS OF STOP (PRD §4.4), AS COMMANDS. The author
             asked for them by their names on the desk (2026-09-18: "Panic is
             missing and Esc key is not bound"), and §4.11 says a key is a
@@ -598,6 +631,14 @@ namespace wfg::cue
                             return Outcome::ok (args);
                         } });
 
+        /*  NOT `killed`, only `skipFooter` (2026-09-26, namespace draft §18.8).
+            `killed` is what the persistent assertion reads as the operator's
+            kill from the running pane, which suspends a persistent cue for the
+            session (decision S). A double Esc is not that: PRD §3.29 says it
+            does not suspend - "the next GO restoring the declared world is the
+            point of declaring it" - and until this date it set `killed` on
+            every root, so a double Esc suspended every persistent cue in the
+            show until a load-to-time. `run.kill` still sets both. */
         registry.add ({ "run.killAll",
                         "Drops every run now: double Esc. No footer runs, and the world is left"
                         " as it was.",
@@ -611,7 +652,6 @@ namespace wfg::cue
                                 if (auto* run = runs.find (id))
                                 {
                                     run->skipFooter = true;
-                                    run->killed = true;
                                     run->state = runState::stopping;
                                 }
                             }

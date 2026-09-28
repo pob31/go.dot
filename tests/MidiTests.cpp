@@ -744,3 +744,108 @@ TEST_CASE ("midi: a surface's port is the surface's, and every other port still 
     result = engine.processTick (3);
     CHECK (result.applied + result.rejected + result.dropped == 1u);
 }
+
+//==============================================================================
+#include <wfg/engine/midi/MidiSender.h>
+#include <wfg/engine/midi/PortBinder.h>
+
+TEST_CASE ("midi: a port changed while the show runs is put on its device then, not at the next start")
+{
+    /*  Found by the author on 2026-09-25, with the D700 on the desk: two ports
+        added in the MIDI tab, both set to the D700, read "unbound" for the rest
+        of the session - with no sentence, because nothing had been tried. The
+        binding runs again for what the show changed, and only for that.
+
+        NO HARDWARE: every device named here is one no machine has, so what is
+        checked is which ports are tried again and what each one says - the
+        sentence a real device would have replaced. */
+    midi::MidiInputs inputs;
+    midi::MidiSender outputs;
+    midi::PortBinder binder { inputs, outputs };
+
+    const auto wish = [] (std::string id, std::string label, std::string device)
+    {
+        midi::PortWish made;
+        made.id = std::move (id);
+        made.label = std::move (label);
+        made.inputDevice = device;
+        made.outputDevice = std::move (device);
+        return made;
+    };
+
+    std::vector<midi::PortWish> show { wish ("PORT0001", "Desk", "no such desk, surely") };
+
+    const auto atStart = binder.bindAll (show);
+    REQUIRE (atStart.size() == 1u);
+    CHECK_FALSE (atStart.front().binding.bound);
+    CHECK (atStart.front().binding.problem.find ("no such desk, surely") != std::string::npos);
+
+    //  The same show again: nothing to do, and nothing asked of the message thread.
+    CHECK_FALSE (binder.want (show));
+    CHECK (binder.take().empty());
+
+    SUBCASE ("a port added is tried, and the one already there is left alone")
+    {
+        show.push_back (wish ("PORT0002", "Surface", "no such surface, surely"));
+        REQUIRE (binder.want (show));
+        CHECK (binder.take().empty());      // nothing until the message thread has done it
+
+        binder.rebind();
+
+        const auto done = binder.take();
+        REQUIRE (done.size() == 1u);
+        CHECK (done.front().id == "PORT0002");
+        CHECK_FALSE (done.front().gone);
+        CHECK_FALSE (done.front().binding.bound);
+        CHECK (done.front().binding.problem.find ("no such surface, surely") != std::string::npos);
+
+        CHECK (binder.take().empty());      // taken once
+    }
+
+    SUBCASE ("a port put on another device is tried on that one")
+    {
+        show.front().outputDevice = "another desk, surely";
+        REQUIRE (binder.want (show));
+        binder.rebind();
+
+        const auto done = binder.take();
+        REQUIRE (done.size() == 1u);
+        CHECK (done.front().id == "PORT0001");
+        CHECK (done.front().binding.problem.find ("another desk, surely") != std::string::npos);
+    }
+
+    SUBCASE ("a port only renamed keeps what it had")
+    {
+        show.front().label = "Lighting desk";
+        REQUIRE (binder.want (show));
+        binder.rebind();
+        CHECK (binder.take().empty());
+    }
+
+    SUBCASE ("a port the show no longer declares is forgotten")
+    {
+        show.clear();
+        REQUIRE (binder.want (show));
+        binder.rebind();
+
+        const auto done = binder.take();
+        REQUIRE (done.size() == 1u);
+        CHECK (done.front().id == "PORT0001");
+        CHECK (done.front().gone);
+    }
+
+    SUBCASE ("two edits before the message thread gets there are one rebinding, of the last")
+    {
+        show.front().outputDevice = "first try";
+        REQUIRE (binder.want (show));
+        show.front().outputDevice = "second try";
+        REQUIRE (binder.want (show));
+
+        binder.rebind();
+        binder.rebind();                    // the second has nothing left to do
+
+        const auto done = binder.take();
+        REQUIRE (done.size() == 1u);
+        CHECK (done.front().binding.problem.find ("second try") != std::string::npos);
+    }
+}

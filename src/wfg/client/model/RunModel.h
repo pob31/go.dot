@@ -71,6 +71,11 @@ namespace wfg::client::model
             every member is at a second of it. A manual sequence has an
             operator between its members and no second to seek to. */
         bool timedGroup = false;
+
+        /*  WHETHER A SURFACE'S ROTARIES ARE AIMED AT THIS RUN'S CUE (author,
+            2026-09-25): a click on a media run's name aims them, and the row
+            says so in a mark and not a colour alone. */
+        bool aimed = false;
         int late = 0;            ///< samples, when the engine had to place a launch in the past
         int depth = 0;
 
@@ -167,6 +172,13 @@ namespace wfg::client::model
             when there is more to say than its mark does, what that strip is
             doing: pending, held, stopping, closing. Empty for every other run. */
         std::string samplerWords;
+
+        /*  WHAT A MIC RUN READS, in words beside its name (Phase 9b, namespace
+            draft §18.9): the channel it plays through - "on Vox 1" - or why it
+            is not playing yet, or any more: "waiting for Vox 1" while another
+            cue holds the channel, "ringing out" after its stop while the
+            channel's plugins decay. Empty for every other run. */
+        std::string liveWords;
 
         /** Whether it is counting down: a pre-wait or a post-wait, which read alike. */
         bool isWaiting() const noexcept;

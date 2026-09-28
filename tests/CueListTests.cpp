@@ -287,22 +287,18 @@ TEST_CASE ("standby.set: the cue must exist, be a cue, and be somewhere the poin
     CHECK (rig.run (5, "standby.set", { osc::Value::string (announce) }).applied == 1);
     CHECK (rig.standbyOf (mainList) == announce);
 
-    /*  WHAT IS STILL REFUSED IS WHAT IS NOT A STOP AT ALL, and a header is the
-        nearest example: it is a cue list the group runs for ITSELF (§3.6), and
-        the operator does not step through a group's preparation. So a cue in
-        one is not a place the pointer may stand however manual the group is.
-
-        With a code of its own rather than `not-in-list`, because the two send
-        somebody somewhere different: the cue IS in this list. */
+    /*  A HEADER IS STILL NOT A STOP: it is a cue list the group runs for
+        ITSELF (§3.6), and the operator does not step through a group's
+        preparation. But since 2026-09-26 the command does not refuse it - the
+        author asked for a cue the pointer cannot stand on to "move the pointer
+        to the group instead of showing an error", so it parks on the group the
+        header belongs to. */
     const auto header = rig.document.createRole (preshow, "header");
     REQUIRE (header.ok);
     const auto preArm = rig.document.createCue (header.id, 0, "memo", "Pre-arm").id;
 
-    CHECK (rig.run (6, "standby.set", { osc::Value::string (preArm) }).rejected == 1);
-    CHECK (rig.engine.lastError().find (reason::notAStop) != std::string::npos);
-
-    // And the refusal left the pointer where it was.
-    CHECK (rig.standbyOf (mainList) == announce);
+    CHECK (rig.run (6, "standby.set", { osc::Value::string (preArm) }).applied == 1);
+    CHECK (rig.standbyOf (mainList) == preshow);
 }
 
 TEST_CASE ("standby.set: every kind of cue can be parked on, not only a memo and a group")
@@ -481,16 +477,33 @@ TEST_CASE ("standby.set: what is refused now is what is not a stop, and it says 
 
     /*  A header and a footer are the group's own preparation and release
         (§3.6); a persistent section is §3.29's bed, asserted at every GO and
-        never stepped through. None of the three is a row an operator walks, so
-        none of them is a place the pointer may be put. */
-    for (const auto& offPath : { preArm, release, bed })
+        never stepped through. None of the three is a row an operator walks -
+        but the first two have a group that stands for them, and since
+        2026-09-26 the command parks there instead of refusing (author: "move
+        the pointer to the group instead of showing an error"). */
+    for (const auto& inAGroup : { preArm, release })
     {
-        INFO ("off the path: " << offPath);
+        INFO ("in the group's own section: " << inAGroup);
 
-        CHECK (rig.run (++step, "standby.set", { osc::Value::string (offPath) }).rejected == 1);
-        CHECK (rig.engine.lastError().find (reason::notAStop) != std::string::npos);
-        CHECK (rig.standbyOf (mainList) == houseToHalf);
+        CHECK (rig.run (++step, "standby.set", { osc::Value::string (houseToHalf) }).applied == 1);
+        CHECK (rig.run (++step, "standby.set", { osc::Value::string (inAGroup) }).applied == 1);
+        CHECK (rig.standbyOf (mainList) == preshow);
     }
+
+    REQUIRE (rig.run (++step, "standby.set", { osc::Value::string (houseToHalf) }).applied == 1);
+
+    /*  THE BED HAS NO GROUP, so it is still refused, and with `not-a-stop`. */
+    CHECK (rig.run (++step, "standby.set", { osc::Value::string (bed) }).rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notAStop) != std::string::npos);
+    CHECK (rig.standbyOf (mainList) == houseToHalf);
+
+    /*  AND A DISABLED CUE IS NOT LIFTED onto its group: it is refused for
+        what it is, not for where it is. */
+    const auto off = rig.document.createCue (preshow, 0, "memo", "Off").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + off + "/enabled", "false").ok);
+    CHECK (rig.run (++step, "standby.set", { osc::Value::string (off) }).rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notAStop) != std::string::npos);
+    CHECK (rig.standbyOf (mainList) == houseToHalf);
 
     /*  AND THE FOURTH ANSWERS DIFFERENTLY, deliberately. A cue in another list
         is a perfectly good stop - just not one of THIS list's - so the remedy

@@ -57,7 +57,9 @@ namespace wfg::plugin::region
     constexpr std::uint32_t magic = 0x746f6447u;
 
     /** Bumped whenever a structure below changes shape. */
-    constexpr std::uint32_t version = 1;
+    /*  3 since 2026-09-26: the plugin's main widths and the layout in words in
+        the header, the latency after a cue's state on each lane. */
+    constexpr std::uint32_t version = 3;
 
     /** The most parameters a plugin may expose through the proxy; a plugin
         with more has the rest neither published nor written. */
@@ -65,6 +67,9 @@ namespace wfg::plugin::region
 
     /** Room for the child's one sentence about why it is not up. */
     constexpr int problemChars = 256;
+
+    /** Room for the path of a cue's state file. */
+    constexpr int pathChars = 1024;
 
     /** A parameter value the child reads as "use the baseline" (§17.4). */
     constexpr float useBaseline = -1.0f;
@@ -109,8 +114,17 @@ namespace wfg::plugin::region
         /** How many parameters the instances have, at most `maxParams`. */
         std::atomic<std::uint32_t> paramCount;
 
+        /*  The plugin's main input and output widths as it took them
+            (2026-09-26), written before `childReady`: what decides whether a
+            cue of a given width goes through it (LaneMapping.h). */
+        std::atomic<std::uint32_t> inputs;
+        std::atomic<std::uint32_t> outputs;
+
         /** The child's sentence, NUL-terminated, written before `childFailed`. */
         char problem[problemChars];
+
+        /** The layout in words - "stereo in, stereo out" - written before `childReady`. */
+        char layout[problemChars];
 
         /** Every parameter's value after the preset was applied: what a value
             a cue does not set rests at (§17.4). Written before `childReady`. */
@@ -135,6 +149,27 @@ namespace wfg::plugin::region
         /** Bumped by the parent at an arm; the child resets the instance
             before the next block so the previous cue's tail is not in it. */
         std::atomic<std::uint32_t> resetSeq;
+
+        /*  A CUE'S WHOLE STATE, loaded onto this lane's instance before the cue
+            may launch (the author's decision of 2026-09-25). One in flight:
+            the parent writes `statePath` - absolute, empty for the preset's
+            own state - only while `stateDoneSeq` has caught up, then stores
+            `stateRequestSeq` with release. The child loads it on its message
+            thread with the lane parked (answered dry, never missed - though
+            the parent, silent while a state loads, does not call it), puts the
+            lane's values back on top, and answers with the sequence in
+            `stateDoneSeq`, having written first whether it failed, why, and
+            how long it took. */
+        std::atomic<std::uint64_t> stateRequestSeq;
+        std::atomic<std::uint64_t> stateDoneSeq;
+        std::atomic<std::uint32_t> stateFailed;
+        std::atomic<std::uint32_t> stateLoadMicros;
+
+        /** What the plugin declares after this lane's last state, uncompensated:
+            a state can change a look-ahead (2026-09-26). Written before `stateDoneSeq`. */
+        std::atomic<std::uint32_t> latencySamples;
+        char statePath[pathChars];
+        char stateProblem[problemChars];
 
         /** Normalised 0..1, or `useBaseline`. */
         std::atomic<float> params[maxParams];

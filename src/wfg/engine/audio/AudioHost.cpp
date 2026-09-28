@@ -19,6 +19,9 @@
 
 #include <wfg/engine/audio/CueOutputPlugin.h>
 #include <wfg/engine/audio/EqPlugin.h>
+#include <wfg/engine/audio/LiveInputPlugin.h>
+#include <wfg/engine/audio/Looper.h>
+#include <wfg/engine/audio/LooperPlugin.h>
 #include <wfg/engine/audio/ProxyPlugin.h>
 #include <wfg/engine/clock/AudioClockSource.h>
 
@@ -32,8 +35,12 @@
     mid-translation-unit. Nothing below is called VERSION.
 */
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <typeinfo>
 #include <utility>
 #include <vector>
@@ -211,6 +218,8 @@ namespace wfg::audio
             engine->getPluginManager().createBuiltInType<CueOutputPlugin>();
             engine->getPluginManager().createBuiltInType<EqPlugin>();
             engine->getPluginManager().createBuiltInType<ProxyPlugin>();
+            engine->getPluginManager().createBuiltInType<LiveInputPlugin>();
+            engine->getPluginManager().createBuiltInType<LooperPlugin>();
 
             auto& hosted = engine->getDeviceManager().getHostedAudioDeviceInterface();
 
@@ -219,10 +228,11 @@ namespace wfg::audio
             parameters.blockSize = requested.blockSize;
             parameters.outputChannels = requested.outputChannels;
 
-            /*  No inputs and no MIDI in this phase. Live input is Phase 9's
-                rack and MIDI cues are Phase 3; asking for either now would
-                build graph nodes nothing drives and make the block cost
-                measured here a measurement of the wrong thing. */
+            /*  The inputs are handed over, and Tracktion is given no input
+                device to take them (`describeWaveDevices`): its own path locks
+                and allocates on the audio thread, so the live rack reads them
+                from the tap below instead (Phase 9b, namespace draft §18.4). No
+                MIDI: nothing drives it. */
             parameters.inputChannels = requested.inputChannels;
             parameters.useMidiDevices = false;
 
@@ -240,6 +250,16 @@ namespace wfg::audio
             scratch.setSize (std::max (requested.outputChannels, requested.inputChannels),
                              requested.blockSize, false, true, true);
             midi.ensureSize (256);
+
+            /*  THE TAP, for every logical input the interface was opened with
+                - one channel at least, so an interface with none still has a
+                buffer to read silence from. */
+            tapChannels = std::max (0, requested.inputChannels);
+            tap.setSize (std::max (1, tapChannels), requested.blockSize, false, true, true);
+            inputPeaks = std::make_unique<std::atomic<float>[]> (static_cast<std::size_t> (std::max (1, tapChannels)));
+
+            for (int channel = 0; channel < std::max (1, tapChannels); ++channel)
+                inputPeaks[static_cast<std::size_t> (channel)].store (0.0f, std::memory_order_relaxed);
 
             current = requested;
             sampleRate = static_cast<double> (requested.sampleRate);
@@ -266,15 +286,22 @@ namespace wfg::audio
             /*  THE PROXIES FIRST, before the Edit whose plugins hold the lanes
                 they are bound to: a host unbinds its lanes as it goes. */
             proxies.clear();
-            lanes.clear();
+            trackLanes.clear();
             proxySlots = 0;
 
             edit.reset();
             matrices.clear();
             eqs.clear();
             plugins.clear();
+            liveInputs.clear();
+            rackTracks.clear();
+            rackShutAt.clear();
+            voices = 0;
             handles.clear();
             context = nullptr;
+
+            /*  THE TAKES, with no graph left to reach them (Phase 9c, §19.2). */
+            refreshTakes (spec);
 
             /*  createEmptyEdit touches no disk. Edit::createEdit is the only
                 non-test, non-preview factory; the Edit ctor and
@@ -299,7 +326,12 @@ namespace wfg::audio
             options.editFileRetriever = [] { return juce::File(); };
             options.filePathResolver = [] (const juce::String& path) { return juce::File (path); };
 
-            options.numAudioTracks = static_cast<std::uint32_t> (std::max (0, spec.tracks));
+            /*  THE VOICES, AND THEN THE RACK (Phase 9b, decision CK): every rack
+                channel is a track of its own after the voices, outside their
+                count, so the polyphony ceiling is still `tracks` and a live
+                input never competes with playback for a voice. */
+            options.numAudioTracks = static_cast<std::uint32_t> (std::max (0, spec.tracks)
+                                                                 + static_cast<int> (spec.rack.size()));
 
             /*  Tracktion's default is -3 dB on the master. A show that asked for
                 0 dB and got -3 would be quietly wrong by half a level. */
@@ -307,6 +339,7 @@ namespace wfg::audio
 
             edit = te::Edit::createEdit (std::move (options));
             proxySlots = static_cast<int> (spec.plugins.size());
+            voices = std::max (0, spec.tracks);
 
             if (edit == nullptr)
             {
@@ -327,11 +360,26 @@ namespace wfg::audio
 
             const auto placeholder = ensureSilentPlaceholder (spec.channelsPerTrack);
             const auto tracks = te::getAudioTracks (*edit);
+            auto trackIndex = 0;
 
             for (auto* track : tracks)
             {
                 if (track == nullptr)
                     continue;
+
+                const auto index = trackIndex++;
+
+                /*  A RACK CHANNEL'S TRACK: built on its own branch below, with
+                    no launcher slot and the live input stage at its head. */
+                if (index >= voices)
+                {
+                    const auto& channel = spec.rack[static_cast<std::size_t> (index - voices)];
+
+                    if (! buildRackTrack (*track, channel, index))
+                        return false;
+
+                    continue;
+                }
 
                 /*  Tracktion's own volume and meter plugins go. The volume one
                     takes a spin lock on the audio thread for VCA support Go.dot
@@ -401,12 +449,13 @@ namespace wfg::audio
                     error = "the EQ plugin would not insert";
                     edit.reset();
                     matrices.clear();
-                    lanes.clear();
+                    trackLanes.clear();
                     eqs.clear();
                     return false;
                 }
 
                 eqs.push_back (&eqStage->eq());
+                trackLanes.emplace_back();
 
                 /*  THE SET'S PROXIES, between the EQ and the output stage, in
                     plugins/order (Phase 9a, decisions AE and AF): one per entry
@@ -422,14 +471,14 @@ namespace wfg::audio
                     if (proxy == nullptr)
                     {
                         error = "the plugin proxy would not insert";
-                        lanes.clear();
+                        trackLanes.clear();
                         edit.reset();
                         matrices.clear();
                         eqs.clear();
                         return false;
                     }
 
-                    lanes.push_back (&proxy->lane());
+                    trackLanes.back().push_back (&proxy->lane());
                 }
 
                 auto plugin = track->pluginList.insertPlugin (
@@ -442,7 +491,7 @@ namespace wfg::audio
                     error = "the cue output plugin would not insert";
                     edit.reset();
                     matrices.clear();
-                    lanes.clear();
+                    trackLanes.clear();
                     eqs.clear();
                     return false;
                 }
@@ -484,7 +533,7 @@ namespace wfg::audio
                         " be built at a fallback rate nobody asked for";
                 edit.reset();
                 matrices.clear();
-                lanes.clear();
+                trackLanes.clear();
                 eqs.clear();
                 return false;
             }
@@ -518,7 +567,7 @@ namespace wfg::audio
                 {
                     error = "the Edit's tempo does not make one beat one second, so every"
                             " launch would be placed at the wrong distance";
-                    lanes.clear();
+                    trackLanes.clear();
                     edit.reset();
                     matrices.clear();
                     plugins.clear();
@@ -537,7 +586,7 @@ namespace wfg::audio
                 that the GO path reaches any of them with one multiply and no
                 allocation. A vector of vectors would be two indirections and a
                 heap block per track for a thing whose shape never changes. */
-            for (int track = 0; track < static_cast<int> (matrices.size()); ++track)
+            for (int track = 0; track < voices; ++track)
             {
                 for (int slot = 0; slot < editSlots; ++slot)
                 {
@@ -569,45 +618,79 @@ namespace wfg::audio
         {
             proxies.clear();
 
-            /*  No voices, nothing to host: the entries stay `unloaded`, which
-                is the truth about a show with plugins and no tracks. */
-            if (matrices.empty())
-                return;
+            /*  WHICH ENTRY IS WHICH SLOT, for as long as this graph stands
+                (2026-09-26): the runner sends a cue's inserts by it, and the
+                tree says which entries of the set the graph does not hold. */
+            if (services.table != nullptr)
+            {
+                std::vector<std::string> ids;
 
-            const auto voices = static_cast<int> (matrices.size());
+                for (const auto& entry : spec.plugins)
+                    ids.push_back (entry.id);
+
+                services.table->setBuilt (std::move (ids));
+                toldTable = true;
+            }
+
+            /*  THE RACK'S CHAINS, as the graph has them, for the runner to send
+                a mic cue's inserts by (Phase 9b). */
+            if (services.table != nullptr)
+            {
+                std::map<std::string, std::vector<std::string>> rackIds;
+
+                for (const auto& channel : spec.rack)
+                {
+                    auto& ids = rackIds[channel.id];
+
+                    for (const auto& entry : channel.plugins)
+                        ids.push_back (entry.id);
+                }
+
+                services.table->setBuiltRack (std::move (rackIds));
+
+                std::map<std::string, plugin::PluginTable::BuiltTake> built;
+
+                for (const auto& channel : spec.rack)
+                {
+                    const auto found = takes.find (channel.id);
+
+                    if (found == takes.end() || found->second.take == nullptr)
+                        continue;
+
+                    auto& each = built[channel.id];
+                    each.seconds = found->second.shape.takeSeconds;
+                    each.layers = found->second.shape.layers;
+                    each.bytes = static_cast<std::uint64_t> (found->second.take->bytes());
+                    each.problem = found->second.problem;
+
+                    for (const auto& entry : channel.plugins)
+                        if (entry.beforeRecorder)
+                            each.before.push_back (entry.id);
+                }
+
+                services.table->setBuiltTakes (std::move (built));
+            }
+
+            /*  No voices, nothing of the set's to host: its entries stay
+                `unloaded`, which is the truth about a show with plugins and no
+                tracks. The rack's channels are tracks of their own. */
+            if (voices <= 0)
+            {
+                startRackProxies (spec);
+                return;
+            }
 
             for (int slot = 0; slot < proxySlots; ++slot)
             {
                 const auto& entry = spec.plugins[static_cast<std::size_t> (slot)];
 
-                plugin::ProxySpec proxySpec;
-                proxySpec.pluginId = entry.id;
-                proxySpec.identifier = entry.identifier;
-                proxySpec.name = entry.name;
-                proxySpec.presetPath = entry.presetPath;
-                proxySpec.lanes = voices;
-                proxySpec.channels = editChannels;
-                proxySpec.maxSamples = current.blockSize;
-                proxySpec.sampleRate = current.sampleRate;
-                proxySpec.deadlineMicroseconds = spec.proxyDeadlineMicroseconds;
-                proxySpec.regionFolder = storageFolder.getChildFile ("proxy").getFullPathName().toStdString();
-                proxySpec.launch = services.launch;
-                proxySpec.catalogues = services.catalogues;
-
-                /*  THE DESCRIPTION, off this machine's scan (PR 9a.7): what the
-                    child makes the plugin from. An identifier the scan does not
-                    know leaves it empty, and the host reads `missing`. */
-                if (entry.identifier != plugin::Catalogue::testGainIdentifier())
-                    if (const auto description = engine->getPluginManager().knownPluginList
-                                                       .getTypeForIdentifierString (juce::String (entry.identifier)))
-                        if (const auto xml = description->createXml())
-                            proxySpec.descriptionXml = xml->toString().toStdString();
+                auto proxySpec = proxySpecFor (entry, spec, voices, editChannels);
 
                 std::vector<plugin::ProxyLane*> slotLanes;
                 slotLanes.reserve (static_cast<std::size_t> (voices));
 
                 for (int track = 0; track < voices; ++track)
-                    slotLanes.push_back (lanes[static_cast<std::size_t> (track * proxySlots + slot)]);
+                    slotLanes.push_back (trackLanes[static_cast<std::size_t> (track)][static_cast<std::size_t> (slot)]);
 
                 auto host = std::make_unique<plugin::ProxyHost> (std::move (proxySpec), std::move (slotLanes),
                                                                  services.table);
@@ -628,13 +711,402 @@ namespace wfg::audio
 
                 proxies.push_back (std::move (host));
             }
+
+            startRackProxies (spec);
+        }
+
+        /*  WHAT A CHILD IS STARTED FROM, for an entry of the set or of the
+            rack alike: the plugin, its preset, how many lanes and how wide.
+
+            THE DESCRIPTION, off this machine's scan (PR 9a.7): what the child
+            makes the plugin from. An identifier the scan does not know leaves
+            it empty, and the host reads `missing` - and asks again at its next
+            start, since a scan may find it. */
+        plugin::ProxySpec proxySpecFor (const PluginSpec& entry, const EditSpec& spec,
+                                        int laneCount, int laneChannels)
+        {
+            plugin::ProxySpec proxySpec;
+            proxySpec.pluginId = entry.id;
+            proxySpec.identifier = entry.identifier;
+            proxySpec.name = entry.name;
+            proxySpec.presetPath = entry.presetPath;
+            proxySpec.lanes = laneCount;
+            proxySpec.channels = laneChannels;
+            proxySpec.maxSamples = current.blockSize;
+            proxySpec.sampleRate = current.sampleRate;
+            proxySpec.deadlineMicroseconds = spec.proxyDeadlineMicroseconds;
+            proxySpec.regionFolder = storageFolder.getChildFile ("proxy").getFullPathName().toStdString();
+            proxySpec.launch = services.launch;
+            proxySpec.catalogues = services.catalogues;
+            proxySpec.describe = services.describe;
+
+            if (! plugin::Catalogue::isTestIdentifier (entry.identifier))
+            {
+                if (services.describe)
+                    proxySpec.descriptionXml = services.describe (entry.identifier);
+                else if (const auto description = engine->getPluginManager().knownPluginList
+                                                        .getTypeForIdentifierString (juce::String (entry.identifier)))
+                    if (const auto xml = description->createXml())
+                        proxySpec.descriptionXml = xml->toString().toStdString();
+            }
+
+            return proxySpec;
+        }
+
+        /*  ONE RACK CHANNEL'S TRACK (Phase 9b, namespace draft §18.4). No
+            launcher slot - its sound is the live input - and a chain of its own:
+            the input stage bound to the tap, the EQ, a proxy for each of the
+            channel's plugins in order, and the output stage, routed once to the
+            one wide device as a voice is. Two channels wide whatever its class:
+            a mono input fills the first, and the routing reads the width after
+            the chain, as a voice's does. The track stays in the graph with no
+            clip because the input stage says it makes sound with no input. */
+        bool buildRackTrack (te::AudioTrack& track, const RackChannelSpec& channel, int index)
+        {
+            constexpr int rackChannels = 2;
+
+            if (auto* volume = track.getVolumePlugin())
+                volume->removeFromParent();
+
+            if (auto* meter = track.getLevelMeterPlugin())
+                meter->removeFromParent();
+
+            const auto fail = [this] (const char* why)
+            {
+                error = why;
+                edit.reset();
+                matrices.clear();
+                trackLanes.clear();
+                eqs.clear();
+                liveInputs.clear();
+                return false;
+            };
+
+            auto inputPlugin = track.pluginList.insertPlugin (LiveInputPlugin::create (rackChannels), -1);
+            auto* stage = dynamic_cast<LiveInputPlugin*> (inputPlugin.get());
+
+            if (stage == nullptr)
+                return fail ("the live input stage would not insert");
+
+            stage->bindTap (&tapView);
+            liveInputs.push_back (stage);
+
+            /*  A SAMPLING CHANNEL (Phase 9c, namespace draft §19.2): the
+                plugins before the recorder, the recorder, then the EQ and the
+                plugins after the player - so what comes before is printed into
+                the take and what comes after is heard as it loops. With no
+                recorder a plugin's side means nothing and the chain is 9b's:
+                the EQ, then every plugin. A lane keeps its place in the
+                channel's own order whichever side it is built on, since a mic
+                cue's inserts are sent by that place. */
+            const auto take = channel.takeSeconds > 0.0 ? takeFor (channel.id) : nullptr;
+            trackLanes.emplace_back (channel.plugins.size(), nullptr);
+
+            const auto insertProxies = [&] (bool beforeTheRecorder)
+            {
+                for (std::size_t slot = 0; slot < channel.plugins.size(); ++slot)
+                {
+                    if ((take != nullptr && channel.plugins[slot].beforeRecorder) != beforeTheRecorder)
+                        continue;
+
+                    auto proxyPlugin = track.pluginList.insertPlugin (
+                        ProxyPlugin::create (rackChannels, static_cast<int> (slot)), -1);
+                    auto* proxy = dynamic_cast<ProxyPlugin*> (proxyPlugin.get());
+
+                    if (proxy == nullptr)
+                        return false;
+
+                    trackLanes.back()[slot] = &proxy->lane();
+                }
+
+                return true;
+            };
+
+            if (take != nullptr)
+            {
+                if (! insertProxies (true))
+                    return fail ("the plugin proxy would not insert on a rack channel");
+
+                auto recorderPlugin = track.pluginList.insertPlugin (LooperPlugin::create (rackChannels), -1);
+                auto* recorder = dynamic_cast<LooperPlugin*> (recorderPlugin.get());
+
+                if (recorder == nullptr)
+                    return fail ("the recorder would not insert on a sampling channel");
+
+                recorder->bind (take.get(), &tapView);
+
+                const std::lock_guard<std::mutex> lock { takesLock };
+                takeTracks[index] = channel.id;
+            }
+
+            auto eqPlugin = track.pluginList.insertPlugin (EqPlugin::create (rackChannels), -1);
+            auto* eqStage = dynamic_cast<EqPlugin*> (eqPlugin.get());
+
+            if (eqStage == nullptr)
+                return fail ("the EQ plugin would not insert on a rack channel");
+
+            eqs.push_back (&eqStage->eq());
+
+            if (! insertProxies (false))
+                return fail ("the plugin proxy would not insert on a rack channel");
+
+            auto outputPlugin = track.pluginList.insertPlugin (
+                CueOutputPlugin::create (rackChannels, current.outputChannels), -1);
+            auto* output = dynamic_cast<CueOutputPlugin*> (outputPlugin.get());
+
+            if (output == nullptr)
+                return fail ("the output stage would not insert on a rack channel");
+
+            matrices.push_back (&output->matrix());
+            plugins.push_back (output);
+
+            if (auto& manager = engine->getDeviceManager(); manager.getNumWaveOutDevices() > 0)
+                if (auto* wide = manager.getWaveOutDevice (0))
+                    track.getOutput().setOutputToDeviceID (wide->getDeviceID());
+
+            rackTracks[channel.id] = index;
+            rackShutAt.push_back (-1);
+            return true;
+        }
+
+        /*  THE RACK'S CHILDREN (Phase 9b, decision CL): one child per distinct
+            plugin and preset across every channel, a lane for each channel that
+            has it - a child spins a core while any of its lanes is switched in,
+            so the number spinning is the number of distinct plugins in use and
+            not the number of channel slots. Grouped in the order the channels
+            and their chains are read, so the same show builds the same children.
+            After the set's in `proxies`, so a set slot is still its index there. */
+        void startRackProxies (const EditSpec& spec)
+        {
+            struct Group
+            {
+                const PluginSpec* entry = nullptr;
+                std::vector<std::string> alsoIds, laneWords, channelNames;
+                std::vector<plugin::ProxyLane*> groupLanes;
+            };
+
+            std::vector<Group> groups;
+
+            for (std::size_t at = 0; at < spec.rack.size(); ++at)
+            {
+                const auto& channel = spec.rack[at];
+                const auto track = static_cast<std::size_t> (voices) + at;
+
+                if (track >= trackLanes.size())
+                    continue;
+
+                const auto called = channel.name.empty() ? channel.id : channel.name;
+
+                for (std::size_t slot = 0; slot < channel.plugins.size() && slot < trackLanes[track].size(); ++slot)
+                {
+                    const auto& entry = channel.plugins[slot];
+
+                    auto group = std::find_if (groups.begin(), groups.end(), [&entry] (const Group& candidate)
+                    {
+                        return candidate.entry->identifier == entry.identifier
+                                 && candidate.entry->presetPath == entry.presetPath;
+                    });
+
+                    if (group == groups.end())
+                    {
+                        groups.push_back ({});
+                        group = std::prev (groups.end());
+                        group->entry = &entry;
+                    }
+                    else
+                    {
+                        group->alsoIds.push_back (entry.id);
+                    }
+
+                    group->groupLanes.push_back (trackLanes[track][slot]);
+                    group->laneWords.push_back ("channel " + called);
+
+                    if (std::find (group->channelNames.begin(), group->channelNames.end(), called)
+                          == group->channelNames.end())
+                        group->channelNames.push_back (called);
+                }
+            }
+
+            for (auto& group : groups)
+            {
+                auto proxySpec = proxySpecFor (*group.entry, spec,
+                                               static_cast<int> (group.groupLanes.size()), 2);
+                proxySpec.alsoIds = group.alsoIds;
+                proxySpec.laneWords = group.laneWords;
+
+                std::string names;
+
+                for (std::size_t at = 0; at < group.channelNames.size(); ++at)
+                    names += (at == 0 ? "" : at + 1 == group.channelNames.size() ? " and " : ", ")
+                             + group.channelNames[at];
+
+                proxySpec.silentWords = names + (group.channelNames.size() == 1 ? " is" : " are")
+                                      + " silent until it is back";
+
+                auto host = std::make_unique<plugin::ProxyHost> (std::move (proxySpec),
+                                                                 std::move (group.groupLanes),
+                                                                 services.table);
+
+                if (services.onFailed)
+                    host->onFailed (services.onFailed);
+
+                if (services.onChanged)
+                    host->onChanged (services.onChanged);
+
+                if (services.table != nullptr)
+                {
+                    std::string problem;
+                    host->start (problem);
+                }
+
+                proxies.push_back (std::move (host));
+            }
+        }
+
+        /*  THE TAKE STORE (Phase 9c, namespace draft §19.2), refreshed each
+            time a graph is built and never emptied by one: a sampling channel
+            whose rate, width, longest take and layers are what they were keeps
+            its take, and one whose shape changed is set aside afresh - which
+            empties it, and a sentence says so. A channel no longer sampling,
+            or gone, lets its take go. Message thread, with the old Edit gone,
+            so nothing still plays the takes this lets go of. */
+        void refreshTakes (const EditSpec& spec)
+        {
+            /*  BUILT BESIDE THE STORE AND SWAPPED IN UNDER THE LOCK: setting a
+                minute aside and touching it is tens of milliseconds, which the
+                tick thread must not wait behind. Read here without the lock,
+                since this thread is the store's only writer. */
+            std::map<std::string, TakeStore> kept;
+
+            for (const auto& channel : spec.rack)
+            {
+                if (channel.takeSeconds <= 0.0)
+                    continue;
+
+                Looper::Shape shape;
+                shape.sampleRate = static_cast<double> (current.sampleRate);
+                shape.channels = 2;
+                shape.takeSeconds = channel.takeSeconds;
+                shape.layers = channel.layers;
+
+                auto found = takes.find (channel.id);
+
+                if (found != takes.end() && found->second.take != nullptr
+                      && std::abs (found->second.shape.sampleRate - shape.sampleRate) < 0.5
+                      && std::abs (found->second.shape.takeSeconds - shape.takeSeconds) < 1.0e-9
+                      && found->second.shape.layers == shape.layers)
+                {
+                    auto same = found->second;
+                    same.problem.clear();
+                    kept[channel.id] = std::move (same);
+                    continue;
+                }
+
+                TakeStore store;
+                store.shape = shape;
+                store.take = std::make_shared<Looper>();
+                store.take->prepare (shape);
+
+                if (found != takes.end() && found->second.take != nullptr
+                      && found->second.take->state() != TakeState::empty)
+                    store.problem = std::abs (found->second.shape.sampleRate - shape.sampleRate) >= 0.5
+                                        ? "the take was cleared: the interface's rate changed"
+                                        : "the take was cleared: its longest take or its layers changed";
+
+                kept[channel.id] = std::move (store);
+            }
+
+            {
+                const std::lock_guard<std::mutex> lock { takesLock };
+                takes.swap (kept);
+                takeTracks.clear();
+            }
+
+            //  The stores let go of go here, outside the lock.
+        }
+
+        std::shared_ptr<Looper> takeFor (const std::string& channelId)
+        {
+            const std::lock_guard<std::mutex> lock { takesLock };
+            const auto found = takes.find (channelId);
+            return found != takes.end() ? found->second.take : nullptr;
+        }
+
+        bool keepTake (const std::string& channelId, const std::string& stem, const std::string& mediaFolder)
+        {
+            auto take = takeFor (channelId);
+
+            if (take == nullptr)
+                return false;
+
+            /*  THE WRITER BESIDE THE TAKES, made with the first Keep: a show
+                that never keeps a take starts no thread for it. */
+            if (takeWriter == nullptr)
+                takeWriter = std::make_unique<TakeWriter>();
+
+            takeWriter->queue ({ channelId, stem, mediaFolder, std::move (take) });
+            return true;
+        }
+
+        std::vector<TakeWriter::Done> keptTakes()
+        {
+            return takeWriter != nullptr ? takeWriter->finished() : std::vector<TakeWriter::Done> {};
+        }
+
+        std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> allTakes()
+        {
+            std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> out;
+            const std::lock_guard<std::mutex> lock { takesLock };
+
+            for (const auto& [channelId, store] : takes)
+                if (store.take != nullptr)
+                    out.emplace_back (channelId, store.take);
+
+            return out;
+        }
+
+        std::shared_ptr<Looper> takeForTrack (int trackIndex)
+        {
+            const std::lock_guard<std::mutex> lock { takesLock };
+            const auto channel = takeTracks.find (trackIndex);
+
+            if (channel == takeTracks.end())
+                return nullptr;
+
+            const auto found = takes.find (channel->second);
+            return found != takes.end() ? found->second.take : nullptr;
+        }
+
+        /** A rack track's input stage, or null for a voice or no such track. */
+        LiveInputPlugin* liveInputOf (int trackIndex) const noexcept
+        {
+            const auto rack = trackIndex - voices;
+
+            if (trackIndex < 0 || rack < 0 || rack >= static_cast<int> (liveInputs.size()))
+                return nullptr;
+
+            return liveInputs[static_cast<std::size_t> (rack)];
         }
 
         void stop()
         {
             proxies.clear();
-            lanes.clear();
+            trackLanes.clear();
+            liveInputs.clear();
+            rackTracks.clear();
+            rackShutAt.clear();
+            voices = 0;
             proxySlots = 0;
+
+            /*  ONLY WHEN IT TOLD THE TABLE SOMETHING: `stop` runs again from
+                the destructor, and a table that went first - a test's, declared
+                after the host - must not be touched then (the macOS job aborted
+                on the destroyed mutex, 2026-09-26). The proxies go by the same
+                rule, being gone after the first stop. */
+            if (toldTable && services.table != nullptr)
+                services.table->clearBuilt();
+
+            toldTable = false;
 
             edit.reset();
             matrices.clear();
@@ -683,6 +1155,35 @@ namespace wfg::audio
                 if (inputs != nullptr && inputs[channel] != nullptr)
                     scratch.copyFrom (channel, 0, inputs[channel], current.blockSize);
             midi.clear();
+
+            /*  Where this block starts in Go.dot's count, for the rack's gates
+                to place an open against; and the tap the stages read. */
+            tapView.buffer = &tap;
+            tapView.channels = tapChannels;
+            tapView.blockStart = samples.samplesElapsed();
+
+            /*  THE TAP, filled before Tracktion runs (namespace draft §18.4):
+                the rack's input stage reads it during the call below, in this
+                same block, so a live input adds no block of delay. Every
+                logical input is written - its samples, or zeros where this
+                block brought none - and its peak kept for the tick. */
+            for (int channel = 0; channel < tapChannels; ++channel)
+            {
+                if (inputs != nullptr && channel < numInputs && inputs[channel] != nullptr)
+                {
+                    tap.copyFrom (channel, 0, inputs[channel], current.blockSize);
+
+                    const auto peak = tap.getMagnitude (channel, 0, current.blockSize);
+                    auto& held = inputPeaks[static_cast<std::size_t> (channel)];
+
+                    if (peak > held.load (std::memory_order_relaxed))
+                        held.store (peak, std::memory_order_relaxed);
+                }
+                else
+                {
+                    tap.clear (channel, 0, current.blockSize);
+                }
+            }
 
             {
                 const rt::ScopedRealtimeCheck tracktionsBlock { rt::Region::foreign };
@@ -1521,12 +2022,51 @@ namespace wfg::audio
         std::vector<CueEq*> eqs;
         std::vector<CueOutputPlugin*> plugins;
 
-        /*  THE SANDBOX'S HALF (Phase 9a): every voice's lane for every set
-            entry, flat and track-major as the handles are, so the tick
-            thread reaches one with a multiply; and the hosts, one per entry,
-            destroyed before the Edit because the lanes live in it. */
-        std::vector<plugin::ProxyLane*> lanes;
+        /*  THE SANDBOX'S HALF (Phase 9a): every track's lanes, in the order of
+            its chain - a voice's by the set's slots, a rack channel's by its own
+            chain (Phase 9b) - and the hosts, destroyed before the Edit because
+            the lanes live in it. `proxySlots` is the SET's size. */
+        std::vector<std::vector<plugin::ProxyLane*>> trackLanes;
         int proxySlots = 0;
+
+        /*  THE LIVE RACK (Phase 9b): how many of the tracks are voices, every
+            rack track's input stage (index - voices), which track each channel
+            was built as, and the view of the tap the stages read. */
+        int voices = 0;
+        std::vector<LiveInputPlugin*> liveInputs;
+        std::map<std::string, int> rackTracks;
+        LiveInputTap tapView;
+
+        /*  WHEN EACH RACK CHANNEL WAS LAST SHUT, in Go.dot's count - the start
+            of its ring-out - or -1 while it is open or has never been, and -2
+            after a kill, which rings out nothing. Tick thread's own, sized with
+            the rack when the graph is built. */
+        std::vector<std::int64_t> rackShutAt;
+
+        /*  THE TAKES (Phase 9c, namespace draft §19.2): each sampling channel's
+            recorder, by the channel's id, owned here beside the Edit and never
+            by a plugin, with the shape its memory was set aside for and what
+            became of a take a rebuild could not keep. */
+        struct TakeStore
+        {
+            Looper::Shape shape;
+            std::shared_ptr<Looper> take;
+            std::string problem;
+        };
+
+        std::map<std::string, TakeStore> takes;
+
+        /** Which rack track records which channel's take, for a stop that knows the track. */
+        std::map<int, std::string> takeTracks;
+        std::mutex takesLock;
+
+        /*  KEEP'S WRITER (Phase 9c, §19.8), made with the first Keep. A job
+            holds its take by a shared pointer, so a take the store lets go of
+            while it is written lives until the file is whole. */
+        std::unique_ptr<TakeWriter> takeWriter;
+
+        /** Whether the plugin table holds this graph's slots, to clear at stop. */
+        bool toldTable = false;
         std::vector<std::unique_ptr<plugin::ProxyHost>> proxies;
         ProxyServices services;
 
@@ -1589,6 +2129,14 @@ namespace wfg::audio
         juce::AudioBuffer<float> scratch;
         juce::MidiBuffer midi;
 
+        /*  THE INPUT TAP and each logical input's peak since the last take
+            (Phase 9b). Sized at `start`, never on the audio thread; the peaks
+            are written there with relaxed stores and taken on the tick thread
+            with an exchange, the output stage's pattern. */
+        juce::AudioBuffer<float> tap;
+        std::unique_ptr<std::atomic<float>[]> inputPeaks;
+        int tapChannels = 0;
+
         AudioClockSource samples;
         std::atomic<std::int64_t> blocks { 0 };
 
@@ -1631,41 +2179,140 @@ namespace wfg::audio
 
     int AudioHost::trackCount() const noexcept
     {
+        return impl->voices;
+    }
+
+    int AudioHost::allTrackCount() const noexcept
+    {
         return static_cast<int> (impl->matrices.size());
+    }
+
+    int AudioHost::rackTrackOf (const std::string& channelId) const noexcept
+    {
+        const auto found = impl->rackTracks.find (channelId);
+        return found != impl->rackTracks.end() ? found->second : -1;
+    }
+
+    std::shared_ptr<Looper> AudioHost::takeOf (const std::string& channelId)
+    {
+        return impl->takeFor (channelId);
+    }
+
+    std::shared_ptr<Looper> AudioHost::takeOfTrack (int trackIndex)
+    {
+        return impl->takeForTrack (trackIndex);
+    }
+
+    std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> AudioHost::allTakes()
+    {
+        return impl->allTakes();
+    }
+
+    bool AudioHost::keepTake (const std::string& channelId, const std::string& stem, const std::string& mediaFolder)
+    {
+        return impl->keepTake (channelId, stem, mediaFolder);
+    }
+
+    std::vector<TakeWriter::Done> AudioHost::keptTakes()
+    {
+        return impl->keptTakes();
+    }
+
+    void AudioHost::setRackSource (int trackIndex, int firstInput, int width) noexcept
+    {
+        if (auto* stage = impl->liveInputOf (trackIndex))
+            stage->setSource (firstInput, width);
+    }
+
+    void AudioHost::openRackGate (int trackIndex, std::int64_t sample, double rampSeconds) noexcept
+    {
+        if (auto* stage = impl->liveInputOf (trackIndex))
+        {
+            stage->openAt (sample, rampSeconds);
+            impl->rackShutAt[static_cast<std::size_t> (trackIndex - impl->voices)] = -1;
+        }
+    }
+
+    void AudioHost::shutRackGate (int trackIndex, double rampSeconds) noexcept
+    {
+        if (auto* stage = impl->liveInputOf (trackIndex))
+        {
+            stage->shut (rampSeconds);
+
+            /*  THE RING-OUT STARTS NOW, and a second shut - a stop's fade that
+                ends in a stop - starts it again from there. A kill's stays a
+                kill. */
+            auto& shutAt = impl->rackShutAt[static_cast<std::size_t> (trackIndex - impl->voices)];
+
+            if (shutAt != -2)
+                shutAt = impl->samples.samplesElapsed();
+        }
+    }
+
+    void AudioHost::killRack (int trackIndex) noexcept
+    {
+        auto* stage = impl->liveInputOf (trackIndex);
+
+        if (stage == nullptr)
+            return;
+
+        stage->shut (LiveInputPlugin::killSeconds);
+        impl->rackShutAt[static_cast<std::size_t> (trackIndex - impl->voices)] = -2;
+
+        if (auto* matrix = trackMatrix (trackIndex))
+            matrix->setLevelDb (-120.0f);
+
+        for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
+            if (lane != nullptr)
+                lane->requestReset();
+    }
+
+    bool AudioHost::isRackTrack (int trackIndex) const noexcept
+    {
+        return impl->liveInputOf (trackIndex) != nullptr;
+    }
+
+    bool AudioHost::isRackSounding (int trackIndex) const noexcept
+    {
+        const auto* stage = impl->liveInputOf (trackIndex);
+
+        if (stage == nullptr)
+            return false;
+
+        if (stage->isPassing())
+            return true;
+
+        const auto shutAt = impl->rackShutAt[static_cast<std::size_t> (trackIndex - impl->voices)];
+
+        if (shutAt < 0)
+            return false;
+
+        /*  RINGING UNTIL QUIET, OR UNTIL THE CAP. What reaches the output
+            stage is the chain's output - the reverb's tail after the input has
+            gone - so a quarter of a second of it under -60 dB is the tail
+            over. Read against the rate the graph runs at. */
+        const auto rate = impl->current.sampleRate > 0 ? impl->current.sampleRate : 48000;
+        const auto* output = impl->plugins[static_cast<std::size_t> (trackIndex)];
+        const auto quietEnough = output != nullptr
+                                   && output->quietSamples() >= static_cast<std::int64_t> (rackQuietSeconds * rate);
+        const auto capped = impl->samples.samplesElapsed() - shutAt
+                              >= static_cast<std::int64_t> (rackTailCapSeconds * rate);
+
+        return ! quietEnough && ! capped;
+    }
+
+    bool AudioHost::isRackPassing (int trackIndex) const noexcept
+    {
+        const auto* stage = impl->liveInputOf (trackIndex);
+        return stage != nullptr && stage->isPassing();
     }
 
     CueMatrix* AudioHost::trackMatrix (int trackIndex) noexcept
     {
-        if (trackIndex < 0 || trackIndex >= trackCount())
+        if (trackIndex < 0 || trackIndex >= allTrackCount())
             return nullptr;
 
         return impl->matrices[static_cast<std::size_t> (trackIndex)];
-    }
-
-    std::vector<plugin::KnownPlugin> AudioHost::knownPlugins() const
-    {
-        std::vector<plugin::KnownPlugin> out;
-
-        if (impl->engine == nullptr)
-            return out;
-
-        for (const auto& description : impl->engine->getPluginManager().knownPluginList.getTypes())
-        {
-            plugin::KnownPlugin known;
-            known.name = description.name.toStdString();
-            known.identifier = description.createIdentifierString().toStdString();
-            known.format = description.pluginFormatName.toStdString();
-            known.manufacturer = description.manufacturerName.toStdString();
-            known.path = description.fileOrIdentifier.toStdString();
-            out.push_back (std::move (known));
-        }
-
-        std::sort (out.begin(), out.end(), [] (const plugin::KnownPlugin& a, const plugin::KnownPlugin& b)
-        {
-            return a.name < b.name || (a.name == b.name && a.identifier < b.identifier);
-        });
-
-        return out;
     }
 
     CueEq* AudioHost::trackEq (int trackIndex) noexcept
@@ -1712,13 +2359,18 @@ namespace wfg::audio
 
     plugin::ProxyLane* AudioHost::proxyLane (int trackIndex, int slot) noexcept
     {
-        if (trackIndex < 0 || slot < 0 || slot >= impl->proxySlots)
+        if (trackIndex < 0 || slot < 0 || trackIndex >= static_cast<int> (impl->trackLanes.size()))
             return nullptr;
 
-        const auto index = static_cast<std::size_t> (trackIndex) * static_cast<std::size_t> (impl->proxySlots)
-                             + static_cast<std::size_t> (slot);
+        const auto& chain = impl->trackLanes[static_cast<std::size_t> (trackIndex)];
 
-        return index < impl->lanes.size() ? impl->lanes[index] : nullptr;
+        return slot < static_cast<int> (chain.size()) ? chain[static_cast<std::size_t> (slot)] : nullptr;
+    }
+
+    void AudioHost::setTrackFxShape (int trackIndex, int slot, int feed, int back) noexcept
+    {
+        if (auto* lane = proxyLane (trackIndex, slot))
+            lane->setShape (feed, back);
     }
 
     void AudioHost::setTrackFxEnabled (int trackIndex, int slot, bool enabled) noexcept
@@ -1734,14 +2386,34 @@ namespace wfg::audio
     }
 
     void AudioHost::snapTrackFx (int trackIndex, int slot, bool enabled,
-                                 const std::vector<std::pair<int, float>>& values) noexcept
+                                 const std::vector<std::pair<int, float>>& values,
+                                 const std::string& statePath)
     {
         if (auto* lane = proxyLane (trackIndex, slot))
         {
             lane->setValues (values);
             lane->setEnabled (enabled);
             lane->requestReset();
+
+            /*  AND ITS WHOLE STATE, when the cue switches it in: loaded before
+                the launch, the values above set again on top of it. A cue
+                with none asks for the preset's own - no state is a state, or
+                the last cue's would be heard under this one. */
+            if (enabled)
+                lane->wantState (statePath);
         }
+    }
+
+    bool AudioHost::isTrackFxSettled (int trackIndex) noexcept
+    {
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->trackLanes.size()))
+            return true;
+
+        for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
+            if (lane != nullptr && ! lane->stateSettled())
+                return false;
+
+        return true;
     }
 
     void AudioHost::pollProxies()
@@ -1753,11 +2425,21 @@ namespace wfg::audio
     bool AudioHost::restartProxy (const std::string& pluginId, std::string& problem)
     {
         for (auto& proxy : impl->proxies)
-            if (proxy->pluginId() == pluginId)
+            if (proxy->serves (pluginId))
                 return proxy->restart (problem);
 
-        problem = "no plugin of the set has the id " + pluginId + " in this graph";
+        problem = "no plugin of the set or the rack has the id " + pluginId + " in this graph";
         return false;
+    }
+
+    void AudioHost::startMissingProxies()
+    {
+        for (auto& proxy : impl->proxies)
+            if (proxy->status().state == "missing")
+            {
+                std::string problem;
+                proxy->start (problem);
+            }
     }
 
     AudioHost::NodeIdReport AudioHost::inspectNodeIds() const  { return impl->inspectNodeIds(); }
@@ -1862,6 +2544,35 @@ namespace wfg::audio
     {
         if (trackIndex >= 0 && trackIndex < static_cast<int> (impl->plugins.size()))
             impl->plugins[static_cast<std::size_t> (trackIndex)]->resetPeaks();
+    }
+
+    float AudioHost::takeTrackOutputPeak (int trackIndex)
+    {
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->plugins.size()))
+            return 0.0f;
+
+        return impl->plugins[static_cast<std::size_t> (trackIndex)]->takeOutputPeak();
+    }
+
+    int AudioHost::inputChannelCount() const noexcept
+    {
+        return impl->tapChannels;
+    }
+
+    float AudioHost::takeInputPeak (int channel) noexcept
+    {
+        if (channel < 0 || channel >= impl->tapChannels || impl->inputPeaks == nullptr)
+            return 0.0f;
+
+        return impl->inputPeaks[static_cast<std::size_t> (channel)].exchange (0.0f, std::memory_order_relaxed);
+    }
+
+    const float* AudioHost::inputTapChannel (int channel) const noexcept
+    {
+        if (channel < 0 || channel >= impl->tapChannels)
+            return nullptr;
+
+        return impl->tap.getReadPointer (channel);
     }
 
     int AudioHost::editChannelsPerTrack() const noexcept  { return impl->editChannels; }

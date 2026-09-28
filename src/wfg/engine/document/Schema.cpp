@@ -124,10 +124,10 @@ namespace wfg::doc
                     exactly as `Audio` carries the track count, which is a fact
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
-                { "List",   true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "List",   true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Persistent" }, { "list" } },
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
-                { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "Group",  true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Header", "Footer", "Trigger" },
                                                                           { "cue", "group" } },
 
@@ -150,9 +150,9 @@ namespace wfg::doc
                     content models to express a rule that fits in one line of
                     validate() would be paying a great deal for a smaller
                     diagnostic. */
-                { "Header", true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "Header", true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                      "Midi", "Start" }, {} },
-                { "Footer", true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "Footer", true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                      "Midi", "Start" }, {} },
 
                 /*  THE PERSISTENT SECTION IS A LIST'S, not a group's (§3.29,
@@ -162,7 +162,7 @@ namespace wfg::doc
                     validate() - and the same children, so that a fade or a stop
                     put there is a validate WARNING that the section ignores
                     rather than a file that refuses to open. */
-                { "Persistent", true, { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "Persistent", true, { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                         "Midi", "Start" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
@@ -176,9 +176,25 @@ namespace wfg::doc
                     Group does: a media cue has a number, a name and a pre-wait
                     like any other, and it is addressed at /godot/cue/<id> so a
                     client holding an identifier never has to know which kind it
-                    got. */
+                    got.
+
+                    AND THE `sound` ROWS BETWEEN THE TWO (Phase 9b, namespace
+                    draft 18.2): what a cue that sounds carries whatever its
+                    source - level, routing, the DCA, the EQ, the inserts, the
+                    sends - which a mic cue carries too. `media` keeps what is
+                    about a file. The addresses do not move: every row is still
+                    /godot/cue/<id>/<row>. */
                 { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" },
-                                                          { "cue", "media" } },
+                                                          { "cue", "sound", "media" } },
+
+                /*  A LIVE INPUT PLAYED AS A CUE (Phase 9b, decisions BW and CE):
+                    a cue first, a sound second - the same level, routing, DCA,
+                    EQ, inserts and sends as a media cue - and a mic third: the
+                    named input it takes, the rack channel it plays through, its
+                    fade-in. Without what names a file: no Range, and no Insert,
+                    whose claim a mic cue's channel IS (namespace draft 18.2). */
+                { "Mic",    true,  { "Route", "Send", "Feed", "Fx", "Trigger" },
+                                                          { "cue", "sound", "mic" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,
@@ -291,7 +307,7 @@ namespace wfg::doc
                     an identifier, a name and two port numbers, and an
                     attribute cannot grow children. */
                 { "Network", false, {},                    { "network" } },
-                { "Audio",  false, { "Bus", "Rack", "Plugins" }, { "audio" } },
+                { "Audio",  false, { "Bus", "Inputs", "Rack", "Plugins" }, { "audio" } },
                 { "Bus",    true,  {},                     { "bus" } },
 
                 /*  PHASE 4'S SLOTS (PRD §3.9e). A slot is one position in a
@@ -307,7 +323,10 @@ namespace wfg::doc
                     `Rack` carries no owner at all, like `Mounts`: it is a
                     container holding channels and says nothing itself. */
                 { "Rack",    false, { "Channel" },         {} },
-                { "Channel", true,  {},                    { "slot", "rackChannel" } },
+                /*  A RACK CHANNEL'S CHAIN is its own `Plugin` children, in
+                    order (Phase 9b, decision BX): the same element, and so the
+                    same rows, as an entry of the show's set. */
+                { "Channel", true,  { "Plugin" },          { "slot", "rackChannel" } },
                 { "Slot",    true,  {},                    { "slot", "processorInput" } },
 
                 /*  And what a cue says about them. A `Route` sends a cue to a
@@ -367,6 +386,18 @@ namespace wfg::doc
                     `order`, as `Dcas` carries `dcas`. */
                 { "Plugins",  false, { "Plugin" },         { "plugins" } },
                 { "Plugin",   true,  {},                   { "plugin" } },
+
+                /*  PHASE 9b'S NAMED INPUTS (PRD §3.18, §6.2, 2026-09-26): the
+                    other side of the interface from the buses, and named for
+                    §3.9b's reason - "Voix solo" is what somebody wrote down and
+                    "input 3" is a fact about a patch. A container like
+                    `Plugins`, made on demand at a fixed place after the buses,
+                    so an input's position counts from nought whatever the
+                    buses are doing and the canonical bytes do not depend on
+                    which container was asked for first. `Inputs` carries
+                    `inputs` for its `order`, as `Plugins` carries `plugins`. */
+                { "Inputs",   false, { "Input" },          { "inputs" } },
+                { "Input",    true,  {},                   { "input" } },
             };
 
             return table;

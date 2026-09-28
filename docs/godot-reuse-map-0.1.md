@@ -20,7 +20,7 @@ CI enforces it, so amendments go into the PRD by the author, citing this map.
 | Source | What it is | Licence | State |
 |---|---|---|---|
 | **WFS-DIY** | the shipping wave-field-synthesis app; JUCE 9.0.2 (since `87d13b3`, 2026-09-11; 9.0.1 before), Projucer-built | GPL-3 | production |
-| **spatcore** (`WFS_DIY_v1/spatcore`, pinned at `237dc3f`; Go.dot pins `cf7ba9f`, the merge of the same tree) | the shared real-time core extracted from WFS-DIY: `rt/`, `dsp/`, `wfs/`, `reverb/`, `gpu/`, `control/{osc,state,mcp}`, `controllers/`, `ui/`, `io/` | GPL-3 (added 2026-09-04, `7e1a8ad`) | consumed by WFS-DIY at source level; CMake targets exist for XOA / Tight-WFS |
+| **spatcore** (`WFS_DIY_v1/spatcore`, pinned at `237dc3f`; Go.dot pins `5803830`, main after PR #18 - `ui/TypedValue.h`, moved 2026-09-25) | the shared real-time core extracted from WFS-DIY: `rt/`, `dsp/`, `wfs/`, `reverb/`, `gpu/`, `control/{osc,state,mcp}`, `controllers/`, `ui/`, `io/` | GPL-3 (added 2026-09-04, `7e1a8ad`) | consumed by WFS-DIY at source level; CMake targets exist for XOA / Tight-WFS |
 | **juce_simpleweb** (`pob31/juce_simpleweb`, a fork of `benkuper/juce_simpleweb`) | JUCE module: HTTP + WebSocket server on one port, WebSocket client; Simple-Web-Server (MIT) over standalone asio (BSL-1.0); TLS optional | GPL-3 | **converged 2026-09-05** on `b953ada` = upstream + the TLS-off guard + the Windows fixes; WFS-DIY, XOA and Tight-WFS vendor the same code |
 
 XOA and Tight-WFS were looked at only for conventions; both are under construction and

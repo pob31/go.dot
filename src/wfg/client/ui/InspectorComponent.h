@@ -78,6 +78,10 @@ namespace wfg::client::ui
 
             /** Picks nothing, which is what closes this panel. */
             std::function<void()> close;
+
+            /*  A CLICK OR A TOUCH ON A NUMBER puts it on the surfaces' master
+                dial (author, 2026-09-26), by the address the node gave. */
+            std::function<void (const std::string& address)> dial;
         };
 
         InspectorComponent (const model::Theme& theme, Actions actions);
@@ -88,11 +92,26 @@ namespace wfg::client::ui
 
         void applyTheme (const model::Theme& theme);
 
+        /*  THE NUMBER THE MASTER DIAL TURNS, as the tree says: its line wears
+            a dial before its name and a frame round its value - a mark and a
+            line, never a colour alone (§4.8). Empty marks nothing. */
+        void showDial (const std::string& address);
+
         void paint (juce::Graphics& g) override;
         void resized() override;
+        void mouseDown (const juce::MouseEvent& event) override;
+
+        /*  A PRESS THAT LANDED ON `hit`: what mouseDown forwards to, and what a
+            test drives without inventing a mouse event. */
+        void pressedOn (const juce::Component* hit);
 
     private:
         struct Line;
+
+        /** A line's name, with the dial's mark when the dial is on it. */
+        juce::String nameOf (const model::Field& field) const;
+        void markDial();
+        std::string dialed;
 
         void rebuild (const model::Inspection& inspection);
 

@@ -26,6 +26,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -89,23 +90,55 @@ namespace wfg::plugin
                                                  std::make_unique<ScanBehaviour>());
         }
 
-        KnownPlugin knownFrom (const juce::PluginDescription& description)
+        /*  WHERE EACH LV2 WAS FOUND, by its URI (2026-09-26). An LV2 is
+            named by a URI, not a file, and a child can only make one whose
+            bundle its LV2 world has loaded - the default folders and
+            LV2_PATH, and nothing a scan was pointed at with --path. So the
+            scan remembers the bundle folder of every LV2 it found, as a
+            `bundle` attribute on the plugin's element in known.xml, and the
+            description a child is handed carries it. JUCE's own reading of
+            the list passes over an attribute it does not know. */
+        using Bundles = std::map<juce::String, juce::String>;
+
+        constexpr const char* bundleAttribute = "bundle";
+
+        Bundles bundlesIn (const juce::XmlElement& list)
+        {
+            Bundles out;
+
+            for (const auto* element : list.getChildWithTagNameIterator ("PLUGIN"))
+                if (element->hasAttribute (bundleAttribute))
+                    out[element->getStringAttribute ("file")] = element->getStringAttribute (bundleAttribute);
+
+            return out;
+        }
+
+        KnownPlugin knownFrom (const juce::PluginDescription& description, const Bundles& bundles)
         {
             KnownPlugin out;
             out.name = description.name.toStdString();
             out.identifier = description.createIdentifierString().toStdString();
-            out.format = description.pluginFormatName.toStdString();
+            out.format = formatWordOf (description.pluginFormatName.toStdString());
             out.manufacturer = description.manufacturerName.toStdString();
             out.path = description.fileOrIdentifier.toStdString();
+
+            if (const auto xml = description.createXml())
+            {
+                if (const auto bundle = bundles.find (description.fileOrIdentifier); bundle != bundles.end())
+                    xml->setAttribute (bundleAttribute, bundle->second);
+
+                out.description = xml->toString().toStdString();
+            }
+
             return out;
         }
 
-        std::vector<KnownPlugin> knownFrom (te::Engine& engine)
+        std::vector<KnownPlugin> knownFrom (const juce::KnownPluginList& list, const Bundles& bundles)
         {
             std::vector<KnownPlugin> out;
 
-            for (const auto& description : engine.getPluginManager().knownPluginList.getTypes())
-                out.push_back (knownFrom (description));
+            for (const auto& description : list.getTypes())
+                out.push_back (knownFrom (description, bundles));
 
             std::sort (out.begin(), out.end(), [] (const KnownPlugin& a, const KnownPlugin& b)
             {
@@ -113,6 +146,58 @@ namespace wfg::plugin
             });
 
             return out;
+        }
+
+        /*  Tracktion's key for the list inside its Settings.xml, on a 64-bit
+            build - the only kind this project makes. Read once, for the
+            import below, and never written. */
+        constexpr const char* tracktionListKey = "knownPluginList64";
+
+        /*  THE LIST AS THE MACHINE KNOWS IT: known.xml, or - on a machine that
+            scanned before that file existed - what Tracktion's Settings.xml
+            holds, which is where the scans of Phase 9a left it. A plain parse:
+            a properties file stores an XML value as the child of its VALUE
+            element. False when neither file says anything. */
+        bool readList (const juce::File& storage, juce::KnownPluginList& list, Bundles& bundles)
+        {
+            bundles.clear();
+
+            if (const auto own = juce::parseXML (juce::File (juce::String (knownListPath (storage.getFullPathName().toStdString()))));
+                own != nullptr)
+            {
+                list.recreateFromXml (*own);
+                bundles = bundlesIn (*own);
+                return true;
+            }
+
+            if (const auto settings = juce::parseXML (storage.getChildFile ("Settings.xml")); settings != nullptr)
+                if (const auto* value = settings->getChildByAttribute ("name", tracktionListKey))
+                    if (const auto* held = value->getFirstChildElement())
+                    {
+                        list.recreateFromXml (*held);
+                        return true;
+                    }
+
+            return false;
+        }
+
+        /*  Written WHOLE, by replacement: JUCE writes a temporary beside the
+            file and moves it over, so a reader never meets half a list. */
+        bool writeList (const juce::File& storage, const juce::KnownPluginList& list, const Bundles& bundles)
+        {
+            const juce::File file { juce::String (knownListPath (storage.getFullPathName().toStdString())) };
+            file.getParentDirectory().createDirectory();
+
+            if (const auto xml = list.createXml())
+            {
+                for (auto* element : xml->getChildWithTagNameIterator ("PLUGIN"))
+                    if (const auto bundle = bundles.find (element->getStringAttribute ("file")); bundle != bundles.end())
+                        element->setAttribute (bundleAttribute, bundle->second);
+
+                return xml->writeTo (file);
+            }
+
+            return false;
         }
 
         bool formatMatches (const juce::AudioPluginFormat& format, const std::string& word)
@@ -245,19 +330,39 @@ namespace wfg::plugin
             dead man's pedal is JUCE's idea kept by hand: the file being scanned
             is written before and cleared after, so one that took THIS process
             down is blacklisted by the next scan's first act. Posts the loop's
-            stop when done, behind the known list's last change message. */
+            stop when done, behind the known list's last change message.
+
+            THE WORK IS LISTED FIRST (2026-09-26), every format's files before
+            the first is scanned, so a scan launched by the app can say "12 of
+            140" from the start; progress is written after every file, and the
+            stop file is looked for between two. A retry scans one file, with
+            the first format that claims it. */
         struct ScanThread final : juce::Thread
         {
-            ScanThread (te::PluginManager& managerToUse, std::string formatWordToUse,
-                        std::string extraFolderToUse, juce::File storageToUse)
+            ScanThread (te::PluginManager& managerToUse, ScanOptions optionsToUse, juce::File storageToUse)
                 : juce::Thread ("wfg plugin scan"),
                   manager (managerToUse),
-                  formatWord (std::move (formatWordToUse)),
-                  extraFolder (std::move (extraFolderToUse)),
+                  options (std::move (optionsToUse)),
                   pedal (storageToUse.getChildFile ("plugin-scan.pedal")),
                   pidFile (storageToUse.getChildFile ("plugin-scan.child"))
             {
                 setEnvironment (pidFileVariable, pidFile.getFullPathName());
+            }
+
+            /** Where the scan is, for whoever asked; a scan run by hand has no file. */
+            void publish()
+            {
+                progress.skipped = skipped;
+                progress.found = manager.knownPluginList.getNumTypes();
+
+                if (! options.progressFile.empty())
+                    juce::File (juce::String (options.progressFile))
+                        .replaceWithText (juce::String (progress.toJson()), false, false, "\n");
+            }
+
+            bool stopAsked() const
+            {
+                return ! options.stopFile.empty() && juce::File (juce::String (options.stopFile)).existsAsFile();
             }
 
             void run() override
@@ -273,11 +378,14 @@ namespace wfg::plugin
 
                 pedal.deleteFile();
 
+                std::vector<std::pair<juce::AudioPluginFormat*, juce::String>> work;
+                const juce::String retry { options.retryFile };
+
                 for (int i = 0; i < manager.pluginFormatManager.getNumFormats() && ! threadShouldExit(); ++i)
                 {
                     auto* format = manager.pluginFormatManager.getFormat (i);
 
-                    if (format == nullptr || ! formatMatches (*format, formatWord))
+                    if (format == nullptr || ! formatMatches (*format, options.formatWord))
                         continue;
 
                     /*  Tracktion's built-in format has nothing to scan, and
@@ -286,67 +394,131 @@ namespace wfg::plugin
                     if (format->getName() == te::PluginManager::builtInPluginFormatName)
                         continue;
 
+                    if (retry.isNotEmpty())
+                    {
+                        if (work.empty() && format->fileMightContainThisPluginType (retry))
+                            work.emplace_back (format, retry);
+
+                        continue;
+                    }
+
                     auto where = format->getDefaultLocationsToSearch();
 
-                    if (! extraFolder.empty())
-                        where.addIfNotAlreadyThere (juce::File (juce::String (extraFolder)));
+                    if (! options.extraFolder.empty())
+                        where.addIfNotAlreadyThere (juce::File (juce::String (options.extraFolder)));
 
-                    if (where.getNumPaths() == 0)
+                    /*  AN AU HAS NO FOLDER TO SEARCH: the system registers
+                        components and JUCE's AU format lists them, whatever
+                        path it is handed. Every other format with nowhere to
+                        look has nothing to find. */
+                    if (where.getNumPaths() == 0 && ! format->getName().startsWith ("AudioUnit"))
                         continue;
 
-                    for (const auto& file : format->searchPathsForPlugins (where, true, false))
-                    {
-                        if (threadShouldExit())
-                            break;
+                    /*  ONCE EACH: an LV2 bundle holding two plugins is answered
+                        twice, once per plugin, by JUCE's search. */
+                    auto files = format->searchPathsForPlugins (where, true, false);
 
-                        if (list.getBlacklistedFiles().contains (file) || list.isListingUpToDate (file, *format))
-                            continue;
+                    /*  AND EVERY LV2 BUNDLE BY ITS FOLDER, beside JUCE's search
+                        (2026-09-26): asking for a bundle by its folder is what
+                        hosting one does, and it does not depend on the LV2
+                        world having read the folder already. Added when the
+                        macOS scan found nothing - which turned out to be the
+                        message loop below returning at once, not the search -
+                        and kept as the second way in; the de-duplication below
+                        makes the two lists one. */
+                    if (format->getName() == "LV2")
+                        for (int p = 0; p < where.getNumPaths(); ++p)
+                            for (const auto& bundle : where[p].findChildFiles (juce::File::findDirectories, false, "*.lv2"))
+                                files.add (bundle.getFullPathName());
 
-                        pedal.replaceWithText (file, false, false, "\n");
-                        fileStartedMs.store (std::max<std::uint32_t> (1u, juce::Time::getMillisecondCounter()),
-                                             std::memory_order_release);
+                    files.removeDuplicates (false);
 
-                        juce::OwnedArray<juce::PluginDescription> found;
-                        list.scanAndAddFile (file, true, found, *format);
-
-                        /*  Nought back means the watchdog claimed the file
-                            while the child was on it: the scan under it was
-                            aborted. One that answered at the very edge is in
-                            the list and is kept; one that did not is
-                            blacklisted. Either way the abort has to be undone
-                            and the child put down, which is what Tracktion's
-                            scanFinished does - the next file gets a new one. */
-                        const auto claimed = fileStartedMs.exchange (0, std::memory_order_acq_rel) == 0;
-                        pedal.deleteFile();
-
-                        if (claimed)
-                        {
-                            if (! list.isListingUpToDate (file, *format))
-                            {
-                                list.addToBlacklist (file);
-                                skipped.push_back (file.toStdString());
-                            }
-
-                            putDownTheChild (list, pidFile);
-                        }
-                    }
+                    for (const auto& file : files)
+                        work.emplace_back (format, file);
                 }
 
+                progress.state = "scanning";
+                progress.total = static_cast<int> (work.size());
+                publish();
+
+                for (const auto& [format, file] : work)
+                {
+                    if (threadShouldExit())
+                        break;
+
+                    if (stopAsked())
+                    {
+                        stopped = true;
+                        break;
+                    }
+
+                    progress.file = file.toStdString();
+                    progress.format = formatWordOf (format->getName().toStdString());
+
+                    if (retry.isEmpty() && (list.getBlacklistedFiles().contains (file) || list.isListingUpToDate (file, *format)))
+                    {
+                        ++progress.done;
+                        continue;
+                    }
+
+                    publish();
+                    pedal.replaceWithText (file, false, false, "\n");
+                    fileStartedMs.store (std::max<std::uint32_t> (1u, juce::Time::getMillisecondCounter()),
+                                         std::memory_order_release);
+
+                    juce::OwnedArray<juce::PluginDescription> found;
+                    list.scanAndAddFile (file, true, found, *format);
+
+                    if (format->getName() == "LV2")
+                        for (const auto* description : found)
+                            bundles[description->fileOrIdentifier] = file;
+
+                    /*  Nought back means the watchdog claimed the file
+                        while the child was on it: the scan under it was
+                        aborted. One that answered at the very edge is in
+                        the list and is kept; one that did not is
+                        blacklisted. Either way the abort has to be undone
+                        and the child put down, which is what Tracktion's
+                        scanFinished does - the next file gets a new one. */
+                    const auto claimed = fileStartedMs.exchange (0, std::memory_order_acq_rel) == 0;
+                    pedal.deleteFile();
+
+                    if (claimed)
+                    {
+                        if (! list.isListingUpToDate (file, *format))
+                        {
+                            list.addToBlacklist (file);
+                            skipped.push_back (file.toStdString());
+                        }
+
+                        putDownTheChild (list, pidFile);
+                    }
+
+                    ++progress.done;
+                    publish();
+                }
+
+                progress.file.clear();
                 putDownTheChild (list, pidFile);
                 juce::MessageManager::callAsync ([] { juce::MessageManager::getInstance()->stopDispatchLoop(); });
             }
 
             te::PluginManager& manager;
-            std::string formatWord;
-            std::string extraFolder;
+            ScanOptions options;
             juce::File pedal;
             juce::File pidFile;
+
+            ScanProgress progress;
+            bool stopped = false;
 
             /** When the file under scan was handed to the child; nought between files. */
             std::atomic<std::uint32_t> fileStartedMs { 0 };
 
             /** The files given up on, read after the thread has stopped. */
             std::vector<std::string> skipped;
+
+            /** Every LV2's bundle, seeded from the list and added to as found. */
+            Bundles bundles;
         };
 
         /*  THE DEADLINE, on the message thread's timer. A file overdue is
@@ -386,6 +558,35 @@ namespace wfg::plugin
     std::vector<std::string> formatWords()
     {
         return { "vst3", "au", "lv2" };
+    }
+
+    std::string setAsideLv2PathOnWindows()
+    {
+       #if JUCE_WINDOWS
+        const auto held = juce::SystemStats::getEnvironmentVariable ("LV2_PATH", {});
+
+        if (held.isEmpty())
+            return {};
+
+        ::_putenv_s ("LV2_PATH", "");
+        return held.toStdString();
+       #else
+        return {};
+       #endif
+    }
+
+    std::string formatWordOf (const std::string& juceFormatName)
+    {
+        if (juce::String (juceFormatName).startsWithIgnoreCase ("AudioUnit"))
+            return "AU";
+
+        return juceFormatName;
+    }
+
+    std::string knownListPath (const std::string& storageFolder)
+    {
+        return juce::File (juce::String (storageFolder)).getChildFile ("plugins").getChildFile ("known.xml")
+                 .getFullPathName().toStdString();
     }
 
     bool runScanChildIfAsked (int argc, char** argv)
@@ -438,6 +639,54 @@ namespace wfg::plugin
     }
 
     //==============================================================================
+    std::string ScanProgress::toJson() const
+    {
+        auto object = std::make_unique<juce::DynamicObject>();
+        object->setProperty ("state", juce::String (state));
+        object->setProperty ("format", juce::String (format));
+        object->setProperty ("file", juce::String (file));
+        object->setProperty ("done", done);
+        object->setProperty ("total", total);
+        object->setProperty ("found", found);
+
+        juce::Array<juce::var> files;
+
+        for (const auto& one : skipped)
+            files.add (juce::String (one));
+
+        object->setProperty ("skipped", files);
+        return juce::JSON::toString (juce::var (object.release()), true).toStdString();
+    }
+
+    bool ScanProgress::fromJson (const std::string& text, ScanProgress& out)
+    {
+        const auto parsed = juce::JSON::parse (juce::String (text));
+        const auto* object = parsed.getDynamicObject();
+
+        if (object == nullptr || ! object->hasProperty ("state"))
+            return false;
+
+        out = {};
+        out.state = object->getProperty ("state").toString().toStdString();
+        out.format = object->getProperty ("format").toString().toStdString();
+        out.file = object->getProperty ("file").toString().toStdString();
+        out.done = static_cast<int> (object->getProperty ("done"));
+        out.total = static_cast<int> (object->getProperty ("total"));
+        out.found = static_cast<int> (object->getProperty ("found"));
+
+        if (const auto* files = object->getProperty ("skipped").getArray())
+            for (const auto& one : *files)
+                out.skipped.push_back (one.toString().toStdString());
+
+        return true;
+    }
+
+    bool readScanProgress (const std::string& path, ScanProgress& out)
+    {
+        const juce::File file { juce::String (path) };
+        return file.existsAsFile() && ScanProgress::fromJson (file.loadFileAsString().toStdString(), out);
+    }
+
     std::vector<KnownPlugin> scanPlugins (const std::string& storageFolder,
                                           const std::string& formatWord,
                                           const std::string& extraFolder,
@@ -445,10 +694,21 @@ namespace wfg::plugin
                                           std::vector<std::string>& skipped,
                                           std::string& problem)
     {
+        ScanOptions options;
+        options.formatWord = formatWord;
+        options.extraFolder = extraFolder;
+        options.retrySkipped = retrySkipped;
+        return scanPlugins (storageFolder, options, skipped, problem);
+    }
+
+    std::vector<KnownPlugin> scanPlugins (const std::string& storageFolder, const ScanOptions& options,
+                                          std::vector<std::string>& skipped, std::string& problem)
+    {
         problem.clear();
         skipped.clear();
 
         const auto words = formatWords();
+        const auto& formatWord = options.formatWord;
 
         if (! formatWord.empty() && std::find (words.begin(), words.end(), formatWord) == words.end())
         {
@@ -469,49 +729,92 @@ namespace wfg::plugin
             disk when the engine goes away. */
         juce::ScopedJuceInitialiser_GUI juceForTheScan;
 
+        const juce::File storage { juce::String (storageFolder) };
         auto engine = engineOn (storageFolder);
         auto& manager = engine->getPluginManager();
         manager.setUsesSeparateProcessForScanning (true);
 
-        if (retrySkipped)
+        /*  THE SCAN STARTS FROM THE MACHINE'S LIST, known.xml, rather than
+            from whatever Tracktion's own settings happen to hold - which a
+            running serve may have written over since (see the header). Each
+            file already listed and unchanged is skipped as up to date, so a
+            second scan only reads what is new. */
+        Bundles bundles;
+
+        {
+            juce::KnownPluginList seed;
+
+            if (readList (storage, seed, bundles))
+                if (const auto xml = seed.createXml())
+                    manager.knownPluginList.recreateFromXml (*xml);
+        }
+
+        if (options.retrySkipped)
             manager.knownPluginList.clearBlacklistedFiles();
 
-        ScanThread thread (manager, formatWord, extraFolder, juce::File (juce::String (storageFolder)));
+        if (! options.retryFile.empty())
+            manager.knownPluginList.removeFromBlacklist (juce::String (options.retryFile));
+
+        ScanThread thread (manager, options, storage);
+        thread.bundles = bundles;
         Watchdog watchdog (thread, manager);
         watchdog.startTimer (250);
         thread.startThread();
+
+       #if JUCE_MAC
+        /*  THE LOOP IS [NSApp run] ON A MAC, and without the application it
+            returns at once - which stopped the thread below before it had
+            looked at a single file: `wfg plugins --scan` found nothing on
+            macOS from its first day (the CI job, 2026-09-26). The scan child
+            and the plugin children do the same, for the same reason. */
+        juce::initialiseNSApplication();
+       #endif
+
         juce::MessageManager::getInstance()->runDispatchLoop();
         thread.stopThread (-1);
         watchdog.stopTimer();
 
         skipped = thread.skipped;
-        return knownFrom (*engine);
+
+        if (! writeList (storage, manager.knownPluginList, thread.bundles))
+            problem = "the scan could not write " + knownListPath (storageFolder);
+
+        /*  THE LAST WORD, after the list is on disk: whoever reads `finished`
+            and then the list finds this scan's list. */
+        thread.progress.state = thread.stopped ? "stopped" : "finished";
+        thread.publish();
+
+        return knownFrom (manager.knownPluginList, thread.bundles);
     }
 
     std::vector<KnownPlugin> knownPlugins (const std::string& storageFolder)
     {
-        auto engine = engineOn (storageFolder);
-        return knownFrom (*engine);
+        juce::KnownPluginList list;
+        Bundles bundles;
+        readList (juce::File (juce::String (storageFolder)), list, bundles);
+        return knownFrom (list, bundles);
     }
 
     std::string describePlugin (const std::string& storageFolder, const std::string& identifier)
     {
-        auto engine = engineOn (storageFolder);
+        juce::KnownPluginList list;
+        Bundles bundles;
+        readList (juce::File (juce::String (storageFolder)), list, bundles);
 
-        if (const auto description = engine->getPluginManager().knownPluginList
-                                           .getTypeForIdentifierString (juce::String (identifier)))
-            if (const auto xml = description->createXml())
-                return xml->toString().toStdString();
+        if (const auto description = list.getTypeForIdentifierString (juce::String (identifier)))
+            return knownFrom (*description, bundles).description;
 
         return {};
     }
 
     std::vector<std::string> skippedPlugins (const std::string& storageFolder)
     {
-        auto engine = engineOn (storageFolder);
+        juce::KnownPluginList list;
+        Bundles bundles;
+        readList (juce::File (juce::String (storageFolder)), list, bundles);
         std::vector<std::string> out;
 
-        for (const auto& file : engine->getPluginManager().knownPluginList.getBlacklistedFiles())
+        for (const auto& file : list.getBlacklistedFiles())
             out.push_back (file.toStdString());
 
         return out;

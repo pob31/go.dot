@@ -62,13 +62,16 @@ namespace wfg::client::ui
             std::function<void (const std::string& address, const std::string& text)> set;
 
             /** `send.create` on this cue into that mix, when a silent strip is raised. */
-            std::function<void (const std::string& cueId, const std::string& busId)> createSend;
+            std::function<void (const std::string& cueId, const std::string& busId, double level)> createSend;
 
             /** `object.delete` on one send, from its cross. */
             std::function<void (const std::string& sendId)> removeSend;
 
             /** A sentence for the panel's head. */
             std::function<void (const juce::String&)> say;
+
+            /** A click or a touch on a strip: its level on the master dial (2026-09-26). */
+            std::function<void (const std::string& address)> dial;
         };
 
         SendMixerComponent (const model::Theme&, Actions);
@@ -81,6 +84,10 @@ namespace wfg::client::ui
 
         void paint (juce::Graphics&) override;
         void resized() override;
+
+        /*  THE NUMBER THE MASTER DIAL TURNS (2026-09-26): a strip whose level
+            it is wears a dial before its name. */
+        void showDial (const std::string& address);
 
     private:
         struct Strip;
@@ -102,6 +109,9 @@ namespace wfg::client::ui
             importer uses when it makes a cue and then fills it in. */
         void levelWanted (std::size_t at, double decibels);
 
+        /** A send's switch, by the mixer's index (2026-09-25). */
+        void switchAt (std::size_t at, bool on);
+
         model::Theme theme;
         Actions actions;
 
@@ -113,6 +123,12 @@ namespace wfg::client::ui
         double awaitingLevel = 0.0;
 
         std::vector<std::unique_ptr<Strip>> strips;
+
+        std::string dialed;
+
+        /** The address of a strip's level - the cue's own for the first - or empty. */
+        std::string levelAddressAt (std::size_t at) const;
+        void dialAt (std::size_t at);
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SendMixerComponent)
     };

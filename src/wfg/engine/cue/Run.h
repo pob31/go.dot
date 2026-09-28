@@ -48,11 +48,13 @@
 */
 
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/document/LevelLane.h>
 
 #include <bit>
 #include <utility>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -259,6 +261,17 @@ namespace wfg::cue
             entire practical difference between the two, and the reason `sent`
             is worth having. */
         inline constexpr const char* sendFailed = "send-failed";
+
+        /*  A MIC CUE THAT CANNOT PLAY (Phase 9b, namespace draft §18.5), each
+            said by `wfg validate` before the show as well: it takes no input,
+            or one the show does not have; its channel is missing or shared - a
+            mic cue holds its channel alone; its input is not as wide as its
+            channel takes; or the channel was declared after the graph was
+            built, and waits for Load now. */
+        inline constexpr const char* noInput = "no-input";
+        inline constexpr const char* badChannel = "bad-channel";
+        inline constexpr const char* badWidth = "bad-width";
+        inline constexpr const char* notBuilt = "not-built";
     }
 
     //==============================================================================
@@ -273,11 +286,27 @@ namespace wfg::cue
         bool enabled = false;
         std::vector<std::pair<int, float>> values;
 
+        /*  THE CUE'S WHOLE STATE for this entry (the author's decision of
+            2026-09-25): the row's name under the bundle's plugins/, and the
+            same resolved to a path on disk for the voice. Empty for the
+            preset's own state. */
+        std::string stateFile;
+        std::string statePath;
+
+        /*  HOW WIDE THE CUE IS AT THIS INSERT (2026-09-26, cue/InsertChain.h):
+            the channels it sends - nought when the insert passes it dry - and
+            how many come back, wider when the plugin makes a mono cue stereo.
+            -1 when nobody worked it out, which the voice reads as its own
+            width both ways. */
+        int feed = -1;
+        int back = -1;
+
         /** Field-wise, the floats by bit pattern (-Wfloat-equal). */
         bool sameAs (const FxSetting& other) const noexcept
         {
             if (slot != other.slot || enabled != other.enabled || fxId != other.fxId
-                 || values.size() != other.values.size())
+                 || stateFile != other.stateFile || values.size() != other.values.size()
+                 || feed != other.feed || back != other.back)
                 return false;
 
             for (std::size_t i = 0; i < values.size(); ++i)
@@ -393,7 +422,54 @@ namespace wfg::cue
             set it are logged, which is what a replay needs. */
         double trim = 0.0;
 
-        /*  THE EQ THE VOICE WAS LAST GIVEN (Phase 9a): the cue's nineteen rows
+        /*  THE CUE'S LEVEL LANE (namespace draft §20): a volume curve over the
+            FILE, and the fourth term of this run's sum, beside `ownLevel`,
+            `trim` and the DCAs. A term of THIS run's sum and of nobody else's:
+            a group has no lane, and nothing inherits one (§4.12).
+
+            `lane` is the points as `doc::readLevelLane` read them - at the arm,
+            and again whenever the show's revision moves, so an edit reaches a
+            sounding cue on the next tick (decision DB). `laneDb` is what they
+            ask for this tick, read by `Runner::applyLanes` at the second of the
+            file the voice will be at one slew from now (DC). Both a media run's
+            only; nought and empty for every other kind. Never logged: the
+            document is, and the sample clock a replay does not have is what
+            says where in the file a voice was. */
+        std::vector<doc::LanePoint> lane;
+        double laneDb = 0.0;
+
+        /*  WHERE THE LANE IS READ BEFORE THE VOICE IS: the second of the file
+            the voice will start at - the start offset, the second somebody
+            jumped to, or the in-point of the slice it enters - recorded at the
+            arm. `positionOrigin` is not it for a cue with slices, which the
+            launch sets and the arm leaves at nought, and a lane read there
+            would start a voice at the level of a second it never plays. */
+        double laneStart = 0.0;
+
+        /*  THE SLICE A VOICE IS STILL IN between a boundary's placement and its
+            crossing. `advanceRanges` moves the slice's clock when it PLACES the
+            boundary, a little early, which is right for the playhead - it waits
+            at the incoming in-point - and wrong for a level, which would take
+            the incoming slice's value before the sound had left the outgoing
+            one. So the outgoing clock is kept here until the crossing: its
+            origin, where it began and how long a pass of it is. Nought
+            `laneOutgoingAt` is "no boundary pending". */
+        double laneOutgoingOrigin = 0.0;
+        std::int64_t laneOutgoingAt = 0;
+        std::int64_t laneOutgoingPass = 0;
+
+        /*  HOW LOUD IT LEFT ITS TRACK over the last tick, in dB below full
+            scale (author, 2026-09-25: "On the sampler fader displays of the
+            D700 can we have a post fader level meter too?"): the loudest
+            sample the track's output stage sent, after its EQ, its inserts,
+            the level and the hand's trim - so after the fader. `silentDb`
+            while it has no voice sounding. A READOUT like `position`: taken
+            on the tick thread from the player, never logged, and nought a
+            replay could reproduce. */
+        static constexpr double silentDb = -120.0;
+        double meter = silentDb;
+
+        /*  THE EQ THE VOICE WAS LAST GIVEN (Phase 9a): the cue's twenty-three rows
             as they were carried by the arm, and as `Runner::applyEq` last
             pushed them. Kept on the run so a tick after an edit can say
             what changed for THIS run and push only that, and a tick with no
@@ -425,6 +501,15 @@ namespace wfg::cue
             that started it owns it. */
         bool held = false;
         std::string heldBy;
+
+        /*  SOLOED ON ITS STRIP (author, 2026-09-25: "The solo switch could be
+            engaged on a track to prevent other faders in the bank to
+            trigger"): while it holds, a press on any other strip of its bank
+            - a touch, a pad, a fire by name - starts nothing. It lets go by
+            itself when the clip stops (`soloCanHold`), so a solo left on
+            never outlives the clip it protected. Run-local, as `held` is: a
+            performance, never an edit to the show. */
+        bool solo = false;
 
         /*  ON A SAMPLER GROUP'S RUN: taken over by another sampler group
             arming with `takeover=group`. A closing group launches nothing
@@ -758,6 +843,21 @@ namespace wfg::cue
         /** The audio side has confirmed a voice and made the media ready. */
         bool armConfirmed = false;
 
+        /*  A MIC RUN'S FADE-IN, copied at its arm (Phase 9b): how long its
+            channel's gate takes to open at the launch. */
+        double fadeIn = 0.0;
+
+        /*  A MIC RUN WAITING FOR ITS CHANNEL, armed with no track (decision
+            CM): set when the claim queued, cleared when the tick asks for the
+            arm again once the claim has landed - which it asks once. */
+        bool waitsForChannel = false;
+
+        /*  A MIC RUN ON A SAMPLING CHANNEL (Phase 9c): GO asked for before the
+            channel was its to act on - `onGo` is acted on when the claim lands
+            - and the `through` last told the audio side, -1 for never. */
+        bool takeOnGoPending = false;
+        int throughSent = -1;
+
         /** The sample the launch was placed at. Zero before it is placed. */
         std::int64_t launchedAtSample = 0;
 
@@ -782,11 +882,13 @@ namespace wfg::cue
         bool skipFooter = false;
 
         /*  WHETHER `run.kill` ENDED IT, which `skipFooter` alone cannot say
-            once Phase 10's double Esc sets that too. The persistent assertion
-            reads it (§3.29, decision S): a kill on a persistent run suspends
-            the assertion for the session, until a load-to-time re-solves - so
-            the operator never fights the machine over a bed they just stopped.
-            Written by the handler, so a replay has it. */
+            because a double Esc (`run.killAll`) sets that too and never this.
+            The persistent assertion reads it (§3.29, decision S): a kill on a
+            persistent run suspends the assertion for the session, until a
+            load-to-time re-solves - so the operator never fights the machine
+            over a bed they just stopped - while a double Esc suspends nothing
+            and the next GO restores the section. Written by the handler, so a
+            replay has it. */
         bool killed = false;
 
         /*  Started by the persistent assertion rather than by anybody. Published
@@ -808,6 +910,14 @@ namespace wfg::cue
         bool isFinished() const noexcept
         {
             return state == runState::done || state == runState::failed;
+        }
+
+        /*  Whether a solo on it holds: until the clip stops - its end, a stop,
+            a kill, a release - and not after. */
+        bool soloCanHold() const noexcept
+        {
+            return ! isFinished() && ! stopIssued && state != runState::stopping
+                     && state != runState::postWait;
         }
 
         /** Whether this run is a group's, and so has children rather than a
@@ -966,6 +1076,14 @@ namespace wfg::cue
             queue decides nothing: it is a fact about the queue rather than a
             choice about the show. That is why there is no `claim.land`. */
         void releaseSlotsOf (const std::string& runId);
+
+        /*  SAID OF EVERY SLOT A RUN LETS GO (Phase 9c): the slot, the run that
+            held it, and the run it went to next, or nothing. A sampling
+            channel's take is held as its cue lets go, and a cue that was
+            waiting for it acts on its GO then - both inside the release, which
+            a replay makes too. */
+        std::function<void (const std::string& slotId, const std::string& fromRun,
+                            const std::string& toRun)> onRelease;
 
         const std::vector<Run>& all() const noexcept { return runs; }
 

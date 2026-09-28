@@ -6,6 +6,7 @@
 #include <juce_events/juce_events.h>
 #include <deque>
 #include <mutex>
+#include <utility>
 
 namespace wfg::audio
 {
@@ -17,22 +18,39 @@ namespace wfg::audio
         explicit SettingsPump (SettingsRequest work) : perform (std::move (work)) { startTimer (40); }
         ~SettingsPump() override { stopTimer(); }
         std::function<void()> maintenance;
+
+        /** `plugin.load`'s work (2026-09-26): the graph built again on what plays now. */
+        std::function<void()> rebuild;
+
         void post (const AudioSettings& settings, bool defaultsOnly)
         {
             const std::lock_guard<std::mutex> lock (mutex);
             queued.push_back ({ settings, defaultsOnly });
         }
+
+        void postRebuild()
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            rebuildAsked = true;
+        }
     private:
         void timerCallback() override
         {
             std::deque<std::pair<AudioSettings, bool>> work;
-            { const std::lock_guard<std::mutex> lock (mutex); work.swap (queued); }
+            auto rebuildNow = false;
+            {
+                const std::lock_guard<std::mutex> lock (mutex);
+                work.swap (queued);
+                rebuildNow = std::exchange (rebuildAsked, false);
+            }
             for (const auto& item : work) perform (item.first, item.second);
+            if (rebuildNow && rebuild) rebuild();
             if (maintenance) maintenance();
         }
         SettingsRequest perform;
         std::mutex mutex;
         std::deque<std::pair<AudioSettings, bool>> queued;
+        bool rebuildAsked = false;
     };
 
     // Repointed only while the tick thread is joined. Device sample counters

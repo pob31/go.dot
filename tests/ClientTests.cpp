@@ -42,6 +42,7 @@
 
 #include "TestSupport.h"
 
+#include <initializer_list>
 #include <optional>
 
 #include <wfg/client/model/Curve.h>
@@ -53,7 +54,9 @@
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Ranges.h>
@@ -62,6 +65,8 @@
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/FxEditor.h>
+#include <wfg/client/model/Rack.h>
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Timeline.h>
@@ -69,11 +74,15 @@
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Surfaces.h>
+#include <wfg/client/model/Take.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Waveform.h>
+#include <wfg/engine/audio/AudioCommands.h>
+#include <wfg/engine/audio/AudioSettings.h>
+#include <wfg/engine/audio/Peaks.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/command/CommandRegistry.h>
@@ -81,14 +90,18 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/FadePoints.h>
+#include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/DocumentWriter.h>
+#include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
@@ -96,6 +109,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <algorithm>
 #include <memory>
@@ -335,6 +349,22 @@ TEST_CASE ("client: the strip says in words what it also says in colour")
     // An unpublished lock says nothing here rather than saying "open".
     reading.locked = model::Flag::unsaid;
     CHECK (reading.lockLine().empty());
+
+    /*  GO IS GREY WITHOUT AUDIO AND SAYS SO UNDER ITS WORD (author,
+        2026-09-25; §4.8), and says nothing while the audio runs. */
+    CHECK (reading.audioRunning());
+    CHECK (reading.goLine().empty());
+
+    reading.status = "stopped";
+    CHECK_FALSE (reading.audioRunning());
+    CHECK (reading.goLine() == "no audio");
+
+    reading.status = "noClock";
+    CHECK (reading.goLine() == "no clock");
+
+    reading.status.clear();
+    CHECK_FALSE (reading.audioRunning());
+    CHECK (reading.goLine() == "audio —");
 }
 
 TEST_CASE ("client: a show with everything wrong with it is summarised, never carried whole")
@@ -411,12 +441,26 @@ TEST_CASE ("client: a row the pointer cannot stand on is not offered, and a refu
     row.section = model::Section::member;
     CHECK (row.mayPark());
 
+    row.id = "CUE";
+    row.parent = "GROUP";
+    CHECK (row.parksOn() == "CUE");
+
     for (const auto section : { model::Section::header, model::Section::footer,
                                 model::Section::persistent })
     {
         row.section = section;
         CHECK_FALSE (row.mayPark());
     }
+
+    /*  BUT A HEADER'S OR A FOOTER'S LINE SENDS ITS GROUP (author, 2026-09-26:
+        "move the pointer to the group instead of showing an error"), and only
+        a persistent bed, which has no group, is still told why not. */
+    row.section = model::Section::header;
+    CHECK (row.parksOn() == "GROUP");
+    row.section = model::Section::footer;
+    CHECK (row.parksOn() == "GROUP");
+    row.section = model::Section::persistent;
+    CHECK (row.parksOn().empty());
 
     /*  AND THE REFUSAL READS AS A SENTENCE. The node is five fields written
         for grep at four in the morning; an operator who just pressed
@@ -544,6 +588,18 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     plugin::PluginTable pluginTable;
     plugin::registerPluginCommands (rig.engine.commands(), pluginTable, {});
 
+    /*  And the audio settings' commands, where Load now's plugin.load lives
+        beside audio.apply (2026-09-26). */
+    audio::AudioState audioState;
+    audio::registerAudioSettingsCommands (rig.engine, rig.document, runner, audioState);
+
+    /*  And the surfaces' aim and the live layer's two (2026-09-25): the running
+        pane's name and the bar's buttons. */
+    surface::SurfaceTable surfaces;
+    surface::registerSurfaceCommands (rig.engine.commands(), rig.document, surfaces);
+    cue::LiveEdits live;
+    cue::registerLiveCommands (rig.engine.commands(), rig.document, live);
+
     const std::vector<Event> gestures
     {
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
@@ -572,10 +628,17 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::fireCue ("B3N8R5TW"),
         gesture::splitRange ("B3N8R5TW", 6.0),
         gesture::createSend ("B3N8R5TW", "J3MT5XYA"),
+        gesture::createSend ("B3N8R5TW", "J3MT5XYA", -18.5),
         gesture::eqReset ("B3N8R5TW"),
         gesture::createFx ("B3N8R5TW", "PG7N0001"),
+        gesture::captureFx ("FX7N0001", "state/PG7N0001-0123456789abcdef.state", "0:0.5 1:0"),
         gesture::createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
         gesture::restartPlugin ("PG7N0001"),
+
+        /*  THE APP'S SCAN AND LOAD NOW (2026-09-26): the Plugins tab's Scan,
+            its folder, a skipped file's Retry, and Load now. */
+        gesture::scanPlugins(), gesture::scanPlugins ("lv2"), gesture::scanPlugins ("", "D:/lv2"),
+        gesture::retryScan ("C:/plugins/hangs.vst3"), gesture::loadPlugins(),
         gesture::createPort ("Lights"),
 
         /*  PHASE 6: the Surfaces tab's three ADD buttons, and the virtual
@@ -588,9 +651,48 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::releaseStrip ("STRP0001"),
         gesture::touchNode ("/godot/dca/DCA00001/trim"),
         gesture::releaseNode ("/godot/dca/DCA00001/trim"),
+
+        /*  THE ROTARIES' AIM AND THE LIVE BAR (2026-09-25). */
+        gesture::aimSurfaces ("B3N8R5TW"), gesture::aimSurfaces (""),
+        gesture::keepLive(), gesture::dropLive(),
+
+        /*  THE MASTER DIAL (2026-09-26): a number clicked, and letting go. */
+        gesture::dial ("/godot/cue/B3N8R5TW/level"), gesture::dial (""),
+        gesture::setNode ("/godot/cue/B3N8R5TW/eqB2On", "false"),
+
+        /*  PHASE 9b: the Inputs tab's list and its patch rule, and the Rack
+            tab's two creates. */
+        gesture::createInput (1, -1), gesture::createInput (2, 0),
+        gesture::deleteInput ("N1000001"), gesture::moveInput ("N1000001", 1),
+        gesture::setInputPatchSettled (true), gesture::setInputPatchSettled (false),
+        gesture::createRackChannel ("mono"),
+        gesture::createChannelPlugin ("K1000001", "Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
+
+        /*  THE NEW-CUE LISTS (2026-09-27): a group made around the picked cues,
+            and a mic cue born with its input and channel. Every line of the
+            fixed lists joins below. */
+        gesture::wrapGroup ({ "B3N8R5TW", "P9XKC2WR" }, { { "mode", "timeline" } }),
+        gesture::wrapGroup ({ "B3N8R5TW" }, {}),
+        gesture::createCue ("7K2QM9X4", 0, "mic", "", { { "input", "N1000001" }, { "channel", "K1000001" } }),
     };
 
-    for (const auto& event : gestures)
+    std::vector<Event> listed = gestures;
+
+    for (const auto* choices : { &model::groupChoices(), &model::transportChoices(), &model::midiChoices() })
+        for (const auto& choice : *choices)
+        {
+            auto settings = choice.settings;
+
+            if (choice.aimed)
+                settings.emplace_back ("target", "B3N8R5TW");
+
+            listed.push_back (gesture::createCue ("7K2QM9X4", 0, choice.kind, "", settings));
+
+            if (choice.kind == "group")
+                listed.push_back (gesture::wrapGroup ({ "B3N8R5TW" }, settings));
+        }
+
+    for (const auto& event : listed)
     {
         INFO ("gesture sends " << event.command);
 
@@ -1151,6 +1253,231 @@ TEST_CASE ("client: an import names its cue after the file, and finds what the c
 }
 
 //==============================================================================
+TEST_CASE ("client: a file dropped on a group's row goes into the group")
+{
+    /*  The author, 2026-09-25: "Drag and dropping a media file on a group
+        places the new media cue after the group and requires moving it into
+        the group afterwards." Rows built by hand, as the row drag's are. */
+    const auto cue = [] (const char* id, const char* kind, const char* parent, int index, int depth)
+    {
+        model::Row row;
+        row.rowKind = model::RowKind::cue;
+        row.id = id;
+        row.name = id;
+        row.kind = kind;
+        row.parent = parent;
+        row.indexInParent = index;
+        row.depth = depth;
+        row.isGroup = std::string (kind) == "group";
+        return row;
+    };
+
+    //  A, then G open holding M1 and M2, then S, then F folded - all in the list L.
+    auto folded = cue ("F", "group", "L", 3, 0);
+    folded.shut = true;
+
+    const std::vector<model::Row> rows {
+        cue ("A", "memo", "L", 0, 0),
+        cue ("G", "group", "L", 1, 0),
+        cue ("M1", "media", "G", 0, 1),
+        cue ("M2", "memo", "G", 1, 1),
+        cue ("S", "memo", "L", 2, 0),
+        folded,
+    };
+
+    //  The middle of a group's row: into it, at the end, the row lit - open or folded.
+    for (const std::size_t group : { std::size_t { 1 }, std::size_t { 5 } })
+    {
+        const auto into = model::fileDropAt (rows, group, 0.5, 0);
+        CHECK (into.parent == rows[group].id);
+        CHECK (into.index == -1);
+        CHECK (into.lit);
+        CHECK (into.words == "into " + rows[group].id + ", at the end");
+    }
+
+    /*  THE REST OF AN OPEN GROUP'S ROW IS ITS FIRST PLACE, where the line
+        under its name is drawn - the author's case: it was after the group. */
+    for (const auto fraction : { 0.1, 0.9 })
+    {
+        const auto first = model::fileDropAt (rows, 1, fraction, 0);
+        CHECK (first.parent == "G");
+        CHECK (first.index == 0);
+        CHECK_FALSE (first.lit);
+        CHECK (first.depth == 1);
+        CHECK (first.words == "first in G");
+    }
+
+    //  A folded group's row is still after it: its members are not on screen to go among.
+    {
+        const auto after = model::fileDropAt (rows, 5, 0.9, 0);
+        CHECK (after.parent == "L");
+        CHECK (after.index == 4);
+        CHECK (after.depth == 0);
+        CHECK (after.words == "after F");
+    }
+
+    //  After a member, in its group; and, with the hand left of it, after the group it ends.
+    {
+        const auto inG = model::fileDropAt (rows, 3, 0.9, 1);
+        CHECK (inG.parent == "G");
+        CHECK (inG.index == 2);
+        CHECK (inG.depth == 1);
+
+        const auto outOfG = model::fileDropAt (rows, 3, 0.9, 0);
+        CHECK (outOfG.parent == "L");
+        CHECK (outOfG.index == 2);
+        CHECK (outOfG.depth == 0);
+        CHECK (outOfG.words == "after G");
+
+        //  A plain cue at the top of the list: after it.
+        CHECK (model::fileDropAt (rows, 0, 0.5, 0).index == 1);
+    }
+
+    /*  A HEADER ROW AND A BAND: the end of their group's members, with no
+        line, since a create cannot reach the section the line would be in. */
+    {
+        auto inHeader = cue ("H1", "memo", "G", 0, 1);
+        inHeader.section = model::Section::header;
+        inHeader.sectionId = "G/header";
+
+        model::Row band;
+        band.rowKind = model::RowKind::band;
+        band.section = model::Section::header;
+        band.parent = "G";
+        band.sectionId = "G/header";
+        band.depth = 1;
+
+        const std::vector<model::Row> headed { cue ("G", "group", "L", 0, 0), band, inHeader,
+                                               cue ("M1", "memo", "G", 0, 1) };
+
+        for (const std::size_t at : { std::size_t { 1 }, std::size_t { 2 } })
+        {
+            const auto end = model::fileDropAt (headed, at, 0.9, 1);
+            CHECK (end.parent == "G");
+            CHECK (end.index == -1);
+            CHECK_FALSE (end.lit);
+            CHECK (end.depth == -1);
+            CHECK (end.words == "at the end of G");
+        }
+    }
+
+    //  Past the rows there is nothing to read.
+    CHECK (model::fileDropAt (rows, rows.size(), 0.5, 0).parent.empty());
+}
+
+//==============================================================================
+TEST_CASE ("client: a cue dragged to the end of a group leaves it when the hand moves left")
+{
+    /*  The author, 2026-09-25: "It's hard to move a cue out of group to place
+        it right below it. It always gets moved back into the group at the last
+        position." Under the last row of a group the pointer's height cannot
+        tell "after this row" from "after the group"; its x can - `depth` is
+        the level the hand is over. Rows built by hand, with their depths. */
+    const auto cue = [] (const char* id, const char* kind, const char* parent, int index, int depth)
+    {
+        model::Row row;
+        row.rowKind = model::RowKind::cue;
+        row.id = id;
+        row.name = id;
+        row.kind = kind;
+        row.parent = parent;
+        row.indexInParent = index;
+        row.depth = depth;
+        row.isGroup = std::string (kind) == "group";
+        return row;
+    };
+
+    //  A, then G holding M1 and M2, then S - all in the list L.
+    const std::vector<model::Row> rows {
+        cue ("A", "memo", "L", 0, 0),
+        cue ("G", "group", "L", 1, 0),
+        cue ("M1", "memo", "G", 0, 1),
+        cue ("M2", "memo", "G", 1, 1),
+        cue ("S", "memo", "L", 2, 0),
+    };
+
+    //  The last member ends the group; the first does not.
+    CHECK (model::endingAt (rows, 3, 1)->id == "M2");
+    CHECK (model::endingAt (rows, 3, 0)->id == "G");
+    CHECK (model::endingAt (rows, 2, 0)->id == "M1");
+
+    //  M1 dropped under M2 with the hand over the group's rail: after G, in the list.
+    {
+        int landed = -1;
+        const auto out = model::dropAtDepth (rows, 3, rows[2], 0.9, 0, &landed);
+        CHECK (out.kind == model::DropKind::after);
+        CHECK (out.container == "L");
+        CHECK (out.index == 2);
+        CHECK (landed == 0);
+
+        //  And over the row's own text: after M2, in the group, as before.
+        const auto in = model::dropAtDepth (rows, 3, rows[2], 0.9, 1, &landed);
+        CHECK (in.kind == model::DropKind::after);
+        CHECK (in.container == "G");
+        CHECK (landed == 1);
+    }
+
+    /*  THE LAST MEMBER TAKES ITSELF OUT: dragged over its own row, left, it
+        lands directly below the group - the author's case exactly. Over its
+        own text it is still nothing, as a row onto itself always was. */
+    {
+        const auto out = model::dropAtDepth (rows, 3, rows[3], 0.9, 0);
+        CHECK (out.kind == model::DropKind::after);
+        CHECK (out.container == "L");
+        CHECK (out.index == 2);
+
+        CHECK (model::dropAtDepth (rows, 3, rows[3], 0.9, 1).kind == model::DropKind::none);
+    }
+
+    //  The middle of a group's own row still means into it, wherever the hand is.
+    CHECK (model::dropAtDepth (rows, 1, rows[0], 0.5, 0).kind == model::DropKind::into);
+
+    //  Nested: G holding H holding N, then S. Each level left is one group further out.
+    {
+        const std::vector<model::Row> nested {
+            cue ("G", "group", "L", 0, 0),
+            cue ("H", "group", "G", 0, 1),
+            cue ("N", "memo", "H", 0, 2),
+            cue ("S", "memo", "L", 1, 0),
+        };
+
+        CHECK (model::endingAt (nested, 2, 2)->id == "N");
+        CHECK (model::endingAt (nested, 2, 1)->id == "H");
+        CHECK (model::endingAt (nested, 2, 0)->id == "G");
+
+        const auto outOfH = model::dropAtDepth (nested, 2, nested[3], 0.9, 1);
+        CHECK (outOfH.kind == model::DropKind::after);
+        CHECK (outOfH.container == "G");
+        CHECK (outOfH.index == 1);
+    }
+
+    //  A group at the very end of the list: the next row is nothing, so both levels are open.
+    {
+        const std::vector<model::Row> last {
+            cue ("A", "memo", "L", 0, 0),
+            cue ("G", "group", "L", 1, 0),
+            cue ("M1", "memo", "G", 0, 1),
+        };
+
+        CHECK (model::endingAt (last, 2, 0)->id == "G");
+
+        const auto out = model::dropAtDepth (last, 2, last[0], 0.9, 0);
+        CHECK (out.kind == model::DropKind::after);
+        CHECK (out.container == "L");
+    }
+
+    //  A group the next row is still inside is not left: the line is only as far out as it is.
+    {
+        const std::vector<model::Row> inside {
+            cue ("G", "group", "L", 0, 0),
+            cue ("M1", "memo", "G", 0, 1),
+            cue ("M2", "memo", "G", 1, 1),
+        };
+
+        CHECK (model::endingAt (inside, 1, 0)->id == "M1");
+    }
+}
+
 TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be named by number or name")
 {
     /*  model/Reorder.h: the one rule the drawing and the dropping share.
@@ -1859,6 +2186,292 @@ TEST_CASE ("client: the new-cue row offers every kind the engine makes, and land
     CHECK_FALSE (model::madeByCreate (job, "fade", "Lights"));  // somebody else's, named already
 }
 
+TEST_CASE ("client: a cue born with its settings is one record, carrying the id it drew")
+{
+    /*  The new-cue lists (2026-09-27) send `cue.create` and `group.wrap` with
+        an EMPTY identifier and the settings after it, as `attribute value`
+        pairs. What a replay needs is the record: the drawn identifier in the
+        empty one's place and the pairs after it, so the second run makes the
+        same cue with the same settings and draws nothing. */
+    Rig rig;
+    rig.engine.log().openInMemory ({});
+
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE_FALSE (listId.empty());
+    const auto membersBefore = model::words (model::text (*rig.publish (0), "/godot/list/" + listId + "/order")).size();
+    auto tick = std::int64_t { 1 };
+
+    const auto args = [] (std::initializer_list<const char*> texts)
+    {
+        std::vector<osc::Value> made;
+        for (const auto* text : texts)
+            made.push_back (osc::Value::string (text));
+        return made;
+    };
+
+    auto create = args ({ "", "", "group", "", "", "mode", "timeline" });
+    create[0] = osc::Value::string (listId);
+    create[1] = osc::Value::int32 (0);
+    rig.document.beginTransaction ("cue.create", tick, "window", {});
+    REQUIRE (rig.apply (tick++, "window", "cue.create", create).applied == 1);
+
+    auto snapshot = rig.publish (tick);
+    const auto group = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
+    REQUIRE (model::text (*snapshot, "/godot/cue/" + group + "/kind") == "group");
+    CHECK (model::text (*snapshot, "/godot/cue/" + group + "/mode") == "timeline");
+
+    auto aimed = args ({ "", "", "transport", "", "", "verb", "afterIteration", "target", "" });
+    aimed[0] = osc::Value::string (listId);
+    aimed[1] = osc::Value::int32 (1);
+    aimed[8] = osc::Value::string (group);
+    rig.document.beginTransaction ("cue.create", tick, "window", {});
+    REQUIRE (rig.apply (tick++, "window", "cue.create", aimed).applied == 1);
+
+    snapshot = rig.publish (tick);
+    const auto stop = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 1);
+    REQUIRE (model::text (*snapshot, "/godot/cue/" + stop + "/kind") == "transport");
+    CHECK (model::text (*snapshot, "/godot/cue/" + stop + "/verb") == "afterIteration");
+    CHECK (model::text (*snapshot, "/godot/cue/" + stop + "/target") == group);
+
+    // One Undo takes the cue and its settings together.
+    REQUIRE (rig.apply (tick++, "window", "undo", {}).applied == 1);
+    CHECK (model::words (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order")).size()
+             == membersBefore + 1);
+
+    // A value missing its name is a message cut short, refused whole.
+    auto cut = args ({ "", "", "memo", "", "", "notes" });
+    cut[0] = osc::Value::string (listId);
+    cut[1] = osc::Value::int32 (0);
+    CHECK (rig.apply (tick++, "window", "cue.create", cut).rejected == 1);
+
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+    std::vector<LogRecord> creates;
+
+    for (const auto& record : parsed.records)
+        if (record.command == "cue.create" && record.kind == LogRecord::Kind::applied)
+            creates.push_back (record);
+
+    REQUIRE (creates.size() == 2);
+    REQUIRE (creates[0].args.size() == 7);
+    CHECK (creates[0].args[4].getString() == group);
+    CHECK (creates[0].args[6].getString() == "timeline");
+    REQUIRE (creates[1].args.size() == 9);
+    CHECK (creates[1].args[4].getString() == stop);
+    CHECK (creates[1].args[8].getString() == group);
+}
+
+TEST_CASE ("client: every line of the new-cue lists makes its cue, born with what the line says")
+{
+    /*  The four lists (the author, 2026-09-27) held against the engine, the
+        way the row of buttons is above: each line is a `cue.create` with
+        pairs the engine accepts, and the cue it makes reads back what the line
+        promised. The mic fixture has named inputs and a rack, so the mic list
+        is a real one. */
+    Rig rig ("mic");
+    const std::string listId = "MC000001";
+    auto tick = std::int64_t { 1 };
+
+    // A stereo channel, and a mono one made shared - a bus with a chain, never claimed.
+    REQUIRE (rig.apply (tick++, "window", "channel.create",
+                        { osc::Value::string ("stereo"), osc::Value::string ("CH000031") }).applied == 1);
+    REQUIRE (rig.apply (tick++, "window", "channel.create",
+                        { osc::Value::string ("mono"), osc::Value::string ("CH000032") }).applied == 1);
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/slot/CH000032/access"),
+                          osc::Value::string ("shared") }).applied == 1);
+
+    auto snapshot = rig.publish (tick);
+    const auto mics = model::micChoices (*snapshot);
+
+    const auto through = [&mics] (const std::string& input)
+    {
+        std::vector<std::string> channels;
+        for (const auto& choice : mics)
+            for (const auto& [attribute, value] : choice.settings)
+                if (attribute == "input" && value == input)
+                    for (const auto& [other, channel] : choice.settings)
+                        if (other == "channel")
+                            channels.push_back (channel);
+        return channels;
+    };
+
+    CHECK (through ("MC000021") == std::vector<std::string> { "MC000011" });   // mono into mono-to-stereo
+    CHECK (through ("MC000022") == std::vector<std::string> { "CH000031" });   // stereo into stereo
+    REQUIRE_FALSE (mics.empty());
+    CHECK (mics.back().settings.empty());                                       // "No input yet"
+    CHECK (mics.back().section.empty());
+
+    const auto micLines = model::micMenu (*snapshot, mics, "at the end of the list");
+    CHECK (std::count_if (micLines.begin(), micLines.end(), [] (const model::MenuLine& line)
+                          { return line.kind == model::MenuLine::Kind::item; })
+             == static_cast<std::ptrdiff_t> (mics.size()));
+    CHECK (std::count_if (micLines.begin(), micLines.end(), [] (const model::MenuLine& line)
+                          { return line.kind == model::MenuLine::Kind::header; }) == 2);
+
+    //  --- every line, made -----------------------------------------------------
+    std::vector<model::Choice> every;
+    for (const auto* choices : { &model::groupChoices(), &model::transportChoices(), &model::midiChoices() })
+        every.insert (every.end(), choices->begin(), choices->end());
+    every.insert (every.end(), mics.begin(), mics.end());
+
+    for (const auto& choice : every)
+    {
+        CAPTURE (choice.label);
+
+        auto settings = choice.settings;
+        if (choice.aimed)
+            settings.emplace_back ("target", "MC000006");
+
+        const auto event = gesture::createCue (listId, 0, choice.kind, "", settings);
+        rig.document.beginTransaction (event.command, tick, event.origin, {});
+        const auto outcome = rig.apply (tick++, event.origin, event.command, event.args);
+        CHECK_MESSAGE (outcome.applied == 1, rig.engine.lastError());
+
+        snapshot = rig.publish (tick);
+        const auto made = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
+        REQUIRE (model::text (*snapshot, "/godot/cue/" + made + "/kind") == choice.kind);
+
+        for (const auto& [attribute, value] : settings)
+            CHECK (model::text (*snapshot, "/godot/cue/" + made + "/" + attribute) == value);
+
+        REQUIRE (rig.apply (tick++, "window", "undo", {}).applied == 1);
+    }
+
+    //  --- the buttons that open them ------------------------------------------
+    const auto& kinds = model::cueKinds();
+    CHECK (std::find (kinds.begin(), kinds.end(), "start") == kinds.end());
+    CHECK (std::any_of (model::transportChoices().begin(), model::transportChoices().end(),
+                        [] (const model::Choice& choice) { return choice.kind == "start"; }));
+    CHECK_FALSE (std::any_of (model::transportChoices().begin(), model::transportChoices().end(),
+                              [] (const model::Choice& choice)
+                              { return choice.settings == model::Settings { { "verb", "fade" } }; }));
+
+    for (const char* kind : { "group", "transport", "midi", "mic" })
+        CHECK (model::opensList (kind));
+    for (const char* kind : { "memo", "media", "fade", "osc" })
+        CHECK_FALSE (model::opensList (kind));
+
+    /*  A WORD FOR EVERY VERB THE ENGINE HAS, short enough for the kind
+        column - read off the row's own range, so a verb the engine grows is a
+        failing case here and not a row that shows its raw name. */
+    const auto stop = gesture::createCue (listId, 0, "transport", "");
+    REQUIRE (rig.apply (tick++, stop.origin, stop.command, stop.args).applied == 1);
+    snapshot = rig.publish (tick);
+    const auto stopId = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
+    const auto* verbs = snapshot->find ("/godot/cue/" + stopId + "/verb");
+    REQUIRE (verbs != nullptr);
+    REQUIRE_FALSE (verbs->enumValues.empty());
+
+    std::vector<std::string> shown;
+    for (const auto& verb : verbs->enumValues)
+    {
+        CAPTURE (verb);
+        const auto word = model::verbWord (verb);
+        CHECK_FALSE (word.empty());
+        CHECK (word.size() <= 8);
+        CHECK (std::find (shown.begin(), shown.end(), word) == shown.end());
+        shown.push_back (word);
+    }
+
+    CHECK (model::verbWord ("hard") == "stop");
+    CHECK (model::verbWord ("afterIteration") == "round");
+}
+
+TEST_CASE ("client: the group list offers the picked cues when the engine would take them")
+{
+    Rig rig;
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE_FALSE (listId.empty());
+    auto tick = std::int64_t { 1 };
+
+    const auto create = [&] (const std::string& parent, const char* kind, const char* id)
+    {
+        REQUIRE (rig.apply (tick++, "window", "cue.create",
+                            { osc::Value::string (parent), osc::Value::int32 (0), osc::Value::string (kind),
+                              osc::Value::string (""), osc::Value::string (id) }).applied == 1);
+    };
+
+    create (listId, "memo", "A0000001");
+    create (listId, "media", "B0000001");
+    create (listId, "media", "C0000001");
+    create (listId, "group", "G0000001");
+    create ("G0000001", "memo", "D0000001");
+    REQUIRE (rig.apply (tick++, "window", "list.create",
+                        { osc::Value::string ("Other"), osc::Value::string ("E0000002") }).applied == 1);
+    create ("E0000002", "memo", "E0000001");
+
+    const auto snapshot = rig.publish (tick);
+
+    const auto nothing = model::wrapOf (*snapshot, {});
+    CHECK_FALSE (nothing.possible());
+    CHECK (nothing.why.empty());
+
+    const auto media = model::wrapOf (*snapshot, { "C0000001", "B0000001" });
+    CHECK (media.possible());
+    CHECK (media.count == 2);
+    CHECK (media.allMedia);
+
+    const auto mixed = model::wrapOf (*snapshot, { "A0000001", "B0000001" });
+    CHECK (mixed.count == 2);
+    CHECK_FALSE (mixed.allMedia);
+
+    // A group and its own member: the member rides in with the group.
+    CHECK (model::wrapOf (*snapshot, { "G0000001", "D0000001" }).count == 1);
+
+    const auto apart = model::wrapOf (*snapshot, { "A0000001", "E0000001" });
+    CHECK_FALSE (apart.possible());
+    CHECK_FALSE (apart.why.empty());
+
+    const auto items = [] (const std::vector<model::MenuLine>& lines, bool wrapped)
+    {
+        return std::count_if (lines.begin(), lines.end(), [wrapped] (const model::MenuLine& line)
+                              { return line.kind == model::MenuLine::Kind::item && line.wrap == wrapped; });
+    };
+
+    const auto groups = static_cast<std::ptrdiff_t> (model::groupChoices().size());
+
+    // Nothing picked: the empty part only, and it says where the group lands.
+    const auto plain = model::groupMenu (nothing, "at the end of the list");
+    REQUIRE_FALSE (plain.empty());
+    CHECK (plain.front().kind == model::MenuLine::Kind::header);
+    CHECK (plain.front().text == "An empty new group, at the end of the list");
+    CHECK (items (plain, true) == 0);
+    CHECK (items (plain, false) == groups);
+
+    // All media: every type around them, the sampler included.
+    const auto around = model::groupMenu (media, "after Rain");
+    CHECK (around.front().text == "Put the 2 picked cues in a new…");
+    CHECK (items (around, true) == groups);
+    CHECK (items (around, false) == groups);
+
+    // A memo among them: no sampler around them, still one in the empty part.
+    CHECK (items (model::groupMenu (mixed, "after Rain"), true) == groups - 1);
+
+    CHECK (model::groupMenu (model::wrapOf (*snapshot, { "A0000001" }), "after Rain").front().text
+             == "Put the picked cue in a new…");
+
+    // Two lists: the sentence why, in place of the offer.
+    const auto refused = model::groupMenu (apart, "after Rain");
+    CHECK (refused.front().kind == model::MenuLine::Kind::note);
+    CHECK (refused.front().text == apart.why);
+    CHECK (items (refused, true) == 0);
+
+    // And the engine takes what the list offered.
+    const auto sampler = gesture::wrapGroup (media.cues, model::groupChoices().back().settings);
+    rig.document.beginTransaction (sampler.command, tick, sampler.origin, {});
+    REQUIRE (rig.apply (tick++, sampler.origin, sampler.command, sampler.args).applied == 1);
+    const auto after = rig.publish (tick);
+    const auto group = model::text (*after, "/godot/cue/B0000001/parent");
+    CHECK (model::text (*after, "/godot/cue/" + group + "/mode") == "sampler");
+    CHECK (model::text (*after, "/godot/cue/C0000001/parent") == group);
+
+    // The transport list says where its cue lands, and aims it.
+    const auto aimed = model::transportMenu ("Rain", "after Rain");
+    CHECK (aimed.front().text.find ("Aimed at Rain") == 0);
+    CHECK (items (aimed, false) == static_cast<std::ptrdiff_t> (model::transportChoices().size()));
+    CHECK (model::transportMenu ("", "at the end of the list").front().text.find ("No target yet") == 0);
+}
+
 //==============================================================================
 TEST_CASE ("client: a view zooms about the pointer and never leaves the file")
 {
@@ -2201,9 +2814,10 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
         nothing would teach somebody the feature is broken rather than absent. */
     const auto onMedia = model::openersFor ("media", "B3N8R5TW");
 
-    /*  TWO SINCE PHASE 9a: the waveform, and the EQ - the second of the four
-        the author named, drawn at the foot as a response a hand can shape. */
-    REQUIRE (onMedia.size() == 2);
+    /*  THREE SINCE PHASE 9a: the waveform, the EQ - the second of the four
+        the author named, drawn at the foot as a response a hand can shape -
+        and the signal chain, whose boxes open each plugin's own window. */
+    REQUIRE (onMedia.size() == 3);
     CHECK (onMedia[0].control == model::Control::opener);
     CHECK (onMedia[0].value == "waveform");
     CHECK (onMedia[0].address == "B3N8R5TW");
@@ -2212,6 +2826,11 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     CHECK (onMedia[1].value == "eq");
     CHECK (onMedia[1].address == "B3N8R5TW");
     CHECK (onMedia[1].label.find ("EQ") != std::string::npos);
+    CHECK (onMedia[2].control == model::Control::opener);
+    CHECK (onMedia[2].value == "fx");
+    CHECK (onMedia[2].address == "B3N8R5TW");
+    CHECK (onMedia[2].label.find ("FX") != std::string::npos);
+    CHECK_FALSE (onMedia[2].writable);
 
     //  An opener is a door and not a decision: it writes nothing.
     CHECK_FALSE (onMedia[0].writable);
@@ -2417,6 +3036,188 @@ TEST_CASE ("client: a drawn fade, and every string it writes is one the engine a
         CHECK (model::writePoints ({}).empty());
         CHECK (doc::readFadePoints ("").problem.empty());
     }
+}
+
+TEST_CASE ("client: a level lane the window writes is one the engine's judge accepts")
+{
+    /*  `doc::readLevelLane` is the ONE judge of what a lane is (namespace
+        draft §20.3) - the door, `validate` and the Runner - and `model/Lane`
+        restates its rules because the boundary forbids reaching for them. So
+        every string the window can write is put to the real judge here. */
+    const auto accepted = [] (const std::vector<model::LanePoint>& points)
+    {
+        const auto text = model::writeLane (points);
+        const auto judged = doc::readLevelLane (text);
+
+        INFO ("wrote: " << text);
+        INFO ("engine said: " << judged.problem);
+
+        return judged.problem.empty() && judged.points.size() == points.size();
+    };
+
+    SUBCASE ("one point, a dip, and a lane over the middle of a file all round-trip")
+    {
+        CHECK (accepted ({ { 12.5, -6.0 } }));
+        CHECK (accepted ({ { 4.0, 0.0 }, { 5.0, -20.0 }, { 8.0, -20.0 }, { 9.0, 0.0 } }));
+        CHECK (accepted ({ { 0.0, -120.0 }, { 0.25, 12.0 }, { 187.4, -3.25 } }));
+    }
+
+    SUBCASE ("and the numbers survive a French locale, which is where a comma would get in")
+    {
+        const auto text = model::writeLane ({ { 4.5, -6.5 }, { 10.25, -120.0 } });
+
+        CHECK (text.find (',') == std::string::npos);
+        CHECK (doc::readLevelLane (text).problem.empty());
+    }
+
+    SUBCASE ("the window refuses what the door would refuse, rather than finding out after")
+    {
+        CHECK_FALSE (model::whyNotALane ({ { -0.5, 0.0 } }).empty());
+        CHECK_FALSE (model::whyNotALane ({ { 4.0, 0.0 }, { 4.0, -6.0 } }).empty());
+        CHECK_FALSE (model::whyNotALane ({ { 5.0, 0.0 }, { 4.0, -6.0 } }).empty());
+        CHECK_FALSE (model::whyNotALane ({ { 4.0, -400.0 } }).empty());
+
+        //  An EMPTY list is not a bad lane, it is the absence of one.
+        CHECK (model::whyNotALane ({}).empty());
+        CHECK (model::writeLane ({}).empty());
+    }
+
+    SUBCASE ("and what the window draws is what the engine plays")
+    {
+        const std::vector<model::LanePoint> points { { 4.0, 0.0 }, { 5.0, -20.0 }, { 9.0, 0.0 } };
+        const auto engine = doc::readLevelLane (model::writeLane (points));
+        REQUIRE (engine.problem.empty());
+
+        for (const auto seconds : { 0.0, 4.0, 4.3, 5.0, 6.75, 9.0, 12.0 })
+        {
+            INFO ("at " << seconds << " s");
+            CHECK (model::laneLevelAt (points, seconds)
+                     == doctest::Approx (doc::laneLevelDb (engine.points, seconds)));
+        }
+    }
+}
+
+TEST_CASE ("client: drawing a level lane over a waveform, point by point")
+{
+    const std::vector<model::LanePoint> dip { { 4.0, 0.0 }, { 5.0, -20.0 }, { 9.0, 0.0 } };
+
+    SUBCASE ("the first point on a lane is a constant offset of nothing, so nothing moves")
+    {
+        const auto made = model::insertLanePoint ({}, 3.0, 30.0);
+
+        REQUIRE (made.has_value());
+        REQUIRE (made->size() == 1u);
+        CHECK (made->front().seconds == doctest::Approx (3.0));
+        CHECK (made->front().levelDb == doctest::Approx (0.0));
+    }
+
+    SUBCASE ("a point added lands on the line, in order, and changes nothing until it moves")
+    {
+        const auto added = model::insertLanePoint (dip, 7.0, 30.0);
+
+        REQUIRE (added.has_value());
+        REQUIRE (added->size() == 4u);
+        CHECK ((*added)[2].seconds == doctest::Approx (7.0));
+        CHECK ((*added)[2].levelDb == doctest::Approx (-10.0));
+
+        for (const auto seconds : { 3.0, 4.5, 7.0, 8.5, 11.0 })
+            CHECK (model::laneLevelAt (*added, seconds) == doctest::Approx (model::laneLevelAt (dip, seconds)));
+
+        //  Beyond both ends it holds, so a point added out there is on the held line.
+        const auto early = model::insertLanePoint (dip, 1.0, 30.0);
+        REQUIRE (early.has_value());
+        CHECK (early->front().levelDb == doctest::Approx (0.0));
+
+        //  Not on top of another, and not outside the file.
+        CHECK_FALSE (model::insertLanePoint (dip, 5.0, 30.0).has_value());
+        CHECK_FALSE (model::insertLanePoint (dip, 31.0, 30.0).has_value());
+        CHECK_FALSE (model::insertLanePoint (dip, -1.0, 30.0).has_value());
+    }
+
+    SUBCASE ("a dragged point stays between its neighbours, in the file, at a level a cue may take")
+    {
+        auto moved = model::dragLanePoint (dip, 1, 11.0, -200.0, 30.0);
+        CHECK (moved.seconds < 9.0);
+        CHECK (moved.seconds > 8.99);
+        CHECK (moved.levelDb == doctest::Approx (-120.0));
+
+        moved = model::dragLanePoint (dip, 1, 2.0, 40.0, 30.0);
+        CHECK (moved.seconds > 4.0);
+        CHECK (moved.seconds < 4.01);
+        CHECK (moved.levelDb == doctest::Approx (12.0));
+
+        //  THE ENDS MOVE IN TIME TOO - a lane has no ends it must keep - but
+        //  not before the file starts, nor past its end.
+        CHECK (model::dragLanePoint (dip, 0, -3.0, 0.0, 30.0).seconds == doctest::Approx (0.0));
+        CHECK (model::dragLanePoint (dip, 2, 45.0, 0.0, 30.0).seconds == doctest::Approx (30.0));
+
+        //  And the lane with it moved is still a lane.
+        const auto lane = model::withLanePoint (dip, 1, 6.5, -9.0, 30.0);
+        CHECK (model::whyNotALane (lane).empty());
+        CHECK (lane[1].seconds == doctest::Approx (6.5));
+    }
+
+    SUBCASE ("any point may go, and the last one gone is no lane")
+    {
+        CHECK (model::removeLanePoint (dip, 0).size() == 2u);
+        CHECK (model::removeLanePoint (dip, 2).size() == 2u);
+        CHECK (model::removeLanePoint ({ { 3.0, -6.0 } }, 0).empty());
+        CHECK (model::removeLanePoint (dip, 7).size() == 3u);
+    }
+
+    SUBCASE ("drawn on a fader's throw, and found by how close it looks")
+    {
+        //  The strips' own law: unity high up, silence at the bottom (DD).
+        CHECK (model::laneHeightFor (0.0) == doctest::Approx (model::fractionForDb (0.0)));
+        CHECK (model::laneHeightFor (-120.0) == doctest::Approx (0.0));
+        CHECK (model::laneLevelForHeight (model::laneHeightFor (-9.5)) == doctest::Approx (-9.5));
+
+        const auto atFive = model::laneHeightFor (-20.0);
+
+        CHECK (model::nearestLanePoint (dip, 5.02, atFive + 0.01, 0.1, 0.05) == 1u);
+        CHECK (model::nearestLanePoint (dip, 6.0, atFive, 0.1, 0.05) == static_cast<std::size_t> (-1));
+        CHECK (model::onLaneLine (dip, 7.0, model::laneHeightFor (-10.0), 0.02));
+        CHECK_FALSE (model::onLaneLine (dip, 7.0, model::laneHeightFor (0.0), 0.02));
+
+        //  An empty lane's line is unity, where the cue is as written.
+        CHECK (model::onLaneLine ({}, 12.0, model::laneHeightFor (0.0), 0.02));
+    }
+
+    SUBCASE ("a typed level reads the way the window writes one")
+    {
+        CHECK (model::levelFrom ("-6").value() == doctest::Approx (-6.0));
+        CHECK (model::levelFrom (" -6.5 dB").value() == doctest::Approx (-6.5));
+        CHECK (model::levelFrom ("+3").value() == doctest::Approx (3.0));
+        CHECK (model::levelFrom ("silence").value() == doctest::Approx (-120.0));
+
+        //  And whatever the box itself shows reads back as the same level.
+        for (const auto level : { -120.0, -18.0, -6.5, 0.0, 3.0 })
+            CHECK (model::levelFrom (model::faderText (level) + " dB").value() == doctest::Approx (level));
+        CHECK_FALSE (model::levelFrom ("loud").has_value());
+        CHECK_FALSE (model::levelFrom ("40").has_value());
+        CHECK_FALSE (model::levelFrom ("").has_value());
+    }
+}
+
+TEST_CASE ("client: the waveform's reading carries the cue's level lane, and the lock")
+{
+    Rig rig ("phase4");
+
+    const auto lane = model::laneAddress ("P4MED001");
+
+    REQUIRE (rig.apply (1, "cli", "node.set", { osc::Value::string (lane),
+                                                osc::Value::string ("4 0 5 -20 9 0") }).applied == 1);
+
+    const auto reading = model::readFoot (*rig.publish (1),
+                                          { model::Subject::Kind::waveform, "P4MED001" });
+
+    REQUIRE (reading.lane.size() == 3u);
+    CHECK (reading.lane[1].seconds == doctest::Approx (5.0));
+    CHECK (reading.lane[1].levelDb == doctest::Approx (-20.0));
+    CHECK_FALSE (reading.locked);
+
+    //  A cue that is not media has no lane to read, whatever its rows say.
+    CHECK (model::readLane (*rig.publish (1), "P4GRP001").empty());
 }
 
 TEST_CASE ("client: drawing on a fade, point by point")
@@ -2889,6 +3690,28 @@ TEST_CASE ("client: the mixer draws a strip per mix channel, not per send")
 
         //  And another cue's sends are not this one's.
         CHECK (model::readSends (*after, "F7HR8TVD").front().present() == false);
+    }
+
+    SUBCASE ("and one made at a level is born at it, in the same edit (2026-09-25)")
+    {
+        const auto made = gesture::createSend (cue, rows[1].id, -18.5);
+        rig.apply (4, made.origin, made.command, made.args);
+
+        const auto after = rig.publish (5);
+        auto raised = model::readSends (*after, cue);
+
+        REQUIRE (raised.size() == 1);
+        CHECK (raised[0].present());
+        CHECK (raised[0].levelDb == doctest::Approx (-18.5));
+    }
+
+    SUBCASE ("and a level the row would refuse makes nothing")
+    {
+        rig.apply (4, "window", "send.create",
+                   { osc::Value::string (cue), osc::Value::string (rows[1].id),
+                     osc::Value::string ({}), osc::Value::string ("loud") });
+
+        CHECK (model::readSends (*rig.publish (5), cue).front().present() == false);
     }
 }
 
@@ -3549,6 +4372,67 @@ TEST_CASE ("client: a patch that is written, or a layout with a hole, has alread
         their edits would be a promise the engine does not keep. */
     Rig unpacked ("slots");
     CHECK (model::patchHasSettled (*unpacked.publish (0)));
+}
+
+TEST_CASE ("client: a waveform's height is the finer level's, where the analysis has one")
+{
+    /*  The author, 2026-09-25: "Can the waveform be more precise in level,
+        not colour when zooming in." The colour stays the frame's; the height
+        is the peak track's - 64 samples a pair and sixteen bits. */
+    audio::TimbrePyramid pyramid;
+    pyramid.sampleRate = 48000;
+    pyramid.samples = 1024 * 4;
+
+    //  Four frames, each loud by its byte: 0.5 all the way.
+    std::vector<audio::timbre::Frame> frames (4);
+
+    for (auto& frame : frames)
+    {
+        frame.peak = 128;
+        frame.hue = 40;
+        frame.saturation = 200;
+        frame.lightness = 128;
+    }
+
+    pyramid.levels.push_back (frames);
+
+    //  And the level under them: sixty-four pairs, each its own height, never 0.5.
+    std::vector<audio::PeakPair> pairs (64);
+
+    for (std::size_t at = 0; at < pairs.size(); ++at)
+    {
+        const auto height = static_cast<std::int16_t> (1000 + 100 * static_cast<int> (at));
+        pairs[at] = { static_cast<std::int16_t> (-height / 2), height };
+    }
+
+    const auto track = audio::peaks::trackOf (pairs, 48000u, 1024u * 4u);
+
+    //  ZOOMED INTO ONE FRAME: sixteen columns over its sixteen pairs, sixteen heights.
+    const auto seconds = 1024.0 / 48000.0;
+    const auto close = model::waveform (pyramid, &track, 16, seconds, 2.0 * seconds);
+    REQUIRE (close.size() == 16u);
+
+    for (std::size_t at = 0; at < close.size(); ++at)
+    {
+        const auto& pair = pairs[16 + at];
+        CHECK (close[at].high == doctest::Approx (audio::peaks::toUnit (pair.high)));
+        CHECK (close[at].low == doctest::Approx (audio::peaks::toUnit (pair.low)));
+        CHECK (close[at].peak == doctest::Approx (audio::peaks::toUnit (pair.high)));
+        CHECK (close[at].hue == doctest::Approx (audio::timbre::hueOf (frames[1])));   // the frame's colour
+    }
+
+    CHECK (close[0].high < close[15].high);
+
+    //  Without the level, the frame's byte, mirrored: the old picture, unchanged.
+    const auto coarse = model::waveform (pyramid, nullptr, 16, seconds, 2.0 * seconds);
+    REQUIRE (coarse.size() == 16u);
+    CHECK (coarse[0].peak == doctest::Approx (audio::timbre::peakOf (frames[1])));
+    CHECK (coarse[0].low == doctest::Approx (-coarse[0].peak));
+
+    //  The whole file with its level: one column per pixel, each the loudest pair of its span.
+    const auto whole = model::waveform (pyramid, &track, 4);
+    REQUIRE (whole.size() == 4u);
+    CHECK (whole[3].high == doctest::Approx (audio::peaks::toUnit (pairs[63].high)));
 }
 
 TEST_CASE ("client: a waveform is the engine's analysis bucketed, and never a second analysis")
@@ -4722,6 +5606,22 @@ TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and
         CHECK (model::readKnownPlugins (*snapshot).empty());
     }
 
+    SUBCASE ("and the foot reads the chain, with the cue's own EQ as its first box")
+    {
+        /*  The author's chain (2026-09-25): file, EQ, the set, out. The FX
+            subject fills the EQ's reading too, because the first box is the
+            EQ's and its switch is `eqOn`; and it follows the pick, as the EQ
+            does. An unloaded entry adds no latency - nothing is known yet. */
+        const auto foot = model::readFoot (*snapshot, { model::Subject::Kind::fx, cue });
+        CHECK (foot.fx.present);
+        CHECK (foot.fx.strips.size() == 2u);
+        CHECK (foot.eq.present);
+        CHECK (foot.eq.settings.on);
+        CHECK (foot.notice.empty());
+        CHECK (foot.fx.strips[0].latencySamples == 0);
+        CHECK (model::followsPick (model::Subject::Kind::fx));
+    }
+
     SUBCASE ("and a cue that is not media has none, and says so")
     {
         Rig memo;
@@ -4740,6 +5640,77 @@ TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and
         CHECK (none.strips.empty());
         CHECK (none.notice.find ("Plugins") != std::string::npos);
     }
+}
+
+TEST_CASE ("client: a box in the chain says what became of its plugin, and what that does to this cue")
+{
+    /*  §4.8 in words: the state word the engine publishes, its sentence, and
+        "this cue is silent" only where this cue has the insert in - a plugin
+        that is not there is not a problem for a cue that does not use it
+        (and it is silence, never dry: the author's decision of 2026-09-26,
+        CU). And a latency is said in samples, or not at all. */
+    model::FxStrip strip;
+    strip.state = "loaded";
+    CHECK (model::stateSentence (strip) == "loaded");
+    CHECK (model::latencyWords (strip).empty());
+
+    strip.state = "loading";
+    CHECK (model::stateSentence (strip) == "loading...");
+
+    strip.state = "unloaded";
+    strip.problem = "added since the show opened; reload to load it";
+    CHECK (model::stateSentence (strip) == "not loaded: added since the show opened; reload to load it");
+
+    strip.state = "missing";
+    strip.problem = "not on this machine";
+    CHECK (model::stateSentence (strip) == "missing: not on this machine");
+
+    strip.fxId = "FX7N0001";
+    strip.enabled = true;
+    CHECK (model::stateSentence (strip) == "missing: not on this machine - this cue is silent while it has it switched in");
+
+    strip.enabled = false;
+    CHECK (model::stateSentence (strip) == "missing: not on this machine");
+
+    strip.enabled = true;
+    strip.state = "failed";
+    strip.problem = "the plugin host process died; every voice using it is silent until it is back";
+    CHECK (model::stateSentence (strip) == "failed: the plugin host process died; every voice using it is silent"
+                                           " until it is back - this cue is silent until it is back");
+    strip.enabled = false;
+
+    strip.state.clear();
+    strip.problem.clear();
+    CHECK (model::stateSentence (strip) == "-");
+
+    strip.latencySamples = 1;
+    CHECK (model::latencyWords (strip) == "1 sample late while it is in");
+    strip.latencySamples = 64;
+    CHECK (model::latencyWords (strip) == "64 samples late while it is in");
+
+    /*  AND WHY IT PLAYS THIS CUE DRY (2026-09-26), switched in and loaded. */
+    strip.state = "loaded";
+    strip.enabled = true;
+    strip.dryWhy = "this cue is 2 channels wide here and the plugin takes 1: it plays dry";
+    CHECK (model::stateSentence (strip) == "loaded - this cue is 2 channels wide here and the plugin takes 1: it plays dry");
+}
+
+TEST_CASE ("client: the chain says how wide the cue comes out through its inserts, and how late")
+{
+    model::FxReading reading;
+    reading.fileChannels = 1;
+    reading.chainChannels = 1;
+    CHECK (model::chainWords (reading).empty());
+
+    reading.chainChannels = 2;
+    CHECK (model::chainWords (reading) == "Plays as stereo through its inserts.");
+
+    reading.insertLatency = 1024;
+    reading.sampleRate = 48000;
+    CHECK (model::chainWords (reading) == "Plays as stereo through its inserts, 21 ms late through its inserts.");
+
+    reading.chainChannels = 1;
+    CHECK (model::chainWords (reading) == "Sounds 21 ms late through its inserts.");
 }
 
 TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, and drawn from the same maths")
@@ -4794,6 +5765,28 @@ TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, a
     CHECK (model::eqShapeFor ("highShelf") == audio::EqSettings::Shape::highShelf);
     CHECK (std::string (model::eqShapeWord (audio::EqSettings::Shape::lowShelf)) == "lowShelf");
 
+    SUBCASE ("and a band switched off reads off, its gain kept, and draws flat")
+    {
+        /*  eqB<n>On (author, 2026-09-25): the press of a gain rotary. */
+        CHECK (eq.settings.band[1].on);
+
+        rig.apply (5, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/eqB2On"),
+                                              osc::Value::boolean (false) });
+        const auto off = model::readEq (*rig.publish (6), cue);
+
+        CHECK_FALSE (off.settings.band[1].on);
+        CHECK (off.settings.band[1].gain == doctest::Approx (6.0f));
+        CHECK (off.settings.band[0].on);
+
+        auto middle = model::eqCurve (off.settings, 48000.0, 241).front();
+
+        for (const auto& point : model::eqCurve (off.settings, 48000.0, 241))
+            if (std::abs (point.frequency - 500.0) < std::abs (middle.frequency - 500.0))
+                middle = point;
+
+        CHECK (middle.db == doctest::Approx (0.0).epsilon (0.05));
+    }
+
     SUBCASE ("and a cue that is not media has none, and says so")
     {
         Rig memo;
@@ -4803,4 +5796,715 @@ TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, a
         CHECK_FALSE (none.present);
         CHECK (none.notice.find ("media") != std::string::npos);
     }
+}
+
+//==============================================================================
+TEST_CASE ("client: closing two fingers narrows a band, on every road a pinch takes")
+{
+    /*  The author, 2026-09-25: "EQ peak gesture to narrow the band (higher
+        Q) is inverted. Pinch widens and this feels reversed." A higher Q is
+        a narrower band, as the row itself says. */
+
+    //  Two fingers: half the distance, twice the Q; twice the distance, half.
+    CHECK (model::pinchedQ (1.0, 60.0, 30.0) == doctest::Approx (2.0));
+    CHECK (model::pinchedQ (1.0, 60.0, 120.0) == doctest::Approx (0.5));
+
+    //  Within the rows' range, and a distance of nothing changes nothing.
+    CHECK (model::pinchedQ (4.0, 100.0, 1.0) == doctest::Approx (model::eqQHighest));
+    CHECK (model::pinchedQ (0.2, 1.0, 100.0) == doctest::Approx (model::eqQLowest));
+    CHECK (model::pinchedQ (0.7, 0.0, 30.0) == doctest::Approx (0.7));
+
+    //  A trackpad's magnify: fingers closing are a scale under one, and narrow it.
+    CHECK (model::magnifiedQ (1.0, 0.5) == doctest::Approx (2.0));
+    CHECK (model::magnifiedQ (1.0, 2.0) == doctest::Approx (0.5));
+
+    /*  THE WHEEL: up narrows, as a knob turned up. A Windows touchpad's pinch
+        comes as the wheel with ctrl, spreading as up - and so widens. */
+    const auto click = 0.25;
+    CHECK (model::turnedQ (1.0, click, false, false) > 1.2);
+    CHECK (model::turnedQ (1.0, -click, false, false) < 1.0 / 1.2);
+    CHECK (model::turnedQ (1.0, click, true, false) < 1.0);
+    CHECK (model::turnedQ (1.0, -click, true, false) > 1.0);
+
+    //  Shift is the fine step - 1.01 a tenth of a unit, not 1.1 - and a long turn stops at the top.
+    CHECK (model::turnedQ (1.0, click, false, true) == doctest::Approx (1.025188).epsilon (1e-5));
+    CHECK (model::turnedQ (9.9, 10.0, false, false) == doctest::Approx (model::eqQHighest));
+}
+
+TEST_CASE ("client: a surface adjusting a cue holds the foot on it, and the rest of the window reads what rides")
+{
+    /*  The author, 2026-09-25: "When adjusting either EQ or send levels
+        display the footer on screen." */
+    Rig rig ("first-sound");
+    surface::SurfaceTable surfaces;
+    rig.parameters.setSurfaces (&surfaces);
+    surface::registerSurfaceCommands (rig.engine.commands(), rig.document, surfaces);
+
+    REQUIRE (rig.apply (1, "cli", "surface.create", { osc::Value::string ("d700") }).applied == 1);
+    const auto surfaceId = model::text (*rig.publish (2), "/godot/surface/order");
+    REQUIRE_FALSE (surfaceId.empty());
+
+    const std::string cue = "B3N8R5TW";
+    REQUIRE (rig.apply (3, "cli", "surface.aim", { osc::Value::string (cue) }).applied == 1);
+
+    //  Nothing up: no page, and the foot is the window's own.
+    auto page = model::readSurfacePage (*rig.publish (4));
+    CHECK_FALSE (page.up);
+    CHECK (page.aim == cue);
+    CHECK_FALSE (model::footForSurface (page.up, page.word, page.edited, page.aim).isOpen());
+
+    //  An EQ page up, not yet turned: still nothing for the foot.
+    surfaces.setPage (surfaceId, { "eq", 0, 2, "" });
+    page = model::readSurfacePage (*rig.publish (5));
+    CHECK (page.up);
+    CHECK (page.word == "eq");
+    CHECK (page.count == 2);
+    CHECK_FALSE (model::footForSurface (page.up, page.word, page.edited, page.aim).isOpen());
+
+    //  Turned: the aimed cue's EQ panel, and the band the rotary is on.
+    surfaces.setPage (surfaceId, { "eq", 0, 2, "/godot/cue/" + cue + "/eqB3Gain" });
+    page = model::readSurfacePage (*rig.publish (6));
+    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+             == model::Subject { model::Subject::Kind::eq, cue });
+    CHECK (model::eqHandleForAddress (cue, page.edited) == 2);
+    CHECK (model::eqHandleForAddress (cue, "/godot/cue/" + cue + "/eqHpfFreq") == 4);
+    CHECK (model::eqHandleForAddress (cue, "/godot/cue/" + cue + "/eqLpf") == 5);
+    CHECK (model::eqHandleForAddress (cue, "/godot/cue/" + cue + "/eqOn") == -1);
+    CHECK (model::eqHandleForAddress (cue, "/godot/cue/OTHERCUE/eqB1Gain") == -1);
+
+    //  A Send page: the send mixer.
+    surfaces.setPage (surfaceId, { "send", 0, 1, "/godot/send/SND00001/level" });
+    page = model::readSurfacePage (*rig.publish (7));
+    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+             == model::Subject { model::Subject::Kind::sends, cue });
+
+    //  An FX page, turned (2026-09-26): the cue's chain.
+    surfaces.setPage (surfaceId, { "fx", 1, 3, "/godot/fx/FXAA0001/p4" });
+    page = model::readSurfacePage (*rig.publish (8));
+    CHECK (page.word == "fx");
+    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+             == model::Subject { model::Subject::Kind::fx, cue });
+
+    //  A Loop page, turned (Phase 9c): the take it rides.
+    surfaces.setPage (surfaceId, { "loop", 0, 1, "/godot/slot/CHAN0001/loopIn" });
+    page = model::readSurfacePage (*rig.publish (9));
+    CHECK (page.word == "loop");
+    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+             == model::Subject { model::Subject::Kind::take, cue });
+}
+
+TEST_CASE ("client: a click on a number puts it on the master dial, and the window says what the dial turns")
+{
+    /*  The author, 2026-09-26: "Can selecting a parameter in the inspector or
+        foot panel on-screen via mouse or touch assign it to the master rotary
+        encoder on the D700?" - any click or touch, and it stays on that cue. */
+    Rig rig ("first-sound");
+    surface::SurfaceTable surfaces;
+    rig.parameters.setSurfaces (&surfaces);
+    surface::registerSurfaceCommands (rig.engine.commands(), rig.document, surfaces);
+
+    const std::string cue = "B3N8R5TW";
+
+    //  A show with no Mackie and no D700 has no dial, so a click sends nothing.
+    CHECK_FALSE (model::hasMasterDial (*rig.publish (1)));
+
+    REQUIRE (rig.apply (2, "cli", "surface.create", { osc::Value::string ("virtual") }).applied == 1);
+    CHECK_FALSE (model::hasMasterDial (*rig.publish (3)));
+
+    REQUIRE (rig.apply (4, "cli", "surface.create", { osc::Value::string ("d700") }).applied == 1);
+    CHECK (model::hasMasterDial (*rig.publish (5)));
+
+    /*  WHICH FIELDS A CLICK PUTS ON IT: a number a hand decides - not a name,
+        a switch, a menu, or a reading. */
+    const auto inspection = model::inspect (*rig.publish (6), cue);
+
+    const auto fieldNamed = [&inspection] (const std::string& name) -> const model::Field*
+    {
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == name)
+                    return &field;
+
+        for (const auto& field : inspection.details)
+            if (field.name == name)
+                return &field;
+
+        return nullptr;
+    };
+
+    for (const auto* name : { "level", "preWait", "startOffset" })
+    {
+        INFO (std::string (name));
+        const auto* field = fieldNamed (name);
+        REQUIRE (field != nullptr);
+        CHECK (model::mayDial (*field));
+    }
+
+    for (const auto* name : { "name", "enabled", "kind" })
+    {
+        INFO (std::string (name));
+        const auto* field = fieldNamed (name);
+        REQUIRE (field != nullptr);
+        CHECK_FALSE (model::mayDial (*field));
+    }
+
+    //  Free, the window says nothing.
+    CHECK (model::dialLine (*rig.publish (7)).empty());
+    CHECK (model::readTransport (*rig.publish (7)).dial.empty());
+
+    //  On the cue's level: its name, the row, the value and the unit.
+    const auto level = fieldNamed ("level")->address;
+    REQUIRE (rig.apply (8, "window", "surface.dial", { osc::Value::string (level) }).applied == 1);
+
+    const auto snapshot = rig.publish (9);
+    const auto name = model::text (*snapshot, "/godot/cue/" + cue + "/name");
+    const auto line = model::dialLine (*snapshot);
+
+    CHECK (line.rfind (name + ": level ", 0) == 0);
+    CHECK (line.size() > 3);
+    CHECK (line.substr (line.size() - 3) == " dB");
+    CHECK (model::readTransport (*snapshot).dial == line);
+
+    //  A row the inspector renames keeps the inspector's words.
+    REQUIRE (rig.apply (10, "window", "surface.dial",
+                        { osc::Value::string ("/godot/cue/" + cue + "/initialLevel") }).applied == 1);
+    CHECK (model::dialLine (*rig.publish (11)).rfind (name + ": initial level ", 0) == 0);
+}
+
+TEST_CASE ("client: the input list reads the named inputs, names the patch rows, and says which regime it is in")
+{
+    /*  Phase 9b (namespace draft §18.2): the output list's twin, made through
+        the same commands a window sends, so the rows are what a client would
+        read off a real engine. */
+    Rig rig;
+
+    REQUIRE (rig.apply (1, "window", "input.create",
+                        { osc::Value::int32 (1), osc::Value::int32 (-1), osc::Value::string ("N1000001") }).applied == 1);
+    REQUIRE (rig.apply (2, "window", "input.create",
+                        { osc::Value::int32 (2), osc::Value::int32 (-1), osc::Value::string ("N1000002") }).applied == 1);
+    REQUIRE (rig.apply (3, "window", "node.set",
+                        { osc::Value::string ("/godot/input/N1000001/name"), osc::Value::string ("Voix solo") }).applied == 1);
+
+    const auto snapshot = rig.publish (3);
+    const auto rows = model::readInputs (*snapshot);
+
+    REQUIRE (rows.size() == 2);
+    CHECK (rows[0].name == "Voix solo");
+    CHECK (rows[0].widthWord() == "Mono");
+    CHECK (rows[1].widthWord() == "Stereo");
+    CHECK (rows[0].channelWord() == "1");
+    CHECK (rows[1].channelWord() == "2-3");
+    CHECK (model::inputChannelCount (rows) == 3);
+
+    /*  No interface in this rig: every input says so in words, where the
+        window would draw its meter. */
+    CHECK (rows[0].problem == "no input interface is open");
+    CHECK (rows[0].meterFill() == doctest::Approx (0.0));
+
+    const auto labels = model::inputChannelLabels (rows, 0);
+    REQUIRE (labels.size() == 3);
+    CHECK (labels[0] == "Voix solo");
+    CHECK (labels[1] == "Input 2 \xc2\xb7 L");
+    CHECK (labels[2] == "Input 2 \xc2\xb7 R");
+    CHECK (model::inputChannelLabels (rows, 5).back() == "Input 5");
+
+    CHECK_FALSE (model::inputPatchHasSettled (*snapshot));
+    CHECK (model::inputRegime (false).find ("follows this list") != std::string::npos);
+
+    /*  A meter reads in fills from nought to one: -60 dB and below is dark. */
+    model::InputRow loud;
+    loud.meterDb = -6.0;
+    CHECK (loud.meterFill() == doctest::Approx (0.9));
+}
+
+TEST_CASE ("client: a mic cue is inspected by its input and its channel, and its FX are its channel's")
+{
+    /*  Phase 9b (namespace draft 18.9): the `mic` fixture's cue MC000002,
+        "Voix solo" through Vox 1 with the channel's test gain switched in.
+        What the window reads of one before it makes a sound: two menus of
+        what the show declares where a media cue has its file, a media cue's
+        outputs, EQ and FX openers and no waveform, the FX panel's strips
+        from the channel's chain, and an EQ like a media cue's. */
+    Rig rig ("mic");
+    const auto snapshot = rig.publish (1);
+
+    const auto panel = model::inspect (*snapshot, "MC000002");
+    REQUIRE_FALSE (panel.empty());
+    CHECK (panel.kind == "mic");
+
+    const auto fieldNamed = [&panel] (const std::string& name) -> const model::Field*
+    {
+        for (const auto& block : panel.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == name)
+                    return &field;
+
+        return nullptr;
+    };
+
+    const auto* input = fieldNamed ("input");
+    REQUIRE (input != nullptr);
+    CHECK (input->control == model::Control::inputRef);
+    CHECK (input->value == "MC000021");
+    REQUIRE (input->choices.size() == 3u);
+    CHECK (input->choices[0] == std::pair<std::string, std::string> { "", "(none)" });
+    CHECK (input->choices[1].first == "MC000021");
+    CHECK (input->choices[1].second == "Voix solo \xc2\xb7 Mono, input 1");
+    CHECK (input->choices[2].second == "Keys \xc2\xb7 Stereo, inputs 2-3");
+
+    const auto* channel = fieldNamed ("channel");
+    REQUIRE (channel != nullptr);
+    CHECK (channel->control == model::Control::channelRef);
+    REQUIRE (channel->choices.size() == 2u);
+    CHECK (channel->choices[1] == std::pair<std::string, std::string> { "MC000011", "Vox 1 \xc2\xb7 Mono to stereo" });
+
+    //  A media cue's outputs, and its fade-in.
+    REQUIRE (fieldNamed ("directOut") != nullptr);
+    CHECK (fieldNamed ("directOut")->control == model::Control::busRef);
+    CHECK (fieldNamed ("fadeIn") != nullptr);
+    CHECK (fieldNamed ("level") != nullptr);
+
+    //  No file, and the EQ's rows are the panel's, behind its opener.
+    CHECK (fieldNamed ("file") == nullptr);
+    CHECK (fieldNamed ("eqB1Freq") == nullptr);
+    CHECK (fieldNamed ("eq") != nullptr);
+    CHECK (fieldNamed ("fx") != nullptr);
+    CHECK (fieldNamed ("waveform") == nullptr);
+
+    /*  ITS FX ARE ITS CHANNEL'S: one strip, the channel's test gain, the
+        fixture's Fx switched in - and the set, which is empty, is not asked. */
+    const auto fx = model::readFx (*snapshot, "MC000002");
+    REQUIRE (fx.present);
+    CHECK (fx.notice.empty());
+    REQUIRE (fx.strips.size() == 1u);
+    CHECK (fx.strips[0].pluginId == "MC000012");
+    CHECK (fx.strips[0].name == "Test gain");
+    CHECK (fx.strips[0].fxId == "MC000005");
+    CHECK (fx.strips[0].enabled);
+
+    //  An EQ like a media cue's.
+    CHECK (model::readEq (*snapshot, "MC000002").present);
+
+    //  Its sends are a sound's too: the foot does not turn a mic cue away.
+    model::Subject sends;
+    sends.kind = model::Subject::Kind::sends;
+    sends.objectId = "MC000002";
+    CHECK (model::readFoot (*snapshot, sends).notice.find ("Only a media") == std::string::npos);
+
+    /*  A MIC CUE THROUGH NO CHANNEL says so where its strips would be. */
+    REQUIRE (rig.apply (2, "window", "node.set", { osc::Value::string ("/godot/cue/MC000002/channel"),
+                                                  osc::Value::string ("") }).applied == 1);
+    const auto none = model::readFx (*rig.publish (3), "MC000002");
+    CHECK (none.present);
+    CHECK (none.strips.empty());
+    CHECK (none.notice == "This mic cue plays through no rack channel yet: pick one in the inspector.");
+}
+
+TEST_CASE ("client: a mic cue's chain starts at its input, its path is said against the budget, and its run by its channel")
+{
+    /*  Phase 9b, stage 9b.7 (namespace draft 18.7 and 18.9): what the window
+        says of a mic cue that a media cue's words do not cover. */
+    Rig rig ("mic");
+    auto snapshot = rig.publish (1);
+
+    /*  THE CHAIN BEGINS AT THE INPUT, by its name, as wide as it is; and the
+        path is always said - here with no plugin loaded and an interface
+        with no delay of its own. */
+    const auto fx = model::readFx (*snapshot, "MC000002");
+    REQUIRE (fx.present);
+    CHECK (fx.live);
+    CHECK (fx.source == "in \xc2\xb7 Voix solo");
+    CHECK (fx.fileChannels == 1);
+    CHECK (fx.budgetMs == doctest::Approx (5.0));
+    CHECK (model::chainWords (fx) == "0 ms from the microphone to the output: 0 ms the interface's, 0 ms its"
+                                     " plugins' - within the 5 ms budget.");
+
+    /*  And as the words read with real delays: 120 samples of interface and
+        230 of plugins at 48 kHz, then the plugins over the budget. */
+    auto path = fx;
+    path.sampleRate = 48000;
+    path.inputLatency = 64;
+    path.outputLatency = 56;
+    path.insertLatency = 230;
+    CHECK (model::chainWords (path) == "7.3 ms from the microphone to the output: 2.5 ms the interface's,"
+                                       " 4.8 ms its plugins' - within the 5 ms budget.");
+
+    path.insertLatency = 300;
+    CHECK (model::chainWords (path).ends_with ("6.3 ms its plugins' - over the 5 ms budget."));
+
+    //  A media cue's source is its file, as it always was.
+    CHECK (model::FxReading {}.source == "file");
+
+    /*  THE PLUGIN'S OWN WINDOW FOLLOWS THE PICK onto a mic cue whose channel
+        carries the plugin. */
+    const auto editor = model::readEditorSubject (*snapshot, "MC000002", "MC000012");
+    CHECK_FALSE (editor.greyed);
+    CHECK (editor.fxId == "MC000005");
+
+    /*  A MIC RUN SAYS WHICH CHANNEL IT IS ON, OR WHY NOT: on it while it
+        plays, waiting for it while another cue holds it, ringing out after its
+        stop. */
+    rig.runs.create ("MICRUN01", "MC000002", "mic");
+    auto* run = rig.runs.find ("MICRUN01");
+    REQUIRE (run != nullptr);
+
+    const auto wordsOf = [&rig] (std::int64_t tick)
+    {
+        for (const auto& row : model::readRuns (*rig.publish (tick)))
+            if (row.id == "MICRUN01")
+                return row.liveWords;
+
+        return std::string ("(no row)");
+    };
+
+    run->state = cue::runState::playing;
+    CHECK (wordsOf (2) == "on Vox 1");
+
+    run->pending = { "MC000011" };
+    CHECK (wordsOf (3) == "waiting for Vox 1");
+
+    run->pending.clear();
+    run->state = cue::runState::stopping;
+    CHECK (wordsOf (4) == "ringing out");
+
+    /*  LOAD NOW SAYS WHAT KEEPS IT WAITING, by name - and a cue only got ready
+        ahead is not a sound. */
+    run->state = cue::runState::playing;
+    CHECK (model::busyWords (*rig.publish (5)) == "Voix solo is sounding");
+
+    run->state = cue::runState::armed;
+    run->prepare = "armed";
+    CHECK (model::busyWords (*rig.publish (6)).empty());
+}
+
+TEST_CASE ("client: the rack reads each channel with its own chain, and says the worst case against the budget")
+{
+    /*  Phase 9b (namespace draft §18.3): the Rack tab's reading, made through
+        the commands the tab sends - the tab's own gestures for the creates, a
+        rename, a class and a budget by `node.set`, a reorder by `object.move`
+        within the channel, a preset named as the Plugins tab names one - so
+        the rows are what a client would read off a real engine. */
+    using V = osc::Value;
+    Rig rig;
+
+    const auto send = [&rig] (std::int64_t tick, const Event& event)
+    {
+        INFO (event.command);
+        REQUIRE (rig.apply (tick, event.origin, event.command, event.args).applied == 1);
+    };
+
+    REQUIRE (rig.apply (1, "window", "channel.create", { V::string ("mono"), V::string ("K1000001") }).applied == 1);
+    send (2, gesture::createRackChannel ("stereo"));
+    send (3, gesture::setNode ("/godot/slot/K1000001/name", "Vox 1"));
+
+    for (const auto* name : { "Gain A", "Gain B" })
+        send (4, gesture::createChannelPlugin ("K1000001", name, "godot:test-gain", "VST3", ""));
+
+    auto snapshot = rig.publish (5);
+    auto rack = model::readRack (*snapshot);
+
+    REQUIRE (rack.channels.size() == 2u);
+    CHECK (rack.channels[0].id == "K1000001");
+    CHECK (rack.channels[0].name == "Vox 1");
+    CHECK (rack.channels[0].classWord() == "Mono");
+    CHECK (rack.channels[0].chainWord() == "2 plugins");
+    REQUIRE (rack.channels[0].chain.size() == 2u);
+    CHECK (rack.channels[0].chain[0].name == "Gain A");
+    CHECK (rack.channels[0].chain[1].name == "Gain B");
+    CHECK (rack.channels[0].chain[0].identifier == "godot:test-gain");
+    CHECK (rack.channels[0].chain[0].state == "unloaded");
+    CHECK (rack.channels[0].latencySamples == 0);
+
+    /*  A channel nobody named reads by its place among the rack's. */
+    CHECK (rack.channels[1].name == "Channel 2");
+    CHECK (rack.channels[1].classWord() == "Stereo");
+    CHECK (rack.channels[1].chainWord() == "No plugins");
+
+    CHECK (rack.budgetMs == doctest::Approx (5.0));
+    CHECK (rack.sampleRate == 48000);
+
+    /*  A RACK'S PLUGINS ARE NEVER THE SET'S: the set's order is the chain on
+        every voice, and a channel's plugins are on its track alone. */
+    CHECK (model::readPluginSet (*snapshot).empty());
+
+    const auto gainA = rack.channels[0].chain[0].id;
+    const auto gainB = rack.channels[0].chain[1].id;
+
+    send (6, gesture::moveObject (gainB, "K1000001", 0));
+    send (7, gesture::setNode ("/godot/plugin/" + gainA + "/preset", "room.vstpreset"));
+    send (8, gesture::setNode ("/godot/slot/K1000001/class", "monoToStereo"));
+    send (9, gesture::setNode ("/godot/audio/rackBudget", "2.5"));
+
+    snapshot = rig.publish (10);
+    rack = model::readRack (*snapshot);
+
+    REQUIRE (rack.channels.size() == 2u);
+    REQUIRE (rack.channels[0].chain.size() == 2u);
+    CHECK (rack.channels[0].chain[0].id == gainB);
+    CHECK (rack.channels[0].chain[1].id == gainA);
+    CHECK (rack.channels[0].chain[1].preset == "room.vstpreset");
+    CHECK (rack.channels[0].classWord() == "Mono to stereo");
+    CHECK (rack.budgetMs == doctest::Approx (2.5));
+
+    /*  THE WORDS. Nothing loads in a rig with no audio graph, and nothing
+        loaded is nothing known - which is said, and not read as no delay. */
+    CHECK (model::budgetWords (rack.channels[0], rack)
+             == "No plugin has loaded yet, so none has said how late it makes the channel.");
+    CHECK (model::budgetWords (rack.channels[1], rack) == "No plugins: the channel adds no delay.");
+
+    auto closed = rack;
+    closed.sampleRate = 0;
+    CHECK (model::budgetWords (closed.channels[0], closed)
+             == "The plugins load when the audio opens, and say then how late they make the channel.");
+
+    /*  And as the engine gives them once the plugins have loaded: the sum it
+        publishes, in milliseconds at the rate, against the budget. */
+    auto vox = rack.channels[0];
+
+    for (auto& entry : vox.chain)
+        entry.state = "loaded";
+
+    vox.latencySamples = 0;
+    CHECK (model::budgetWords (vox, rack) == "Adds no delay, with every plugin in.");
+
+    vox.latencySamples = 96;
+    CHECK_FALSE (model::overBudget (vox, rack));
+    CHECK (model::budgetWords (vox, rack) == "2 ms at worst, with every plugin in - within the 2.5 ms budget.");
+
+    vox.latencySamples = 350;
+    CHECK (model::overBudget (vox, rack));
+    CHECK (model::budgetWords (vox, rack)
+             == "7.3 ms at worst, with every plugin in - over the 2.5 ms budget. A mic cue that switches"
+                " them all in says so, and plays.");
+
+    /*  A plugin that failed has declared nothing, and the sentence names it. */
+    vox.chain[1].state = "failed";
+    CHECK (model::budgetWords (vox, rack).ends_with (" Not counted, not loaded: Gain A."));
+
+    /*  With no audio open, samples - and nothing is over a budget in ms. */
+    auto silent = rack;
+    silent.sampleRate = 0;
+    vox.chain[1].state = "loaded";
+    CHECK_FALSE (model::overBudget (vox, silent));
+    CHECK (model::budgetWords (vox, silent) == "350 samples at worst, with every plugin in.");
+
+    CHECK (model::millisecondWords (5.0) == "5 ms");
+    CHECK (model::millisecondWords (7.2916) == "7.3 ms");
+    CHECK (model::millisecondWords (0.04) == "0 ms");
+
+    /*  A CHANNEL TAKES ITS CHAIN WITH IT when it goes, and an undo brings both
+        back. The rig cuts no transactions - serve's hook does - so the delete
+        is given its own, as a window's command would be. */
+    rig.document.beginTransaction ("object.delete", 11, "window", {});
+    send (11, gesture::deleteObject ("K1000001"));
+    snapshot = rig.publish (12);
+    CHECK (model::readRack (*snapshot).channels.size() == 1u);
+    CHECK (snapshot->find ("/godot/plugin/" + gainA + "/name") == nullptr);
+
+    send (13, gesture::undo());
+    snapshot = rig.publish (14);
+    rack = model::readRack (*snapshot);
+    REQUIRE (rack.channels.size() == 2u);
+    CHECK (rack.channels[0].chain.size() == 2u);
+}
+
+TEST_CASE ("client: a sampling channel says its recorder, what it sets aside, and which side of it each plugin is on")
+{
+    /*  Phase 9c, stage 9c.2 (namespace draft §19.2): the recorder's rows
+        written as the Rack tab writes them - the take's length and its layers
+        on the channel, a plugin's side - and read back into the tab's words. */
+    using V = osc::Value;
+    Rig rig;
+
+    const auto send = [&rig] (std::int64_t tick, const Event& event)
+    {
+        INFO (event.command);
+        REQUIRE (rig.apply (tick, event.origin, event.command, event.args).applied == 1);
+    };
+
+    REQUIRE (rig.apply (1, "window", "channel.create", { V::string ("mono"), V::string ("K1000001") }).applied == 1);
+    send (2, gesture::setNode ("/godot/slot/K1000001/name", "Loops"));
+    send (3, gesture::createChannelPlugin ("K1000001", "Gain A", "godot:test-gain", "VST3", ""));
+
+    auto rack = model::readRack (*rig.publish (4));
+    REQUIRE (rack.channels.size() == 1u);
+    CHECK_FALSE (rack.channels[0].samples());
+    CHECK (rack.channels[0].takeWord() == "No recorder");
+    CHECK (model::takeWords (rack.channels[0], rack).empty());
+    REQUIRE (rack.channels[0].chain.size() == 1u);
+    CHECK (rack.channels[0].chain[0].side == "after");
+
+    const auto gain = rack.channels[0].chain[0].id;
+    send (5, gesture::setNode ("/godot/slot/K1000001/takeSeconds", "60"));
+    send (6, gesture::setNode ("/godot/slot/K1000001/layers", "4"));
+    send (7, gesture::setNode ("/godot/plugin/" + gain + "/side", "before"));
+
+    rack = model::readRack (*rig.publish (8));
+    auto loops = rack.channels[0];
+    CHECK (loops.samples());
+    CHECK (loops.takeSeconds == doctest::Approx (60.0));
+    CHECK (loops.layers == 4);
+    CHECK (loops.takeWord() == "Take 1 min, 4 layers");
+    CHECK (loops.chain[0].side == "before");
+
+    /*  NOTHING SET ASIDE YET - a rig has no graph - so what Load now will set
+        aside, at the engine's rate: five passes of a minute and a crossfade,
+        two channels, four bytes a sample. */
+    CHECK (model::takeWords (loops, rack)
+             == "It records up to 1 min with 4 layers on top: 115.2 MB to set aside at Load now.");
+
+    loops.takeMemoryMb = 115.2;
+    CHECK (model::takeWords (loops, rack) == "It records up to 1 min with 4 layers on top: 115.2 MB set aside.");
+
+    loops.takeProblem = "the take was cleared: the interface's rate changed";
+    CHECK (model::takeWords (loops, rack).ends_with (" set aside. The take was cleared: the interface's rate changed."));
+
+    auto closed = rack;
+    closed.sampleRate = 0;
+    CHECK (model::takeWords (closed.channels[0], closed)
+             == "It records up to 1 min with 4 layers on top: about 115.2 MB at 48 kHz, set aside when the audio opens.");
+
+    //  The schema's own words for what a row may hold.
+    CHECK (rig.apply (9, "window", "node.set", { V::string ("/godot/slot/K1000001/takeSeconds"), V::string ("900") }).applied == 0);
+    CHECK (rig.apply (10, "window", "node.set", { V::string ("/godot/plugin/" + gain + "/side"), V::string ("sideways") }).applied == 0);
+
+    CHECK (model::secondsWords (10) == "10 s");
+    CHECK (model::secondsWords (90) == "1 min 30 s");
+    CHECK (model::secondsWords (600) == "10 min");
+}
+
+//==============================================================================
+TEST_CASE ("client: a mic cue's take is read off its channel's rows, said in words, with why Rec is not offered")
+{
+    /*  Phase 9c, stage 9c.4 (namespace draft 19.7): the take panel's reading,
+        from the `take` fixture with the engine's account of the take behind
+        the tree - the same table the take verbs move. */
+    Rig rig ("take");
+    cue::TakeTable takes;
+    rig.parameters.setTakes (&takes);
+
+    /*  PRESSED HERE BY HAND, so the tree is told to look again as every
+        applied command tells it in serve: the account only moves inside a
+        take verb, `take.closed` or a release, and each of those applies. */
+    const auto readNow = [&rig] (std::int64_t tick, const std::string& cueId)
+    {
+        rig.parameters.markStale();
+        return model::readTake (*rig.publish (tick), cueId);
+    };
+
+    //  Only a mic cue has one: a transport cue says so.
+    const auto transport = readNow (1, "TK000006");
+    CHECK_FALSE (transport.present);
+    CHECK (transport.notice == "Only a mic cue on a sampling channel has a take.");
+
+    auto reading = readNow (2, "TK000002");
+    REQUIRE (reading.present);
+    CHECK (reading.channelId == "TK000011");
+    CHECK (reading.channelName == "Looper");
+    CHECK (reading.state == "empty");
+    CHECK (reading.capacity == doctest::Approx (10.0));
+    CHECK (reading.maxLayers == 2);
+    CHECK (reading.onGo == "wait");
+    CHECK_FALSE (reading.through);
+    CHECK (reading.span() == doctest::Approx (10.0));
+    CHECK (model::takePanelWords (reading) == "Empty: Rec records up to 10 s.");
+    CHECK (model::takePressWhy (reading) == "Nothing sounds on Looper: GO a mic cue on it to record.");
+
+    //  Scene 5's own rows: its GO loops what it finds, and it hears its input through.
+    const auto scene = readNow (3, "TK000008");
+    CHECK (scene.onGo == "loop");
+    CHECK (scene.through);
+    CHECK (scene.channelId == "TK000011");
+
+    //  A mic cue sounding on the channel: Rec is offered, and the take records.
+    rig.runs.create ("MICRUN01", "TK000002", "mic");
+    auto* run = rig.runs.find ("MICRUN01");
+    REQUIRE (run != nullptr);
+    run->claims = { "TK000011" };
+    run->state = cue::runState::playing;
+
+    takes.press ("TK000011", cue::TakeVerb::record, 2);
+    reading = readNow (4, "TK000002");
+    CHECK (reading.state == "recording");
+    CHECK (reading.channelSounds);
+    CHECK (reading.holderName == "Loop voice");
+    CHECK (model::takePressWhy (reading).empty());
+    CHECK (model::takePanelWords (reading) == "Recording, up to 10 s: Rec again loops it.");
+
+    //  Closed by the recorder at 4.25 s: looping between the take's two ends, the playhead going round.
+    takes.press ("TK000011", cue::TakeVerb::record, 2);
+    takes.closed ("TK000011", 4.25, "pressed", 10.0);
+    takes.setPlayhead ("TK000011", 1.5);
+    reading = readNow (5, "TK000002");
+    CHECK (reading.state == "looping");
+    CHECK (reading.length == doctest::Approx (4.25));
+    CHECK (reading.loopIn == doctest::Approx (0.0));
+    CHECK (reading.loopOut == doctest::Approx (4.25));
+    CHECK (reading.playhead == doctest::Approx (1.5));
+    CHECK (reading.span() == doctest::Approx (4.25));
+    CHECK (model::takePanelWords (reading) == "Looping 4.3 s, 0 of 2 layers on it.");
+
+    //  Both layers in use: section 19.3's sentence, which no refusal says where a hand would see it.
+    for (int layer = 0; layer < 2; ++layer)
+    {
+        takes.press ("TK000011", cue::TakeVerb::overdub, 2);
+        takes.press ("TK000011", cue::TakeVerb::loop, 2);
+    }
+
+    reading = readNow (6, "TK000002");
+    CHECK (reading.layers == 2);
+    CHECK (reading.layersFull());
+    CHECK (model::takePanelWords (reading)
+             == "Looping 4.3 s, 2 of 2 layers on it. Looper holds its 2 layers: Undo one or Clear.");
+
+    //  The cue let go: held, and nothing sounding to press it through.
+    takes.release ("TK000011");
+    run->claims.clear();
+    run->state = cue::runState::done;
+    reading = readNow (7, "TK000002");
+    CHECK (reading.state == "held");
+    CHECK_FALSE (reading.channelSounds);
+    CHECK (model::takePanelWords (reading).starts_with ("Held: 4.3 s, silent until Rec or Loop."));
+
+    //  The door's address, and a tenth of a second spelled the same in either locale.
+    CHECK (model::loopPointAddress ("TK000011", true) == "/godot/slot/TK000011/loopIn");
+    CHECK (model::loopPointAddress ("TK000011", false) == "/godot/slot/TK000011/loopOut");
+    CHECK (model::tenthsOfSeconds (4.25) == "4.3 s");
+    CHECK (model::tenthsOfSeconds (0.04) == "0.0 s");
+
+    //  The foot opens on it by its own word, and it follows the pick.
+    const auto foot = model::readFoot (*rig.publish (8), { model::Subject::Kind::take, "TK000002" });
+    CHECK (foot.take.present);
+    CHECK (foot.notice.empty());
+    CHECK (model::followsPick (model::Subject::Kind::take));
+
+    //  And the gesture is the take verb of its name, from the window.
+    const auto press = gesture::takePress ("record", "TK000011");
+    CHECK (press.command == "take.record");
+    CHECK (press.origin == "window");
+    REQUIRE (press.args.size() == 1u);
+    CHECK (press.args[0].getString() == "TK000011");
+
+    /*  KEEP (9c.6): writing, then written, said in the sentence - and while
+        it writes, another Keep is not offered. */
+    takes.keep ({ "TK000011", "Looper", false, {}, 0.0, 4.25 });
+    reading = readNow (30, "TK000002");
+    CHECK (reading.keeping);
+    CHECK_FALSE (reading.mayKeep());
+    CHECK (model::takePanelWords (reading).ends_with ("Keeping it as a file..."));
+
+    takes.kept ("TK000011", "takes/Looper take 1.wav", "");
+    reading = readNow (31, "TK000002");
+    CHECK_FALSE (reading.keeping);
+    CHECK (reading.kept == "takes/Looper take 1.wav");
+    CHECK (reading.mayKeep());
+    CHECK (model::takePanelWords (reading).ends_with ("Kept as takes/Looper take 1.wav."));
+    CHECK_FALSE (reading.locked);
+
+    const auto keep = gesture::takeKeep ("TK000011", true, "TK000002");
+    CHECK (keep.command == "take.keep");
+    REQUIRE (keep.args.size() == 3u);
+    CHECK (keep.args[0].getString() == "TK000011");
+    CHECK (keep.args[1].getBool());
+    CHECK (keep.args[2].getString() == "TK000002");
 }

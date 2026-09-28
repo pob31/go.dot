@@ -4,10 +4,18 @@
 #include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
+#include <wfg/client/ui/FxPanelComponent.h>
+#include <wfg/client/ui/TakePanelComponent.h>
+#include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
+#include <wfg/client/ui/WaveformEditorComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
+#include <wfg/client/ui/NewCueBarComponent.h>
+#include <wfg/client/ui/NewCueMenu.h>
+#include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/NewCueMenus.h>
 
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/RunModel.h>
@@ -15,10 +23,16 @@
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
+#include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/command/Event.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/plugin/EditorHost.h>
+#include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -161,6 +175,185 @@ TEST_CASE ("foot panel: it opens on one subject, draws a file, and a drag writes
 
     panel.open ({});
     CHECK_FALSE (panel.subject().isOpen());
+}
+
+
+TEST_CASE ("waveform: a level lane is drawn over the file, and one gesture is one write")
+{
+    /*  Namespace draft §20.5. The arithmetic of every gesture is `model/Lane`'s
+        and tested there; what is asked here is the wiring - which press finds
+        a point, that a drag writes ONCE and on release, that a double click
+        on the line adds and on a point removes, and that the lock stops all
+        of it - through the component's own mouse handlers. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value)
+    { written.emplace_back (address, value); };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setSize (900, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 10.0;
+
+    editor.show (reading, nullptr);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+
+    const auto mouse = [&] (juce::Point<float> at, int clicks, bool dragged, juce::ModifierKeys mods)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, mods, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &editor, &editor, now, at, now,
+                                 clicks, dragged);
+    };
+
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+
+    const auto lastLane = [&]
+    {
+        REQUIRE_FALSE (written.empty());
+        CHECK (written.back().first == "/godot/cue/CUE00001/levelLane");
+        return written.back().second;
+    };
+
+    //  A DOUBLE CLICK ON THE UNITY LINE of a lane nobody has drawn: the first point, at nought.
+    const auto onLine = editor.pointPosition ({ 3.0, 0.0 });
+    editor.mouseDoubleClick (mouse (onLine, 2, false, left));
+
+    REQUIRE (written.size() == 1u);
+
+    auto parsed = wfg::doc::readLevelLane (lastLane());
+    REQUIRE (parsed.problem.empty());
+    REQUIRE (parsed.points.size() == 1u);
+    CHECK (parsed.points[0].seconds == doctest::Approx (3.0).epsilon (0.02));
+    CHECK (parsed.points[0].levelDb == doctest::Approx (0.0));
+
+    //  THE ENGINE ANSWERS, and the reading carries the point.
+    reading.lane = { { parsed.points[0].seconds, 0.0 } };
+    editor.show (reading, nullptr);
+
+    /*  A DRAG MOVES IT AND WRITES NOTHING UNTIL IT LETS GO: one gesture, one
+        write, one step of undo. */
+    const auto from = editor.pointPosition (reading.lane[0]);
+    const auto to = editor.pointPosition ({ reading.lane[0].seconds, -12.0 });
+
+    editor.mouseDown (mouse (from, 1, false, left));
+    editor.mouseDrag (mouse (from.translated (0.0f, (to.y - from.y) * 0.5f), 1, true, left));
+    editor.mouseDrag (mouse (to, 1, true, left));
+
+    CHECK (written.size() == 1u);
+
+    editor.mouseUp (mouse (to, 1, true, left));
+
+    REQUIRE (written.size() == 2u);
+
+    parsed = wfg::doc::readLevelLane (lastLane());
+    REQUIRE (parsed.points.size() == 1u);
+    CHECK (parsed.points[0].levelDb == doctest::Approx (-12.0).epsilon (0.05));
+
+    //  A PRESS THAT ONLY PICKS a point has decided nothing, and writes nothing.
+    reading.lane = { { parsed.points[0].seconds, parsed.points[0].levelDb } };
+    editor.show (reading, nullptr);
+
+    const auto picked = editor.pointPosition (reading.lane[0]);
+    editor.mouseDown (mouse (picked, 1, false, left));
+    editor.mouseUp (mouse (picked, 1, false, left));
+
+    CHECK (written.size() == 2u);
+
+    //  A DOUBLE CLICK ON THE POINT takes it away, and the last one gone is no lane.
+    editor.mouseDoubleClick (mouse (picked, 2, false, left));
+
+    REQUIRE (written.size() == 3u);
+    CHECK (lastLane().empty());
+
+    /*  THE ENGINE ANSWERS WITH NO LANE, and the editor lets go of the copy
+        it drew while the write came round - drawn from the reading again. */
+    reading.lane.clear();
+    editor.show (reading, nullptr);
+
+    //  UNDER THE LOCK nothing is grabbed, added or taken away.
+    reading.lane = { { 3.0, -12.0 } };
+    reading.locked = true;
+    editor.show (reading, nullptr);
+
+    const auto locked = editor.pointPosition (reading.lane[0]);
+    editor.mouseDown (mouse (locked, 1, false, left));
+    editor.mouseDrag (mouse (locked.translated (0.0f, 20.0f), 1, true, left));
+    editor.mouseUp (mouse (locked.translated (0.0f, 20.0f), 1, true, left));
+    editor.mouseDoubleClick (mouse (locked, 2, false, left));
+    editor.mouseDoubleClick (mouse (editor.pointPosition ({ 7.0, -12.0 }), 2, false, left));
+
+    CHECK (written.size() == 3u);
+
+    /*  AND IT DRAWS, over a file with a shape, with a dip, a picked point and
+        a cue sounding - the picture the author judges the law and the look
+        from (decision DD), written out when WFG_SNAPSHOT_DIR asks for it. */
+    auto pyramid = std::make_shared<wfg::audio::TimbrePyramid>();
+    pyramid->sampleRate = 48000;
+    pyramid->samples = 48000ull * 10ull;
+
+    for (const auto count : { 512, 256, 128, 64 })
+    {
+        std::vector<wfg::audio::timbre::Frame> level;
+
+        for (auto at = 0; at < count; ++at)
+        {
+            wfg::audio::timbre::Frame frame;
+            frame.peak = static_cast<std::uint8_t> (120 + static_cast<int> (100.0 * std::abs (std::sin (at * 0.07))));
+            frame.saturation = 160;
+            frame.lightness = 110;
+            level.push_back (frame);
+        }
+
+        pyramid->levels.push_back (std::move (level));
+    }
+
+    auto table = std::make_shared<wfg::audio::MediaRecords>();
+    wfg::audio::MediaRecord record;
+    record.seconds = 10.0;
+    record.contentHash = "hash";
+    record.pyramid = pyramid;
+    table->emplace ("bed.wav", record);
+
+    reading.locked = false;
+    reading.lane = { { 1.0, 0.0 }, { 2.0, -18.0 }, { 6.0, -18.0 }, { 7.5, 3.0 } };
+    reading.ranges = { { "RNG00001", "verse", 0.5, 8.5, 0, 0 } };
+    reading.running = true;
+    reading.position = 4.0;
+    editor.show (reading, table);
+
+    const auto dip = editor.pointPosition (reading.lane[1]);
+    editor.mouseDown (mouse (dip, 1, false, left));
+    editor.mouseUp (mouse (dip, 1, false, left));
+    editor.show (reading, table);
+
+    juce::Image canvas (juce::Image::ARGB, 900, 220, true);
+    {
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, false);
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto snapshot = editor.createComponentSnapshot (editor.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("waveform-lane.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (snapshot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
 }
 
 
@@ -315,6 +508,103 @@ TEST_CASE ("inspector: an opener is a button that asks the window to open the pa
     CHECK (written.empty());
 }
 
+TEST_CASE ("inspector: a press on a number puts it on the master dial, and its line wears the dial")
+{
+    /*  The author, 2026-09-26: "Can selecting a parameter in the inspector or
+        foot panel on-screen via mouse or touch assign it to the master rotary
+        encoder on the D700?" - any click or touch. */
+    std::vector<std::string> dialed;
+
+    ui::InspectorComponent::Actions actions;
+    actions.dial = [&] (const std::string& address) { dialed.push_back (address); };
+
+    ui::InspectorComponent inspector (model::Theme {}, actions);
+    inspector.setSize (320, 200);
+
+    const auto field = [] (std::string name, std::string tags, std::string value, std::string unit)
+    {
+        model::Field made;
+        made.address = "/godot/cue/CUE00001/" + name;
+        made.name = name;
+        made.label = name;
+        made.typeTags = std::move (tags);
+        made.value = std::move (value);
+        made.unit = std::move (unit);
+        made.writable = true;
+        return made;
+    };
+
+    model::Inspection inspection;
+    inspection.cueId = "CUE00001";
+    inspection.cueName = "The bed";
+    inspection.kind = "media";
+    inspection.count = 1;
+    inspection.blocks.push_back ({ "what it is", { field ("name", "s", "The bed", "") } });
+    inspection.blocks.push_back ({ "what it does", { field ("level", "d", "-6", "dB"),
+                                                     field ("preWait", "d", "0.5", "s") } });
+    inspector.show (inspection);
+
+    const auto labelSaying = [&inspector] (const juce::String& word) -> juce::Label*
+    {
+        juce::Label* found = nullptr;
+
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+        {
+            for (auto* child : at.getChildren())
+            {
+                if (auto* label = dynamic_cast<juce::Label*> (child))
+                    if (label->getText().endsWith (word) && found == nullptr)
+                        found = label;
+
+                walk (*child);
+            }
+        };
+
+        walk (inspector);
+        return found;
+    };
+
+    auto* levelName = labelSaying ("level");
+    auto* nameName = labelSaying ("name");
+    REQUIRE (levelName != nullptr);
+    REQUIRE (nameName != nullptr);
+
+    //  A press on a number's name sends its address; on a word, nothing.
+    inspector.pressedOn (levelName);
+    inspector.pressedOn (nameName);
+    CHECK (dialed == std::vector<std::string> { "/godot/cue/CUE00001/level" });
+
+    //  The tree says the dial is on it: the dial before its name.
+    inspector.showDial ("/godot/cue/CUE00001/level");
+    CHECK (levelName->getText().startsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89"))));
+    CHECK_FALSE (nameName->getText().startsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89"))));
+
+    //  And a poll of the same values keeps it.
+    inspector.show (inspection);
+    CHECK (levelName->getText().startsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89"))));
+
+    inspector.showDial ({});
+    CHECK (levelName->getText() == "level");
+
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isNotEmpty())
+    {
+        inspector.showDial ("/godot/cue/CUE00001/level");
+
+        const auto picture = inspector.createComponentSnapshot (inspector.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("inspector-dial.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+    }
+}
+
 TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes the send first")
 {
     /*  The author, 2026-09-22: "there is a general level for the file and a
@@ -323,13 +613,17 @@ TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes 
         what makes that sentence true rather than approximately true. */
     std::vector<std::pair<std::string, std::string>> written;
     std::vector<std::pair<std::string, std::string>> made;
+    std::vector<double> madeAt;
 
     ui::SendMixerComponent::Actions actions;
     actions.set = [&] (const std::string& address, const std::string& text)
     { written.emplace_back (address, text); };
 
-    actions.createSend = [&] (const std::string& cueId, const std::string& busId)
-    { made.emplace_back (cueId, busId); };
+    actions.createSend = [&] (const std::string& cueId, const std::string& busId, double level)
+    {
+        made.emplace_back (cueId, busId);
+        madeAt.push_back (level);
+    };
 
     ui::SendMixerComponent mixer (model::Theme {}, actions);
     mixer.setSize (420, 180);
@@ -367,8 +661,17 @@ TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes 
     /*  ONE CROSS PER SEND THAT EXISTS, and none for the mix the cue does not
         feed yet: the asymmetry shows as the cross appearing rather than as a
         fader that will not move. */
-    const auto crosses = buttonsUnder (mixer);
+    std::vector<juce::Button*> crosses, switches;
+
+    for (auto* button : buttonsUnder (mixer))
+        (button->getButtonText() == "x" ? crosses : switches).push_back (button);
+
     CHECK (crosses.size() == 1);
+
+    /*  AND ONE SWITCH PER SEND (2026-09-25), on, beside its cross: off keeps
+        the level and takes the send out of the mix. */
+    REQUIRE (switches.size() == 1);
+    CHECK (switches[0]->getToggleState());
 
     /*  THE VALUE BOXES, which are also how this test moves a fader. Typing a
         number is the same gesture as dragging one - both end in
@@ -404,6 +707,12 @@ TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes 
         CHECK (made[0].first == "CUE00001");
         CHECK (made[0].second == "BUS00001");
 
+        /*  AND IT IS MADE AT THE LEVEL ASKED FOR (2026-09-25): born at the
+            row's default of nought and set a round trip later, the voice
+            climbed towards unity in between - the author heard it. */
+        REQUIRE (madeAt.size() == 1);
+        CHECK (madeAt[0] == doctest::Approx (0.0));
+
         //  And nothing was written to an address that is not there yet.
         CHECK (written.empty());
 
@@ -426,6 +735,19 @@ TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes 
         CHECK (written[0].first == "/godot/send/SND00001/level");
         CHECK (written[0].second == "-12");
         CHECK (made.empty());
+    }
+
+    SUBCASE ("a level is read the way it is typed, and a word writes nothing")
+    {
+        /*  "-6,5 dB" is what a French hand types into a box that showed -6;
+            "full" has no number in it, and writing nought for it would be
+            full level. */
+        boxes[2]->setText ("-6,5 dB", juce::sendNotificationSync);
+        boxes[2]->setText ("full", juce::sendNotificationSync);
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/send/SND00001/level");
+        CHECK (written[0].second == "-6.5");
     }
 
     SUBCASE ("and the master writes the cue's own level, which is the DCA")
@@ -776,6 +1098,59 @@ TEST_CASE ("run pane: a sampler group counts its members in words")
     pane.paintEntireComponent (g, true);
 }
 
+TEST_CASE ("run pane: a click on a running cue's name aims the rotaries, and on the aimed one lets go")
+{
+    /*  The author, 2026-09-25: "We will also add a way to edit other running
+        media cues like clicking on the label over the waveform in the running
+        cue panel." The cross still kills; a fade's line aims nothing. */
+    std::vector<std::string> aimed, killed;
+
+    ui::RunPaneComponent::Actions actions;
+    actions.aim = [&aimed] (const std::string& cueId) { aimed.push_back (cueId); };
+    actions.kill = [&killed] (const std::string& runId) { killed.push_back (runId); };
+
+    model::RunRow bed;
+    bed.id = "RUN00001";
+    bed.cueId = "CUE00001";
+    bed.cueName = "Bed";
+    bed.kind = "media";
+    bed.state = "playing";
+
+    model::RunRow fade = bed;
+    fade.id = "RUN00002";
+    fade.cueId = "CUE00002";
+    fade.cueName = "Down";
+    fade.kind = "fade";
+
+    ui::RunPaneComponent pane (model::Theme {}, actions);
+    pane.setSize (450, 300);
+    pane.show ({ bed, fade }, {});
+
+    const auto row = juce::roundToInt (model::Theme {}.row * model::Theme {}.type);
+
+    pane.clickAt (60, row / 2);
+    CHECK (aimed == std::vector<std::string> { "CUE00001" });
+
+    pane.clickAt (60, row + row / 2);
+    CHECK (aimed.size() == 1u);
+
+    pane.clickAt (445, row / 2);
+    CHECK (killed == std::vector<std::string> { "RUN00001" });
+
+    //  Aimed, it draws its mark - and a click lets go.
+    bed.aimed = true;
+    pane.show ({ bed, fade }, {});
+
+    juce::Image canvas (juce::Image::ARGB, 450, 300, true);
+    {
+        juce::Graphics g (canvas);
+        pane.paintEntireComponent (g, true);
+    }
+
+    pane.clickAt (60, row / 2);
+    CHECK (aimed == std::vector<std::string> { "CUE00001", "" });
+}
+
 //==============================================================================
 TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writes a flag, Flat is one command")
 {
@@ -843,6 +1218,22 @@ TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writ
         CHECK (written[0].second == "24");
     }
 
+    SUBCASE ("a box reads what a person types, unit and all")
+    {
+        /*  spatcore's typed reader: the unit is not a mistake, "k" is
+            thousands, a comma is a decimal point - and a text with no
+            number in it writes nothing, because nought is a real gain. */
+        boxes[5]->setText ("2.5 kHz", juce::sendNotificationSync);
+        boxes[6]->setText ("-3 dB", juce::sendNotificationSync);
+        boxes[7]->setText ("1,5", juce::sendNotificationSync);
+        boxes[6]->setText ("loud", juce::sendNotificationSync);
+
+        REQUIRE (written.size() == 3);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/cue/CUE00001/eqB2Freq", "2500"));
+        CHECK (written[1] == std::pair<std::string, std::string> ("/godot/cue/CUE00001/eqB2Gain", "-3"));
+        CHECK (written[2] == std::pair<std::string, std::string> ("/godot/cue/CUE00001/eqB2Q", "1.5"));
+    }
+
     SUBCASE ("a switch writes a flag")
     {
         juce::Button* highPass = nullptr;
@@ -858,6 +1249,25 @@ TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writ
         REQUIRE (written.size() == 1);
         CHECK (written[0].first == "/godot/cue/CUE00001/eqHpf");
         CHECK (written[0].second == "true");
+    }
+
+    SUBCASE ("a band's own switch writes its flag, off keeping its numbers (2026-09-25)")
+    {
+        juce::Button* bandTwo = nullptr;
+
+        for (auto* button : buttonsUnder (panel))
+            if (button->getTooltip().startsWith ("Whether band 2 is in"))
+                bandTwo = button;
+
+        REQUIRE (bandTwo != nullptr);
+        CHECK (bandTwo->getToggleState());
+
+        bandTwo->setToggleState (false, juce::dontSendNotification);
+        bandTwo->onClick();
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/cue/CUE00001/eqB2On");
+        CHECK (written[0].second == "false");
     }
 
     SUBCASE ("Flat is one command on the cue, and writes no row itself")
@@ -901,6 +1311,162 @@ TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writ
     }
 }
 
+TEST_CASE ("eq panel: a dragged point follows the hand, however often the reading comes back")
+{
+    /*  The author, 2026-09-25: "The Eq points move in very large increments
+        when using the mouse on the graph. Same with touch." The drag took the
+        handle from the reading, which the drag's own writes move - so each
+        pass added the whole movement again and the point ran away from the
+        hand. Here the reading comes back with every write, as it does live. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::EqPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text)
+    { written.emplace_back (address, text); };
+
+    ui::EqPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (720, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::eq, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.eq.present = true;
+    reading.eq.settings.band[1] = { wfg::audio::EqSettings::Shape::peak, 1000.0f, 0.0f, 1.0f };
+
+    panel.show (reading);
+
+    const auto lastOf = [&written] (const std::string& row)
+    {
+        for (auto at = written.rbegin(); at != written.rend(); ++at)
+            if (at->first == "/godot/cue/CUE00001/" + row)
+                return wfg::osc::parseDouble (at->second).value_or (std::nan (""));   // never the locale's
+
+        return std::nan ("");
+    };
+
+    //  What the engine publishes after each write: the band where it was put.
+    const auto publish = [&]
+    {
+        reading.eq.settings.band[1].freq = static_cast<float> (lastOf ("eqB2Freq"));
+        reading.eq.settings.band[1].gain = static_cast<float> (lastOf ("eqB2Gain"));
+        panel.show (reading);
+    };
+
+    const auto from = panel.handlePosition (1);
+    panel.beginDrag (from);
+
+    panel.dragTo (from + juce::Point<float> (20.0f, 0.0f), false);
+    const auto first = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+    publish();
+
+    panel.dragTo (from + juce::Point<float> (40.0f, 0.0f), false);
+    const auto second = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+    publish();
+
+    panel.dragTo (from + juce::Point<float> (60.0f, 0.0f), false);
+    const auto third = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+
+    /*  FREQUENCY IS LOGARITHMIC ACROSS THE FIELD, so twice the pointer's
+        travel is twice the octaves - and not three times, then six, which is
+        what adding the movement to a published value that already held it
+        came to. Whole hertz rounding is the tolerance. */
+    REQUIRE (first > 0.0);
+    CHECK (second == doctest::Approx (2.0 * first).epsilon (0.02));
+    CHECK (third == doctest::Approx (3.0 * first).epsilon (0.02));
+
+    //  And the handle is drawn where the hand is, not ahead of it.
+    CHECK (std::abs (panel.handlePosition (1).x - (from.x + 60.0f)) <= 1.0f);
+
+    /*  SHIFT MID-DRAG IS A CHANGE OF SPEED, NOT A JUMP: the fine drag starts
+        from where the handle is, a tenth of the movement from there on. */
+    publish();
+    panel.dragTo (from + juce::Point<float> (60.0f, 0.0f), true);
+    const auto still = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+    CHECK (still == doctest::Approx (third).epsilon (0.02));
+
+    //  A hundred pixels at a tenth is ten: half of one of the twenty-pixel steps above.
+    panel.dragTo (from + juce::Point<float> (160.0f, 0.0f), true);
+    const auto fine = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+    CHECK (fine - third == doctest::Approx (0.5 * (third - second)).epsilon (0.1));
+
+    panel.endDrag();
+}
+
+TEST_CASE ("eq panel: two fingers pinch a band's width, closing them narrows it, and the band taken is ringed")
+{
+    /*  The author, 2026-09-25: "Touch gestures on the EQ are not working",
+        "Pinch widens and this feels reversed", and "having a circle around
+        the one being edited". Fingers are driven as the mouse handlers drive
+        them, by their index. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::EqPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text)
+    { written.emplace_back (address, text); };
+
+    ui::EqPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (720, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::eq, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.eq.present = true;
+    reading.eq.settings.band[1] = { wfg::audio::EqSettings::Shape::peak, 1000.0f, 6.0f, 1.0f };
+
+    panel.show (reading);
+
+    const auto lastQ = [&written]
+    {
+        for (auto at = written.rbegin(); at != written.rend(); ++at)
+            if (at->first == "/godot/cue/CUE00001/eqB2Q")
+                return wfg::osc::parseDouble (at->second).value_or (std::nan (""));   // never the locale's
+
+        return std::nan ("");
+    };
+
+    //  Nothing is ringed until a hand takes something, and a press on a handle rings it.
+    CHECK (panel.editedHandle() == -1);
+
+    const auto centre = panel.handlePosition (1);
+    panel.fingerDown (0, centre);
+    CHECK (panel.editedHandle() == 1);
+    panel.fingerUp (0);
+
+    //  Still ringed once the hand is gone - the wheel acts on it - and a press on nothing lets it go.
+    CHECK (panel.editedHandle() == 1);
+    panel.fingerDown (0, { 2.0f, 2.0f });
+    panel.fingerUp (0);
+    CHECK (panel.editedHandle() == -1);
+
+    /*  TWO FINGERS either side of the band, sixty pixels apart, on no handle:
+        the pinch takes the band nearest their middle, and rings it. */
+    const juce::Point<float> half { 30.0f, 0.0f };
+    panel.fingerDown (0, centre - half);
+    panel.fingerDown (1, centre + half);
+    CHECK (panel.editedHandle() == 1);
+
+    //  CLOSED TO HALF THE DISTANCE: twice the Q, a narrower band.
+    panel.fingerMoved (0, centre - half * 0.5f, false);
+    panel.fingerMoved (1, centre + half * 0.5f, false);
+    CHECK (lastQ() == doctest::Approx (2.0));
+
+    //  SPREAD TO TWICE IT: half the Q, a wider band - measured from where the pinch began.
+    panel.fingerMoved (0, centre - half * 2.0f, false);
+    panel.fingerMoved (1, centre + half * 2.0f, false);
+    CHECK (lastQ() == doctest::Approx (0.5));
+
+    //  LIFTING ONE ENDS THE PINCH, and the finger left drags nothing.
+    const auto writes = written.size();
+    panel.fingerUp (1);
+    panel.fingerMoved (0, centre + juce::Point<float> (-100.0f, 40.0f), false);
+    CHECK (written.size() == writes);
+    panel.fingerUp (0);
+
+    CHECK (panel.editedHandle() == 1);
+}
+
 TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 {
     /*  NOT AN ASSERTION BUT AN EYE. With WFG_SNAPSHOT_DIR set, the panel is
@@ -932,6 +1498,10 @@ TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 
     panel.show (reading);
 
+    //  The third band taken by a hand and let go: drawn ringed, the one being edited.
+    panel.fingerDown (0, panel.handlePosition (2));
+    panel.fingerUp (0);
+
     const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
     const juce::File file { juce::File (dir).getChildFile ("eq-panel.png") };
     file.getParentDirectory().createDirectory();
@@ -943,4 +1513,914 @@ TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
     juce::PNGImageFormat png;
     CHECK (png.writeImageToStream (picture, out));
     MESSAGE ("wrote " << file.getFullPathName().toStdString());
+}
+
+namespace
+{
+    /*  A CHAIN AS A SHOW MIGHT HAVE IT: one entry the cue has not switched
+        in, one it has (and which adds latency), one switched out, and one the
+        machine has not got although the cue uses it. */
+    model::FootReading chainReading (const std::string& cueId)
+    {
+        model::FootReading reading;
+        reading.subject = { model::Subject::Kind::fx, cueId };
+        reading.cueName = "The bed";
+        reading.cueKind = "media";
+        reading.eq.present = true;
+        reading.fx.present = true;
+
+        model::FxStrip gain;
+        gain.pluginId = "PG7N0001";
+        gain.name = "Test gain";
+        gain.index = 0;
+        gain.state = "loaded";
+
+        model::FxStrip verb;
+        verb.pluginId = "PG7N0002";
+        verb.name = "Verb";
+        verb.index = 1;
+        verb.state = "loaded";
+        verb.fxId = "FX7N0001";
+        verb.enabled = true;
+        verb.latencySamples = 64;
+
+        model::FxStrip delay;
+        delay.pluginId = "PG7N0003";
+        delay.name = "Delay";
+        delay.index = 2;
+        delay.state = "loaded";
+        delay.fxId = "FX7N0002";
+        delay.enabled = false;
+
+        model::FxStrip shimmer;
+        shimmer.pluginId = "PG7N0004";
+        shimmer.name = "Shimmer";
+        shimmer.index = 3;
+        shimmer.state = "missing";
+        shimmer.problem = "no plugin on this machine answers VST3-0badf00d-shim";
+        shimmer.fxId = "FX7N0003";
+        shimmer.enabled = true;
+
+        reading.fx.strips = { gain, verb, delay, shimmer };
+        return reading;
+    }
+
+    std::vector<juce::Button*> buttonsNamed (juce::Component& from, const juce::String& text)
+    {
+        std::vector<juce::Button*> out;
+
+        for (auto* button : buttonsUnder (from))
+            if (button->getButtonText() == text)
+                out.push_back (button);
+
+        return out;
+    }
+
+    void press (juce::Button& button, bool state)
+    {
+        button.setToggleState (state, juce::dontSendNotification);
+        button.onClick();
+    }
+}
+
+TEST_CASE ("fx panel: the chain runs file, EQ, the set, out, and a first switch-in makes the insert")
+{
+    /*  The author's design, 2026-09-25: "show the chain, bypass switch and
+        open the native plugin UI as a popup". A box per link in the order the
+        sound goes through them, the EQ first; a switch that is fx.create the
+        first time and `enabled` after; a door that opens the EQ or the
+        plugin's own window. */
+    std::vector<std::pair<std::string, std::string>> written, made, edited;
+    std::vector<std::string> eqOpened;
+
+    ui::FxPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.createFx = [&] (const std::string& cue, const std::string& plugin) { made.emplace_back (cue, plugin); };
+    actions.edit = [&] (const std::string& cue, const std::string& plugin) { edited.emplace_back (cue, plugin); };
+    actions.openEq = [&] (const std::string& cue) { eqOpened.push_back (cue); };
+
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1400, 230);
+    panel.show (chainReading ("CUE00001"));
+
+    juce::Image canvas (juce::Image::ARGB, 1400, 230, true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, true);
+    }
+
+    //  THE LINKS, in chain order: the EQ's switch first, then one per entry of the set.
+    auto switches = buttonsNamed (panel, "in");
+    REQUIRE (switches.size() == 5);
+    CHECK (buttonsNamed (panel, "Open").size() == 1);
+    REQUIRE (buttonsNamed (panel, "Edit...").size() == 4);
+
+    CHECK (switches[0]->getToggleState());           // the EQ, in by default
+    CHECK_FALSE (switches[1]->getToggleState());     // Test gain: not in this cue
+    CHECK (switches[2]->getToggleState());           // Verb: in
+    CHECK_FALSE (switches[3]->getToggleState());     // Delay: switched out
+    CHECK (switches[4]->getToggleState());           // Shimmer: in, and missing
+
+    //  Nothing takes the keyboard: the space bar is GO's.
+    for (auto* button : buttonsUnder (panel))
+        CHECK_FALSE (button->getWantsKeyboardFocus());
+
+    SUBCASE ("the first switch-in is fx.create and nothing else, and a second press waits for it")
+    {
+        press (*switches[1], true);
+
+        REQUIRE (made.size() == 1);
+        CHECK (made[0] == std::pair<std::string, std::string> ("CUE00001", "PG7N0001"));
+        CHECK (written.empty());
+
+        //  The switch stays in while the tree catches up, and pressing again sends no second create.
+        CHECK (switches[1]->getToggleState());
+        press (*switches[1], true);
+        CHECK (made.size() == 1);
+
+        //  Once the tree has it, the next press is an ordinary write to `enabled`.
+        auto arrived = chainReading ("CUE00001");
+        arrived.fx.strips[0].fxId = "FX7N0009";
+        arrived.fx.strips[0].enabled = true;
+        panel.show (arrived);
+
+        switches = buttonsNamed (panel, "in");
+        press (*switches[1], false);
+        REQUIRE (written.size() == 1);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/fx/FX7N0009/enabled", "false"));
+        CHECK (made.size() == 1);
+    }
+
+    SUBCASE ("a create in flight belongs to the cue it was pressed on")
+    {
+        press (*switches[1], true);
+        REQUIRE (made.size() == 1);
+
+        //  Another cue picked before the tree answered: its switch is out, and pressing it asks again.
+        panel.show (chainReading ("CUE00002"));
+        switches = buttonsNamed (panel, "in");
+        CHECK_FALSE (switches[1]->getToggleState());
+
+        press (*switches[1], true);
+        REQUIRE (made.size() == 2);
+        CHECK (made[1] == std::pair<std::string, std::string> ("CUE00002", "PG7N0001"));
+    }
+
+    SUBCASE ("an insert the cue has is switched with one write, never a second create")
+    {
+        press (*switches[2], false);
+        press (*switches[3], true);
+
+        REQUIRE (written.size() == 2);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/fx/FX7N0001/enabled", "false"));
+        CHECK (written[1] == std::pair<std::string, std::string> ("/godot/fx/FX7N0002/enabled", "true"));
+        CHECK (made.empty());
+    }
+
+    SUBCASE ("the EQ's switch writes eqOn, and its door opens the EQ on the same cue")
+    {
+        press (*switches[0], false);
+        REQUIRE (written.size() == 1);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/cue/CUE00001/eqOn", "false"));
+
+        buttonsNamed (panel, "Open")[0]->onClick();
+        REQUIRE (eqOpened.size() == 1);
+        CHECK (eqOpened[0] == "CUE00001");
+    }
+
+    SUBCASE ("Edit... asks for that plugin's own window on this cue")
+    {
+        buttonsNamed (panel, "Edit...")[1]->onClick();
+
+        REQUIRE (edited.size() == 1);
+        CHECK (edited[0] == std::pair<std::string, std::string> ("CUE00001", "PG7N0002"));
+        CHECK (written.empty());
+        CHECK (made.empty());
+    }
+
+    SUBCASE ("a long set scrolls sideways rather than squeezing its boxes")
+    {
+        auto many = chainReading ("CUE00001");
+
+        for (int n = 4; n < 8; ++n)
+        {
+            auto more = many.fx.strips[0];
+            more.pluginId = "PG7N000" + std::to_string (n + 1);
+            more.index = n;
+            many.fx.strips.push_back (more);
+        }
+
+        panel.setSize (700, 230);
+        panel.show (many);
+
+        juce::Viewport* viewport = nullptr;
+
+        for (auto* child : panel.getChildren())
+            if (auto* found = dynamic_cast<juce::Viewport*> (child))
+                viewport = found;
+
+        REQUIRE (viewport != nullptr);
+        REQUIRE (viewport->getViewedComponent() != nullptr);
+        CHECK (viewport->getViewedComponent()->getWidth() > panel.getWidth());
+        CHECK (buttonsNamed (panel, "in").size() == 9);
+    }
+
+    SUBCASE ("a show with no plugins still has its EQ, and says how to add one")
+    {
+        auto bare = chainReading ("CUE00001");
+        bare.fx.strips.clear();
+        bare.fx.notice = "The show declares no plugins yet: Show settings, Plugins.";
+        panel.show (bare);
+
+        CHECK (buttonsNamed (panel, "in").size() == 1);
+        CHECK (buttonsNamed (panel, "Open").size() == 1);
+        CHECK (buttonsNamed (panel, "Edit...").empty());
+
+        juce::Image blank (juce::Image::ARGB, 1400, 230, true);
+        juce::Graphics g (blank);
+        panel.paintEntireComponent (g, true);
+    }
+
+    SUBCASE ("a cue that is not media has no chain, and the panel says why")
+    {
+        model::FootReading memo;
+        memo.subject = { model::Subject::Kind::fx, "CUE00002" };
+        memo.cueKind = "memo";
+        memo.fx.notice = "Inserts belong to media cues; this cue plays no file.";
+        panel.show (memo);
+
+        CHECK (buttonsNamed (panel, "in").empty());
+        CHECK (buttonsNamed (panel, "Edit...").empty());
+
+        juce::Image blank (juce::Image::ARGB, 1400, 230, true);
+        juce::Graphics g (blank);
+        panel.paintEntireComponent (g, true);
+    }
+}
+
+TEST_CASE ("fx panel: a picture of it, when somebody asks for one")
+{
+    //  The EQ picture case's shape: with WFG_SNAPSHOT_DIR set, fx-panel.png; skipped otherwise.
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isEmpty())
+        return;
+
+    ui::FxPanelComponent::Actions actions;
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1650, 250);
+
+    auto reading = chainReading ("CUE00001");
+    reading.eq.settings.hpf = true;
+    reading.eq.settings.band[1].gain = -4.0f;
+
+    panel.setEditorWords ({ { "PG7N0002", "its window is open" } });
+    panel.show (reading);
+
+    const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+    const juce::File file { juce::File (dir).getChildFile ("fx-panel.png") };
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    juce::FileOutputStream out { file };
+    REQUIRE (out.openedOk());
+
+    juce::PNGImageFormat png;
+    CHECK (png.writeImageToStream (picture, out));
+    MESSAGE ("wrote " << file.getFullPathName().toStdString());
+}
+
+TEST_CASE ("fx panel: a mic cue's chain starts at its input, and its path is said against the budget")
+{
+    /*  Phase 9b (namespace draft 18.9): the chain drawn from "in" and the
+        input's name where a media cue's says "file", its boxes the channel's
+        plugins, and the path's delay in words - always, for a live voice. With
+        WFG_SNAPSHOT_DIR set, fx-panel-mic.png as well. */
+    ui::FxPanelComponent::Actions actions;
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (2050, 250);
+
+    auto reading = chainReading ("CUE00009");
+    reading.cueName = "Voix solo";
+    reading.cueKind = "mic";
+    reading.fx.source = "in \xc2\xb7 Voix solo";
+    reading.fx.live = true;
+    reading.fx.fileChannels = 1;
+    reading.fx.chainChannels = 2;
+    reading.fx.sampleRate = 48000;
+    reading.fx.inputLatency = 64;
+    reading.fx.outputLatency = 56;
+    reading.fx.insertLatency = 230;
+    reading.fx.budgetMs = 5.0;
+
+    CHECK (model::chainWords (reading.fx) == "7.3 ms from the microphone to the output: 2.5 ms the interface's,"
+                                              " 4.8 ms its plugins' - within the 5 ms budget.");
+
+    panel.show (reading);
+
+    juce::Image canvas (juce::Image::ARGB, panel.getWidth(), panel.getHeight(), true);
+    juce::Graphics g (canvas);
+    panel.paintEntireComponent (g, false);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("fx-panel-mic.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
+TEST_CASE ("fx panel: on a sampling channel the recorder sits after the plugins before it, ahead of the EQ, and opens the take")
+{
+    /*  Phase 9c, stage 9c.4 (namespace draft 19.7): a mic cue on a sampling
+        channel draws its chain as its track is built - the plugins before
+        the recorder, the recorder, the EQ, the plugins after the player - and
+        the recorder's box opens the take panel. With WFG_SNAPSHOT_DIR set,
+        fx-panel-take.png as well. */
+    std::vector<std::string> opened;
+
+    ui::FxPanelComponent::Actions actions;
+    actions.openTake = [&opened] (const std::string& cueId) { opened.push_back (cueId); };
+
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (2300, 250);
+
+    auto reading = chainReading ("CUE00009");
+    reading.cueName = "Loop voice";
+    reading.cueKind = "mic";
+    reading.fx.source = "in \xc2\xb7 Voice";
+    reading.fx.live = true;
+    reading.fx.recorder = true;
+    reading.fx.takeState = "looping";
+
+    //  The second entry is printed into the take; the rest are heard after it.
+    for (auto& strip : reading.fx.strips)
+        strip.side = strip.pluginId == "PG7N0002" ? "before" : "after";
+
+    panel.show (reading);
+
+    auto* take = buttonTipped (panel, "Show the take");
+    auto* eq = buttonTipped (panel, "Show this cue's EQ");
+    auto* before = buttonTipped (panel, "Open Verb");
+    auto* after = buttonTipped (panel, "Open Test gain");
+
+    REQUIRE (take != nullptr);
+    REQUIRE (eq != nullptr);
+    REQUIRE (before != nullptr);
+    REQUIRE (after != nullptr);
+
+    const auto x = [&panel] (juce::Component* control)
+    {
+        return panel.getLocalArea (control, control->getLocalBounds()).getX();
+    };
+
+    CHECK (x (before) < x (take));
+    CHECK (x (take) < x (eq));
+    CHECK (x (eq) < x (after));
+
+    take->onClick();
+    CHECK (opened == std::vector<std::string> { "CUE00009" });
+
+    //  Moved to the other side, the entry is drawn there: a side is part of the chain's shape.
+    for (auto& strip : reading.fx.strips)
+        strip.side = "after";
+
+    panel.show (reading);
+    before = buttonTipped (panel, "Open Verb");
+    take = buttonTipped (panel, "Show the take");
+    REQUIRE (before != nullptr);
+    REQUIRE (take != nullptr);
+    CHECK (x (take) < x (before));
+
+    juce::Image canvas (juce::Image::ARGB, panel.getWidth(), panel.getHeight(), true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, false);
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        for (auto& strip : reading.fx.strips)
+            strip.side = strip.pluginId == "PG7N0002" ? "before" : "after";
+
+        panel.show (reading);
+
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("fx-panel-take.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
+TEST_CASE ("take panel: its five presses are the take verbs, offered only where the engine would apply them")
+{
+    /*  Phase 9c, stage 9c.4 (namespace draft 19.7): Rec, Loop, Overdub, Undo
+        and Clear send the take verb of their name on the channel; Rec, Loop
+        and a layer want a mic cue sounding there, as the engine does. The
+        picture stacks a layer on the take, with the loop's edges and the
+        playhead over it. With WFG_SNAPSHOT_DIR set, take-panel.png as well. */
+    std::vector<std::string> presses;
+
+    ui::TakePanelComponent::Actions actions;
+    actions.press = [&presses] (const std::string& verb, const std::string& channel)
+                    { presses.push_back (verb + " " + channel); };
+    actions.keep = [&presses] (const std::string& channel, bool asCue, const std::string& after)
+                   { presses.push_back (std::string (asCue ? "keep as cue " : "keep ") + channel + " after " + after); };
+
+    ui::TakePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1400, 240);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::take, "TK000002" };
+    reading.cueName = "Loop voice";
+    reading.cueKind = "mic";
+
+    auto& take = reading.take;
+    take.present = true;
+    take.cueId = "TK000002";
+    take.channelId = "TK000011";
+    take.channelName = "Looper";
+    take.state = "looping";
+    take.length = 4.0;
+    take.capacity = 10.0;
+    take.loopIn = 1.0;
+    take.loopOut = 3.25;
+    take.playhead = 2.1;
+    take.layers = 1;
+    take.maxLayers = 2;
+    take.holderRun = "RUN00001";
+    take.holderName = "Loop voice";
+    take.channelSounds = true;
+
+    //  A picture: a take at about a half, and a layer at a quarter over its second half.
+    auto set = std::make_shared<wfg::audio::TakePictureSet>();
+    auto& picture = set->byChannel["TK000011"];
+    picture.sampleRate = 48000;
+    picture.binSamples = 4 * 256;
+    picture.slots = 2;
+    picture.bins = static_cast<int> (std::ceil (4.0 * 48000.0 / picture.binSamples));
+    picture.peaks.assign (static_cast<std::size_t> (picture.slots * picture.bins), 0.0f);
+
+    for (int bin = 0; bin < picture.bins; ++bin)
+    {
+        picture.peaks[static_cast<std::size_t> (bin)] = 0.3f + 0.2f * static_cast<float> (std::sin (bin * 0.15));
+
+        if (bin >= picture.bins / 2)
+            picture.peaks[static_cast<std::size_t> (picture.bins + bin)] = 0.25f;
+    }
+
+    panel.show (reading, set);
+
+    std::map<std::string, juce::Button*> buttons;
+
+    for (auto* button : buttonsUnder (panel))
+        buttons[button->getButtonText().toStdString()] = button;
+
+    for (const auto* name : { "Rec", "Loop", "Overdub", "Undo", "Clear", "Keep", "Keep as cue" })
+        REQUIRE (buttons.count (name) == 1u);
+
+    //  LOOPING, a cue sounding: a layer and Undo and Clear are offered; Loop has nothing to close.
+    CHECK (buttons["Rec"]->isEnabled());
+    CHECK_FALSE (buttons["Loop"]->isEnabled());
+    CHECK (buttons["Overdub"]->isEnabled());
+    CHECK (buttons["Undo"]->isEnabled());
+    CHECK (buttons["Clear"]->isEnabled());
+
+    for (const auto* name : { "Rec", "Overdub", "Undo", "Clear" })
+        buttons[name]->onClick();
+
+    CHECK (presses == std::vector<std::string> { "record TK000011", "overdub TK000011",
+                                                 "undo TK000011", "clear TK000011" });
+
+    /*  KEEP (9c.6): the take made a file, and as a cue, after this one. While
+        a Keep writes, Keep, Undo and Clear wait; under the lock, the file
+        alone. */
+    CHECK (buttons["Keep"]->isEnabled());
+    CHECK (buttons["Keep as cue"]->isEnabled());
+    presses.clear();
+    buttons["Keep"]->onClick();
+    buttons["Keep as cue"]->onClick();
+    CHECK (presses == std::vector<std::string> { "keep TK000011 after TK000002", "keep as cue TK000011 after TK000002" });
+
+    take.keeping = true;
+    panel.show (reading, set);
+    CHECK_FALSE (buttons["Keep"]->isEnabled());
+    CHECK_FALSE (buttons["Undo"]->isEnabled());
+    CHECK_FALSE (buttons["Clear"]->isEnabled());
+
+    take.keeping = false;
+    take.locked = true;
+    panel.show (reading, set);
+    CHECK (buttons["Keep"]->isEnabled());
+    CHECK_FALSE (buttons["Keep as cue"]->isEnabled());
+    take.locked = false;
+    panel.show (reading, set);
+
+    /*  IT DRAWS, and with a picture to look at when somebody asks for one. A
+        panel that threw or read past an end would take the window down rather
+        than fail a check. */
+    juce::Image canvas (juce::Image::ARGB, panel.getWidth(), panel.getHeight(), true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, false);
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto snapshot = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("take-panel.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (snapshot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    //  NOTHING SOUNDING ON THE CHANNEL: only Undo and Clear, which take something away.
+    take.channelSounds = false;
+    take.holderRun.clear();
+    panel.show (reading, set);
+
+    CHECK_FALSE (buttons["Rec"]->isEnabled());
+    CHECK_FALSE (buttons["Overdub"]->isEnabled());
+    CHECK (buttons["Undo"]->isEnabled());
+    CHECK (buttons["Clear"]->isEnabled());
+
+    //  RECORDING, and drawn growing across the longest take, with nothing to close a loop on yet.
+    take.channelSounds = true;
+    take.state = "recording";
+    take.layers = 0;
+    panel.show (reading, set);
+
+    CHECK (buttons["Loop"]->isEnabled());
+    CHECK (buttons["Undo"]->isEnabled());
+
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, false);
+    }
+
+    //  A CUE WITH NO TAKE draws its sentence and nothing else, and offers nothing.
+    reading.take = model::TakeReading {};
+    reading.take.notice = "Only a mic cue on a sampling channel has a take.";
+    panel.show (reading, nullptr);
+
+    for (const auto* name : { "Rec", "Loop", "Overdub", "Undo", "Clear" })
+        CHECK_FALSE (buttons[name]->isEnabled());
+
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, false);
+    }
+}
+
+TEST_CASE ("run pane: a mic run says the channel it is on, that it waits for one, or that it rings out")
+{
+    /*  Phase 9b (namespace draft 18.9): the words a mic run reads beside its
+        name, drawn where a sampler member's are. With WFG_SNAPSHOT_DIR set,
+        run-pane-mic.png as well. */
+    const auto mic = [] (const char* runId, const char* name, const char* runState, const char* words)
+    {
+        model::RunRow row;
+        row.id = runId;
+        row.cueId = std::string ("CUE") + runId;
+        row.cueName = name;
+        row.kind = "mic";
+        row.state = runState;
+        row.liveWords = words;
+        return row;
+    };
+
+    const std::vector<model::RunRow> rows { mic ("MIC00001", "Voix solo", "playing", "on Vox 1"),
+                                            mic ("MIC00002", "Voix deux", "armed", "waiting for Vox 1"),
+                                            mic ("MIC00003", "Choeur", "stopping", "ringing out") };
+
+    ui::RunPaneComponent pane (model::Theme {}, {});
+    pane.setSize (450, 200);
+    pane.show (rows, {});
+
+    juce::Image canvas (juce::Image::ARGB, 450, 200, true);
+    juce::Graphics g (canvas);
+    pane.paintEntireComponent (g, false);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto picture = pane.createComponentSnapshot (pane.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("run-pane-mic.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
+namespace
+{
+    /*  A TREE BY HAND: the few nodes the plugin windows read, sorted as a
+        snapshot must be. Enough for a media cue with the test gain switched
+        in, a memo beside it, and the set's one entry. */
+    std::shared_ptr<const wfg::tree::TreeSnapshot> editorTree (bool withInsert, const std::string& bundle = {})
+    {
+        std::vector<wfg::tree::Node> nodes;
+
+        const auto add = [&nodes] (const std::string& address, wfg::osc::Value value)
+        {
+            wfg::tree::Node node;
+            node.address = address;
+            node.values.push_back (std::move (value));
+            nodes.push_back (std::move (node));
+        };
+
+        using wfg::osc::Value;
+        add ("/godot/cue/CUE00001/kind", Value::string ("media"));
+        add ("/godot/cue/CUE00001/name", Value::string ("Steady"));
+        add ("/godot/cue/CUE00001/number", Value::string ("1"));
+        add ("/godot/cue/CUE00002/kind", Value::string ("memo"));
+        add ("/godot/cue/CUE00002/name", Value::string ("Memo"));
+        add ("/godot/cue/CUE00002/number", Value::string ("2"));
+
+        if (withInsert)
+        {
+            add ("/godot/fx/FX7N0001/cue", Value::string ("CUE00001"));
+            add ("/godot/fx/FX7N0001/enabled", Value::boolean (true));
+            add ("/godot/fx/FX7N0001/plugin", Value::string ("PG7N0001"));
+            add ("/godot/fx/FX7N0001/values", Value::string ("0:0.25"));
+        }
+
+        if (! bundle.empty())
+            add ("/godot/document/path", Value::string (bundle));
+
+        add ("/godot/plugin/PG7N0001/identifier", Value::string ("godot:test-gain"));
+        add ("/godot/plugin/PG7N0001/name", Value::string ("Test gain"));
+        add ("/godot/plugin/PG7N0001/paramCount", Value::string ("2"));
+
+        std::sort (nodes.begin(), nodes.end(), [] (const auto& a, const auto& b) { return a.address < b.address; });
+        return std::make_shared<const wfg::tree::TreeSnapshot> (1, nullptr, nullptr, std::move (nodes));
+    }
+
+    wfg::plugin::EditorLaunch launchOfThisBinary()
+    {
+        wfg::plugin::EditorLaunch launch;
+        launch.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+        launch.leadingArgs = { "plugin-editor" };
+        return launch;
+    }
+
+    /** The editors' timer, turned by hand until `done` or a deadline. */
+    template <typename Done>
+    bool serviceUntil (ui::PluginEditors& editors, Done done, int milliseconds = 10000)
+    {
+        const auto until = juce::Time::getMillisecondCounter() + static_cast<juce::uint32> (milliseconds);
+
+        while (juce::Time::getMillisecondCounter() < until)
+        {
+            editors.service();
+
+            if (done())
+                return true;
+
+            juce::Thread::sleep (10);
+        }
+
+        editors.service();
+        return done();
+    }
+}
+
+TEST_CASE ("plugin windows: Edit... opens a helper on the cue, a turn is one write on its insert, the lock closes it")
+{
+    /*  The author's design, 2026-09-25: the plugin's own window, in a helper
+        process, following the pick. Driven here headless - the helper is this
+        test binary - with the tree built by hand, so what is pinned is the
+        client's half: which helper opens, what it is told, where what it
+        reports is written, and when it goes. */
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("wfg-editors-ui-" + juce::Uuid().toDashedString());
+
+    std::vector<std::pair<std::string, std::string>> written, made;
+    auto changes = 0;
+
+    ui::PluginEditors::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.createFx = [&] (const std::string& cue, const std::string& plugin) { made.emplace_back (cue, plugin); };
+    actions.changed = [&] { ++changes; };
+
+    std::vector<std::vector<std::string>> kept;
+    actions.capture = [&] (const std::string& fxId, const std::string& file, const std::string& values)
+    { kept.push_back ({ fxId, file, values }); };
+
+    {
+        ui::PluginEditors editors (actions, {}, folder.getFullPathName().toStdString(), launchOfThisBinary(), true);
+        const auto bundle = folder.getChildFile ("show");
+        const auto tree = editorTree (true, bundle.getFullPathName().toStdString());
+
+        editors.edit (*tree, "CUE00001", "PG7N0001", false);
+        auto* host = editors.hostFor ("PG7N0001");
+        REQUIRE (host != nullptr);
+        CHECK (made.empty());
+
+        //  Up, on the cue, at the cue's value - and saying so in the chain's words.
+        REQUIRE (serviceUntil (editors, [&] { return host->status() == wfg::plugin::EditorHost::Status::open
+                                                     && host->subjectTaken() >= 1u
+                                                     && std::abs (host->currentValue (0) - 0.25f) < 1.0e-4f; }));
+        CHECK (editors.words().at ("PG7N0001") == "its window is open");
+        CHECK (changes > 0);
+        CHECK (written.empty());
+
+        SUBCASE ("a turn in the plugin's window is one node.set on that cue's insert")
+        {
+            host->poke (0, 0.7f);
+            REQUIRE (serviceUntil (editors, [&] { return ! written.empty(); }));
+            REQUIRE (written.size() == 1);
+            CHECK (written[0] == std::pair<std::string, std::string> ("/godot/fx/FX7N0001/p0", "0.7"));
+        }
+
+        SUBCASE ("the window follows the pick, and on a memo a turn goes nowhere")
+        {
+            editors.follow (*tree, "CUE00002", false);
+            REQUIRE (serviceUntil (editors, [&] { return host->subjectTaken() >= 2u; }));
+
+            host->poke (0, 0.1f);
+            juce::Thread::sleep (150);
+            editors.service();
+            CHECK (written.empty());
+        }
+
+        SUBCASE ("the plugin's whole state is kept with the cue: one fx.capture, the file in the bundle")
+        {
+            host->poke (-1, 0.0f);      // Pad: no parameter, only state
+            REQUIRE (serviceUntil (editors, [&] { return ! kept.empty(); }, 6000));
+            REQUIRE (kept.size() == 1);
+            CHECK (kept[0][0] == "FX7N0001");
+            CHECK (kept[0][1].rfind ("state/PG7N0001-", 0) == 0);
+            CHECK (kept[0][2] == "0:0.25 1:0");
+            CHECK (bundle.getChildFile ("plugins").getChildFile (juce::String (kept[0][1])).existsAsFile());
+        }
+
+        SUBCASE ("the lock closes every window and says why")
+        {
+            editors.follow (*tree, "CUE00001", true);
+            CHECK (editors.hostFor ("PG7N0001") == nullptr);
+            CHECK (editors.words().at ("PG7N0001") == "closed: the show is locked");
+
+            //  And Edit... under the lock says why rather than opening.
+            editors.edit (*tree, "CUE00001", "PG7N0001", true);
+            CHECK (editors.hostFor ("PG7N0001") == nullptr);
+            CHECK (editors.words().at ("PG7N0001").find ("locked") != std::string::npos);
+        }
+
+        SUBCASE ("its close button ends the helper, and the box goes quiet")
+        {
+            host->poke (-2, 0.0f);
+            REQUIRE (serviceUntil (editors, [&] { return editors.hostFor ("PG7N0001") == nullptr; }, 5000));
+            CHECK (editors.words().count ("PG7N0001") == 0);
+        }
+    }
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("plugin windows: Edit... on an insert the cue has not got switches it in, then opens")
+{
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("wfg-editors-ui-" + juce::Uuid().toDashedString());
+
+    std::vector<std::pair<std::string, std::string>> made;
+
+    ui::PluginEditors::Actions actions;
+    actions.createFx = [&] (const std::string& cue, const std::string& plugin) { made.emplace_back (cue, plugin); };
+
+    {
+        ui::PluginEditors editors (actions, {}, folder.getFullPathName().toStdString(), launchOfThisBinary(), true);
+
+        editors.edit (*editorTree (false), "CUE00001", "PG7N0001", false);
+        REQUIRE (made.size() == 1);
+        CHECK (made[0] == std::pair<std::string, std::string> ("CUE00001", "PG7N0001"));
+        CHECK (editors.hostFor ("PG7N0001") == nullptr);
+        CHECK (editors.words().at ("PG7N0001").find ("switching it in") != std::string::npos);
+
+        SUBCASE ("the tree shows the insert: the window opens")
+        {
+            editors.follow (*editorTree (true), "CUE00001", false);
+            CHECK (editors.hostFor ("PG7N0001") != nullptr);
+        }
+
+        SUBCASE ("the pick moves on first: it is forgotten")
+        {
+            editors.follow (*editorTree (false), "CUE00002", false);
+            editors.follow (*editorTree (true), "CUE00002", false);
+            CHECK (editors.hostFor ("PG7N0001") == nullptr);
+            CHECK (editors.words().count ("PG7N0001") == 0);
+        }
+    }
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("new-cue bar: four buttons open their list under themselves, the rest make a cue")
+{
+    /*  The author (2026-09-27): "+ group" and "+ transport" show a vertical
+        list, and so do "+ midi" and "+ mic"; "+ start" went into the
+        transport list. What a window-less test can see is which buttons
+        there are, which of them ask for a list - with themselves as the place
+        to show it - and that the rest still make their cue at once. */
+    std::vector<std::string> created;
+    std::vector<std::pair<std::string, juce::Component*>> chosen;
+
+    ui::NewCueBarComponent::Actions actions;
+    actions.create = [&created] (const std::string& kind) { created.push_back (kind); };
+    actions.choose = [&chosen] (const std::string& kind, juce::Component& button)
+    {
+        chosen.emplace_back (kind, &button);
+    };
+
+    ui::NewCueBarComponent bar (model::Theme {}, actions);
+    bar.setBounds (0, 0, 1400, bar.preferredHeight());
+
+    const auto buttons = buttonsUnder (bar);
+    REQUIRE (buttons.size() == model::cueKinds().size());
+
+    for (auto* button : buttons)
+        CHECK_FALSE (button->getButtonText().startsWith ("+ start"));
+
+    // A click, as the button delivers it (triggerClick posts, and this build runs no nested loop).
+    for (auto* button : buttons)
+        if (button->onClick)
+            button->onClick();
+
+    CHECK (chosen.size() == 4);
+    for (const auto& [kind, anchor] : chosen)
+    {
+        CAPTURE (kind);
+        CHECK (model::opensList (kind));
+
+        const auto at = std::find_if (buttons.begin(), buttons.end(), [target = anchor] (juce::Button* button)
+                                      { return button == target; });
+        REQUIRE (at != buttons.end());
+        CHECK ((*at)->getButtonText().endsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"))));
+    }
+
+    CHECK (created.size() == model::cueKinds().size() - 4);
+    for (const auto& kind : created)
+        CHECK_FALSE (model::opensList (kind));
+
+    /*  AND THE LIST AS JUCE IS HANDED IT: every line to click answers the
+        choice it names, headings and greyed sentences answer nothing. */
+    const auto lines = model::transportMenu ("Rain", "after Rain");
+    const auto menu = ui::newCueMenu (lines);
+
+    int items = 0;
+    int enabled = 0;
+
+    for (juce::PopupMenu::MenuItemIterator it (menu); it.next();)
+    {
+        const auto& item = it.getItem();
+
+        if (item.isSectionHeader || item.isSeparator)
+            continue;
+
+        ++items;
+
+        if (! item.isEnabled)
+            continue;
+
+        ++enabled;
+        const auto [choice, wrap] = ui::choiceOfMenuItem (item.itemID);
+        REQUIRE (choice >= 0);
+        REQUIRE (static_cast<std::size_t> (choice) < model::transportChoices().size());
+        CHECK_FALSE (wrap);
+        CHECK (item.text.startsWith (juce::String (model::transportChoices()[static_cast<std::size_t> (choice)].label)));
+    }
+
+    CHECK (enabled == static_cast<int> (model::transportChoices().size()));
+    CHECK (items == enabled + 1);   // the sentence saying where it lands
+
+    CHECK (ui::choiceOfMenuItem (0).first == -1);
+    CHECK (ui::choiceOfMenuItem (1) == std::make_pair (0, false));
+    CHECK (ui::choiceOfMenuItem (2) == std::make_pair (0, true));
+    CHECK (ui::choiceOfMenuItem (7) == std::make_pair (3, false));
 }

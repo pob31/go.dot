@@ -684,11 +684,19 @@ TEST_CASE ("verified: a cue nobody gave a timeout waits five seconds rather than
     REQUIRE (rig.document.findById (id).hasProperty (juce::Identifier ("timeout")) == false);
     CHECK (rig.document.getAttribute (base + "timeout").value_or ("?") == "5");
 
-    /*  A device that answers with something else, so the cue can never be
-        satisfied and the only way it can end is by running out of patience.
-        Ten ticks is a fifth of a second; a cue that had read its timeout as
-        zero would have given up on the second one. */
-    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    /*  A device with nothing to say - the node is real and has no value yet,
+        so it answers 204 and the probe submits nothing - and the only way the
+        cue can end is by running out of patience. Ten ticks is a fifth of a
+        second; a cue that had read its timeout as zero would have given up on
+        the second one.
+
+        It used to be a device that answered 0.2, on the reasoning that such a
+        cue could never be satisfied. It cannot - but a verify decides on the
+        first answer that comes back, and one that differs fails the run with
+        `disagreed` at once (namespace draft §13.6). On a slow macOS runner
+        (d71883a) the answer crossed the socket inside the ten ticks, and the
+        run was over for the right reason, which is not this case's. */
+    rig.device.target.says ({});
     rig.fire (id);
 
     for (int n = 0; n < 10; ++n)

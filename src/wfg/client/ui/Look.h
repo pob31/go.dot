@@ -62,6 +62,12 @@ namespace wfg::client::ui
             read from furthest away. */
         static const juce::Identifier& fontScale();
 
+        /*  A BUTTON WITH A CAPTION draws its text at its own size and a short
+            line under it at a word's size: GO and, while the audio is not
+            running, "no audio" (author, 2026-09-25; §4.8). A string property
+            on the button; empty or absent draws the text alone. */
+        static const juce::Identifier& caption();
+
         void drawButtonText (juce::Graphics& g, juce::TextButton& button,
                              bool shouldDrawButtonAsHighlighted,
                              bool shouldDrawButtonAsDown) override;

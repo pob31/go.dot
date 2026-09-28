@@ -68,9 +68,19 @@ namespace wfg::client::ui
             /** A scrub settling on a second of a run: one per position the hand rests at, one on release. */
             std::function<void (const std::string&, double)> seek;
             std::function<void (const std::string&)> inspectError;
+
+            /*  A click on a media run's name (author, 2026-09-25): the cue a
+                surface's rotaries edit on their EQ and Send pages - the cue's
+                identifier, or empty when it was already the one. */
+            std::function<void (const std::string&)> aim;
         };
 
         RunPaneComponent (const model::Theme& theme, Actions actions);
+
+        /*  A CLICK AT A POINT OF THE ROWS, as the mouse's release makes one when
+            no scrub was taken: the cross kills, a media run's name line aims
+            the surfaces' rotaries. Public so a test clicks where a hand would. */
+        void clickAt (int x, int y);
 
         /*  The runs this pass found, and the analyser's table to draw their
             waveforms from. Cheap when they are the ones already drawn.

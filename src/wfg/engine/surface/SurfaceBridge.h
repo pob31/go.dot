@@ -30,7 +30,9 @@
     `node.touch`/`node.release` on it, a pad is `strip.press`/`strip.release`
     - exactly what the virtual panel and the page send - with the origin
     `surface:<id>`, so the log says which hand did what and the touch table
-    gates this surface as it gates every other client.
+    gates this surface as it gates every other client. A rotary on an EQ page
+    (2026-09-25) is `node.set` on the aimed cue's row, and SELECT is
+    `surface.aim`; which page is up is the surface's own and no command.
 
     THREE THREADS, AND ONE LOCK.
       - `arrived` runs on the MIDI callback thread. It asks whether a declared
@@ -124,6 +126,12 @@ namespace wfg::surface
         colour is written again only when it moved a step somebody could see.
         What is written is the colour itself, not its level. */
     Rgb colourLevels (Rgb colour) noexcept;
+
+    /*  WHAT AN RGB SURFACE'S LEDS ARE SENT for a colour as the eye should see
+        it: the total light held to `ledLightBudget` channels' worth, each
+        channel trimmed, the response straightened by `ledGamma`
+        (SurfaceProfile.h). Every colour a D700 is sent passes through it. */
+    Rgb forTheLeds (Rgb colour) noexcept;
 
     //==========================================================================
     class SurfaceBridge

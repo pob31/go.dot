@@ -57,8 +57,10 @@
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/Solver.h>
+#include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/plugin/PluginTable.h>
 
 #include <cstdint>
 #include <functional>
@@ -88,6 +90,7 @@ namespace wfg::tree
 namespace wfg::cue
 {
     class DcaTable;
+    class LiveEdits;
 
     /*  HOW FAR AHEAD A LAUNCH MUST BE PLACED, in ticks.
 
@@ -208,6 +211,14 @@ namespace wfg::cue
         /*  And its inserts, one per entry of the set in chain order (PR
             9a.8): switched in or not, and the values the cue sets. */
         std::vector<FxSetting> fx;
+
+        /*  A LIVE INPUT (Phase 9b, namespace draft §18.5): no file - the
+            source is `inputWidth` logical inputs from `firstInput`, through the
+            rack channel whose track this is, and `fx` is that channel's chain.
+            The gate stays shut until the launch. */
+        bool live = false;
+        int firstInput = -1;
+        int inputWidth = 1;
     };
 
     /*  The audio side, as the cue layer sees it.
@@ -296,10 +307,80 @@ namespace wfg::cue
         virtual void setFxEnabled (int, int, bool) {}
         virtual void setFxParameter (int, int, int, float) {}
 
+        /*  How wide the cue is at one insert, changed under it (2026-09-26):
+            the channels it sends and how many come back (FxSetting). Tick
+            thread; atomics on the audio side. A no-op by default. */
+        virtual void setFxShape (int, int, int, int) {}
+
+        /*  A cue's whole state for one entry changed after its arm and before
+            its launch (the author's decision of 2026-09-25): load that one
+            instead, and hold the launch until it is in. The tick thread; a
+            player that hosts no plugin has nothing to do. */
+        virtual void requestFxState (int, int, const std::string&) {}
+
         /*  Whether that track's cue is sounding, out of any of its slots.
             Tick thread. Track-wide for the reason `stop` is: the question is
             about the cue. */
         virtual bool isPlaying (int track) const = 0;
+
+        /*  The loudest sample the track's output stage has sent since the
+            last take, linear, and counting starts again (2026-09-25, a strip's
+            post-fader meter). Tick thread, once a tick for each sounding
+            track; one atomic exchange on the audio side. Silence by default,
+            so a replay's player and a test's are still complete. */
+        virtual float takeOutputPeak (int) { return 0.0f; }
+
+        /*  THE INPUTS' SIDE (Phase 9b, namespace draft §18.2): how many logical
+            inputs the interface hands the graph, and the loudest sample on one
+            since the last take, linear, the count starting again - the
+            soundcheck's meter, taken once a tick. None, and silence, by
+            default: the answer for a player with no interface. */
+        /*  THE LIVE RACK (Phase 9b, namespace draft §18.5). The track a rack
+            channel was built as, or -1 for one the graph does not have; a mic
+            cue's launch, its channel's gate opened at a sample over its
+            fade-in; a stop's fade taken by the input, the tail left to ring;
+            and a kill, which for a voice is its stop and for a rack channel is
+            silence at once with nothing left ringing. Defaults a test's player
+            is complete with. */
+        virtual int rackTrackOf (const std::string&) const { return -1; }
+        virtual bool openLive (int track, std::int64_t sample, double) { return launchAtSample (track, 0, sample); }
+        virtual void shutLive (int, double) {}
+        virtual bool kill (int track) { return stop (track); }
+
+        virtual int inputCount() const { return 0; }
+        virtual float takeInputPeak (int) { return 0.0f; }
+
+        /*  A SAMPLING CHANNEL'S TAKE (Phase 9c, namespace draft §19.6): a press
+            placed at one of Go.dot's samples, its loop points in seconds; whether
+            the channel sounds its input as well as its loop; what the audio
+            thread did by itself since the last ask, for `take.closed`; and where
+            each loop is playing, for the picture. Tick thread. Defaults a player
+            with no recorder is complete with - a replay's, a test's. */
+        struct TakeReport
+        {
+            std::string channel;
+            std::string how;            ///< pressed, full, held
+            double seconds = 0.0;
+        };
+
+        virtual bool postTake (const std::string&, TakeVerb, std::int64_t, double, double) { return false; }
+        virtual void setTakeThrough (const std::string&, bool) {}
+        virtual std::vector<TakeReport> takeReports (const std::vector<std::string>&) { return {}; }
+        virtual double takePlayhead (const std::string&) const { return 0.0; }
+
+        /*  KEEP (Phase 9c, §19.8): a channel's closed take made a file under
+            the show's media, off the tick thread - `stem` the channel's name,
+            which the file is called after - and what finished since the last
+            ask, for `take.kept`: the file, or why there is none. */
+        struct KeptReport
+        {
+            std::string channel;
+            std::string file;
+            std::string error;
+        };
+
+        virtual bool keepTake (const std::string&, const std::string&, const std::string&) { return false; }
+        virtual std::vector<KeptReport> keptTakes() { return {}; }
 
         /*  Whether the media for that track is actually ready to sound.
 
@@ -343,8 +424,17 @@ namespace wfg::cue
         Runner (const doc::ShowDocument& document, RunTable& runs,
                 doc::IdRegistry& runIds, Focus& focus);
 
+        /** Lets go of the run table's release listener, which calls into this. */
+        ~Runner();
+
         /** Null is legal and means a show with no audio side. */
         void setPlayer (Player* player) noexcept { audio = player; }
+
+        /*  THE TAKES' ACCOUNT (Phase 9c), which the take verbs move too: a
+            transport cue's press, a mic cue's GO and its channel let go move it
+            here, and the hook places the presses. None, and a sampling
+            channel's takes are left alone. */
+        void setTakes (TakeTable* table) noexcept { takes = table; }
         void resetAudioPreparation() { armedStandby.clear(); }
 
         /*  The runs, for the one caller outside the Runner that has to ask
@@ -353,6 +443,12 @@ namespace wfg::cue
             Const, because the table's one writer is the command handler and
             that is the whole point of the arrangement. */
         const RunTable& runTable() const noexcept { return runs; }
+
+        /*  Each logical input's loudest sample over the last tick, in decibels,
+            -120 for silence - taken from the player once a tick, and empty with
+            no player (Phase 9b). What the tree publishes as each named input's
+            meter. */
+        const std::vector<double>& inputMetersDb() const noexcept { return inputMeters; }
         Player* player() const noexcept          { return audio; }
 
         /** How many samples make a tick. Set once, from the tick schedule. */
@@ -367,6 +463,11 @@ namespace wfg::cue
             that exists, or the run fails before it gets there. */
         void setMediaFolder (std::string folder) { mediaFolder = std::move (folder); }
 
+        /*  Where a cue's plugin states live: the bundle's `plugins/` folder,
+            which a cue's `fx/stateFile` names a file under - as `media/` is to
+            `media/file`, and for the same reason. */
+        void setPluginsFolder (std::string folder) { pluginsFolder = std::move (folder); }
+
         /*  Where a MIDI cue's bytes go. Null is legal and is what a replay has:
             the run is created and finishes on the ticks the log says, and
             nothing reaches a port - exactly as a mount table's absence leaves a
@@ -379,6 +480,20 @@ namespace wfg::cue
             which case every DCA trims nothing: the Runner's arithmetic is
             unchanged for a show that declares none. */
         void setDcas (DcaTable* table) noexcept { dcas = table; }
+
+        /*  THE EQ AND SENDS A LOCKED SHOW IS RIDING (LiveEdits.h, 2026-09-25):
+            asked before the show wherever a cue's EQ or routing is read - at
+            the arm, and for a sounding cue whenever the layer moves. Null
+            where nothing was handed in, which is every tool but serve and
+            replay. */
+        void setLiveEdits (const LiveEdits* layer) noexcept { liveLayer = layer; }
+
+        /*  WHICH SET ENTRY IS WHICH SLOT OF THE GRAPH (2026-09-26): a cue's
+            inserts are sent by slot, and the slots are the graph's, fixed when
+            it was built - never counted off the set as it stands now. Null, or
+            a table with no graph, and the set's own order is the slots, which
+            is what a replay and a test rig have. */
+        void setPlugins (const plugin::PluginTable* table) noexcept { pluginTable = table; }
 
         /*  WHO IS HOLDING WHICH NODE, for the fader edges (PRD §3.9a): a
             fader-start counts only from a fader released at the bottom, and a
@@ -704,9 +819,14 @@ namespace wfg::cue
             thrown because a cue that cannot be routed fails its RUN - the
             request was legal and the show cannot honour it - and never the
             load. */
+        /*  How wide a media cue is after the inserts it switches in
+            (cue/InsertChain.h): what its routing reads (2026-09-26). */
+        int chainChannelsOf (const juce::ValueTree& cue) const;
+
         std::vector<Coefficient> resolveRouting (const juce::ValueTree& cue,
                                                  int trackChannels,
-                                                 std::string& problem) const;
+                                                 std::string& problem,
+                                                 int chainChannels = 0) const;
 
         /** Every fade in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<FadeJob>& fades() const noexcept { return running; }
@@ -763,7 +883,7 @@ namespace wfg::cue
             tree it may edit meanwhile. */
         std::vector<RangeSpec> rangesOf (const juce::ValueTree& cue) const;
 
-        /** The cue's nineteen EQ rows, read through the schema so a saved
+        /** The cue's twenty-three EQ rows, read through the schema so a saved
             flat EQ - which the writer omits - reads as flat. */
         audio::EqSettings eqOf (const juce::ValueTree& cue) const;
 
@@ -797,6 +917,10 @@ namespace wfg::cue
             `rangeIteration`, which is §3.15: a readout is not an event. */
         void updatePositions (std::int64_t tick);
 
+        /*  The inputs' peaks, taken once a tick into `inputMeters`. */
+        void takeInputMeters();
+        std::vector<double> inputMeters;
+
         /*  Recomputes every live run's effective level from its own and its
             ancestors', and hands the media ones to the audio side.
 
@@ -809,9 +933,17 @@ namespace wfg::cue
         void applyLevels();
         void applyRouting();
 
+        /*  WHAT EACH SOUNDING MEDIA CUE'S LEVEL LANE ASKS FOR THIS TICK
+            (namespace draft §20.4), into `Run::laneDb` for `applyLevels` to add.
+            Just before it, below nothing: with no Player there is no sample
+            clock, no second of any file, and every lane's term stays nought.
+            The points are re-read when the show's revision moves - `applyEq`'s
+            gate - and read at the second the voice will be at one slew ahead. */
+        void applyLanes();
+
         /*  A sounding cue's EQ, kept up with the document (Phase 9a): the
             routing pass's shape, gated on the same revision, pushing only
-            the runs whose nineteen rows differ from what the voice holds. */
+            the runs whose twenty-three rows differ from what the voice holds. */
         void applyEq();
         void applyFx();
 
@@ -958,6 +1090,30 @@ namespace wfg::cue
         void armMedia (Engine& engine, const juce::ValueTree& cue,
                        const std::string& runId);
 
+        /*  A MIC CUE CLAIMING ITS CHANNEL AND TAKING ITS TRACK (Phase 9b,
+            namespace draft §18.5): the claim first, as a media cue's are; then,
+            with an audio side, what would fail it in words, the wait when the
+            channel is held - armed with no track - and the arm on the
+            channel's own track. */
+        void armMic (Engine& engine, const juce::ValueTree& cue, const std::string& runId);
+
+        /*  A mic run whose channel has come free asks to be armed, once:
+            `run.arm`, the sampler's door. The tick's, with an audio side. */
+        void armWaitingMics (Engine& engine);
+
+        /*  THE TAKES' HOOK (Phase 9c): the presses asked for placed at the
+            launch latency, what the audio thread did by itself reported as
+            `take.closed`, the playheads read, and each channel's `through` as
+            the cue holding it says. Below the null-player gate. */
+        void serviceTakes (Engine& engine);
+
+        /*  A MIC CUE'S GO ON ITS SAMPLING CHANNEL (decision CF): what its
+            `onGo` says, once the cue both has GO and holds the channel. */
+        void takeOnGo (const std::string& runId, const std::string& channelId);
+
+        /** A channel let go, the take held; and a waiting cue's GO acted on. */
+        void takeReleased (const std::string& slotId, const std::string& toRun);
+
         /*  The half of an arm below the track: the routing, the offset, the
             ranges and the request itself, for a run that already holds its
             voice. `armMedia` reaches it after choosing a track; a seek reaches
@@ -965,10 +1121,15 @@ namespace wfg::cue
             two disagree about it: an arm plays the cue's authored level, a
             seek keeps the one a fade had brought the run to. */
         void requestArmOn (Engine& engine, const juce::ValueTree& cue, Run& run,
-                           double levelDb);
+                           double levelDb, int liveFirstInput = -1, int liveWidth = 1);
 
         /** A bundle-relative file name as the path the audio side opens. */
         std::string mediaPathOf (const std::string& named) const;
+
+        /*  A state file's name resolved under the plugins folder - string
+            work, no disk. One that would climb out of it resolves to a file
+            that is not there, so the load fails in words. */
+        std::string statePathOf (const std::string& named) const;
 
         /*  Builds the runs a plan names, outermost first, under the groups
             `runFor` already holds, and the jobs that carry them on. A jump
@@ -1069,6 +1230,13 @@ namespace wfg::cue
             the touch table, and submitted as `strip.press` / `strip.release`. */
         void samplerEdges (Engine& engine);
 
+        /*  A SOLO IN A BANK (2026-09-25): whether any clip of the sampler
+            group run `groupRunId` is soloed and still held, and, every tick,
+            the solos let go of whose clips have stopped - above the null
+            player's gate, so a replay lets go the same. */
+        bool bankSoloed (const std::string& groupRunId) const;
+        void releaseSolos();
+
         /*  Takes a strip for a sampler member, or queues for it behind the
             run holding it - which is how a takeover waits for a playing clip
             to finish rather than cutting it off. */
@@ -1138,8 +1306,10 @@ namespace wfg::cue
         Focus& focus;
 
         Player* audio = nullptr;
+        TakeTable* takes = nullptr;
         int samplesPerTick = 0;
         std::string mediaFolder;
+        std::string pluginsFolder;
 
         std::vector<FadeJob> running;
 
@@ -1189,6 +1359,8 @@ namespace wfg::cue
         tree::MountSender* sender_ = nullptr;
         midi::MidiSink* midiOut = nullptr;
         DcaTable* dcas = nullptr;
+        const LiveEdits* liveLayer = nullptr;
+        const plugin::PluginTable* pluginTable = nullptr;
         const tree::TouchTable* touches = nullptr;
 
         /*  THE SAMPLER ROSTER, read once per show revision: every sampler
@@ -1260,7 +1432,21 @@ namespace wfg::cue
 
         /** The show revision `applyEq` last pushed at; `routingRevision`'s twin. */
         std::uint64_t eqRevision = 0;
+
+        /** The show revision `applyLanes` last read the lanes at; the same twin. */
+        std::uint64_t laneRevision = 0;
+
+        /*  And the live layer's, beside each: a turn under the lock moves the
+            layer and not the show. */
+        std::uint64_t routingLiveRevision = 0;
+        std::uint64_t eqLiveRevision = 0;
         std::uint64_t fxRevision = 0;
+
+        /*  And the plugin table's (2026-09-26): a plugin coming up says what
+            it takes, which can change how wide a sounding cue is. */
+        std::uint64_t routingPluginRevision = 0;
+        std::uint64_t fxPluginRevision = 0;
+        std::uint64_t fxLiveRevision = 0;
 
         /*  THE PERSISTENT ASSERTION (§3.29, §13.11): after every applied
             trigger, what the section declares is checked against what is

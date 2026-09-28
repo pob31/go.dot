@@ -17,6 +17,7 @@
 
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/audio/TakeWriter.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/ProxyHost.h>
@@ -26,6 +27,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 /*  Tracktion Engine, stood up with no audio hardware, and the sample counter it
@@ -54,6 +56,7 @@
 namespace wfg::audio
 {
     class CueEq;
+    class Looper;
 
     /** How the hosted audio interface is opened. No defaults: a rate Go.dot
         chose for itself is a rate nobody chose, which is the same reason
@@ -77,6 +80,28 @@ namespace wfg::audio
 
         /** A preset file, resolved under the bundle, or empty. */
         std::string presetPath;
+
+        /*  ON A SAMPLING CHANNEL (Phase 9c, decision BZ): before the recorder,
+            printed into the take, rather than after the player. Ignored on a
+            channel with no recorder and on the set's entries. */
+        bool beforeRecorder = false;
+    };
+
+    /*  ONE RACK CHANNEL, as the document declares it (Phase 9b, namespace
+        draft §18.2): a track of its own after the voices, with its own chain.
+        Its name is for the words a failure says; its plugins are in the order
+        of the chain, each a proxy between the EQ and the output stage. */
+    struct RackChannelSpec
+    {
+        std::string id;
+        std::string name;
+        std::vector<PluginSpec> plugins;
+
+        /*  THE RECORDER (Phase 9c, namespace draft §19.2): the longest take, in
+            seconds - nought for a channel with none - and the passes it keeps
+            on top of it. */
+        double takeSeconds = 0.0;
+        int layers = 4;
     };
 
     /*  What the proxies need from outside the host (Phase 9a, §17.6): the
@@ -92,6 +117,12 @@ namespace wfg::audio
         plugin::ProxyLaunch launch;
         std::function<void (const std::string& pluginId, const std::string& problem)> onFailed;
         std::function<void()> onChanged;
+
+        /*  THIS MACHINE'S LIST, for the description each child makes its
+            plugin from (2026-09-26): Go.dot's own known.xml as serve holds
+            it, asked at every start of a host. Empty in a test rig, which
+            then falls back to whatever Tracktion's own list holds. */
+        std::function<std::string (const std::string& identifier)> describe;
     };
 
     /** The shape of the show's audio, read out of the document's <Audio>. */
@@ -122,6 +153,11 @@ namespace wfg::audio
             one proxy per entry on every voice, between the EQ and the output
             stage, fixed with the graph like everything else here. */
         std::vector<PluginSpec> plugins;
+
+        /*  THE LIVE RACK (Phase 9b, decisions BX and CK): one track per rack
+            channel, AFTER the voices and outside their count, each with the
+            live input stage at its head and its own chain. */
+        std::vector<RackChannelSpec> rack;
 
         /** The proxies' spin limit; nought means the rule (§17.6). */
         std::int64_t proxyDeadlineMicroseconds = 0;
@@ -215,8 +251,78 @@ namespace wfg::audio
             `lastError` says which. */
         bool buildEdit (const EditSpec& spec);
 
-        /** How many tracks the generated Edit has. Zero before one is built. */
+        /*  HOW MANY VOICES the generated Edit has - the tracks a media cue
+            plays on, and so the polyphony ceiling. The rack's tracks come after
+            them and are not counted (Phase 9b, decision CK). Zero before an
+            Edit is built. */
         int trackCount() const noexcept;
+
+        /** Every track, the voices and then the rack's channels. */
+        int allTrackCount() const noexcept;
+
+        /*  The track a rack channel was built as, or -1 for one the graph was
+            built without (declared since, until Load now). */
+        int rackTrackOf (const std::string& channelId) const noexcept;
+
+        /*  A SAMPLING CHANNEL'S TAKE (Phase 9c, namespace draft §19.2): its
+            recorder, which the host keeps beside the Edit so that a rebuilt
+            graph - a media arm, Load now, another interface - finds the take it
+            had while the channel's shape holds. Null for a channel with no
+            recorder or none by that id; by a rack track's index as well, for a
+            stop that knows only the track. Shared, and under a lock of its own,
+            because the tick thread posts to it while Load now may be setting
+            takes aside on the message thread: a take let go of lives on until
+            the last press aimed at it has gone. One thread posts to it; the
+            host alone prepares it, in buildEdit. */
+        std::shared_ptr<Looper> takeOf (const std::string& channelId);
+        std::shared_ptr<Looper> takeOfTrack (int trackIndex);
+
+        /*  EVERY SAMPLING CHANNEL'S RECORDER, by its channel's id, as the store
+            holds them now - for the take's picture (9c.4), which reads their
+            peaks on the window's thread. Copied out under the store's lock. */
+        std::vector<std::pair<std::string, std::shared_ptr<const Looper>>> allTakes();
+
+        /*  KEEP (Phase 9c, §19.8): a channel's take queued for the writer
+            beside the takes, which makes it a file under `mediaFolder`/takes
+            named after `stem`; and what it has finished since the last ask.
+            False for a channel with no recorder. Tick thread. */
+        bool keepTake (const std::string& channelId, const std::string& stem, const std::string& mediaFolder);
+        std::vector<TakeWriter::Done> keptTakes();
+
+        /*  THE RACK CHANNEL'S INPUT STAGE (Phase 9b, namespace draft §18.4):
+            which logical input it takes and how many, and its gate - opened at
+            a sample of Go.dot's count (-1 for at once) over a ramp of so many
+            seconds (a mic cue's fade-in, five milliseconds at the least), and
+            shut over one (a stop's fade, or the five milliseconds). Tick
+            thread; atomics. Nothing on a voice. */
+        void setRackSource (int trackIndex, int firstInput, int width) noexcept;
+        void openRackGate (int trackIndex, std::int64_t sample, double rampSeconds = 0.005) noexcept;
+        void shutRackGate (int trackIndex, double rampSeconds = 0.005) noexcept;
+
+        /*  A KILL (namespace draft §18.5, decision CN): the input shut in a
+            millisecond, the output stage's level to silence behind its own
+            ramp, the channel's plugins reset so that the next cue does not open
+            onto a tail left inside them - and no ring-out: the channel is free
+            at once. Tick thread. */
+        void killRack (int trackIndex) noexcept;
+
+        /** Whether this track is a rack channel's rather than a voice. Any thread. */
+        bool isRackTrack (int trackIndex) const noexcept;
+
+        /*  Whether a rack channel's gate lets anything through - open, or still
+            ramping shut. False for a voice. Any thread. */
+        bool isRackPassing (int trackIndex) const noexcept;
+
+        /*  WHETHER A RACK CHANNEL STILL SOUNDS: its gate passing, or - after a
+            shut that was not a kill - its plugins still ringing, until what
+            reaches the output stage has been quiet for a quarter of a second
+            or ten seconds have passed since the shut (decision CG). What a mic
+            run's `isPlaying` is, so a stopped cue ends when its tail has, and
+            the channel frees then. Tick thread. */
+        bool isRackSounding (int trackIndex) const noexcept;
+
+        static constexpr double rackQuietSeconds = 0.25;
+        static constexpr double rackTailCapSeconds = 10.0;
 
         /** How many channels each of those tracks carries - a cue's input width. */
         int editChannelsPerTrack() const noexcept;
@@ -484,13 +590,8 @@ namespace wfg::audio
             50 Hz. Null for an index no track answers to. */
         CueMatrix* trackMatrix (int trackIndex) noexcept;
 
-        /*  WHAT THIS MACHINE'S LAST SCAN FOUND, read off the engine's own list
-            at start (Phase 9a, §17.7). Empty before a scan and on a machine
-            that never had one. */
-        std::vector<plugin::KnownPlugin> knownPlugins() const;
-
         /*  A track's EQ stage, sitting before its output stage: what a media
-            cue's nineteen eq rows write (Phase 9a). Null for an index no
+            cue's twenty-three eq rows write (Phase 9a). Null for an index no
             track answers to. */
         CueEq* trackEq (int trackIndex) noexcept;
 
@@ -526,17 +627,33 @@ namespace wfg::audio
         void setTrackFxEnabled (int trackIndex, int slot, bool enabled) noexcept;
         void setTrackFxParameter (int trackIndex, int slot, int parameter, float normalised) noexcept;
 
+        /*  How wide the cue is at one insert (2026-09-26): the channels it
+            sends and how many come back. Any thread; atomics on the lane. */
+        void setTrackFxShape (int trackIndex, int slot, int feed, int back) noexcept;
+
         /*  An arm: the cue's switch and every value for one entry, and the
             instance reset before its next block. Message thread, beside
             snapTrackEq. */
         void snapTrackFx (int trackIndex, int slot, bool enabled,
-                          const std::vector<std::pair<int, float>>& values) noexcept;
+                          const std::vector<std::pair<int, float>>& values,
+                          const std::string& statePath = {});
+
+        /*  The tick thread, at every launch: every entry this voice has
+            switched in holds the state its cue asked for - two atomics a
+            lane, nothing else. */
+        bool isTrackFxSettled (int trackIndex) noexcept;
 
         /** Message thread, every ten milliseconds: HostPlayer's timer. */
         void pollProxies();
 
         /** `plugin.restart`: false with a sentence for an id not in the set. */
         bool restartProxy (const std::string& pluginId, std::string& problem);
+
+        /*  After a scan (2026-09-26): every entry of the set that read
+            `missing` asked again, since the scan may have found its plugin -
+            the host re-reads its description and brings its child up. An
+            entry in any other state is left as it is. Message thread. */
+        void startMissingProxies();
 
         /*  The loudest sample the track's output plugin saw arriving and
             leaving, since the last reset.
@@ -550,6 +667,34 @@ namespace wfg::audio
         float trackInputPeak (int trackIndex) const;
         float trackOutputPeak (int trackIndex) const;
         void resetTrackPeaks (int trackIndex);
+
+        /*  The output peak TAKEN - read and set back to nought in one
+            exchange - which is what a strip's post-fader meter asks for once a
+            tick (2026-09-25). The input peak is left to the diagnostics. */
+        float takeTrackOutputPeak (int trackIndex);
+
+        //======================================================================
+        /*  THE INPUT TAP (Phase 9b, namespace draft §18.4). Every block's
+            logical inputs, copied into a buffer set aside at `start` - inside
+            Go.dot's own part of the block and BEFORE Tracktion is called,
+            because the buffer Tracktion is handed is its outputs as well and is
+            cleared before it renders. Zeros where a block brings no inputs, so
+            a block pumped without any never repeats the last one.
+
+            How many logical inputs the tap holds: what the interface was
+            opened with, which is the input patch's length when there is one. */
+        int inputChannelCount() const noexcept;
+
+        /*  The loudest sample on one logical input since the last take, linear,
+            and the count starts again - the soundcheck's meter, taken once a
+            tick. Nought for an input the tap does not hold. */
+        float takeInputPeak (int channel) noexcept;
+
+        /*  One logical input's samples for the block being processed, for the
+            rack's input stage to read during it - the AUDIO THREAD, inside
+            `processBlock`, and nowhere else. Null for an input the tap does not
+            hold. */
+        const float* inputTapChannel (int channel) const noexcept;
 
     private:
         struct Impl;

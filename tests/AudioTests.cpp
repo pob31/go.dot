@@ -34,6 +34,7 @@
 #include <wfg/engine/audio/RecoveryGate.h>
 #include <wfg/engine/rt/RtCheck.h>
 #include <wfg/engine/audio/HostPlayer.h>
+#include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/CueCommands.h>
@@ -48,6 +49,7 @@
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -55,6 +57,7 @@
 #include "TestSupport.h"
 
 #include <algorithm>
+#include <iterator>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -3586,6 +3589,13 @@ TEST_CASE ("ranges: a range plays the part of the file it names, and goes on pla
     /*  And the cue-wide question answers yes, because a ranged cue sounds out
         of whichever slot its current range is in. */
     CHECK (rig.host.isTrackPlaying (0));
+
+    /*  AND THE PLAYER ANSWERS IT TOO (2026-09-26). `HostPlayer::isPlaying` is
+        what the Runner reads a cue's end from, and it asked slot nought: this
+        cue, sounding out of its second slot, read silent there. */
+    Engine engine;
+    const audio::HostPlayer player { rig.host, engine };
+    CHECK (player.isPlaying (0));
 }
 
 TEST_CASE ("ranges: arming a cue with none of them puts the whole file back in the first slot")
@@ -4827,4 +4837,497 @@ TEST_CASE ("eq: a peak on the voice doubles a sine at its centre, written live t
     rig.host.setBlockSink (nullptr);
 
     CHECK (20.0 * std::log10 (rmsOf (again, 0) / flatRms) == doctest::Approx (0.0).scale (1.0).epsilon (0.05));
+}
+
+//==============================================================================
+TEST_CASE ("input tap: a block's inputs are copied before the graph runs, each one's peak taken once")
+{
+    /*  Phase 9b (namespace draft §18.4). The rack's input stage reads the tap
+        during the block, so the tap must hold THIS block's inputs; a block
+        pumped with none must read silence, never the last one again; and each
+        input's peak is taken once a tick, the output meter's rule. All of it
+        inside Go.dot's own part of the block, which allocates nothing. */
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+    CHECK (rig.host.inputChannelCount() == 2);
+
+    std::vector<float> left (128), right (128);
+
+    for (int n = 0; n < 128; ++n)
+    {
+        left[static_cast<std::size_t> (n)] = 0.5f * std::sin (0.1f * static_cast<float> (n));
+        right[static_cast<std::size_t> (n)] = 0.25f;
+    }
+
+    const float* inputs[] { left.data(), right.data() };
+
+    rt::resetCounts();
+    rig.host.processBlock (inputs, 2);
+    CHECK (rt::violations() == 0);
+
+    const auto* tapped = rig.host.inputTapChannel (0);
+    REQUIRE (tapped != nullptr);
+
+    auto same = true;
+
+    for (int n = 0; n < 128; ++n)
+        same = same && juce::exactlyEqual (tapped[n], left[static_cast<std::size_t> (n)]);
+
+    CHECK (same);
+    CHECK (rig.host.inputTapChannel (1)[64] == doctest::Approx (0.25f));
+
+    /*  The peak, taken: the loudest sample, then nothing until another block. */
+    CHECK (rig.host.takeInputPeak (1) == doctest::Approx (0.25f));
+    CHECK (rig.host.takeInputPeak (0) > 0.49f);
+    CHECK (rig.host.takeInputPeak (1) == doctest::Approx (0.0f));
+
+    /*  A block with no inputs is silence, not the last block again. */
+    rig.host.processBlock();
+    CHECK (rig.host.inputTapChannel (1)[64] == doctest::Approx (0.0f));
+    CHECK (rig.host.takeInputPeak (1) == doctest::Approx (0.0f));
+
+    /*  An input the tap does not hold answers nothing rather than something. */
+    CHECK (rig.host.inputTapChannel (2) == nullptr);
+    CHECK (rig.host.takeInputPeak (7) == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("input tap: an interface with no inputs holds none, and reads silence")
+{
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+    CHECK (rig.host.inputChannelCount() == 0);
+
+    rig.host.processBlock();
+    CHECK (rig.host.inputTapChannel (0) == nullptr);
+    CHECK (rig.host.takeInputPeak (0) == doctest::Approx (0.0f));
+}
+
+//==============================================================================
+TEST_CASE ("M10: rack channels beside the voices keep every node's identity unique")
+{
+    /*  Phase 9b (decision CK): every rack channel is a track after the voices,
+        with the live input stage, the EQ, its own proxies and the output stage,
+        and no launcher slot. A new shape of track is a new shape of graph, so
+        the identity check M10 asked of the voices is asked of it too - beside
+        the voices at the sizes a show uses, each channel with a chain of two -
+        and every other one a sampling channel (Phase 9c, §19.2), its recorder
+        between a plugin before it and one after. */
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (8)));
+
+    for (const int tracks : { 1, 8, 32, 64 })
+        for (const int channels : { 1, 4, 8 })
+            for (const int slots : { 1, 4 })
+            {
+                INFO ("tracks " << tracks << ", rack channels " << channels << ", slots " << slots);
+
+                audio::EditSpec spec;
+                spec.tracks = tracks;
+                spec.slots = slots;
+
+                for (int at = 0; at < channels; ++at)
+                {
+                    audio::RackChannelSpec channel;
+                    channel.id = "CH0000" + std::to_string (10 + at);
+
+                    for (int plugin = 0; plugin < 2; ++plugin)
+                    {
+                        audio::PluginSpec entry;
+                        entry.id = "PG" + std::to_string (100000 + at * 10 + plugin);
+                        entry.identifier = "godot:test-gain";
+                        entry.beforeRecorder = plugin == 0;
+                        channel.plugins.push_back (entry);
+                    }
+
+                    if (at % 2 == 1)
+                    {
+                        channel.takeSeconds = 0.05;
+                        channel.layers = 2;
+                    }
+
+                    spec.rack.push_back (channel);
+                }
+
+                REQUIRE (rig.host.buildEdit (spec));
+                CHECK (rig.host.trackCount() == tracks);
+                CHECK (rig.host.allTrackCount() == tracks + channels);
+
+                const auto report = rig.host.inspectNodeIds();
+
+                INFO ("nodes " << report.nodes << ", duplicates " << report.duplicates);
+                CHECK (report.duplicates == 0);
+                CHECK (report.typedDuplicates == 0);
+                CHECK (report.nodes > tracks + channels);
+            }
+}
+
+//==============================================================================
+TEST_CASE ("host player: an arm and a state asked for the same insert land in the order they were asked")
+{
+    /*  THE PLUGIN-VOICE HANDOFF'S THIRD FINDING (docs/handoffs/2026-09-26-
+        plugin-voice-flakes.md). An arm snaps its cue's whole state onto the
+        voice, and a state asked for after it - an undo in standby - reaches
+        the message thread in the same ten-millisecond batch when the two are
+        close. serviceArms kept two queues and applied every state before
+        every arm, so the arm's OLDER state was the one the lane held: the
+        "processed without the state" shape one of the CI sightings had. One
+        queue now, in the order it was filled - and each way round, the one
+        asked for last is the one held. */
+    constexpr int rate = 48000;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::PluginSpec gain;
+    gain.id = "PG000001";
+    gain.identifier = "godot:test-gain";
+    gain.name = "Test gain";
+    spec.plugins.push_back (gain);
+
+    REQUIRE (rig.host.buildEdit (spec));
+
+    auto* lane = rig.host.proxyLane (0, 0);
+    REQUIRE (lane != nullptr);
+
+    Engine engine;
+    audio::HostPlayer player { rig.host, engine };
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 2, rate);
+
+    cue::ArmRequest arm;
+    arm.runId = "RN000001";
+    arm.track = 0;
+    arm.mediaFile = tone.getFullPathName().toStdString();
+
+    cue::FxSetting insert;
+    insert.slot = 0;
+    insert.fxId = "FX000001";
+    insert.enabled = true;
+    insert.statePath = "older.state";
+    arm.fx.push_back (insert);
+
+    SUBCASE ("an arm, then a newer state: the state")
+    {
+        player.requestArm (arm);
+        player.requestFxState (0, 0, "newer.state");
+        player.serviceArms();
+
+        CHECK (lane->wantedState() == "newer.state");
+    }
+
+    SUBCASE ("a state, then an arm: the arm's")
+    {
+        player.requestFxState (0, 0, "newer.state");
+        player.requestArm (arm);
+        player.serviceArms();
+
+        CHECK (lane->wantedState() == "older.state");
+    }
+}
+
+//==============================================================================
+TEST_CASE ("host player: a take's presses reach the recorder at their sample, its closes come back in seconds, and a stop holds it")
+{
+    /*  Phase 9c, stage 9c.3: the Player's take doors on the real host - a
+        sampling channel with no plugin, so no child. A steady input is
+        recorded from the sample the press was placed at to the sample the
+        close was; the recorder's report comes back in seconds for
+        `take.closed`; the points go in as seconds and land in samples; and a
+        stop of the rack track holds the take, as a stop's tail must not be
+        the loop playing on. */
+    constexpr int rate = 48000;
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::RackChannelSpec channel;
+    channel.id = "TK000011";
+    channel.name = "Looper";
+    channel.takeSeconds = 1.0;
+    channel.layers = 2;
+    spec.rack.push_back (channel);
+    REQUIRE (rig.host.buildEdit (spec));
+
+    Engine engine;
+    audio::HostPlayer player { rig.host, engine };
+
+    const auto track = rig.host.rackTrackOf ("TK000011");
+    REQUIRE (track == 1);
+    rig.host.setRackSource (track, 0, 1);
+    rig.host.openRackGate (track, -1);
+
+    const std::vector<float> steady (128, 0.5f), silent (128, 0.0f);
+    const float* inputs[] { steady.data(), silent.data() };
+    const auto run = [&rig, &inputs] (int blocks)
+    {
+        for (int i = 0; i < blocks; ++i)
+            rig.host.processBlock (inputs, 2);
+    };
+
+    run (10);
+
+    const auto recordAt = rig.host.clock().samplesElapsed() + 256;
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, recordAt, 0.0, 0.0));
+    run (40);
+
+    const auto closeAt = rig.host.clock().samplesElapsed() + 64;
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, closeAt, 0.0, 0.0));
+    run (4);
+
+    const auto reports = player.takeReports ({ "TK000011" });
+    REQUIRE (reports.size() == 1u);
+    CHECK (reports[0].channel == "TK000011");
+    CHECK (reports[0].how == "pressed");
+    CHECK (reports[0].seconds == doctest::Approx (static_cast<double> (closeAt - recordAt) / rate));
+    CHECK (player.takeReports ({ "TK000011" }).empty());
+
+    const auto take = rig.host.takeOf ("TK000011");
+    REQUIRE (take != nullptr);
+    CHECK (take->state() == audio::TakeState::looping);
+    CHECK (take->length() == closeAt - recordAt);
+
+    //  The points in seconds, landing in samples at the rate.
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::points, -1, 0.01, 0.05));
+    run (1);
+    CHECK (take->loopIn() == 480);
+    CHECK (take->loopOut() == 2400);
+    CHECK (player.takePlayhead ("TK000011") >= 0.01);
+    CHECK (player.takePlayhead ("TK000011") < 0.05);
+
+    player.setTakeThrough ("TK000011", true);
+    CHECK (take->isThrough());
+
+    //  A STOP OF THE RACK TRACK HOLDS THE TAKE: the loop fades out and stays.
+    REQUIRE (player.stop (track));
+    run (10);
+    CHECK (take->state() == audio::TakeState::held);
+    CHECK (player.takeReports ({ "TK000011" }).empty());
+
+    /*  AND A STOP THAT LANDS WHILE A TAKE RECORDS CLOSES IT HELD, which the
+        report says - `take.closed ... held`, so the account holds it too. */
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::clear, -1, 0.0, 0.0));
+    run (1);
+    REQUIRE (take->state() == audio::TakeState::empty);
+
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, -1, 0.0, 0.0));
+    run (20);
+    REQUIRE (take->state() == audio::TakeState::recording);
+
+    REQUIRE (player.stop (track));
+    run (1);
+
+    const auto held = player.takeReports ({ "TK000011" });
+    REQUIRE (held.size() == 1u);
+    CHECK (held[0].how == "held");
+    CHECK (held[0].seconds == doctest::Approx (20.0 * 128.0 / rate));
+    CHECK (take->state() == audio::TakeState::held);
+
+    //  Nothing for a channel with no recorder.
+    CHECK_FALSE (player.postTake ("NQNQNQNQ", cue::TakeVerb::record, -1, 0.0, 0.0));
+    CHECK (player.takeReports ({ "NQNQNQNQ" }).empty());
+}
+
+//==============================================================================
+TEST_CASE ("M44: a take starts on the sample Rec was placed at, found by a click in the input")
+{
+    /*  Phase 9c, stage 9c.7 (namespace draft 19.9): through the real host - the
+        input stage, the tap and the recorder - a press placed at a sample, and
+        a click in the input some way after it. The take's sample k is the
+        input's sample `placed + k` when nothing is late, so the click's place
+        in the take says where the take began. Read back with Keep's own copy.
+        With no plugin before the recorder there is no child to be late. */
+    constexpr int rate = 48000;
+    constexpr int block = 128;
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = block;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::RackChannelSpec channel;
+    channel.id = "TK000011";
+    channel.name = "Looper";
+    channel.takeSeconds = 1.0;
+    channel.layers = 1;
+    spec.rack.push_back (channel);
+    REQUIRE (rig.host.buildEdit (spec));
+
+    Engine engine;
+    audio::HostPlayer player { rig.host, engine };
+
+    const auto track = rig.host.rackTrackOf ("TK000011");
+    REQUIRE (track >= 0);
+    rig.host.setRackSource (track, 0, 1);
+    rig.host.openRackGate (track, -1);
+
+    //  A click: one sample at full scale, at a sample that is no block boundary.
+    const std::int64_t click = 20 * block + 77;
+    std::vector<float> first (block), second (block, 0.0f);
+    const float* inputs[] { first.data(), second.data() };
+
+    const auto run = [&] (int blocks)
+    {
+        for (int n = 0; n < blocks; ++n)
+        {
+            const auto at = rig.host.clock().samplesElapsed();
+
+            for (int k = 0; k < block; ++k)
+                first[static_cast<std::size_t> (k)] = at + k == click ? 1.0f : 0.0f;
+
+            rig.host.processBlock (inputs, 2);
+        }
+    };
+
+    //  The gate's own ramp done, then Rec placed a little ahead, inside a block.
+    run (4);
+    const auto placed = rig.host.clock().samplesElapsed() + 5 * block + 13;
+    REQUIRE (placed < click);
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, placed, 0.0, 0.0));
+    run (30);
+    REQUIRE (player.postTake ("TK000011", cue::TakeVerb::record, -1, 0.0, 0.0));
+    run (20);
+
+    const auto take = rig.host.takeOf ("TK000011");
+    REQUIRE (take != nullptr);
+    REQUIRE (take->isSettled());
+
+    const auto length = take->length();
+    REQUIRE (length > click - placed);
+
+    std::vector<float> left (static_cast<std::size_t> (length)), right (static_cast<std::size_t> (length));
+    take->copyTake (0, 0, static_cast<int> (length), left.data(), right.data());
+
+    const auto loudest = std::max_element (left.begin(), left.end(), [] (float a, float b) { return std::abs (a) < std::abs (b); });
+    const auto found = static_cast<std::int64_t> (std::distance (left.begin(), loudest));
+    const auto out = found - (click - placed);
+
+    MESSAGE ("M44: Rec placed at sample " << placed << ", the click at " << click << ": found " << found
+             << " samples into the take, out by " << out << " samples");
+
+    CHECK (std::abs (*loudest) == doctest::Approx (1.0f));
+    CHECK (out == 0);
+}
+
+//==============================================================================
+TEST_CASE ("M38: the live rack's cost in the audio callback, with 0, 8 and 32 channels open")
+{
+    /*  Phase 9b (namespace draft 18.10). Each rack channel is a track of its
+        own - the input stage, the EQ and the output stage - and open, it copies
+        its input from the tap every block and sends it through the matrix.
+        Measured with no plugin on any channel, since the proxy's own cost is
+        M31's, beside eight idle voices, at 48 kHz and 128 samples into eight
+        outputs. In alternation, twice over, for M11's reason: the cost of a
+        block drifts with how many engines this process has built before it. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+    constexpr int blocks = 1500;
+
+    const auto measure = [] (int channels)
+    {
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = rate;
+        settings.blockSize = blockSize;
+        settings.outputChannels = 8;
+        settings.inputChannels = 2;
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 8;
+        spec.channelsPerTrack = 2;
+
+        for (int n = 0; n < channels; ++n)
+        {
+            audio::RackChannelSpec channel;
+            channel.id = "CH" + juce::String (n).paddedLeft ('0', 6).toStdString();
+            channel.name = "Mic " + std::to_string (n + 1);
+            spec.rack.push_back (channel);
+        }
+
+        REQUIRE (rig.host.buildEdit (spec));
+
+        for (int n = 0; n < channels; ++n)
+        {
+            const auto track = rig.host.rackTrackOf ("CH" + juce::String (n).paddedLeft ('0', 6).toStdString());
+            REQUIRE (track >= 0);
+
+            auto* matrix = rig.host.trackMatrix (track);
+            REQUIRE (matrix != nullptr);
+            matrix->setLevelDb (0.0f);
+            matrix->setGain (0, n % 8, 1.0f);
+            matrix->snapToTargets();
+
+            rig.host.setRackSource (track, n % 2, 1);
+            rig.host.openRackGate (track, -1);
+        }
+
+        const std::vector<float> one (blockSize, 0.25f), two (blockSize, -0.25f);
+        const float* inputs[] { one.data(), two.data() };
+
+        for (int i = 0; i < 200; ++i)
+            rig.host.processBlock (inputs, 2);
+
+        const auto from = std::chrono::steady_clock::now();
+
+        for (int i = 0; i < blocks; ++i)
+            rig.host.processBlock (inputs, 2);
+
+        const auto took = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - from).count();
+
+        rig.host.stop();
+        return took / blocks;
+    };
+
+    const auto budget = 1.0e6 * blockSize / rate;
+
+    for (int pass = 0; pass < 2; ++pass)
+        for (const auto channels : { 0, 8, 32 })
+        {
+            const auto cost = measure (channels);
+
+            MESSAGE ("M38 pass " << pass + 1 << ": " << channels << " rack channels open, 8 voices idle: "
+                     << cost << " us/block of " << budget << " us (" << 100.0 * cost / budget
+                     << "% of real time)");
+
+            CHECK (cost > 0.0);
+        }
 }
