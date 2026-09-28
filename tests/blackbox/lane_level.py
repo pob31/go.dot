@@ -180,10 +180,39 @@ def window_db(samples: "list[float]", centre: int, width: int = 512) -> float:
     return 20.0 * math.log10(rms * math.sqrt(2.0)) if rms > 0.0 else -400.0
 
 
+def muted_block_in(samples: "list[float]", centre: int, width: int = 512) -> bool:
+    """Whether the window around `centre` holds a block of exact zeros.
+
+    A sounding cue is never exactly nought for a block - its quietest point in
+    these fixtures is -25 dB - so a run of BLOCK exact zeros is the engine
+    muting a block it had no time to render, which is a loaded runner and
+    never the lane."""
+    start = max(0, centre - width // 2)
+    run = 0
+
+    for x in samples[start:start + width]:
+        run = run + 1 if x == 0.0 else 0
+
+        if run >= BLOCK:
+            return True
+
+    return False
+
+
 def level_db(samples: "list[float]", centre: int) -> float:
-    """The median of five windows 4 ms apart: one muted block moves none of it."""
+    """The median of five windows 4 ms apart, leaving out any window that holds
+    a muted block.
+
+    The windows overlap, so one muted block can sit in three of the five and
+    carry the median with it. On 2026-09-28 one did, on macOS, in the window
+    every other reading is measured against: 64 silent samples of a 512-sample
+    window is 7/8 of its energy, -0.58 dB, and every level after it read 0.58
+    dB loud. A window with a muted block in it says nothing about the lane."""
     spread = int(RATE * 0.004)
-    return statistics.median(window_db(samples, centre + k * spread) for k in range(-2, 3))
+    centres = [centre + k * spread for k in range(-2, 3)]
+    clean = [c for c in centres if not muted_block_in(samples, c)]
+
+    return statistics.median(window_db(samples, c) for c in (clean or centres))
 
 
 # =============================================================================
