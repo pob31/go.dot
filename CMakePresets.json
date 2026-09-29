@@ -102,6 +102,36 @@
     },
 
     {
+      "name": "package",
+      "inherits": "dev",
+      "displayName": "package (the test build's archive)",
+      "description": "What .github/workflows/release.yml configures on Linux, and the parent of the other two package presets. WFG_BUILD_TESTS=OFF because the release workflow does not run the suite - CI already ran it on the commit being tagged - and a package build should not need lxml. It smoke-tests the installed binary instead (--version, selftest, validate on the shipped empty show). Build package-release, then `cmake --install build/package --config Release --prefix <dir>`: cmake/WfgInstall.cmake says what lands there.",
+      "cacheVariables": {
+        "WFG_BUILD_TESTS": "OFF"
+      }
+    },
+
+    {
+      "name": "package-macos",
+      "inherits": "package",
+      "displayName": "package-macos (universal)",
+      "description": "The macOS test build: arm64 AND x86_64, so one archive runs on Apple silicon and on the Intel Macs still in racks. Twice the compile of ci-macos, which is why only the release workflow pays it. The deployment target is the root CMakeLists' 13.3, not set here.",
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64"
+      }
+    },
+
+    {
+      "name": "package-windows",
+      "inherits": "vs",
+      "displayName": "package-windows",
+      "description": "The Windows test build. Inherits vs, not package, so no shell needs to be a Native Tools prompt; carries package's one cache variable by hand for that reason.",
+      "cacheVariables": {
+        "WFG_BUILD_TESTS": "OFF"
+      }
+    },
+
+    {
       "name": "spikes",
       "inherits": "ci-linux",
       "displayName": "spikes (throwaway PRD 6.1 programs)",
@@ -162,6 +192,21 @@
       "name": "rtsan-debug",
       "configurePreset": "rtsan",
       "configuration": "Debug"
+    },
+    {
+      "name": "package-release",
+      "configurePreset": "package",
+      "configuration": "Release"
+    },
+    {
+      "name": "package-macos-release",
+      "configurePreset": "package-macos",
+      "configuration": "Release"
+    },
+    {
+      "name": "package-windows-release",
+      "configurePreset": "package-windows",
+      "configuration": "Release"
     },
     {
       "name": "spikes-debug",

@@ -5,9 +5,9 @@ name: CI
 
 # What this workflow is for, in Phase 0 terms: "it configures, it links, and the
 # binary boots on three platforms". Nothing else. There is no signing, no
-# packaging, no notarization and no artefact upload here — that is a future
-# release.yml, and mixing the two is how a release pipeline ends up running on
-# every push.
+# packaging, no notarization and no artefact upload here — packaging is
+# release.yml's, which runs on a tag, and mixing the two is how a release
+# pipeline ends up running on every push.
 #
 # Beyond "it compiled", CI asserts exactly six things:
 #   1. the two submodule pins are coherent and TE's vendored JUCE is empty  (job `pins`)

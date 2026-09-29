@@ -76,7 +76,8 @@ CMakeLists.txt text eol=lf
 
 # The sanitizer suppression list, and this is a correctness matter rather than a
 # tidiness one. RTSAN_OPTIONS=suppressions=... is read by the Clang runtime on
-# Linux, which matches each line as a pattern; a trailing  would be part of the
+# Linux, which matches each line as a pattern; a trailing 
+ would be part of the
 # symbol being matched and every suppression would silently stop suppressing -
 # leaving a CI job that reports thousands of known Tracktion locks and looks like
 # a real-time failure that had just appeared.
@@ -111,3 +112,11 @@ patches/tracktion_engine/series text eol=lf
 # Nothing here reaches ThirdParty/: those are two gitlinks, and Git does not
 # apply a superproject's attributes across a submodule boundary. JUCE and
 # Tracktion Engine carry their own.
+
+# The Windows launcher (packaging/). A .cmd is read by cmd.exe, which mis-parses
+# labels and `if` blocks in an LF file, so it is the one file in the repo
+# checked out CRLF. The .plist and .c files under packaging/macos are LF.
+*.cmd     text eol=crlf
+*.plist   text eol=lf
+*.plist.in text eol=lf
+*.c       text eol=lf
