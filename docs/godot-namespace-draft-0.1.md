@@ -12767,6 +12767,12 @@ the drawing:
   Signalsmith's own `outputSeekLength`. `TimeStretcher` reports its output latency apart for that.
   A stretched cue now starts at its first sample and sits within a stretcher's chunk of its place
   in the file at any speed (`AudioTests`, "a stretched cue starts at its first sample").
+- **And the first CI run found a third, on every platform and on no machine here**: a real-time
+  read of Tracktion's file cache fails whenever the cache's own thread holds the reader, and the
+  stretch reader gave up the block and held its place - every later moment a chunk late - where a
+  resampled read keeps time. On a shared runner stretched cues came out 10 to 60 ms late. The
+  reader now feeds the stretcher silence for what the cache could not hand over and carries on;
+  only the prime it is built with stays strict, since its failing says the file is not there yet.
 - **Timestretch on a cue with ranges is named, not refused**: a range is played by jumping the
   stretcher to its in-point, which starts it again - M47 hears a gap of one stretcher chunk and a
   click after the launch and at every pass, where varispeed ranges are seamless. `wfg validate`
