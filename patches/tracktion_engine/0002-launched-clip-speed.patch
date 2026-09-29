@@ -41,6 +41,13 @@ rebuilt in the middle of a change of speed needs nothing carried across it.
   latency of nothing - 150 ms at 48 kHz - with its file's first moments lost.
   A stretcher whose file was there primes once, as before. Both this and the
   aim were found by M14, 2026-09-29.
+- And the plain stretch reader keeps time through a file-cache miss, as a
+  resampled read does: a real-time cache read does not wait, and fails
+  whenever the cache's own thread holds the reader, so it feeds silence for
+  what the cache could not hand over and carries on. It used to give up the
+  block and hold its place - every later moment a chunk late, and a prime of
+  dozens of reads failing whole and beginning again the next block (10 to
+  60 ms late on the CI runners). Only the prime it is built with stays strict.
 - The Lagrange resampler takes a read too large for the scratch pool or the
   file cache in halves, and is given the EXACT ratio, putting back whatever
   the interpolator did not consume. It was fed a whole number of frames a
@@ -240,7 +247,7 @@ index 90ee2402c5c..fef637df9bd 100644
              }
  
 diff --git a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
-index 1993f02782b..760fd80db7f 100644
+index 1993f02782b..f2c7da68ef0 100644
 --- a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
 +++ b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
 @@ -279,6 +279,15 @@ public:
@@ -388,10 +395,12 @@ index 1993f02782b..760fd80db7f 100644
          return ok;
      }
  };
-@@ -631,6 +691,7 @@ public:
+@@ -630,7 +690,8 @@ public:
+         setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
          inputFifo.reset();
          outputFifo.reset();
-         primeStretcher();
+-        primeStretcher();
++        primeStretcher (true);
 +        awaitingFirstRead = true;
      }
  
@@ -432,13 +441,22 @@ index 1993f02782b..760fd80db7f 100644
 +                setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
 +                inputFifo.reset();
 +                outputFifo.reset();
-+                primeStretcher();
++                primeStretcher (true);
 +            }
 +        }
 +
          for (;;)
          {
              // If there are enough output samples in the fifo, read them out
+@@ -684,7 +772,7 @@ public:
+                 break;
+             }
+ 
+-            if (! feedAndProcess())
++            if (! feedAndProcess (true))
+                 return false;
+         }
+ 
 @@ -696,6 +784,10 @@ public:
      static constexpr int chunkSize = 256;
      const int numChannels;
@@ -450,7 +468,38 @@ index 1993f02782b..760fd80db7f 100644
      TimeStretcher timeStretcher;
      AudioFifo inputFifo { numChannels, chunkSize }, outputFifo { numChannels, chunkSize };
      double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
-@@ -731,22 +823,62 @@ public:
+@@ -706,7 +798,15 @@ public:
+     }
+ 
+     // Reads source audio, feeds it to the stretcher, and produces output into the FIFO
+-    bool feedAndProcess()
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): `tolerant` feeds silence for input the
++    // file cache could not hand over this instant - a real-time cache read does not wait,
++    // and fails whenever the cache's own thread holds the reader - rather than giving up.
++    // A resampled read keeps time through a miss; a stretched one gave up the block and
++    // held its place, so every later moment played a chunk late, and a prime of dozens of
++    // reads failed whole and began again the next block (CI, 2026-09-29: 10 to 60 ms late).
++    // Only the prime a stretcher is built with is strict: that one's failing says the file
++    // is not there yet, and is primed again at the first read.
++    bool feedAndProcess (bool tolerant = false)
+     {
+         const auto numThisTime = timeStretcher.getFramesNeeded();
+ 
+@@ -717,7 +817,12 @@ public:
+             auto scratchView = toBufferView (scratchBuffer.buffer);
+ 
+             if (! source->readSamples (scratchView))
+-                return false;
++            {
++                if (! tolerant)
++                    return false;
++
++                scratchBuffer.buffer.clear();
++            }
+ 
+             inputFifo.write (scratchBuffer.buffer);
+         }
+@@ -731,27 +836,67 @@ public:
          return true;
      }
  
@@ -465,7 +514,8 @@ index 1993f02782b..760fd80db7f 100644
 +
      // Pre-feeds real audio into the stretcher and discards the initial output
      // to handle the stretcher's startup latency locally
-     void primeStretcher()
+-    void primeStretcher()
++    void primeStretcher (bool tolerant = false)
      {
 +        primedAt = -1.0;
 +
@@ -516,7 +566,13 @@ index 1993f02782b..760fd80db7f 100644
          int outputDiscarded = 0;
  
          while (outputDiscarded < numToDiscard)
-@@ -764,6 +896,9 @@ public:
+         {
+-            if (! feedAndProcess())
++            if (! feedAndProcess (tolerant))
+                 break;
+ 
+             const int available = outputFifo.getNumReady();
+@@ -764,6 +909,9 @@ public:
                  outputDiscarded += toDiscard;
              }
          }
@@ -526,7 +582,7 @@ index 1993f02782b..760fd80db7f 100644
      }
  };
  
-@@ -784,7 +919,7 @@ public:
+@@ -784,7 +932,7 @@ public:
          source->setPosition (getReadPosition());
          timeStretcher.reset();
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
@@ -535,7 +591,7 @@ index 1993f02782b..760fd80db7f 100644
      }
  
      SampleCount getPosition() override
-@@ -802,7 +937,7 @@ public:
+@@ -802,7 +950,7 @@ public:
          source->setPosition (t);
          timeStretcher.reset();
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
@@ -544,7 +600,7 @@ index 1993f02782b..760fd80db7f 100644
      }
  
      void setPosition (TimePosition t) override
-@@ -837,7 +972,10 @@ public:
+@@ -837,7 +985,10 @@ public:
          playbackSpeedRatio = speedRatio;
          semitonesShift = semitones;
  
@@ -556,7 +612,7 @@ index 1993f02782b..760fd80db7f 100644
          assert (ok);
      }
  
-@@ -847,6 +985,19 @@ public:
+@@ -847,6 +998,19 @@ public:
          const auto numFramesToDo = static_cast<int> (destBuffer.getNumFrames());
          int startFrame = 0;
  
@@ -576,7 +632,7 @@ index 1993f02782b..760fd80db7f 100644
          // Always push one block to keep the input fifo stoked but don't do this for every chunk unless required
          if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
              if (! readSourceAndPushFrames (numToPush))
-@@ -884,6 +1035,7 @@ public:
+@@ -884,6 +1048,7 @@ public:
  
      const int numChannels, chunkSize = 1024;
      int latencySamples = 0;
@@ -584,7 +640,7 @@ index 1993f02782b..760fd80db7f 100644
      ReadAheadTimeStretcher timeStretcher { 3 };
      double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
  
-@@ -910,10 +1062,28 @@ public:
+@@ -910,10 +1075,28 @@ public:
  
      // Pre-feeds real audio into the stretcher and discards initial output
      // to handle the stretcher's startup latency locally
@@ -615,7 +671,7 @@ index 1993f02782b..760fd80db7f 100644
  
          const auto position = static_cast<SampleCount> (readPosition);
          const auto backupPos = std::max (SampleCount (0), position - latencySamples);
-@@ -928,7 +1098,8 @@ public:
+@@ -928,7 +1111,8 @@ public:
          while (outputDiscarded < numToDiscard)
          {
              if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
@@ -625,7 +681,7 @@ index 1993f02782b..760fd80db7f 100644
  
              // Only ever discard up to the target so the stretcher isn't left ahead of readPosition
              const int numThisTime = std::min (chunkSize, numToDiscard - outputDiscarded);
-@@ -940,6 +1111,8 @@ public:
+@@ -940,6 +1124,8 @@ public:
  
              outputDiscarded += numRead;
          }
@@ -634,7 +690,7 @@ index 1993f02782b..760fd80db7f 100644
      }
  };
  
-@@ -1149,7 +1322,12 @@ public:
+@@ -1149,7 +1335,12 @@ public:
      {
          const auto numSourceSamples = toSamples (tr.getLength(), getSampleRate());
  
@@ -648,7 +704,7 @@ index 1993f02782b..760fd80db7f 100644
          {
              destBuffer.clear();
              return true;
-@@ -1164,7 +1342,12 @@ public:
+@@ -1164,7 +1355,12 @@ public:
  
          setPosition (tr.getStart());
  
@@ -662,7 +718,7 @@ index 1993f02782b..760fd80db7f 100644
              reset();
  
          return readSamples (destBuffer);
-@@ -1172,6 +1355,10 @@ public:
+@@ -1172,6 +1368,10 @@ public:
  
      ResamplerReader* resamplerReader = nullptr;
      TimeStretchReaderBase* timeStretchSource = nullptr;
@@ -673,7 +729,7 @@ index 1993f02782b..760fd80db7f 100644
  };
  
  
-@@ -2137,6 +2324,12 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
+@@ -2137,6 +2337,12 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
  }
  
  //==============================================================================
@@ -686,7 +742,7 @@ index 1993f02782b..760fd80db7f 100644
  void WaveNodeRealTime::setDynamicOffsetBeats (BeatDuration newOffset)
  {
      if (juce::approximatelyEqual (dynamicOffsetBeats->inBeats(), newOffset.inBeats()))
-@@ -2285,6 +2478,9 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
+@@ -2285,6 +2491,9 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
          }
      }
  
@@ -696,7 +752,7 @@ index 1993f02782b..760fd80db7f 100644
      if (syncTempo == SyncTempo::yes || syncPitch == SyncPitch::yes)
      {
          assert (fileTempoSequence);
-@@ -2348,6 +2544,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
+@@ -2348,6 +2557,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
      editReader = other.editReader;
      pitchAdjustReader = other.pitchAdjustReader;
      dynamicOffsetBeats = other.dynamicOffsetBeats;
@@ -704,7 +760,7 @@ index 1993f02782b..760fd80db7f 100644
  }
  
  void WaveNodeRealTime::processSection (ProcessContext& pc)
-@@ -2355,6 +2552,40 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2355,6 +2565,40 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
      const auto sectionEditBeats = getEditBeatRange();
      const auto sectionEditTime = getEditTimeRange();
  
@@ -745,7 +801,7 @@ index 1993f02782b..760fd80db7f 100644
      // Check that the number of channels requested matches the destination buffer num channels
      assert (destChannels.getNumChannels() == (int) pc.buffers.audio.getNumChannels());
  
-@@ -2401,7 +2632,7 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2401,7 +2645,7 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
          }
          else if (fileTempoSequence != nullptr)
          {
@@ -754,7 +810,7 @@ index 1993f02782b..760fd80db7f 100644
              auto sourceBeats = BeatPosition::fromBeats (offsetIntoClip.inBeats() + offsetBeats.inBeats());
  
              if (! loopSectionBeats.isEmpty() && sourceBeats >= loopSectionBeats.getStart())
-@@ -2440,12 +2671,52 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2440,12 +2684,52 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
      if (pitchAdjustReader != nullptr)
          pitchAdjustReader->setKey (getKeyToSyncTo (sectionEditTime.getStart()));
  
