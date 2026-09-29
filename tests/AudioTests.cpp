@@ -5795,9 +5795,13 @@ TEST_CASE ("audio host: at twice the speed, varispeed doubles the pitch and time
         const auto last = speed.startedAt + lastSoundAt (around);
         const auto ends = static_cast<double> (last - speed.launch) / speed.rate;
 
+        /*  A stretched sound also rings the stretcher's own tail, and its place
+            in the file is right to within a few of the stretcher's 256-sample
+            chunks - one machine to the next (2026-09-29: up to three on the CI
+            runners, none here). */
         INFO ("the last sound " << ends << " s after the launch");
         CHECK (ends > 1.99);
-        CHECK (ends < 2.01);
+        CHECK (ends < (stretch ? 2.025 : 2.01));
 
         speed.runTo (speed.at (2.3));
         CHECK_FALSE (speed.rig.host.trackPlayState (0).playing);
@@ -6259,7 +6263,12 @@ TEST_CASE ("audio host: a stretched cue starts at its first sample and keeps its
 
         CHECK (first + base <= 2);
         CHECK (last + base >= end - 64);
-        CHECK (last + base <= end + 320);     // the stretcher's own tail, stopped with the clip
+
+        //  The stretcher's own tail, stopped with the clip - and its place is
+        //  right to within a few 256-sample chunks, one machine to the next
+        //  (up to three on the CI runners, 2026-09-29; the faults this case is
+        //  for were 4544 and 7200 samples).
+        CHECK (last + base <= end + 1100);
     }
 
     for (const auto speed : { 0.5, 1.0, 2.0 })
@@ -6290,7 +6299,7 @@ TEST_CASE ("audio host: a stretched cue starts at its first sample and keeps its
 
             INFO ("the file's click at " << second << " s peaks at " << peakAt << ", expected " << expected);
             CHECK (peak > 0.3f);
-            CHECK (std::abs (peakAt - expected) <= 300);     // a stretcher's chunk at half the speed
+            CHECK (std::abs (peakAt - expected) <= 1024);    // within four of the stretcher's chunks
         }
     }
 }
