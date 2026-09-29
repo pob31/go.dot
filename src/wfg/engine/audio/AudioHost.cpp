@@ -307,6 +307,19 @@ namespace wfg::audio
             engine->getPluginManager().createBuiltInType<LiveInputPlugin>();
             engine->getPluginManager().createBuiltInType<LooperPlugin>();
 
+            /*  TRACKTION'S CPU-OVERLOAD MUTE, OFF (the author, 2026-09-29).
+                DeviceManager answers a block that took more than 0.98 of its
+                budget by writing the NEXT block as silence without playing it
+                (tracktion_DeviceManager.cpp:1376): a certain, unlogged gap, and
+                everything after it a block late against the sample count the
+                show is placed on. A long block is the device's to absorb or not,
+                as in any host - a show over its budget has an xrun to show for
+                it, not a hole Go.dot made. The mute was the "gap of one
+                stretcher chunk" M47 heard at every pass of a stretched loop, and
+                at a stretched range's launch (namespace draft §22.12).
+                Tracktion's own test player sets it out of reach the same way. */
+            engine->getDeviceManager().setCpuLimitBeforeMuting (std::numeric_limits<double>::infinity());
+
             auto& hosted = engine->getDeviceManager().getHostedAudioDeviceInterface();
 
             te::HostedAudioDeviceInterface::Parameters parameters;

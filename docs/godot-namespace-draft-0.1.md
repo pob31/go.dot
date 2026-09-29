@@ -12910,16 +12910,23 @@ late.
 **What is left, named: the boundary from one range to the next.** Each range is a slot of its own
 (§3.25), and the incoming range's stretcher is primed at its launch, on the audio thread.
 
-- In Release on this machine the mute did not fire, and there is no gap.
+- In Debug the prime was long enough for the mute to fire: a 256-sample gap a block or two after
+  the boundary. In Release on this machine it did not.
 - At one, the boundary steps no further than a resampled one does (M12's decay). At one and a half
   it steps 0.26, against varispeed's 0.07: two stretchers spliced, their phases not lined up.
-- In Debug the prime is long enough for the mute to fire: a 256-sample gap a block or two after the
-  boundary. M47, "a stretched cue's move from one range to the next", is skipped for that reason.
-- `wfg validate` now names a stretched cue with more than one range, rather than every ranged one.
+- `wfg validate` now names a stretched cue with more than one range, rather than every ranged one:
+  the prime is still a long block on the audio thread, which a small block or a busy machine may
+  not absorb.
 
-Two levers, neither pulled. One is the prime on the message thread (§22.9). The other is the mute:
-the question put to the author on 2026-09-27, whether to turn it off, has a second reason now. The
-mute turns a long block into a certain gap, and leaves everything after it a block late.
+**The mute is off** (the author, 2026-09-29, answering the question put on 2026-09-27). `AudioHost`
+sets `setCpuLimitBeforeMuting` out of reach as it starts Tracktion, as Tracktion's own test player
+does. A long block is now the device's to absorb or not, as in any host: a show over its budget
+has an xrun to show for it, not a block of silence Go.dot made and a playhead left a block behind.
+The boundary case (`AudioTests`, "a stretched cue passes from one range to the next with no gap")
+is no longer skipped: in Debug, where the prime always tripped the mute, it now finds no gap, and
+it is what says the mute stays off. The lane driver's rule that leaves a window holding a block of
+exact zeros unjudged (fb12d4f) stays, harmless. The other lever, the prime on the message thread
+(§22.9), is still proposed.
 
 **For upstream**, the author posted a report on the JUCE forum (Tracktion takes no pull requests),
 2026-09-29: https://forum.juce.com/t/wavenoderealtime-readers-resampler-rounding-stretcher-priming-cache-misses-loop-wraps-and-slot-rebuilds/69617.

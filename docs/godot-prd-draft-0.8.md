@@ -3192,8 +3192,9 @@ DT-EH in §22.1 are the author's to overrule; these are what the work left out:
   draft §22.11).
 - **Speed fades in load-to-time**: the solve reads a cue's own speed, not a fade's.
 - **A stretcher primed on the message thread**, once its file is in the cache and before the launch:
-  M46 measured the prime at 1 to 5 ms on the audio thread, a dropout at blocks of 64 - and Tracktion's
-  CPU-overload mute answers a block that long with a block of silence (namespace draft §22.12).
+  M46 measured the prime at 1 to 5 ms on the audio thread, a dropout at blocks of 64. Tracktion's
+  CPU-overload mute, which answered a block that long with a block of silence, is off (the author,
+  2026-09-29; namespace draft §22.12).
 - ~~**Timestretch on a cue with ranges without a gap at each pass**, by a loop below the stretcher~~ -
   built 2026-09-29 (the author: "one less artefact to hear complaints about"): a launched clip's loop
   now sits below its resampler and its stretcher, and a stretched loop passes its wraps with no gap

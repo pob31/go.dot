@@ -3944,9 +3944,9 @@ namespace wfg::doc
                     passes of a range are seamless since its loop sits below the
                     stretcher; but each range is a slot of its own, and the next
                     one's stretcher is primed as it begins, on the audio thread -
-                    a long block, which Tracktion's overload mute can answer with a
-                    block of silence - and away from speed one the two stretchers
-                    meet out of phase, a click. Varispeed ranges are seamless. */
+                    a long block, which a small block or a busy machine may not
+                    absorb - and away from speed one the two stretchers meet out
+                    of phase, a click. Varispeed ranges are seamless. */
                 if (node.getType().toString() == "Media"
                       && document.getAttribute ("/godot/cue/" + node[idProperty].toString().toStdString()
                                                   + "/rateMode").value_or (std::string {}) == "timestretch")
