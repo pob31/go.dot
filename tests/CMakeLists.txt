@@ -542,6 +542,18 @@ add_test(NAME wfg.replay.lane.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/lane.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/lane
                  --wfg-locale=${WFG_LOCALE_FR})
+# A MEDIA CUE'S SPEED AS RECORDS (namespace draft §22): a speed edited, three
+# refused with the reason each deserves, a mode changed and taken back by undo, a
+# fade's switches set, and the fade fired with nothing to move - its run ending
+# once - replayed through the document door under both locales.
+add_test(NAME wfg.replay.rate.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/rate.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/rate
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.rate.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/rate.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/rate
+                 --wfg-locale=${WFG_LOCALE_FR})
 # A LANE RECORDED FROM A FADER AS RECORDS (namespace draft §20.9): the pick,
 # every refusal the lane commands owe, and a pass - replayed under both locales.
 add_test(NAME wfg.replay.lane-record.C
@@ -1179,6 +1191,23 @@ add_test(NAME blackbox.lane-level.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_level.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.lane-level.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# A MEDIA CUE'S SPEED, HEARD (namespace draft §22): four cues at twice and half
+# their speed in varispeed and timestretch - M14, each one's length and pitch
+# read out of the render - then a cue whose speed is edited while it sounds and
+# a fade cue that takes it to nought, a tape stop, exactly silent and still
+# playing; served with a real Tracktion graph, and the session replayed. What
+# follows the tick waits a margin past it; nothing here times a tick.
+add_test(NAME blackbox.rate-speed.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/rate_speed.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.rate-speed.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.rate-speed.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/rate_speed.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.rate-speed.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # A LANE RECORDED FROM A FADER, HEARD AND WRITTEN (namespace draft §20.9): a

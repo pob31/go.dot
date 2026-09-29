@@ -12717,9 +12717,91 @@ Each is a proposal in PRD §6.9, awaiting a yes or a no:
 - Reverse.
 - Varispeed on a live take (the Looper, §19).
 - Pitch as a number of its own.
-- A sinc resampler above one, which would first need Tracktion's own sinc reader fixed: it looks
-  wrong at any speed other than one (`WaveNode.cpp:436-446, 574`).
+- A band-limited resampler above one, which would first need Tracktion's own sinc reader fixed: it
+  looks wrong at any speed other than one (`WaveNode.cpp:436-446, 574`). M47 says it is worth it:
+  above one, Lagrange folds everything above Nyquist over the speed back at full level.
 - Speed fades in load-to-time.
+- A stretcher primed on the message thread, once its file is in the cache and before the launch
+  (M46: the prime is 1 to 5 ms on the audio thread, a dropout at blocks of 64).
+- Timestretch on a cue with ranges without a gap at each pass: a loop below the stretcher, so a
+  range's wrap does not start the stretcher again (M47; `wfg validate` names it meanwhile).
 
 **Video, when Phase 8 brings it**, presents frames against the audio position (PRD §3.19d), so it
 follows the speed with nothing more to do.
+
+### 22.10 What was built, against what §22.1-22.9 drew
+
+*Written at close-out, 2026-09-29.* S.0 `619a10b` (this section's drawing), S.1 `cd7e317` (the patch
+mechanism, patch 0001, Signalsmith switched on), S.2 `dd62b01` and `e8081e8` (patch 0002, the voice's
+clock), S.3 `afbcb92` (the rows, the Runner's clock, the inspector), S.4 `1414b7c` (fades on the
+speed), S.5 `15489e9` (the dial and the window), S.6 `eb4d77a` (time as heard), and S.7 - the driver,
+the replay fixture, the measurements, and what the measurements found. Where the build departs from
+the drawing:
+
+- **Esc ends a speed fade at the press** and leaves the speed where it has got to (EB, §22.6): a
+  speed fade's own run is stopped with every other root, and a stop it carried, due later than the
+  panic's, goes with it. The first build let the fade's stopped run hand its target back to
+  `playing` under the panic fade; its tests found it.
+- **Whether a speed fade holds a run is asked of the fades each tick**, and the tick that finds it
+  let go reads the cue again (DW), so every way a fade ends - arriving, taken over, killed, dropped
+  by a double Esc - lets go the same way, and an edit made under the fade lands then.
+- **A stop at the end of a fade that moves the speed** waits a horizon and one tick past the fade's
+  last (ED): the last speed is placed a horizon ahead and reached over one more tick. In a fade that
+  moves both, the level's job carries it.
+- **A fade naming a DCA reads no target**, with its speed switch on or not: with its level switch
+  off it moves nothing.
+- **The dial writes a speed to four significant figures**, within a hundredth of a semitone of the
+  grid, and treats anything within a fiftieth of a semitone as on it.
+- **Load-to-time found a bug of its own**: a cue with no ranges was handed the seconds since it
+  began as a place in its file, so a jump into a cue that starts two seconds into its file landed
+  two seconds early. S.6 counts from where the cue starts (§22.5).
+- **M14 found two faults in Tracktion's stretch reader, both mended in patch 0002.** It primed
+  itself when it was built - with the graph, before the file cache had read the file, whose
+  real-time reads do not wait - so every stretched cue opened on a whole stretcher latency of
+  silence, 150 ms at 48 kHz, with the file's first moments lost. And it primed at one (S.2's own
+  mend of a prime that read twenty times too much at twenty), which at another speed left the sound
+  (1 - speed) x the stretcher's output latency out of place in its file: 95 ms early at half the
+  speed, 47 ms late at twice. The reader now primes again at its first read when its prime fell short
+  or was for another speed, and primes AT the speed it plays at, its discard counted in output
+  frames - the lag at a speed being the input latency plus the speed times the output latency,
+  Signalsmith's own `outputSeekLength`. `TimeStretcher` reports its output latency apart for that.
+  A stretched cue now starts at its first sample and sits within a stretcher's chunk of its place
+  in the file at any speed (`AudioTests`, "a stretched cue starts at its first sample").
+- **Timestretch on a cue with ranges is named, not refused**: a range is played by jumping the
+  stretcher to its in-point, which starts it again - M47 hears a gap of one stretcher chunk and a
+  click after the launch and at every pass, where varispeed ranges are seamless. `wfg validate`
+  says so; the fix is a loop below the stretcher.
+- **A stretched sound is not the same twice**: Signalsmith seeds its phases from the machine's
+  random device, so a stretched render differs run to run (the freeze's level by two decibels), where
+  a resampled one is the same doubles every time. Nothing in the suite compares stretched renders
+  sample for sample.
+
+**The measurements** (§22.8), on this machine:
+
+- **M14** (Debug, `blackbox/rate_speed.py`, both locales): a two-second file at twice and half its
+  speed lasts 1.001 s and 4.000 s in varispeed, 1.006 s and 4.005 s in timestretch - a stretched cue
+  also sounds a few milliseconds of the stretcher's own tail until it is stopped - and sounds at
+  1498.9 Hz and 375.0 Hz where 1500 and 375 were asked in varispeed, 750.4 and 749.8 Hz where 750 is
+  held in timestretch. Before patch 0002's two mends the half-speed stretched cue was 3.948 s.
+- **M46** (Release, one voice, a thirty-second file): at steady state a resampled voice costs 3 to
+  121 us a block - at most 0.9% of real time, at 20× in blocks of 1024 - and a stretched one 10 to
+  316 us, 0.5 to 3.1%: about three to ten times as much, and still small. Nothing allocated, at any
+  speed up to twenty. THE LAUNCH IS WHERE A STRETCHER COSTS: its prime runs on the audio thread at
+  the first read, 1 to 5 ms in one block - 75 to 760% of a block of 64, 18 to 101% of 256, 5 to 38%
+  of 1024 - so at blocks of 64 a stretched cue's launch is a dropout. A stretched loop's every wrap
+  costs 1.5 to 4 ms the same way. This is §22.8's likely outcome, and its first fallback - the prime
+  on the message thread, once the file is in the cache, before the launch - is proposed, not built
+  (§22.9); until then timestretch wants blocks of 256 or more at 48 kHz.
+- **M47** (Debug, 48 kHz): a 5 kHz tone at 1, 1.3, 2 and 4 times keeps its fundamental within
+  0.003 dB and everything else 68 to 78 dB below it - Lagrange's images are low while the sound stays
+  under Nyquist - but at twenty times, where the tone lands at 100 kHz and nothing should sound, it
+  folds back at FULL level: above one, anything above Nyquist over the speed aliases unattenuated.
+  So a band-limited resampler above one is worth building for material with a top end played above
+  about one and a half. Varispeed's gate, slid from a tenth to nought at blocks of 64, makes no step
+  larger than the tone's own at that speed - a tenth of the tone's at one. A freeze holds its pitch
+  (501 and 502 rising crossings a second for 500 Hz) at 4 to 7 dB below the sound it froze, the spread
+  being Signalsmith's random phases. A stretched loop: see above.
+
+**Waiting for the author and the bench:** the ear, on the S.2 renders and on a show - the tape stop,
+the freeze, a speed fade up and down in both modes; the D700's master dial on a Speed box, a
+semitone a detent; and a Mac mini run of `ctest -R "rate|speed"`.

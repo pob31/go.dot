@@ -740,6 +740,13 @@ or both. CI is green on fresh checkouts with the patch applied by the build.
 **Needs from the author:** listening at S.2 (tape stop, freeze, 2× both ways), before any row exists;
 the D700 dial's semitone law; a Mac mini run.
 
+**Built 2026-09-29, S.0-S.7** (namespace draft §22.10). The measurements found two faults in
+Tracktion's stretcher, mended in patch 0002, and left three things named and proposed rather than
+built: a stretched launch's prime costs 1 to 5 ms on the audio thread (a dropout at blocks of 64,
+so timestretch wants 256 or more until it primes on the message thread); a stretched cue with ranges
+has a short gap and a click at every pass (`wfg validate` says so); and above one Lagrange aliases
+what the speed lifts past Nyquist at full level (a band-limited resampler is worth building).
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

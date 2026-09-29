@@ -68,7 +68,10 @@ section 5(a):
   clip's handle can carry, read by its wave node and its slot so the clip plays
   at a speed that moves; a freeze at nought for a stretched clip; and the Lagrange
   reader made to track the interpolator exactly, so a ratio that is not a whole
-  number of frames a block no longer clicks.
+  number of frames a block no longer clicks; a stretcher primed for the speed
+  it will play at, which its output latency, now reported on its own, says how
+  to aim; and a stretcher primed before its file was read primed again when it
+  is first read, so a stretched clip no longer opens on a latency of silence.
 
 Tracktion Engine vendors several libraries of its own inside
 `modules/3rd_party/` and `modules/tracktion_engine/3rd_party/`. The ones that

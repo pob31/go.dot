@@ -3186,9 +3186,14 @@ DT-EH in §22.1 are the author's to overrule; these are what the work left out:
   nothing and `wfg validate` says so.
 - **Reverse.**
 - **Pitch as a number of its own**, apart from the speed.
-- **A sinc resampler above one**, which needs Tracktion's own sinc reader fixed first (M47 says
-  whether it is worth it).
+- **A band-limited resampler above one**, which needs Tracktion's own sinc reader fixed first. M47
+  says it is worth it: above one, Lagrange folds everything above Nyquist over the speed back at
+  full level.
 - **Speed fades in load-to-time**: the solve reads a cue's own speed, not a fade's.
+- **A stretcher primed on the message thread**, once its file is in the cache and before the launch:
+  M46 measured the prime at 1 to 5 ms on the audio thread, a dropout at blocks of 64.
+- **Timestretch on a cue with ranges without a gap at each pass**, by a loop below the stretcher;
+  `wfg validate` names the gap meanwhile.
 
 ### 6.10 Protocol implementation order (§3.16)
 
@@ -3288,7 +3293,16 @@ Mackie vs HUI first — first week with the D700.
   timestretch; **M46** - a voice's cost a block by mode at 1, 2, 8 and 20×, at 48 and 96 kHz, in
   blocks of 64 to 1024, what a block that re-primes the stretcher costs, and no allocation at 20×;
   **M47** - the resampler's aliasing above one, the largest step through varispeed's gate near
-  nought, the level of a freeze, and the damage at a stretched loop's wrap. Not yet taken.
+  nought, the level of a freeze, and the damage at a stretched loop's wrap. *Taken 2026-09-29:*
+  M14 exact to a millisecond in varispeed and to the stretcher's few-millisecond tail in timestretch,
+  pitch within a hertz - once patch 0002 had mended two faults it found in Tracktion's stretcher (a
+  150 ms silent start, and a place in the file off by up to 95 ms at half the speed). M46: a voice
+  costs at most 0.9% of real time resampled and 3.1% stretched, allocating nothing; a stretched
+  launch costs 1 to 5 ms on the audio thread, a dropout at blocks of 64, and so does a stretched
+  loop's every wrap. M47: Lagrange's images are 68 to 78 dB down while a sound stays under Nyquist,
+  but above one everything over Nyquist folds back at full level; the gate makes no step; a freeze
+  holds its pitch 4 to 7 dB down; a stretched loop has a gap and a click at every pass. Namespace
+  draft §22.10.
 
 ---
 

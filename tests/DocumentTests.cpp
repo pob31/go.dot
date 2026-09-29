@@ -1122,6 +1122,38 @@ TEST_CASE ("document: a fade's two switches, and a speed fade aimed at something
     CHECK (document.validate().empty());
 }
 
+TEST_CASE ("document: timestretch on a cue with ranges is named, and varispeed ranges are not")
+{
+    /*  Namespace draft §22.9 and M47: a range is played by jumping the stretcher
+        to its in-point, which starts it again - a gap and a click at every
+        pass. A warning, never a refusal: the cue still plays. */
+    ShowDocument document;
+    const auto list = document.createList ("Main");
+    const auto cue = document.createCue (list.id, 0, "media", "Bed");
+    const auto address = "/godot/cue/" + cue.id + "/";
+
+    REQUIRE (document.setAttribute (address + "rateMode", "timestretch").ok);
+
+    const auto aboutTheStretch = [&document]
+    {
+        const auto problems = document.warnings();
+        return std::count_if (problems.begin(), problems.end(),
+                              [] (const std::string& problem)
+                              {
+                                  return problem.find ("@rateMode: timestretch") != std::string::npos;
+                              });
+    };
+
+    CHECK (aboutTheStretch() == 0);
+
+    REQUIRE (document.createRange (cue.id, 1.0, 2.0).ok);
+    CHECK (aboutTheStretch() == 1);
+
+    REQUIRE (document.setAttribute (address + "rateMode", "varispeed").ok);
+    CHECK (aboutTheStretch() == 0);
+    CHECK (document.validate().empty());
+}
+
 TEST_CASE ("document: a write is checked before it lands")
 {
     ShowDocument document;

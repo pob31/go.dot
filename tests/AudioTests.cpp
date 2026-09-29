@@ -6079,9 +6079,13 @@ TEST_CASE ("audio host: a fade cue takes a cue's speed to nought and back - a ta
         //  The fade's second, the horizon, the last ramp, and a little over.
         const auto gliding = show.record (60);
 
-        //  No step larger than the tone's own at one: 2 pi x 500 / 48000 x 0.25.
+        /*  No step larger than the tone's own at one, 2 pi x 500 / 48000 x 0.25,
+            in varispeed. A stretched sound is resynthesised, with phases
+            Signalsmith seeds from the machine's random device, so its steps run
+            a little above a pure tone's and vary from run to run (0.0207 was
+            seen); a click is ten times that - a stretched loop's wrap is 0.22. */
         INFO ("largest step on the way down " << largestStep (gliding));
-        CHECK (largestStep (gliding) < 0.02f);
+        CHECK (largestStep (gliding) < (stretch ? 0.04f : 0.02f));
         CHECK (show.tone().ownRate == doctest::Approx (0.0));
 
         const auto held = show.record (25);
@@ -6214,6 +6218,81 @@ TEST_CASE ("audio host: timestretch at nought holds the sound, and goes on when 
     const auto after = speed.record (2.75, 0.5);
     CHECK (rmsOver (after, 0, after.getNumSamples()) > 0.05f);
     CHECK (speed.rig.host.trackPlayState (0).playing);
+}
+
+TEST_CASE ("audio host: a stretched cue starts at its first sample and keeps its place in its file, at any speed")
+{
+    /*  What M14 found in Tracktion's stretch reader (2026-09-29), both mended in
+        patch 0002. It was primed when it was built - before its file had been
+        read, with the graph, while the cache was still loading - so a stretched
+        cue opened on 150 ms of silence with its file's first moments lost; and
+        primed at one, so played at another speed it was (1 - speed) x its
+        output latency out of place in its source, 95 ms early at half the speed
+        and 47 ms late at twice. A tone says where the sound starts and ends;
+        a click at each of the file's seconds says where in the file it is - at
+        the speeds where a stretcher still passes a lone click. */
+    for (const auto speed : { 0.5, 1.0, 2.0, 4.0, 20.0 })
+    {
+        INFO ("x" << speed);
+
+        SpeedRig voice;
+        const auto tone = writeSineTone (voice.rig.storage.folder, voice.rate, 750.0, 0.25f, 2);
+        REQUIRE (voice.open (tone, true));
+        REQUIRE (voice.go (speed));
+
+        const auto heard = voice.record (0.0, 2.0 / speed + 0.3);
+        const auto base = voice.startedAt - voice.launch;
+        const auto* x = heard.getReadPointer (0);
+        auto first = -1, last = -1;
+
+        for (int n = 0; n < heard.getNumSamples(); ++n)
+            if (std::abs (x[n]) > 0.005f)
+            {
+                if (first < 0)
+                    first = n;
+
+                last = n;
+            }
+
+        REQUIRE (first >= 0);
+        const auto end = static_cast<std::int64_t> (2.0 / speed * voice.rate);
+
+        CHECK (first + base <= 2);
+        CHECK (last + base >= end - 64);
+        CHECK (last + base <= end + 320);     // the stretcher's own tail, stopped with the clip
+    }
+
+    for (const auto speed : { 0.5, 1.0, 2.0 })
+    {
+        INFO ("x" << speed);
+
+        SpeedRig voice;
+        const auto clicks = writeClicks (voice.rig.storage.folder, voice.rate, 3);
+        REQUIRE (voice.open (clicks, true));
+        REQUIRE (voice.go (speed));
+
+        const auto heard = voice.record (0.0, 3.0 / speed + 0.3);
+        const auto base = voice.startedAt - voice.launch;
+        const auto* x = heard.getReadPointer (0);
+
+        for (int second = 0; second < 3; ++second)
+        {
+            const auto expected = static_cast<int> (second / speed * voice.rate) - static_cast<int> (base);
+            auto peakAt = -1;
+            auto peak = 0.0f;
+
+            for (int n = std::max (0, expected - 12000); n < std::min (heard.getNumSamples(), expected + 12000); ++n)
+                if (std::abs (x[n]) > peak)
+                {
+                    peak = std::abs (x[n]);
+                    peakAt = n;
+                }
+
+            INFO ("the file's click at " << second << " s peaks at " << peakAt << ", expected " << expected);
+            CHECK (peak > 0.3f);
+            CHECK (std::abs (peakAt - expected) <= 300);     // a stretcher's chunk at half the speed
+        }
+    }
 }
 
 TEST_CASE ("audio host: a looping range at one and a half wraps where the source says")
@@ -6427,5 +6506,262 @@ TEST_CASE ("audio host: speed renders for the ear, written when WFG_SPEED_WAVS n
             writer->writeFromAudioSampleBuffer (heard, 0, heard.getNumSamples());
             MESSAGE ("wrote " << out.getFullPathName());
         }
+    }
+}
+
+//==============================================================================
+namespace
+{
+    /*  The amplitude of `hertz` in a recording, by Goertzel under a Hann
+        window: a sine of amplitude A reads A, give or take the window's own
+        leakage. What M47 reads a speed's fundamental with. */
+    double amplitudeAt (const juce::AudioBuffer<float>& buffer, double hertz, int rate)
+    {
+        const auto* x = buffer.getReadPointer (0);
+        const auto n = buffer.getNumSamples();
+        const auto w = 2.0 * juce::MathConstants<double>::pi * hertz / rate;
+        const auto c = 2.0 * std::cos (w);
+
+        auto s1 = 0.0, s2 = 0.0, sum = 0.0;
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto window = 0.5 - 0.5 * std::cos (2.0 * juce::MathConstants<double>::pi * i / (n - 1));
+            const auto s0 = window * static_cast<double> (x[i]) + c * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+            sum += window;
+        }
+
+        const auto power = s1 * s1 + s2 * s2 - c * s1 * s2;
+        return 2.0 * std::sqrt (std::max (0.0, power)) / sum;
+    }
+
+    double decibels (double ratio)
+    {
+        return 20.0 * std::log10 (std::max (ratio, 1.0e-12));
+    }
+}
+
+/*  M46 - A VOICE'S COST AT SPEED (namespace draft §22.8). One voice, launched
+    at each speed in each mode, at 48 and 96 kHz, in blocks of 64, 256 and
+    1024: the mean microseconds a block over a second of output, after a
+    quarter second's settling, against the block's period; the worst of the
+    first twenty blocks from the launch, which is where a stretched voice
+    primes; and whether Go.dot's own code allocated on the way. Then a
+    stretched loop, whose every wrap primes again (the loop is split above
+    the stretcher, `WaveNode.cpp:1312-1336`): the worst block beside a wrap
+    against the median block. Run with --no-skip on a quiet machine, in
+    Release; the figures go to §22.8. */
+TEST_CASE ("M46: a voice's cost in the audio callback at speed - by mode, speed, rate and block" * doctest::skip())
+{
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("wfg-m46");
+
+    const auto timeBlock = [] (SpeedRig& voice)
+    {
+        const auto from = std::chrono::steady_clock::now();
+        voice.rig.host.processBlock();
+        return std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - from).count();
+    };
+
+    for (const auto rate : { 48000, 96000 })
+    {
+        //  Thirty seconds, so twenty times its speed has a second and a half to play.
+        const auto file = writeSineTone (folder.getChildFile (juce::String (rate)), rate, 750.0, 0.25f, 30);
+        REQUIRE (file.existsAsFile());
+
+        for (const auto block : { 64, 256, 1024 })
+            for (const auto stretch : { false, true })
+                for (const auto speed : { 1.0, 2.0, 8.0, 20.0 })
+                {
+                    SpeedRig voice;
+                    voice.rate = rate;
+                    voice.block = block;
+                    REQUIRE (voice.open (file, stretch));
+
+                    rt::resetCounts();
+                    REQUIRE (voice.go (speed));
+                    voice.runTo (voice.launch - block);
+
+                    auto worstAtLaunch = 0.0;
+
+                    for (int i = 0; i < 20; ++i)
+                        worstAtLaunch = std::max (worstAtLaunch, timeBlock (voice));
+
+                    voice.runTo (voice.at (0.25));
+
+                    const auto blocks = rate / block;
+                    auto total = 0.0;
+
+                    for (int i = 0; i < blocks; ++i)
+                        total += timeBlock (voice);
+
+                    const auto budget = 1.0e6 * block / rate;
+                    const auto mean = total / blocks;
+
+                    MESSAGE ("M46 " << std::string (stretch ? "timestretch" : "varispeed") << " x" << speed
+                             << " at " << rate << " Hz, blocks of " << block << ": " << mean << " us a block ("
+                             << 100.0 * mean / budget << "% of " << budget << " us); the worst of the first "
+                             << "twenty from the launch " << worstAtLaunch << " us ("
+                             << 100.0 * worstAtLaunch / budget << "%); " << rt::violations()
+                             << " real-time violations");
+
+                    CHECK (mean > 0.0);
+                    CHECK (rt::violations() == 0);
+                }
+
+        //  A stretched loop of a second, played at one: every wrap primes.
+        for (const auto block : { 64, 256 })
+        {
+            SpeedRig voice;
+            voice.rate = rate;
+            voice.block = block;
+            REQUIRE (voice.open (file, true, { { 1.0, 2.0, 0 } }));
+            REQUIRE (voice.go (1.0));
+            voice.runTo (voice.launch - block);
+
+            std::vector<double> costs;
+            std::vector<std::int64_t> starts;
+
+            while (voice.rig.host.clock().samplesElapsed() < voice.at (3.5))
+            {
+                starts.push_back (voice.rig.host.clock().samplesElapsed());
+                costs.push_back (timeBlock (voice));
+            }
+
+            auto sorted = costs;
+            std::sort (sorted.begin(), sorted.end());
+            const auto median = sorted[sorted.size() / 2];
+
+            auto worstAtWrap = 0.0;
+
+            for (std::size_t i = 0; i < costs.size(); ++i)
+                for (const auto wrap : { voice.at (1.0), voice.at (2.0), voice.at (3.0) })
+                    if (std::abs (starts[i] - wrap) <= 2 * block)
+                        worstAtWrap = std::max (worstAtWrap, costs[i]);
+
+            const auto budget = 1.0e6 * block / rate;
+
+            MESSAGE ("M46 a stretched loop at " << rate << " Hz, blocks of " << block << ": the median block "
+                     << median << " us, the worst beside a wrap " << worstAtWrap << " us ("
+                     << 100.0 * worstAtWrap / budget << "% of " << budget << " us)");
+
+            CHECK (median > 0.0);
+        }
+    }
+}
+
+/*  M47 - WHAT A SPEED DOES TO THE SOUND (namespace draft §22.8), at 48 kHz:
+    - above one, Lagrange's aliasing: a 5 kHz tone at 1.3, 2, 4 and 20 times,
+      the fundamental where it should be and everything else - above Nyquist,
+      where a proper resampler would give silence, everything is alias;
+    - the varispeed gate at blocks of 64: the largest step a tone makes as it
+      is slid from a tenth to nought, against the step it makes at one;
+    - a freeze: the level timestretch holds at nought, against the tone's;
+    - a stretched wrap: the largest step, and the quietest 256 samples, at the
+      wraps of a looping second played at one.
+    Run with --no-skip; the figures go to §22.8, and say whether Lagrange is
+    good enough above one and whether the gate's two numbers are right. */
+TEST_CASE ("M47: what a speed does to the sound - aliasing above one, the gate's step, a freeze, a stretched wrap" * doctest::skip())
+{
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("wfg-m47");
+    constexpr int rate = 48000;
+    constexpr double tone = 5000.0;
+    constexpr float amplitude = 0.25f;
+
+    //  Aliasing, a speed at a time.
+    {
+        const auto file = writeSineTone (folder.getChildFile ("high"), rate, tone, amplitude, 30);
+        REQUIRE (file.existsAsFile());
+
+        for (const auto speed : { 1.0, 1.3, 2.0, 4.0, 20.0 })
+        {
+            SpeedRig voice;
+            voice.rate = rate;
+            voice.block = 256;
+            REQUIRE (voice.open (file, false));
+            REQUIRE (voice.go (speed));
+
+            const auto heard = voice.record (0.25, 0.5);
+            const auto total = rmsOver (heard, 0, heard.getNumSamples());
+            const auto wanted = tone * speed;
+            const auto below = wanted < 0.5 * rate;
+            const auto fundamental = below ? amplitudeAt (heard, wanted, rate) : 0.0;
+            const auto rest = std::sqrt (std::max (0.0, static_cast<double> (total) * total
+                                                          - 0.5 * fundamental * fundamental));
+
+            if (below)
+                MESSAGE ("M47 a " << tone << " Hz tone at x" << speed << ": its " << wanted << " Hz at "
+                         << decibels (fundamental / amplitude) << " dB, everything else "
+                         << decibels (rest / (amplitude / std::sqrt (2.0))) << " dB re the tone");
+            else
+                MESSAGE ("M47 a " << tone << " Hz tone at x" << speed << ": above Nyquist, where nothing "
+                         << "should sound, " << decibels (rest / (amplitude / std::sqrt (2.0)))
+                         << " dB re the tone");
+
+            CHECK (total >= 0.0f);
+        }
+    }
+
+    const auto low = writeSineTone (folder.getChildFile ("low"), rate, 500.0, amplitude, 30);
+    REQUIRE (low.existsAsFile());
+
+    //  The gate at blocks of 64, slid from a tenth to nought over a second.
+    {
+        SpeedRig voice;
+        voice.rate = rate;
+        voice.block = 64;
+        REQUIRE (voice.open (low, false));
+        REQUIRE (voice.go (0.1));
+        REQUIRE (voice.speedAt (0.5, 0.1));
+        REQUIRE (voice.speedAt (1.5, 0.0));
+
+        const auto heard = voice.record (0.4, 1.3);
+        const auto ownAtOne = 2.0 * juce::MathConstants<double>::pi * 500.0 / rate * amplitude;
+
+        MESSAGE ("M47 the varispeed gate at blocks of 64: the largest step " << largestStep (heard)
+                 << ", against the tone's own " << ownAtOne << " at one");
+
+        CHECK (largestStep (heard) >= 0.0f);
+    }
+
+    //  A freeze: timestretch at nought, held.
+    {
+        SpeedRig voice;
+        voice.rate = rate;
+        REQUIRE (voice.open (low, true));
+        REQUIRE (voice.go (1.0));
+        REQUIRE (voice.speedAt (0.5, 1.0));
+        REQUIRE (voice.speedAt (1.0, 0.0));
+
+        const auto held = voice.record (1.5, 1.0);
+        const auto level = rmsOver (held, 0, held.getNumSamples());
+
+        MESSAGE ("M47 a freeze holds " << decibels (level / (amplitude / std::sqrt (2.0)))
+                 << " dB re the tone it froze, " << risingCrossings (held) << " rising crossings in its second");
+
+        CHECK (level >= 0.0f);
+    }
+
+    //  A stretched wrap: a looping second, played at one.
+    {
+        SpeedRig voice;
+        voice.rate = rate;
+        voice.block = 256;
+        REQUIRE (voice.open (low, true, { { 1.0, 2.0, 0 } }));
+        REQUIRE (voice.go (1.0));
+
+        const auto heard = voice.record (0.5, 2.0);
+        const auto ownAtOne = 2.0 * juce::MathConstants<double>::pi * 500.0 / rate * amplitude;
+        auto quietest = 1.0f;
+
+        for (int from = 0; from + 256 <= heard.getNumSamples(); from += 64)
+            quietest = std::min (quietest, rmsOver (heard, from, from + 256));
+
+        MESSAGE ("M47 a stretched loop at one: the largest step " << largestStep (heard)
+                 << " against the tone's own " << ownAtOne << "; the quietest 256 samples "
+                 << decibels (quietest / (amplitude / std::sqrt (2.0))) << " dB re the tone");
+
+        CHECK (quietest >= 0.0f);
     }
 }

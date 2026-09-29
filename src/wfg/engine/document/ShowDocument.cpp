@@ -3940,6 +3940,20 @@ namespace wfg::doc
                     }
                 }
 
+                /*  AND TIMESTRETCH ON A CUE WITH RANGES (§22.9, M47): a range is
+                    played by jumping the stretcher to its in-point, which starts
+                    the stretcher again - a gap of a stretcher's block and a click
+                    after the launch and at every pass. Named until the loop sits
+                    below the stretcher; varispeed ranges are seamless. */
+                if (node.getType().toString() == "Media"
+                      && document.getAttribute ("/godot/cue/" + node[idProperty].toString().toStdString()
+                                                  + "/rateMode").value_or (std::string {}) == "timestretch"
+                      && node.getChildWithName (juce::Identifier ("Range")).isValid())
+                    problems.push_back ("/Show/.../Media[" + node[idProperty].toString().toStdString()
+                                          + "]/@rateMode: timestretch, and the cue plays ranges - a stretcher"
+                                            " starts again at every range and every pass, heard as a short gap"
+                                            " and a click; in varispeed ranges are seamless");
+
                 for (const auto& child : node)
                     visit (child);
             }
