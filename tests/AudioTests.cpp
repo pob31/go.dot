@@ -6262,14 +6262,17 @@ TEST_CASE ("audio host: a stretched cue starts at its first sample and keeps its
         const auto end = static_cast<std::int64_t> (2.0 / speed * voice.rate);
 
         CHECK (first + base <= 2);
-        CHECK (last + base >= end - 64);
 
         //  The stretcher's own tail, stopped with the clip - and its place is
         //  right to within a few 256-sample chunks, one run and one machine to
-        //  the next (five seen, 2026-09-29). Fifty milliseconds is plenty: the
-        //  author, the same day - "The timestretch doesn't have to be so
-        //  accurate. This is mostly for fine tuning up or down or for sound
-        //  design." The faults this case is for were at the start.
+        //  the next (five seen, 2026-09-29), early as well as late: a macOS
+        //  runner ended the tone at half the speed 247 samples early (CI run
+        //  36558400206). So the end is judged as the clicks are, to 1024
+        //  either side of it, and the tail to fifty milliseconds. The author,
+        //  the same day - "The timestretch doesn't have to be so accurate.
+        //  This is mostly for fine tuning up or down or for sound design."
+        //  The faults this case is for were at the start.
+        CHECK (last + base >= end - 1024);
         CHECK (last + base <= end + 2400);
     }
 
