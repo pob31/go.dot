@@ -56,20 +56,24 @@ if(APPLE)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/Go.dot-Info.plist"
             DESTINATION "${_wfg_contents}" RENAME Info.plist COMPONENT wfg)
     install(FILES "${_wfg_packaging}/macos/launch.sh" DESTINATION "${_wfg_res}" COMPONENT wfg)
+    set(_wfg_res_prefix "${_wfg_res}/")
 else()
+    # The resource prefix is EMPTY here, not "./": CMake 3.31 warns (CMP0177)
+    # on a destination such as ./console that is not already normalized, and
+    # the policy cannot be set NEW on the 3.22 floor.
     set(_wfg_bin .)
-    set(_wfg_res .)
+    set(_wfg_res_prefix "")
 endif()
 
 install(TARGETS wfg RUNTIME DESTINATION "${_wfg_bin}" COMPONENT wfg)
 
 # The web client, for `serve --ui=console` - the launchers pass it, so a tablet
 # on the same network can reach http://<this machine>:<port>/ui beside the window.
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/clients/console/" DESTINATION "${_wfg_res}/console" COMPONENT wfg)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/clients/console/" DESTINATION "${_wfg_res_prefix}console" COMPONENT wfg)
 
 # An empty show to open, because a launcher opens a bundle rather than asking.
 # The window's New show and Save as are how a tester makes their own.
-install(DIRECTORY "${_wfg_packaging}/Untitled/" DESTINATION "${_wfg_res}/Untitled" COMPONENT wfg)
+install(DIRECTORY "${_wfg_packaging}/Untitled/" DESTINATION "${_wfg_res_prefix}Untitled" COMPONENT wfg)
 
 # Beside the app on macOS (the DMG's window), beside the binary elsewhere.
 install(FILES
@@ -103,3 +107,4 @@ unset(_wfg_packaging)
 unset(_wfg_contents)
 unset(_wfg_bin)
 unset(_wfg_res)
+unset(_wfg_res_prefix)
