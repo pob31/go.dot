@@ -6351,6 +6351,168 @@ TEST_CASE ("audio host: a looping range at one and a half wraps where the source
     }
 }
 
+TEST_CASE ("audio host: a looping range whose length is not a whole number of samples wraps without drifting")
+{
+    /*  A range of 47 999.5 samples at 48 kHz, looped at one and a half: a pass
+        is 31 999.67 samples of output, so the click at the range's start comes
+        back on a grid that is not a whole number of samples. Twelve passes in,
+        a loop that wrapped a whole number of samples at a time - 47 999 or
+        48 000 every pass - would be four samples off that grid. The loop sits
+        below the reader of a launched clip (patch 0002), where the file is
+        counted in whole frames, and keeps the range's exact length. */
+    SpeedRig speed;
+    const auto clicks = writeClicks (speed.rig.storage.folder, speed.rate, 2);
+    REQUIRE (clicks.existsAsFile());
+
+    const auto length = 47999.5 / speed.rate;
+    REQUIRE (speed.open (clicks, false, { { 0.0, length, 0 } }));
+    REQUIRE (speed.go (1.5));
+
+    const auto heard = speed.record (0.1, 8.0);
+    const auto* x = heard.getReadPointer (0);
+
+    std::vector<std::int64_t> wraps;
+
+    for (int n = 0; n < heard.getNumSamples(); ++n)
+    {
+        if (std::abs (x[n]) < 0.2f)
+            continue;
+
+        auto peak = n;
+
+        while (n < heard.getNumSamples() && std::abs (x[n]) >= 0.05f)
+        {
+            if (std::abs (x[n]) > std::abs (x[peak]))
+                peak = n;
+
+            ++n;
+        }
+
+        wraps.push_back (speed.startedAt + peak);
+    }
+
+    REQUIRE (wraps.size() >= 12);
+
+    const auto pass = 47999.5 / 1.5;
+
+    for (std::size_t i = 1; i < wraps.size(); ++i)
+    {
+        const auto expected = static_cast<double> (i) * pass;
+        INFO ("wrap " << i << " at " << (wraps[i] - wraps[0]) << " samples after the first, " << expected << " expected");
+        CHECK (std::abs (static_cast<double> (wraps[i] - wraps[0]) - expected) <= 2.0);
+    }
+}
+
+TEST_CASE ("audio host: a stretched range loops with no gap and no click at its wraps")
+{
+    /*  The second second of a 500 Hz tone - five hundred whole periods, so the
+        file itself joins with no step - looped, in timestretch, at three
+        speeds. A pass that started the stretcher again left a gap of about one
+        of its chunks and a click at every wrap (M47, 2026-09-29): the loop was
+        split above the stretcher, so a wrap was a jump back in its source and
+        a new prime. The loop of a launched clip now sits below the stretcher
+        (patch 0002), which reads one unbroken stream through every pass. */
+    constexpr float amplitude = 0.25f;
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("wfg-stretched-loop");
+    const auto tone = writeSineTone (folder, 48000, 500.0, amplitude, 4);
+    REQUIRE (tone.existsAsFile());
+
+    //  The largest step a 500 Hz sine at a quarter of full scale makes.
+    const auto ownStep = static_cast<float> (2.0 * juce::MathConstants<double>::pi * 500.0 / 48000.0 * amplitude);
+
+    for (const auto speed : { 1.0, 1.5, 0.75 })
+    {
+        INFO ("at x" << speed);
+
+        SpeedRig voice;
+        REQUIRE (voice.open (tone, true, { { 1.0, 2.0, 0 } }));
+        REQUIRE (voice.go (speed));
+
+        //  From half a pass in, three passes and more: at least two wraps at every speed.
+        const auto heard = voice.record (0.5 / speed, 3.0);
+        auto quietest = 1.0f;
+
+        for (int from = 0; from + 256 <= heard.getNumSamples(); from += 64)
+            quietest = std::min (quietest, rmsOver (heard, from, from + 256));
+
+        const auto quietestDb = 20.0 * std::log10 (std::max (1.0e-9, static_cast<double> (quietest) / (amplitude / std::sqrt (2.0))));
+        const auto step = largestStep (heard);
+
+        INFO ("the quietest 256 samples at " << quietestDb << " dB re the tone; the largest step "
+              << step << " against the tone's own " << ownStep);
+        CHECK (quietestDb > -3.0);
+        CHECK (step < 1.5f * ownStep);
+    }
+}
+
+TEST_CASE ("M47: a stretched cue's move from one range to the next, against a resampled one's" * doctest::skip())
+{
+    /*  Two ranges end to end - the second and third seconds of a 500 Hz tone -
+        and the boundary placed as the Runner places it: the outgoing range's
+        stop and the incoming one's launch on the same sample. M12 priced that
+        pair at 25 to 33 samples of the outgoing range's decay, in either mode.
+
+        SKIPPED, AND WHY (§22.12, 2026-09-29). The incoming range's stretcher
+        is primed at its launch, on the audio thread, and the readers hand
+        every block over whole - traced block by block. But the prime is a long
+        block (M46: 1 to 5 ms in Release, far more in Debug), and Tracktion's
+        DeviceManager answers a block over 0.98 of its budget by writing the
+        NEXT block as silence without playing it (`setCpuLimitBeforeMuting`,
+        DeviceManager.cpp:1376): a 256-sample gap a block or two after the
+        boundary. The same mute was the "gap of one stretcher chunk" M47 heard
+        at every pass of a stretched loop, when every wrap primed. Whether the
+        mute stays is the author's to say; a prime on the message thread
+        (§22.9) would take the long block away. In Release on the author's
+        machine the mute did not fire: no gap, the step at one the resampled
+        boundary's own, and at one and a half 0.26 against 0.07 - two
+        stretchers spliced, their phases not lined up. Run with --no-skip. */
+    constexpr float amplitude = 0.25f;
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("wfg-stretched-boundary");
+    const auto tone = writeSineTone (folder, 48000, 500.0, amplitude, 4);
+    REQUIRE (tone.existsAsFile());
+
+    for (const auto speed : { 1.0, 1.5 })
+    {
+        float steps[2] {};
+        double quietest[2] {};
+
+        for (const auto stretch : { false, true })
+        {
+            INFO ("at x" << speed << (stretch ? ", in timestretch" : ", in varispeed"));
+
+            SpeedRig voice;
+            REQUIRE (voice.open (tone, stretch, { { 1.0, 2.0, 1 }, { 2.0, 3.0, 1 } }));
+            REQUIRE (voice.go (speed));
+
+            //  Once the first range sounds, as the Runner places a boundary: a
+            //  stop sent to a handle that has not started cancels its launch.
+            voice.runTo (voice.at (0.1));
+            REQUIRE (voice.rig.host.trackPlayState (0, 0).playing);
+
+            const auto boundary = voice.at (1.0 / speed);
+            REQUIRE (voice.rig.host.stopTrackAt (0, 0, voice.rig.host.beatsAtSample (boundary)));
+            REQUIRE (voice.rig.host.launchTrackAt (0, 1, voice.rig.host.beatsAtSample (boundary)));
+
+            //  A quarter of a second either side of the boundary.
+            const auto heard = voice.record (1.0 / speed - 0.25, 0.5);
+            auto quiet = 1.0f;
+
+            for (int from = 0; from + 256 <= heard.getNumSamples(); from += 64)
+                quiet = std::min (quiet, rmsOver (heard, from, from + 256));
+
+            quietest[stretch ? 1 : 0] = 20.0 * std::log10 (std::max (1.0e-9, static_cast<double> (quiet) / (amplitude / std::sqrt (2.0))));
+            steps[stretch ? 1 : 0] = largestStep (heard);
+        }
+
+        MESSAGE ("x" << speed << ": the boundary's largest step " << steps[0] << " resampled, " << steps[1]
+                 << " stretched; the quietest 256 samples " << quietest[0] << " and " << quietest[1] << " dB");
+
+        INFO ("at x" << speed);
+        CHECK (quietest[1] > -3.0);
+        CHECK (steps[1] <= steps[0] * 1.5f);
+    }
+}
+
 TEST_CASE ("audio host: a graph rebuilt in the middle of a ramp keeps its place")
 {
     /*  Tracktion keeps no answer about speed between blocks, so a rebuild
@@ -6621,7 +6783,8 @@ TEST_CASE ("M46: a voice's cost in the audio callback at speed - by mode, speed,
                     CHECK (rt::violations() == 0);
                 }
 
-        //  A stretched loop of a second, played at one: every wrap primes.
+        //  A stretched loop of a second, played at one: every wrap primed, until the
+        //  loop moved below the stretcher (§22.12) - now a wrap is an ordinary block.
         for (const auto block : { 64, 256 })
         {
             SpeedRig voice;

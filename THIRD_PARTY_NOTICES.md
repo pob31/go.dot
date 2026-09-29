@@ -72,7 +72,9 @@ section 5(a):
   one, so a speed does not alias; a stretcher primed for the speed
   it will play at, which its output latency, now reported on its own, says how
   to aim; and a stretcher primed before its file was read primed again when it
-  is first read, so a stretched clip no longer opens on a latency of silence.
+  is first read, so a stretched clip no longer opens on a latency of silence;
+  and a launched clip's loop moved below its resampler and its stretcher, so a
+  stretched loop no longer starts its stretcher again at every pass.
 
 Tracktion Engine vendors several libraries of its own inside
 `modules/3rd_party/` and `modules/tracktion_engine/3rd_party/`. The ones that

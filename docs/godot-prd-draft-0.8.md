@@ -3192,9 +3192,12 @@ DT-EH in §22.1 are the author's to overrule; these are what the work left out:
   draft §22.11).
 - **Speed fades in load-to-time**: the solve reads a cue's own speed, not a fade's.
 - **A stretcher primed on the message thread**, once its file is in the cache and before the launch:
-  M46 measured the prime at 1 to 5 ms on the audio thread, a dropout at blocks of 64.
-- **Timestretch on a cue with ranges without a gap at each pass**, by a loop below the stretcher;
-  `wfg validate` names the gap meanwhile.
+  M46 measured the prime at 1 to 5 ms on the audio thread, a dropout at blocks of 64 - and Tracktion's
+  CPU-overload mute answers a block that long with a block of silence (namespace draft §22.12).
+- ~~**Timestretch on a cue with ranges without a gap at each pass**, by a loop below the stretcher~~ -
+  built 2026-09-29 (the author: "one less artefact to hear complaints about"): a launched clip's loop
+  now sits below its resampler and its stretcher, and a stretched loop passes its wraps with no gap
+  and no click (namespace draft §22.12).
 
 ### 6.10 Protocol implementation order (§3.16)
 
@@ -3303,7 +3306,8 @@ Mackie vs HUI first — first week with the D700.
   loop's every wrap. M47: Lagrange's images are 68 to 78 dB down while a sound stays under Nyquist,
   but above one everything over Nyquist folds back at full level - since filtered, 83 dB down at
   twenty (§22.11); the gate makes no step; a freeze holds its pitch 4 to 7 dB down; a stretched loop
-  has a gap and a click at every pass. Namespace draft §22.10.
+  had a gap and a click at every pass - since its loop sits below the stretcher, none (§22.12).
+  Namespace draft §22.10.
 
 ---
 

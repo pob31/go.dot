@@ -3940,19 +3940,31 @@ namespace wfg::doc
                     }
                 }
 
-                /*  AND TIMESTRETCH ON A CUE WITH RANGES (§22.9, M47): a range is
-                    played by jumping the stretcher to its in-point, which starts
-                    the stretcher again - a gap of a stretcher's block and a click
-                    after the launch and at every pass. Named until the loop sits
-                    below the stretcher; varispeed ranges are seamless. */
+                /*  AND TIMESTRETCH ON A CUE WITH MORE THAN ONE RANGE (§22.12). The
+                    passes of a range are seamless since its loop sits below the
+                    stretcher; but each range is a slot of its own, and the next
+                    one's stretcher is primed as it begins, on the audio thread -
+                    a long block, which Tracktion's overload mute can answer with a
+                    block of silence - and away from speed one the two stretchers
+                    meet out of phase, a click. Varispeed ranges are seamless. */
                 if (node.getType().toString() == "Media"
                       && document.getAttribute ("/godot/cue/" + node[idProperty].toString().toStdString()
-                                                  + "/rateMode").value_or (std::string {}) == "timestretch"
-                      && node.getChildWithName (juce::Identifier ("Range")).isValid())
-                    problems.push_back ("/Show/.../Media[" + node[idProperty].toString().toStdString()
-                                          + "]/@rateMode: timestretch, and the cue plays ranges - a stretcher"
-                                            " starts again at every range and every pass, heard as a short gap"
-                                            " and a click; in varispeed ranges are seamless");
+                                                  + "/rateMode").value_or (std::string {}) == "timestretch")
+                {
+                    auto ranges = 0;
+
+                    for (const auto& child : node)
+                        if (child.hasType (juce::Identifier ("Range")))
+                            ++ranges;
+
+                    if (ranges > 1)
+                        problems.push_back ("/Show/.../Media[" + node[idProperty].toString().toStdString()
+                                              + "]/@rateMode: timestretch, and the cue plays " + std::to_string (ranges)
+                                              + " ranges - each range after the first starts a stretcher of its own,"
+                                                " which on a small block or a busy machine can be heard as a short gap"
+                                                " at the boundary, and away from speed one as a click; the passes of a"
+                                                " range are seamless, and in varispeed so are its boundaries");
+                }
 
                 for (const auto& child : node)
                     visit (child);

@@ -12722,8 +12722,8 @@ Each is a proposal in PRD §6.9, awaiting a yes or a no:
 - Speed fades in load-to-time.
 - A stretcher primed on the message thread, once its file is in the cache and before the launch
   (M46: the prime is 1 to 5 ms on the audio thread, a dropout at blocks of 64).
-- Timestretch on a cue with ranges without a gap at each pass: a loop below the stretcher, so a
-  range's wrap does not start the stretcher again (M47; `wfg validate` names it meanwhile).
+- ~~Timestretch on a cue with ranges without a gap at each pass: a loop below the stretcher, so a
+  range's wrap does not start the stretcher again~~ - built, §22.12.
 
 **Video, when Phase 8 brings it**, presents frames against the audio position (PRD §3.19d), so it
 follows the speed with nothing more to do.
@@ -12859,3 +12859,69 @@ over every frame of the file the speed reads, so its cost grows with the speed: 
 at 48 kHz now costs at most 1.2% of a block (twenty times, blocks of 64), and at 96 kHz up to 4.6%
 at twenty times - about ten times what it cost unfiltered. Affordable for a voice or a few; a room
 full of voices at twenty times at 96 kHz would feel it.
+
+### 22.12 A stretched loop, below the stretcher (2026-09-29)
+
+The author, after §22.11: *"If you manage to fix the click with the looping and timestretch then it's
+one less artefact to hear complaints about."*
+
+**A launched clip's loop now sits below its resampler and its stretcher** (patch 0002,
+`UnrolledLoopReader`). Tracktion looped a beat-based clip above them, in `BeatRangeReader`. A block
+that crossed the loop's end was split, and its second part read from the loop's start: a jump back.
+`TimeStretchReader::setPosition` answers any jump of more than ten samples by resetting its
+stretcher and priming it again, so every pass started the stretcher again. Now:
+
+- **The reader that wraps is the one that reads the file.** Its position is the file's, counted on
+  past the loop's end as if the passes were written out one after another. The resampler and the
+  stretcher above it read one unbroken stream and are never moved back. `BeatRangeReader` passes the
+  source's beats on unwrapped.
+- **It keeps the loop's exact length**, fractions of a frame and all, so it wraps where the beats
+  say, pass after pass. A range of 47 999.5 samples, looped twelve times at one and a half, lands
+  every pass within a sample of its place; a loop that wrapped at whole frames would be four samples
+  off by then. Every pass begins on the loop's first frame, and the fraction falls at its tail.
+- **Up to the loop's end it is the file**, so a stretcher primed at a range's in-point primes on
+  what comes before it, as anywhere else.
+- **Only for a launched clip of one tempo from the loop's start on**, where a beat past the loop's
+  end is the same time past it as a beat inside it. That is every Go.dot cue. Any other clip loops
+  as Tracktion always has.
+- **Varispeed ranges gain as well**: the interpolator and the anti-alias filter (§22.11) run through
+  a wrap instead of starting again at it.
+
+**What the gap was.** Traced block by block, the readers handed every block over whole. The
+silence came from Tracktion's `DeviceManager`. When a block takes more than 0.98 of its budget, it
+writes the next block as silence and does not play it (`setCpuLimitBeforeMuting`, 0.98 by default,
+which Go.dot has never set). A prime is such a block. So the "gap of one stretcher chunk and a
+click" that M47 heard at every pass (§22.10) was a prime at every wrap, and the mute after it. It
+was 256 samples because that was the case's block size, which is also, by coincidence, the
+stretcher's chunk. And because the muted block is not played, everything after it sounds a block
+late.
+
+**Measured.**
+
+- `AudioTests`, "a stretched range loops with no gap and no click at its wraps": a looped second of a
+  500 Hz tone in timestretch, at 1, 1.5 and 0.75.
+  - Before: its quietest 256 samples were silence, and its largest step was 0.16 to 0.44 against the
+    tone's own 0.016.
+  - Now: the quietest 256 samples are 0.13 to 0.23 dB below the tone, and the largest step is the
+    tone's own.
+- M46 (Release): the worst block beside a wrap cost 1.5 to 4 ms. It now costs 35 to 61 us, 0.7 to
+  6.9% of a block of 64 or 256 at 48 or 96 kHz: an ordinary stretcher block.
+
+**What is left, named: the boundary from one range to the next.** Each range is a slot of its own
+(§3.25), and the incoming range's stretcher is primed at its launch, on the audio thread.
+
+- In Release on this machine the mute did not fire, and there is no gap.
+- At one, the boundary steps no further than a resampled one does (M12's decay). At one and a half
+  it steps 0.26, against varispeed's 0.07: two stretchers spliced, their phases not lined up.
+- In Debug the prime is long enough for the mute to fire: a 256-sample gap a block or two after the
+  boundary. M47, "a stretched cue's move from one range to the next", is skipped for that reason.
+- `wfg validate` now names a stretched cue with more than one range, rather than every ranged one.
+
+Two levers, neither pulled. One is the prime on the message thread (§22.9). The other is the mute:
+the question put to the author on 2026-09-27, whether to turn it off, has a second reason now. The
+mute turns a long block into a certain gap, and leaves everything after it a block late.
+
+**For upstream**, a JUCE forum post drafted for the author to send (Tracktion takes no pull
+requests) lists what is Tracktion's own in patch 0002: the Lagrange reader's per-block rounding, the stretcher's prime at speeds other than one, its prime before the file is cached, its
+lost place after a cache miss, a slot rebuilt mid-play restarting its reader, and this loop above
+the stretcher.

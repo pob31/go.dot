@@ -1122,11 +1122,12 @@ TEST_CASE ("document: a fade's two switches, and a speed fade aimed at something
     CHECK (document.validate().empty());
 }
 
-TEST_CASE ("document: timestretch on a cue with ranges is named, and varispeed ranges are not")
+TEST_CASE ("document: timestretch on a cue with more than one range is named, and one range or varispeed is not")
 {
-    /*  Namespace draft §22.9 and M47: a range is played by jumping the stretcher
-        to its in-point, which starts it again - a gap and a click at every
-        pass. A warning, never a refusal: the cue still plays. */
+    /*  Namespace draft §22.12: the passes of a stretched range are seamless
+        since its loop sits below the stretcher, but each further range starts a
+        stretcher of its own at its boundary. A warning, never a refusal: the
+        cue still plays. */
     ShowDocument document;
     const auto list = document.createList ("Main");
     const auto cue = document.createCue (list.id, 0, "media", "Bed");
@@ -1147,6 +1148,9 @@ TEST_CASE ("document: timestretch on a cue with ranges is named, and varispeed r
     CHECK (aboutTheStretch() == 0);
 
     REQUIRE (document.createRange (cue.id, 1.0, 2.0).ok);
+    CHECK (aboutTheStretch() == 0);
+
+    REQUIRE (document.createRange (cue.id, 2.0, 3.0).ok);
     CHECK (aboutTheStretch() == 1);
 
     REQUIRE (document.setAttribute (address + "rateMode", "varispeed").ok);
