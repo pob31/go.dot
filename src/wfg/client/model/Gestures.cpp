@@ -18,6 +18,7 @@
 
 #include <wfg/engine/osc/OscValue.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -191,6 +192,31 @@ namespace wfg::client::gesture
     Event takePress (const std::string& verb, const std::string& channelId)
     {
         return { origin::window, "take." + verb, { osc::Value::string (channelId) } };
+    }
+
+    Event laneArm (const std::string& cueId)
+    {
+        return { origin::window, "lane.arm", { osc::Value::string (cueId) } };
+    }
+
+    Event laneTake (const std::string& stripId)
+    {
+        return { origin::window, "lane.take", { osc::Value::string (stripId) } };
+    }
+
+    Event laneFree()
+    {
+        return { origin::window, "lane.free", {} };
+    }
+
+    Event laneRecord (double fromSeconds)
+    {
+        return { origin::window, "lane.record", { osc::Value::float64 (std::max (fromSeconds, 0.0)) } };
+    }
+
+    Event laneStop()
+    {
+        return { origin::window, "lane.stop", {} };
     }
 
     Event takeKeep (const std::string& channelId, bool asCue, const std::string& afterCue)

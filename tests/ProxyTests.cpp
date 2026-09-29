@@ -401,6 +401,34 @@ TEST_CASE ("proxy: a value written before the child is up is in the region once 
     CHECK (l->resetSeq.load() == 1);
 }
 
+TEST_CASE ("proxy: an insert switched in is reset first, so nothing it last held is heard")
+{
+    /*  Found 2026-09-28: an insert out of the chain is not called, so it keeps
+        whatever it last held - the tail of the last cue through it on this
+        voice, a delay line frozen when it was switched out - and switching it
+        in played that first. The reset goes with the switch, on the edge only:
+        a lane already in has nothing to clear, and one switched out is not
+        called at all. */
+    plugin::ProxyLane lane;
+    VectorRegion region (2, 64, 1);
+    region.bind (lane, 0);
+
+    auto* l = region.lane (0);
+    const auto from = l->resetSeq.load();
+
+    lane.setEnabled (true);
+    CHECK (l->resetSeq.load() == from + 1);
+
+    lane.setEnabled (true);
+    CHECK (l->resetSeq.load() == from + 1);
+
+    lane.setEnabled (false);
+    CHECK (l->resetSeq.load() == from + 1);
+
+    lane.setEnabled (true);
+    CHECK (l->resetSeq.load() == from + 2);
+}
+
 TEST_CASE ("proxy: the deadline rule is the smaller of 250 microseconds and a quarter of the block")
 {
     CHECK (plugin::proxyDeadlineFor (48000, 64, 0) == 250);        // 1333 µs block, a quarter is 333

@@ -23,6 +23,7 @@
 #include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/audio/LooperPlugin.h>
 #include <wfg/engine/audio/ProxyPlugin.h>
+#include <wfg/engine/audio/RateVoice.h>
 #include <wfg/engine/clock/AudioClockSource.h>
 
 /*  juce_core and juce_events are named directly even though tracktion_engine.h
@@ -36,11 +37,14 @@
 */
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <typeinfo>
 #include <utility>
 #include <vector>
@@ -140,6 +144,88 @@ namespace wfg::audio
                 sample-accurate; a fade nobody declared is exactly the kind of
                 thing that makes a join not be. */
             bool autoAddClipEdgeFades() override { return false; }
+
+            /*  A CUE IN VARISPEED IS RESAMPLED, NOT STRETCHED - the question
+                patch 0001 adds to Tracktion (patches/tracktion_engine/, decision
+                DQ, namespace draft §22.3).
+
+                Every slot clip is auto-tempo, and Tracktion hands an auto-tempo
+                clip whose mode is `disabled` the default stretcher. Since
+                Signalsmith is compiled in (§22, DZ) that default is Signalsmith,
+                so without this every cue - those at one included - would go
+                through a stretcher: no longer bit-exact, primed, and its CPU spent
+                for nothing. With it, `disabled` means the resampler, and a cue in
+                timestretch names Signalsmith itself at the arm. */
+            bool autoTempoClipsUseDefaultTimeStretcher() override { return false; }
+        };
+
+        /*  ONE SLOT'S ANSWER TO TRACKTION'S QUESTION ABOUT SPEED (patch 0002,
+            namespace draft §22.3-22.4): how far beyond one-for-one a clip
+            launched at a beat has played, and when it will have played a length
+            of its file. Both are read off the voice's RateClock, in the
+            monotonic beats the launch handles are placed in.
+
+            AT EXACTLY ONE FROM THE LAUNCH ON, the answers are Tracktion's own
+            arithmetic - nought, and `launch + length`, the same doubles - so a
+            cue at one renders bit for bit as it did before there was a speed.
+
+            Where the file was AT the launch is kept here, the first time a
+            launch is asked about: the clock lets go of its past a block at a
+            time, and a clip is asked about its launch for as long as it plays.
+
+            Asked on the audio thread, inside Tracktion's block, twice a block at
+            most. Its own code is ours to judge (PRD §4.2): nothing allocates,
+            locks or throws, and the region says so. */
+        struct SlotSpeed final : te::LaunchHandle::SpeedSource
+        {
+            explicit SlotSpeed (const RateVoice& voiceToRead) noexcept : voice (voiceToRead) {}
+
+            double extraSourceBeats (te::MonotonicBeat launch, tracktion::BeatDuration sinceLaunch) noexcept WFG_AUDIO_THREAD override
+            {
+                const rt::ScopedRealtimeCheck goDotsOwn { rt::Region::ours };
+
+                const auto& clock = voice.clock();
+                const auto at = launch.v.inBeats();
+
+                if (clock.isIdentityFrom (at))
+                    return 0.0;
+
+                const auto since = sinceLaunch.inBeats();
+                return clock.sourceAt (at + since) - sourceAtLaunch (at) - since;
+            }
+
+            std::optional<te::MonotonicBeat> whenSourceHasPlayed (te::MonotonicBeat launch,
+                                                                  tracktion::BeatDuration length) noexcept WFG_AUDIO_THREAD override
+            {
+                const rt::ScopedRealtimeCheck goDotsOwn { rt::Region::ours };
+
+                const auto& clock = voice.clock();
+                const auto at = launch.v.inBeats();
+
+                if (clock.isIdentityFrom (at))
+                    return te::MonotonicBeat { launch.v + length };
+
+                if (const auto when = clock.whenSourceReaches (sourceAtLaunch (at) + length.inBeats()))
+                    return te::MonotonicBeat { tracktion::BeatPosition::fromBeats (*when) };
+
+                return std::nullopt;
+            }
+
+        private:
+            double sourceAtLaunch (double at) noexcept
+            {
+                if (std::bit_cast<std::uint64_t> (at) != std::bit_cast<std::uint64_t> (launchSeen))
+                {
+                    launchSeen = at;
+                    sourceSeen = voice.clock().sourceAt (at);
+                }
+
+                return sourceSeen;
+            }
+
+            const RateVoice& voice;
+            double launchSeen = std::numeric_limits<double>::quiet_NaN();
+            double sourceSeen = 0.0;
         };
 
         /*  Where Tracktion keeps its preferences and cache.
@@ -298,6 +384,8 @@ namespace wfg::audio
             rackShutAt.clear();
             voices = 0;
             handles.clear();
+            slotSpeeds.clear();
+            rateVoices.clear();
             context = nullptr;
 
             /*  THE TAKES, with no graph left to reach them (Phase 9c, §19.2). */
@@ -598,6 +686,34 @@ namespace wfg::audio
                     handles.push_back (std::move (handle));
                 }
             }
+
+            /*  A SPEED FOR EVERY VOICE, and every slot of it reading that speed
+                (namespace draft §22.4): made here, beside the handles, because a
+                handle's speed source is set once, on the message thread, before
+                the graph that asks it runs. A voice starts at one, the identity,
+                so until a cue says otherwise every read is the read it was. */
+            rateVoices.reserve (static_cast<std::size_t> (voices));
+            slotSpeeds.reserve (handles.size());
+
+            for (int track = 0; track < voices; ++track)
+                rateVoices.push_back (std::make_unique<RateVoice>());
+
+            for (std::size_t at = 0; at < handles.size(); ++at)
+            {
+                const auto track = at / static_cast<std::size_t> (editSlots);
+                slotSpeeds.push_back (std::make_unique<SlotSpeed> (*rateVoices[track]));
+
+                if (handles[at] != nullptr)
+                    handles[at]->setSpeedSource (slotSpeeds.back().get());
+            }
+
+            /*  THE FASTEST A STRETCHED CUE CAN GO at this graph's rate: the
+                stretcher takes 256 x speed frames a chunk into a buffer as long
+                as its latency (tracktion_TimeStretch.cpp:937-945), so the limit
+                is that latency over 256, a frame short. */
+            stretchLimit.store (static_cast<double> (te::TimeStretcher::getLatencySamplesForMode (
+                                    te::TimeStretcher::signalsmithDefault, sampleRate, true) - 1) / 256.0,
+                                std::memory_order_relaxed);
 
             beatOffset.store (0.0, std::memory_order_relaxed);
             anchorSample.store (0, std::memory_order_relaxed);
@@ -1113,6 +1229,12 @@ namespace wfg::audio
             eqs.clear();
             plugins.clear();
             handles.clear();
+
+            /*  After the Edit, whose graph could still ask a slot about its
+                speed while it was torn down. */
+            slotSpeeds.clear();
+            rateVoices.clear();
+            stretchLimit.store (0.0, std::memory_order_relaxed);
             context = nullptr;
 
             if (engine != nullptr)
@@ -1183,6 +1305,18 @@ namespace wfg::audio
                 {
                     tap.clear (channel, 0, current.blockSize);
                 }
+            }
+
+            /*  EVERY VOICE'S SPEED, brought up to date before the graph reads
+                it (namespace draft §22.4): the breakpoints the tick thread placed
+                since the last block go into each voice's clock, and what is
+                before this block is let go. Ours, and allocation-free: a fixed
+                queue into a fixed clock. */
+            {
+                const auto blockStartBeat = beatsAtSample (samples.samplesElapsed());
+
+                for (auto& voice : rateVoices)
+                    voice->drain (blockStartBeat);
             }
 
             {
@@ -1336,7 +1470,7 @@ namespace wfg::audio
             into one second, and at one second the cue goes quiet while the
             launch handle still cheerfully reports that it is playing. M1 lost
             exactly the second half of its tone. */
-        static void makeClipPlayAtItsOwnRate (te::WaveAudioClip& clip)
+        static void makeClipPlayAtItsOwnRate (te::WaveAudioClip& clip, bool stretch = false)
         {
             const auto seconds = clip.getSourceLength().inSeconds();
 
@@ -1349,6 +1483,19 @@ namespace wfg::audio
 
             clip.setAutoPitch (false);
             clip.setSpeedRatio (1.0);
+
+            /*  THE MODE IS NAMED, NEVER INHERITED, and it is the cue's
+                `rateMode` (namespace draft §22.2): `disabled` is the resampler -
+                varispeed, the engine behaviour above sees to that - and
+                Signalsmith's default preset is timestretch (decision DZ). It is
+                written on every arm because Tracktion gives a clip created from
+                a loopable file a stretch mode of its own
+                (tracktion_ClipOwner.cpp:291-297). A mode is on Tracktion's
+                restart list, which is why it changes at the arm and never under
+                a sounding cue (DV); writing the value a clip already holds
+                changes nothing and rebuilds nothing. */
+            clip.setTimeStretchMode (stretch ? te::TimeStretcher::signalsmithDefault
+                                             : te::TimeStretcher::disabled);
         }
 
         /*  Points one slot's clip at one file, whole - the Phase 2 arm, now
@@ -1359,7 +1506,7 @@ namespace wfg::audio
             It does not dispatch: the caller does, once, so that arming eight
             slots is one round of pending updates rather than eight. */
         bool pointSlotAtFile (int trackIndex, int slotIndex, const juce::File& file,
-                              double startOffset = 0.0)
+                              double startOffset = 0.0, bool stretch = false)
         {
             auto* clip = clipOn (trackIndex, slotIndex);
 
@@ -1399,7 +1546,7 @@ namespace wfg::audio
                 to the shortened length and the file's declared tempo rises
                 above sixty, Tracktion stretches it, and a cue starting two
                 seconds in would also play back fast. */
-            makeClipPlayAtItsOwnRate (*clip);
+            makeClipPlayAtItsOwnRate (*clip, stretch);
 
             const auto sourceSeconds = clip->getSourceLength().inSeconds();
 
@@ -1470,9 +1617,9 @@ namespace wfg::audio
             At 60 bpm one beat is one second, which is what makes the loop range
             in beats the same number as the range in seconds. */
         bool armRangeInto (int trackIndex, int slotIndex, const juce::File& file,
-                           const AudioHost::RangeSpec& range)
+                           const AudioHost::RangeSpec& range, bool stretch = false)
         {
-            if (! pointSlotAtFile (trackIndex, slotIndex, file))
+            if (! pointSlotAtFile (trackIndex, slotIndex, file, 0.0, stretch))
                 return false;
 
             auto* clip = clipOn (trackIndex, slotIndex);
@@ -1509,11 +1656,12 @@ namespace wfg::audio
             return clip->isLooping();
         }
 
-        bool setTrackSource (int trackIndex, int slotIndex, const std::string& mediaFile)
+        bool setTrackSource (int trackIndex, int slotIndex, const std::string& mediaFile,
+                             bool stretch = false)
         {
             const juce::File file { juce::String (mediaFile) };
 
-            if (! pointSlotAtFile (trackIndex, slotIndex, file))
+            if (! pointSlotAtFile (trackIndex, slotIndex, file, 0.0, stretch))
                 return false;
 
             edit->dispatchPendingUpdatesSynchronously();
@@ -1522,7 +1670,7 @@ namespace wfg::audio
 
         bool setTrackRanges (int trackIndex, const std::string& mediaFile,
                              const std::vector<AudioHost::RangeSpec>& ranges,
-                             double startOffset)
+                             double startOffset, bool stretch)
         {
             const juce::File file { juce::String (mediaFile) };
 
@@ -1576,7 +1724,7 @@ namespace wfg::audio
                 if (slot < static_cast<int> (ranges.size()))
                 {
                     armed = armRangeInto (trackIndex, slot, file,
-                                          ranges[static_cast<std::size_t> (slot)]) && armed;
+                                          ranges[static_cast<std::size_t> (slot)], stretch) && armed;
                     continue;
                 }
 
@@ -1591,7 +1739,7 @@ namespace wfg::audio
                     arm is the only branch that takes it. */
                 if (ranges.empty() && slot == 0)
                 {
-                    armed = pointSlotAtFile (trackIndex, 0, file, startOffset) && armed;
+                    armed = pointSlotAtFile (trackIndex, 0, file, startOffset, stretch) && armed;
                     continue;
                 }
 
@@ -1652,6 +1800,14 @@ namespace wfg::audio
                     return false;
 
             return true;
+        }
+
+        bool isTrackStretched (int trackIndex, int slotIndex) const
+        {
+            const auto* clip = clipOn (trackIndex, slotIndex);
+
+            return clip != nullptr
+                     && clip->getActualTimeStretchMode() != te::TimeStretcher::disabled;
         }
 
         void setTrackRouting (int trackIndex, double levelDb,
@@ -1726,6 +1882,25 @@ namespace wfg::audio
 
             return beatOffset.load (std::memory_order_relaxed)
                      + static_cast<double> (sample) / sampleRate;
+        }
+
+        /*  A breakpoint for a voice's speed, turned from Go.dot's sample into
+            the beat the launches are placed in by the same anchor, and queued
+            for the audio thread (namespace draft §22.4). Tick thread. */
+        bool placeTrackRate (int trackIndex, std::int64_t atSample, double rate) noexcept
+        {
+            if (trackIndex < 0 || trackIndex >= static_cast<int> (rateVoices.size()) || ! (rate >= 0.0))
+                return false;
+
+            return rateVoices[static_cast<std::size_t> (trackIndex)]->post ({ beatsAtSample (atSample), rate });
+        }
+
+        std::uint32_t trackRateLateCount (int trackIndex) const noexcept
+        {
+            if (trackIndex < 0 || trackIndex >= static_cast<int> (rateVoices.size()))
+                return 0;
+
+            return rateVoices[static_cast<std::size_t> (trackIndex)]->lateCount();
         }
 
         bool launchTrackAt (int trackIndex, int slotIndex, double monotonicBeat) noexcept
@@ -2017,6 +2192,17 @@ namespace wfg::audio
         }
 
         std::unique_ptr<te::Engine> engine;
+
+        /*  EVERY VOICE'S SPEED, and every slot's adaptor onto it (namespace
+            draft §22.4): one RateVoice a track, one SlotSpeed a launch handle,
+            in `handles`' order. DECLARED BEFORE `edit` so that they are
+            destroyed after it: a graph still being torn down may ask a slot one
+            last question, and the answer must still be there. Made by buildEdit
+            and let go by stop, like the handles, never while a block runs. */
+        std::vector<std::unique_ptr<RateVoice>> rateVoices;
+        std::vector<std::unique_ptr<SlotSpeed>> slotSpeeds;
+        std::atomic<double> stretchLimit { 0.0 };
+
         std::unique_ptr<te::Edit> edit;
         std::vector<CueMatrix*> matrices;
         std::vector<CueEq*> eqs;
@@ -2445,15 +2631,16 @@ namespace wfg::audio
     AudioHost::NodeIdReport AudioHost::inspectNodeIds() const  { return impl->inspectNodeIds(); }
     int AudioHost::residentClipCount() const { return impl->residentClipCount(); }
 
-    bool AudioHost::setTrackSource (int trackIndex, int slot, const std::string& mediaFile)
+    bool AudioHost::setTrackSource (int trackIndex, int slot, const std::string& mediaFile, bool stretch)
     {
-        return impl->setTrackSource (trackIndex, slot, mediaFile);
+        return impl->setTrackSource (trackIndex, slot, mediaFile, stretch);
     }
 
     bool AudioHost::setTrackRanges (int trackIndex, const std::string& mediaFile,
-                                    const std::vector<RangeSpec>& ranges, double startOffset)
+                                    const std::vector<RangeSpec>& ranges, double startOffset,
+                                    bool stretch)
     {
-        return impl->setTrackRanges (trackIndex, mediaFile, ranges, startOffset);
+        return impl->setTrackRanges (trackIndex, mediaFile, ranges, startOffset, stretch);
     }
 
     int AudioHost::slotCount() const noexcept  { return impl->editSlots; }
@@ -2461,6 +2648,11 @@ namespace wfg::audio
     bool AudioHost::isTrackSourceReady (int trackIndex) const
     {
         return impl->isTrackSourceReady (trackIndex);
+    }
+
+    bool AudioHost::isTrackStretched (int trackIndex, int slot) const
+    {
+        return impl->isTrackStretched (trackIndex, slot);
     }
 
     void AudioHost::setTrackRouting (int trackIndex, double levelDb,
@@ -2497,6 +2689,21 @@ namespace wfg::audio
     bool AudioHost::launchTrackAt (int trackIndex, int slot, double monotonicBeat) noexcept
     {
         return impl->launchTrackAt (trackIndex, slot, monotonicBeat);
+    }
+
+    bool AudioHost::placeTrackRate (int trackIndex, std::int64_t atSample, double rate) noexcept
+    {
+        return impl->placeTrackRate (trackIndex, atSample, rate);
+    }
+
+    std::uint32_t AudioHost::trackRateLateCount (int trackIndex) const noexcept
+    {
+        return impl->trackRateLateCount (trackIndex);
+    }
+
+    double AudioHost::stretchSpeedLimit() const noexcept
+    {
+        return impl->stretchLimit.load (std::memory_order_relaxed);
     }
 
     bool AudioHost::stopTrackAt (int trackIndex, int slot, double monotonicBeat) noexcept

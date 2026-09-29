@@ -75,6 +75,14 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId)> play;
             std::function<void (const std::string& runId)> stop;
             std::function<void (const std::string& runId, double seconds)> seek;
+
+            /*  RECORDING THE LANE FROM A FADER (namespace draft §20.9): arm this
+                cue's lane (empty cancels), let the fader go, start a pass from
+                a second of the file, end it. */
+            std::function<void (const std::string& cueId)> laneArm;
+            std::function<void()> laneFree;
+            std::function<void (double fromSeconds)> laneRecord;
+            std::function<void()> laneStop;
         };
 
         WaveformEditorComponent (const model::Theme&, Actions);
@@ -199,6 +207,23 @@ namespace wfg::client::ui
         double sentAtMs = 0.0;
 
         juce::TextButton transport;
+
+        /*  THE LANE'S REC (namespace draft §20.9), beside the transport: `Rec`
+            arms this cue's lane, `Rec…` waits for a fader to be touched (a
+            click cancels), `● Rec` starts a pass from the playhead once one is
+            taken, `■` stops it - the words say which, never the colour alone
+            (§4.8) - and the ✕ lets the fader go. */
+        juce::TextButton rec;
+        juce::TextButton freeFader;
+        void sayWhatRecDoes();
+        bool laneIsMine() const;
+        int recWidth() const;
+
+        /*  THE RIDE AS IT IS HEARD, drawn over the lane while a pass records -
+            the file's second and the fader's level, a point a pass - until the
+            pass ends and the lane it wrote comes back in the reading. */
+        std::vector<model::LanePoint> trail;
+        void paintTrail (juce::Graphics&, juce::Rectangle<int>);
 
         model::Hit hover;
         model::Hit grabbed;

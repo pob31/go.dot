@@ -25,6 +25,7 @@
 #include <wfg/engine/clock/SampleClock.h>
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -400,8 +401,14 @@ namespace wfg::audio
             which RANGE of the cue this is. Slot nought is the whole file, and
             is what a cue with no ranges plays.
 
+            `stretch` is the cue's `rateMode` (namespace draft §22.2): false
+            resamples, so a speed moves the pitch with it; true time-stretches,
+            so a speed leaves the pitch where it was. Only a speed other than
+            one tells them apart.
+
             False if the index or the file is no good. */
-        bool setTrackSource (int trackIndex, int slot, const std::string& mediaFile);
+        bool setTrackSource (int trackIndex, int slot, const std::string& mediaFile,
+                             bool stretch = false);
 
         /*  Arms a whole cue: its file into as many slots as it has ranges, each
             clip LOOPING its own region, and every slot past them put back on
@@ -432,10 +439,42 @@ namespace wfg::audio
             or past the end of the file is a refusal, asked here for the reason
             a range's bounds are - this is where the file is finally open.
 
+            `stretch` is the cue's mode, as for setTrackSource, and every slot
+            of the cue takes it.
+
             Message thread. One rebuild for the lot, rather than one per range. */
         bool setTrackRanges (int trackIndex, const std::string& mediaFile,
                              const std::vector<RangeSpec>& ranges,
-                             double startOffset = 0.0);
+                             double startOffset = 0.0, bool stretch = false);
+
+        /*  A CUE'S SPEED, PLACED AHEAD (namespace draft §22.4): from the last
+            breakpoint the voice holds, its speed moves in a straight line to
+            `rate` at `atSample` - a speed of one being the file's own. Two calls
+            at one sample make a step. The tick thread places each change a
+            launch horizon ahead, as it places a launch, and the audio thread
+            reads the voice's breakpoints every block, so what a block plays is
+            decided before it plays.
+
+            Every launched slot of the track follows it: a cue's ranges are one
+            voice with one speed. A voice nobody moves is at one, and a cue at
+            one plays exactly as it did before there was a speed.
+
+            Tick thread, lock-free. False when the track has no voice, the rate
+            is below nought, or the queue is full. */
+        bool placeTrackRate (int trackIndex, std::int64_t atSample, double rate) noexcept;
+
+        /*  How many of a track's breakpoints arrived after the moment they were
+            for had played, and were placed at the block instead - the horizon
+            exists so that this stays nought. Any thread. */
+        std::uint32_t trackRateLateCount (int trackIndex) const noexcept;
+
+        /*  The fastest a time-stretched cue can play at this graph's rate:
+            the stretcher takes 256 x speed frames a chunk, into a buffer as
+            long as its latency, so the limit is that latency over 256 - about
+            28 at 48 kHz, but under twenty below about 34 kHz. The Runner holds
+            a stretched cue's speed to it, so both clocks agree. Nought before
+            a graph. Any thread. */
+        double stretchSpeedLimit() const noexcept;
 
         /** How many slots every track was built with: the show's widest cue. */
         int slotCount() const noexcept;
@@ -462,6 +501,16 @@ namespace wfg::audio
             is. A show has a pump thread, so the arm asks once a tick and gets
             on with the tick. Any thread. */
         bool isTrackSourceReady (int trackIndex) const;
+
+        /*  Whether a slot's clip will play through a time-stretcher, asked
+            with the predicate Tracktion builds the graph with. False for a cue
+            in varispeed however many stretchers are compiled in: that is what
+            patch 0001 and the engine behaviour are for (namespace draft
+            §22.3), and a test that asks this is how a build that lost either
+            finds out. False for a slot with no clip.
+
+            Message thread: it reads Tracktion's model. */
+        bool isTrackStretched (int trackIndex, int slot = 0) const;
 
         /*  Points a track's output stage at a set of destinations: absolute
             hardware channels and their gains, plus the cue's level in dB.

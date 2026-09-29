@@ -150,6 +150,10 @@ document would be a row that does not do what the PRD says. It is a proposed
 amendment rather than a deferral, and the engine-side change that would settle it
 is named in the close-out.
 
+*Answered 2026-09-28:* built as a live speed rather than rate at arm, once a patch
+the build applies to Tracktion made a playing clip's speed movable - *Speed:
+varispeed and timestretch on a media cue*, below, and namespace draft §22.
+
 ---
 
 ## Phase 4 — Prepare/commit, solver, allocator · L
@@ -671,6 +675,78 @@ the build departs from the drawing.
 
 **Needs from the author:** judging the vertical law and the gestures by eye (DD), and listening on
 the MADIface.
+
+**Recording a lane from a fader** - *added on 2026-09-28*: *"Could we use a chosen fader to record
+the level curve instead of mouse clicks only?"* §3.10's automation, latch first. Four decisions of
+the author's (**DF**-**DI**, `godot-namespace-draft-0.1.md` §20.9), three against the
+recommendation - a fader taken by touch, the curve's start value, latch - and five of the
+implementer's (DJ-DN).
+
+| Stage | What | Depends on |
+|---|---|---|
+| R.0 | Docs: namespace §20.9, PRD §3.10 and §6.9, this | L.5 |
+| R.1 | The pick: the `surfaces` lane rows, `lane.arm`/`take`/`free`, the taken strip's target, the ride's live door | R.0 |
+| R.2 | The pass: `lane.record`/`stop`, the Runner's recorder, the splice and the thinning, Esc and double Esc | R.1 |
+| R.3 | The hands: the bridge (a touch that takes, the Rec key, the lights) and the virtual panel | R.2 |
+| R.4 | The window: the Rec button's four states, the fader's name, the trail | R.2 |
+| R.5 | `blackbox/lane_record.py`, `logs/lane-record.wfglog`, close-out §20.10 | R.3, R.4 |
+
+**Done when:** a fader touched while a lane waits is taken and flies to the curve's start; a pass
+plays the cue with the fader following the lane; a touch is heard at once and written, held after
+let-go, until the pass stops; the lane holds the ride and one undo takes the pass away; the D700's
+Rec starts and stops it; CI green.
+
+*As built, 2026-09-28:* R.0 `39600af`, R.1-R.2 `447d14d`, R.3-R.4 `7767a52` and R.5 with the
+close-out (namespace §20.10). What the code can show is shown: the pick, the refusals and a pass
+latched and written once (`LaneRecordTests`, `logs/lane-record.wfglog`); a touch that takes and the
+Rec key's pass (`SurfaceBridgeTests`); the panel's take and the window's four states
+(`RunPaneUiTests`); and the whole of it over a real graph - heard, written, undone, replayed
+(`blackbox/lane_record.py`, timing judged off CI). The D700 itself is the bench's.
+
+### Speed: varispeed and timestretch on a media cue · M
+
+*Added on 2026-09-28*, at the author's request: *"We have unfinished work on Varispeed and
+Timestretch. This is a toggle in each media file to change the behaviour of faster or slower
+playback speed. The playback speed can be adjusted from 0.f to 20.f default to 1.f"* - and, the same
+day, fades on the rate *"in either mode"*. Phase 3's one dropped line (PR 3.10), built live rather
+than at arm.
+
+**Three decisions** are the author's (`godot-namespace-draft-0.1.md` §22.1), one against the
+recommendation:
+- **DQ**: Tracktion is changed by a patch the build applies, not a fork.
+- **DR**: timestretch freezes at nought.
+- **DS**: the fade cue gains a speed.
+
+Fifteen more are the implementer's (DT-EH). Not a phase: it sits here because it follows the lanes
+in time, and no later phase is renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| S.0 | Docs: namespace §22, PRD §3.24, §3.25, §6.9 and §6.11, this | - |
+| S.1 | The patch mechanism (`patches/tracktion_engine/`, `cmake/WfgTracktionPatches.cmake`, `te-patches.py`, `check-pins` (g)), patch 0001, Signalsmith switched on - no change in behaviour | S.0 |
+| S.2 | Patch 0002 (a launched clip's speed), `RateClock`, `RateVoice`, the slot adaptors, heard through a real graph | S.1 |
+| S.3 | The rows, the Runner's clock (playhead, lane, ranges), the wiring, the inspector's two rows | S.2 |
+| S.4 | Speed fades: the fade's switches, per-parameter takeover, Esc, the solver's `levelOn` | S.3 |
+| S.5 | The window: the running pane's `×`, the head row, the dial's semitone law, the page | S.3 |
+| S.6 | The list, the walk, the timeline and load-to-time at the cue's own speed | S.3 |
+| S.7 | `blackbox/rate_speed.py`, `logs/rate.wfglog`, M14, M46, M47 and the close-out | S.4-S.6 |
+
+**Done when:** a media cue plays at any speed from nought to twenty in either mode, typed, dialled or
+faded while it sounds. Varispeed's pitch moves and timestretch's holds; nought is silence in one mode
+and a freeze in the other. At one, every render is bit-identical to the day before. The playhead, a
+level lane and a looping range follow the file at its speed, and one fade moves the level, the speed
+or both. CI is green on fresh checkouts with the patch applied by the build.
+
+**Needs from the author:** listening at S.2 (tape stop, freeze, 2× both ways), before any row exists;
+the D700 dial's semitone law; a Mac mini run.
+
+**Built 2026-09-29, S.0-S.7** (namespace draft §22.10). The measurements found two faults in
+Tracktion's stretcher, mended in patch 0002, and left three things named and proposed rather than
+built: a stretched launch's prime costs 1 to 5 ms on the audio thread (a dropout at blocks of 64,
+so timestretch wants 256 or more until it primes on the message thread); a stretched cue with ranges
+had a short gap and a click at every pass - since mended, the loop moved below the stretcher
+(namespace draft §22.12); and above one Lagrange aliased what the speed lifts past Nyquist at full
+level - since filtered, the author's way (namespace draft §22.11).
 
 ---
 

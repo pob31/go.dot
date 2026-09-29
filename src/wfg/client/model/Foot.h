@@ -52,6 +52,7 @@
 #include <wfg/client/model/Lane.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Take.h>
 #include <wfg/client/model/Timeline.h>
 
@@ -89,6 +90,12 @@ namespace wfg::client::model
         double fileLength = 0.0; ///< the cue's `duration`, or nought when unknown
         double startOffset = 0.0;
 
+        /*  THE SPEED THE CUE PLAYS AT AND ITS MODE (namespace draft §22.7), as
+            the document says them: the head row carries both, since the clock
+            beside them counts the file's seconds and not the room's. */
+        double rate = 1.0;
+        std::string rateMode;
+
         std::vector<RangeRow> ranges;
 
         /*  THE CUE'S LEVEL LANE, drawn over the waveform (namespace draft
@@ -96,6 +103,10 @@ namespace wfg::client::model
             the lane may be grabbed, the lane being a decision the lock keeps. */
         std::vector<LanePoint> lane;
         bool locked = false;
+
+        /*  AND A LANE BEING RECORDED FROM A FADER (namespace draft §20.9) -
+            whichever cue it is for, so the waveform can say it is another's. */
+        LaneRecordReading laneRecord;
 
         /*  THE MIX CHANNELS AND WHAT THIS CUE SENDS INTO THEM, filled only
             when the sends are what is open. `cueLevel` is the cue's own

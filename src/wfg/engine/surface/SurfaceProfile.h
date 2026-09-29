@@ -209,6 +209,16 @@ namespace wfg::surface
     inline constexpr double dialCoarseSeconds = 1.0;
     inline constexpr double dialCoarseFromSeconds = 10.0;
 
+    /*  THE MASTER DIAL'S DETENT on a speed (namespace draft §22.7, decision
+        EF): a semitone, along the equal-tempered grid, so varispeed's steps
+        are musical and twelve detents are an octave. The grid's lowest step
+        is `dialLowestSemitone`, 2^(-52/12) - about 0.05, where a tape has as
+        good as stopped - and the next detent down is nought. A speed is
+        written to `dialSpeedFigures` significant figures, which keeps it
+        within a hundredth of a semitone of the grid and readable in a box. */
+    inline constexpr int dialLowestSemitone = -52;
+    inline constexpr int dialSpeedFigures = 4;
+
     /*  A LOOP POINT'S DETENT on the Loop page (Phase 9c, namespace draft
         §19.7): ten milliseconds, fine enough to find a downbeat by ear, and
         fifty while the hand spins - `loopCoarseFromDetents` or more arriving

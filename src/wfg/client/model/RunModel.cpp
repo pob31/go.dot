@@ -484,6 +484,9 @@ namespace wfg::client::model
                     row.rangeIteration = static_cast<int> (*pass);
                 }
 
+                if (const auto speed = osc::parseDouble (at (snapshot, id, "rate")); speed.has_value())
+                    row.rate = *speed;
+
                 /*  The wait it is IN, which is the only one worth a bar: the
                     two are the same question from where an operator sits, and
                     the state node is what tells them apart. */

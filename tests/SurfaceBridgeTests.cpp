@@ -42,6 +42,7 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveRows.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -895,6 +896,93 @@ TEST_CASE ("surface bridge: a touch holds the strip's target, and reaches the qu
     desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x40 });
     desk.tickOnce();
     CHECK (desk.submitted.empty());
+}
+
+TEST_CASE ("surface bridge: while a lane waits a touch takes the fader, and with it taken Rec runs the pass")
+{
+    /*  Namespace draft §20.9. DF: the first fader touched while a lane waits
+        is taken for it, and that touch holds nothing. DI: with a fader taken
+        the transport Rec starts and stops the pass, its light shows it, and
+        the taken strip's own REC light is lit while it records. What the
+        bridge ASKS is asserted - the lane's commands are the engine's. */
+    Desk desk;
+    desk.forward = false;
+
+    cue::LaneTable lanes;
+    desk.parameters.setLanes (&lanes);
+
+    const auto mcu = desk.makeSurface ("mcu", "Desk");
+    const auto& strips = desk.strips[mcu];
+    const auto list = desk.document.createList ("Sound").id;
+    const auto bed = desk.document.createCue (list, 0, "media", "Bed").id;
+
+    desk.declare ({ desk.spec (mcu, "mcu", { "PORTMCU1" }) }, { { "PORTMCU1", plugged ("Desk port") } });
+    desk.ticks (3);
+
+    //  A LANE WAITS: a finger on fader two takes it, and holds nothing.
+    lanes.arm (bed);
+    desk.tickOnce();
+    desk.clear();
+
+    desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x7f });
+    desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x40 });
+    desk.tickOnce();
+
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted[0].command == "lane.take");
+    REQUIRE (desk.submitted[0].args.size() == 1u);
+    CHECK (desk.submitted[0].args[0].getString() == strips[1]);
+    CHECK (desk.touches.empty());
+
+    for (const auto& event : desk.submitted)
+        CHECK (event.command != "node.touch");
+
+    //  TAKEN: the strip rides the lane's node, and the hand lets go of nothing it did not hold.
+    lanes.take (strips[1]);
+    desk.clear();
+    desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x00 });
+    desk.ticks (2);
+
+    CHECK (desk.published ("/godot/slot/" + strips[1] + "/target") == "/godot/surface/laneRide");
+
+    for (const auto& event : desk.submitted)
+        CHECK (event.command != "node.release");
+
+    //  REC STARTS THE PASS.
+    desk.clear();
+    desk.arrive ("PORTMCU1", { 0x90, 0x5f, 0x7f });
+    desk.arrive ("PORTMCU1", { 0x90, 0x5f, 0x00 });
+    desk.tickOnce();
+
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted[0].command == "lane.record");
+
+    //  THE PASS RUNNING: Rec's light and the strip's REC light are lit.
+    lanes.startPass ("RN000001");
+    desk.clear();
+    desk.ticks (2);
+
+    const auto lit = [&desk] (int note)
+    {
+        for (const auto& message : desk.sink.sent)
+            if (message.bytes.size() == 3 && message.bytes[0] == 0x90 && message.bytes[1] == note
+                  && message.bytes[2] == 0x7f)
+                return true;
+
+        return false;
+    };
+
+    CHECK (lit (0x5f));
+    CHECK (lit (0x01));     // strip two's REC
+
+    //  AND REC AGAIN STOPS IT.
+    desk.clear();
+    desk.arrive ("PORTMCU1", { 0x90, 0x5f, 0x7f });
+    desk.arrive ("PORTMCU1", { 0x90, 0x5f, 0x00 });
+    desk.tickOnce();
+
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted[0].command == "lane.stop");
 }
 
 TEST_CASE ("surface bridge: the V-Pot press is a sampler strip's gate, and puts a DCA back to nought")

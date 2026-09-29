@@ -28,9 +28,28 @@ namespace wfg::cue
 {
     namespace
     {
-        /*  What a media cue's own material lasts, or nothing when the document
-            does not say. The same arithmetic the walk does, asked of one cue
-            rather than of a chain. */
+        /*  THE SPEED A MEDIA CUE PLAYS AT, as its document says (namespace draft
+            §22.5, decision EE): a second on the clock is that many seconds of
+            the file. A speed FADE is not solved - load-to-time puts a cue whose
+            speed was faded where its own speed would have taken it, a named
+            limitation. */
+        double speedOf (const Reader& read, const juce::ValueTree& cue)
+        {
+            const auto speed = read.number (cue, "media", "rate");
+            return std::isfinite (speed) ? std::clamp (speed, 0.0, 20.0) : 1.0;
+        }
+
+        /*  Seconds of the file as seconds on the clock, at that speed: for
+            ever at nought, which is a length the show KNOWS - not the unknown
+            one a file this build cannot read has. */
+        double onTheClock (double fileSeconds, double speed)
+        {
+            return speed > 0.0 ? fileSeconds / speed : std::numeric_limits<double>::infinity();
+        }
+
+        /*  What a media cue's own material lasts on the clock, or nothing when
+            the document does not say. The same arithmetic the walk does, asked
+            of one cue rather than of a chain. */
         std::optional<double> materialOf (const Reader& read, const juce::ValueTree& cue,
                                           const std::map<std::string, double>* durations)
         {
@@ -59,7 +78,7 @@ namespace wfg::cue
             }
 
             if (anyRange)
-                return total;
+                return onTheClock (total, speedOf (read, cue));
 
             if (durations == nullptr)
                 return std::nullopt;
@@ -70,7 +89,7 @@ namespace wfg::cue
                 return std::nullopt;
 
             const auto span = found->second - read.number (cue, "media", "startOffset");
-            return span > 0.0 ? std::optional<double> (span) : std::nullopt;
+            return span > 0.0 ? std::optional<double> (onTheClock (span, speedOf (read, cue))) : std::nullopt;
         }
 
         /*  Which range a media cue is in `offset` seconds after it started, and
@@ -83,8 +102,12 @@ namespace wfg::cue
         void placeInRanges (const Reader& read, const juce::ValueTree& cue, double offset,
                             PlannedRun& out, std::vector<Confusion>& confused)
         {
+            /*  `offset` IS THE CLOCK'S, seconds since the cue started, and the
+                file has moved its own speed times as far (§22.5). */
+            const auto progress = offset * speedOf (read, cue);
+
             auto index = 0;
-            auto remaining = offset;
+            auto remaining = progress;
 
             for (const auto& child : cue)
             {
@@ -137,9 +160,14 @@ namespace wfg::cue
             /*  Past the end of every range: the cue is over, and the caller has
                 already decided it is live, so it sits at the last instant it
                 had. */
+            /*  AND A CUE WITH NO RANGES IS WHERE ITS FILE HAS GOT TO, counted
+                from where the cue starts in it. The arm takes a run's offset as
+                a place in the FILE (`requestArmOn`), and until 2026-09-29 this
+                handed it the seconds since the cue began - so a jump into a cue
+                that starts two seconds into its file landed two seconds early. */
             out.range = index > 0 ? index - 1 : -1;
             out.pass = 1;
-            out.offset = offset;
+            out.offset = index > 0 ? progress : read.number (cue, "media", "startOffset") + progress;
         }
 
         //======================================================================
@@ -484,6 +512,13 @@ namespace wfg::cue
             if (entry.element != "Fade" || ! read.flag (entry.node, "cue", "enabled"))
                 continue;
 
+            /*  A FADE THAT LEAVES THE LEVEL ALONE trims nothing (namespace
+                draft §22.6): read as a level, a fade that moves only the speed
+                would be a fade to its `level`'s default, silence. Its speed is
+                not solved (EE). */
+            if (! read.flag (entry.node, "fade", "levelOn"))
+                continue;
+
             const auto targetCue = read.text (entry.node, "fade", "target");
 
             if (targetCue.empty())
@@ -730,7 +765,11 @@ namespace wfg::cue
                     happened inside it: a fade three seconds into six has moved
                     its target half of the way. Linear, which is the shape a
                     reading can promise without the curve; the run that is
-                    built from this plays the real one. */
+                    built from this plays the real one. A fade that leaves the
+                    level alone trims nothing, as above. */
+                if (! read.flag (entry->node, "fade", "levelOn"))
+                    continue;
+
                 const auto targetCue = read.text (entry->node, "fade", "target");
                 const auto cue = document.findById (targetCue);
 

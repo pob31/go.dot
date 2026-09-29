@@ -65,6 +65,34 @@ namespace wfg::surface
             return std::round (value / step) * step;
         }
 
+        /*  A SPEED TURNED A SEMITONE A DETENT (namespace draft §22.7, EF),
+            along the equal-tempered grid, with nought below its lowest step: a
+            turn down past that step lands on nought, a turn up from nought
+            lands on it. A speed typed off the grid - or kept to four figures,
+            which is a hair off it - joins the grid at the first detent, on the
+            step the turn meets first, so no detent is ever lost to a rounding. */
+        double speedTurned (double value, int steps, double minimum, double maximum) noexcept
+        {
+            const auto lowest = static_cast<double> (dialLowestSemitone);
+            const auto at = value > 0.0 ? 12.0 * std::log2 (value) : lowest - 1.0;
+            const auto nearest = std::round (at);
+
+            auto semitone = nearest + static_cast<double> (steps);
+
+            if (std::abs (at - nearest) > 0.02)
+                semitone = (steps > 0 ? std::ceil (at) : std::floor (at))
+                             + static_cast<double> (steps > 0 ? steps - 1 : steps + 1);
+
+            if (semitone < lowest)
+                return std::clamp (0.0, minimum, maximum);
+
+            const auto speed = std::exp2 (semitone / 12.0);
+            const auto scale = std::pow (10.0, static_cast<double> (dialSpeedFigures - 1)
+                                                 - std::floor (std::log10 (speed)));
+
+            return std::clamp (std::round (speed * scale) / scale, minimum, maximum);
+        }
+
         /*  Where a value stands between its ends, nought to one: evenly in
             ratio for a frequency and a width, evenly in decibels for a gain,
             along the fader for a level. */
@@ -271,6 +299,12 @@ namespace wfg::surface
 
             return std::clamp (std::max (at, 0.0), low, high);
         }
+
+        /*  A SPEED, the unit `x`: a semitone a detent (EF). Its range starts
+            at nought, which no law in ratios can reach and the linear one
+            below would cross the musical range of in six detents. */
+        if (range.unit == "x")
+            return speedTurned (value, steps, low, high);
 
         /*  A WIDTH, or anything else that spans a hundredfold with no unit: in
             ratios, as a band's Q turns. */

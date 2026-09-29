@@ -515,6 +515,72 @@ TEST_CASE ("show settings UI: the Rack tab makes channels, and says each chain's
     CHECK (button (*page, "Restart")->isVisible());
 }
 
+TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs and the panic fade")
+{
+    /*  Author, 2026-09-28: "In the show settings, there should be a 'time
+        between' Go's and a 'Panic' fade duration". Two numbers, each a
+        `node.set` that lands at once - nothing on the tab waits for Apply. */
+    Rig rig;
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    const auto names = tabs->getTabNames();
+    REQUIRE (names.contains ("Playback"));
+    CHECK (names.indexOf ("Playback") == names.size() - 1);
+    tabs->setCurrentTabIndex (names.indexOf ("Playback"));
+
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    std::vector<juce::TextEditor*> boxes;
+    std::function<void (juce::Component&)> collect = [&] (juce::Component& at)
+    {
+        if (auto* box = dynamic_cast<juce::TextEditor*> (&at))
+            boxes.push_back (box);
+
+        for (auto* child : at.getChildren())
+            collect (*child);
+    };
+    collect (*page);
+    REQUIRE (boxes.size() == 2u);
+
+    auto* between = boxes[0];
+    auto* fade = boxes[1];
+
+    //  What a show that says nothing has: half a second, and one.
+    CHECK (between->getText().getDoubleValue() == doctest::Approx (0.5));
+    CHECK (fade->getText().getDoubleValue() == doctest::Approx (1.0));
+
+    //  A comma is a decimal point, as a French booth types it.
+    between->setText ("0,4", juce::dontSendNotification);
+    between->onReturnKey();
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent.back().command == "node.set");
+    CHECK (rig.sent.back().args[0].getString() == "/godot/list/goDebounce");
+    CHECK (rig.sent.back().args[1].getString() == "0.4");
+
+    fade->setText ("2.5", juce::dontSendNotification);
+    fade->onReturnKey();
+    REQUIRE (rig.sent.size() == 2u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/audio/panicFade");
+    CHECK (rig.sent.back().args[1].getString() == "2.5");
+
+    //  The value it already has is not an edit.
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "2.5").ok);
+    panel.refresh (*rig.publish());
+    fade->onFocusLost();
+    CHECK (rig.sent.size() == 2u);
+
+    //  Locked, neither can be typed into.
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (between->isEnabled());
+    CHECK_FALSE (fade->isEnabled());
+}
+
 //==============================================================================
 /*  A ROW'S NAME CAN CHANGE NOW, AND THE PANEL HAS TO FOLLOW IT.
 

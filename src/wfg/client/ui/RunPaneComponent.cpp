@@ -16,6 +16,7 @@
 
 #include <wfg/client/ui/RunPaneComponent.h>
 
+#include <wfg/client/model/Text.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/audio/Timbre.h>
 
@@ -814,8 +815,14 @@ namespace wfg::client::ui
             line, so the name keeps the room it is read by. */
         /*  AND A MIC RUN'S (Phase 9b): the channel it is on, or that it waits
             for one or rings out - in the same place, by the same rule. */
-        if (const auto& beside = entry.samplerWords.empty() ? entry.liveWords : entry.samplerWords;
-            ! beside.empty())
+        /*  AND A SPEED THAT IS NOT ONE (namespace draft §22.7), after
+            whatever else the run says: "×0.5". */
+        auto beside = entry.samplerWords.empty() ? entry.liveWords : entry.samplerWords;
+
+        if (const auto speed = model::speedText (entry.rate); ! speed.empty())
+            beside = beside.empty() ? speed : beside + " \xc2\xb7 " + speed;
+
+        if (! beside.empty())
         {
             const auto said = juce::String (beside);
 

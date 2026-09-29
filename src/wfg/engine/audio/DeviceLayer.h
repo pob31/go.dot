@@ -59,6 +59,7 @@
 namespace juce
 {
     class AudioDeviceManager;
+    class AudioIODeviceType;
 }
 
 namespace wfg::audio
@@ -160,12 +161,43 @@ namespace wfg::audio
         const std::string& availableBufferSizes() const noexcept;
         void setOutputTest (const OutputTestSettings&) noexcept;
 
+        /*  WHAT AN OUTAGE HAS COME TO (PRD §6.2). `ready`: the interface is
+            back on the clock the show ran on, steady, and the paused show may
+            go on. `moved`: the same interface is back and steady on ANOTHER
+            clock - a rate, block or channel count it was asked to give up and
+            would not - at `sampleRate` / `blockSize`, and the show can only
+            follow it (`followClock`). */
+        struct Recovery
+        {
+            bool ready = false;
+            bool moved = false;
+            int sampleRate = 0;
+            int blockSize = 0;
+        };
+
         // Reopen only the original hardware, retaining the graph and its clock.
         // serviceRecovery is message-thread work; the other two use atomics.
-        bool serviceRecovery();
+        Recovery serviceRecovery();
         void reconnect();
         bool recoveryPaused() const noexcept;
         bool resumeConnection() noexcept;
+
+        /*  THE SHOW FOLLOWS A MOVED CLOCK, on the interface as it runs now:
+            the engine brought up again on the rate, block and channels the
+            device insists on, with `request`'s graph and patches, without
+            closing the device - a Dante interface that has just settled on a
+            new domain is not asked to do it twice. Message thread.
+
+            `nothing` when there is no moved clock to follow (it went away
+            again, or came back as it was), and the paused show is left as it
+            stands; `failed` with `lastError` when the engine would not come
+            up on it, and the device is closed. */
+        enum class Follow { followed, nothing, failed };
+        Follow followClock (const Request& request);
+
+        /*  A device type the platform does not provide, offered beside the
+            ones it does. For tests: an interface whose clock they can move. */
+        void addDeviceType (std::unique_ptr<juce::AudioIODeviceType>);
 
         AudioHost& host() noexcept;
 

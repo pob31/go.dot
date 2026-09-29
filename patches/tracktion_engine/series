@@ -1,0 +1,5 @@
+# Go.dot's changes to Tracktion Engine, applied in this order by the build
+# (cmake/WfgTracktionPatches.cmake) and by scripts/te-patches.py.
+# One file name per line; a line starting with # is a comment.
+0001-auto-tempo-clips-may-resample.patch
+0002-launched-clip-speed.patch

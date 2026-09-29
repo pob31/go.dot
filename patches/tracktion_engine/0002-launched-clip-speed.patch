@@ -1,0 +1,1322 @@
+Go.dot patch 0002 for Tracktion Engine: a launched clip's speed, which can change while it plays.
+
+A clip in a launcher slot plays its source one-for-one with the Edit's beats:
+every block its wave node is told which stretch of the file the block's beats
+cover and is moved there, so a speed given to the resampler alone would be
+undone at the next block. And its slot ends it at "launch + length" on the beat
+grid. Go.dot's media cues need a speed from nought to twenty that moves while
+they sound (namespace draft section 22).
+
+This adds LaunchHandle::SpeedSource, an interface the host implements and sets
+on a clip's handle, asked on the audio thread two questions it answers from
+nothing but its arguments and what the host has placed: how far beyond
+one-for-one a clip launched at a beat has played, and when it will have played
+a length of its source. Tracktion keeps no answer between blocks, so a graph
+rebuilt in the middle of a change of speed needs nothing carried across it.
+
+- WaveNodeRealTime reads the stretch of source the speed says; Tracktion's own
+  per-block ratio then drives its resampler or its time-stretcher.
+- SlotControlNode ends a clip where its SOURCE has played the clip's length,
+  and a slot rebuilt while its clip plays carries on playing it: a fresh slot
+  told its reader the playhead had jumped, which at any ratio but one is a
+  jump of a fraction of a sample - a faint tick at every arm of another cue.
+- A resampled read is faded to silence as its speed nears nought (full at 0.05,
+  silent at 0.01, Tracktion's own tape-stop and slowest-clip numbers) and not
+  read at all below 0.01; a stretched read at nought is fed nothing and keeps
+  sounding what the stretcher holds, a freeze.
+- TimeStretchReader is told nought as a very large stretch rather than a
+  division by nought, and primes at speed one - its prime counts output frames
+  as input frames, which holds only at one - AIMED for the speed it will play
+  at. A stretcher's lag, in input samples, is its input latency plus the speed
+  times its output latency (Signalsmith's own outputSeekLength), so one primed
+  at one and played at another speed is (1 - speed) x its output latency out
+  of place in its source: 95 ms early at half the speed, 47 ms late at twice.
+  So TimeStretcher reports its output latency apart (nought for a stretcher
+  that does not know it, which is primed as before), and the prime aims that
+  much earlier, or later above one.
+- Both stretch readers prime again at their first read when the prime they
+  were built with fell short. They are built with the graph, while the file
+  cache may still be loading the file, and a real-time cache read does not
+  wait: the prime read silence, and every stretched clip opened on a whole
+  latency of nothing - 150 ms at 48 kHz - with its file's first moments lost.
+  A stretcher whose file was there primes once, as before. Both this and the
+  aim were found by M14, 2026-09-29.
+- And the plain stretch reader keeps time through a file-cache miss, as a
+  resampled read does: a real-time cache read does not wait, and fails
+  whenever the cache's own thread holds the reader, so it feeds silence for
+  what the cache could not hand over and carries on. It used to give up the
+  block and hold its place - every later moment a chunk late, and a prime of
+  dozens of reads failing whole and beginning again the next block (10 to
+  60 ms late on the CI runners). Only the prime it is built with stays strict.
+- Above one, the Lagrange resampler low-passes the file before it interpolates
+  (the author, 2026-09-29: "filter out the high frequency content"): an
+  eighth-order Butterworth, four trapezoidal state-variable stages whose cutoff
+  follows the speed, at 0.4 of the source's frequencies over the ratio. The
+  interpolator filters nothing, so at twenty a 5 kHz tone came back as 4 kHz at
+  full level (M47); now -83 dB. At one and below the filter is not there, so a
+  read at one is the same doubles as ever; crossing one it is blended in and
+  out over 1024 source frames, and its state is kept where the interpolator
+  stopped consuming, since what it did not consume is read again.
+- A launched clip's loop sits below its resampler and its stretcher, where
+  the file is read (UnrolledLoopReader), instead of above them in
+  BeatRangeReader. Above, every pass was a jump back in the source: a
+  stretcher was reset and primed again at each wrap - a gap of about one of
+  its chunks, a click, and 1.5 to 4 ms of priming on the audio thread (M46,
+  M47) - and a resampler lost its interpolator's history. The reader below
+  counts on past the loop's end and wraps only where it reads, at the loop's
+  exact length so it does not drift, every pass starting on the loop's first
+  frame; BeatRangeReader passes the source's beats on unwrapped. Only for a
+  file of one tempo from the loop's start on (the author, 2026-09-29: "one
+  less artefact to hear complaints about").
+- The Lagrange resampler takes a read too large for the scratch pool or the
+  file cache in halves, and is given the EXACT ratio, putting back whatever
+  the interpolator did not consume. It was fed a whole number of frames a
+  block, so at any ratio that is not one - a speed that moves, a file at
+  another sample rate - the file position drifted until setPosition's
+  one-sample tolerance reset the interpolator: a small click every few blocks.
+  And setPosition moves the file only on a jump, judged against where the
+  reader exactly is - moved to the rounded request every block, it handed the
+  interpolator a frame twice or skipped one, and judged against the file's
+  whole-frame position it reset whenever a moving ratio moved the part of a
+  frame the interpolator had pending.
+
+With no speed source, or one at exactly one, every read is the same doubles as
+before. Each file it touches carries a notice that Go.dot modified it (GPL-3,
+section 5(a)).
+
+Applied by Go.dot's build, cmake/WfgTracktionPatches.cmake, in the order
+patches/tracktion_engine/series gives; refreshed from the working tree with
+scripts/te-patches.py refresh, which keeps this header. Against Tracktion
+Engine 13b5132 (2026-09-23). Namespace draft section 22.3, decisions DQ-DX.
+
+diff --git a/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h b/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h
+index 264346b5f0c..c20954b804a 100644
+--- a/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h
++++ b/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h
+@@ -74,6 +74,54 @@ public:
+     /** Moves the playhead by a given number of beats. */
+     void nudge (BeatDuration);
+ 
++    //==============================================================================
++    /** MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++        patches/tracktion_engine/0002-launched-clip-speed.patch, which Go.dot's build
++        applies to this Tracktion Engine checkout. This interface is Go.dot's addition.
++
++        A speed for a launched clip that can change while the clip plays. Without one, a
++        launched clip plays its source one-for-one with the Edit's beats, as it always
++        has. With one, the clip's WaveNodeRealTime reads the stretch of source the speed
++        says - Tracktion's own per-block ratio then drives its resampler, or its
++        time-stretcher, from that - and its SlotControlNode ends it where the SOURCE has
++        played the clip's length rather than where the Edit has.
++
++        Both questions are asked on the audio thread, once or twice a block, and must not
++        block, allocate or throw. Tracktion keeps no answer between blocks, so a graph
++        rebuilt in the middle of a change of speed needs nothing carried across it.
++    */
++    struct SpeedSource
++    {
++        virtual ~SpeedSource() = default;
++
++        /** How many source beats BEYOND one-for-one a clip launched at `launch` has
++            played, `sinceLaunch` Edit beats after its launch. Zero at zero, continuous,
++            and never below -sinceLaunch: a source never plays backwards.
++            [[ audio_thread ]]
++        */
++        virtual double extraSourceBeats (MonotonicBeat launch, BeatDuration sinceLaunch) noexcept = 0;
++
++        /** When a clip launched at `launch` will have played `source` beats of its
++            source, or nullopt if, at the speeds known now, it will not.
++            [[ audio_thread ]]
++        */
++        virtual std::optional<MonotonicBeat> whenSourceHasPlayed (MonotonicBeat launch,
++                                                                  BeatDuration source) noexcept = 0;
++    };
++
++    /** Sets the speed this clip plays at, or nullptr for one-for-one. The source must
++        outlive every graph built with this handle. Message thread. */
++    void setSpeedSource (SpeedSource* source) noexcept
++    {
++        speedSource.store (source, std::memory_order_release);
++    }
++
++    /** The speed source, or nullptr. [[ audio_thread ]] */
++    SpeedSource* getSpeedSource() const noexcept
++    {
++        return speedSource.load (std::memory_order_acquire);
++    }
++
+     //==============================================================================
+     /** Represents two beat ranges where the play state can be different in each. */
+     struct SplitStatus
+@@ -151,6 +199,11 @@ private:
+     //==============================================================================
+     // audio-write/read, message-read/write
+     std::atomic<double> nudgeBeats { 0.0 };
++
++    //==============================================================================
++    // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): message-write, audio-read. A copy
++    // of a handle starts with none - the copy constructor copies the played state only.
++    std::atomic<SpeedSource*> speedSource { nullptr };
+ };
+ 
+ } // namespace tracktion::inline engine
+diff --git a/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
+index 90ee2402c5c..fef637df9bd 100644
+--- a/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
++++ b/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
+@@ -12,6 +12,23 @@
+ 
+ namespace tracktion::inline engine {
+ 
++namespace
++{
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++    // patches/tracktion_engine/0002-launched-clip-speed.patch: where a launched clip's
++    // own stop falls - `stopDuration` of its SOURCE after its launch, which with no speed
++    // source is the same number of Edit beats, and exactly the expression this file
++    // always used. Nothing when, at the speeds known now, the source will not get there.
++    std::optional<MonotonicBeat> goDotStopPointFor (const LaunchHandle& handle, BeatPosition launch,
++                                                   BeatDuration stopDuration)
++    {
++        if (auto source = handle.getSpeedSource())
++            return source->whenSourceHasPlayed (MonotonicBeat { launch }, stopDuration);
++
++        return MonotonicBeat { launch + stopDuration };
++    }
++}
++
+ SlotControlNode::SlotControlNode (ProcessState& ps,
+                                   std::shared_ptr<LaunchHandle> launchHandle_,
+                                   std::optional<BeatDuration> stopDuration_,
+@@ -43,6 +60,11 @@ SlotControlNode::SlotControlNode (ProcessState& ps,
+         if (auto dynamicNode = dynamic_cast<DynamicallyOffsettableNodeBase*> (n))
+             offsetNodes.push_back (dynamicNode);
+ 
++        // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): a launched clip's wave nodes read
++        // at the speed its handle's source says.
++        if (auto waveNode = dynamic_cast<WaveNodeRealTime*> (n))
++            waveNode->setLaunchHandle (launchHandle.get());
++
+         if (auto mn = dynamic_cast<LoopingMidiNode*> (n))
+             midiNode = mn;
+     }
+@@ -92,10 +114,23 @@ void SlotControlNode::prepareToPlay (const tracktion::graph::PlaybackInitialisat
+         return;
+ 
+     if (auto oldGraph = info.nodeGraphToReplace)
++    {
+         if (auto oldNode = findNodeWithID<SlotControlNode> (*oldGraph, (size_t) slotID.getRawID()))
++        {
+             if (oldNode->lastSamples && oldNode->lastSamples->size() == numChans)
+                 lastSamples = oldNode->lastSamples;
+ 
++            // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++            // patches/tracktion_engine/0002-launched-clip-speed.patch: a slot rebuilt while
++            // its clip plays carries on playing it. Starting from `wasPlaying = false`, its
++            // first block told the clip's nodes the playhead had jumped, and the reader reset:
++            // exact at a ratio of one, where the prime re-reads the same samples, but at any
++            // other ratio a jump of a fraction of a sample - a faint tick in a sped cue every
++            // time any other cue is armed, since arming rebuilds the graph.
++            wasPlaying = oldNode->wasPlaying;
++        }
++    }
++
+     if (lastSamples)
+         return;
+ 
+@@ -136,16 +171,23 @@ void SlotControlNode::process (ProcessContext& pc)
+             if (auto playedMonotonicRange = launchHandle->getPlayedMonotonicRange())
+             {
+                 const auto blockRange = MonotonicBeatRange { { syncRange.start.monotonicBeat.v, syncRange.end.monotonicBeat.v } };
+-                const auto stopPoint = MonotonicBeat { playedMonotonicRange->v.getStart() + *stopDuration };
+ 
+-                if (blockRange.v.contains (stopPoint.v))
++                // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): with a speed, the stop is
++                // where the source has played the clip's length, which a change of speed
++                // can bring before this block - then it is this block's start.
++                auto stopPoint = goDotStopPointFor (*launchHandle, playedMonotonicRange->v.getStart(), *stopDuration);
++
++                if (stopPoint && launchHandle->getSpeedSource() != nullptr && stopPoint->v < blockRange.v.getStart())
++                    stopPoint = MonotonicBeat { blockRange.v.getStart() };
++
++                if (stopPoint && blockRange.v.contains (stopPoint->v))
+                 {
+                     const auto stopQueued = launchHandle->getQueuedStatus() == LaunchHandle::QueueState::stopQueued;
+-                    launchHandle->stop (stopPoint);
++                    launchHandle->stop (*stopPoint);
+ 
+                     // If there was a stop already queued, ignore the follow action
+                     if (! stopQueued && stopFunction)
+-                        stopFunction (stopPoint);
++                        stopFunction (*stopPoint);
+                 }
+             }
+         }
+@@ -161,9 +203,11 @@ void SlotControlNode::process (ProcessContext& pc)
+                 && ! splitStatus.playing1 && splitStatus.playing2)
+             {
+                 const auto blockRange = MonotonicBeatRange { { syncRange.start.monotonicBeat.v, syncRange.end.monotonicBeat.v } };
+-                const auto stopPoint = MonotonicBeat { playedMonotonicRange->v.getStart() + *stopDuration };
+ 
+-                if (stopPoint.v <= blockRange.v.getEnd())
++                // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): the source's stop, as above.
++                const auto stopPoint = goDotStopPointFor (*launchHandle, playedMonotonicRange->v.getStart(), *stopDuration);
++
++                if (stopPoint && stopPoint->v <= blockRange.v.getEnd())
+                     return launchHandle->stop ({});
+             }
+ 
+diff --git a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
+index 1993f02782b..445b5eba3d4 100644
+--- a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
++++ b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
+@@ -237,6 +237,115 @@ public:
+     const SampleRange loopRange;
+ };
+ 
++//==============================================================================
++/** MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-29, by
++    patches/tracktion_engine/0002-launched-clip-speed.patch: this reader is Go.dot's addition.
++
++    A loop below the resampler and the stretcher. Its position is the file's, counted on
++    past the loop's end as if the loop were written out pass after pass, and it wraps only
++    where it reads the file: what sits above it - an interpolator, a stretcher - reads one
++    unbroken stream through every pass and is never moved back. Up to the loop's end it is
++    the file, so a stretcher primed at the loop's start is primed on what comes before it,
++    as it would be anywhere else. The loop keeps its exact length in frames, fractions and
++    all, so pass after pass it wraps where the beats above say, and not a fraction of a
++    frame further off each time; and every pass begins on the loop's first frame, the
++    fraction falling at its tail, so a pass never steps over the frame it starts on.
++*/
++class UnrolledLoopReader final  : public SingleInputAudioReader
++{
++public:
++    UnrolledLoopReader (std::unique_ptr<AudioReader> input, double loopStartFrame, double loopLengthFrames)
++        : SingleInputAudioReader (std::move (input)),
++          loopStart (static_cast<SampleCount> (std::llround (loopStartFrame))),
++          loopLength (std::max (loopLengthFrames, 1.0)),
++          lastInLoop (static_cast<SampleCount> (std::ceil (loopLength)) - 1)
++    {
++    }
++
++    SampleCount getPosition() override
++    {
++        return position;
++    }
++
++    void setPosition (SampleCount t) override
++    {
++        position = t;
++        source->setPosition (fileFrameFor (t));
++    }
++
++    void setPosition (TimePosition t) override
++    {
++        setPosition (toSamples (t, getSampleRate()));
++    }
++
++    bool readSamples (choc::buffer::ChannelArrayView<float>& destBuffer) override
++    {
++        using choc::buffer::FrameCount;
++
++        const auto numFrames = static_cast<SampleCount> (destBuffer.getNumFrames());
++        SampleCount done = 0;
++        bool allOk = true;
++
++        while (done < numFrames)
++        {
++            const auto numThisTime = std::min (numFrames - done, nextPassAfter (position) - position);
++            auto section = destBuffer.getFrameRange ({ (FrameCount) done, (FrameCount) (done + numThisTime) });
++
++            source->setPosition (fileFrameFor (position));
++            allOk = source->readSamples (section) && allOk;
++
++            position += numThisTime;
++            done += numThisTime;
++        }
++
++        return allOk;
++    }
++
++private:
++    const SampleCount loopStart;    // the loop's first frame
++    const double loopLength;        // in frames, with its fraction
++    const SampleCount lastInLoop;   // the furthest a pass reads past its first frame
++    SampleCount position = 0;
++
++    // Which pass a position is in: nought up to the loop's end.
++    SampleCount passOf (SampleCount t) const
++    {
++        const auto intoLoop = static_cast<double> (t - loopStart);
++
++        return intoLoop < loopLength ? 0
++                                     : static_cast<SampleCount> (std::floor (intoLoop / loopLength));
++    }
++
++    // The frame of the file a position reads.
++    SampleCount fileFrameFor (SampleCount t) const
++    {
++        const auto pass = passOf (t);
++
++        if (pass == 0)
++            return t;
++
++        const auto intoPass = static_cast<SampleCount> (std::floor (static_cast<double> (t - loopStart)
++                                                                     - static_cast<double> (pass) * loopLength));
++
++        return loopStart + std::clamp (intoPass, SampleCount (0), lastInLoop);
++    }
++
++    // The first position of the pass after the one t is in.
++    SampleCount nextPassAfter (SampleCount t) const
++    {
++        const auto pass = passOf (t);
++        auto next = std::max (t + 1, loopStart + static_cast<SampleCount> (std::ceil (static_cast<double> (pass + 1) * loopLength)));
++
++        while (next > t + 1 && passOf (next - 1) > pass)
++            --next;
++
++        while (passOf (next) <= pass)
++            ++next;
++
++        return next;
++    }
++};
++
+ 
+ //==============================================================================
+ class ResamplerReader : public SingleInputAudioReader
+@@ -266,6 +375,11 @@ public:
+             resamplers.emplace_back();
+             resamplers.back().reset();
+         }
++
++        // MODIFIED BY GO.DOT (patch 0002): the anti-alias stages, sized here and not on the
++        // audio thread.
++        antiAlias.resize (resamplers.size());
++        antiAliasAt.resize (resamplers.size());
+     }
+ 
+     void reset() override
+@@ -275,10 +389,25 @@ public:
+ 
+         hasBeenReset = true;
+         timeSourceIsAheadDueToLatency = {};
++
++        // MODIFIED BY GO.DOT (patch 0002): a jump starts the low-pass again from the next
++        // frame, and takes up the next read's own share of it at once - a jump is a new
++        // start, and a clip launched at two is filtered from its first frame.
++        antiAliasWarm = false;
++        antiAliasSnap = true;
+     }
+ 
+     SampleCount getPosition() override
+     {
++        // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++        // patches/tracktion_engine/0002-launched-clip-speed.patch: once placed, where the
++        // reader IS - the exact integral of every ratio it has read at - and not the file's
++        // whole-frame position, which lags the interpolator by the part of a frame it still
++        // has pending: about one frame at one, about two at two. A moving ratio moved that
++        // lag, until it passed setPosition's one-sample tolerance and reset the interpolator.
++        if (placedAt)
++            return toSamples (*placedAt, destSampleRate);
++
+         const auto sourcePosition = TimePosition::fromSamples (source->getPosition(), source->getSampleRate());
+         return toSamples (sourcePosition - timeSourceIsAheadDueToLatency, destSampleRate);
+     }
+@@ -292,10 +421,24 @@ public:
+     {
+         // If the position has jumped, reset so the interpolator doesn't blend in samples from the
+         // old position. This also clears the latency offset so it's re-compensated on the next read
++        //
++        // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++        // patches/tracktion_engine/0002-launched-clip-speed.patch: ONLY a jump moves the file.
++        // A position within a sample of where the interpolator already is, is where it is -
++        // readResampling leaves the file exactly where the interpolator stopped consuming, the
++        // exact integral of the ratio - and moving the file to the rounded request every block
++        // handed the interpolator a frame twice, or skipped one: a small click at a block's
++        // first sample at any ratio that is not a whole number of frames a block.
+         if (std::abs (toSamples (t, destSampleRate) - getPosition()) > 1)
++        {
+             reset();
+-
+-        source->setPosition (t + timeSourceIsAheadDueToLatency);
++            source->setPosition (t + timeSourceIsAheadDueToLatency);
++            placedAt = t;
++        }
++        else if (! placedAt)
++        {
++            placedAt = t;
++        }
+     }
+ 
+     /** Sets a ratio to increase or decrease playback speed. */
+@@ -328,6 +471,25 @@ public:
+         const auto numDestFrames = destBuffer.getNumFrames();
+         const int numSourceFramesToRead = static_cast<int> ((numDestFrames * ratio) + 0.5);
+ 
++        // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++        // patches/tracktion_engine/0002-launched-clip-speed.patch: at a high speed one block
++        // can ask for more source frames than an AudioScratchBuffer holds without growing
++        // (about 82 000 floats) or the file cache allows in one read (48 000). Such a read
++        // is taken in two halves, the interpolators carrying on across them. Never at one.
++        if (const auto maxSourceFrames = std::min (40000, 80000 / std::max (1, (int) numChannels));
++            numSourceFramesToRead > maxSourceFrames && numDestFrames > 1)
++        {
++            const auto half = numDestFrames / 2;
++            auto firstHalf = destBuffer.getStart (half);
++            auto secondHalf = destBuffer.getFrameRange ({ half, numDestFrames });
++
++            return readSamples (firstHalf) && readSamples (secondHalf);
++        }
++
++        // MODIFIED BY GO.DOT (patch 0002): what this read covers, in file time.
++        if (placedAt)
++            placedAt = *placedAt + TimeDuration::fromSeconds (static_cast<double> (numDestFrames) * ratio / sourceSampleRate);
++
+         if (std::exchange (hasBeenReset, false))
+         {
+             constexpr auto baseLatencyNumSamples = static_cast<FrameCount> (juce::LagrangeInterpolator::getBaseLatency());
+@@ -340,16 +502,16 @@ public:
+             auto destScratchView = toBufferView (destDataScratch.buffer);
+             destScratchView.clear();
+ 
+-            if (! readResampling (destScratchView, *source, modifiedNumSourceFramesToRead,
+-                                  resamplers, std::to_array (gains)))
++            juce::ignoreUnused (modifiedNumSourceFramesToRead);
++
++            if (! readResampling (destScratchView, ratio))
+                 return false;
+ 
+             copy (destBuffer, destScratchView.fromFrame (numFramesToDrop));
+             return true;
+         }
+ 
+-        return readResampling (destBuffer, *source, numSourceFramesToRead,
+-                               resamplers, std::to_array (gains));
++        return readResampling (destBuffer, ratio);
+     }
+ 
+     const double destSampleRate;
+@@ -360,30 +522,140 @@ public:
+     float gains[2] = { 1.0f, 1.0f };
+     TimeDuration timeSourceIsAheadDueToLatency;
+     bool hasBeenReset = true;
+-
+-    static bool readResampling (choc::buffer::ChannelArrayView<float> destBuffer,
+-                                AudioReader& sourceReader, int numSourceFramesToRead,
+-                                std::vector<juce::LagrangeInterpolator>& resamplers_,
+-                                const std::array<float, 2> gains)
+-    {
++    std::optional<TimePosition> placedAt;   // MODIFIED BY GO.DOT (patch 0002): see getPosition
++
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-29, by
++    // patches/tracktion_engine/0002-launched-clip-speed.patch: the low-pass that keeps a read
++    // above one from aliasing (see readResampling). Per channel, four stages of state, and
++    // where they stood after each of a read's last frames, since the frames the interpolator
++    // does not consume are read again; the share of the filtered source the interpolator
++    // hears, which moves a frame at a time; whether the stages hold a state yet; and whether
++    // the next read takes up its share at once, after a jump.
++    struct AntiAliasStage { double ic1 = 0.0, ic2 = 0.0; };
++    using AntiAliasState = std::array<AntiAliasStage, 4>;
++    static constexpr int antiAliasSnapshots = 6;
++    static constexpr double antiAliasRampFrames = 1024.0;
++    std::vector<AntiAliasState> antiAlias;
++    std::vector<std::array<AntiAliasState, antiAliasSnapshots>> antiAliasAt;
++    double antiAliasMix = 0.0;
++    bool antiAliasWarm = false, antiAliasSnap = true;
++
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++    // patches/tracktion_engine/0002-launched-clip-speed.patch: the interpolator is given
++    // the EXACT ratio, one frame more than it can use, and whatever it did not consume is
++    // put back. Before, it was fed a whole number of frames a block at that number's own
++    // ratio: at a ratio that is not a whole number of frames a block - any file at another
++    // sample rate, any speed that moves - the file position drifted from where the beats
++    // put it by a fraction of a frame a block, until setPosition's one-sample tolerance
++    // reset the interpolator: a small click every few blocks. Now the file position is
++    // wherever the interpolator is, which is the exact integral of the ratio, and the
++    // drift never builds. At a ratio of exactly one the interpolator consumes one frame an
++    // output either way, so the samples are the same as before.
++    //
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): AND ABOVE ONE THE FILE IS LOW-PASSED
++    // FIRST. The interpolator filters nothing, so a read above one folded everything the
++    // ratio lifted past the output's Nyquist back into the band at full level - at twenty,
++    // a 5 kHz tone came out as 4 kHz, as loud (M47). Now, above one, the source goes
++    // through an eighth-order Butterworth low-pass - four state-variable stages, trapezoidal,
++    // which take a cutoff that moves with the speed - at 0.4 of the source's frequencies
++    // over the ratio, the output's band kept to 0.4 of its rate, 19.2 kHz at 48: what the
++    // ratio would lift past the output's Nyquist is gone before it is interpolated, 31 dB
++    // down where it would fold to 18 kHz and 58 where it would fold to 4. At one and below it is not there at all, so a read at one is the same
++    // doubles as ever; crossing one it is taken in and out over 1024 source frames, so a
++    // speed passing through one does not tick.
++    bool readResampling (choc::buffer::ChannelArrayView<float> destBuffer, double ratio)
++    {
++        auto& sourceReader = *source;
+         const auto numChannels = destBuffer.getNumChannels();
+         const auto numDestFrames = destBuffer.getNumFrames();
++        const auto numSourceFramesToRead = static_cast<int> (std::ceil (numDestFrames * ratio)) + 1;
+ 
+         AudioScratchBuffer fileData ((int) numChannels, numSourceFramesToRead);
+         auto fileDataView = toBufferView (fileData.buffer);
+         const bool ok = sourceReader.readSamples (fileDataView);
+ 
+-        const auto resamplerRatio = static_cast<double> (numSourceFramesToRead) / numDestFrames;
++        const auto target = ratio > 1.0 + 1.0e-9 ? 1.0 : 0.0;
++
++        if (std::exchange (antiAliasSnap, false))
++            antiAliasMix = target;
++
++        const auto mixStart = antiAliasMix;
++        const auto filtering = target > 0.0 || mixStart > 0.0;
++        const auto firstKept = numSourceFramesToRead - (antiAliasSnapshots - 1);
++
++        const auto mixAt = [mixStart, target] (int frame)
++        {
++            const auto moved = (frame + 1) / antiAliasRampFrames;
++            return target > mixStart ? std::min (target, mixStart + moved)
++                                     : std::max (target, mixStart - moved);
++        };
++
++        if (filtering)
++        {
++            // An eighth-order Butterworth's four Qs.
++            static constexpr double q[4] { 0.50979557910415917, 0.60134488693504528,
++                                           0.89997622313641570, 2.56291544774150617 };
++            const auto g = std::tan (juce::MathConstants<double>::pi * 0.4 / std::max (ratio, 1.0));
++            std::array<double, 4> a1 {}, a2 {}, a3 {};
++
++            for (size_t stage = 0; stage < 4; ++stage)
++            {
++                a1[stage] = 1.0 / (1.0 + g * (g + 1.0 / q[stage]));
++                a2[stage] = g * a1[stage];
++                a3[stage] = g * a2[stage];
++            }
++
++            for (choc::buffer::ChannelCount channel = 0;
++                 channel < numChannels && channel < (choc::buffer::ChannelCount) antiAlias.size(); ++channel)
++            {
++                auto* x = fileData.buffer.getWritePointer ((int) channel);
++                auto& stages = antiAlias[(size_t) channel];
++                auto& at = antiAliasAt[(size_t) channel];
++
++                // From cold, as if the first frame had always been there: no step to ring.
++                if (! antiAliasWarm && numSourceFramesToRead > 0)
++                    for (auto& stage : stages)
++                        stage = { 0.0, (double) x[0] };
++
++                if (firstKept <= 0)
++                    at[(size_t) (-firstKept)] = stages;
++
++                for (int i = 0; i < numSourceFramesToRead; ++i)
++                {
++                    auto v = (double) x[i];
++
++                    for (size_t stage = 0; stage < 4; ++stage)
++                    {
++                        auto& st = stages[stage];
++                        const auto v3 = v - st.ic2;
++                        const auto v1 = a1[stage] * st.ic1 + a2[stage] * v3;
++                        const auto v2 = st.ic2 + a2[stage] * st.ic1 + a3[stage] * v3;
++                        st.ic1 = 2.0 * v1 - st.ic1;
++                        st.ic2 = 2.0 * v2 - st.ic2;
++                        v = v2;
++                    }
++
++                    x[i] = static_cast<float> (x[i] + (v - x[i]) * mixAt (i));
++
++                    if (i + 1 >= firstKept)
++                        at[(size_t) (i + 1 - firstKept)] = stages;
++                }
++            }
++
++            antiAliasWarm = true;
++        }
++
++        auto used = numSourceFramesToRead;
+ 
+         for (choc::buffer::ChannelCount channel = 0; channel < numChannels; ++channel)
+         {
+-            if (channel < (choc::buffer::ChannelCount) resamplers_.size())
++            if (channel < (choc::buffer::ChannelCount) resamplers.size())
+             {
+                 const auto src = fileData.buffer.getReadPointer ((int) channel);
+                 const auto dest = destBuffer.getChannel (channel).data.data;
+ 
+-                auto& resampler = resamplers_[(size_t) channel];
+-                resampler.processAdding (resamplerRatio, src, dest, (int) numDestFrames, gains[channel & 1]);
++                auto& resampler = resamplers[(size_t) channel];
++                used = resampler.processAdding (ratio, src, dest, (int) numDestFrames, gains[channel & 1]);
+             }
+             else
+             {
+@@ -391,6 +663,26 @@ public:
+             }
+         }
+ 
++        // The low-pass where it stood after the last frame the interpolator took, since
++        // what it did not take is read again - filtered twice, it would ring.
++        if (filtering)
++        {
++            if (used >= std::max (firstKept, 0) && used <= numSourceFramesToRead)
++            {
++                for (size_t channel = 0; channel < antiAlias.size() && channel < (size_t) numChannels; ++channel)
++                    antiAlias[channel] = antiAliasAt[channel][(size_t) (used - firstKept)];
++            }
++            else
++            {
++                antiAliasWarm = false;
++            }
++
++            antiAliasMix = used > 0 ? mixAt (used - 1) : mixStart;
++        }
++
++        if (used < numSourceFramesToRead)
++            sourceReader.setPosition (sourceReader.getPosition() - (numSourceFramesToRead - used));
++
+         return ok;
+     }
+ };
+@@ -630,7 +922,8 @@ public:
+         setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
+         inputFifo.reset();
+         outputFifo.reset();
+-        primeStretcher();
++        primeStretcher (true);
++        awaitingFirstRead = true;
+     }
+ 
+     void setPosition (TimePosition t) override
+@@ -665,7 +958,10 @@ public:
+         playbackSpeedRatio = speedRatio;
+         semitonesShift = semitones;
+ 
+-        [[ maybe_unused ]] const bool ok = timeStretcher.setSpeedAndPitch ((float) (1.0 / speedRatio), (float) semitonesShift);
++        // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): a speed of nought is a stretch so
++        // large the stretcher needs no input - it keeps sounding what it holds - rather
++        // than a division by nought.
++        [[ maybe_unused ]] const bool ok = timeStretcher.setSpeedAndPitch ((float) (1.0 / std::max (speedRatio, 1.0e-9)), (float) semitonesShift);
+         assert (ok);
+     }
+ 
+@@ -674,6 +970,30 @@ public:
+         assert (numChannels == (int) destBuffer.getNumChannels());
+         const auto numFramesToDo = destBuffer.getNumFrames();
+ 
++        // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): a stretcher is primed when it is
++        // built - at one, since nothing has told it a speed yet, and perhaps before its file
++        // has been read, since it is built with the graph while the file cache may still be
++        // loading and a real-time cache read does not wait. So at its first read, the
++        // launch, it primes again if it was primed for another speed than it plays at, or
++        // its prime fell short; and until a prime gets all the way, at every read. Without
++        // this a stretched clip opened on a whole latency of silence with its file's first
++        // moments lost, or out of place in its source by (1 - speed) x its output latency -
++        // 150 ms of nothing at one, 95 ms early at half the speed (M14, 2026-09-29).
++        if (awaitingFirstRead || primedAt < 0.0)
++        {
++            awaitingFirstRead = false;
++
++            if (primedAt != primingSpeedFor (playbackSpeedRatio))
++            {
++                source->setPosition (getReadPosition());
++                timeStretcher.reset();
++                setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
++                inputFifo.reset();
++                outputFifo.reset();
++                primeStretcher (true);
++            }
++        }
++
+         for (;;)
+         {
+             // If there are enough output samples in the fifo, read them out
+@@ -684,7 +1004,7 @@ public:
+                 break;
+             }
+ 
+-            if (! feedAndProcess())
++            if (! feedAndProcess (true))
+                 return false;
+         }
+ 
+@@ -696,6 +1016,10 @@ public:
+     static constexpr int chunkSize = 256;
+     const int numChannels;
+     int latencySamples = 0;
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): the speed the stretcher was primed at,
++    // below nought when its last prime fell short, and whether it has been read since.
++    double primedAt = -1.0;
++    bool awaitingFirstRead = true;
+     TimeStretcher timeStretcher;
+     AudioFifo inputFifo { numChannels, chunkSize }, outputFifo { numChannels, chunkSize };
+     double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
+@@ -706,7 +1030,15 @@ public:
+     }
+ 
+     // Reads source audio, feeds it to the stretcher, and produces output into the FIFO
+-    bool feedAndProcess()
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): `tolerant` feeds silence for input the
++    // file cache could not hand over this instant - a real-time cache read does not wait,
++    // and fails whenever the cache's own thread holds the reader - rather than giving up.
++    // A resampled read keeps time through a miss; a stretched one gave up the block and
++    // held its place, so every later moment played a chunk late, and a prime of dozens of
++    // reads failed whole and began again the next block (CI, 2026-09-29: 10 to 60 ms late).
++    // Only the prime a stretcher is built with is strict: that one's failing says the file
++    // is not there yet, and is primed again at the first read.
++    bool feedAndProcess (bool tolerant = false)
+     {
+         const auto numThisTime = timeStretcher.getFramesNeeded();
+ 
+@@ -717,7 +1049,12 @@ public:
+             auto scratchView = toBufferView (scratchBuffer.buffer);
+ 
+             if (! source->readSamples (scratchView))
+-                return false;
++            {
++                if (! tolerant)
++                    return false;
++
++                scratchBuffer.buffer.clear();
++            }
+ 
+             inputFifo.write (scratchBuffer.buffer);
+         }
+@@ -731,27 +1068,67 @@ public:
+         return true;
+     }
+ 
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): a speed below a quarter is primed at
++    // a quarter - the prime's discard grows as one over the speed, and at nought would
++    // never end - which leaves a freeze at most a quarter of the output latency from
++    // where it was sent.
++    static double primingSpeedFor (double speed)
++    {
++        return std::max (speed, 0.25);
++    }
++
+     // Pre-feeds real audio into the stretcher and discards the initial output
+     // to handle the stretcher's startup latency locally
+-    void primeStretcher()
++    void primeStretcher (bool tolerant = false)
+     {
++        primedAt = -1.0;
++
+         if (latencySamples <= 0)
++        {
++            primedAt = primingSpeedFor (playbackSpeedRatio);
+             return;
++        }
++
++        // MODIFIED BY GO.DOT, 2026-09-28/29 (patch 0002): primed at the speed it will play
++        // at, its discard counted in OUTPUT frames. The discard below counted output frames
++        // as if they were input frames, which holds only at one: at twenty it read twenty
++        // times too much and started in the wrong place. A stretcher's lag, in input samples,
++        // is its input latency plus the speed times its output latency - Signalsmith's own
++        // outputSeekLength; nought output latency for a stretcher that does not report one,
++        // whose lag is taken to be all input, as it always was - and the output frames that
++        // consume it and the stretch backed up before it are those over the speed.
++        const auto speedToRestore = playbackSpeedRatio;
++        const auto primingSpeed = primingSpeedFor (speedToRestore);
++        const auto primedAtAnotherSpeed = primingSpeed != speedToRestore;
++
++        if (primedAtAnotherSpeed)
++            setSpeedAndPitch (primingSpeed, semitonesShift);
++
++        const juce::ScopeGuard restoreSpeed { [this, speedToRestore, primedAtAnotherSpeed]
++                                              {
++                                                  if (primedAtAnotherSpeed)
++                                                      setSpeedAndPitch (speedToRestore, semitonesShift);
++                                              } };
++
++        const auto outputLatency = timeStretcher.getOutputLatencySamples();
++        const auto lag = static_cast<SampleCount> (std::llround ((latencySamples - outputLatency)
++                                                                   + primingSpeed * outputLatency));
+ 
+         // Back up the source to provide real audio context for the warmup
+         const auto position = static_cast<SampleCount> (readPosition);
+-        const auto backupPos = std::max (SampleCount (0), position - latencySamples);
++        const auto backupPos = std::max (SampleCount (0), position - lag);
+         source->setPosition (backupPos);
+ 
+-        // The stretcher's output lags its input by latencySamples so to line the next
++        // The stretcher's output lags its input by its lag so to line the next
+         // output frame up with readPosition, the frames between backupPos and
+         // readPosition have to be discarded as well as the latency region itself
+-        const auto numToDiscard = static_cast<int> (position - backupPos) + latencySamples;
++        const auto numToDiscard = static_cast<int> (std::llround (static_cast<double> (position - backupPos + lag)
++                                                                    / primingSpeed));
+         int outputDiscarded = 0;
+ 
+         while (outputDiscarded < numToDiscard)
+         {
+-            if (! feedAndProcess())
++            if (! feedAndProcess (tolerant))
+                 break;
+ 
+             const int available = outputFifo.getNumReady();
+@@ -764,6 +1141,9 @@ public:
+                 outputDiscarded += toDiscard;
+             }
+         }
++
++        if (outputDiscarded >= numToDiscard)
++            primedAt = primingSpeed;
+     }
+ };
+ 
+@@ -784,7 +1164,7 @@ public:
+         source->setPosition (getReadPosition());
+         timeStretcher.reset();
+         setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
+-        primeStretcher();
++        primed = primeStretcher();
+     }
+ 
+     SampleCount getPosition() override
+@@ -802,7 +1182,7 @@ public:
+         source->setPosition (t);
+         timeStretcher.reset();
+         setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
+-        primeStretcher();
++        primed = primeStretcher();
+     }
+ 
+     void setPosition (TimePosition t) override
+@@ -837,7 +1217,10 @@ public:
+         playbackSpeedRatio = speedRatio;
+         semitonesShift = semitones;
+ 
+-        [[ maybe_unused ]] const bool ok = timeStretcher.setSpeedAndPitch ((float) (1.0 / speedRatio), (float) semitonesShift);
++        // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): a speed of nought is a stretch so
++        // large the stretcher needs no input - it keeps sounding what it holds - rather
++        // than a division by nought.
++        [[ maybe_unused ]] const bool ok = timeStretcher.setSpeedAndPitch ((float) (1.0 / std::max (speedRatio, 1.0e-9)), (float) semitonesShift);
+         assert (ok);
+     }
+ 
+@@ -847,6 +1230,19 @@ public:
+         const auto numFramesToDo = static_cast<int> (destBuffer.getNumFrames());
+         int startFrame = 0;
+ 
++        // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): a stretcher primed before its file
++        // had been read - built while the file cache was still loading, whose reads do not
++        // wait - holds silence where the file's first moments should be, and plays a whole
++        // latency of nothing before them. It primes again at its first read, which is the
++        // launch, by when the file is there.
++        if (! primed)
++        {
++            source->setPosition (getReadPosition());
++            timeStretcher.reset();
++            setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
++            primed = primeStretcher();
++        }
++
+         // Always push one block to keep the input fifo stoked but don't do this for every chunk unless required
+         if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
+             if (! readSourceAndPushFrames (numToPush))
+@@ -884,6 +1280,7 @@ public:
+ 
+     const int numChannels, chunkSize = 1024;
+     int latencySamples = 0;
++    bool primed = true;
+     ReadAheadTimeStretcher timeStretcher { 3 };
+     double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
+ 
+@@ -910,10 +1307,28 @@ public:
+ 
+     // Pre-feeds real audio into the stretcher and discards initial output
+     // to handle the stretcher's startup latency locally
+-    void primeStretcher()
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): answers whether it got all the way,
++    // which it does not when the file could not be read yet.
++    bool primeStretcher()
+     {
+         if (latencySamples <= 0)
+-            return;
++            return true;
++
++        // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): the discard below counts OUTPUT
++        // frames as if they were INPUT frames, which holds only at speed one - at twenty
++        // it reads twenty times too much and starts in the wrong place. So the stretcher
++        // is primed at one and given its speed back after.
++        const auto speedToRestore = playbackSpeedRatio;
++        const auto primedAtAnotherSpeed = speedToRestore != 1.0;
++
++        if (primedAtAnotherSpeed)
++            setSpeedAndPitch (1.0, semitonesShift);
++
++        const juce::ScopeGuard restoreSpeed { [this, speedToRestore, primedAtAnotherSpeed]
++                                              {
++                                                  if (primedAtAnotherSpeed)
++                                                      setSpeedAndPitch (speedToRestore, semitonesShift);
++                                              } };
+ 
+         const auto position = static_cast<SampleCount> (readPosition);
+         const auto backupPos = std::max (SampleCount (0), position - latencySamples);
+@@ -928,7 +1343,8 @@ public:
+         while (outputDiscarded < numToDiscard)
+         {
+             if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
+-                readSourceAndPushFrames (numToPush);
++                if (! readSourceAndPushFrames (numToPush))
++                    return false;
+ 
+             // Only ever discard up to the target so the stretcher isn't left ahead of readPosition
+             const int numThisTime = std::min (chunkSize, numToDiscard - outputDiscarded);
+@@ -940,6 +1356,8 @@ public:
+ 
+             outputDiscarded += numRead;
+         }
++
++        return outputDiscarded >= numToDiscard;
+     }
+ };
+ 
+@@ -1149,7 +1567,12 @@ public:
+     {
+         const auto numSourceSamples = toSamples (tr.getLength(), getSampleRate());
+ 
+-        if (numSourceSamples == 0)
++        // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): a launched clip that is stretched
++        // and whose speed is nought reads no source and still sounds - the stretcher is
++        // fed nothing and keeps sounding what it holds, a freeze - instead of this silence.
++        const bool freeze = speedDriven && timeStretchSource != nullptr && editDuration > TimeDuration();
++
++        if (numSourceSamples == 0 && ! freeze)
+         {
+             destBuffer.clear();
+             return true;
+@@ -1164,7 +1587,12 @@ public:
+ 
+         setPosition (tr.getStart());
+ 
+-        if (! isContiguous)
++        // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): a launched clip's reader judges
++        // continuity by where it exactly is (setPosition resets on any jump), not by the
++        // playhead's flag - which a slot rebuilt mid-play raises on its first block, for a
++        // reset that at any ratio but one loses the interpolator's phase: a faint tick in a
++        // sped cue at every arm of another cue. Every real jump moves the position.
++        if (! isContiguous && ! speedDriven)
+             reset();
+ 
+         return readSamples (destBuffer);
+@@ -1172,6 +1600,10 @@ public:
+ 
+     ResamplerReader* resamplerReader = nullptr;
+     TimeStretchReaderBase* timeStretchSource = nullptr;
++
++    // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): set for a launched clip, whose
++    // speed the host drives and can be nought: see read().
++    bool speedDriven = false;
+ };
+ 
+ 
+@@ -1291,6 +1723,12 @@ public:
+         return source->readSamples (destBuffer);
+     }
+ 
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): set when the loop sits below the
++    // resampler and the stretcher (see WaveNodeRealTime::buildAudioReaderGraph). This
++    // reader then passes the source's beats on unwrapped, as if the loop were written out
++    // pass after pass, and the reader that wraps is the one that reads the file.
++    bool loopIsBelow = false;
++
+ private:
+     std::unique_ptr<TimeRangeReader> source;
+     const BeatRange loopRange;
+@@ -1309,6 +1747,11 @@ private:
+         if (loopRange.isEmpty())
+             return readBeatRange (br, destBuffer, editDuration, isContiguous, playbackSpeedRatio);
+ 
++        // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): the loop is below, so no split and
++        // no jump back - where linearPositionToLoopPosition would wrap, this goes on.
++        if (loopIsBelow)
++            return readBeatRange (br + toDuration (loopRange.getStart()), destBuffer, editDuration, isContiguous, playbackSpeedRatio);
++
+         const auto s = linearPositionToLoopPosition (br.getStart(), loopRange);
+         const auto e = linearPositionToLoopPosition (br.getEnd(), loopRange);
+ 
+@@ -2137,6 +2580,12 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
+ }
+ 
+ //==============================================================================
++// MODIFIED BY GO.DOT, 2026-09-28 (patch 0002).
++void WaveNodeRealTime::setLaunchHandle (const LaunchHandle* handle) noexcept
++{
++    launchHandle = handle;
++}
++
+ void WaveNodeRealTime::setDynamicOffsetBeats (BeatDuration newOffset)
+ {
+     if (juce::approximatelyEqual (dynamicOffsetBeats->inBeats(), newOffset.inBeats()))
+@@ -2234,6 +2683,35 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
+         loopReader = std::move (audioFileCacheReader);
+     }
+ 
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-29, by
++    // patches/tracktion_engine/0002-launched-clip-speed.patch: a launched clip's loop sits
++    // below its resampler and its stretcher, where the file is read, instead of above them
++    // in BeatRangeReader. Above, every pass was a jump back in the source: a stretcher was
++    // reset and primed again at each wrap - a gap of about one of its chunks and a click,
++    // and 1.5 to 4 ms of priming on the audio thread (M46, M47) - and a resampler lost its
++    // interpolator's history. Below, both read one unbroken stream. Only for a file of one
++    // tempo from the loop's start on, where a beat past the loop's end is the same time
++    // past it as a beat inside it.
++    bool loopIsBelow = false;
++
++    if (launchHandle != nullptr && ! warpMap && ! loopSectionBeats.isEmpty() && fileTempoPosition != nullptr
++         && (syncTempo == SyncTempo::yes || syncPitch == SyncPitch::yes))
++    {
++        auto position = *fileTempoPosition;
++        const auto loopStartTime = position.set (loopSectionBeats.getStart());
++
++        if (position.getTimeOfNextChange() <= loopStartTime)
++        {
++            const auto loopEndTime = position.set (loopSectionBeats.getEnd());
++            const auto fileRate = loopReader->getSampleRate();
++
++            loopReader = std::make_unique<UnrolledLoopReader> (std::move (loopReader),
++                                                               loopStartTime.inSeconds() * fileRate,
++                                                               (loopEndTime - loopStartTime).inSeconds() * fileRate);
++            loopIsBelow = true;
++        }
++    }
++
+     const bool timestretchDisabled = timeStretcherMode == TimeStretcher::Mode::disabled;
+     std::unique_ptr<ResamplerReader> resamplerAudioReader;
+ 
+@@ -2285,11 +2763,15 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
+         }
+     }
+ 
++    // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): a launched clip's speed can be nought.
++    timeRangeReader->speedDriven = launchHandle != nullptr;
++
+     if (syncTempo == SyncTempo::yes || syncPitch == SyncPitch::yes)
+     {
+         assert (fileTempoSequence);
+         auto beatRangeReader    = std::make_unique<BeatRangeReader> (std::move (timeRangeReader),
+                                                                      loopSectionBeats, offsetBeats, dynamicOffsetBeats, *fileTempoPosition);
++        beatRangeReader->loopIsBelow = loopIsBelow;   // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002)
+         auto editToClipBeatReader    = std::make_unique<EditToClipBeatReader> (std::move (beatRangeReader), editPositionBeats, dynamicOffsetBeats);
+         basicEditReader = std::make_unique<EditReader> (std::move (editToClipBeatReader), nullptr);
+     }
+@@ -2348,6 +2830,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
+     editReader = other.editReader;
+     pitchAdjustReader = other.pitchAdjustReader;
+     dynamicOffsetBeats = other.dynamicOffsetBeats;
++    speedGate = other.speedGate;    // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002)
+ }
+ 
+ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2355,6 +2838,40 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+     const auto sectionEditBeats = getEditBeatRange();
+     const auto sectionEditTime = getEditTimeRange();
+ 
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++    // patches/tracktion_engine/0002-launched-clip-speed.patch: a launched clip with a
++    // speed source reads the beats of source the speed says rather than the section's
++    // own - `readBeats` below is what every read and the playhead use. With no source,
++    // or a source at exactly one, it is the section's own range, the same doubles.
++    auto readBeats = sectionEditBeats;
++    auto sectionSpeed = 1.0;
++    auto speedDriven = false;
++
++    if (launchHandle != nullptr)
++    {
++        if (auto source = launchHandle->getSpeedSource())
++        {
++            if (const auto played = launchHandle->getPlayedMonotonicRange())
++            {
++                const auto sync = getProcessState().getSyncRange();
++                const auto toMonotonic = sync.start.monotonicBeat.v.inBeats() - sync.start.beat.inBeats();
++                const auto launch = MonotonicBeat { played->v.getStart() };
++                const auto since = [&] (BeatPosition b)
++                {
++                    return BeatDuration::fromBeats (b.inBeats() + toMonotonic - launch.v.inBeats());
++                };
++
++                readBeats = { sectionEditBeats.getStart() + BeatDuration::fromBeats (source->extraSourceBeats (launch, since (sectionEditBeats.getStart()))),
++                              sectionEditBeats.getEnd() + BeatDuration::fromBeats (source->extraSourceBeats (launch, since (sectionEditBeats.getEnd()))) };
++
++                if (const auto length = sectionEditBeats.getLength().inBeats(); length > 0.0)
++                    sectionSpeed = readBeats.getLength().inBeats() / length;
++
++                speedDriven = true;
++            }
++        }
++    }
++
+     // Check that the number of channels requested matches the destination buffer num channels
+     assert (destChannels.getNumChannels() == (int) pc.buffers.audio.getNumChannels());
+ 
+@@ -2401,7 +2918,7 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+         }
+         else if (fileTempoSequence != nullptr)
+         {
+-            const auto offsetIntoClip = sectionEditBeats.getStart() - editPositionBeats.getStart() - *dynamicOffsetBeats;
++            const auto offsetIntoClip = readBeats.getStart() - editPositionBeats.getStart() - *dynamicOffsetBeats;   // MODIFIED BY GO.DOT (patch 0002)
+             auto sourceBeats = BeatPosition::fromBeats (offsetIntoClip.inBeats() + offsetBeats.inBeats());
+ 
+             if (! loopSectionBeats.isEmpty() && sourceBeats >= loopSectionBeats.getStart())
+@@ -2440,12 +2957,52 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+     if (pitchAdjustReader != nullptr)
+         pitchAdjustReader->setKey (getKeyToSyncTo (sectionEditTime.getStart()));
+ 
++    // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): the varispeed gate. A resampled read
++    // slides down through the subsonic as its speed falls, and at nought would hold
++    // whatever value it had reached: so below 0.05 of its speed it is faded, along a
++    // smooth step, to silence at 0.01 - Tracktion's own tape-stop and slowest-clip
++    // numbers - and below 0.01 the file is not read at all, which also keeps a vanishing
++    // ratio from asking the resampler for thousands of frames of warm-up. A stretched
++    // read is not gated: at nought it freezes.
++    const auto gated = speedDriven && timeStretcherMode == TimeStretcher::Mode::disabled;
++    const auto gateFor = [] (double speed)
++    {
++        const auto x = std::clamp ((speed - 0.01) / (0.05 - 0.01), 0.0, 1.0);
++        return static_cast<float> (x * x * (3.0 - 2.0 * x));
++    };
++    const auto gateNow = gated ? gateFor (sectionSpeed) : 1.0f;
++    const auto gateBefore = *speedGate < 0.0f ? gateNow : *speedGate;
++    *speedGate = gateNow;
++
++    if (gated && gateNow <= 0.0f && gateBefore <= 0.0f)
++    {
++        pc.buffers.audio.clear();
++
++        for (auto& lastSample : *channelState)
++            lastSample = 0.0f;
++
++        return;
++    }
++
+     // Read through the audio stack
+     const auto isContiguous = getPlayHeadState().isContiguousWithPreviousBlock();
+     uint32_t lastSampleFadeLength = (isFirstBlock && ! sectionContainsStartOfClip) ? std::min (numFrames, 10u) : 0;
+     isFirstBlock = false;
+ 
+-    if (editReader->read (sectionEditBeats, sectionEditTime, pc.buffers.audio, isContiguous, getPlaybackSpeedRatio()))
++    const auto readOk = editReader->read (readBeats, sectionEditTime, pc.buffers.audio, isContiguous, getPlaybackSpeedRatio());
++
++    if (gated && (gateNow < 1.0f || gateBefore < 1.0f))
++    {
++        for (choc::buffer::ChannelCount channel = 0; channel < numChannels; ++channel)
++        {
++            const auto dest = pc.buffers.audio.getIterator (channel).sample;
++
++            for (uint32_t i = 0; i < numFrames; ++i)
++                dest[i] *= gateBefore + (gateNow - gateBefore) * (static_cast<float> (i + 1) / static_cast<float> (numFrames));
++        }
++    }
++
++    if (readOk)
+     {
+         if (! isContiguous && (! getPlayHeadState().isFirstBlockOfLoop()) && (! sectionContainsStartOfClip))
+             lastSampleFadeLength = std::min (numFrames, 40u);
+diff --git a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.h b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.h
+index e85787125b1..458f5e4d811 100644
+--- a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.h
++++ b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.h
+@@ -92,6 +92,9 @@ private:
+ };
+ 
+ //==============================================================================
++// MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): declared for WaveNodeRealTime below.
++class LaunchHandle;
++
+ //==============================================================================
+ /**
+     An Node that plays back a wave file.
+@@ -208,6 +211,15 @@ public:
+     */
+     void setDynamicOffsetBeats (BeatDuration) override;
+ 
++    /** MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
++        patches/tracktion_engine/0002-launched-clip-speed.patch: the launch handle whose
++        speed this node reads at, set by the clip's SlotControlNode before the node is
++        prepared; nullptr, the default, for a clip that is not launched. With a handle
++        whose speed source is set, the node reads the stretch of source the speed says;
++        a varispeed read is faded to silence as the speed nears nought, and a stretched
++        one keeps sounding what the stretcher holds when the speed is nought. */
++    void setLaunchHandle (const LaunchHandle*) noexcept;
++
+     //==============================================================================
+     graph::NodeProperties getNodeProperties() override;
+     void prepareToPlay (const graph::PlaybackInitialisationInfo&) override;
+@@ -241,6 +253,13 @@ private:
+     const ReadAhead readAhead;
+ 
+     size_t stateHash = 0;
++
++    // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): the handle whose speed this node
++    // reads at, and the varispeed gate's gain at the end of the last block (below
++    // nought until the first).
++    const LaunchHandle* launchHandle = nullptr;
++    std::shared_ptr<float> speedGate = std::make_shared<float> (-1.0f);
++
+     ResamplerReader* resamplerReader = nullptr;
+     PitchAdjustReader* pitchAdjustReader = nullptr;
+     std::shared_ptr<SpeedFadeEditReader> editReader;
+diff --git a/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp b/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp
+index 26fd3d15d2e..70591eb7cb1 100644
+--- a/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp
++++ b/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp
+@@ -87,6 +87,10 @@ struct TimeStretcher::Stretcher
+     virtual int processData (const float* const* inChannels, int numSamples, float* const* outChannels) = 0;
+     virtual int flush (float* const* outChannels) = 0;
+     virtual int getLatencySamples() const { return 0; }
++
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): the output part of the latency, where
++    // a stretcher knows it apart; see TimeStretcher::getOutputLatencySamples.
++    virtual int getOutputLatencySamples() const { return 0; }
+ };
+ 
+ //==============================================================================
+@@ -966,6 +970,12 @@ struct SignalsmithStretcher  : public TimeStretcher::Stretcher
+         return stretch.inputLatency() + stretch.outputLatency();
+     }
+ 
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002).
++    int getOutputLatencySamples() const override
++    {
++        return stretch.outputLatency();
++    }
++
+ private:
+     signalsmith::stretch::SignalsmithStretch<float> stretch;
+     int numChannels = 0;
+@@ -1383,6 +1393,12 @@ int TimeStretcher::getLatencySamples() const
+     return stretcher ? stretcher->getLatencySamples() : 0;
+ }
+ 
++// MODIFIED BY GO.DOT, 2026-09-29 (patch 0002).
++int TimeStretcher::getOutputLatencySamples() const
++{
++    return stretcher ? stretcher->getOutputLatencySamples() : 0;
++}
++
+ int TimeStretcher::getLatencySamplesForMode (Mode mode, double sampleRate, bool realtime)
+ {
+     TimeStretcher temp;
+diff --git a/modules/tracktion_engine/timestretch/tracktion_TimeStretch.h b/modules/tracktion_engine/timestretch/tracktion_TimeStretch.h
+index ae18046910c..9f8b3874fb0 100644
+--- a/modules/tracktion_engine/timestretch/tracktion_TimeStretch.h
++++ b/modules/tracktion_engine/timestretch/tracktion_TimeStretch.h
+@@ -189,6 +189,18 @@ public:
+     */
+     static int getLatencySamplesForMode (Mode, double sampleRate, bool realtime);
+ 
++    /** MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-29, by
++        patches/tracktion_engine/0002-launched-clip-speed.patch against 13b5132.
++
++        The part of getLatencySamples() that is OUTPUT - samples the stretcher gives
++        before what it was fed is heard - for a stretcher that knows it apart from the
++        part that is input; nought for one that does not. Signalsmith's lag, in input
++        samples, is its input latency plus the speed times its output latency, so a
++        stretcher primed at one and then played at another speed is that difference out
++        of place in its source.
++    */
++    int getOutputLatencySamples() const;
++
+     /** @internal */
+     struct Stretcher;
+ 

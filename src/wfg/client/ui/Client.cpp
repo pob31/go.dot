@@ -492,6 +492,18 @@ namespace wfg::client
                 footActions.seek = [this] (const std::string& runId, double seconds)
                                    { send (gesture::seek (runId, seconds)); };
 
+                /*  THE LANE RECORDED FROM A FADER (§20.9), the same four named
+                    commands a surface's Rec key and the network send. */
+                footActions.laneArm = [this] (const std::string& cueId)
+                                      { send (gesture::laneArm (cueId)); };
+
+                footActions.laneFree = [this] { send (gesture::laneFree()); };
+
+                footActions.laneRecord = [this] (double fromSeconds)
+                                         { send (gesture::laneRecord (fromSeconds)); };
+
+                footActions.laneStop = [this] { send (gesture::laneStop()); };
+
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
                                                             std::move (listActions),
                                                             std::move (runActions),
@@ -1453,7 +1465,18 @@ namespace wfg::client
                 else
                 {
                     send (gesture::stopAll());
-                    shell->transport.setNotice ("Esc: every cue stopping, footers run - Esc again drops everything");
+
+                    /*  HOW LONG IT WILL TAKE, said in the show's own number
+                        (2026-09-28): a fade the operator did not know about
+                        reads as an Esc that did not work. */
+                    const auto fade = latest != nullptr ? model::text (*latest, "/godot/audio/panicFade")
+                                                        : std::string {};
+                    const auto seconds = juce::String (fade).getDoubleValue();
+
+                    shell->transport.setNotice (seconds > 0.0
+                        ? "Esc: every cue fading out over " + juce::String (fade) + " s, footers run"
+                          " - Esc again cuts at once"
+                        : juce::String ("Esc: every cue stopping, footers run - Esc again drops everything"));
                 }
             }
 

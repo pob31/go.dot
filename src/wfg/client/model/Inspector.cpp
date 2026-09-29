@@ -68,9 +68,11 @@ namespace wfg::client::model
                     from (2026-09-25), where its fader waits, then what a hand
                     on its strip does, in the order a press happens - it is let
                     go, it is pressed again, it was struck, it is leant on, it
-                    fades. */
+                    fades. The speed and its mode sit after where the file
+                    starts: two more things said about how the file is played
+                    (namespace draft §22.7). */
                 { "media",   { "file", "channels", "stereoToMono", "directOut",
-                               "level", "startOffset", "dca", "strip", "initialLevel", "release",
+                               "level", "startOffset", "rate", "rateMode", "dca", "strip", "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
                                "releaseFade" } },
 
@@ -80,8 +82,12 @@ namespace wfg::client::model
                 { "mic",     { "input", "channel", "fadeIn", "stereoToMono", "directOut",
                                "level", "dca" } },
 
-                //  What it moves - a cue, or a DCA instead - then where to and how.
-                { "fade",    { "target", "dca", "level", "curve", "points", "stopWhenDone" } },
+                /*  What it moves - a cue, or a DCA instead - then where to and
+                    how. Each thing a fade can move is a switch and then where it
+                    goes, level then speed (namespace draft §22.7); the curve is
+                    both's shape, so it comes after both. */
+                { "fade",    { "target", "dca", "levelOn", "level", "rateOn", "rate", "curve", "points",
+                               "stopWhenDone" } },
                 { "transport", { "target", "verb", "range", "curve" } },
                 { "start",   { "target" } },
                 { "osc",     { "device", "address", "value", "wait", "timeout" } },
@@ -119,6 +125,10 @@ namespace wfg::client::model
                 { "velocityFloor", "velocity floor" },
                 { "releaseFade", "release fade" },
                 { "initialLevel", "initial level" },
+                { "rate", "speed" },
+                { "rateMode", "speed mode" },
+                { "levelOn", "moves level" },
+                { "rateOn", "moves speed" },
             };
 
             return table;
@@ -326,6 +336,35 @@ namespace wfg::client::model
                 {
                     field.applies = ! system;
                 }
+            }
+        }
+
+        /*  WHAT A FADE'S TWO SWITCHES LEAVE ALONE (namespace draft §22.7):
+            the level and its drawn curve while `levelOn` is off, the speed
+            while `rateOn` is. Greyed and never hidden - the `stereoToMono`
+            rule - so turning a switch on finds its row where it already was.
+            The curve is the shape of both, and greyed only with neither on. */
+        void greyWhatAFadeLeavesAlone (std::vector<Field>& decided)
+        {
+            auto levelOn = true;
+            auto rateOn = false;
+
+            for (const auto& field : decided)
+            {
+                if (field.name == "levelOn")
+                    levelOn = field.value != "false";
+                else if (field.name == "rateOn")
+                    rateOn = field.value == "true";
+            }
+
+            for (auto& field : decided)
+            {
+                if (field.name == "level" || field.name == "points")
+                    field.applies = levelOn;
+                else if (field.name == "rate")
+                    field.applies = rateOn;
+                else if (field.name == "curve")
+                    field.applies = levelOn || rateOn;
             }
         }
 
@@ -768,6 +807,9 @@ namespace wfg::client::model
             aimAtAPort (snapshot, decided);
             nameTheNumbers (decided);
         }
+
+        if (out.kind == "fade")
+            greyWhatAFadeLeavesAlone (decided);
 
         /*  THE DCA A CUE ANSWERS TO, on the three kinds that carry the row -
             a media cue and a group marked with one, a fade that moves one - and

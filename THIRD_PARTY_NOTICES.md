@@ -44,12 +44,37 @@ every Go.dot binary through `juce_graphics` are listed separately below. See
 ## Tracktion Engine
 
 - **Website**: https://github.com/Tracktion/tracktion_engine
-- **Version**: develop (3.5.0), commit `b88a6ee51913668cb53e911e030ab736b13342cf`
+- **Version**: develop (3.5.0), commit `13b51326693e3227ddef91b224114d12af6433ce`,
+  **modified by Go.dot** (below)
 - **Licence**: GPLv3 or commercial Tracktion licence
 - **Copyright**: Tracktion Corporation
 
 Go.dot uses Tracktion Engine under the GPLv3 path, and links the
 `tracktion_core`, `tracktion_engine` and `tracktion_graph` modules.
+
+**Modified.** Since 2026-09-28 Go.dot builds Tracktion Engine with a series of
+changes of its own, kept in `patches/tracktion_engine/` and applied by the build
+to the submodule's working tree (`cmake/WfgTracktionPatches.cmake`; namespace
+draft §22.3). The corresponding source of the Tracktion Engine in a Go.dot binary
+is therefore the commit above **plus** the patches that
+`patches/tracktion_engine/series` lists, in its order. Every file a patch touches
+carries a notice saying Go.dot modified it, when, and in which patch - GPL-3,
+section 5(a):
+
+- `0001-auto-tempo-clips-may-resample.patch` (2026-09-28): an engine behaviour
+  that lets an auto-tempo clip left at `disabled` be resampled rather than handed
+  the default time-stretcher.
+- `0002-launched-clip-speed.patch` (2026-09-28): a speed source a launched
+  clip's handle can carry, read by its wave node and its slot so the clip plays
+  at a speed that moves; a freeze at nought for a stretched clip; and the Lagrange
+  reader made to track the interpolator exactly, so a ratio that is not a whole
+  number of frames a block no longer clicks, and made to low-pass the file above
+  one, so a speed does not alias; a stretcher primed for the speed
+  it will play at, which its output latency, now reported on its own, says how
+  to aim; and a stretcher primed before its file was read primed again when it
+  is first read, so a stretched clip no longer opens on a latency of silence;
+  and a launched clip's loop moved below its resampler and its stretcher, so a
+  stretched loop no longer starts its stretcher again at every pass.
 
 Tracktion Engine vendors several libraries of its own inside
 `modules/3rd_party/` and `modules/tracktion_engine/3rd_party/`. The ones that
@@ -84,8 +109,8 @@ vendored copy means Go.dot needs no additional test-framework submodule.
 Vendored by Tracktion Engine at `modules/3rd_party/libsamplerate/` and compiled
 **unconditionally** into `tracktion_engine_playback.cpp`. That is the fact
 behind a build-system decision worth recording: varispeed works in Go.dot with
-no build flag at all, which is part of why none of the
-`TRACKTION_ENABLE_TIMESTRETCH_*` options are set.
+no build flag at all. Only one `TRACKTION_ENABLE_TIMESTRETCH_*` option is set,
+Signalsmith's, and that is for time-stretch.
 
 Full licence text:
 https://github.com/libsndfile/libsamplerate/blob/master/COPYING
@@ -110,6 +135,22 @@ code is in the binary anyway.
 
 LGPL-2.1-**or-later** upgrades to LGPL-3, which is compatible with GPL-3.0, so
 this is a notice obligation and not a conflict.
+
+---
+
+## Signalsmith Stretch, and Signalsmith Linear
+
+- **Website**: https://github.com/Signalsmith-Audio/signalsmith-stretch
+- **Licence**: MIT (both)
+- **Copyright**: (c) 2022 Geraint Luff / Signalsmith Audio Ltd. (Stretch);
+  (c) 2025 Signalsmith Audio (Linear)
+
+Vendored by Tracktion Engine at
+`modules/tracktion_engine/3rd_party/signalsmith-stretch/`, with the Linear
+library it uses for its FFT beside it in `signalsmith-linear/`. Header-only, and
+compiled in since 2026-09-28 by `TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH=1`: it
+is the time-stretcher behind a media cue's `timestretch` mode (namespace draft
+§22). The licence texts are `LICENSE.txt` in each of the two directories.
 
 ---
 
@@ -316,8 +357,9 @@ All five are under the ISC licence:
 
 - **RubberBand** is *not* a dependency. Enabling it would mean a licence decision
   (PRD §3.25's "licence permitting") plus a fourth submodule that hard-`#error`s
-  on a clean clone. All four `TRACKTION_ENABLE_TIMESTRETCH_*` flags are left at
-  0; Tracktion Engine degrades cleanly with them off.
+  on a clean clone. Of the four `TRACKTION_ENABLE_TIMESTRETCH_*` flags only
+  Signalsmith's is set (above); Elastique, RubberBand and SoundTouch's stay at 0,
+  and Tracktion Engine degrades cleanly with them off.
 - **libcurl**, **WebKitGTK**, **JACK** and the **LADSPA SDK** are kept out of the
   build by `JUCE_USE_CURL=0`, `JUCE_WEB_BROWSER=0`, `JUCE_JACK=0` and
   `JUCE_PLUGINHOST_LADSPA=0`. Each is a package the Linux dependency list does

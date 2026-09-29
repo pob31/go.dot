@@ -3882,6 +3882,97 @@ namespace wfg::doc
 
         Mics { problems, *this }.visit (showNode);
 
+        /*  A FADE ON A SPEED THAT HAS NO SPEED TO MOVE (namespace draft §22.6,
+            EC), and a fade that moves nothing at all.
+
+            Only a media cue plays a file at a speed. A group's level is a trim
+            its members add, and a speed trim would be a factor each of them
+            multiplied by - a proposal, not a rule to read into §4.12; a mic cue
+            has no file, and a DCA no sound of its own. So `rateOn` on a fade
+            aimed at any of them moves nothing when it runs, and this is where
+            somebody finds out why. A fade with both switches off is the same
+            surprise from the other side: its run ends the moment it starts.
+
+            WARNINGS AND NOT REFUSALS, as every one here is: the show plays,
+            and the fade does what it says. */
+        struct SpeedFades
+        {
+            std::vector<std::string>& problems;
+            const ShowDocument& document;
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.getType().toString() == "Fade")
+                {
+                    const auto id = node[idProperty].toString().toStdString();
+                    const auto read = [this, &id] (const char* name)
+                    {
+                        return document.getAttribute ("/godot/cue/" + id + "/" + name)
+                                 .value_or (std::string {});
+                    };
+
+                    const auto here = "/Show/.../Fade[" + id + "]";
+                    const auto levelOn = read ("levelOn") != "false";
+                    const auto rateOn = read ("rateOn") == "true";
+                    const std::string what = levelOn ? "only the level moves" : "the fade moves nothing";
+
+                    if (! levelOn && ! rateOn)
+                        problems.push_back (here + "/@levelOn: off, and so is @rateOn - the fade moves"
+                                                   " neither the level nor the speed, and ends the moment"
+                                                   " it starts");
+                    else if (rateOn && ! read ("dca").empty())
+                        problems.push_back (here + "/@rateOn: on, and the fade moves a DCA - a DCA has"
+                                                   " no speed, so " + what);
+                    else if (rateOn)
+                    {
+                        const auto targetId = read ("target");
+                        const auto target = document.findById (targetId);
+                        const auto kind = target.isValid() ? target.getType().toString().toLowerCase().toStdString()
+                                                           : std::string {};
+
+                        //  A target this show does not contain is the References visitor's.
+                        if (! kind.empty() && kind != "media")
+                            problems.push_back (here + "/@rateOn: on, and \"" + targetId + "\" is "
+                                                  + (std::string ("aeiou").find (kind.front()) != std::string::npos
+                                                       ? "an " : "a ")
+                                                  + kind + " cue - only a media cue plays at a speed, so "
+                                                  + what);
+                    }
+                }
+
+                /*  AND TIMESTRETCH ON A CUE WITH MORE THAN ONE RANGE (§22.12). The
+                    passes of a range are seamless since its loop sits below the
+                    stretcher; but each range is a slot of its own, and the next
+                    one's stretcher is primed as it begins, on the audio thread -
+                    a long block, which Tracktion's overload mute can answer with a
+                    block of silence - and away from speed one the two stretchers
+                    meet out of phase, a click. Varispeed ranges are seamless. */
+                if (node.getType().toString() == "Media"
+                      && document.getAttribute ("/godot/cue/" + node[idProperty].toString().toStdString()
+                                                  + "/rateMode").value_or (std::string {}) == "timestretch")
+                {
+                    auto ranges = 0;
+
+                    for (const auto& child : node)
+                        if (child.hasType (juce::Identifier ("Range")))
+                            ++ranges;
+
+                    if (ranges > 1)
+                        problems.push_back ("/Show/.../Media[" + node[idProperty].toString().toStdString()
+                                              + "]/@rateMode: timestretch, and the cue plays " + std::to_string (ranges)
+                                              + " ranges - each range after the first starts a stretcher of its own,"
+                                                " which on a small block or a busy machine can be heard as a short gap"
+                                                " at the boundary, and away from speed one as a click; the passes of a"
+                                                " range are seamless, and in varispeed so are its boundaries");
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        SpeedFades { problems, *this }.visit (showNode);
+
         /*  AND A MOUNT THAT SAYS ITS NODES MAY BE WRITTEN EARLY BUT CANNOT BE
             ASKED WHAT THEY HELD.
 

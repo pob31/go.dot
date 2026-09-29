@@ -1,0 +1,31 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="RT000001" name="Speed">
+      <Media id="RT000002" file="tone.wav" name="Twice, varispeed" number="1" rate="2">
+        <Route id="RT000003" bus="RT000004" gains="1 0 0 1"/>
+      </Media>
+      <Media id="RT000005" file="tone.wav" name="Half, varispeed" number="2" rate="0.5">
+        <Route id="RT000006" bus="RT000004" gains="1 0 0 1"/>
+      </Media>
+      <Media id="RT000007" file="tone.wav" name="Twice, stretched" number="3" rate="2" rateMode="timestretch">
+        <Route id="RT000008" bus="RT000004" gains="1 0 0 1"/>
+      </Media>
+      <Media id="RT000009" file="tone.wav" name="Half, stretched" number="4" rate="0.5" rateMode="timestretch">
+        <Route id="RT00000A" bus="RT000004" gains="1 0 0 1"/>
+      </Media>
+      <Media id="RT00000B" file="tape.wav" name="Tape" number="5">
+        <Route id="RT00000C" bus="RT000004" gains="1 0 0 1"/>
+      </Media>
+      <Fade duration="1" id="RT00000D" levelOn="false" name="Tape stop" number="6" rate="0" rateOn="true" target="RT00000B"/>
+      <Cue id="RT00000E" name="Note" number="7"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="RT000004" name="Main L/R" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

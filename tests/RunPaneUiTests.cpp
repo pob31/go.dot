@@ -178,6 +178,49 @@ TEST_CASE ("foot panel: it opens on one subject, draws a file, and a drag writes
 }
 
 
+TEST_CASE ("waveform: the head row carries the cue's speed and mode beside the clock")
+{
+    /*  Namespace draft §22.7. The clock counts the file's seconds, so the row
+        says when they are not the room's. With WFG_SNAPSHOT_DIR set,
+        waveform-speed.png as well. */
+    ui::WaveformEditorComponent editor (model::Theme {}, {});
+    editor.setSize (900, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 10.0;
+    reading.rate = 0.5;
+    reading.rateMode = "timestretch";
+    reading.running = true;
+    reading.position = 4.0;
+
+    editor.show (reading, nullptr);
+
+    juce::Image canvas (juce::Image::ARGB, 900, 220, true);
+    {
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, false);
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto snapshot = editor.createComponentSnapshot (editor.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("waveform-speed.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (snapshot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
 TEST_CASE ("waveform: a level lane is drawn over the file, and one gesture is one write")
 {
     /*  Namespace draft §20.5. The arithmetic of every gesture is `model/Lane`'s
@@ -356,6 +399,195 @@ TEST_CASE ("waveform: a level lane is drawn over the file, and one gesture is on
     }
 }
 
+
+TEST_CASE ("surface panel: while a lane waits for a fader, a press takes it and does nothing else")
+{
+    /*  Namespace draft §20.9, decision DF: the first fader touched is taken
+        for the lane - even a strip riding nothing, the likeliest one to be
+        chosen - and that press neither touches nor moves anything. */
+    std::vector<wfg::Event> sent;
+
+    ui::SurfacePanelComponent panel (model::Theme {},
+                                     [&sent] (wfg::Event event) { sent.push_back (std::move (event)); });
+    panel.setSize (600, 420);
+
+    model::SurfaceRow desk;
+    desk.id = "SRF00001";
+    desk.name = "Desk";
+    desk.profile = "virtual";
+    desk.strips = 2;
+    desk.connected = true;
+
+    model::StripRow idle;
+    idle.id = "STP00002";
+    idle.surface = desk.id;
+    idle.index = 0;
+    idle.role = "sampler";
+    idle.endpoint = "absolute";
+    idle.word = "free";
+
+    model::StripRow band;
+    band.id = "STP00003";
+    band.surface = desk.id;
+    band.index = 1;
+    band.role = "dca";
+    band.dca = "DCA00001";
+    band.endpoint = "absolute";
+    band.target = "/godot/dca/DCA00001/trim";
+    band.word = "dca";
+    band.hasLevel = true;
+    band.levelDb = -6.0;
+
+    //  Nothing waits: a strip riding nothing cannot be taken, as before.
+    panel.show ({ desk }, { idle, band }, false);
+    panel.dragFader (0, 0.5);
+    CHECK (sent.empty());
+
+    //  A lane waits: the press is `lane.take`, and nothing else goes.
+    panel.show ({ desk }, { idle, band }, true);
+    panel.dragFader (0, 0.5);
+
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent[0].command == "lane.take");
+    REQUIRE (sent[0].args.size() == 1u);
+    CHECK (sent[0].args[0].getString() == "STP00002");
+
+    //  Even on a strip that rides a DCA: its trim is not touched.
+    panel.dragFader (1, 0.2);
+
+    REQUIRE (sent.size() == 2u);
+    CHECK (sent[1].command == "lane.take");
+    CHECK (sent[1].args[0].getString() == "STP00003");
+}
+
+TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops - saying which")
+{
+    /*  Namespace draft §20.9: one button, four states read from the tree at
+        every click, and the transport's stop ending a pass rather than
+        killing it (a kill drops the ride). */
+    std::vector<std::string> said;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.laneArm = [&said] (const std::string& cue) { said.push_back ("arm " + cue); };
+    actions.laneFree = [&said] { said.push_back ("free"); };
+    actions.laneRecord = [&said] (double from) { said.push_back ("record " + std::to_string (static_cast<int> (from))); };
+    actions.laneStop = [&said] { said.push_back ("stop"); };
+    actions.stop = [&said] (const std::string& run) { said.push_back ("kill " + run); };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setSize (1000, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 10.0;
+    reading.lane = { { 1.0, 0.0 }, { 6.0, -20.0 } };
+
+    const auto rec = [&editor]
+    {
+        juce::Button* found = nullptr;
+
+        for (auto* button : buttonsUnder (editor))
+            if (button->getButtonText().contains ("Rec") || button->getButtonText().contains ("Stop"))
+                found = button;
+
+        REQUIRE (found != nullptr);
+        return found;
+    };
+
+    //  IDLE: Rec arms this cue's lane.
+    editor.show (reading, nullptr);
+    CHECK (rec()->getButtonText() == "Rec");
+    rec()->onClick();
+    CHECK (said.back() == "arm CUE00001");
+
+    //  WAITING: a click cancels.
+    reading.laneRecord.cue = "CUE00001";
+    reading.laneRecord.waiting = true;
+    editor.show (reading, nullptr);
+    CHECK (rec()->getButtonText().startsWith ("Rec"));
+    CHECK (rec()->getToggleState());
+    rec()->onClick();
+    CHECK (said.back() == "arm ");
+
+    //  TAKEN: Rec starts a pass from the playhead, and a cross frees the fader.
+    reading.laneRecord.waiting = false;
+    reading.laneRecord.taken = true;
+    reading.laneRecord.strip = "STRP0003";
+    reading.laneRecord.faderLabel = "Panel \xc2\xb7 fader 3";
+    reading.laneRecord.hasRide = true;
+    reading.laneRecord.rideDb = 0.0;
+    editor.show (reading, nullptr);
+
+    CHECK (rec()->getButtonText().endsWith ("Rec"));
+    rec()->onClick();
+    CHECK (said.back() == "record 0");
+
+    juce::Button* cross = nullptr;
+
+    for (auto* button : buttonsUnder (editor))
+        if (button->getButtonText() == juce::String::fromUTF8 ("\xe2\x9c\x95"))
+            cross = button;
+
+    REQUIRE (cross != nullptr);
+    CHECK (cross->isVisible());
+    cross->onClick();
+    CHECK (said.back() == "free");
+
+    //  RECORDING: the button stops the pass, and so does the transport - ending it, not killing it.
+    reading.laneRecord.recording = true;
+    reading.running = true;
+    reading.runId = "RN000001";
+
+    for (int pass = 0; pass < 12; ++pass)
+    {
+        reading.position = 1.0 + 0.25 * pass;
+        reading.laneRecord.rideDb = -3.0 - 1.5 * pass;
+        editor.show (reading, nullptr);
+    }
+
+    CHECK (rec()->getButtonText().contains ("Stop"));
+    rec()->onClick();
+    CHECK (said.back() == "stop");
+
+    for (auto* button : buttonsUnder (editor))
+        if (button->getTooltip().startsWith ("Stop") || button->getTooltip().startsWith ("Play"))
+            button->onClick();
+
+    CHECK (said.back() == "stop");
+    CHECK (std::find (said.begin(), said.end(), "kill RN000001") == said.end());
+
+    //  AND IT DRAWS, the ride's trail over the lane - the picture to judge by.
+    juce::Image canvas (juce::Image::ARGB, 1000, 220, true);
+    {
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, false);
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto snapshot = editor.createComponentSnapshot (editor.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("waveform-lane-rec.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (snapshot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    //  UNDER THE LOCK, a lane not recording offers nothing.
+    reading.laneRecord = {};
+    reading.running = false;
+    reading.locked = true;
+    editor.show (reading, nullptr);
+    CHECK_FALSE (rec()->isEnabled());
+}
 
 TEST_CASE ("range table: every slice shows its times, and the arrow gives the next one this length")
 {
@@ -2090,6 +2322,53 @@ TEST_CASE ("take panel: its five presses are the take verbs, offered only where 
     {
         juce::Graphics g (canvas);
         panel.paintEntireComponent (g, false);
+    }
+}
+
+TEST_CASE ("run pane: a run at a speed other than one says so beside its name, after whatever else it says")
+{
+    /*  Namespace draft §22.7: "×0.5" beside a media run, and after a
+        sampler member's strip. Painted, so a layout that lost it would at least
+        be drawn; with WFG_SNAPSHOT_DIR set, run-pane-speed.png as well. */
+    const auto media = [] (const char* runId, const char* name, double rate, const char* words)
+    {
+        model::RunRow row;
+        row.id = runId;
+        row.cueId = std::string ("CUE") + runId;
+        row.cueName = name;
+        row.kind = "media";
+        row.state = "playing";
+        row.position = "12.5";
+        row.rate = rate;
+        row.samplerWords = words;
+        return row;
+    };
+
+    const std::vector<model::RunRow> rows { media ("RUN00001", "Slowed", 0.5, ""),
+                                            media ("RUN00002", "At one", 1.0, ""),
+                                            media ("RUN00003", "Pad", 2.0, "on 3") };
+
+    ui::RunPaneComponent pane (model::Theme {}, {});
+    pane.setSize (450, 200);
+    pane.show (rows, {});
+
+    juce::Image canvas (juce::Image::ARGB, 450, 200, true);
+    juce::Graphics g (canvas);
+    pane.paintEntireComponent (g, false);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto picture = pane.createComponentSnapshot (pane.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("run-pane-speed.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
 }
 

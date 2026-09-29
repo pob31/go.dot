@@ -161,6 +161,13 @@ namespace wfg
             group is not armed, or this member is past the last strip. */
         inline constexpr const char* needsStrip       = "needs-strip";
 
+        /*  A GO INSIDE THE SHOW'S LEAST TIME BETWEEN TWO GOs (`list/goDebounce`,
+            PRD §3.7, 2026-09-28): the last GO fired something less than that
+            long ago, so this one is taken for a bounce and fires nothing. The
+            standby has not moved, so the next GO outside the window fires what
+            this one would have. */
+        inline constexpr const char* tooSoon          = "too-soon";
+
         /*  A PRESS ON A TAKE WITH NOTHING TO PRESS IT THROUGH (Phase 9c,
             namespace draft §19.6): Rec, Loop or a layer asked of a sampling
             channel no sounding mic cue holds - its cue not fired yet, ended,
@@ -184,6 +191,16 @@ namespace wfg
             would empty what the writer is reading, and a second Keep would
             write the same take twice. Until `take.kept` says it is done. */
         inline constexpr const char* busy             = "busy";
+
+        /*  A FADER OFFERED TO A LANE THAT IS NOT WAITING FOR ONE (namespace
+            draft §20.9): `lane.take` is what a surface sends for the first
+            fader touched while a lane is armed, and with none armed - or one
+            that already has its fader - there is nothing to take it for. */
+        inline constexpr const char* notWaiting       = "not-waiting";
+
+        /*  A PASS ASKED OF A LANE WITH NO FADER TAKEN (§20.9): the pass is the
+            fader's, and until one is touched there is no hand to record. */
+        inline constexpr const char* noFader          = "no-fader";
 
         /*  The argument's TYPE was right and its VALUE is not one this command
             accepts - a scope that is neither "round" nor "group", a stop verb

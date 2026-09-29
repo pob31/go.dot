@@ -21,8 +21,9 @@ interface with a steady level at its first input. GO fires the mic cue "Voix
 solo": it claims its channel, Vox 1, whose own child - the test gain at a half
 - comes up loaded; the input is heard through it at a half on both sides, the
 plugin having made the mono voice stereo, after rising over the cue's
-half-second fade-in rather than stepping. Esc shuts the input, the tail rings
-out, the run ends and the channel is free - and silent. Fired again, and the
+half-second fade-in rather than stepping. Esc fades the input over the show's
+panic fade and shuts it, the tail rings out, the run ends and the channel is
+free - and silent. Fired again, and the
 child killed from its own parameter, the plugin reads failed in words naming the
 channel, silent until it is back, and the voice is silent - never dry, the
 author's decision of 2026-09-26 (CU) - through the relaunch the same parameter
@@ -189,14 +190,18 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             went_at = clock_frame(server)
             report.check(wait_for_frames(render, went_at + int(RATE * 2.0)), "the render runs two seconds past GO")
 
-            # Esc: the input shut, the tail rung out, the run over and the channel free.
+            # Esc: the input faded over the show's panic fade (2026-09-28) and shut,
+            # the tail rung out, the run over and the channel free.
+            fade = float(value_of(server, "/godot/audio/panicFade") or 0.0)
             stopped_at = clock_frame(server)
             send(server, "/godot/cmd/run/stopAll")
-            freed = common.wait_until(lambda: not value_of(server, f"/godot/slot/{CHANNEL}/holder"), timeout=5.0)
+            freed = common.wait_until(lambda: not value_of(server, f"/godot/slot/{CHANNEL}/holder"),
+                                      timeout=5.0 + fade)
             report.check(freed, "Esc frees the channel once the tail has rung out")
             report.equal(value_of(server, f"/godot/run/{holder}/state") if holder else None, "done",
                          "and the run is done")
-            report.check(wait_for_frames(render, stopped_at + int(RATE * 1.5)), "the render runs on past the stop")
+            report.check(wait_for_frames(render, stopped_at + int(RATE * max(1.5, fade + 0.5))),
+                         "the render runs on past the stop")
 
             # Fired again, then its plugin's child killed from its own parameter.
             send(server, "/godot/cmd/cue/fire", [MIC])
@@ -253,7 +258,14 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             # gives the half-second fade-in about a second and a half.
             steady_to = stopped_at - int(RATE * 0.1)
             steady_from = max(start + int(RATE * 0.75), steady_to - int(RATE * 0.6))
-            after = level(left, stopped_at + int(RATE * 0.8))
+            # SILENT ONCE THE PANIC FADE HAS DONE ITS WORK, read in the fifth of a
+            # second that ends where the render was waited to before the cue was
+            # fired again. Read 0.8 s after Esc, a second's fade was still going
+            # through part of the window, and a macOS runner that placed Esc a few
+            # tenths late (db21011) heard the end of it. The fade is in decibels,
+            # so its last few tenths are far below this bar anyway.
+            quiet_from = stopped_at + int(RATE * (max(1.5, fade + 0.5) - 0.2))
+            after = level(left, quiet_from, 0.2)
             dead_from, dead_to = killed_at + int(RATE * 1.0), down_at + int(RATE * 1.0)
             dead = level(left, dead_from, (dead_to - dead_from) / RATE)
 

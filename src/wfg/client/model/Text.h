@@ -69,4 +69,9 @@ namespace wfg::client::model
     /*  The words of a space-separated node, which is how every `order` node
         lists identifiers - the page's tree.ids() does the same split. */
     std::vector<std::string> words (std::string_view line);
+
+    /*  A SPEED AS THE WINDOW WRITES IT (namespace draft §22.7): "×0.5", to the
+        thousandth and in no locale's spelling - and nothing at all at one,
+        which is not worth a word beside every run. */
+    std::string speedText (double rate);
 }

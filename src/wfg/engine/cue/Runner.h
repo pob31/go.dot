@@ -57,6 +57,8 @@
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/Solver.h>
+#include <wfg/engine/cue/LaneRecording.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -219,6 +221,14 @@ namespace wfg::cue
         bool live = false;
         int firstInput = -1;
         int inputWidth = 1;
+
+        /*  THE CUE'S MODE (namespace draft §22.2): timestretch when true, the
+            speed then changing how long the sound takes and not its pitch;
+            varispeed when false. Read at the arm and applied there, because a
+            mode is on Tracktion's rebuild list (DV). The speed itself is not in
+            the request: it is placed on the voice at the launch, and moves
+            after it (Player::placeRate). */
+        bool stretch = false;
     };
 
     /*  The audio side, as the cue layer sees it.
@@ -275,6 +285,23 @@ namespace wfg::cue
         /*  The level a track's cue is playing at, in dB. Tick thread, once per
             tick while a fade runs, and one relaxed atomic store. */
         virtual void setLevelDb (int track, double levelDb) = 0;
+
+        /*  A VOICE'S SPEED, placed ahead (namespace draft §22.4): from the last
+            breakpoint the voice holds, its speed moves in a straight line to
+            `rate` at `sample` - one is the file's own - and two at one sample
+            are a step. The Runner places each change a launch horizon ahead,
+            as it places a launch, so what a block plays is decided before it
+            plays. Tick thread, never blocking.
+
+            The default does nothing, which is a voice at one: a replay, and
+            every rig that plays no speed. */
+        virtual bool placeRate (int, std::int64_t, double) { return true; }
+
+        /*  The fastest a time-stretched cue can play at this graph's rate:
+            the stretcher's buffer is its latency long, and it takes 256 x
+            speed frames a chunk. The Runner holds a stretched cue's speed to
+            it, so its clock and the voice's agree. */
+        virtual double stretchSpeedLimit() const { return 20.0; }
 
         /*  Where a SOUNDING cue's channels go, changed under it. Tick thread,
             on an edit and never per tick.
@@ -435,6 +462,13 @@ namespace wfg::cue
             here, and the hook places the presses. None, and a sampling
             channel's takes are left alone. */
         void setTakes (TakeTable* table) noexcept { takes = table; }
+
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): the
+            table `lane.*` moves, which the hook `recordLane` reads each tick -
+            the ride's value, and during a pass the hand sampled against the
+            file's clock. Absent - a replay, a tree dump - nothing is recorded,
+            and the lane a pass ended in arrives from the log instead. */
+        void setLanes (LaneTable* table) noexcept { lanes = table; }
         void resetAudioPreparation() { armedStandby.clear(); }
 
         /*  The runs, for the one caller outside the Runner that has to ask
@@ -831,6 +865,40 @@ namespace wfg::cue
         /** Every fade in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<FadeJob>& fades() const noexcept { return running; }
 
+        /*  ESC, THE GRACEFUL WAY, AS A FADE (author, 2026-09-28: "a 'Panic'
+            fade duration that fades out all playing cues. It seems the Panic
+            cuts everything with no fade time").
+
+            What `run.stopAll` does to the sound before it asks every root to
+            stop: every run that is sounding is faded to silence over the show's
+            `audio/panicFade` and stopped when it gets there - the job a stop
+            cue's `fade` verb runs, one per voice, with no cue behind it. A
+            group is asked to stop as it always was; its members are already
+            fading, so its footer runs when they have gone, which is §4.4's
+            "same code path as normal completion, entered early" at the speed
+            the show chose. Nought is the cut Esc used to be.
+
+            A run already on its way out keeps its own stop when that lands
+            first. `tick` is the command's own, for the reason `fire`'s is. */
+        void beginPanicFade (std::int64_t tick);
+
+        /*  AND A DOUBLE ESC DURING IT (§4.4, "drops all actions"): every job
+            that is holding a voice for a stop still to come lets go, so the
+            runs `run.killAll` marks are cut on this tick by `enforceStops`
+            rather than faded to the end. Without it the second Esc would be
+            waited out - and, for a stop cue's fade, the target was put back to
+            `playing` by the killed fade and never stopped at all. */
+        void dropStopFades();
+
+        /*  THE LEAST TIME BETWEEN TWO GOs (PRD §3.7's GO debounce, a show
+            setting since 2026-09-28): whether a GO at `tick` falls inside the
+            show's `list/goDebounce` of the last GO that fired something. The
+            handler asks, and says `too-soon` when it does; `noteGo` is the GO
+            that fired. Handler state, so a replay - which runs the handler -
+            refuses the same GOs the night did. */
+        bool goTooSoon (std::int64_t tick) const;
+        void noteGo (std::int64_t tick) noexcept { lastGoTick = tick; }
+
         /*  The mounted namespaces and the socket that serves them, which is
             what a network cue needs and nothing else does.
 
@@ -940,6 +1008,22 @@ namespace wfg::cue
             The points are re-read when the show's revision moves - `applyEq`'s
             gate - and read at the second the voice will be at one slew ahead. */
         void applyLanes();
+
+        /*  EVERY SOUNDING MEDIA CUE'S SPEED (namespace draft §22.4): the cue's
+            `rate` re-read when the show's revision moves - unless a speed fade
+            holds the run - and any change placed on the voice a launch horizon
+            ahead, held until then and ramped over a tick, on the run's own
+            clock and the Player's alike, so the two never disagree. Between the
+            launch and the range boundaries, which read that clock. `rateNow` is
+            the readout. */
+        void applyRates();
+
+        /*  THE PASS (§20.9), just after `applyLanes` and before the sum: the
+            ride's value while nobody holds it, the hand's level as the voice's
+            lane term from the first touch (latch, DH), a sample of it per tick
+            where the voice is, and - when the pass ends - the lane it leaves,
+            written in one engine `node.set` (DK). */
+        void recordLane (Engine& engine);
 
         /*  A sounding cue's EQ, kept up with the document (Phase 9a): the
             routing pass's shape, gated on the same revision, pushing only
@@ -1191,12 +1275,30 @@ namespace wfg::cue
         Takeover resolveTakeover (const std::string& targetId);
 
         /*  `points` is a drawn curve, or empty for the two words; a stop
-            passes it empty, having no curve to draw (§14.6). */
+            passes it empty, having no curve to draw (§14.6). `stopLagTicks`
+            holds a stop of its own back that many ticks past the level's
+            arrival: a fade that also moves the speed stops once the speed has
+            been heard too (§22.6, ED). */
         void beginFade (const std::string& selfCueId,
                         const std::string& targetCueId,
                         const std::string& selfRunId, const std::string& kind,
                         double toDb, double seconds, FadeCurve, bool stopWhenDone,
-                        std::vector<doc::FadePoint> points);
+                        std::vector<doc::FadePoint> points,
+                        int stopLagTicks = 0);
+
+        /*  A FADE ON A SPEED (namespace draft §22.6): the target's own speed,
+            from wherever it stands to `toRate`, straight or S in the ratio. A
+            media cue's only: aimed at a group, a mic cue or a cue not running
+            it moves nothing (EC). Its takeover key is `rate:` and the run, so
+            it takes over a speed fade and never a level fade. `alone` is a fade
+            that moves the speed only: then it says what became of a target
+            that is not there, and carries the fade's stop, which lands once the
+            speed has reached the voice - a horizon and a tick after its last
+            breakpoint (ED). With the level moving too, the level's job does
+            both. Answers whether a job now moves the speed. */
+        bool beginRateFade (const std::string& targetCueId, const std::string& selfRunId,
+                            double toRate, double seconds, FadeCurve, bool stopWhenDone,
+                            bool alone);
 
         /*  A FADE AIMED AT A DCA (`fade/dca`, Phase 6): the DCA's trim moves
             from wherever it stands to `toDb`. No run to find and nothing to
@@ -1353,6 +1455,10 @@ namespace wfg::cue
             handler can be scheduled against the same clock the tick hook
             reads. Set by beforeTick, which runs before the handlers do. */
         std::int64_t currentTick = 0;
+
+        /*  The tick of the last GO that fired something, or none yet. */
+        std::int64_t lastGoTick = -1;
+
         std::vector<OscJob> sending;
 
         tree::MountTable* mounts = nullptr;
@@ -1435,6 +1541,21 @@ namespace wfg::cue
 
         /** The show revision `applyLanes` last read the lanes at; the same twin. */
         std::uint64_t laneRevision = 0;
+
+        /** The show revision `applyRates` last read the speeds at; the same twin. */
+        std::uint64_t rateRevision = 0;
+
+        /*  THE PASS'S OWN BOOKS (§20.9): the table `lane.*` moves; the ride so
+            far, a segment per stretch between a loop's wraps; the lane of the
+            cue being ridden, re-read when the show's revision moves; and the
+            run whose pass has been written, so the tick between the write and
+            its `lane.stop` landing does not write it twice. */
+        LaneTable* lanes = nullptr;
+        std::vector<RideSegment> ride;
+        std::vector<doc::LanePoint> rideLane;
+        std::string rideLaneCue;
+        std::uint64_t rideLaneRevision = 0;
+        std::string rideWritten;
 
         /*  And the live layer's, beside each: a turn under the lock moves the
             layer and not the show. */

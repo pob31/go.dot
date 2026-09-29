@@ -123,6 +123,24 @@ namespace wfg::client::model
     /** Every strip of every surface: surface order, then index. */
     std::vector<StripRow> readStrips (const tree::TreeSnapshot&);
 
+    /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9), as the tree
+        says: the lane's cue, the fader taken for it (and how a person names
+        it - "Panel · fader 3"), whether it still waits for a touch, whether a
+        pass runs, and what the fader rides. */
+    struct LaneRecordReading
+    {
+        std::string cue;
+        std::string strip;
+        std::string faderLabel;
+        bool waiting = false;
+        bool taken = false;
+        bool recording = false;
+        bool hasRide = false;
+        double rideDb = 0.0;
+    };
+
+    LaneRecordReading readLaneRecord (const tree::TreeSnapshot&);
+
     /** The strips of one surface, from a readStrips result, in index order. */
     std::vector<StripRow> stripsOf (const std::vector<StripRow>& strips, const std::string& surfaceId);
 

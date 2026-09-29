@@ -18,6 +18,7 @@
 
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <cmath>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -80,6 +81,16 @@ namespace wfg::client::model
             return Flag::unsaid;
 
         return sole->getBool() ? Flag::yes : Flag::no;
+    }
+
+    std::string speedText (double rate)
+    {
+        const auto rounded = std::round (rate * 1000.0) / 1000.0;
+
+        if (! (rounded < 1.0) && ! (rounded > 1.0))
+            return {};
+
+        return "\xc3\x97" + osc::formatDouble (rounded);
     }
 
     std::vector<std::string> words (std::string_view line)

@@ -30,6 +30,7 @@
 #include <juce_core/juce_core.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+#include <concepts>
 #include <string>
 
 //==============================================================================
@@ -121,6 +122,48 @@ TEST_CASE ("toolchain: the wfg::deps compile definitions reached this target")
     // as a usable string literal proves the mechanism, not just the flags.
     CHECK (std::string (WFG_PRODUCT_NAME) == "Go.dot");
     CHECK_FALSE (std::string (WFG_VERSION).empty());
+}
+
+//==============================================================================
+namespace
+{
+    /*  Asked through a template so that an UNPATCHED Tracktion answers false,
+        with the static_assert's own sentence, instead of failing somewhere
+        inside a requires-expression on a non-dependent type - which the
+        language makes a hard error with nothing of ours in it. */
+    template <typename Behaviour>
+    constexpr bool carriesPatch0001 = requires (Behaviour& behaviour)
+    {
+        { behaviour.autoTempoClipsUseDefaultTimeStretcher() } -> std::same_as<bool>;
+    };
+}
+
+TEST_CASE ("toolchain: Tracktion carries Go.dot's patches, and Signalsmith is compiled in")
+{
+    /*  Namespace draft §22.3, decision DQ: the build applies
+        patches/tracktion_engine/series to the Tracktion checkout before a line
+        of it compiles (cmake/WfgTracktionPatches.cmake). A build that somehow
+        compiled the pin WITHOUT them - a tree reset after the configure, a
+        cached object from before - would still link, and every cue in
+        varispeed would go through a stretcher with nothing to say so. This
+        file does not build against that tree.
+
+        And the stretcher itself (DZ): the define is what makes Signalsmith
+        Tracktion's default mode, so it has to reach this target exactly as it
+        reaches Tracktion's own. */
+    static_assert (TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH == 1,
+                   "TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH must be 1 - see cmake/WfgThirdParty.cmake (2026-09-28)");
+    static_assert (tracktion::engine::TimeStretcher::defaultMode == tracktion::engine::TimeStretcher::signalsmithDefault,
+                   "Signalsmith must be Tracktion's default stretcher, which the define decides");
+    static_assert (carriesPatch0001<tracktion::engine::EngineBehaviour>,
+                   "Tracktion does not carry patches/tracktion_engine/0001 - configure again "
+                   "(cmake/WfgTracktionPatches.cmake applies the series)");
+
+    /*  The patch changes nothing for anybody who does not ask: its default is
+        what Tracktion has always done. Go.dot's own engine behaviour is the
+        one that says no, and AudioTests asks what that does to a cue. */
+    tracktion::engine::EngineBehaviour defaults;
+    CHECK (defaults.autoTempoClipsUseDefaultTimeStretcher());
 }
 
 //==============================================================================

@@ -157,8 +157,9 @@ namespace wfg::surface
         the law its own row implies - the parameter table's type, unit and
         range, and nothing named. A frequency in ratios, a level along the
         fader, a gain in half decibels, a width in ratios, a time in tenths
-        of a second (whole seconds past ten), a whole number by one. So a row
-        added to the table tomorrow turns sensibly with no line written here. */
+        of a second (whole seconds past ten), a speed a semitone a detent
+        (namespace draft §22.7), a whole number by one. So a row added to the
+        table tomorrow turns sensibly with no line written here. */
     struct DialRange
     {
         bool integer = false;

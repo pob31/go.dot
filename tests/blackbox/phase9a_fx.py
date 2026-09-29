@@ -473,6 +473,130 @@ def run_state(locale: "str | None") -> int:
     return report.finish()
 
 
+def run_switch_in(locale: "str | None") -> int:
+    """AN INSERT SWITCHED IN AT STANDBY, heard (found 2026-09-28).
+
+    A cue armed with its insert out asks the voice for no plugin state, so
+    switching the insert in before GO used to send the switch alone: the cue
+    played through whatever the instance last held - here the Pad of the cue
+    played before it on the same voice, a quarter of the level it should have.
+    The voice is made to hold the Pad by playing the cue with it; Undo takes
+    the state off the cue, the insert is switched out, standby arms the cue,
+    the insert is switched back in, and GO. It must be heard at a half - the
+    preset's own state, because no state is a state - not at the Pad's quarter
+    of a half. One track, so the second cue is on the first one's voice."""
+    report = Report(f"phase 9a: an insert switched in at standby plays the cue's own state ({locale or 'C'})")
+    with tempfile.TemporaryDirectory(prefix="wfg-phase9a-switch-") as scratch:
+        room = Path(scratch)
+        bundle = common.copy_bundle(FIXTURE, room / "fx")
+        render = room / "out.wav"
+        log = room / "session.wfglog"
+        (bundle / "media").mkdir(exist_ok=True)
+        write_constant(bundle / "media" / "tone.wav", seconds=30.0)
+        (bundle / "plugins" / "state").mkdir(parents=True, exist_ok=True)
+        (bundle / "plugins" / STATE_NAME).write_text("gain=0.5\ndie=0\npad=1\n")
+
+        padded_at = 0
+        at_switched = "not read"
+
+        def runs_of(server: Server) -> "list[tuple[str, str]]":
+            status, body = common.http_get(server.http_port, "/godot/run")
+            if status != 200:
+                return []
+            contents = common.json.loads(body).get("CONTENTS") or {}
+            out = []
+            for node in contents.values():
+                leaves = node.get("CONTENTS") or {}
+                cue = ((leaves.get("cue") or {}).get("VALUE") or [None])[0]
+                state = ((leaves.get("state") or {}).get("VALUE") or [None])[0]
+                out.append((cue, state))
+            return out
+
+        with Server(bundle, log=log, locale=locale, sample_rate=RATE,
+                    buffer_size=BLOCK, hosted=True, render=render,
+                    proxy_deadline_us=20000) as server:
+            hand = Hand(server)
+            try:
+                report.equal(wait_for(server, f"/godot/plugin/{PLUGIN}/state", "loaded"), "loaded",
+                             "the test-gain child comes up")
+
+                hand.send("/godot/cmd/fx/create", [MEDIA, PLUGIN])
+                fx_id = None
+
+                def made():
+                    nonlocal fx_id
+                    listed = value_of(server, f"/godot/cue/{MEDIA}/fx")
+                    if listed:
+                        fx_id = str(listed).split()[0]
+                    return bool(fx_id)
+
+                report.check(common.wait_until(made, timeout=10.0), "fx.create switches the entry in", str(fx_id))
+                if fx_id is None:
+                    raise HarnessError("no Fx was made")
+
+                #  The voice is given the Pad by playing the cue with it.
+                hand.send("/godot/cmd/fx/capture", [fx_id, STATE_NAME, "0:0.5 1:0"])
+                report.equal(wait_for(server, f"/godot/fx/{fx_id}/stateFile", STATE_NAME), STATE_NAME,
+                             "fx.capture names the Pad state on the cue")
+                went_at = first_sound.frames_on_disk(render)
+                hand.send("/godot/cmd/go")
+                report.check(wait_for_frames(render, went_at + int(RATE * 3.0)), "the render runs three seconds past GO")
+                padded_at = first_sound.frames_on_disk(render)
+                hand.send("/godot/cmd/run/killAll")
+                report.check(common.wait_until(
+                    lambda: not any(state in ("armed", "playing", "stopping") for _, state in runs_of(server)),
+                    timeout=10.0), "the kill finishes the run")
+
+                #  The cue loses its state, its insert goes out, and standby arms it so.
+                hand.send("/godot/cmd/undo")
+                report.equal(wait_for(server, f"/godot/fx/{fx_id}/stateFile", ""), "",
+                             "Undo takes the state off the cue")
+                hand.send("/godot/cmd/node/set", [f"/godot/fx/{fx_id}/enabled", False])
+                report.equal(wait_for(server, f"/godot/fx/{fx_id}/enabled", False), False,
+                             "the insert is switched out")
+                hand.send("/godot/cmd/standby/set", [MEDIA])
+                report.check(common.wait_until(lambda: (MEDIA, "armed") in runs_of(server), timeout=10.0),
+                             "standby arms the cue with its insert out", str(runs_of(server)))
+
+                #  Switched back in while it waits, and GO.
+                hand.send("/godot/cmd/node/set", [f"/godot/fx/{fx_id}/enabled", True])
+                report.equal(wait_for(server, f"/godot/fx/{fx_id}/enabled", True), True,
+                             "the insert is switched back in at standby")
+                fired_at = first_sound.frames_on_disk(render)
+                hand.send("/godot/cmd/go")
+                report.check(wait_for_frames(render, fired_at + int(RATE * 3.0)),
+                             "the render runs three seconds past the second GO")
+                at_switched = plugin_said(server)
+                first_sound.wait_for_render_tail(render)
+            finally:
+                hand.close()
+
+        channels, data = first_sound.read_render(render)
+        left = data[0] if data else []
+        start = first_sound.first_above(left, 0.005)
+        report.check(start >= 0, "the cue was heard at all")
+
+        # The first window ends where the kill was sent; the second is the
+        # render's last second - the file plays thirty seconds, past the end of
+        # the session - for phase9a_fx.run_state's reason: the writer flushes in
+        # its own time, so a window placed by the frames on disk can miss.
+        if start >= 0 and len(left) > padded_at + int(RATE * 2.5):
+            padded_from, padded_to = start + int(RATE * 0.5), min(start + int(RATE * 2.5), padded_at)
+            plain_from, plain_to = len(left) - int(RATE * 1.5), len(left) - int(RATE * 0.5)
+            starved = common.logged_before(log, "plugin.failed", containing="stopped answering")
+            common.check_level(report, common.answered_level(left, padded_from, padded_to, BLOCK), PADDED,
+                               PAD_TOLERANCE, starved, "played with the Pad, the voice holds it",
+                               f"{shares(left, padded_from, (padded_to - padded_from) / RATE)}; {stopped_answering(log)}")
+            common.check_level(report, common.answered_level(left, plain_from, plain_to, BLOCK), SOURCE * 0.5,
+                               TOLERANCE, starved,
+                               "switched in at standby, the cue is heard at a half - its own state, not the last cue's Pad",
+                               f"{shares(left, plain_from)}; {at_switched} three seconds in; {stopped_answering(log)}")
+        else:
+            report.check(False, "the render is long enough to read both windows",
+                         f"{len(left)} frames, padded at {padded_at}")
+    return report.finish()
+
+
 def main(argv: "list[str]") -> int:
     locale = None
     for argument in argv[1:]:
@@ -481,7 +605,8 @@ def main(argv: "list[str]") -> int:
     try:
         first = run(locale)
         second = run_state(locale)
-        return first or second
+        third = run_switch_in(locale)
+        return first or second or third
     except HarnessError as error:
         print(f"harness: {error}", file=sys.stderr)
         return 2

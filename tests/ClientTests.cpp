@@ -91,6 +91,8 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
+#include <wfg/engine/cue/LaneCommands.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/cue/Runner.h>
@@ -476,6 +478,32 @@ TEST_CASE ("client: a row the pointer cannot stand on is not offered, and a refu
         visible rather than swallowed into a wrong-looking sentence. */
     reading.lastError = "something else entirely";
     CHECK (reading.errorLine() == "something else entirely");
+
+    /*  A BOUNCED GO IS SAID IN WORDS, and where to change it (2026-09-28). */
+    reading.lastError = "5500 27 window too-soon go";
+    CHECK (reading.errorLine() == "GO ignored: too soon after the last one (Show settings > Playback)");
+    reading.lastError = "something else entirely";
+
+    /*  THE CLOCK MOVED AND THE SHOW FOLLOWED IT (PRD §6.2, 2026-09-28): said
+        until something is refused after it - the cues it stopped are what
+        anybody at the desk asks about first - and a refusal from before it is
+        older news. The outage itself outranks both. */
+    reading.rateMoved = "The interface's clock moved from 48000 Hz to 96000 Hz; the show runs at 96000 Hz, "
+                        "and the cues that were playing were stopped.";
+    reading.rateMovedTick = "6000";
+    CHECK (reading.errorLine() == "something else entirely");     // a record the model cannot date stays visible
+
+    reading.lastError = "5411 26 window not-a-stop standby.set";
+    CHECK (reading.errorLine() == reading.rateMoved);
+
+    reading.lastError.clear();
+    CHECK (reading.errorLine() == reading.rateMoved);
+
+    reading.lastError = "6021 30 window not-a-stop standby.set";
+    CHECK (reading.errorLine() == "standby.set refused: not-a-stop");
+
+    reading.status = "noClock";
+    CHECK (reading.errorLine() == "Audio disconnected - cues paused; waiting for the interface and clock.");
 }
 
 TEST_CASE ("client: show mode does not offer a save, and nothing else is withdrawn")
@@ -591,7 +619,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     /*  And the audio settings' commands, where Load now's plugin.load lives
         beside audio.apply (2026-09-26). */
     audio::AudioState audioState;
-    audio::registerAudioSettingsCommands (rig.engine, rig.document, runner, audioState);
+    audio::registerAudioSettingsCommands (rig.engine, rig.document, runner, rig.runs, audioState);
 
     /*  And the surfaces' aim and the live layer's two (2026-09-25): the running
         pane's name and the bar's buttons. */
@@ -600,8 +628,16 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     cue::LiveEdits live;
     cue::registerLiveCommands (rig.engine.commands(), rig.document, live);
 
+    /*  And the lane recorded from a fader (namespace draft §20.9): the
+        waveform's Rec and ✕, and the virtual panel's press that takes a fader. */
+    cue::LaneTable lanes;
+    cue::registerLaneCommands (rig.engine.commands(), rig.engine, runner, rig.document, lanes);
+
     const std::vector<Event> gestures
     {
+        gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneTake ("STRP0001"),
+        gesture::laneFree(), gesture::laneRecord (0.0), gesture::laneRecord (12.5), gesture::laneStop(),
+
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
         gesture::stopAll(), gesture::killAll(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
@@ -2633,6 +2669,49 @@ TEST_CASE ("client: the foot panel says which subject it is on, and follows a pi
 }
 
 
+TEST_CASE ("client: a speed is said where it is not one - beside a run, and in the waveform's head row")
+{
+    /*  Namespace draft §22.7. To the thousandth, in no locale's spelling, and
+        nothing at all at one. */
+    CHECK (model::speedText (1.0).empty());
+    CHECK (model::speedText (0.9996).empty());
+    CHECK (model::speedText (0.5) == "×0.5");
+    CHECK (model::speedText (2.0) == "×2");
+    CHECK (model::speedText (0.0) == "×0");
+    CHECK (model::speedText (1.0594630943592953) == "×1.059");
+
+    Rig rig ("phase4");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED001/rate", "0.5").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED001/rateMode", "timestretch").ok);
+
+    //  The run's readout is what a fade is moving, so the row reads the run.
+    rig.runs.create ("SPEEDRUN", "P4MED001", "media");
+    auto* run = rig.runs.find ("SPEEDRUN");
+    REQUIRE (run != nullptr);
+    run->state = cue::runState::playing;
+    run->rateNow = 0.75;
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+
+    auto found = false;
+
+    for (const auto& row : model::readRuns (*snapshot))
+        if (row.id == "SPEEDRUN")
+        {
+            found = true;
+            CHECK (row.rate == doctest::Approx (0.75));
+            CHECK (model::speedText (row.rate) == "×0.75");
+        }
+
+    CHECK (found);
+
+    //  The head row reads the cue: what the document decided, speed and mode.
+    const auto reading = model::readFoot (*snapshot, { model::Subject::Kind::waveform, "P4MED001" });
+    CHECK (reading.rate == doctest::Approx (0.5));
+    CHECK (reading.rateMode == "timestretch");
+}
+
 TEST_CASE ("client: a time reads and writes back as the same instant, in either locale")
 {
     /*  The table types where the bar drags: a loop point is FOUND with a hand
@@ -3218,6 +3297,50 @@ TEST_CASE ("client: the waveform's reading carries the cue's level lane, and the
 
     //  A cue that is not media has no lane to read, whatever its rows say.
     CHECK (model::readLane (*rig.publish (1), "P4GRP001").empty());
+}
+
+TEST_CASE ("client: a lane recorded from a fader reads as the tree says, and names its fader as a person would")
+{
+    /*  Namespace draft §20.9: the lane's cue, whether it waits, the fader taken
+        and what it rides - and the waveform's reading carries it, whichever
+        cue it is for, so the panel can say when it is another's. */
+    Rig rig ("surfaces");
+    cue::LaneTable lanes;
+    rig.parameters.setLanes (&lanes);
+
+    auto reading = model::readLaneRecord (*rig.publish (0));
+    CHECK (reading.cue.empty());
+    CHECK_FALSE (reading.waiting);
+    CHECK_FALSE (reading.taken);
+
+    lanes.arm ("SRF00005");
+    rig.parameters.markStale();
+    reading = model::readLaneRecord (*rig.publish (1));
+
+    CHECK (reading.cue == "SRF00005");
+    CHECK (reading.waiting);
+    CHECK_FALSE (reading.taken);
+    CHECK_FALSE (reading.hasRide);
+
+    lanes.take ("SRFT0003");
+    lanes.rideDb = -12.0;
+    rig.parameters.markStale();
+    reading = model::readLaneRecord (*rig.publish (2));
+
+    CHECK (reading.taken);
+    CHECK_FALSE (reading.waiting);
+    CHECK (reading.strip == "SRFT0003");
+    CHECK (reading.faderLabel == "Panel \xc2\xb7 fader 3");
+    REQUIRE (reading.hasRide);
+    CHECK (reading.rideDb == doctest::Approx (-12.0));
+
+    lanes.startPass ("RN000001");
+    rig.parameters.markStale();
+    CHECK (model::readLaneRecord (*rig.publish (3)).recording);
+
+    const auto foot = model::readFoot (*rig.publish (3), { model::Subject::Kind::waveform, "SRF00005" });
+    CHECK (foot.laneRecord.recording);
+    CHECK (foot.laneRecord.cue == "SRF00005");
 }
 
 TEST_CASE ("client: drawing on a fade, point by point")
@@ -4579,6 +4702,52 @@ TEST_CASE ("client: every range in the show is gathered in one pass, owned by it
     CHECK (model::readRanges (*snapshot, "NOSUCHID").empty());
 }
 
+TEST_CASE ("client: a media cue's time is its file's at its own speed - in the list's column and on a timeline")
+{
+    /*  Namespace draft §22.5, decision EE: `duration` stays the file's own
+        length, and what counts time as heard divides it by the cue's speed -
+        for ever at nought, which no bar can end. */
+    Rig rig ("phase4");
+    const std::map<std::string, double> lengths { { "segments.wav", 30.0 }, { "ramp.wav", 4.0 } };
+    rig.parameters.setMediaDurations (&lengths);
+
+    const auto columnAt = [&rig] (std::int64_t tick)
+    {
+        rig.parameters.markStale();
+        model::ShowModel show;
+        REQUIRE (show.refresh (*rig.publish (tick), "P4ACT001"));
+
+        const auto at = show.indexOf ("P4MED003");
+        REQUIRE (at >= 0);
+        return show.rows()[static_cast<std::size_t> (at)].duration;
+    };
+
+    const auto besideAt = [&rig] (std::int64_t tick)
+    {
+        rig.parameters.markStale();
+        const auto reading = model::readTimeline (*rig.publish (tick), "P4GRP002");
+        REQUIRE (reading.bars.size() == 2u);
+        return reading.bars[1];
+    };
+
+    CHECK (columnAt (1) == "30.0");
+    CHECK (besideAt (1).lengthKnown);
+    CHECK (besideAt (1).length == doctest::Approx (30.0));
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED003/rate", "2").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED002/rate", "2").ok);
+    CHECK (columnAt (2) == "15.0");
+    CHECK (besideAt (2).length == doctest::Approx (15.0));
+
+    //  The file's own length is the file's, whatever the speed.
+    CHECK (model::text (*rig.publish (2), "/godot/cue/P4MED003/duration") == "30");
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED003/rate", "0").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/P4MED002/rate", "0").ok);
+    CHECK (columnAt (3) == "\xe2\x88\x9e");
+    CHECK_FALSE (besideAt (3).lengthKnown);
+}
+
 TEST_CASE ("client: a playhead needs a length, and a countdown empties")
 {
     CHECK (model::playhead (0.0, 10.0) == 0.0);
@@ -5331,6 +5500,65 @@ TEST_CASE ("client: the DCAs are read in the show's order, and a menu of them st
     CHECK (model::dcaChoices ({}).size() == 1u);
 }
 
+TEST_CASE ("client: a fade's two switches, each before what it moves, and what a switch leaves alone is greyed")
+{
+    /*  Namespace draft §22.7: the Level switch before the level, the Speed
+        switch before the speed, and the curve - the shape of both - after
+        both. Greyed while its switch is off and never hidden, so turning one
+        on finds the row where it already was; and a greyed number is not one
+        the dial turns. */
+    Rig rig;
+
+    const auto fade = rig.document.createCue ("7K2QM9X4", 0, "fade", "Slower");
+    REQUIRE (fade.ok);
+
+    const auto panelNow = [&rig, &fade]
+    {
+        rig.parameters.markStale();
+        return model::inspect (*rig.publish (1), fade.id);
+    };
+
+    auto panel = panelNow();
+    const auto does = namesUnder (panel, "what it does");
+    const auto levelOnAt = positionOf (does, "levelOn");
+    REQUIRE (levelOnAt + 4 < does.size());
+    CHECK (does[levelOnAt + 1] == "level");
+    CHECK (does[levelOnAt + 2] == "rateOn");
+    CHECK (does[levelOnAt + 3] == "rate");
+    CHECK (does[levelOnAt + 4] == "curve");
+
+    for (const auto& said : std::vector<std::pair<std::string, std::string>> {
+             { "levelOn", "moves level" }, { "rateOn", "moves speed" }, { "rate", "speed" } })
+    {
+        INFO ("row " << said.first);
+        REQUIRE (rowIn (panel, said.first) != nullptr);
+        CHECK (rowIn (panel, said.first)->label == said.second);
+    }
+
+    //  As every fade was: the level moves, the speed does not.
+    CHECK (rowIn (panel, "level")->applies);
+    CHECK_FALSE (rowIn (panel, "rate")->applies);
+    CHECK (rowIn (panel, "curve")->applies);
+    CHECK_FALSE (model::mayDial (*rowIn (panel, "rate")));
+
+    //  The speed switched on: its row lights, and the dial may turn it.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/rateOn", "true").ok);
+    panel = panelNow();
+    CHECK (rowIn (panel, "rate")->applies);
+    CHECK (model::mayDial (*rowIn (panel, "rate")));
+
+    //  The level switched off: the level greys, the curve still shapes the speed.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/levelOn", "false").ok);
+    panel = panelNow();
+    CHECK_FALSE (rowIn (panel, "level")->applies);
+    CHECK (rowIn (panel, "curve")->applies);
+
+    //  Neither: nothing to shape.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/rateOn", "false").ok);
+    panel = panelNow();
+    CHECK_FALSE (rowIn (panel, "curve")->applies);
+}
+
 TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler rows follow what a media cue has")
 {
     Rig rig;
@@ -5369,15 +5597,20 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
 
     CHECK (seen == wanted);
 
+    /*  The speed and its mode straight after where the file starts, then the
+        sampler's rows (namespace draft §22.7). */
     const auto startOffsetAt = positionOf (does, "startOffset");
-    REQUIRE (startOffsetAt + 1 < does.size());
-    CHECK (does[startOffsetAt + 1] == "dca");
+    REQUIRE (startOffsetAt + 3 < does.size());
+    CHECK (does[startOffsetAt + 1] == "rate");
+    CHECK (does[startOffsetAt + 2] == "rateMode");
+    CHECK (does[startOffsetAt + 3] == "dca");
 
     //  Two words the tree runs together, said as two words.
     const std::vector<std::pair<std::string, std::string>> spoken {
         { "secondPress", "second press" }, { "velocityFloor", "velocity floor" },
         { "releaseFade", "release fade" }, { "shortName", "short name" },
-        { "initialLevel", "initial level" } };
+        { "initialLevel", "initial level" }, { "rate", "speed" },
+        { "rateMode", "speed mode" } };
 
     for (const auto& said : spoken)
     {
@@ -5405,10 +5638,11 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
     //  A fade's DCA beside its target - the other thing it can move - and a menu too.
     const auto fading = model::inspect (*snapshot, fade.id);
     const auto fadeRows = namesUnder (fading, "what it does");
-    REQUIRE (fadeRows.size() >= 3u);
+    REQUIRE (fadeRows.size() >= 4u);
     CHECK (fadeRows[0] == "target");
     CHECK (fadeRows[1] == "dca");
-    CHECK (fadeRows[2] == "level");
+    CHECK (fadeRows[2] == "levelOn");
+    CHECK (fadeRows[3] == "level");
     REQUIRE (rowIn (fading, "dca") != nullptr);
     CHECK (rowIn (fading, "dca")->control == model::Control::dcaRef);
 

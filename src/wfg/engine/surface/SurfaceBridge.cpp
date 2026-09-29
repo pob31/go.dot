@@ -777,6 +777,30 @@ namespace wfg::surface
             return aimed.empty() ? std::string {} : textAt (published.get(), "/godot/cue/" + aimed + "/channel");
         }
 
+        /*  THE LANE A FADER RECORDS (namespace draft §20.9), as the tree says:
+            a lane that waits for a fader, the strip taken for it, and whether a
+            pass runs. Copies, not references - the addresses are temporaries. */
+        struct LaneState
+        {
+            bool waiting = false;
+            bool taken = false;
+            bool recording = false;
+            std::string strip;
+        };
+
+        LaneState laneState() const
+        {
+            const auto* at = published.get();
+            const std::string cue = textAt (at, "/godot/surface/lane");
+
+            LaneState out;
+            out.strip = textAt (at, "/godot/surface/laneFader");
+            out.waiting = ! cue.empty() && out.strip.empty();
+            out.taken = ! cue.empty() && ! out.strip.empty();
+            out.recording = out.taken && flagAt (at, "/godot/surface/laneRecording");
+            return out;
+        }
+
         /*  WHAT A CLIENT SEES OF THE PAGE: its word, which, how many, and what
             it last wrote - read by the tree's runtime half at every publish. */
         void publishPage (const Surface& box)
@@ -1395,6 +1419,17 @@ namespace wfg::surface
 
                 strip.handDown = true;
 
+                /*  A LANE WAITS FOR A FADER (DF): the first fader touched is
+                    taken for it, and that touch does nothing else - no clip
+                    under it starts, no DCA moves. The strip rides the lane's
+                    node from the next publish, and the motor flies there once
+                    the hand lets go. */
+                if (laneState().waiting)
+                {
+                    submit (commandFrom (box.origin, "lane.take", { osc::Value::string (strip.id) }));
+                    return;
+                }
+
                 if (const auto& target = targetOf (strip); ! target.empty())
                 {
                     submit (commandFrom (box.origin, "node.touch", { osc::Value::string (target) }));
@@ -1532,6 +1567,16 @@ namespace wfg::surface
                     words - nothing sounding there, every layer in use. */
                 case Action::record:
                 case Action::loop:
+                    /*  WITH A LANE'S FADER TAKEN, REC IS THE LANE'S (DI): it
+                        starts a pass, and stops the one running. The take's
+                        Rec comes back when the fader is freed. */
+                    if (event.down && action == Action::record)
+                        if (const auto lane = laneState(); lane.taken)
+                        {
+                            submit (commandFrom (box.origin, lane.recording ? "lane.stop" : "lane.record"));
+                            break;
+                        }
+
                     if (event.down)
                         if (const auto channel = aimedChannel(); ! channel.empty())
                             submit (commandFrom (box.origin, action == Action::record ? "take.record" : "take.loop",
@@ -1597,8 +1642,10 @@ namespace wfg::surface
         {
             const auto* at = published.get();
 
+            /*  NOT ON A STRIP TAKEN FOR A LANE: its cue is the lane's, which is
+                no sampler member with a starting level to set (§20.9). */
             if (strip.cueId.empty() || textAt (at, strip.roleAt) == "dca"
-                  || flagAt (at, "/godot/document/locked"))
+                  || flagAt (at, "/godot/document/locked") || laneState().strip == strip.id)
                 return;
 
             const auto& target = textAt (at, strip.targetAt);
@@ -2386,8 +2433,12 @@ namespace wfg::surface
             const auto channel = aimedChannel();
             const auto state = channel.empty() ? std::string {}
                                                : textAt (published.get(), "/godot/slot/" + channel + "/take");
+            const auto lane = laneState();
 
-            const auto wanted = state == "recording"   ? Led::on
+            /*  THE LANE'S PASS FIRST (DI): while a fader is taken the key is the
+                lane's, so its light says whether a pass runs. */
+            const auto wanted = lane.taken             ? (lane.recording ? Led::on : Led::off)
+                              : state == "recording"   ? Led::on
                               : state == "overdubbing" ? blinked (Led::flash, tick)
                                                        : Led::off;
 
@@ -2478,8 +2529,11 @@ namespace wfg::surface
                 strip.soloLed = static_cast<int> (soloLit);
             }
 
-            //  REC, lit a moment after it set the starting level.
-            const auto recLit = tick < strip.recLitUntil ? Led::on : Led::off;
+            //  REC, lit a moment after it set the starting level - and on the
+            //  strip taken for a lane, lit while its pass runs (§20.9).
+            const auto lane = laneState();
+            const auto laneRecording = lane.recording && lane.strip == strip.id;
+            const auto recLit = tick < strip.recLitUntil || laneRecording ? Led::on : Led::off;
 
             if (static_cast<int> (recLit) != strip.recLed)
             {

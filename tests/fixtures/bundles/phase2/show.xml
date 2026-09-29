@@ -1,5 +1,5 @@
 <Show>
-  <Lists>
+  <Lists goDebounce="0">
     <List id="7K2QM9X4" name="Show">
       <Media id="B3N8R5TW" file="tone.wav" name="Thunder" number="1">
         <Route id="Z04EH7PH" bus="J3MT5XYA" gains="1 0.5"/>

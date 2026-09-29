@@ -177,6 +177,7 @@ namespace wfg
         // Keep serving commands and publishing snapshots at the frozen tick,
         // without running the scheduler or advancing any cue's elapsed time.
         void setSuspended (bool value) noexcept { suspended.store (value); wakeUp.notify_all(); }
+        bool isSuspended() const noexcept { return suspended.load(); }
 
         // Only while stopped. Keep tick indices monotonic across a device switch.
         std::int64_t rebaseAudio (int newSampleRate)

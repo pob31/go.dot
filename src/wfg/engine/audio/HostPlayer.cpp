@@ -116,7 +116,7 @@ namespace wfg::audio
         if (request.live)
             audioHost.setRackSource (request.track, request.firstInput, request.inputWidth);
         else if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges,
-                                             request.startOffset))
+                                             request.startOffset, request.stretch))
         {
             /*  MEDIA-MISSING COVERS ALL THREE, for now: a file that is not
                 there, one that is there and is not audio, and a range that
@@ -339,6 +339,18 @@ namespace wfg::audio
             atomic store; the audio side interpolates between the values. */
         if (auto* matrix = audioHost.trackMatrix (track))
             matrix->setLevelDb (static_cast<float> (levelDb));
+    }
+
+    bool HostPlayer::placeRate (int track, std::int64_t sample, double rate)
+    {
+        /*  The tick thread, at a launch and at each change of speed (namespace
+            draft §22.4). A queue of sixty-four one way; nothing waits. */
+        return audioHost.placeTrackRate (track, sample, rate);
+    }
+
+    double HostPlayer::stretchSpeedLimit() const
+    {
+        return audioHost.stretchSpeedLimit();
     }
 
     void HostPlayer::setRouting (int track, const std::vector<cue::Coefficient>& coefficients)

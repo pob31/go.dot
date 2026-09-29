@@ -603,31 +603,22 @@ namespace wfg::cue
 
             AN EMPTY TABLE IS APPLIED AND DOES NOTHING. Esc on a silent show is
             not a mistake, and the hand that pressed it needs no error to read.
-            The third level, Go Doh!, stays deferred in the law itself. */
-        const auto rootsOf = [&runs]
-        {
-            std::vector<std::string> roots;
+            The third level, Go Doh!, stays deferred in the law itself.
 
-            for (const auto& run : runs.all())
-                if (! run.isFinished()
-                      && (run.parent.empty() || runs.find (run.parent) == nullptr))
-                    roots.push_back (run.id);
-
-            return roots;
-        };
-
+            THE RUNNER SPECIALISES BOTH (2026-09-28, `registerGoCommands`): Esc
+            fades what is sounding over the show's `audio/panicFade` before the
+            roots are asked to stop, and a double Esc lets go of every stop
+            still to come before they are dropped. What is here is the half
+            that needs only the run table, and a rig with no Runner has it. */
         registry.add ({ "run.stopAll",
                         "Stops every run now, gracefully: Esc. Members come down in order and"
                         " every footer runs.",
                         {},
                         true,
-                        [&runs, rootsOf, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             if (stopDiagnostics) stopDiagnostics();
-                            for (const auto& id : rootsOf())
-                                if (auto* run = runs.find (id))
-                                    run->state = runState::stopping;
-
+                            stopEveryRoot (runs, false);
                             return Outcome::ok (args);
                         } });
 
@@ -644,19 +635,32 @@ namespace wfg::cue
                         " as it was.",
                         {},
                         true,
-                        [&runs, rootsOf, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             if (stopDiagnostics) stopDiagnostics();
-                            for (const auto& id : rootsOf())
-                            {
-                                if (auto* run = runs.find (id))
-                                {
-                                    run->skipFooter = true;
-                                    run->state = runState::stopping;
-                                }
-                            }
-
+                            stopEveryRoot (runs, true);
                             return Outcome::ok (args);
                         } });
+    }
+
+    void stopEveryRoot (RunTable& runs, bool immediate)
+    {
+        std::vector<std::string> roots;
+
+        for (const auto& run : runs.all())
+            if (! run.isFinished()
+                  && (run.parent.empty() || runs.find (run.parent) == nullptr))
+                roots.push_back (run.id);
+
+        for (const auto& id : roots)
+        {
+            if (auto* run = runs.find (id))
+            {
+                if (immediate)
+                    run->skipFooter = true;
+
+                run->state = runState::stopping;
+            }
+        }
     }
 }

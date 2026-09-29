@@ -48,6 +48,11 @@
     and `/loopOut` on a sampling channel belong to tonight's take, not to the
     show, and are ridden the way a trim is - a rotary, the master dial, the
     take's picture - so they come through this door too.
+
+    AND THE LANE'S RIDE (namespace draft §20.9, DJ): `/godot/surface/laneRide`,
+    the node a fader taken for a lane rides. What the hand writes there is
+    what a pass records, and the lane the pass ends in is the decision - so
+    the ride itself is a trim's kind of row, answered here.
 */
 
 #include <wfg/engine/document/DocumentCommands.h>
@@ -61,12 +66,13 @@ namespace wfg::doc { class ShowDocument; }
 namespace wfg::cue
 {
     class DcaTable;
+    class LaneTable;
     class RunTable;
     class TakeTable;
 
     /** Whether `address` is one of the rows answered here rather than by the
-        document: `/godot/run/<id>/trim`, `/godot/dca/<id>/trim`, or a take's
-        `/godot/slot/<id>/loopIn` and `/loopOut`. */
+        document: `/godot/run/<id>/trim`, `/godot/dca/<id>/trim`, a take's
+        `/godot/slot/<id>/loopIn` and `/loopOut`, or `/godot/surface/laneRide`. */
     bool isLiveAddress (std::string_view address);
 
     /*  Whether an applied command was a ride on a live row - `node.set` on
@@ -90,7 +96,11 @@ namespace wfg::cue
         - a loop point on a channel the show does not declare is `unknown-id`;
           on a take with no length to keep it in - recording its first pass,
           or empty - it is applied and ignored, for the finished run's reason.
-          `takes` may be null, and every point is then ignored. */
+          `takes` may be null, and every point is then ignored.
+        - the lane's ride is the hand's level for the pass running, APPLIED AND
+          IGNORED with no pass (DG: nothing is written until a touch in one),
+          and with `lanes` null. */
     doc::LiveWrite liveWriteFor (RunTable& runs, DcaTable& dcas,
-                                 const doc::ShowDocument& document, TakeTable* takes = nullptr);
+                                 const doc::ShowDocument& document, TakeTable* takes = nullptr,
+                                 LaneTable* lanes = nullptr);
 }

@@ -43,6 +43,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <wfg/engine/cue/InsertChain.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/document/LevelLane.h>
 
 #include <algorithm>
@@ -50,6 +51,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <utility>
 
 namespace wfg::cue
@@ -1849,6 +1851,7 @@ namespace wfg::cue
         request.levelDb = levelDb;
         request.routing = routing;
         request.ranges = rangesOf (cue);
+        request.stretch = run.stretch;
 
         /*  THE CUE'S EQ RIDES THE ARM (Phase 9a), read through the schema
             here and applied on the far side while the voice is silent, as
@@ -1986,7 +1989,12 @@ namespace wfg::cue
                 it and descend through it. A horizon that rebuilt what it had
                 built a moment ago would re-arm every voice in the block every
                 time the pointer twitched. */
-            if (const auto* live = runs.liveRunOf (groupId))
+            /*  NOT ONE ON ITS WAY OUT (2026-09-28): a group Esc is fading down
+                is going, and preparing a member into it would hand the member
+                to a group about to kill it. The horizon builds a fresh one,
+                as it would once the old one has ended. */
+            if (const auto* live = runs.liveRunOf (groupId);
+                live != nullptr && live->state != runState::stopping)
             {
                 parentRun = live->id;
                 continue;
@@ -2166,8 +2174,16 @@ namespace wfg::cue
 
             /*  ALREADY RUNNING IS THE ORDINARY CASE: the operator pressed GO on
                 member one a moment ago, and members two onwards join the run
-                that started then. */
-            if (const auto* live = runs.liveRunOf (groupId))
+                that started then.
+
+                NOT A GROUP ON ITS WAY OUT, though (2026-09-28). Esc fades a
+                scene down before it stops it, so a group can be `stopping` for
+                as long as the show's panic fade - and a member spawned into it
+                would be killed by it on the next tick, a GO that made no sound.
+                The GO starts the scene again instead, which is what it did
+                when the group was gone a tick after Esc. */
+            if (const auto* live = runs.liveRunOf (groupId);
+                live != nullptr && live->state != runState::stopping)
             {
                 parentRun = live->id;
                 continue;
@@ -2767,6 +2783,20 @@ namespace wfg::cue
             same voice. The audio side confirms with audio.armed once the graph
             and the disk are ready; until then the run is armed and silent. */
         run->track = track;
+
+        /*  THE SPEED AND ITS MODE (namespace draft §22), read here because the
+            arm is where the mode has to be - it rebuilds Tracktion's graph - and
+            where a fresh run's speed begins. A seek arms again through
+            requestArmOn and keeps both (DV). Read with one as the fallback, never
+            nought: an unreadable number read as nought would be a stopped tape.
+            A stretched run is held to the stretcher's limit at this rate, so the
+            run's clock and the voice's never disagree. */
+        run->stretch = textOf (cue, "rateMode") == "timestretch";
+        run->rateSeen = osc::parseDouble (textOf (cue, "rate")).value_or (1.0);
+        const auto stretchLimit = audio != nullptr ? audio->stretchSpeedLimit() : 0.0;
+        run->ownRate = run->stretch && stretchLimit > 0.0 ? std::min (run->rateSeen, stretchLimit) : run->rateSeen;
+        run->ratePlaced = run->ownRate;
+        run->rateNow = run->ownRate;
 
         requestArmOn (engine, cue, *run, numberOf (cue, "level"));
     }
@@ -3428,10 +3458,31 @@ namespace wfg::cue
         const auto toDb = drawn.points.empty() ? numberOf (cue, "level")
                                                : drawn.points.back().levelDb;
 
+        /*  WHAT IT MOVES (namespace draft §22.6): the level unless `levelOn`
+            says not, the speed when `rateOn` says so - one fade, either or both,
+            QLab's shape. A fade that moves neither is a fade that moves
+            nothing: its run ends at once, and `wfg validate` says why. So is a
+            fade on a DCA with its level switch off: a DCA has no speed (EC),
+            and its `target` is not read. */
+        const auto levelOn = textOf (cue, "levelOn") != "false";
+        const auto rateOn = textOf (cue, "rateOn") == "true";
+
+        if (! levelOn && (! rateOn || ! textOf (cue, "dca").empty()))
+        {
+            if (auto* selfRun = runs.find (runId))
+                selfRun->state = runState::playing;
+
+            FadeJob nothing;
+            nothing.self = runId;
+            running.push_back (nothing);
+            return;
+        }
+
         /*  A FADE THAT NAMES A DCA MOVES THE DCA (Phase 6, `fade/dca`), and
             `target` is not read: a DCA has no run to find, and a fade that
             named both would otherwise have to choose which of two levels it
-            meant. `wfg validate` says so when both are written. */
+            meant. `wfg validate` says so when both are written. A DCA has no
+            speed, so `rateOn` there moves nothing (EC). */
         if (const auto dcaId = textOf (cue, "dca"); ! dcaId.empty())
         {
             beginDcaFade (dcaId, runId, toDb, numberOf (cue, "duration"),
@@ -3445,14 +3496,32 @@ namespace wfg::cue
             silently, until it ended by itself - right for a fade that will
             come back up, and a surprise for the common fade-out. `false`
             reads as the default the writer omits, so an unsaid box is off. */
-        beginFade (cue[idProperty].toString().toStdString(),
-                          textOf (cue, "target"),
-                          runId, "fade",
-                          toDb,
-                          numberOf (cue, "duration"),
-                          fadeCurveFrom (textOf (cue, "curve")),
-                          textOf (cue, "stopWhenDone") == "true",
-                          std::move (drawn.points));
+        const auto stopWhenDone = textOf (cue, "stopWhenDone") == "true";
+
+        /*  THE SPEED FIRST, so the level knows whether to wait for it: a
+            speed is heard a horizon after the tick that moved it, so a fade
+            that moves both and stops at the end stops once the speed has
+            arrived too (ED). The level's job carries that stop; a fade that
+            moves only the speed carries its own. Read with one as the
+            fallback, never nought, for the reason the cue's own speed is. */
+        const auto speedMoves = rateOn
+                                  && beginRateFade (textOf (cue, "target"), runId,
+                                                    osc::parseDouble (textOf (cue, "rate")).value_or (1.0),
+                                                    numberOf (cue, "duration"),
+                                                    fadeCurveFrom (textOf (cue, "curve")),
+                                                    stopWhenDone && ! levelOn,
+                                                    ! levelOn);
+
+        if (levelOn)
+            beginFade (cue[idProperty].toString().toStdString(),
+                              textOf (cue, "target"),
+                              runId, "fade",
+                              toDb,
+                              numberOf (cue, "duration"),
+                              fadeCurveFrom (textOf (cue, "curve")),
+                              stopWhenDone,
+                              std::move (drawn.points),
+                              speedMoves ? latencyTicks() + 1 : 0);
     }
 
     int Runner::advanceTargetOf (const juce::ValueTree& cue, const Run& run) const
@@ -3628,6 +3697,7 @@ namespace wfg::cue
             else now) and which SCHEDULE is inherited (a stop that was already
             coming). The first is about lifetime; the second is about time. */
         Takeover out;
+        std::vector<std::string> supersededSelves;
 
         for (const auto& superseded : running)
         {
@@ -3654,7 +3724,7 @@ namespace wfg::cue
 
                 QUEUED RATHER THAN SUBMITTED, because only the tick hook
                 reports. See advanceFades. */
-            supersededRuns.push_back (superseded.self);
+            supersededSelves.push_back (superseded.self);
 
             /*  BUT A STOP IS NOT A FADE, AND IT STILL HAPPENS (author,
                 2026-09-06). A fade takes over the LEVEL; it does not call off
@@ -3690,6 +3760,15 @@ namespace wfg::cue
                                        }),
                        running.end());
 
+        /*  A FADE CUE THAT MOVES TWO THINGS ENDS WHEN BOTH ARE TAKEN (namespace
+            draft §22.6): a level fade over one that also moves the speed takes
+            the level and leaves the speed moving, and the older fade's run goes
+            on until that job is done too. */
+        for (const auto& self : supersededSelves)
+            if (std::none_of (running.begin(), running.end(),
+                              [&self] (const FadeJob& job) { return job.self == self; }))
+                supersededRuns.push_back (self);
+
         return out;
     }
 
@@ -3697,7 +3776,8 @@ namespace wfg::cue
                             const std::string& targetCueId,
                             const std::string& selfRunId, const std::string& kind,
                             double toDb, double seconds, FadeCurve curve,
-                            bool stopWhenDone, std::vector<doc::FadePoint> points)
+                            bool stopWhenDone, std::vector<doc::FadePoint> points,
+                            int stopLagTicks)
     {
         juce::ignoreUnused (selfCueId, kind);
 
@@ -3818,8 +3898,9 @@ namespace wfg::cue
         {
             /*  A stop of its own, landing when its own fade arrives. The two
                 are the same number here and diverge only when somebody fades
-                over the top of it. */
-            job.stopsAtTick = currentTick + job.ticksTotal;
+                over the top of it - or when the same fade moves the speed,
+                which is heard later (ED). */
+            job.stopsAtTick = currentTick + job.ticksTotal + stopLagTicks;
         }
 
         /*  A MIC CUE FADED OUT IS ITS INPUT FADED (Phase 9b, namespace draft
@@ -3844,6 +3925,86 @@ namespace wfg::cue
                 stopping->state = runState::stopping;
 
         running.push_back (job);
+    }
+
+    bool Runner::beginRateFade (const std::string& targetCueId, const std::string& selfRunId,
+                                double toRate, double seconds, FadeCurve curve,
+                                bool stopWhenDone, bool alone)
+    {
+        auto* selfRun = runs.find (selfRunId);
+
+        if (selfRun == nullptr)
+            return false;
+
+        selfRun->state = runState::playing;
+
+        /*  NOTHING TO MOVE, said once: by this job when the fade moves only the
+            speed, by the level's job when it moves both. */
+        const auto nothing = [&] (std::string failure)
+        {
+            if (! alone)
+                return false;
+
+            FadeJob orphan;
+            orphan.self = selfRunId;
+            orphan.failure = std::move (failure);
+            running.push_back (orphan);
+            return false;
+        };
+
+        if (! targetCueId.empty() && ! document.findById (targetCueId).isValid())
+            return nothing (runError::badTarget);
+
+        /*  A MEDIA CUE'S, and one that is running (§3.8's silent no-op). A
+            group, a mic cue, a memo: nothing there has a speed to move (EC). */
+        const auto* live = runs.liveRunOf (targetCueId);
+
+        if (live == nullptr || live->kind != "media")
+            return nothing ({});
+
+        const auto targetId = live->id;
+        const auto takeover = resolveTakeover ("rate:" + targetId);
+        auto* target = runs.find (targetId);
+
+        if (target == nullptr)
+            return false;
+
+        FadeJob job;
+        job.target = "rate:" + targetId;
+        job.self = selfRunId;
+        job.movesRate = true;
+        job.fromRate = target->ownRate;
+
+        /*  Nought to twenty, as the row is, whatever reached here - and a
+            stretched cue held to the stretcher's limit, as its own speed is,
+            so its clock and its voice agree. */
+        const auto stretchLimit = audio != nullptr ? audio->stretchSpeedLimit() : 0.0;
+        const auto wanted = std::isfinite (toRate) ? std::clamp (toRate, 0.0, 20.0) : 1.0;
+        job.toRate = target->stretch && stretchLimit > 0.0 ? std::min (wanted, stretchLimit) : wanted;
+        job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
+        job.curve = curve;
+        job.stopWhenDone = stopWhenDone;
+
+        /*  A STOP ONCE THE SPEED HAS ARRIVED (ED). The last speed is placed a
+            horizon ahead of the tick that wrote it and reached over one more,
+            and a stop is heard at the next block: stopped with the fade's last
+            tick, the voice would never play the end of the ramp. A stop this
+            job inherited keeps its own tick, as a level's does. */
+        if (takeover.keepStopping)
+        {
+            job.stopWhenDone = true;
+            job.stopsAtTick = takeover.stopsAtTick;
+        }
+        else if (stopWhenDone)
+        {
+            job.stopsAtTick = currentTick + job.ticksTotal + latencyTicks() + 1;
+        }
+
+        if (job.stopWhenDone)
+            target->state = runState::stopping;
+
+        running.push_back (job);
+        return true;
     }
 
     void Runner::beginDcaFade (const std::string& dcaId, const std::string& selfRunId,
@@ -4305,6 +4466,167 @@ namespace wfg::cue
 
         target->state = runState::stopping;
         running.push_back (job);
+    }
+
+    void Runner::beginPanicFade (std::int64_t tick)
+    {
+        /*  THE SHOW'S NUMBER, read at the press: an edit to it lands at the next
+            Esc and never under one already fading. A show that cannot say -
+            no Audio element, a value that will not parse - gets the schema's
+            second rather than a cut nobody chose. */
+        const auto seconds = std::max (0.0, osc::parseDouble (document.getAttribute ("/godot/audio/panicFade")
+                                                                .value_or ("1")).value_or (1.0));
+        const auto ticks = static_cast<int> (std::lround (seconds * TickClock::rateHz));
+
+        /*  NOUGHT IS THE CUT, and nothing is started for it: `enforceStops`
+            stops every run the roots' stop reaches - once no stop cue's fade is
+            holding it back. Left holding, a fade-and-stop whose own run the
+            roots' stop reaches next hands its target back its level (the rule
+            for a stop cue killed on its own), and the cue played on after Esc.
+            Found by this change's tests, and older than it. */
+        if (ticks <= 0)
+        {
+            dropStopFades();
+            return;
+        }
+
+        const auto stopsAt = tick + ticks;
+
+        /*  WHAT IS SOUNDING, collected before anything is changed, since a fade
+            begun here takes over the jobs the next one would be asked about. */
+        std::vector<std::string> sounding;
+
+        for (const auto& run : runs.all())
+        {
+            if (run.isFinished() || run.track < 0 || run.stopIssued)
+                continue;
+
+            if (run.state == runState::playing)
+            {
+                sounding.push_back (run.id);
+                continue;
+            }
+
+            /*  ALREADY ON ITS WAY OUT, by a stop cue's fade or a clip's release.
+                The stop that lands first wins: a ten-second fade-and-stop is
+                brought down with everything else, and a stop due sooner than
+                the panic's is left to land where it was going to. A `stopping`
+                run no job holds is a hard stop `enforceStops` is about to
+                issue, and is left to it. */
+            if (run.state == runState::stopping)
+            {
+                /*  The soonest of them: a level's stop and a speed's can hold
+                    one voice (§22.6), and the first to land is the one that
+                    counts. */
+                auto soonest = std::numeric_limits<std::int64_t>::max();
+
+                for (const auto& held : running)
+                    if (held.stopWhenDone && held.heldRun() == run.id)
+                        soonest = std::min (soonest, held.stopsAtTick);
+
+                if (soonest != std::numeric_limits<std::int64_t>::max() && soonest > stopsAt)
+                    sounding.push_back (run.id);
+            }
+
+            /*  ARMED AND NOT SOUNDING - a standby made ready, a clip waiting for
+                its launch, a cue in its pre-wait - has nothing to fade, and the
+                roots' stop ends it at once as it always did. */
+        }
+
+        /*  A SOONER STOP ON A VOICE LANDS, LET GO OF BY THE STOP CUE THAT
+            STARTED IT. The roots' stop is about to reach that stop cue's own
+            run, and a fade whose run is stopped gives its target back its level
+            - the rule for a stop cue killed on its own - so the cue went back to
+            `playing` and played on after Esc. Found by this change's tests, and
+            older than it. Held by nobody's run, the job lands its stop, and the
+            stop cue's run, stopped like every other and owned by no job, ends
+            with the rest. A stop on a group is left as it was: the group is a
+            root the same press stops, and it came down without this. */
+        for (auto& job : running)
+        {
+            if (! job.stopWhenDone || ! job.dca.empty()
+                  || std::find (sounding.begin(), sounding.end(), job.heldRun()) != sounding.end())
+                continue;
+
+            const auto* held = runs.find (job.heldRun());
+
+            if (held == nullptr || held->track < 0)
+                continue;
+
+            job.self.clear();
+            job.reportsSelf = false;
+        }
+
+        for (const auto& id : sounding)
+        {
+            auto* target = runs.find (id);
+
+            if (target == nullptr)
+                continue;
+
+            /*  A FADE ALREADY ON IT GIVES WAY, from wherever its level has got
+                to - and the stop it may have carried with it lands later than
+                this one, or it would not be here. So does a fade on its SPEED,
+                which Esc does not move: the speed stays where it has got to
+                (EB), and a speed fade's stop, due later, goes with it. */
+            resolveTakeover (id);
+            resolveTakeover ("rate:" + id);
+
+            FadeJob job;
+            job.target = id;
+            job.reportsSelf = false;
+            job.fromDb = target->ownLevel;
+            job.toDb = silenceDb;
+            job.ticksTotal = ticks;
+            job.curve = FadeCurve::linear;
+            job.stopWhenDone = true;
+            job.stopsAtTick = stopsAt;
+
+            /*  A MIC CUE IS FADED AT ITS INPUT, as a stop cue's fade fades one
+                (namespace draft §18.5): the voice goes and the channel's reverb
+                rings on after it, which is what Esc has always let a mic cue
+                do. The output stays where it is. */
+            if (target->kind == "mic")
+            {
+                job.toDb = job.fromDb;
+
+                if (audio != nullptr)
+                    audio->shutLive (target->track, seconds);
+            }
+
+            target->state = runState::stopping;
+            running.push_back (job);
+        }
+    }
+
+    void Runner::dropStopFades()
+    {
+        /*  ONLY THE JOBS THAT HOLD A STOP. A plain fade's own run is marked by
+            the double Esc like every other root and `advanceFades` retires it;
+            it holds no voice, so nothing waits on it. A job that holds a stop
+            is the one thing `enforceStops` defers to, and deferring is exactly
+            what a double Esc does not do. */
+        running.erase (std::remove_if (running.begin(), running.end(),
+                                       [] (const FadeJob& job)
+                                       {
+                                           return job.stopWhenDone && job.dca.empty();
+                                       }),
+                       running.end());
+    }
+
+    bool Runner::goTooSoon (std::int64_t tick) const
+    {
+        if (lastGoTick < 0)
+            return false;
+
+        /*  The schema's half second when the show cannot say, as the panic
+            fade falls back to its own default rather than to nothing. */
+        const auto seconds = osc::parseDouble (document.getAttribute ("/godot/list/goDebounce")
+                                                 .value_or ("0.5")).value_or (0.5);
+        const auto window = static_cast<std::int64_t> (std::llround (std::max (0.0, seconds)
+                                                                      * TickClock::rateHz));
+
+        return window > 0 && tick >= lastGoTick && tick - lastGoTick < window;
     }
 
     std::string Runner::pressStrip (Engine& engine, std::int64_t tick, const std::string& stripId,
@@ -5036,6 +5358,18 @@ namespace wfg::cue
 
         supersededRuns.clear();
 
+        /*  WHETHER A JOB IS THE LAST OF ITS FADE CUE STILL MOVING: a fade that
+            moves the level and the speed is two jobs under one run, and the run
+            reports once, when the second of them is done (§22.6). */
+        const auto lastOfItsCue = [this] (const FadeJob& job)
+        {
+            return std::none_of (running.begin(), running.end(),
+                                 [&job] (const FadeJob& other)
+                                 {
+                                     return &other != &job && ! other.retired && other.self == job.self;
+                                 });
+        };
+
         for (auto& job : running)
         {
             /*  KILLED, and this is the half of `run.kill` that did not exist.
@@ -5089,12 +5423,15 @@ namespace wfg::cue
             if (selfRun != nullptr && selfRun->state == runState::stopping)
             {
                 if (job.stopWhenDone)
-                    if (auto* held = runs.find (job.target))
+                    if (auto* held = runs.find (job.heldRun()))
                         if (held->state == runState::stopping && ! held->stopIssued)
                             held->state = runState::playing;
 
                 job.retired = true;
-                engine.submit (origin::engine, "run.ended", one (job.self));
+
+                if (lastOfItsCue (job))
+                    engine.submit (origin::engine, "run.ended", one (job.self));
+
                 continue;
             }
 
@@ -5121,7 +5458,7 @@ namespace wfg::cue
                 continue;
             }
 
-            auto* target = runs.find (job.target);
+            auto* target = runs.find (job.heldRun());
 
             /*  What was being faded has gone - it ended on its own, or somebody
                 killed it. The fade has nothing left to do and says so, rather
@@ -5131,13 +5468,17 @@ namespace wfg::cue
             {
                 job.retired = true;
 
-                if (job.reportsSelf)
+                if (job.reportsSelf && lastOfItsCue (job))
                     engine.submit (origin::engine, "run.ended", one (job.self));
 
                 continue;
             }
 
-            const auto level = job.currentDb();
+            /*  A SPEED FADE moves the run's own speed, which `applyRates`
+                places on the voice a horizon ahead (namespace draft §22.4), and
+                leaves its level to whatever else is moving it. */
+            if (job.movesRate)
+                target->ownRate = job.currentRate();
 
             /*  THE RUN'S OWN LEVEL, and only that.
 
@@ -5151,7 +5492,8 @@ namespace wfg::cue
                 NEITHER IS LOGGED - §3.15 keeps continuous readouts out of the
                 log, and a replay recomputes them from the GO that started the
                 fade and the document it read. */
-            target->ownLevel = level;
+            if (! job.movesRate)
+                target->ownLevel = job.currentDb();
 
             /*  WHAT THIS JOB IS WAITING FOR. A plain fade is done when its
                 level arrives. A job carrying a stop is done when the STOP is
@@ -5167,7 +5509,15 @@ namespace wfg::cue
                     of the fade verb: by the time the clip stops the level is
                     already at silence, so Tracktion's own click suppression has
                     nothing left to suppress. */
-                if (audio != nullptr && target->track >= 0)
+                /*  NOT A RUN THAT HAS ALREADY ENDED (2026-09-28). A cue whose
+                    file ran out during the fade gave its voice back when it
+                    did, and a finished run still names that track - so a stop
+                    issued now would land on whatever cue took the voice since.
+                    Esc made that likely rather than rare: the fade is a second
+                    long, and a GO inside it is exactly what an operator does
+                    next. The job still runs to its tick for the stop cue's
+                    own run; it just has nothing left to stop. */
+                if (audio != nullptr && target->track >= 0 && ! target->isFinished())
                 {
                     /*  MARKED BEFORE IT IS ISSUED, so that enforceStops does
                         not come along on the next tick and issue a second one.
@@ -5186,7 +5536,7 @@ namespace wfg::cue
                     engine.submit (origin::engine, "run.ended", one (target->id));
             }
 
-            if (job.reportsSelf)
+            if (job.reportsSelf && lastOfItsCue (job))
                 engine.submit (origin::engine, "run.ended", one (job.self));
 
             job.retired = true;
@@ -6617,6 +6967,7 @@ namespace wfg::cue
         armStandby (engine);
         advanceFades (engine, tick);
         applyLanes();
+        recordLane (engine);
         applyLevels();
         applyRouting();
         applyEq();
@@ -6635,6 +6986,10 @@ namespace wfg::cue
         armWaitingMics (engine);
         serviceTakes (engine);
         launchIfDue (engine, tick);
+
+        /*  AFTER THE LAUNCH AND BEFORE THE RANGES: a launch starts its run's
+            clock, and a range's boundary is read off it (§22.4). */
+        applyRates();
         advanceRanges (engine);
 
         /*  AFTER THE RANGES AND BEFORE THE EDGES, which is the only place it
@@ -6758,6 +7113,21 @@ namespace wfg::cue
             {
                 run->launchRequested = false;
                 run->launchedAtSample = target;
+
+                /*  THE SPEED FROM THE LAUNCH (namespace draft §22.4): the run's
+                    clock starts on the launch's sample at the run's speed, and
+                    the voice is told the same breakpoint, so the two begin
+                    together. A voice at one told one stays the identity, and a
+                    cue at one plays exactly as it did before there was a speed. */
+                if (run->kind == "media")
+                {
+                    run->rateClock.start (static_cast<double> (target), run->ownRate);
+                    run->launchSource = static_cast<double> (target);
+                    run->rangeSource = run->launchSource;
+                    run->ratePlaced = run->ownRate;
+                    run->rateNow = run->ownRate;
+                    audio->placeRate (run->track, target, run->ownRate);
+                }
 
                 engine.submit (origin::engine, "run.started", one (run->id));
 
@@ -6901,8 +7271,37 @@ namespace wfg::cue
                 nought through every replay - and because at 50 Hz a pass
                 shorter than 20 ms would be missed entirely by anything that
                 counted edges. */
-            const auto elapsed = std::max<std::int64_t> (0, now - run->rangeStartedAtSample);
-            run->rangeIteration = static_cast<int> (elapsed / run->passSamples) + 1;
+            /*  AT A SPEED (namespace draft §22.4) a pass is the slice's length
+                of the FILE, and how far the file has got is the run's clock's
+                business; at exactly one from the launch on, the count below. */
+            const auto atSpeed = ! run->rateClock.isIdentityFrom (static_cast<double> (run->launchedAtSample));
+            const auto pass = static_cast<double> (run->passSamples);
+            const auto played = atSpeed ? std::max (0.0, run->rateClock.sourceAt (static_cast<double> (now)) - run->rangeSource)
+                                        : 0.0;
+
+            if (atSpeed)
+            {
+                run->rangeIteration = static_cast<int> (played / pass) + 1;
+            }
+            else
+            {
+                const auto elapsed = std::max<std::int64_t> (0, now - run->rangeStartedAtSample);
+                run->rangeIteration = static_cast<int> (elapsed / run->passSamples) + 1;
+            }
+
+            /*  The sample at which the file will have played `passes` of the
+                slice, at the speeds placed so far - nothing while a speed held
+                at nought never gets there, and a boundary that is never reached
+                is not placed. */
+            const auto sampleAfterPasses = [&] (double passes) -> std::optional<std::int64_t>
+            {
+                const auto when = run->rateClock.whenSourceReaches (run->rangeSource + passes * pass);
+
+                if (! when.has_value())
+                    return std::nullopt;
+
+                return static_cast<std::int64_t> (std::llround (*when));
+            };
 
             if (run->rangesFinished)
                 continue;
@@ -6955,14 +7354,38 @@ namespace wfg::cue
                     The horizon belongs to the PLACEMENT and not to the choice
                     of instant. If the pass ends too soon to place cleanly, that
                     is what `run.late` is for. */
-                const auto passesGone = (now - run->rangeStartedAtSample) / run->passSamples;
+                if (atSpeed)
+                {
+                    const auto when = sampleAfterPasses (std::floor (played / pass) + 1.0);
 
-                endsAt = run->rangeStartedAtSample + (passesGone + 1) * run->passSamples;
+                    if (! when.has_value())
+                        continue;               // held at nought: the advance waits for the file to move
+
+                    endsAt = *when;
+                }
+                else
+                {
+                    const auto passesGone = (now - run->rangeStartedAtSample) / run->passSamples;
+
+                    endsAt = run->rangeStartedAtSample + (passesGone + 1) * run->passSamples;
+                }
             }
             else if (wanted > 0)
             {
-                endsAt = run->rangeStartedAtSample
-                           + static_cast<std::int64_t> (wanted) * run->passSamples;
+                if (atSpeed)
+                {
+                    const auto when = sampleAfterPasses (static_cast<double> (wanted));
+
+                    if (! when.has_value())
+                        continue;
+
+                    endsAt = *when;
+                }
+                else
+                {
+                    endsAt = run->rangeStartedAtSample
+                               + static_cast<std::int64_t> (wanted) * run->passSamples;
+                }
             }
             else
             {
@@ -7041,11 +7464,13 @@ namespace wfg::cue
             run->laneOutgoingOrigin = run->positionOrigin;
             run->laneOutgoingAt = run->rangeStartedAtSample;
             run->laneOutgoingPass = run->passSamples;
+            run->laneOutgoingSource = run->rangeSource;
 
             /*  The next range's clock starts at the boundary, so its first pass
                 is measured from where it will actually begin rather than from
                 the tick that decided it. */
             run->rangeStartedAtSample = placeAt;
+            run->rangeSource = run->rateClock.sourceAt (static_cast<double> (placeAt));
 
             /*  THE PLAYHEAD'S ORIGIN MOVES WITH THAT CLOCK, and both move when
                 the boundary is PLACED rather than when it is crossed. They have
@@ -7166,6 +7591,25 @@ namespace wfg::cue
                                         : Run::silentDb;
             }
 
+            /*  AT A SPEED (namespace draft §22.4) the file moves by the run's
+                clock - the breakpoints the voice was given - rather than one
+                second a second: how far it has moved since the launch, or since
+                the slice began, wrapped by the slice's pass as below. A run at
+                exactly one from its launch on takes the count below instead,
+                the same integers as before there was a speed. */
+            if (! run->rateClock.isIdentityFrom (static_cast<double> (run->launchedAtSample)))
+            {
+                const auto inRange = run->range >= 0 && run->rangeStartedAtSample > 0;
+                const auto origin = inRange ? run->rangeSource : run->launchSource;
+                auto played = std::max (0.0, run->rateClock.sourceAt (static_cast<double> (now)) - origin);
+
+                if (inRange && run->passSamples > 0)
+                    played = std::fmod (played, static_cast<double> (run->passSamples));
+
+                run->position = run->positionOrigin + played / rate;
+                continue;
+            }
+
             /*  MEASURED FROM THE LAUNCH, and clamped at nought because the
                 launch is PLACED a few ticks into the future: between the
                 placement and the instant itself the difference is negative, and
@@ -7206,6 +7650,30 @@ namespace wfg::cue
         {
             if (run.launchedAtSample <= 0 || sample < run.launchedAtSample)
                 return run.laneStart;
+
+            /*  AT A SPEED (namespace draft §22.4), the file by the run's clock:
+                the same origins and wraps as below, measured in the file's
+                samples rather than the clock's. A lane is a property of the
+                recording, so a slowed cue hears its lane slowed with it. */
+            if (! run.rateClock.isIdentityFrom (static_cast<double> (run.launchedAtSample)))
+            {
+                const auto source = run.rateClock.sourceAt (static_cast<double> (sample));
+                const auto inSlice = run.range >= 0 && run.rangeStartedAtSample > 0;
+                const auto outgoing = run.range >= 0 && run.laneOutgoingAt > 0 && sample < run.rangeStartedAtSample;
+
+                const auto originSource = outgoing ? run.laneOutgoingSource
+                                        : inSlice ? run.rangeSource
+                                                  : run.launchSource;
+                const auto pass = static_cast<double> (outgoing ? run.laneOutgoingPass : run.passSamples);
+                const auto secondOrigin = outgoing ? run.laneOutgoingOrigin : run.positionOrigin;
+
+                auto played = std::max (0.0, source - originSource);
+
+                if ((outgoing || inSlice) && pass > 0.0)
+                    played = std::fmod (played, pass);
+
+                return secondOrigin + played / rate;
+            }
 
             if (run.range >= 0 && run.laneOutgoingAt > 0 && sample < run.rangeStartedAtSample)
             {
@@ -7280,6 +7748,226 @@ namespace wfg::cue
             run->laneDb = run->lane.empty() ? 0.0
                                             : doc::laneLevelDb (run->lane, lanePositionAt (*run, at, rate));
         }
+    }
+
+    void Runner::applyRates()
+    {
+        if (audio == nullptr || samplesPerTick <= 0)
+            return;
+
+        /*  THE CUE'S SPEED FOLLOWS THE DOCUMENT, gated as `applyLanes` is: a
+            tick with nobody editing compares one number, and an edit - or an
+            undo - reaches every sounding run on the next tick (DW). Only the
+            cue whose `rate` moved is moved: an edit of anything else reads the
+            same number and places nothing. A speed fade holds its run, and the
+            document waits until it lets go. */
+        const auto revision = document.showRevision();
+        const auto reread = revision != rateRevision;
+        rateRevision = revision;
+
+        const auto now = audio->samplesElapsed();
+        const auto lead = static_cast<std::int64_t> (latencyTicks()) * samplesPerTick;
+        const auto stretchLimit = audio->stretchSpeedLimit();
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
+                continue;
+
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr)
+                continue;
+
+            /*  HELD WHILE A SPEED FADE MOVES IT (DW), asked of the fades
+                themselves, so every way one ends - arriving, taken over,
+                killed, dropped by a double Esc - lets go the same way. And
+                read again as it lets go: an edit of the cue's speed made under
+                the fade lands then, not at whatever edit comes next. */
+            const auto held = std::any_of (running.begin(), running.end(),
+                                           [&snapshot] (const FadeJob& job)
+                                           {
+                                               return job.movesRate && job.heldRun() == snapshot.id;
+                                           });
+            const auto letGo = run->rateHeld && ! held;
+            run->rateHeld = held;
+
+            if ((reread || letGo) && ! held)
+            {
+                if (const auto cue = document.findById (run->cue); cue.isValid())
+                {
+                    const auto decided = osc::parseDouble (textOf (cue, "rate")).value_or (1.0);
+
+                    if (std::bit_cast<std::uint64_t> (decided) != std::bit_cast<std::uint64_t> (run->rateSeen))
+                    {
+                        run->rateSeen = decided;
+                        run->ownRate = run->stretch && stretchLimit > 0.0 ? std::min (decided, stretchLimit) : decided;
+                    }
+                }
+            }
+
+            /*  Before the launch the launch places it (`launchIfDue`). */
+            if (run->launchedAtSample <= 0)
+            {
+                run->rateNow = run->ownRate;
+                continue;
+            }
+
+            /*  A CHANGE IS HELD UNTIL ONE HORIZON FROM NOW, then a straight line
+                to it over a tick - the same two breakpoints on the run's clock
+                and on the voice, so the playhead is read off the arithmetic the
+                audio thread plays by. A speed fade moves `ownRate` every tick,
+                and its ramps join end to end: each starts where the last one
+                ended. */
+            if (std::bit_cast<std::uint64_t> (run->ownRate) != std::bit_cast<std::uint64_t> (run->ratePlaced))
+            {
+                const auto last = run->rateClock.size() > 0 ? run->rateClock.back().at : 0.0;
+                const auto from = std::max (static_cast<double> (now + lead), last);
+                const auto to = from + static_cast<double> (samplesPerTick);
+
+                if (from > last)
+                {
+                    run->rateClock.place (from, run->ratePlaced);
+                    audio->placeRate (run->track, static_cast<std::int64_t> (from), run->ratePlaced);
+                }
+
+                run->rateClock.place (to, run->ownRate);
+                audio->placeRate (run->track, static_cast<std::int64_t> (to), run->ownRate);
+                run->ratePlaced = run->ownRate;
+            }
+
+            /*  The past the clock no longer needs: what the playhead reads is
+                now and after, and where the file was at the launch and at the
+                slice's start is kept on the run. */
+            run->rateClock.forgetBefore (static_cast<double> (now) - static_cast<double> (samplesPerTick));
+            run->rateNow = run->rateClock.rateAt (static_cast<double> (now));
+        }
+    }
+
+    void Runner::recordLane (Engine& engine)
+    {
+        if (lanes == nullptr || ! lanes->taken())
+        {
+            ride.clear();
+            return;
+        }
+
+        const auto cue = document.findById (lanes->cue());
+        const std::string rideAddress = "/godot/surface/laneRide";
+
+        /*  THE LANE AS THE SHOW HAS IT, re-read when the show's revision moves
+            or the lane changes hands - the curve the fader follows, and the one
+            a pass is spliced into. */
+        if (rideLaneCue != lanes->cue() || rideLaneRevision != document.showRevision())
+        {
+            rideLaneCue = lanes->cue();
+            rideLaneRevision = document.showRevision();
+            rideLane = cue.isValid() ? doc::readLevelLane (textOf (cue, "levelLane")).points
+                                     : std::vector<doc::LanePoint> {};
+        }
+
+        /*  OUTSIDE A PASS, THE FADER SITS WHERE THE LANE STARTS (DG): at the
+            cue's start offset, or at the in-point of its first slice. */
+        if (! lanes->recording)
+        {
+            ride.clear();
+            rideWritten.clear();
+
+            if (cue.isValid())
+            {
+                const auto ranges = rangesOf (cue);
+                const auto start = ranges.empty() ? numberOf (cue, "startOffset") : ranges.front().in;
+
+                lanes->rideDb = doc::laneLevelDb (rideLane, start);
+            }
+
+            return;
+        }
+
+        //  Written already, and waiting for the `lane.stop` that says so.
+        if (lanes->run == rideWritten)
+            return;
+
+        auto* run = runs.find (lanes->run);
+
+        /*  HOW THE PASS ENDS (DM). A hand asking - Rec again, the window's stop
+            - keeps the ride and stops the cue; the cue ending on its own, a stop
+            cue or Esc keeps it and leaves the stop to what started it; a KILL -
+            double Esc, which drops every action (§4.4) - drops it. */
+        const auto handAsked = lanes->stopping;
+        const auto gone = run == nullptr || run->isFinished();
+        const auto killed = run != nullptr && run->skipFooter;
+        const auto stopped = run != nullptr && run->state == runState::stopping;
+
+        if (handAsked || gone || stopped)
+        {
+            rideWritten = lanes->run;
+
+            if (killed || ! cue.isValid())
+            {
+                ride.clear();
+                engine.submit (origin::engine, "lane.stop", one ("dropped"));
+                return;
+            }
+
+            if (lanes->touched && ! ride.empty())
+            {
+                const auto text = laneText (spliceRide (rideLane, ride, 0.05, 0.1));
+
+                /*  JUDGED BEFORE IT IS SENT: a lane the door would refuse is a
+                    ride lost with nothing to show for it, and the refusal is
+                    worth a record of its own rather than a surprise. */
+                if (doc::readLevelLane (text).problem.empty())
+                    engine.submit (origin::engine, "node.set",
+                                   { osc::Value::string ("/godot/cue/" + lanes->cue() + "/levelLane"),
+                                     osc::Value::string (text) });
+            }
+
+            ride.clear();
+
+            if (handAsked && run != nullptr && ! gone && ! stopped)
+                engine.submit (origin::engine, "run.kill", one (run->id));
+
+            engine.submit (origin::engine, "lane.stop", one ("kept"));
+            return;
+        }
+
+        /*  UNTIL A HAND TOUCHES THE RIDE, THE FADER READS THE LANE: the run's
+            own lane term, where the file is. From the first touch the pass is
+            LATCHED (DH) - the hand's level is the voice's lane term, heard at
+            once, and it stays the hand's after the hand lets go. A touch with
+            no move yet has written nothing, so the latch starts from where the
+            fader was. */
+        const auto held = touches != nullptr && ! touches->holdersOf (rideAddress).empty();
+
+        if (held && ! lanes->touched)
+        {
+            lanes->touched = true;
+
+            if (! lanes->handSeen)
+                lanes->handDb = lanes->rideDb;
+        }
+
+        if (! lanes->touched)
+        {
+            lanes->rideDb = run->laneDb;
+            return;
+        }
+
+        run->laneDb = lanes->handDb;
+        lanes->rideDb = lanes->handDb;
+
+        /*  AND A SAMPLE WHERE THE VOICE IS NOW - not one slew ahead, as the lane
+            is read: a hand answers what it hears. Only once the voice sounds;
+            before its launch the second does not move. */
+        if (audio == nullptr || run->state != runState::playing || run->launchedAtSample <= 0)
+            return;
+
+        const auto rate = static_cast<double> (audio->sampleRate());
+        const auto now = audio->samplesElapsed();
+
+        if (rate > 0.0 && now >= run->launchedAtSample)
+            appendRide (ride, lanePositionAt (*run, now, rate), lanes->handDb);
     }
 
     void Runner::applyLevels()
@@ -7569,8 +8257,18 @@ namespace wfg::cue
                 /*  A NEW STATE ON A CUE THAT HAS NOT LAUNCHED is loaded before
                     it may (an undo in standby, a capture while it waits); on
                     one already sounding it is not - the knobs follow live, and
-                    the rest applies the next time the cue plays. */
-                if (next.stateFile != last.stateFile && run->launchedAtSample == 0 && next.enabled)
+                    the rest applies the next time the cue plays.
+
+                    AND AN INSERT SWITCHED IN BEFORE GO (found 2026-09-28): the
+                    arm asked for no state while it was out, so the instance
+                    still held the last cue's - which the arm's own rule says
+                    must never be heard under this one. So switching in asks for
+                    the cue's state, the preset's own when it has none, whether
+                    or not the row changed; and the launch waits for it, as it
+                    waits for an arm's. */
+                const auto switchedIn = next.enabled && ! last.enabled;
+
+                if (next.enabled && run->launchedAtSample == 0 && (switchedIn || next.stateFile != last.stateFile))
                     audio->requestFxState (run->track, next.slot, next.statePath);
 
                 /*  Both sorted by index: one walk finds what moved, what
@@ -7692,7 +8390,7 @@ namespace wfg::cue
                                            [&snapshot] (const FadeJob& job)
                                            {
                                                return job.stopWhenDone
-                                                        && job.target == snapshot.id;
+                                                        && job.heldRun() == snapshot.id;
                                            });
 
             if (held)
@@ -7809,6 +8507,51 @@ namespace wfg::cue
 
             return args;
         };
+
+        //----------------------------------------------------------------------
+        /*  ESC AND DOUBLE ESC, SPECIALISED WITH THE RUNNER (2026-09-28).
+
+            `registerRunCommands` gave them their meaning on the run table: every
+            root asked to stop, gracefully or at once. What that cannot do is
+            move a level - which is what the author asked Esc to do ("a 'Panic'
+            fade duration that fades out all playing cues") - because the fades
+            are the Runner's. So the two are taken over here, the registry's own
+            "last registration wins", and each does its Runner half FIRST and
+            then exactly what it did before: `run.stopAll` fades what sounds over
+            `audio/panicFade` and then stops every root, `run.killAll` lets go of
+            every stop still to come and then drops every root.
+
+            WRAPPED, NOT REWRITTEN, so what the earlier registration carries -
+            the output test it stops, since 2026-09-21 - comes with it; and a
+            rig that registered the run commands alone keeps the plain ones. */
+        for (const auto* level : { "run.stopAll", "run.killAll" })
+        {
+            const auto* plain = registry.find (level);
+
+            if (plain == nullptr)
+                continue;
+
+            auto specialised = *plain;
+            const auto graceful = std::string (level) == "run.stopAll";
+
+            if (graceful)
+                specialised.description = "Stops every run now, gracefully: Esc. What is sounding fades to"
+                                          " silence over audio/panicFade first; members come down in order"
+                                          " and every footer runs.";
+
+            specialised.handler = [&runner, graceful, before = plain->handler]
+                                  (CommandContext& context, const std::vector<osc::Value>& args)
+            {
+                if (graceful)
+                    runner.beginPanicFade (context.tick);
+                else
+                    runner.dropStopFades();
+
+                return before (context, args);
+            };
+
+            registry.add (std::move (specialised));
+        }
 
         //----------------------------------------------------------------------
         /*  ARMING LIVES HERE, WITH THE RUNNER, because it is an ACTION and not
@@ -8279,6 +9022,22 @@ namespace wfg::cue
                                 would bury the rejections that matter. */
                             if (standby.empty())
                                 return Outcome::ok (args);
+
+                            /*  TOO SOON AFTER THE LAST ONE (PRD §3.7's GO
+                                debounce, a show setting since 2026-09-28): a
+                                hand that bounced, or two people on two GO
+                                buttons, and the second press would fire the
+                                cue after the one the operator meant. Refused
+                                rather than applied-and-ignored, so the error
+                                line says a GO was eaten and the log says whose;
+                                the pointer does not move, so the next press
+                                fires what this one would have. Half a second
+                                unless the show says otherwise (the author's
+                                default, 2026-09-28); nought is off. */
+                            if (runner.goTooSoon (context.tick))
+                                return Outcome::rejected (reason::tooSoon);
+
+                            runner.noteGo (context.tick);
 
                             /*  STANDBY MOVES FIRST, and unconditionally (§3.5).
                                 Whether the cue makes a sound, fails to find a

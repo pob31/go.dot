@@ -900,6 +900,14 @@ hand's trim and the DCAs, never a second writer of the level. Media cues only:
 a sampler clip and a kept take are media cues and have one; a live take is
 tonight's and has none.
 
+*Added in 0.8, at the author's direction (2026-09-28).* **A lane is recorded
+from a fader, in latch** - the first automation mode built. Rec in the
+waveform arms a cue's lane and the first fader touched on any surface is
+taken for it; it flies to the curve's start value; Rec again (or the D700's
+transport Rec) plays the cue with the fader following the lane, and from the
+first touch the hand's level is heard and written, held after let-go, until
+the pass stops - one pass, one step of undo (namespace draft §20.9).
+
 **Curve editor:** breakpoint lists with numeric entry, not only draggable
 pixels.
 
@@ -1862,6 +1870,18 @@ the wave node, which this engine does not have; when it does, rate becomes a
 node like any other. Rate changes apply to the **whole cue**, driven off the
 sample clock, so audio and video move together (§3.19d).
 
+*Amended 2026-09-28, at the author's direction — namespace draft §22.* The
+per-clip speed the paragraph above waited for now exists, as a patch Go.dot's
+build applies to Tracktion (decision DQ), and rate becomes a node like any
+other: a **speed from nought to twenty**, one by default and at rest, on every
+media cue, heard while the cue sounds when it is typed, turned on the master
+dial or moved by a fade. The toggle is **varispeed | timestretch**, set per cue
+and read when the cue is armed. At nought, varispeed is silence - a stopped
+tape - and timestretch **freezes** the instant it reached, pitch held, until the
+speed moves again (DR). A fade cue moves the speed as it moves the level, either
+or both (DS). A lane on the speed, riding it under the lock, and a group's speed
+as a trim are *(proposed)*, §6.9.
+
 #### Joins
 
 - **Sample-accurate loop points**, with an **optional short crossfade at the
@@ -2097,6 +2117,14 @@ it declared would delay the whole show.
 
 - **Varispeed** = speed ratio with stretch off (resampling). **Time-stretch** via
   Elastique or RubberBand, licence permitting.
+  *Amended 2026-09-28 — namespace draft §22:* time-stretch is **Signalsmith
+  Stretch** (MIT, vendored inside Tracktion), the only one of Tracktion's
+  stretchers that reaches the twenty the speed allows and freezes at nought;
+  Elastique and RubberBand stay declined. Both modes ride one patch to
+  Tracktion that Go.dot's build applies (decision DQ): a launched clip asks
+  Go.dot how far its source has played, so the speed is Go.dot's schedule,
+  placed ahead like a launch - no custom clip type, and no curve inside the
+  engine.
 - **Video stays Go.dot's**, reading TE's playhead each frame (§3.19d).
 - **Timecode chase** = TE's transport following MTC (Waveform does it; verify the
   engine exposes it). LTC is decoded by Go.dot and fed to the same mechanism.
@@ -2913,6 +2941,47 @@ section's: the state is a first-class one, it is distinct from both "running" an
 validation, the dropped GO and the resume. *Not yet built:* the rate-change stop,
 the resampling, and the operator-facing indication that reconnection is under way.
 
+*Built 2026-09-28, at the author's direction — the rate-change stop and the adaptation.* Asked
+*"Don't you think we will need the flexibility to adapt to a new sample rate? If the computer
+interface goes between locations with 48kHz and others with 96kHz..."*, and of the mid-show case,
+*"I hope the rate never changes while running, at least not during a show. But at setup this might
+happen"* — both built. The same interface coming back from an outage on another clock is first
+**asked for the clock the show ran on** (JUCE's own ASIO reset asks the same), and only a clock it
+**insists on** is followed: a USB interface power-cycled mid-show takes the old rate back and the
+outage stays the pause above; a Dante interface whose domain moved cannot, and the show follows it.
+Following is this section's stop and adaptation. Whatever is playing is stopped **the Esc way** —
+members down in order, every footer run, the sound itself gone since the outage began — the
+prepared runs are revoked, and the engine is brought up again on the interface as it runs,
+**without closing it**, with the graph it had. At setup there is nothing to stop, and it is simply
+the show following the room. The operator is told in words on the transport line of both clients
+(`/godot/audio/rateMoved`) until something newer is refused.
+
+**The resampling is Tracktion's, and was already there.** Every file is read at its own rate and
+converted to the graph's as it plays, so following a clock converts nothing on disk. The author's
+test is now a unit test — a thousand hertz written at 48 kHz counted back out of a 96 kHz graph by
+its zero crossings, the reverse, and 44.1 on 48 — and it passes: no Alvin. What cannot follow a
+clock is what is held in memory at the old rate: a live-sampling take not yet kept is cleared, with
+its sentence (*"the take was cleared: the interface's rate changed"*), as the take store has done
+since Phase 9c (namespace draft §19).
+
+**The same interface is its type and its name, not its channel count:** a Dante or MADI interface
+at double speed offers half its channels and is still the box the show was playing through. A show
+whose patch names a channel the interface no longer has at the new rate fails the follow, and says
+which. **Apply is let through an outage when nothing plays** — refused `audio-busy` when something
+does — the way out when the interface is gone for good, which until now was a relaunch. These are
+implementer's calls, recorded as decisions DF–DJ in the namespace draft's §11.1 with the rest of
+what was built, and the author's to overrule.
+
+**At load nothing is compared, because nothing is stored.** A show file carries no rate
+(`AudioSettings` has none), every open asks the interface for its own, and a show made at 48 kHz
+opened in a 96 kHz room runs at 96: the *(proposed)* paragraph above describes what the code has
+always done. Whether opening such a file should *ask* first stays the open question it was — and a
+moot one until a show records the rate it was made at.
+
+*Still not built:* reconnection shown as a state rather than a line of text (§4.8). *Owed to the
+bench:* the Digiface Dante with its domain moved in Dante Controller, at setup and under a playing
+cue — the CI tests move the clock of an interface that exists only in the test.
+
 *Amended 2026-09-26 — live input handling answered* (§3.18, `docs/godot-namespace-draft-0.1.md`
 §18). A live input is a **named input** of the show — packed onto the logical inputs the input patch
 already maps to hardware, with a meter whether or not anything listens — and is heard only through a
@@ -3091,19 +3160,44 @@ Added 2026-09-26 *(proposed)*, with §3.18 and §3.31:
 - **Loop points written in the show**, a cue saying *loop the first two seconds*.
 - **Overdub feedback**, each pass decaying the layers under it.
 - **Varispeed and reverse on a loop** — the conversation about varispeed on files (2026-09-21) is the
-  same one.
+  same one. *2026-09-28:* varispeed on FILES is decided (§3.24, namespace draft §22); a loop's is
+  still this proposal.
 - **A mic cue as a sampler member**: fader-start for a microphone.
 - **The shared rack channel** — a reverb return cues send into, §3.9e's *"bus with a chain"* — and a
   media cue's `Insert` made to sound, both still Phase 9b's.
 
 Added 2026-09-27 *(proposed)*, with §3.10's level lane:
 
-- **A lane recorded from a fader** — §3.10's read, touch, latch and write, riding a cue's level on
-  the D700 and keeping the ride as its lane.
+- ~~**A lane recorded from a fader**~~ — *decided 2026-09-28*: latch, from a fader taken by touch
+  (§3.10, namespace draft §20.9). Touch and write modes stay proposed.
 - **The master dial on a lane point's level**, which §17.18's rule against a handle's two numbers
   keeps out today.
 - **Lanes on other numbers** — pan, a send, a plugin's parameter — each a row beside the number it
   rides.
+
+Added 2026-09-28 *(proposed)*, with §3.24's speed (namespace draft §22). The implementer's calls
+DT-EH in §22.1 are the author's to overrule; these are what the work left out:
+
+- **The speed ridden under the lock**: `run/<id>/rate` through the live door, as EQ and sends are
+  ridden (namespace draft §17.14, decision AM). Today the lock refuses it (§17.18, BT).
+- **A lane on the speed**, drawn over the waveform as the level's is.
+- **A drawn speed curve in a fade**: a fade's `points` stay the level's.
+- **A group's speed as a trim** its members multiply by. Today a speed fade aimed at a group moves
+  nothing and `wfg validate` says so.
+- **Reverse.**
+- **Pitch as a number of its own**, apart from the speed.
+- ~~**A band-limited resampler above one**~~ - answered 2026-09-29 the author's second way ("or we
+  could simply filter out the high frequency content"): above one the file is low-passed before the
+  interpolator, and a 5 kHz tone at twenty, which folded back at full level, is 83 dB down (namespace
+  draft §22.11).
+- **Speed fades in load-to-time**: the solve reads a cue's own speed, not a fade's.
+- **A stretcher primed on the message thread**, once its file is in the cache and before the launch:
+  M46 measured the prime at 1 to 5 ms on the audio thread, a dropout at blocks of 64 - and Tracktion's
+  CPU-overload mute answers a block that long with a block of silence (namespace draft §22.12).
+- ~~**Timestretch on a cue with ranges without a gap at each pass**, by a loop below the stretcher~~ -
+  built 2026-09-29 (the author: "one less artefact to hear complaints about"): a launched clip's loop
+  now sits below its resampler and its stretcher, and a stretched loop passes its wraps with no gap
+  and no click (namespace draft §22.12).
 
 ### 6.10 Protocol implementation order (§3.16)
 
@@ -3198,6 +3292,22 @@ Mackie vs HUI first — first week with the D700.
   Debug build:* within 0.014-0.022 dB of the lane away from its corners, and a step's midpoint -8.0
   to -5.3 ms from where it was drawn - inside a tick, read one slew ahead. A runner that stalls the
   tick thread holds the level still, as it holds a fade; the driver voids what a stall moved.
+- **A cue's speed** (§3.24, 2026-09-28, namespace draft §22.8): **M14**, reopened from Phase 3 - a
+  file's duration at 0.5× and 2× in both modes, its pitch moved under varispeed and held under
+  timestretch; **M46** - a voice's cost a block by mode at 1, 2, 8 and 20×, at 48 and 96 kHz, in
+  blocks of 64 to 1024, what a block that re-primes the stretcher costs, and no allocation at 20×;
+  **M47** - the resampler's aliasing above one, the largest step through varispeed's gate near
+  nought, the level of a freeze, and the damage at a stretched loop's wrap. *Taken 2026-09-29:*
+  M14 exact to a millisecond in varispeed and to the stretcher's few-millisecond tail in timestretch,
+  pitch within a hertz - once patch 0002 had mended two faults it found in Tracktion's stretcher (a
+  150 ms silent start, and a place in the file off by up to 95 ms at half the speed). M46: a voice
+  costs at most 0.9% of real time resampled and 3.1% stretched, allocating nothing; a stretched
+  launch costs 1 to 5 ms on the audio thread, a dropout at blocks of 64, and so does a stretched
+  loop's every wrap. M47: Lagrange's images are 68 to 78 dB down while a sound stays under Nyquist,
+  but above one everything over Nyquist folds back at full level - since filtered, 83 dB down at
+  twenty (§22.11); the gate makes no step; a freeze holds its pitch 4 to 7 dB down; a stretched loop
+  had a gap and a click at every pass - since its loop sits below the stretcher, none (§22.12).
+  Namespace draft §22.10.
 
 ---
 

@@ -1,0 +1,22 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="VR000001" name="Sound">
+      <Media id="VR000002" file="tone.wav" name="Bed" number="1">
+        <Route id="VR000003" bus="VR000004" gains="1 0 0 1"/>
+      </Media>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="1">
+    <Bus id="VR000004" name="Main L/R" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces>
+    <Surface id="VR000005" name="Panel">
+      <Strip id="VR000006"/>
+      <Strip id="VR000007"/>
+    </Surface>
+  </Surfaces>
+  <Dcas/>
+</Show>

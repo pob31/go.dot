@@ -314,6 +314,41 @@ TEST_CASE ("solve: a fade leaves a trim behind, as base plus what it moved")
     CHECK (plan.trims[0].decibels == doctest::Approx (-12.0));
 }
 
+TEST_CASE ("solve: a fade that leaves the level alone trims nothing, read in order or from what happened")
+{
+    /*  Namespace draft §22.6. Read as a level, a fade that moves only the
+        speed is a fade to its `level`'s default, silence, and load-to-time
+        would silence its target. Its speed is not solved (EE). */
+    SolverRig rig;
+
+    const auto bed = rig.media (rig.listId, 0, "Ambience");
+
+    const auto fade = rig.document.createCue (rig.listId, 1, "fade", "Slower").id;
+    rig.document.setAttribute ("/godot/cue/" + fade + "/target", bed);
+    rig.document.setAttribute ("/godot/cue/" + fade + "/levelOn", "false");
+    rig.document.setAttribute ("/godot/cue/" + fade + "/rateOn", "true");
+    rig.document.setAttribute ("/godot/cue/" + fade + "/rate", "0.5");
+
+    const auto target = rig.document.createCue (rig.listId, 2, "memo", "Here").id;
+
+    const std::vector<cue::Step> steps { { 0, bed, 'g' }, { 50, fade, 'g' }, { 100, target, 'g' } };
+    const auto fromWhatHappened = [&]
+    {
+        return cue::solveHistory (rig.document, &rig.durations, nullptr, { rig.listId, target, 0.0 }, steps);
+    };
+
+    CHECK (rig.solve (target, -1.0).trims.empty());
+
+    const auto history = fromWhatHappened();
+    CHECK (history.how == "history");
+    CHECK (history.trims.empty());
+
+    //  The same fade with its level switch on trims as it always did.
+    rig.document.setAttribute ("/godot/cue/" + fade + "/levelOn", "true");
+    CHECK (rig.solve (target, -1.0).trims.size() == 1u);
+    CHECK (fromWhatHappened().trims.size() == 1u);
+}
+
 TEST_CASE ("solve: the target's own groups come with it")
 {
     /*  A member sounds as part of its scene, so the plan has to say the scene
@@ -463,6 +498,168 @@ TEST_CASE ("solve: an aim spells the same way it reads")
     CHECK_FALSE (cue::readAim ("F7HR8TVD").isSet());
     CHECK_FALSE (cue::readAim ("").isSet());
     CHECK_FALSE (cue::readAim (" 1.0").isSet());
+}
+
+TEST_CASE ("solve: a media cue at its own speed - its time on the clock, and where its file has got to")
+{
+    /*  Namespace draft §22.5, decision EE. A second on the clock is the cue's
+        speed in seconds of its file, and the planned offset is a place in the
+        FILE, which is what the arm reads it as. The four-second tone is two
+        at twice the speed and eight at half. */
+    SolverRig rig;
+
+    const auto tone = rig.media (rig.listId, 0, "Tone");
+    const auto address = "/godot/cue/" + tone + "/";
+
+    SUBCASE ("no ranges: the file is the clock times the speed")
+    {
+        rig.document.setAttribute (address + "rate", "2");
+
+        const auto plan = rig.solve (tone, 1.0);
+        REQUIRE (plan.runs.size() == 1u);
+        CHECK (plan.runs[0].offset == doctest::Approx (2.0));
+    }
+
+    SUBCASE ("ranges are walked in the file's seconds")
+    {
+        //  A second looped twice, then a second: at twice the speed, 1.25 s is 2.5 s of passes.
+        const auto first = rig.document.createRange (tone, 0.0, 1.0);
+        REQUIRE (first.ok);
+        REQUIRE (rig.document.setAttribute ("/godot/range/" + first.id + "/loops", "2").ok);
+        REQUIRE (rig.document.createRange (tone, 2.0, 3.0).ok);
+        rig.document.setAttribute (address + "rate", "2");
+
+        const auto plan = rig.solve (tone, 1.25);
+        REQUIRE (plan.runs.size() == 1u);
+        CHECK (plan.runs[0].range == 1);
+        CHECK (plan.runs[0].pass == 1);
+        CHECK (plan.runs[0].offset == doctest::Approx (2.5));
+    }
+
+    SUBCASE ("at nought the file never moves, and its length is for ever, not unknown")
+    {
+        rig.document.setAttribute (address + "rate", "0");
+
+        const auto plan = rig.solve (tone, 5.0);
+        REQUIRE (plan.runs.size() == 1u);
+        CHECK (plan.runs[0].offset == doctest::Approx (0.0));
+        CHECK_FALSE (rig.confusedAbout (plan, tone, cue::confusion::unknownLength));
+
+        //  So a cue after it finds it still going, where it started - nothing about it a guess.
+        const auto later = rig.document.createCue (rig.listId, 1, "memo", "Later").id;
+        const auto after = rig.solve (later, 0.0);
+        const auto found = std::find_if (after.runs.begin(), after.runs.end(),
+                                         [&tone] (const cue::PlannedRun& run) { return run.cue == tone; });
+        REQUIRE (found != after.runs.end());
+        CHECK (found->offset == doctest::Approx (0.0));
+        CHECK (after.confused.empty());
+    }
+}
+
+TEST_CASE ("solve: a jump into a cue that starts into its file lands where the cue has got to in the file")
+{
+    /*  Found while S.6 put the speed here (2026-09-29): the arm reads a
+        planned offset as a place in the file (`requestArmOn`), and a cue with
+        no ranges was handed the seconds since it began - so a jump into a cue
+        that starts two seconds into its file landed two seconds early. */
+    SolverRig rig;
+
+    const auto tone = rig.media (rig.listId, 0, "Tone");
+    rig.document.setAttribute ("/godot/cue/" + tone + "/startOffset", "2");
+
+    auto plan = rig.solve (tone, 1.0);
+    REQUIRE (plan.runs.size() == 1u);
+    CHECK (plan.runs[0].offset == doctest::Approx (3.0));
+
+    //  And at half the speed, a second in is half a second of the file past where it starts.
+    rig.document.setAttribute ("/godot/cue/" + tone + "/rate", "0.5");
+    plan = rig.solve (tone, 1.0);
+    REQUIRE (plan.runs.size() == 1u);
+    CHECK (plan.runs[0].offset == doctest::Approx (2.5));
+}
+
+TEST_CASE ("solve: a timeline places a member at its own speed, and hears it end when it does")
+{
+    /*  The walk sizes a member by its speed: the four-second tone at twice the
+        speed has ended two seconds into the scene, at half it is still going
+        at six. What else is sounding is the same arithmetic as ever. */
+    SolverRig rig;
+
+    const auto scene = rig.document.createCue (rig.listId, 0, "group", "Scene").id;
+    rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline");
+
+    const auto fast = rig.media (scene, 0, "Fast");
+    const auto aim = rig.media (scene, 1, "Aim");
+    rig.document.setAttribute ("/godot/cue/" + aim + "/preWait", "3");
+
+    const auto whenOf = [] (const cue::Plan& plan, const std::string& cueId)
+    {
+        for (const auto& run : plan.runs)
+            if (run.cue == cueId)
+                return run;
+
+        return cue::PlannedRun {};
+    };
+
+    //  At one, the first member is still going three seconds in, at its third second.
+    auto plan = rig.solve (aim, 0.0);
+    CHECK (whenOf (plan, fast).when == cue::planned::sounding);
+    CHECK (whenOf (plan, fast).offset == doctest::Approx (3.0));
+
+    //  At twice the speed it was over at two.
+    rig.document.setAttribute ("/godot/cue/" + fast + "/rate", "2");
+    plan = rig.solve (aim, 0.0);
+    CHECK (whenOf (plan, fast).when == cue::planned::finished);
+
+    //  At half, three seconds in is a second and a half of the file.
+    rig.document.setAttribute ("/godot/cue/" + fast + "/rate", "0.5");
+    plan = rig.solve (aim, 0.0);
+    CHECK (whenOf (plan, fast).when == cue::planned::sounding);
+    CHECK (whenOf (plan, fast).offset == doctest::Approx (1.5));
+}
+
+TEST_CASE ("solve: read from what happened, a cue at its own speed is over when its file is")
+{
+    SolverRig rig;
+
+    const auto tone = rig.media (rig.listId, 0, "Tone");
+    const auto later = rig.document.createCue (rig.listId, 1, "memo", "Later").id;
+
+    //  The tone fired three seconds before the aim.
+    const std::vector<cue::Step> steps { { 0, tone, 'g' }, { 150, later, 'g' } };
+
+    const auto fromWhatHappened = [&]
+    {
+        return cue::solveHistory (rig.document, &rig.durations, nullptr, { rig.listId, later, 0.0 }, steps);
+    };
+
+    const auto toneIn = [&tone] (const cue::Plan& plan) -> const cue::PlannedRun*
+    {
+        for (const auto& run : plan.runs)
+            if (run.cue == tone)
+                return &run;
+
+        return nullptr;
+    };
+
+    //  Four seconds at twice the speed were over after two.
+    rig.document.setAttribute ("/godot/cue/" + tone + "/rate", "2");
+    auto plan = fromWhatHappened();
+    REQUIRE (plan.how == "history");
+    CHECK (toneIn (plan) == nullptr);
+
+    //  At half the speed it has eight, and is a second and a half into its file.
+    rig.document.setAttribute ("/godot/cue/" + tone + "/rate", "0.5");
+    plan = fromWhatHappened();
+    REQUIRE (toneIn (plan) != nullptr);
+    CHECK (toneIn (plan)->offset == doctest::Approx (1.5));
+
+    //  At nought it sounds for ever, at its start, and nothing about it is a guess.
+    rig.document.setAttribute ("/godot/cue/" + tone + "/rate", "0");
+    plan = fromWhatHappened();
+    REQUIRE (toneIn (plan) != nullptr);
+    CHECK (toneIn (plan)->offset == doctest::Approx (0.0));
+    CHECK_FALSE (rig.confusedAbout (plan, tone, cue::confusion::unknownLength));
 }
 
 TEST_CASE ("solve: inside a timeline group, what else is sounding is arithmetic")

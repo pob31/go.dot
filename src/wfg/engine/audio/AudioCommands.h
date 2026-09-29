@@ -47,6 +47,8 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/audio/AudioSettings.h>
 
+#include <cstdint>
+#include <functional>
 #include <string>
 
 namespace wfg::audio
@@ -95,6 +97,20 @@ namespace wfg::audio
         std::string status = "stopped";
         std::function<bool()> resumePlayback;
         std::function<void()> reconnect;
+
+        /*  THE INTERFACE'S CLOCK MOVED under the show and the show followed it
+            (PRD §6.2, `audio.clockMoved`): what happened in words, for the
+            transport's line, and the tick it happened at, so a client can tell
+            it from a refusal that came before or after. Empty and nought until
+            it first happens; replaced each time. */
+        std::string rateMoved;
+        std::int64_t rateMovedTick = 0;
+
+        /*  `audio.clockMoved` applied: the show brought up again on the
+            interface's new clock, message-thread work like the two above.
+            Absent in a replay, which re-applies the stops and reads what came
+            of it from the logged `audio.settingsReady`. */
+        std::function<void()> followClock;
     };
 
     /*  Adds `audio.editBuilt`, bound to `state`.

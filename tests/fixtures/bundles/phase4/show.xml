@@ -1,5 +1,5 @@
 <Show>
-  <Lists>
+  <Lists goDebounce="0">
     <List id="P4ACT001" name="Act One">
       <Group id="P4GRP001" advance="auto" name="The scene" number="1">
         <Media id="P4MED001" file="segments.wav" name="The bed" number="1.1">

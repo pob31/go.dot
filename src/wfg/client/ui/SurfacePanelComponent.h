@@ -76,7 +76,8 @@ namespace wfg::client::ui
             writes ride: a value dragged since the last pass goes out here, so
             a moving fader sends at most one `node.set` a pass. */
         void show (const std::vector<model::SurfaceRow>& surfacesNow,
-                   const std::vector<model::StripRow>& stripsNow);
+                   const std::vector<model::StripRow>& stripsNow,
+                   bool laneWaitingNow = false);
 
         /** How many columns are drawn: every strip of every surface. */
         std::size_t columnCount() const noexcept { return strips.size(); }
@@ -202,6 +203,10 @@ namespace wfg::client::ui
         Canvas canvas { *this };
 
         std::vector<model::StripRow> strips;
+
+        /*  A LANE WAITS FOR A FADER (namespace draft §20.9, DF): a press on any
+            fader strip takes it for the lane, and takes nothing else. */
+        bool laneWaiting = false;
         std::vector<Band> bands;
         std::vector<int> columnX;
         std::string shape;

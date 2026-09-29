@@ -99,6 +99,15 @@ CMakeLists.txt text eol=lf
 .gitmodules    text eol=lf
 LICENSE        text eol=lf
 
+# Go.dot's patches to Tracktion Engine and the series that orders them, and a
+# correctness matter. The build applies them with `git apply` inside the
+# submodule (cmake/WfgTracktionPatches.cmake), and `git apply` compares a patch
+# against the working tree AFTER converting the tree through the submodule's own
+# attributes - so the tree may be CRLF, as Tracktion is on the author's machine,
+# but the patch must be LF, or no hunk matches and the configure stops.
+*.patch                     text eol=lf
+patches/tracktion_engine/series text eol=lf
+
 # Nothing here reaches ThirdParty/: those are two gitlinks, and Git does not
 # apply a superproject's attributes across a submodule boundary. JUCE and
 # Tracktion Engine carry their own.

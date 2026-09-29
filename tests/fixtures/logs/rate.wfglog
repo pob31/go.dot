@@ -1,0 +1,48 @@
+# wfg-log 1
+# fixture rate - a media cue's speed edited, refused and taken back, and a fade
+# that moves a speed (namespace draft §22).
+#
+# WHAT IT IS FOR: that a session in which the window's hands set a cue's speed
+# and its mode, and a fade's switches, through the document's own door -
+# refusals included - reproduces exactly. What a speed does to a SOUND is not in
+# this file and cannot be, for fade-curve's reason: §3.15 keeps the fifty values
+# a second out of the log and a replay runs no tick hooks; it is checked in
+# GoTests and AudioTests, and heard by blackbox/rate_speed.py. Recorded from a
+# real `wfg serve` of tests/fixtures/bundles/rate driven over OSC with no audio
+# device; the header lines below are the session's own.
+#
+# bundle rate sha256:4d23dbc7b94f6f773b643e4255958bc75bdb0f07c8f38e919048dc77d3a639ba
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media tape.wav 0 0.000
+# media tone.wav 0 0.000
+#
+# THE TAPE'S SPEED, as the inspector's Speed box or the master dial sends it: a
+# number from nought to twenty.
+A 25 0 udp:127.0.0.1:56524 node.set s:"/godot/cue/RT00000B/rate" f:1.5
+#
+# THREE THE DOOR WOULD NOT TAKE. Past twenty, the row's top: `type-mismatch`,
+# as every number out of its row's range is.
+R 41 1 udp:127.0.0.1:56525 type-mismatch node.set s:"/godot/cue/RT00000B/rate" f:25
+#
+# A word that is neither of the mode's two: `type-mismatch`.
+R 56 2 udp:127.0.0.1:56526 type-mismatch node.set s:"/godot/cue/RT00000B/rateMode" s:"backwards"
+#
+# And a memo's speed: the row is a media cue's (§22.2), so the address does not
+# exist on anything else - `bad-address`, not a speed quietly ignored.
+R 71 3 udp:127.0.0.1:56527 bad-address node.set s:"/godot/cue/RT00000E/rate" f:2
+#
+# THE TAPE'S MODE CHANGED, AND TAKEN BACK: a mode is a decision, so it is one
+# step of the show's history like any other row.
+A 86 4 udp:127.0.0.1:56528 node.set s:"/godot/cue/RT00000B/rateMode" s:"timestretch"
+A 101 5 udp:127.0.0.1:56529 undo s:"document" s:"node.set"
+#
+# THE FADE'S SWITCHES (§22.6): its level switch turned on beside its speed's, and
+# the speed it goes to moved - so it now moves both.
+A 116 6 udp:127.0.0.1:56530 node.set s:"/godot/cue/RT00000D/levelOn" T
+A 131 7 udp:127.0.0.1:56531 node.set s:"/godot/cue/RT00000D/rate" f:0.5
+#
+# AND FIRED WITH NOTHING SOUNDING: its target is not running, which §3.8 makes a
+# silent no-op, so its run ends on the next tick - once, though it moves two
+# things.
+A 146 8 udp:127.0.0.1:56532 cue.fire s:"RT00000D" s:"YPJXH0GD"
+A 147 9 engine run.ended s:"YPJXH0GD"

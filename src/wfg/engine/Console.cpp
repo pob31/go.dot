@@ -22,6 +22,8 @@
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/LiveRows.h>
+#include <wfg/engine/cue/LaneCommands.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/RunCommands.h>
@@ -266,6 +268,11 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
         runner.setTakes (&takes);
+
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): tonight's,
+            moved by `lane.*` and read by the Runner's hook and the tree. */
+        wfg::cue::LaneTable lanes;
+        runner.setLanes (&lanes);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -291,6 +298,7 @@ namespace
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+        wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -305,7 +313,7 @@ namespace
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
-        wfg::audio::registerAudioSettingsCommands (engine, document, runner, audioState);
+        wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
 
         for (const auto& command : engine.commands().all())
         {
@@ -551,6 +559,11 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
         runner.setTakes (&takes);
+
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): tonight's,
+            moved by `lane.*` and read by the Runner's hook and the tree. */
+        wfg::cue::LaneTable lanes;
+        runner.setLanes (&lanes);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -566,7 +579,7 @@ namespace
             as applied on a machine with no sound card and no show, which is
             exactly the guarantee the event exists to provide. */
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
-        wfg::audio::registerAudioSettingsCommands (engine, document, runner, audioState);
+        wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
 
         /*  The run lifecycle, unconditionally and for the same reason. Only
             `audio.arm` reads the document, and it answers unknown-id against an
@@ -576,6 +589,7 @@ namespace
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+        wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -695,7 +709,7 @@ namespace
                     session wrote it through - a fader's trim or a DCA's - so the
                     record applies as it did rather than being refused by a
                     document that cannot hold it. */
-                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes),
+                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
                                     wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                         wfg::cue::fxWriteFor (document, nullptr, &liveEdits))),
                 wfg::cue::liveSendFor (liveEdits, document));
@@ -1180,6 +1194,11 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
         runner.setTakes (&takes);
+
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): tonight's,
+            moved by `lane.*` and read by the Runner's hook and the tree. */
+        wfg::cue::LaneTable lanes;
+        runner.setLanes (&lanes);
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
@@ -1191,6 +1210,7 @@ namespace
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+        wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -1204,7 +1224,7 @@ namespace
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
-        wfg::audio::registerAudioSettingsCommands (engine, document, runner, audioState);
+        wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
 
         /*  The mounts are loaded before the first publish, so what this prints
             includes somebody else's namespace at its own prefix. A mount that
@@ -2618,6 +2638,11 @@ namespace
         runner.setDcas (&dcas);
         runner.setTakes (&takes);
 
+        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): tonight's,
+            moved by `lane.*` and read by the Runner's hook and the tree. */
+        wfg::cue::LaneTable lanes;
+        runner.setLanes (&lanes);
+
         /*  The touch table, for the fader edges (PRD 3.9a): a fader-start
             counts only from a fader released at the bottom, and released is
             what this table knows. Serve only - a replay runs no hooks, and the
@@ -2709,7 +2734,7 @@ namespace
             /*  AND UNDER THE LOCK, A CUE'S EQ AND SENDS, ridden live in front
                 of the document that would refuse them (2026-09-25) - and its
                 plugins' parameters, held by the FX door (2026-09-26). */
-            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes),
+            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
                                 wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                     wfg::cue::fxWriteFor (document, &catalogues, &liveEdits))),
             wfg::cue::liveSendFor (liveEdits, document));
@@ -2811,11 +2836,12 @@ namespace
                            { wfg::osc::Value::string (id), wfg::osc::Value::string (problem) });
         };
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+        wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
-        wfg::audio::registerAudioSettingsCommands (engine, document, runner, audioState);
+        wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
 
         /*  ONE APPLIED COMMAND, ONE UNDO TRANSACTION, opened here and nowhere
             else - so a command added next year is on the stack without knowing
@@ -3298,6 +3324,7 @@ namespace
             refers to has to outlive it. */
         const auto surfaceBridge = std::make_shared<wfg::surface::SurfaceBridge> (midiOut, surfaceTable);
         parameters.setSurfaces (&surfaceTable);
+        parameters.setLanes (&lanes);
 
         /*  WHAT THE SHOW DECLARES ABOUT ITS SURFACES, read off the document -
             at start and whenever the show changes - and what this machine has
@@ -3905,6 +3932,8 @@ namespace
                                 state.audioAvailableBufferSizes = audioState.availableBufferSizes;
                                 state.audioTest = audioState.test;
                                 state.audioSettingsError = audioState.settingsError;
+                                state.audioRateMoved = audioState.rateMoved;
+                                state.audioRateMovedTick = audioState.rateMovedTick;
                                 state.audioSampleRate = audioState.sampleRate;
                                 state.audioBufferSize = audioState.bufferSize;
                                 state.hardwareInputs = audioState.inputs;
@@ -4318,6 +4347,17 @@ namespace
                       wfg::osc::Value::int32 (activeDeviceRequest.edit.tracks),
                       wfg::osc::Value::int32 (deviceDriver->settings().outputChannels),
                       wfg::osc::Value::int32 (deviceDriver->host().inspectNodeIds().nodes) });
+
+            /*  AN APPLY MADE DURING AN OUTAGE ENDS IT (decision DI): the
+                interface it was waiting for is closed, whatever opened in its
+                place, so the show's clock runs again - and the second-resolution
+                triggers it slept through are not all fired at once. */
+            if (ticks.isSuspended())
+            {
+                ticks.setSuspended (false);
+                previousSecond = -1;
+            }
+
             ticks.start();
         });
         audioState.requestSettings = [&settingsPump] (const wfg::audio::AudioSettings& settings, bool defaultsOnly)
@@ -4335,6 +4375,7 @@ namespace
             ticks.stop();
             player.reset();
             runner.setPlayer (nullptr);
+            const auto hadDevice = deviceDriver != nullptr;
 
             std::string error;
             const auto shape = audioShapeOf (document);
@@ -4409,6 +4450,17 @@ namespace
                 buffer = driver->host().settings().blockSize;
                 outputs = driver->host().settings().outputChannels;
             }
+            else if (hadDevice)
+            {
+                /*  THE INTERFACE COULD NOT BE PUT BACK, and the clock the show
+                    was reading went with it: `blockSource` still pointed into
+                    the driver just destroyed (found 2026-09-28). A steady
+                    clock of the same shape keeps the control plane ticking,
+                    as audio.apply's own failure does. */
+                dummy = std::make_unique<wfg::DummyAudioClock> (rate, buffer);
+                blockSource = &dummy->clock();
+                dummy->start();
+            }
 
             runner.setPlayer (player.get());
             sessionClock.use (*blockSource, ticks.rebaseAudio (rate));
@@ -4431,10 +4483,105 @@ namespace
         };
         audioState.requestRebuild = [&settingsPump] { settingsPump.postRebuild(); };
 
+        /*  THE INTERFACE'S CLOCK MOVED, AND THE SHOW FOLLOWS IT (PRD §6.2,
+            2026-09-28). `audio.clockMoved` has stopped what played; this
+            brings the engine up again on the interface as it runs now, with
+            the graph it had - Load now stays the door for a plugin set not
+            yet applied (decision DJ). The clock is gapped as for audio.apply,
+            the same two records say what came of it, and the outage ends
+            with them: the show's clock runs again, and the second-resolution
+            triggers it slept through are not all fired at once.
+
+            Nothing to follow any more - the interface went away again, or
+            came back as it was - leaves the paused show exactly as it stood,
+            waiting, on the graph and the player it still has. A follow that
+            fails is opened again from the start, as an Apply would; and
+            failing that, the steady clock keeps the control plane up and the
+            error says why there is no sound. */
+        settingsPump.follow = [&]
+        {
+            if (! deviceDriver) return;
+
+            ticks.stop();
+            const auto outcome = deviceDriver->followClock (activeDeviceRequest);
+
+            if (outcome == wfg::audio::DeviceAudioDriver::Follow::nothing)
+            {
+                ticks.start();
+                return;
+            }
+
+            player.reset();
+            runner.setPlayer (nullptr);
+            std::string error;
+
+            if (outcome == wfg::audio::DeviceAudioDriver::Follow::failed)
+            {
+                error = "The interface's clock moved and the show could not follow it: "
+                      + deviceDriver->lastError();
+
+                if (deviceDriver->open (activeDeviceRequest))
+                    error += "; the interface was opened again from the start";
+                else
+                {
+                    error += "; the interface could not be opened again";
+                    deviceDriver.reset();
+                }
+            }
+
+            if (deviceDriver && ! wfg::TickClock::create (deviceDriver->settings().sampleRate))
+            {
+                error = "The interface's new rate does not support the 50 Hz show clock";
+                deviceDriver.reset();
+            }
+
+            int rate = ticks.sampleRate(), buffer = blockSize, inputs = 0, outputs = 0;
+
+            if (deviceDriver)
+            {
+                const auto granted = deviceDriver->settings();
+                rate = granted.sampleRate;
+                buffer = granted.blockSize;
+                inputs = deviceDriver->inputChannels();
+                outputs = deviceDriver->outputChannels();
+                player = std::make_unique<wfg::audio::HostPlayer> (deviceDriver->host(), engine);
+                blockSource = &deviceDriver->host().clock();
+            }
+            else
+            {
+                dummy = std::make_unique<wfg::DummyAudioClock> (rate, buffer);
+                blockSource = &dummy->clock();
+                dummy->start();
+            }
+
+            runner.setPlayer (player.get());
+            sessionClock.use (*blockSource, ticks.rebaseAudio (rate));
+            ticks.setSuspended (false);
+            previousSecond = -1;
+
+            engine.submit ("engine", "audio.settingsReady",
+                { wfg::osc::Value::string (error), wfg::osc::Value::int32 (rate),
+                  wfg::osc::Value::int32 (buffer), wfg::osc::Value::int32 (inputs),
+                  wfg::osc::Value::int32 (outputs), wfg::osc::Value::string (
+                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->inputLatency() : 0),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->outputLatency() : 0) });
+
+            if (deviceDriver)
+                engine.submit ("engine", "audio.editBuilt",
+                    { wfg::osc::Value::string (deviceDriver->deviceName()),
+                      wfg::osc::Value::int32 (activeDeviceRequest.edit.tracks),
+                      wfg::osc::Value::int32 (deviceDriver->settings().outputChannels),
+                      wfg::osc::Value::int32 (deviceDriver->host().inspectNodeIds().nodes) });
+
+            ticks.start();
+        };
+        audioState.followClock = [&settingsPump] { settingsPump.postFollow(); };
+
         bool connectionLost = false;
         std::atomic<bool> reconnectRequested { false };
         audioState.reconnect = [&] { reconnectRequested.store (true); };
-        double resumeRequestedAt = 0;
+        double resumeRequestedAt = 0, clockMovedAt = 0;
         audioState.resumePlayback = [&]
         {
             if (! deviceDriver || ! deviceDriver->resumeConnection()) return false;
@@ -4447,8 +4594,8 @@ namespace
         {
             if (! deviceDriver) return;
             if (reconnectRequested.exchange (false)) deviceDriver->reconnect();
-            const auto ready = deviceDriver->serviceRecovery();
-            if (! deviceDriver->recoveryPaused()) { connectionLost = false; return; }
+            const auto recovery = deviceDriver->serviceRecovery();
+            if (! deviceDriver->recoveryPaused()) { connectionLost = false; clockMovedAt = 0; return; }
             if (! connectionLost)
             {
                 connectionLost = true;
@@ -4456,10 +4603,22 @@ namespace
                 engine.submit ("engine", "audio.connection", { wfg::osc::Value::boolean (false) });
             }
             const auto now = juce::Time::getMillisecondCounterHiRes();
-            if (ready && now - resumeRequestedAt >= 250.0)
+            if (recovery.ready && now - resumeRequestedAt >= 250.0)
             {
                 resumeRequestedAt = now;
                 engine.submit ("engine", "audio.connection", { wfg::osc::Value::boolean (true) });
+            }
+
+            /*  THE SAME INTERFACE ON ANOTHER CLOCK, asked back and refused
+                (PRD §6.2): the engine is told, at most every two seconds while
+                it stands, and its handler stops what plays and asks for the
+                follow above - which, done, ends the outage and this with it. */
+            else if (recovery.moved && now - clockMovedAt >= 2000.0)
+            {
+                clockMovedAt = now;
+                engine.submit ("engine", "audio.clockMoved",
+                    { wfg::osc::Value::int32 (recovery.sampleRate),
+                      wfg::osc::Value::int32 (recovery.blockSize) });
             }
         };
 

@@ -96,6 +96,12 @@ set(JUCE_VERSION "${WFG_PIN_JUCE}")
 #
 # scripts/check-pins.py enforces this mechanically (check (d)): it fails CI if any
 # add_subdirectory of tracktion_engine in our tree is not followed by "/modules".
+#
+# Go.dot's own changes to Tracktion go on FIRST (decision DQ, namespace draft §22.3):
+# a patch series the build applies to the submodule's working tree, so everything
+# below reads and compiles the patched sources. check-pins.py check (g) says whether
+# the series fits the pin before any toolchain runs.
+include(WfgTracktionPatches)
 add_subdirectory("${CMAKE_SOURCE_DIR}/ThirdParty/tracktion_engine/modules" tracktion_modules)
 
 # ---------------------------------------------------------------------------
@@ -258,6 +264,16 @@ target_compile_definitions(wfg_deps INTERFACE
     JUCE_MODAL_LOOPS_PERMITTED=0    # all 20 TE uses are #if-guarded; a modal loop in a show engine is a hang
     JUCE_JACK=0                     # already the default; explicit because it is what keeps libjack-jackd2-dev off the apt line
     JUCE_PLUGINHOST_LADSPA=0        # already the default; explicit because it is what keeps ladspa-sdk off the apt line
+    # 2026-09-28 (namespace draft §22, decision DZ): Signalsmith Stretch, the time-
+    # stretcher behind a media cue's `timestretch` mode. MIT-licensed, header-only and
+    # vendored inside Tracktion (3rd_party/signalsmith-stretch), so it costs no
+    # submodule and no package. HERE, on the interface every translation unit sees,
+    # and not on Tracktion's module alone: the define decides what
+    # TimeStretcher::defaultMode IS, and a translation unit of ours reading a different
+    # answer from Tracktion's own would be an ODR violation nothing reports. Patch 0001
+    # is what keeps a varispeed cue off it (Go.dot's engine behaviour says so), since
+    # every auto-tempo clip would otherwise be handed the stretcher the moment it exists.
+    TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH=1
     # Phase 9a (2026-09-23, decision AF): VST3 hosting compiled in, on every
     # platform, in the one place WfgOptions.cmake reserved for it. What hosts
     # a plugin is the child process (wfg plugin-host) and the scan child;
@@ -465,11 +481,15 @@ endif()
 #  * the static MSVC runtime (l.22-24) — see the root CMakeLists; we are a plugin host.
 #  * JUCE_MODAL_LOOPS_PERMITTED=1 (l.79) — see above; we set 0 deliberately.
 #  * TRACKTION_UNIT_TESTS=1 (l.82) — compiles TE's ENTIRE test corpus into the binary.
-#  * every TRACKTION_ENABLE_TIMESTRETCH_* — TE degrades cleanly with all four at 0
-#    (TimeStretcher::Mode::defaultMode resolves to `disabled`, every accessor is
-#    null-guarded). Varispeed already works: libsamplerate is compiled unconditionally
-#    into tracktion_engine_playback.cpp. RubberBand is a LICENCE decision (PRD 3.25
-#    "licence permitting") plus a fourth submodule that hard-#errors on a clean clone.
+#  * TRACKTION_ENABLE_TIMESTRETCH_ELASTIQUE, _RUBBERBAND and _SOUNDTOUCH — Signalsmith,
+#    switched on above (2026-09-28), is the one stretcher a media cue's speed needs: the
+#    only one of Tracktion's four that reaches the speed's twenty and freezes at nought.
+#    Elastique is a commercial SDK that is not here. RubberBand is a LICENCE decision
+#    (PRD 3.25 "licence permitting") plus a fourth submodule that hard-#errors on a clean
+#    clone. SoundTouch (LGPL) is sized for 0.25 to 4 and asserts at twenty
+#    (tracktion_TimeStretch.cpp:503-538, 1364-1368). Before that day all four were
+#    declined, and Tracktion degraded cleanly: defaultMode resolved to `disabled` and
+#    every accessor is null-guarded.
 #  * TRACKTION_LOG_DEVICES — a product decision, not a build-system default.
 #  * juce_generate_juce_header — configure-time FATAL_ERROR on a plain add_library
 #    (JUCEUtils.cmake:551-556: "does not have a generated sources directory"). Our

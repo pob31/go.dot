@@ -106,7 +106,8 @@ const SAID_LAST = ["enabled", "preset"];
     happens. A group's `takeover` sits beside `mode`, the answer that makes it a
     question; a fade's `dca` beside `target`, the other thing it can move. */
 const KIND_ORDER = {
-  media:   ["file", "level", "startOffset", "levelLane", "dca", "initialLevel", "release", "secondPress",
+  // The speed and its mode after where the file starts (namespace draft §22.7).
+  media:   ["file", "level", "startOffset", "rate", "rateMode", "levelLane", "dca", "initialLevel", "release", "secondPress",
             "velocity", "velocityFloor", "pressure", "releaseFade",
             // The EQ (Phase 9a): the switch, the two filters, then four bands - each its
             // own switch (2026-09-25), then frequency, gain and width, the outer two with a
@@ -117,7 +118,8 @@ const KIND_ORDER = {
             "eqB2On", "eqB2Freq", "eqB2Gain", "eqB2Q",
             "eqB3On", "eqB3Freq", "eqB3Gain", "eqB3Q",
             "eqB4On", "eqB4Shape", "eqB4Freq", "eqB4Gain", "eqB4Q"],
-  fade:    ["target", "dca", "level", "curve", "points", "stopWhenDone"],
+  // Each thing a fade moves is a switch, then where it goes: level, then speed (§22.7).
+  fade:    ["target", "dca", "levelOn", "level", "rateOn", "rate", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],
   start:   ["target"],
   osc:     ["address", "value", "wait", "timeout"],

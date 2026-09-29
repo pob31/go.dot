@@ -3,6 +3,7 @@
 #include <wfg/client/ui/WaveformEditorComponent.h>
 
 #include <wfg/client/model/Fader.h>
+#include <wfg/client/model/Text.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
@@ -23,6 +24,23 @@ namespace wfg::client::ui
             pixels. Generous, because an in-point is one pixel wide and a hand
             on a trackpad is not. */
         constexpr int grabRadius = 7;
+
+        /*  What the head row says of a media cue's speed: nothing when it plays
+            at one in varispeed, its speed and its mode otherwise. */
+        juce::String speedWords (const model::FootReading& reading)
+        {
+            if (reading.cueKind != "media")
+                return {};
+
+            const auto speed = model::speedText (reading.rate);
+            const auto stretched = reading.rateMode == "timestretch";
+
+            if (speed.empty() && ! stretched)
+                return {};
+
+            return juce::String (juce::CharPointer_UTF8 ((speed.empty() ? std::string ("\xc3\x97" "1") : speed).c_str()))
+                     + (stretched ? " timestretch" : " varispeed");
+        }
 
         /** A time, as a ruler writes it: 1.5 s, or 1:04.2 once there are minutes. */
         juce::String clockText (double seconds)
@@ -87,6 +105,16 @@ namespace wfg::client::ui
         transport.setWantsKeyboardFocus (false);
         transport.onClick = [this]
         {
+            /*  A PASS IS ENDED, NOT KILLED: a kill drops the ride (§20.9, DM),
+                and the transport's stop is a hand that has heard enough. */
+            if (laneIsMine() && reading.laneRecord.recording)
+            {
+                if (actions.laneStop)
+                    actions.laneStop();
+
+                return;
+            }
+
             if (reading.running && ! reading.runId.empty())
             {
                 point = reading.position;
@@ -108,6 +136,50 @@ namespace wfg::client::ui
 
         addAndMakeVisible (transport);
         sayWhichWayTheTransportGoes();
+
+        /*  THE LANE'S REC (§20.9): what a click does is decided by what the
+            tree says the lane is doing, read again at every click - never by
+            what the button last showed. */
+        rec.setWantsKeyboardFocus (false);
+        rec.onClick = [this]
+        {
+            const auto& lane = reading.laneRecord;
+            const auto cue = reading.subject.objectId;
+
+            if (laneIsMine() && lane.recording)
+            {
+                if (actions.laneStop)
+                    actions.laneStop();
+            }
+            else if (laneIsMine() && lane.taken)
+            {
+                if (actions.laneRecord)
+                    actions.laneRecord (headSeconds());
+            }
+            else if (laneIsMine() && lane.waiting)
+            {
+                if (actions.laneArm)
+                    actions.laneArm ({});
+            }
+            else if (actions.laneArm)
+            {
+                actions.laneArm (cue);
+            }
+        };
+
+        addAndMakeVisible (rec);
+
+        freeFader.setButtonText (juce::String::fromUTF8 ("\xe2\x9c\x95"));
+        freeFader.setTooltip ("Let the fader go back to what it rode");
+        freeFader.setWantsKeyboardFocus (false);
+        freeFader.onClick = [this]
+        {
+            if (actions.laneFree)
+                actions.laneFree();
+        };
+
+        addChildComponent (freeFader);
+        sayWhatRecDoes();
 
         /*  THE PICKED POINT, TYPED. A number that will not parse is put back
             to what the lane says rather than written as nought - a slip of the
@@ -176,6 +248,64 @@ namespace wfg::client::ui
     /*  WHAT THE BUTTON DOES NEXT, on the button - a triangle to start it and
         two bars to hold it. A SHAPE and not a colour (4.8), and the tooltip
         says it in words for anyone who reads the glyph the other way. */
+    bool WaveformEditorComponent::laneIsMine() const
+    {
+        return ! reading.laneRecord.cue.empty() && reading.laneRecord.cue == reading.subject.objectId;
+    }
+
+    int WaveformEditorComponent::recWidth() const
+    {
+        const auto height = headArea().getHeight();
+        return height * 3 + (freeFader.isVisible() ? height : 0);
+    }
+
+    /*  WHAT THE LANE'S REC DOES NEXT, on the button in words (§4.8): Rec to arm
+        this cue's lane; Rec… while it waits for a fader, a click cancelling;
+        ● Rec to start a pass once a fader is taken; ■ to stop it. The ✕ is up
+        while this cue's lane has a fader and no pass runs. Nothing under the
+        lock but the stop - a lane is the show's. */
+    void WaveformEditorComponent::sayWhatRecDoes()
+    {
+        const auto& lane = reading.laneRecord;
+        const auto mine = laneIsMine();
+        const auto recording = mine && lane.recording;
+
+        if (recording)
+        {
+            rec.setButtonText (juce::String::fromUTF8 ("\xe2\x96\xa0 Stop"));
+            rec.setTooltip ("End the pass, and write what the fader rode into the level lane");
+        }
+        else if (mine && lane.taken)
+        {
+            rec.setButtonText (juce::String::fromUTF8 ("\xe2\x97\x8f Rec"));
+            rec.setTooltip ("Play the cue from the playhead and record the level from the first touch"
+                            " of the fader, held until the pass stops");
+        }
+        else if (mine && lane.waiting)
+        {
+            rec.setButtonText (juce::String::fromUTF8 ("Rec\xe2\x80\xa6"));
+            rec.setTooltip ("Waiting for a fader: touch one on any surface to take it. Click to cancel");
+        }
+        else
+        {
+            rec.setButtonText ("Rec");
+            rec.setTooltip ("Record the level lane from a fader: the next fader touched is taken for it");
+        }
+
+        rec.setToggleState (mine && (lane.waiting || recording), juce::dontSendNotification);
+        rec.setColour (juce::TextButton::buttonOnColourId,
+                       Look::colour (theme, recording ? "failed" : "standby"));
+        rec.setEnabled (recording || (reading.cueKind == "media" && ! reading.locked && reading.notice.empty()));
+
+        const auto freeable = mine && lane.taken && ! recording;
+
+        if (freeFader.isVisible() != freeable)
+        {
+            freeFader.setVisible (freeable);
+            resized();
+        }
+    }
+
     void WaveformEditorComponent::sayWhichWayTheTransportGoes()
     {
         const auto sounding = reading.running && ! reading.runId.empty();
@@ -263,6 +393,15 @@ namespace wfg::client::ui
             playingRun.clear();
 
         sayWhichWayTheTransportGoes();
+        sayWhatRecDoes();
+
+        /*  THE RIDE AS IT IS HEARD, a point a pass while this cue's lane records
+            - the file's second and the fader's level - and nothing once the pass
+            is over: the lane it wrote is in the reading by then. */
+        if (laneIsMine() && reading.laneRecord.recording && reading.running && reading.laneRecord.hasRide)
+            trail.push_back ({ reading.position, reading.laneRecord.rideDb });
+        else if (! (laneIsMine() && reading.laneRecord.recording))
+            trail.clear();
 
         if (table != nullptr)
         {
@@ -540,6 +679,7 @@ namespace wfg::client::ui
         paintBar (g, bar);
         paintRanges (g, bar);
         paintLane (g, bar);
+        paintTrail (g, bar);
         paintRuler (g, rulerArea());
         paintHead (g, headArea());
     }
@@ -770,14 +910,50 @@ namespace wfg::client::ui
 
             if (x >= static_cast<float> (bar.getX()) && x <= static_cast<float> (bar.getRight()))
             {
-                const auto y = yForLevel (model::laneLevelAt (points, reading.position));
+                /*  WHILE A PASS RECORDS, WHERE THE FADER IS: what is heard is
+                    the hand's, not the lane's. */
+                const auto riding = laneIsMine() && reading.laneRecord.recording && reading.laneRecord.hasRide;
+                const auto y = yForLevel (riding ? reading.laneRecord.rideDb
+                                                 : model::laneLevelAt (points, reading.position));
 
                 g.setColour (juce::Colours::black);
                 g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
-                g.setColour (Look::colour (theme, "standby"));
+                g.setColour (Look::colour (theme, riding ? "failed" : "standby"));
                 g.fillEllipse (x - 2.5f, y - 2.5f, 5.0f, 5.0f);
             }
         }
+    }
+
+    /*  THE RIDE AS IT IS HEARD (§20.9): a line in the recording's colour over
+        the lane, broken wherever the second falls back - a loop's wrap - so a
+        second pass over a stretch draws over the first rather than across. */
+    void WaveformEditorComponent::paintTrail (juce::Graphics& g, juce::Rectangle<int> bar)
+    {
+        if (trail.size() < 2)
+            return;
+
+        juce::Path line;
+        auto previous = -1.0;
+
+        for (const auto& ridden : trail)
+        {
+            const auto at = pointPosition (ridden);
+
+            if (ridden.seconds < previous || previous < 0.0)
+                line.startNewSubPath (at);
+            else
+                line.lineTo (at);
+
+            previous = ridden.seconds;
+        }
+
+        g.saveState();
+        g.reduceClipRegion (bar);
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.strokePath (line, juce::PathStrokeType (3.5f));
+        g.setColour (Look::colour (theme, "failed"));
+        g.strokePath (line, juce::PathStrokeType (2.0f));
+        g.restoreState();
     }
 
     /*  THE TRANSPORT'S OWN ROW: the button, and beside it where the head is
@@ -786,7 +962,7 @@ namespace wfg::client::ui
         wants "exactly when". */
     void WaveformEditorComponent::paintHead (juce::Graphics& g, juce::Rectangle<int> head)
     {
-        auto area = head.withTrimmedLeft (head.getHeight() * 2 + 8);
+        auto area = head.withTrimmedLeft (head.getHeight() * 2 + recWidth() + 8);
 
         g.setFont (Look::font (theme, 12.0f));
         g.setColour (Look::colour (theme, reading.running ? "ink" : "ink-dim"));
@@ -795,6 +971,17 @@ namespace wfg::client::ui
 
         g.setColour (Look::colour (theme, "ink-off"));
         g.setFont (Look::font (theme, 11.0f));
+
+        /*  THE SPEED AND ITS MODE (namespace draft §22.7), beside the clock -
+            which counts the file's seconds, not the room's - whenever either
+            is not the plain one: "×0.5 varispeed", "×1 timestretch". */
+        if (const auto speed = speedWords (reading); speed.isNotEmpty())
+        {
+            g.setColour (Look::colour (theme, "ink-dim"));
+            g.drawText (speed, area.removeFromLeft (juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), speed) + 12),
+                        juce::Justification::centredLeft, false);
+            g.setColour (Look::colour (theme, "ink-off"));
+        }
 
         /*  THE PICKED POINT'S NUMBERS take the right of the row, captioned
             in words so two bare numbers are never left to explain themselves,
@@ -806,6 +993,30 @@ namespace wfg::client::ui
 
             g.drawText ("level point at", boxes.removeFromLeft (boxes.getWidth() - 2 * 64 - 6).withTrimmedRight (4),
                         juce::Justification::centredRight, true);
+            return;
+        }
+
+        /*  A LANE BEING RECORDED FROM A FADER says so here, in place of the
+            row's instructions: what it waits for, which fader has it, what a
+            pass is doing - and whose it is when it is another cue's. */
+        const auto& laneRecord = reading.laneRecord;
+
+        if (laneIsMine() && laneRecord.waiting)
+        {
+            g.setColour (Look::colour (theme, "standby"));
+            g.drawText ("touch a fader on any surface to take it for the level", area,
+                        juce::Justification::centredLeft, true);
+            return;
+        }
+
+        if (laneIsMine() && laneRecord.taken)
+        {
+            g.setColour (Look::colour (theme, laneRecord.recording ? "failed" : "ink-dim"));
+            g.drawText (juce::String (laneRecord.recording ? "recording the level from " : "level on ")
+                          + juce::String (laneRecord.faderLabel)
+                          + (laneRecord.recording ? " - held from the first touch until you stop"
+                                                  : " - Rec plays the cue and records from the first touch"),
+                        area, juce::Justification::centredLeft, true);
             return;
         }
 
@@ -886,6 +1097,10 @@ namespace wfg::client::ui
 
         auto head = headArea();
         transport.setBounds (head.removeFromLeft (head.getHeight() * 2).reduced (2, 1));
+        rec.setBounds (head.removeFromLeft (head.getHeight() * 3).reduced (2, 1));
+
+        if (freeFader.isVisible())
+            freeFader.setBounds (head.removeFromLeft (head.getHeight()).reduced (2, 1));
 
         auto boxes = pointBoxes();
         pointLevel.setBounds (boxes.removeFromRight (64));

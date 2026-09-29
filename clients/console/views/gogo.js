@@ -135,6 +135,12 @@ function runRow(id, depth, out) {
                 + (timed ? " of " + length.toFixed(1) + "s" : ""));
   }
 
+  /*  AND THE SPEED IT PLAYS AT, when that is not one (namespace draft §22.7):
+      the run's own readout, which a fade moves. The position above counts the
+      file's seconds, and this is what says they are not the room's. */
+  const rate = Math.round(Number(tree.run(id, "rate", 1)) * 1000) / 1000;
+  if (kind === "media" && Number.isFinite(rate) && rate !== 1) bits.push("×" + rate);
+
   /*  AND WHAT IT SOUNDS LIKE THERE: the engine's reading of the frame under the
       playhead (PRD §3.30, namespace draft §14.5), published as "<hue> <sat>
       <light>" - hue in degrees, the other two from nought to one. IN WORDS

@@ -80,7 +80,7 @@ namespace wfg::midi { class PortTable; }
 
 namespace wfg::surface { class SurfaceTable; }
 
-namespace wfg::cue { class DcaTable; class LiveEdits; class TakeTable; }
+namespace wfg::cue { class DcaTable; class LaneTable; class LiveEdits; class TakeTable; }
 
 namespace wfg::tree
 {
@@ -119,6 +119,11 @@ namespace wfg::tree
         audio::OutputTestSettings audioTest;
         int audioSampleRate = 0, audioBufferSize = 0, hardwareInputs = 0, hardwareOutputs = 0;
         int audioSettingsRevision = 0;
+
+        /*  The last time the show followed the interface onto another clock
+            (PRD §6.2, 2026-09-28): the sentence, and the tick it happened at. */
+        std::string audioRateMoved;
+        std::int64_t audioRateMovedTick = 0;
 
         /*  THE INPUTS' SIDE (Phase 9b, namespace draft §18.2). How many logical
             inputs the open interface hands the graph, the interface's own two
@@ -297,6 +302,11 @@ namespace wfg::tree
             take reads empty, which is the truth of a show nobody is playing. */
         void setTakes (const cue::TakeTable* takesToRead) noexcept { takes = takesToRead; }
 
+        /*  A lane being recorded from a fader (namespace draft §20.9), for
+            `/godot/surface/lane…` and the taken strip's target. Absent - a tree
+            dump - no lane is armed, which is the truth. */
+        void setLanes (const cue::LaneTable* lanesToRead) noexcept { lanes = lanesToRead; }
+
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
             four `none` rows under /godot/plugin/<id>. The surface table's
@@ -422,6 +432,7 @@ namespace wfg::tree
         const surface::SurfaceTable* surfaces = nullptr;
         const cue::DcaTable* dcas = nullptr;
         const cue::TakeTable* takes = nullptr;
+        const cue::LaneTable* lanes = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;

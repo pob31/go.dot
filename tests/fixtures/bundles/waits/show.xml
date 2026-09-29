@@ -1,5 +1,5 @@
 <Show>
-  <Lists>
+  <Lists goDebounce="0">
     <List id="7K2QM9X4" name="Waits">
       <Cue id="B3N8R5TW" name="House to half" number="1" preWait="0.2"/>
       <Cue id="E4GP6QSC" name="Announce" number="2" postWait="0.3"/>

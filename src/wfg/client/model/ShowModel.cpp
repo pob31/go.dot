@@ -48,7 +48,7 @@ namespace wfg::client::model
             cue's file could not be read and its length is unknown. A writable
             nought is a decision somebody made and is shown. */
         std::string timeText (const tree::TreeSnapshot& snapshot,
-                              const std::string& cueId, const char* name)
+                              const std::string& cueId, const char* name, double per = 1.0)
         {
             const auto* node = snapshot.find ("/godot/cue/" + cueId + "/" + name);
 
@@ -60,7 +60,7 @@ namespace wfg::client::model
             if (! sole.has_value() || ! sole->isNumber())
                 return {};
 
-            const auto seconds = sole->asDouble();
+            const auto seconds = sole->asDouble() / per;
 
             /*  One decimal, written by hand rather than through a locale: a
                 stream under fr_FR would put a comma where the page puts a
@@ -86,6 +86,20 @@ namespace wfg::client::model
 
             if (! writable && (written == "0.0" || written == "-0.0"))
                 return {};
+
+            return written;
+        }
+
+        /*  A MEDIA CUE'S TIME IS ITS FILE'S AT ITS OWN SPEED (namespace draft
+            §22.5, decision EE): the column says how long the cue sounds, and
+            `duration` stays the file's own length. For ever at nought. */
+        std::string mediaTime (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+        {
+            const auto speed = osc::parseDouble (text (snapshot, "/godot/cue/" + cueId + "/rate")).value_or (1.0);
+            const auto written = timeText (snapshot, cueId, "duration", speed > 0.0 ? speed : 1.0);
+
+            if (! (speed > 0.0) && ! written.empty())
+                return "\xe2\x88\x9e";
 
             return written;
         }
@@ -292,7 +306,7 @@ namespace wfg::client::model
         row.number = attribute (snapshot, cueId, "number");
         row.preset = attribute (snapshot, cueId, "preset");
         row.preWait = timeText (snapshot, cueId, "preWait");
-        row.duration = timeText (snapshot, cueId, "duration");
+        row.duration = row.kind == "media" ? mediaTime (snapshot, cueId) : timeText (snapshot, cueId, "duration");
         row.postWait = timeText (snapshot, cueId, "postWait");
         row.depth = depth;
         row.section = section;

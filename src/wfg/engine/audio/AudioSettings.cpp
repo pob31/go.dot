@@ -3,6 +3,7 @@
 #include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <charconv>
@@ -10,6 +11,8 @@
 #include <array>
 #include <sstream>
 #include <locale>
+#include <string>
+#include <vector>
 
 namespace wfg::audio
 {
@@ -144,11 +147,21 @@ namespace wfg::audio
     }
 
     void registerAudioSettingsCommands (Engine& engine, doc::ShowDocument& document,
-                                        cue::Runner& runner, AudioState& state, SettingsRequest request)
+                                        cue::Runner& runner, cue::RunTable& runs, AudioState& state,
+                                        SettingsRequest request)
     {
+        /*  WHAT AN OUTAGE LETS THROUGH (namespace draft §11.1). Since
+            2026-09-28 also: the engine's own `audio.clockMoved`, and the two
+            records a settings operation ends with - a follow, or an Apply made
+            during the outage, would otherwise never be heard to finish - and
+            Apply itself (decision DI), which still refuses while anything
+            plays: the way out when the interface is gone for good, which until
+            then was a relaunch. */
         engine.setAdmissionCheck ([&state] (const std::string& command)
         {
             if (state.status == "noClock" && command != "audio.connection" && command != "audio.reconnect"
+                && command != "audio.clockMoved" && command != "audio.settingsReady"
+                && command != "audio.editBuilt" && command != "audio.apply" && command != "audio.setup"
                 && command != "run.killAll" && command != "run.kill" && command != "run.stopAll"
                 && command != "run.stop" && command != "audio.testStop"
                 && command != "audio.armed" && command != "run.failed" && command != "take.closed"
@@ -250,6 +263,82 @@ namespace wfg::audio
                 if (state.hardwareOutputs == 0) { state.device.clear(); state.outputs = 0; }
                 if (state.sampleRate > 0) runner.setSamplesPerTick (state.sampleRate / 50);
                 runner.resetAudioPreparation();
+                return Outcome::ok (args);
+            } });
+
+        /*  THE INTERFACE'S CLOCK MOVED (PRD §6.2, built 2026-09-28): the same
+            interface came back from an outage on another rate, block or
+            channel count, was asked for the one the show ran on, and would
+            not give it up. The engine's watchdog submits this; nothing about
+            it is anybody's decision, so it is logged like `audio.connection`
+            and a replay re-applies what it did.
+
+            What it does is §6.2's answer - a stop, then an adaptation. The
+            prepared runs are revoked, as for any settings operation. Anything
+            still playing is stopped THE ESC WAY (decision DG): members come
+            down in order and every footer runs, because nobody declared an
+            emergency and the rest of the rig should be left as the show says;
+            the sound itself went when the outage began. This has to happen
+            here, in the handler: the scheduler runs before the commands on
+            each tick, so a `run.stopAll` sent from here would reach a group
+            one tick after it had seen its member fall silent on the new graph
+            and started the next one. Then the Console is asked to follow
+            (`followClock`), which ends with `audio.settingsReady`.
+
+            Refused outside an outage: there is no moved clock to follow on an
+            interface that is running. */
+        engine.commands().add ({ "audio.clockMoved",
+            "The interface came back on another clock and will not give it up: stop what plays, and follow it.",
+            { { "sampleRate", 'i', false }, { "bufferSize", 'i', false } }, false,
+            [&] (CommandContext& context, const std::vector<osc::Value>& args)
+            {
+                if (state.status != "noClock")
+                    return Outcome::rejected ("audio-not-reconnecting");
+
+                const auto to = args[0].getInt32();
+                const auto block = args[1].getInt32();
+
+                if (to <= 0 || block <= 0)
+                    return Outcome::rejected (reason::badValue);
+
+                std::vector<std::string> prepared;
+                auto sounding = false;
+
+                for (const auto& run : runs.all())
+                {
+                    if (run.isFinished())
+                        continue;
+
+                    if (run.state == cue::runState::preparing
+                          || (run.state == cue::runState::armed && ! run.prepare.empty()))
+                        prepared.push_back (run.id);
+                    else
+                        sounding = true;
+                }
+
+                for (const auto& id : prepared)
+                    runner.revokePrepared (engine, context.tick, id);
+
+                if (sounding)
+                    cue::stopEveryRoot (runs, false);
+
+                stopOutputTest (state);
+
+                const auto hz = [] (int rate) { return std::to_string (rate) + " Hz"; };
+                const auto from = state.sampleRate;
+
+                state.rateMoved = from > 0 && from != to
+                                    ? "The interface's clock moved from " + hz (from) + " to " + hz (to)
+                                        + "; the show runs at " + hz (to)
+                                    : "The interface came back changed, at " + hz (to) + " and "
+                                        + std::to_string (block) + "-sample blocks; the show follows it";
+                state.rateMoved += sounding ? ", and the cues that were playing were stopped." : ".";
+                state.rateMovedTick = context.tick;
+                state.settingsError = "The interface's clock moved to " + hz (to) + ": following it.";
+
+                if (state.followClock)
+                    state.followClock();
+
                 return Outcome::ok (args);
             } });
     }

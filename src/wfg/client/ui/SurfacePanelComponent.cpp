@@ -132,8 +132,11 @@ namespace wfg::client::ui
 
     //==============================================================================
     void SurfacePanelComponent::show (const std::vector<model::SurfaceRow>& surfacesNow,
-                                      const std::vector<model::StripRow>& stripsNow)
+                                      const std::vector<model::StripRow>& stripsNow,
+                                      bool laneWaitingNow)
     {
+        laneWaiting = laneWaitingNow;
+
         /*  THE HAND'S LATEST FIRST, before the readings move: a fader dragged
             since the last pass sends where it got to, once, on this pass's
             clock - which is what keeps a ride to one `node.set` a pass however
@@ -349,6 +352,15 @@ namespace wfg::client::ui
 
         if (word == "dca")
             return Look::colour (theme, "ink-dim");
+
+        /*  TAKEN FOR A LANE (§20.9): waiting for its pass in the standby's
+            colour, recording in the one for what cannot be taken back - and
+            the word beside it either way (§4.8). */
+        if (word == "lane")
+            return Look::colour (theme, "standby");
+
+        if (word == "recording")
+            return Look::colour (theme, "failed");
 
         return Look::colour (theme, "ink-off");
     }
@@ -714,6 +726,18 @@ namespace wfg::client::ui
         if (grab.has_value())
             return grab->strip == strip.id;
 
+        /*  A LANE WAITS FOR A FADER (DF): this press takes the strip for it -
+            even one that rides nothing, which is most likely the one somebody
+            chose - and does nothing else. The strip rides the lane from the
+            next pass, and the next press takes its fader as any other. */
+        if (laneWaiting && strip.endpoint != "gate")
+        {
+            if (send)
+                send (gesture::laneTake (strip.id));
+
+            return false;
+        }
+
         /*  A PAD STRIP HAS NO FADER, and a strip riding nothing has no node
             to hold: both are drawn and neither can be taken. */
         if (strip.endpoint == "gate" || strip.target.empty())
@@ -924,7 +948,8 @@ namespace wfg::client::ui
         if (! isVisible())
             return;
 
-        panel->show (model::readSurfaces (snapshot), model::readStrips (snapshot));
+        panel->show (model::readSurfaces (snapshot), model::readStrips (snapshot),
+                     model::readLaneRecord (snapshot).waiting);
     }
 
     void SurfaceWindow::closeButtonPressed()
