@@ -122,3 +122,14 @@ set(WFG_PIN_JUCE "8.0.13" CACHE STRING
 # non-emptiness only.
 set(WFG_PIN_TE "3.5.0-develop" CACHE STRING
     "Tracktion Engine version pinned by ThirdParty/tracktion_engine (documentation only — see comment)")
+
+# ---------------------------------------------------------------------------
+# Packaging
+# ---------------------------------------------------------------------------
+# Go.dot.app's CFBundleIdentifier, read by cmake/WfgInstall.cmake into
+# packaging/macos/Info.plist.in. macOS files every permission a tester grants -
+# the microphone above all - under this string, so changing it later asks every
+# tester again. A placeholder in the author's GitHub namespace until the author
+# names the one Go.dot keeps.
+set(WFG_MACOS_BUNDLE_ID "com.github.pob31.godot" CACHE STRING
+    "CFBundleIdentifier of the Go.dot.app the package-macos preset installs")

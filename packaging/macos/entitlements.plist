@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    What Go.dot.app's two executables are signed with, under the hardened
+    runtime that notarization requires. scripts/package-macos.sh reads it.
+    SPDX-License-Identifier: GPL-3.0-or-later
+
+    audio-input                 mic cues and takes (Phase 9b, 9c). Without it
+                                the hardened runtime hands wfg silence, and no
+                                prompt is ever shown.
+    disable-library-validation  Go.dot hosts plugins (VST3, AU, LV2) in its
+                                child processes, and a plugin is signed by its
+                                maker's team, not ours. Without it the hardened
+                                runtime refuses to load every one of them.
+    get-task-allow false        stated, not left out: notarization refuses a
+                                binary that allows a debugger to attach (WFS-DIY
+                                met it as statusCode 4000).
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.get-task-allow</key>
+    <false/>
+</dict>
+</plist>

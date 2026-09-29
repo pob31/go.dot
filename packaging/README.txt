@@ -1,8 +1,8 @@
 Go.dot - test build
 ===================
 
-This is an early build for testing and comments. It is not signed, it is not
-an installer, and it is not ready to run a show. Please do try it, and please
+This is an early build for testing and comments. It is not an installer, the
+Windows and Linux builds are not signed, and it is not ready to run a show. Please do try it, and please
 tell us what you find:
 
     https://github.com/pob31/go.dot/issues
@@ -15,9 +15,10 @@ terminal window printed.
 Starting it
 -----------
 
-Every platform has a launcher beside the binary. With nothing else it opens
-the empty show in the folder "Untitled", in a window, on your system's default
-audio interface. Give it a show folder to open that instead.
+On Windows and Linux a launcher sits beside the binary; on macOS the launcher
+is the app. With nothing else it opens the empty show "Untitled", in a window,
+on your system's default audio interface. On Windows and Linux, give the
+launcher a show folder to open that instead.
 
 In the window, "New show...", "Open show..." and "Save as..." work on show
 folders anywhere you like; "Show settings..." picks the audio interface, and
@@ -27,17 +28,19 @@ a show remembers the one it was saved with.
             SmartScreen will warn that the publisher is unknown: choose
             "More info", then "Run anyway".
 
-  macOS     Double-click Go.dot.command. The first time, macOS will refuse
-            because the build is not notarized. Either open System Settings >
-            Privacy & Security and choose "Open Anyway", or clear the
-            quarantine once in Terminal, from this folder:
+  macOS     Open the .dmg and drag Go.dot to Applications, then open it
+            like any app. It is signed and notarized, so macOS opens it
+            without a warning. Universal (Apple silicon and Intel), macOS
+            13.3 or later.
 
-                xattr -dr com.apple.quarantine .
+            The first time, it copies the empty show to
+            ~/Library/Application Support/Go.dot/Untitled and opens that.
+            Each launch writes its log to ~/Library/Logs/Go.dot - attach the
+            newest one to a report. The first mic cue or recording asks for
+            microphone access: allow it, or inputs stay silent.
 
-            The binary is universal (Apple silicon and Intel) and needs
-            macOS 13.3 or later. It runs inside Terminal, so the first mic
-            cue or recording asks for microphone access for Terminal: allow
-            it, or inputs stay silent.
+            The command-line tool is inside the app:
+                /Applications/Go.dot.app/Contents/MacOS/wfg --version
 
   Linux     ./go.dot.sh  (or ./go.dot.sh ~/shows/Tuesday)
             Built on Ubuntu 24.04; it needs ALSA, FreeType, fontconfig and

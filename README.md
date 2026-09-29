@@ -634,12 +634,14 @@ Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …
 
 ### Test builds
 
-`.github/workflows/release.yml` makes one archive per platform for people to try:
-the `wfg` binary, `console/` (the web client), an empty show in `Untitled/`, a
-launcher (`Go.dot.cmd`, `Go.dot.command` or `go.dot.sh`) and a `README.txt` for
-the tester. `cmake/WfgInstall.cmake` is the list; the extra files live in
-`packaging/`. **Nothing is signed or notarized** — the tester's README says how
-to get past SmartScreen and Gatekeeper.
+`.github/workflows/release.yml` makes one download per platform for people to
+try. Windows and Linux get a folder: the `wfg` binary, `console/` (the web
+client), an empty show in `Untitled/`, a launcher (`Go.dot.cmd` or `go.dot.sh`)
+and a `README.txt` for the tester. macOS gets the same inside `Go.dot.app`, in a
+DMG that is **signed with the author's Developer ID, notarized and stapled** by
+`scripts/package-macos.sh`, from the secrets in the protected `go-dot`
+environment. Windows and Linux are not signed. `cmake/WfgInstall.cmake` is the
+list; the extra files live in `packaging/`.
 
 - **To publish one**, bump `project(VERSION)` in the root `CMakeLists.txt` if
   needed and push a tag whose numbers match it:
@@ -660,6 +662,11 @@ to get past SmartScreen and Gatekeeper.
   cmake --preset package && cmake --build --preset package-release
   cmake --install build/package --config Release --component wfg --prefix stage/go.dot
   ```
+
+  On a Mac, `package-macos` in place of `package`, then
+  `scripts/package-macos.sh stage/go.dot go.dot.dmg` signs with the Developer ID
+  in your keychain and notarizes with the `NOTARY_PROFILE` you name (or ad hoc,
+  unnotarized, with neither).
 
 ---
 
@@ -751,9 +758,11 @@ CMakeLists.txt       orchestration only; defines no source target
 CMakePresets.json    every preset here is run by CI
 cmake/               guards, options, third-party wiring
 docs/                the PRD and the development plan — the spec
-scripts/             bootstrap, the Linux package list, the pin gate
+scripts/             bootstrap, the Linux package list, the pin gate, and
+                     package-macos.sh (sign, DMG, notarize, staple)
 packaging/           what a test build carries beside the binary: the
-                     launchers, the tester's README.txt, an empty show
+                     launchers, the tester's README.txt, an empty show, and
+                     macos/ - Go.dot.app's launcher, Info.plist, entitlements
 clients/console/     the web client the engine serves at /ui; reads by polling,
                      writes binary OSC, no build step, no dependency
 src/                 wfg_engine (the library) and wfg (the binary)
