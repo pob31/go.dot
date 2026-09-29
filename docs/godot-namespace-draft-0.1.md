@@ -12773,6 +12773,13 @@ the drawing:
   resampled read keeps time. On a shared runner stretched cues came out 10 to 60 ms late. The
   reader now feeds the stretcher silence for what the cache could not hand over and carries on;
   only the prime it is built with stays strict, since its failing says the file is not there yet.
+  What the runners still show, and this machine does not, is a spread: a stretched sound's place in
+  its file is right to within one to three of the stretcher's 256-sample chunks, one machine to the
+  next and with the state the stretcher primed from, and on a starved runner a stretched voice's
+  length and pitch read a few percent off where a resampled one's are exact. The cases judge the
+  first to four chunks, and the driver judges the second to the letter off CI and loosely on it.
+  **Open for the author**: whether a few milliseconds of spread in a stretched cue's placement
+  matters to a show, and whether a loaded show machine should be measured for the second.
 - **Timestretch on a cue with ranges is named, not refused**: a range is played by jumping the
   stretcher to its in-point, which starts it again - M47 hears a gap of one stretcher chunk and a
   click after the launch and at every pass, where varispeed ranges are seamless. `wfg validate`
