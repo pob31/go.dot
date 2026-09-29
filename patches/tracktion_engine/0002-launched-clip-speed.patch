@@ -48,6 +48,15 @@ rebuilt in the middle of a change of speed needs nothing carried across it.
   block and hold its place - every later moment a chunk late, and a prime of
   dozens of reads failing whole and beginning again the next block (10 to
   60 ms late on the CI runners). Only the prime it is built with stays strict.
+- Above one, the Lagrange resampler low-passes the file before it interpolates
+  (the author, 2026-09-29: "filter out the high frequency content"): an
+  eighth-order Butterworth, four trapezoidal state-variable stages whose cutoff
+  follows the speed, at 0.4 of the source's frequencies over the ratio. The
+  interpolator filters nothing, so at twenty a 5 kHz tone came back as 4 kHz at
+  full level (M47); now -83 dB. At one and below the filter is not there, so a
+  read at one is the same doubles as ever; crossing one it is blended in and
+  out over 1024 source frames, and its state is kept where the interpolator
+  stopped consuming, since what it did not consume is read again.
 - The Lagrange resampler takes a read too large for the scratch pool or the
   file cache in halves, and is given the EXACT ratio, putting back whatever
   the interpolator did not consume. It was fed a whole number of frames a
@@ -247,10 +256,32 @@ index 90ee2402c5c..fef637df9bd 100644
              }
  
 diff --git a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
-index 1993f02782b..f2c7da68ef0 100644
+index 1993f02782b..a41faf1e86f 100644
 --- a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
 +++ b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
-@@ -279,6 +279,15 @@ public:
+@@ -266,6 +266,11 @@ public:
+             resamplers.emplace_back();
+             resamplers.back().reset();
+         }
++
++        // MODIFIED BY GO.DOT (patch 0002): the anti-alias stages, sized here and not on the
++        // audio thread.
++        antiAlias.resize (resamplers.size());
++        antiAliasAt.resize (resamplers.size());
+     }
+ 
+     void reset() override
+@@ -275,10 +280,25 @@ public:
+ 
+         hasBeenReset = true;
+         timeSourceIsAheadDueToLatency = {};
++
++        // MODIFIED BY GO.DOT (patch 0002): a jump starts the low-pass again from the next
++        // frame, and takes up the next read's own share of it at once - a jump is a new
++        // start, and a clip launched at two is filtered from its first frame.
++        antiAliasWarm = false;
++        antiAliasSnap = true;
+     }
  
      SampleCount getPosition() override
      {
@@ -266,7 +297,7 @@ index 1993f02782b..f2c7da68ef0 100644
          const auto sourcePosition = TimePosition::fromSamples (source->getPosition(), source->getSampleRate());
          return toSamples (sourcePosition - timeSourceIsAheadDueToLatency, destSampleRate);
      }
-@@ -292,10 +301,24 @@ public:
+@@ -292,10 +312,24 @@ public:
      {
          // If the position has jumped, reset so the interpolator doesn't blend in samples from the
          // old position. This also clears the latency offset so it's re-compensated on the next read
@@ -293,7 +324,7 @@ index 1993f02782b..f2c7da68ef0 100644
      }
  
      /** Sets a ratio to increase or decrease playback speed. */
-@@ -328,6 +351,25 @@ public:
+@@ -328,6 +362,25 @@ public:
          const auto numDestFrames = destBuffer.getNumFrames();
          const int numSourceFramesToRead = static_cast<int> ((numDestFrames * ratio) + 0.5);
  
@@ -319,32 +350,54 @@ index 1993f02782b..f2c7da68ef0 100644
          if (std::exchange (hasBeenReset, false))
          {
              constexpr auto baseLatencyNumSamples = static_cast<FrameCount> (juce::LagrangeInterpolator::getBaseLatency());
-@@ -340,7 +382,9 @@ public:
+@@ -340,16 +393,16 @@ public:
              auto destScratchView = toBufferView (destDataScratch.buffer);
              destScratchView.clear();
  
 -            if (! readResampling (destScratchView, *source, modifiedNumSourceFramesToRead,
+-                                  resamplers, std::to_array (gains)))
 +            juce::ignoreUnused (modifiedNumSourceFramesToRead);
 +
-+            if (! readResampling (destScratchView, *source, ratio,
-                                   resamplers, std::to_array (gains)))
++            if (! readResampling (destScratchView, ratio))
                  return false;
  
-@@ -348,7 +392,7 @@ public:
+             copy (destBuffer, destScratchView.fromFrame (numFramesToDrop));
              return true;
          }
  
 -        return readResampling (destBuffer, *source, numSourceFramesToRead,
-+        return readResampling (destBuffer, *source, ratio,
-                                resamplers, std::to_array (gains));
+-                               resamplers, std::to_array (gains));
++        return readResampling (destBuffer, ratio);
      }
  
-@@ -360,20 +404,33 @@ public:
+     const double destSampleRate;
+@@ -360,30 +413,140 @@ public:
      float gains[2] = { 1.0f, 1.0f };
      TimeDuration timeSourceIsAheadDueToLatency;
      bool hasBeenReset = true;
 -
+-    static bool readResampling (choc::buffer::ChannelArrayView<float> destBuffer,
+-                                AudioReader& sourceReader, int numSourceFramesToRead,
+-                                std::vector<juce::LagrangeInterpolator>& resamplers_,
+-                                const std::array<float, 2> gains)
+-    {
 +    std::optional<TimePosition> placedAt;   // MODIFIED BY GO.DOT (patch 0002): see getPosition
++
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-29, by
++    // patches/tracktion_engine/0002-launched-clip-speed.patch: the low-pass that keeps a read
++    // above one from aliasing (see readResampling). Per channel, four stages of state, and
++    // where they stood after each of a read's last frames, since the frames the interpolator
++    // does not consume are read again; the share of the filtered source the interpolator
++    // hears, which moves a frame at a time; whether the stages hold a state yet; and whether
++    // the next read takes up its share at once, after a jump.
++    struct AntiAliasStage { double ic1 = 0.0, ic2 = 0.0; };
++    using AntiAliasState = std::array<AntiAliasStage, 4>;
++    static constexpr int antiAliasSnapshots = 6;
++    static constexpr double antiAliasRampFrames = 1024.0;
++    std::vector<AntiAliasState> antiAlias;
++    std::vector<std::array<AntiAliasState, antiAliasSnapshots>> antiAliasAt;
++    double antiAliasMix = 0.0;
++    bool antiAliasWarm = false, antiAliasSnap = true;
 +
 +    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
 +    // patches/tracktion_engine/0002-launched-clip-speed.patch: the interpolator is given
@@ -357,12 +410,21 @@ index 1993f02782b..f2c7da68ef0 100644
 +    // wherever the interpolator is, which is the exact integral of the ratio, and the
 +    // drift never builds. At a ratio of exactly one the interpolator consumes one frame an
 +    // output either way, so the samples are the same as before.
-     static bool readResampling (choc::buffer::ChannelArrayView<float> destBuffer,
--                                AudioReader& sourceReader, int numSourceFramesToRead,
-+                                AudioReader& sourceReader, double ratio,
-                                 std::vector<juce::LagrangeInterpolator>& resamplers_,
-                                 const std::array<float, 2> gains)
-     {
++    //
++    // MODIFIED BY GO.DOT, 2026-09-29 (patch 0002): AND ABOVE ONE THE FILE IS LOW-PASSED
++    // FIRST. The interpolator filters nothing, so a read above one folded everything the
++    // ratio lifted past the output's Nyquist back into the band at full level - at twenty,
++    // a 5 kHz tone came out as 4 kHz, as loud (M47). Now, above one, the source goes
++    // through an eighth-order Butterworth low-pass - four state-variable stages, trapezoidal,
++    // which take a cutoff that moves with the speed - at 0.4 of the source's frequencies
++    // over the ratio, the output's band kept to 0.4 of its rate, 19.2 kHz at 48: what the
++    // ratio would lift past the output's Nyquist is gone before it is interpolated, 31 dB
++    // down where it would fold to 18 kHz and 58 where it would fold to 4. At one and below it is not there at all, so a read at one is the same
++    // doubles as ever; crossing one it is taken in and out over 1024 source frames, so a
++    // speed passing through one does not tick.
++    bool readResampling (choc::buffer::ChannelArrayView<float> destBuffer, double ratio)
++    {
++        auto& sourceReader = *source;
          const auto numChannels = destBuffer.getNumChannels();
          const auto numDestFrames = destBuffer.getNumFrames();
 +        const auto numSourceFramesToRead = static_cast<int> (std::ceil (numDestFrames * ratio)) + 1;
@@ -372,30 +434,122 @@ index 1993f02782b..f2c7da68ef0 100644
          const bool ok = sourceReader.readSamples (fileDataView);
  
 -        const auto resamplerRatio = static_cast<double> (numSourceFramesToRead) / numDestFrames;
++        const auto target = ratio > 1.0 + 1.0e-9 ? 1.0 : 0.0;
++
++        if (std::exchange (antiAliasSnap, false))
++            antiAliasMix = target;
++
++        const auto mixStart = antiAliasMix;
++        const auto filtering = target > 0.0 || mixStart > 0.0;
++        const auto firstKept = numSourceFramesToRead - (antiAliasSnapshots - 1);
++
++        const auto mixAt = [mixStart, target] (int frame)
++        {
++            const auto moved = (frame + 1) / antiAliasRampFrames;
++            return target > mixStart ? std::min (target, mixStart + moved)
++                                     : std::max (target, mixStart - moved);
++        };
++
++        if (filtering)
++        {
++            // An eighth-order Butterworth's four Qs.
++            static constexpr double q[4] { 0.50979557910415917, 0.60134488693504528,
++                                           0.89997622313641570, 2.56291544774150617 };
++            const auto g = std::tan (juce::MathConstants<double>::pi * 0.4 / std::max (ratio, 1.0));
++            std::array<double, 4> a1 {}, a2 {}, a3 {};
++
++            for (size_t stage = 0; stage < 4; ++stage)
++            {
++                a1[stage] = 1.0 / (1.0 + g * (g + 1.0 / q[stage]));
++                a2[stage] = g * a1[stage];
++                a3[stage] = g * a2[stage];
++            }
++
++            for (choc::buffer::ChannelCount channel = 0;
++                 channel < numChannels && channel < (choc::buffer::ChannelCount) antiAlias.size(); ++channel)
++            {
++                auto* x = fileData.buffer.getWritePointer ((int) channel);
++                auto& stages = antiAlias[(size_t) channel];
++                auto& at = antiAliasAt[(size_t) channel];
++
++                // From cold, as if the first frame had always been there: no step to ring.
++                if (! antiAliasWarm && numSourceFramesToRead > 0)
++                    for (auto& stage : stages)
++                        stage = { 0.0, (double) x[0] };
++
++                if (firstKept <= 0)
++                    at[(size_t) (-firstKept)] = stages;
++
++                for (int i = 0; i < numSourceFramesToRead; ++i)
++                {
++                    auto v = (double) x[i];
++
++                    for (size_t stage = 0; stage < 4; ++stage)
++                    {
++                        auto& st = stages[stage];
++                        const auto v3 = v - st.ic2;
++                        const auto v1 = a1[stage] * st.ic1 + a2[stage] * v3;
++                        const auto v2 = st.ic2 + a2[stage] * st.ic1 + a3[stage] * v3;
++                        st.ic1 = 2.0 * v1 - st.ic1;
++                        st.ic2 = 2.0 * v2 - st.ic2;
++                        v = v2;
++                    }
++
++                    x[i] = static_cast<float> (x[i] + (v - x[i]) * mixAt (i));
++
++                    if (i + 1 >= firstKept)
++                        at[(size_t) (i + 1 - firstKept)] = stages;
++                }
++            }
++
++            antiAliasWarm = true;
++        }
++
 +        auto used = numSourceFramesToRead;
  
          for (choc::buffer::ChannelCount channel = 0; channel < numChannels; ++channel)
          {
-@@ -383,7 +440,7 @@ public:
+-            if (channel < (choc::buffer::ChannelCount) resamplers_.size())
++            if (channel < (choc::buffer::ChannelCount) resamplers.size())
+             {
+                 const auto src = fileData.buffer.getReadPointer ((int) channel);
                  const auto dest = destBuffer.getChannel (channel).data.data;
  
-                 auto& resampler = resamplers_[(size_t) channel];
+-                auto& resampler = resamplers_[(size_t) channel];
 -                resampler.processAdding (resamplerRatio, src, dest, (int) numDestFrames, gains[channel & 1]);
++                auto& resampler = resamplers[(size_t) channel];
 +                used = resampler.processAdding (ratio, src, dest, (int) numDestFrames, gains[channel & 1]);
              }
              else
              {
-@@ -391,6 +448,9 @@ public:
+@@ -391,6 +554,26 @@ public:
              }
          }
  
++        // The low-pass where it stood after the last frame the interpolator took, since
++        // what it did not take is read again - filtered twice, it would ring.
++        if (filtering)
++        {
++            if (used >= std::max (firstKept, 0) && used <= numSourceFramesToRead)
++            {
++                for (size_t channel = 0; channel < antiAlias.size() && channel < (size_t) numChannels; ++channel)
++                    antiAlias[channel] = antiAliasAt[channel][(size_t) (used - firstKept)];
++            }
++            else
++            {
++                antiAliasWarm = false;
++            }
++
++            antiAliasMix = used > 0 ? mixAt (used - 1) : mixStart;
++        }
++
 +        if (used < numSourceFramesToRead)
 +            sourceReader.setPosition (sourceReader.getPosition() - (numSourceFramesToRead - used));
 +
          return ok;
      }
  };
-@@ -630,7 +690,8 @@ public:
+@@ -630,7 +813,8 @@ public:
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
          inputFifo.reset();
          outputFifo.reset();
@@ -405,7 +559,7 @@ index 1993f02782b..f2c7da68ef0 100644
      }
  
      void setPosition (TimePosition t) override
-@@ -665,7 +726,10 @@ public:
+@@ -665,7 +849,10 @@ public:
          playbackSpeedRatio = speedRatio;
          semitonesShift = semitones;
  
@@ -417,7 +571,7 @@ index 1993f02782b..f2c7da68ef0 100644
          assert (ok);
      }
  
-@@ -674,6 +738,30 @@ public:
+@@ -674,6 +861,30 @@ public:
          assert (numChannels == (int) destBuffer.getNumChannels());
          const auto numFramesToDo = destBuffer.getNumFrames();
  
@@ -448,7 +602,7 @@ index 1993f02782b..f2c7da68ef0 100644
          for (;;)
          {
              // If there are enough output samples in the fifo, read them out
-@@ -684,7 +772,7 @@ public:
+@@ -684,7 +895,7 @@ public:
                  break;
              }
  
@@ -457,7 +611,7 @@ index 1993f02782b..f2c7da68ef0 100644
                  return false;
          }
  
-@@ -696,6 +784,10 @@ public:
+@@ -696,6 +907,10 @@ public:
      static constexpr int chunkSize = 256;
      const int numChannels;
      int latencySamples = 0;
@@ -468,7 +622,7 @@ index 1993f02782b..f2c7da68ef0 100644
      TimeStretcher timeStretcher;
      AudioFifo inputFifo { numChannels, chunkSize }, outputFifo { numChannels, chunkSize };
      double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
-@@ -706,7 +798,15 @@ public:
+@@ -706,7 +921,15 @@ public:
      }
  
      // Reads source audio, feeds it to the stretcher, and produces output into the FIFO
@@ -485,7 +639,7 @@ index 1993f02782b..f2c7da68ef0 100644
      {
          const auto numThisTime = timeStretcher.getFramesNeeded();
  
-@@ -717,7 +817,12 @@ public:
+@@ -717,7 +940,12 @@ public:
              auto scratchView = toBufferView (scratchBuffer.buffer);
  
              if (! source->readSamples (scratchView))
@@ -499,7 +653,7 @@ index 1993f02782b..f2c7da68ef0 100644
  
              inputFifo.write (scratchBuffer.buffer);
          }
-@@ -731,27 +836,67 @@ public:
+@@ -731,27 +959,67 @@ public:
          return true;
      }
  
@@ -572,7 +726,7 @@ index 1993f02782b..f2c7da68ef0 100644
                  break;
  
              const int available = outputFifo.getNumReady();
-@@ -764,6 +909,9 @@ public:
+@@ -764,6 +1032,9 @@ public:
                  outputDiscarded += toDiscard;
              }
          }
@@ -582,7 +736,7 @@ index 1993f02782b..f2c7da68ef0 100644
      }
  };
  
-@@ -784,7 +932,7 @@ public:
+@@ -784,7 +1055,7 @@ public:
          source->setPosition (getReadPosition());
          timeStretcher.reset();
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
@@ -591,7 +745,7 @@ index 1993f02782b..f2c7da68ef0 100644
      }
  
      SampleCount getPosition() override
-@@ -802,7 +950,7 @@ public:
+@@ -802,7 +1073,7 @@ public:
          source->setPosition (t);
          timeStretcher.reset();
          setSpeedAndPitch (playbackSpeedRatio, semitonesShift);
@@ -600,7 +754,7 @@ index 1993f02782b..f2c7da68ef0 100644
      }
  
      void setPosition (TimePosition t) override
-@@ -837,7 +985,10 @@ public:
+@@ -837,7 +1108,10 @@ public:
          playbackSpeedRatio = speedRatio;
          semitonesShift = semitones;
  
@@ -612,7 +766,7 @@ index 1993f02782b..f2c7da68ef0 100644
          assert (ok);
      }
  
-@@ -847,6 +998,19 @@ public:
+@@ -847,6 +1121,19 @@ public:
          const auto numFramesToDo = static_cast<int> (destBuffer.getNumFrames());
          int startFrame = 0;
  
@@ -632,7 +786,7 @@ index 1993f02782b..f2c7da68ef0 100644
          // Always push one block to keep the input fifo stoked but don't do this for every chunk unless required
          if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
              if (! readSourceAndPushFrames (numToPush))
-@@ -884,6 +1048,7 @@ public:
+@@ -884,6 +1171,7 @@ public:
  
      const int numChannels, chunkSize = 1024;
      int latencySamples = 0;
@@ -640,7 +794,7 @@ index 1993f02782b..f2c7da68ef0 100644
      ReadAheadTimeStretcher timeStretcher { 3 };
      double playbackSpeedRatio = 1.0, semitonesShift = 0.0, readPosition = 0.0;
  
-@@ -910,10 +1075,28 @@ public:
+@@ -910,10 +1198,28 @@ public:
  
      // Pre-feeds real audio into the stretcher and discards initial output
      // to handle the stretcher's startup latency locally
@@ -671,7 +825,7 @@ index 1993f02782b..f2c7da68ef0 100644
  
          const auto position = static_cast<SampleCount> (readPosition);
          const auto backupPos = std::max (SampleCount (0), position - latencySamples);
-@@ -928,7 +1111,8 @@ public:
+@@ -928,7 +1234,8 @@ public:
          while (outputDiscarded < numToDiscard)
          {
              if (const auto numToPush = timeStretcher.getFramesRecomended(); numToPush > 0)
@@ -681,7 +835,7 @@ index 1993f02782b..f2c7da68ef0 100644
  
              // Only ever discard up to the target so the stretcher isn't left ahead of readPosition
              const int numThisTime = std::min (chunkSize, numToDiscard - outputDiscarded);
-@@ -940,6 +1124,8 @@ public:
+@@ -940,6 +1247,8 @@ public:
  
              outputDiscarded += numRead;
          }
@@ -690,7 +844,7 @@ index 1993f02782b..f2c7da68ef0 100644
      }
  };
  
-@@ -1149,7 +1335,12 @@ public:
+@@ -1149,7 +1458,12 @@ public:
      {
          const auto numSourceSamples = toSamples (tr.getLength(), getSampleRate());
  
@@ -704,7 +858,7 @@ index 1993f02782b..f2c7da68ef0 100644
          {
              destBuffer.clear();
              return true;
-@@ -1164,7 +1355,12 @@ public:
+@@ -1164,7 +1478,12 @@ public:
  
          setPosition (tr.getStart());
  
@@ -718,7 +872,7 @@ index 1993f02782b..f2c7da68ef0 100644
              reset();
  
          return readSamples (destBuffer);
-@@ -1172,6 +1368,10 @@ public:
+@@ -1172,6 +1491,10 @@ public:
  
      ResamplerReader* resamplerReader = nullptr;
      TimeStretchReaderBase* timeStretchSource = nullptr;
@@ -729,7 +883,7 @@ index 1993f02782b..f2c7da68ef0 100644
  };
  
  
-@@ -2137,6 +2337,12 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
+@@ -2137,6 +2460,12 @@ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
  }
  
  //==============================================================================
@@ -742,7 +896,7 @@ index 1993f02782b..f2c7da68ef0 100644
  void WaveNodeRealTime::setDynamicOffsetBeats (BeatDuration newOffset)
  {
      if (juce::approximatelyEqual (dynamicOffsetBeats->inBeats(), newOffset.inBeats()))
-@@ -2285,6 +2491,9 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
+@@ -2285,6 +2614,9 @@ bool WaveNodeRealTime::buildAudioReaderGraph()
          }
      }
  
@@ -752,7 +906,7 @@ index 1993f02782b..f2c7da68ef0 100644
      if (syncTempo == SyncTempo::yes || syncPitch == SyncPitch::yes)
      {
          assert (fileTempoSequence);
-@@ -2348,6 +2557,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
+@@ -2348,6 +2680,7 @@ void WaveNodeRealTime::replaceStateIfPossible (WaveNodeRealTime& other)
      editReader = other.editReader;
      pitchAdjustReader = other.pitchAdjustReader;
      dynamicOffsetBeats = other.dynamicOffsetBeats;
@@ -760,7 +914,7 @@ index 1993f02782b..f2c7da68ef0 100644
  }
  
  void WaveNodeRealTime::processSection (ProcessContext& pc)
-@@ -2355,6 +2565,40 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2355,6 +2688,40 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
      const auto sectionEditBeats = getEditBeatRange();
      const auto sectionEditTime = getEditTimeRange();
  
@@ -801,7 +955,7 @@ index 1993f02782b..f2c7da68ef0 100644
      // Check that the number of channels requested matches the destination buffer num channels
      assert (destChannels.getNumChannels() == (int) pc.buffers.audio.getNumChannels());
  
-@@ -2401,7 +2645,7 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2401,7 +2768,7 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
          }
          else if (fileTempoSequence != nullptr)
          {
@@ -810,7 +964,7 @@ index 1993f02782b..f2c7da68ef0 100644
              auto sourceBeats = BeatPosition::fromBeats (offsetIntoClip.inBeats() + offsetBeats.inBeats());
  
              if (! loopSectionBeats.isEmpty() && sourceBeats >= loopSectionBeats.getStart())
-@@ -2440,12 +2684,52 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
+@@ -2440,12 +2807,52 @@ void WaveNodeRealTime::processSection (ProcessContext& pc)
      if (pitchAdjustReader != nullptr)
          pitchAdjustReader->setKey (getKeyToSyncTo (sectionEditTime.getStart()));
  

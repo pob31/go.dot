@@ -12717,9 +12717,8 @@ Each is a proposal in PRD §6.9, awaiting a yes or a no:
 - Reverse.
 - Varispeed on a live take (the Looper, §19).
 - Pitch as a number of its own.
-- A band-limited resampler above one, which would first need Tracktion's own sinc reader fixed: it
-  looks wrong at any speed other than one (`WaveNode.cpp:436-446, 574`). M47 says it is worth it:
-  above one, Lagrange folds everything above Nyquist over the speed back at full level.
+- ~~A band-limited resampler above one~~ - built instead as a low-pass before the interpolator,
+  the author's second way (§22.11).
 - Speed fades in load-to-time.
 - A stretcher primed on the message thread, once its file is in the cache and before the launch
   (M46: the prime is 1 to 5 ms on the audio thread, a dropout at blocks of 64).
@@ -12778,8 +12777,8 @@ the drawing:
   next and with the state the stretcher primed from, and on a starved runner a stretched voice's
   length and pitch read a few percent off where a resampled one's are exact. The cases judge the
   first to four chunks, and the driver judges the second to the letter off CI and loosely on it.
-  **Open for the author**: whether a few milliseconds of spread in a stretched cue's placement
-  matters to a show, and whether a loaded show machine should be measured for the second.
+  **Answered by the author** (§22.11): timestretch "doesn't have to be so accurate" - it is for fine
+  tuning and sound design - so the spread stands.
 - **Timestretch on a cue with ranges is named, not refused**: a range is played by jumping the
   stretcher to its in-point, which starts it again - M47 hears a gap of one stretcher chunk and a
   click after the launch and at every pass, where varispeed ranges are seamless. `wfg validate`
@@ -12818,3 +12817,45 @@ the drawing:
 **Waiting for the author and the bench:** the ear, on the S.2 renders and on a show - the tape stop,
 the freeze, a speed fade up and down in both modes; the D700's master dial on a Speed box, a
 semitone a detent; and a Mac mini run of `ctest -R "rate|speed"`.
+
+### 22.11 After the close-out: the author's answers, and varispeed filtered (2026-09-29)
+
+The author, on what §22.10 left open:
+
+- *"The timestretch doesn't have to be so accurate. This is mostly for fine tuning up or down or for
+  sound design."* The spread of a few of the stretcher's chunks stands, and nothing more is owed on
+  it.
+- *"If we can improve on the plain varispeed, to avoid aliasing, this would be great. Or we could
+  simple filter out the hight frequency content."* Built the second way, in patch 0002.
+- *"A quieter freeze might be a good thing! I will try it out and let you know."* Left as it is until
+  he has.
+
+**Varispeed above one is low-passed before it is interpolated.** The Lagrange interpolator filters
+nothing, so whatever a speed above one lifted past the output's Nyquist folded back into the band at
+full level. Now, above one, the file goes through an eighth-order Butterworth low-pass - four
+trapezoidal state-variable stages, which take a cutoff that moves with the speed - at 0.4 of the
+source's frequencies over the ratio. The output keeps a band of 0.4 of its rate, 19.2 kHz at 48, at
+any speed; what the speed would lift above that is gone before it can fold.
+
+- **At one and below it is not there**, so a render at one is the same doubles as ever. Crossing
+  one - a fade, the dial - it is blended in and out over 1024 source frames, so nothing ticks.
+- **A file at a higher rate than the graph** (a 96 kHz file on a 48 kHz interface) is read at a
+  ratio above one at speed one, and is filtered too: it used to alias as well.
+- **Its state follows the interpolator exactly.** This resampler reads a frame or two ahead and puts
+  back what the interpolator did not consume; the filter's state is kept as it stood after each of a
+  read's last frames, and the one matching what was consumed is taken up, so no frame is filtered
+  twice.
+- **Timestretch is untouched**: a stretched clip reads its file at one and the stretcher does the
+  speed.
+
+**M47 again** (Debug, 48 kHz): a 5 kHz tone at twenty, which came back as 4 kHz at full level, is
+83 dB down; at twice, the fundamental at 10 kHz is untouched and nothing else is measurable; at four
+its 20 kHz lands just above the band kept and is 4.8 dB down, everything else 92 dB down. And in the
+case that pins it (`AudioTests`, "varispeed above one filters out what the speed would lift past
+Nyquist"), a 15 kHz tone at twice, which would fold to 18 kHz, is 50 dB down.
+
+**M46 again** (Release): the filter costs nothing at one, where it is not there. Above one it runs
+over every frame of the file the speed reads, so its cost grows with the speed: a resampled voice
+at 48 kHz now costs at most 1.2% of a block (twenty times, blocks of 64), and at 96 kHz up to 4.6%
+at twenty times - about ten times what it cost unfiltered. Affordable for a voice or a few; a room
+full of voices at twenty times at 96 kHz would feel it.

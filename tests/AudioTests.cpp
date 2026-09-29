@@ -5801,7 +5801,7 @@ TEST_CASE ("audio host: at twice the speed, varispeed doubles the pitch and time
             runners, none here). */
         INFO ("the last sound " << ends << " s after the launch");
         CHECK (ends > 1.99);
-        CHECK (ends < (stretch ? 2.025 : 2.01));
+        CHECK (ends < (stretch ? 2.05 : 2.01));
 
         speed.runTo (speed.at (2.3));
         CHECK_FALSE (speed.rig.host.trackPlayState (0).playing);
@@ -6265,10 +6265,12 @@ TEST_CASE ("audio host: a stretched cue starts at its first sample and keeps its
         CHECK (last + base >= end - 64);
 
         //  The stretcher's own tail, stopped with the clip - and its place is
-        //  right to within a few 256-sample chunks, one machine to the next
-        //  (up to three on the CI runners, 2026-09-29; the faults this case is
-        //  for were 4544 and 7200 samples).
-        CHECK (last + base <= end + 1100);
+        //  right to within a few 256-sample chunks, one run and one machine to
+        //  the next (five seen, 2026-09-29). Fifty milliseconds is plenty: the
+        //  author, the same day - "The timestretch doesn't have to be so
+        //  accurate. This is mostly for fine tuning up or down or for sound
+        //  design." The faults this case is for were at the start.
+        CHECK (last + base <= end + 2400);
     }
 
     for (const auto speed : { 0.5, 1.0, 2.0 })
@@ -6772,5 +6774,52 @@ TEST_CASE ("M47: what a speed does to the sound - aliasing above one, the gate's
                  << decibels (quietest / (amplitude / std::sqrt (2.0))) << " dB re the tone");
 
         CHECK (quietest >= 0.0f);
+    }
+}
+
+TEST_CASE ("audio host: varispeed above one filters out what the speed would lift past Nyquist")
+{
+    /*  The author, 2026-09-29: "If we can improve on the plain varispeed, to
+        avoid aliasing, this would be great. Or we could simply filter out the
+        high frequency content." Patch 0002 low-passes the file before the
+        interpolator above one, at 0.4 of the output's rate over the speed.
+        M47 heard a 5 kHz tone at twenty come out at 4 kHz, as loud. */
+    constexpr int rate = 48000;
+    constexpr float amplitude = 0.25f;
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("wfg-antialias");
+
+    struct Case { double hertz; double speed; bool passes; };
+
+    for (const auto& c : { Case { 5000.0, 20.0, false },    // 100 kHz: nothing should sound
+                           Case { 15000.0, 2.0, false },    // 30 kHz: would fold to 18
+                           Case { 5000.0, 2.0, true },      // 10 kHz: through, as loud
+                           Case { 4000.0, 4.0, true },      // 16 kHz: through, as loud
+                           Case { 1000.0, 1.3, true } })    // 1.3 kHz: through
+    {
+        INFO (c.hertz << " Hz at x" << c.speed);
+
+        const auto tone = writeSineTone (folder.getChildFile (juce::String (c.hertz) + "-" + juce::String (c.speed)),
+                                         rate, c.hertz, amplitude, 30);
+        REQUIRE (tone.existsAsFile());
+
+        SpeedRig voice;
+        voice.rate = rate;
+        REQUIRE (voice.open (tone, false));
+        REQUIRE (voice.go (c.speed));
+
+        const auto heard = voice.record (0.25, 0.5);
+        const auto level = rmsOver (heard, 0, heard.getNumSamples()) / (amplitude / std::sqrt (2.0f));
+
+        if (c.passes)
+        {
+            const auto fundamental = amplitudeAt (heard, c.hertz * c.speed, rate) / amplitude;
+            INFO ("the fundamental at " << decibels (fundamental) << " dB");
+            CHECK (std::abs (decibels (fundamental)) < 0.5);
+        }
+        else
+        {
+            INFO ("everything at " << decibels (level) << " dB re the tone");
+            CHECK (decibels (level) < (c.speed > 10.0 ? -60.0 : -25.0));
+        }
     }
 }

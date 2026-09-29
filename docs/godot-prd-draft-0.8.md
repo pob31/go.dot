@@ -3186,9 +3186,10 @@ DT-EH in §22.1 are the author's to overrule; these are what the work left out:
   nothing and `wfg validate` says so.
 - **Reverse.**
 - **Pitch as a number of its own**, apart from the speed.
-- **A band-limited resampler above one**, which needs Tracktion's own sinc reader fixed first. M47
-  says it is worth it: above one, Lagrange folds everything above Nyquist over the speed back at
-  full level.
+- ~~**A band-limited resampler above one**~~ - answered 2026-09-29 the author's second way ("or we
+  could simply filter out the high frequency content"): above one the file is low-passed before the
+  interpolator, and a 5 kHz tone at twenty, which folded back at full level, is 83 dB down (namespace
+  draft §22.11).
 - **Speed fades in load-to-time**: the solve reads a cue's own speed, not a fade's.
 - **A stretcher primed on the message thread**, once its file is in the cache and before the launch:
   M46 measured the prime at 1 to 5 ms on the audio thread, a dropout at blocks of 64.
@@ -3300,9 +3301,9 @@ Mackie vs HUI first — first week with the D700.
   costs at most 0.9% of real time resampled and 3.1% stretched, allocating nothing; a stretched
   launch costs 1 to 5 ms on the audio thread, a dropout at blocks of 64, and so does a stretched
   loop's every wrap. M47: Lagrange's images are 68 to 78 dB down while a sound stays under Nyquist,
-  but above one everything over Nyquist folds back at full level; the gate makes no step; a freeze
-  holds its pitch 4 to 7 dB down; a stretched loop has a gap and a click at every pass. Namespace
-  draft §22.10.
+  but above one everything over Nyquist folds back at full level - since filtered, 83 dB down at
+  twenty (§22.11); the gate makes no step; a freeze holds its pitch 4 to 7 dB down; a stretched loop
+  has a gap and a click at every pass. Namespace draft §22.10.
 
 ---
 
