@@ -12921,7 +12921,8 @@ Two levers, neither pulled. One is the prime on the message thread (§22.9). The
 the question put to the author on 2026-09-27, whether to turn it off, has a second reason now. The
 mute turns a long block into a certain gap, and leaves everything after it a block late.
 
-**For upstream**, a JUCE forum post drafted for the author to send (Tracktion takes no pull
-requests) lists what is Tracktion's own in patch 0002: the Lagrange reader's per-block rounding, the stretcher's prime at speeds other than one, its prime before the file is cached, its
+**For upstream**, the author posted a report on the JUCE forum (Tracktion takes no pull requests),
+2026-09-29: https://forum.juce.com/t/wavenoderealtime-readers-resampler-rounding-stretcher-priming-cache-misses-loop-wraps-and-slot-rebuilds/69617.
+It lists what is Tracktion's own in patch 0002: the Lagrange reader's per-block rounding, the stretcher's prime at speeds other than one, its prime before the file is cached, its
 lost place after a cache miss, a slot rebuilt mid-play restarting its reader, and this loop above
 the stretcher.
