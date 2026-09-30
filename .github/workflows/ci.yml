@@ -563,48 +563,58 @@ jobs:
         # violation does not hide the next - the point of the first run is the
         # whole list, not the first line of it.
         #
-        # AND EVERY REPORT GOES TO A FILE (2026-09-30), because until this date
-        # the job could not go red. With halt_on_error=0 a process that reports
-        # a violation carries on and exits 0, so its test passes; and ctest's
-        # --output-on-failure shows the output of FAILED tests only, so the
-        # report was printed into a log nobody was shown. 134 tests passed on
-        # 45e1664 with not one report line in the job's log, which proves
-        # nothing either way. log_path is the sanitizers' common flag: each
-        # process writes <path>.<pid>, which catches a `wfg` started by a Python
-        # driver and every helper it starts too - their stderr goes wherever
-        # the driver sends it. The directory has to exist first; the sanitizer
-        # opens a file and does not make folders.
+        # WHY THIS STEP CANNOT BE THE GATE ON ITS OWN (2026-09-30). With
+        # halt_on_error=0 a process that reports a violation carries on and
+        # exits 0, so its test passes; and --output-on-failure shows the output
+        # of FAILED tests only. Until this date the report was printed into a
+        # log nobody was shown, and the job could not go red. The first repair
+        # sent reports to files through the sanitizers' log_path flag - and
+        # RTSan in Clang 20 parses log_path and never applies it (__rtsan_init
+        # does not call __sanitizer_set_report_path, as ASan and UBSan do), so
+        # the files never appeared and the gate was green because it was deaf.
+        # The step after this one is the gate; tests/RtsanControl.cpp proves it
+        # can hear.
         env:
-          RTSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/rtsan-suppressions.txt:halt_on_error=0:log_path=${{ runner.temp }}/rtsan/report
-        run: |
-          mkdir -p "${{ runner.temp }}/rtsan"
-          ctest --test-dir build/rtsan -C Debug --output-on-failure
+          RTSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/rtsan-suppressions.txt:halt_on_error=0
+        run: ctest --test-dir build/rtsan -C Debug --output-on-failure
 
       - name: Fail on any sanitizer report
-        # The gate the step above cannot be. A file that names the sanitizer is
-        # a violation somebody's test walked into, whether or not that test
-        # passed; anything else a process wrote there is shown but is not one.
-        # Each report is printed here, in the log, where it can be read.
+        # ctest writes the whole output of EVERY test to LastTest.log, passed or
+        # failed, so a report printed anywhere in the suite is in that file:
+        # the unit suite, a replay, a helper process that inherited a test's
+        # output. A `wfg` started by a Python driver writes to a pipe the driver
+        # holds, and tests/blackbox/common.py prints what it finds there and
+        # fails the driver. The control's own planted report never reaches this
+        # file (tests/rtsan_control.py reads it from the child), so a match
+        # here is always a real violation. Each test that printed one is named.
         if: always()
         run: |
-          shopt -s nullglob
-          reports=("${{ runner.temp }}"/rtsan/report.*)
-          found=0
-          for file in "${reports[@]}"; do
-            echo "::group::$(basename "$file")"
-            cat "$file"
-            echo "::endgroup::"
-            if grep -q "RealtimeSanitizer" "$file"; then
-              found=$((found + 1))
-            fi
-          done
-          echo "${#reports[@]} file(s) written, ${found} holding a sanitizer report"
-          test "$found" -eq 0
+          log=build/rtsan/Testing/Temporary/LastTest.log
+          if [ ! -f "$log" ]; then
+            echo "no LastTest.log: the tests did not run, so nothing was checked"
+            exit 1
+          fi
+          python3 - "$log" <<'PY'
+          import re, sys
+          text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+          tell = "Realtime" + "Sanitizer"
+          sections = re.split(r"\n(?=\d+/\d+ Testing: )", text)
+          hits = [s for s in sections if tell in s]
+          for section in hits:
+              name = section.splitlines()[0]
+              print(f"::group::{name}")
+              for line in section.splitlines():
+                  if tell in line or line.startswith("    #"):
+                      print(line)
+              print("::endgroup::")
+          print(f"{len(hits)} test(s) printed a sanitizer report")
+          sys.exit(1 if hits else 0)
+          PY
 
-      - name: Keep the sanitizer's reports
+      - name: Keep the whole test output
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: rtsan-reports
-          path: ${{ runner.temp }}/rtsan/
+          name: rtsan-lasttest-log
+          path: build/rtsan/Testing/Temporary/LastTest.log
           if-no-files-found: ignore

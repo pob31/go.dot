@@ -627,11 +627,72 @@ class Server:
                 self.process.kill()
                 self.process.wait(timeout=10)
 
+        # WHAT THE ENGINE SAID ON ITS WAY OUT, read for one thing only: a
+        # report from the real-time sanitizer. The rtsan CI job builds with it
+        # and runs with halt_on_error=0, so a `wfg` that walks into a lock on
+        # the audio thread carries on and says so on stderr - a pipe nobody
+        # reads after the ports, which is where the report used to vanish. It
+        # is printed here, into the test's output, where the job's gate reads
+        # it (.github/workflows/ci.yml), and the driver fails. Read on a thread
+        # with a deadline: a helper the engine started can outlive it holding
+        # the pipe's write end, and a plain read would then wait for that
+        # helper instead of returning. A driver that already read stderr
+        # itself (device_serve, crash_during_write) leaves nothing to find.
+        report = sanitizer_report(_rest_of(self.process.stderr))
+
+        if report:
+            print(report, flush=True)
+            raise HarnessError("serve printed a real-time sanitizer report (above)")
+
+
+def _rest_of(stream, timeout: float = 5.0) -> str:
+    """What is left in a child's pipe, or "" if it cannot be read in time."""
+    if stream is None:
+        return ""
+
+    got: "list[str]" = []
+
+    def read() -> None:
+        try:
+            got.append(stream.read() or "")
+        except (OSError, ValueError):
+            pass
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    reader.join(timeout)
+    return got[0] if got else ""
+
+
+def sanitizer_report(text: str) -> str:
+    """The real-time sanitizer's report lines in `text`, or "".
+
+    The name is assembled rather than written out, so that nothing but a
+    real report can put it into a test's output: the CI gate fails the job on
+    it, wherever it appears.
+    """
+    tell = "Realtime" + "Sanitizer"
+
+    if tell not in text:
+        return ""
+
+    return "\n".join(line for line in text.splitlines()
+                     if tell in line or line.startswith("    #"))
+
 
 def run_wfg(*args: str) -> "tuple[int, str, str]":
-    """One shot of the binary. (exit code, stdout, stderr)."""
+    """One shot of the binary. (exit code, stdout, stderr).
+
+    A sanitizer report in what it printed is echoed into this test's output,
+    where the rtsan job's gate reads it (see Server.stop).
+    """
     done = subprocess.run([str(find_binary()), *args],
                           capture_output=True, text=True, timeout=120)
+    report = sanitizer_report(done.stdout + done.stderr)
+
+    if report:
+        print(report, flush=True)
+
     return done.returncode, done.stdout, done.stderr
 
 

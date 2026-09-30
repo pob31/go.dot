@@ -205,6 +205,24 @@ add_test(NAME unit.C     COMMAND wfg_tests --wfg-locale=C)
 add_test(NAME unit.fr_FR COMMAND wfg_tests --wfg-locale=${WFG_LOCALE_FR})
 
 # -----------------------------------------------------------------------------
+# THE REAL-TIME SANITIZER'S CONTROL (2026-09-30), built only where it means
+# something: the rtsan preset, whose flags carry -fsanitize=realtime. It walks
+# into PRD §4.2 on purpose through WFG_AUDIO_THREAD, and rtsan_control.py
+# passes only if the sanitizer reported it - so the rtsan job's green says the
+# sanitizer looked rather than that nobody could hear it (RtsanControl.cpp
+# tells how the job went weeks unable to go red). The planted report stays
+# inside the wrapper: the job's gate fails on the sanitizer's name anywhere in
+# the tests' output, and this one is the only report that is meant.
+# -----------------------------------------------------------------------------
+if(CMAKE_CXX_FLAGS MATCHES "fsanitize=realtime")
+    add_executable(wfg_rtsan_control RtsanControl.cpp)
+    target_include_directories(wfg_rtsan_control PRIVATE "${CMAKE_SOURCE_DIR}/src")
+    add_test(NAME rtsan.control
+             COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/rtsan_control.py"
+                     "$<TARGET_FILE:wfg_rtsan_control>")
+endif()
+
+# -----------------------------------------------------------------------------
 # The product binary boots.
 #
 # This is the whole of what Phase 0 claims: the thing we ship starts, links
