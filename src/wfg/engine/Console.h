@@ -53,6 +53,15 @@ namespace wfg
     struct Client
     {
         virtual ~Client() = default;
+
+        /*  The system asked Go.dot to quit - ⌘Q, the Dock, a Windows shutdown:
+            the window's own close, which asks first and refuses in show mode,
+            rather than the end of the process there and then. */
+        virtual void requestClose() {}
+
+        /*  This window's show was asked for again - a double-click on it, or
+            Open show... on it from another window: come forward. */
+        virtual void bringToFront() {}
     };
 
     /** What the console hands the client: the doors, and the way out. */

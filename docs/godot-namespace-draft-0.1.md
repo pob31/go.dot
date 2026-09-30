@@ -7645,6 +7645,17 @@ chosen folder; and the menu's keys are the classical ones - ctrl/⌘-N, -O, -S, 
 them from, so the menu cannot show a key the window ignores, and a key for an item the reading
 disables does nothing, exactly as the item would.
 
+*2026-09-30, with the `.wfg` double-click:* **a show is open in at most one window.** New and Open had
+never asked, so Open on a show already open stood up a second engine whose autosave wrote the same
+`recovery/`, and a double-click would have made that one gesture away. A windowed serve now CLAIMS its
+show before loading it (`app/OpenShows.h`): a system lock - a named mutex on Windows, an fcntl lock
+elsewhere - which the system lets go of however the process ends, and beside it, in Go.dot's own folder
+and never in the show (§4.10), a file naming the holder's process. A serve that finds its show claimed
+brings the holder's window forward and exits 0; Open answers "already open: its window is in front".
+Where the system will not say which window that is (Linux, for now) both say the show is already open.
+`serve` and Open also take the show's `.wfg` for its folder, and a windowed serve that cannot start says
+why in the system's alert, since a double-click leaves nobody reading stderr.
+
 **A FADE THAT STOPS WHEN IT ARRIVES (2026-09-18).** *"Something else I think I haven't seen, a tick box to
 stop a media file once a fade has completed."* There was none, and reading the code for it found the
 fade cue passing `false` to the one flag that would have done it: a fade never stopped anything, even at

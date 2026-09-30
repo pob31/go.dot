@@ -601,6 +601,24 @@ namespace wfg::client
             }
 
             //======================================================================
+            //  What the system asks of the window (Console.h, `Client`)
+            void requestClose() override
+            {
+                closeRequested();
+            }
+
+            void bringToFront() override
+            {
+                if (window == nullptr)
+                    return;
+
+                if (window->isMinimised())
+                    window->setMinimised (false);
+
+                window->toFront (true);
+            }
+
+            //======================================================================
             //  The menu (juce::MenuBarModel)
             juce::StringArray getMenuBarNames() override
             {

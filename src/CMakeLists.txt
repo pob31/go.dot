@@ -69,8 +69,14 @@
 # where most of the reasoning lives.
 # -----------------------------------------------------------------------------
 add_library(wfg_engine STATIC
+    wfg/engine/app/OpenShows.cpp
+    wfg/engine/app/OpenShows.h
+    wfg/engine/app/Raise.cpp
+    wfg/engine/app/Raise.h
     wfg/engine/app/StartupReport.cpp
     wfg/engine/app/StartupReport.h
+    wfg/engine/app/WindowApplication.cpp
+    wfg/engine/app/WindowApplication.h
     wfg/engine/audio/AudioSettings.cpp
     wfg/engine/audio/AudioSettings.h
     wfg/engine/audio/OutputTestSignal.h
@@ -321,6 +327,12 @@ add_library(wfg::engine ALIAS wfg_engine)
 # path that also carries two whole vendor module trees, and the first vendor
 # header that ever takes the same name wins silently.
 target_include_directories(wfg_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# The Mac's half of app/Raise.h, which needs AppKit; Raise.cpp compiles to
+# nothing there.
+if(APPLE)
+    target_sources(wfg_engine PRIVATE wfg/engine/app/Raise_mac.mm)
+endif()
 
 # wfg::thirdparty is PUBLIC on purpose. The engine's own public headers name no
 # JUCE type — Engine.h and Console.h are vendor-free, and that is a rule, not an

@@ -17,7 +17,9 @@
 #include <wfg/engine/Console.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/app/OpenShows.h>
 #include <wfg/engine/app/StartupReport.h>
+#include <wfg/engine/app/WindowApplication.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/DcaTable.h>
@@ -2284,6 +2286,11 @@ namespace
             Headless is untouched: this reaches MessageManager::getInstance()
             and nothing else, opens no display, and the Linux job runs it with
             no xvfb - the selftest verb has done exactly this since Phase 0. */
+        /*  A WINDOWED SERVE IS AN APPLICATION, and JUCE has to be told before
+            it starts, not after (app/WindowApplication.h). Headless is not. */
+        if (args.containsOption ("--window"))
+            wfg::app::WindowApplication::declareStandalone();
+
         const juce::ScopedJuceInitialiser_GUI juceForTheVerb;
 
        #if JUCE_MAC
@@ -2475,6 +2482,38 @@ namespace
             std::cerr << "wfg serve: not a show folder or a .wfg: "
                       << given.getFullPathName() << std::endl;
             return 2;
+        }
+
+        /*  ONE WINDOW PER SHOW (app/OpenShows.h): claimed before anything is
+            loaded or opened, so a second serve on it costs a lock and not an
+            audio device. The one that finds it taken brings the holder's
+            window forward and goes, having done what was asked of it - or,
+            where the system will not say which window that is, says so.
+
+            And the application the system talks to (app/WindowApplication.h),
+            made here and given its jobs once there is a window to do them. */
+        std::unique_ptr<wfg::app::OpenShow> openShow;
+        std::optional<wfg::app::WindowApplication> application;
+
+        if (wantWindow)
+        {
+            openShow = wfg::app::OpenShow::claim (target);
+
+            if (openShow == nullptr)
+            {
+                const auto name = target.getFileName().toStdString();
+
+                if (wfg::app::OpenShow::raiseHolder (target))
+                {
+                    std::cout << "wfg serve: " << name << " is already open; its window is in front" << std::endl;
+                    return 0;
+                }
+
+                std::cerr << "wfg serve: " << name << " is already open in another Go.dot window" << std::endl;
+                return 2;
+            }
+
+            application.emplace();
         }
 
         //  --- the document -----------------------------------------------
@@ -4700,7 +4739,7 @@ namespace
 
                 `--recover` is not carried: the child finds any recovery for
                 itself and offers it, as this one did. */
-            const auto launchAnother = [&args] (const std::string& folderPath, bool createNew) -> std::string
+            const auto launchAnother = [&args, &target] (const std::string& folderPath, bool createNew) -> std::string
             {
                 /*  Open takes the show's `.wfg` as well as its folder, which
                     is the one an Open dialog lets a person pick inside it;
@@ -4710,6 +4749,21 @@ namespace
 
                 if (folder == juce::File())
                     return chosen.getFileName().toStdString() + " is not a show folder or a .wfg";
+
+                /*  ONE WINDOW PER SHOW: this one's, or another's brought
+                    forward, never a second engine on it (app/OpenShows.h). */
+                if (! createNew)
+                {
+                    const auto name = folder.getFileName().toStdString();
+
+                    if (folder == target)
+                        return name + " is the show in this window";
+
+                    if (wfg::app::OpenShow::heldElsewhere (folder))
+                        return wfg::app::OpenShow::raiseHolder (folder)
+                                 ? name + " is already open: its window is in front"
+                                 : name + " is already open in another window";
+                }
 
                 if (createNew)
                 {
@@ -4841,6 +4895,30 @@ namespace
 
                 if (client == nullptr)
                     return 2;   // the factory has already said why
+
+                /*  WHAT THE SYSTEM ASKS, to the window. A file to open is this
+                    window's show, which comes forward, or another, which opens
+                    as Open show... opens it; quitting is the window's own close,
+                    which asks first and refuses in show mode. */
+                if (application.has_value())
+                {
+                    application->onOpen = [&client, &target, &launchAnother] (const juce::String& path)
+                    {
+                        if (! juce::File::isAbsolutePath (path))
+                            return;
+
+                        if (wfg::doc::Bundle::folderFor (juce::File (path)) == target)
+                        {
+                            client->bringToFront();
+                            return;
+                        }
+
+                        if (const auto refused = launchAnother (path.toStdString(), false); ! refused.empty())
+                            std::cerr << "wfg serve: " << refused << std::endl;
+                    };
+
+                    application->onQuit = [&client] { client->requestClose(); };
+                }
             }
 
             /*  THREE CLOCKS, AND ALL THREE ANSWERED FOR.
@@ -4892,6 +4970,13 @@ namespace
                 needs a message thread for plugin scanning and device callbacks, so
                 it is stood up now rather than retrofitted around a loop of our own. */
             runMessageLoopUntilInterrupted();
+
+            //  The window goes with this scope; the application outlives it.
+            if (application.has_value())
+            {
+                application->onOpen = nullptr;
+                application->onQuit = nullptr;
+            }
 
             ticks.stop();
         }

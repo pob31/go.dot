@@ -68,6 +68,7 @@ add_executable(wfg_tests
     ToolchainTests.cpp
     LocaleTests.cpp
     OscValueTests.cpp
+    OpenShowsTests.cpp
     CommandTests.cpp
     EventLogTests.cpp
     EngineTests.cpp
