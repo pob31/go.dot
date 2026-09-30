@@ -52,6 +52,16 @@ fi
 # anybody starting from nothing needs is the interface to play through. A show
 # of your own opens as it was saved.
 #
+# THROUGH PIPEWIRE'S JACK WHEN IT IS INSTALLED (pw-jack, from pipewire-jack).
+# A desktop running PipeWire holds the audio interface, and plain ALSA then
+# offers only its stereo pair; as a JACK client Go.dot sees every channel, and
+# the desktop keeps its sound. pw-jack points wfg at PipeWire's libjack, which
+# is what makes "JACK" appear in Show settings - from a double-click too, since
+# `wfg associate`'s desktop entry runs this script. Without pw-jack, plain wfg.
+#
 # --ui is resolved against the working directory, so run from beside the binary.
 cd "$here"
+if command -v pw-jack >/dev/null 2>&1; then
+    exec pw-jack ./wfg serve "$show" --window --ui=console ${first[@]+"${first[@]}"} "$@"
+fi
 exec ./wfg serve "$show" --window --ui=console ${first[@]+"${first[@]}"} "$@"

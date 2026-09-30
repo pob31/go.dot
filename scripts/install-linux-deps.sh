@@ -33,7 +33,6 @@
 # cmake/WfgThirdParty.cmake, on the wfg_deps target):
 #   libcurl4-openssl-dev   JUCE_USE_CURL=0
 #   libwebkit2gtk-4.1-dev  JUCE_WEB_BROWSER=0   (revisit at Phase 11, PRD 3.23)
-#   libjack-jackd2-dev     JUCE_JACK=0          (a Phase-2 Linux audio-backend decision)
 #   ladspa-sdk             JUCE_PLUGINHOST_LADSPA=0
 #   libglu1-mesa-dev /     juce_opengl, which we do not link
 #     mesa-common-dev
@@ -85,6 +84,7 @@ $SUDO apt-get install -y --no-install-recommends \
     locales \
     python3-lxml \
     libasound2-dev \
+    libjack-jackd2-dev \
     libfreetype-dev \
     libfontconfig1-dev \
     libx11-dev \
@@ -118,6 +118,10 @@ $SUDO apt-get install -y --no-install-recommends \
 #                        source build of lxml on a CI runner is a slow way to
 #                        discover that a compiler flag changed.
 #   libasound2-dev       juce_audio_devices (ALSA)
+#   libjack-jackd2-dev   juce_audio_devices (JACK, JUCE_JACK=1 on Linux): the
+#                        header only. JUCE loads libjack.so.0 when Go.dot starts,
+#                        so the binary needs no JACK to run - it offers JACK
+#                        where there is one, PipeWire's included.
 #   libfreetype-dev      juce_graphics
 #   libfontconfig1-dev   juce_graphics
 #   libx11-dev           juce_gui_basics

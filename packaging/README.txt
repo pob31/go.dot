@@ -58,6 +58,14 @@ open in a window is brought forward instead of being opened twice.
             Built on Ubuntu 24.04; it needs ALSA, FreeType, fontconfig and
             the X11 libraries, which a desktop install already has.
 
+            A multichannel interface: a desktop running PipeWire holds it,
+            and ALSA then offers only two channels. Use JACK instead:
+            install pipewire-jack, set the interface's profile to "Pro
+            Audio" (pavucontrol, Configuration tab), and choose JACK in Show
+            settings. go.dot.sh starts Go.dot through pw-jack when it is
+            installed, so every channel is there and the desktop keeps its
+            sound.
+
             To open a show's .wfg with a double-click, choose "Open .wfg
             files with this Go.dot" in the File menu, or run
             ./wfg associate  - for you alone, pointing at this folder: run

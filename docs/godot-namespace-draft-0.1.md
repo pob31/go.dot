@@ -764,7 +764,10 @@ back on if nobody feels strongly by then.
 - **I — Audio backends as WFS-DIY builds them** (settled 2026-09-05): `JUCE_ASIO=1` behind a
   `WFG_ASIO_SDK` path variable (the SDK is not redistributable, so without a path the build
   is WASAPI/DirectSound only) and `JUCE_JACK=1` on Linux with `libjack-jackd2-dev` in the
-  package list. CoreAudio needs nothing.
+  package list. CoreAudio needs nothing. *(The Linux half was only carried out on 2026-09-30 - the
+  build had kept Phase 0's `JUCE_JACK=0` until a multichannel interface on the author's Linux
+  machine showed only its stereo pair through ALSA under PipeWire; `go.dot.sh` now runs through
+  `pw-jack` where PipeWire's JACK is installed.)*
 
 - **L — The §3.24 proposals touching Phase 3** (settled 2026-09-06, with the Phase 3 plan):
   ranges **may be discontiguous and in any file order** — a media cue is then a playlist over one

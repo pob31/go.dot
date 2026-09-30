@@ -262,7 +262,12 @@ target_compile_definitions(wfg_deps INTERFACE
     JUCE_WEB_BROWSER=0              # drops libwebkit2gtk-4.1-dev; revisit at Phase 11 (PRD 3.23)
     JUCE_STRICT_REFCOUNTEDPOINTER=1 # hygiene; TE's own reference sets it, zero TE references
     JUCE_MODAL_LOOPS_PERMITTED=0    # all 20 TE uses are #if-guarded; a modal loop in a show engine is a hang
-    JUCE_JACK=0                     # already the default; explicit because it is what keeps libjack-jackd2-dev off the apt line
+    # JACK on Linux (namespace draft decision I, 2026-09-05, carried out 2026-09-30):
+    # the way to every channel of a multichannel interface on a desktop where
+    # PipeWire holds it and ALSA offers its stereo pair. Only the header is
+    # needed to build (libjack-jackd2-dev); JUCE dlopens libjack.so.0 when Go.dot
+    # starts, so a machine without JACK still runs it, with no JACK choice.
+    JUCE_JACK=$<IF:$<PLATFORM_ID:Linux>,1,0>
     JUCE_PLUGINHOST_LADSPA=0        # already the default; explicit because it is what keeps ladspa-sdk off the apt line
     # 2026-09-28 (namespace draft §22, decision DZ): Signalsmith Stretch, the time-
     # stretcher behind a media cue's `timestretch` mode. MIT-licensed, header-only and
