@@ -1100,6 +1100,36 @@ add_test(NAME blackbox.phase5.fr_FR
 set_tests_properties(blackbox.phase5.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# H6: CRASH-SAFE SAVING, KILLED HALFWAY THROUGH A WRITE (namespace draft §23.4,
+# and §23.5 for the two engine fixes it failed first on). Phase 5's kill waits
+# for the autosave to land before it pulls the plug; this one never waits. A
+# stream of renames, saves and autosaves keeps the writer thread busy, and the
+# engine is killed at twenty seeded random points while the writes are in
+# flight. After each kill the files must be exactly one of the states written -
+# show.xml byte for byte the calibrated template with one marker in it,
+# recovery/ absent or complete and never older than a show its own session
+# saved, and the offered folder the one the engine's rule picks - with every
+# temp beside them ignored. Then a plain restart must publish show.xml's state
+# and take document.recover, and a --recover restart must start rather than
+# exit 2. Killed and never stopped: on POSIX a stop is a clean exit that drains
+# the writer. REGISTERED WITH THE ENGINE FIXES IT FAILED FIRST ON (H6b): before
+# them every run on the Windows box was red - an autosave older than the save
+# left on offer in about one kill in five, on every platform, and on Windows a
+# file under no name in about one kill in twenty-five. A red here is the
+# engine's, never a flake to re-run. Ports are ephemeral and the scratch folder
+# is unique, so no RUN_SERIAL. About twenty seconds on the Windows box in Debug;
+# three hundred for a loaded runner.
+add_test(NAME blackbox.crash-write.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/crash_during_write.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.crash-write.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.crash-write.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/crash_during_write.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.crash-write.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # PRD §3.30'S CHECK, BEFORE ANYTHING IS DRAWN (PR 5.7, namespace draft §14.12):
 # a 1 kHz sine saturated at the ramp's 1 kHz hue, white noise grey, a sweep
 # walking the ramp - three WAVs the driver writes with stdlib `wave`, analysed

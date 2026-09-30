@@ -42,12 +42,14 @@
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/Bundle.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
 
 #include <juce_core/juce_core.h>
+#include <juce_cryptography/juce_cryptography.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -193,6 +195,21 @@ namespace
         wiring.settleNow();
 
         REQUIRE (Bundle::hasRecovery (folder));
+    }
+
+    /*  WHAT A `superseded` MARKER HOLDS, spelled out as BundleTests.cpp spells
+        it and for its reason - the engine does not get to agree with itself:
+        `show.xml`, the byte count and the SHA-256 of the show.xml a save was
+        about to write, on one line (H6b, namespace draft §23.5). */
+    std::string markerFor (const std::string& show)
+    {
+        return "show.xml " + std::to_string (show.size()) + " sha256:"
+             + juce::SHA256 (show.data(), show.size()).toHexString().toStdString() + "\n";
+    }
+
+    juce::File supersededIn (const juce::File& recovery)
+    {
+        return recovery.getChildFile ("superseded");
     }
 }
 
@@ -882,6 +899,625 @@ TEST_CASE ("the clean exit drains the writer before it decides, so a save queued
 }
 
 //==============================================================================
+/*  H6b: A SAVE MARKS WHAT IT WILL RETIRE BEFORE IT WRITES (namespace draft
+    §23.5).
+
+    `blackbox/crash_during_write.py` killed the engine inside saves, and in
+    about one kill in five the next start offered the autosave from BEFORE the
+    save as recovery: the save's job wrote show.xml, state.xml and the manifest,
+    and only then deleted the folders the work had outgrown. A kill in between
+    left them, and adopting one took the show back past the save. These cases
+    make the same folders without a kill - a save stopped after its show.xml, a
+    marker a crashed session left - and ask what the writer leaves on offer. */
+
+TEST_CASE ("a save marks the recovery it will retire before it writes show.xml, so a save stopped after show.xml leaves nothing older on offer")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  STOPPED BY state.xml, which cannot be written - a directory where its
+        temp goes - and not by a kill. The folders it leaves are the kill's:
+        show.xml new, and `recovery/` still holding the autosave from before. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Autosaved before the save").ok);
+    REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+    wiring.settleNow();
+    REQUIRE (nameIn (Bundle::recoveryFolder (temp.folder)) == "Autosaved before the save");
+
+    REQUIRE (Bundle::temporaryFor (Bundle::stateFile (temp.folder)).createDirectory().wasOk());
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Saved, and stopped at state.xml").ok);
+    CHECK (wiring.invoke ("document.save", {}, 20).applied);
+    wiring.settleNow();
+
+    //  show.xml landed; the save as a whole did not, and says so, dot lit.
+    CHECK (nameInBundle (temp.folder) == "Saved, and stopped at state.xml");
+    CHECK (session.writeError.rfind ("document.save at tick 20: ", 0) == 0);
+    CHECK (isDirty (document, session));
+
+    /*  THE FOLDER STAYS - a save that did not land retires nothing - and
+        holds the afternoon from before the save. But it is marked with the
+        show.xml the save wrote, which is the one on the disk now, so it is
+        offered by nothing: adopting it would take the show back past a save
+        whose show.xml is there. */
+    CHECK (nameIn (Bundle::recoveryFolder (temp.folder)) == "Autosaved before the save");
+    CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+    CHECK_FALSE (Bundle::hasRecovery (temp.folder));
+
+    const auto marker = supersededIn (Bundle::recoveryFolder (temp.folder));
+    REQUIRE (marker.existsAsFile());
+    CHECK (readBytes (marker) == markerFor (readBytes (Bundle::showFile (temp.folder))));
+}
+
+TEST_CASE ("a session's first write settles what an earlier session's saves left marked: a folder a save superseded goes, one whose save never landed keeps its show and loses the marker")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto live = temp.folder.getChildFile ("recovery.previous.1");
+
+    //  Two earlier sessions, each gone with work in recovery/ ...
+    abandonAnAfternoon (temp.folder, "Its save never landed");
+    REQUIRE (Bundle::recoveryFolder (temp.folder).moveFileTo (live));
+    abandonAnAfternoon (temp.folder, "Its save landed");
+
+    /*  ... each killed inside a save, after the marker: the first before its
+        show.xml, so the marker names a show that is nowhere; the second after
+        it, so the marker names the show.xml on the disk. */
+    const auto shown = readBytes (Bundle::showFile (temp.folder));
+    writeBytes (supersededIn (live), markerFor (shown + "<!-- the save that never landed -->\n"));
+    writeBytes (supersededIn (Bundle::recoveryFolder (temp.folder)), markerFor (shown));
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+
+    //  At open, judged and not yet settled: the superseded folder is no offer, and the one below it is.
+    CHECK (session.offeredRecovery == live);
+
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "This session's work").ok);
+    REQUIRE (wiring.invoke ("document.autosave", {}, 150).applied);
+    wiring.settleNow();
+
+    /*  SETTLED BY THE FIRST JOB, before its own bytes and before any save of
+        this session could change show.xml. The superseded folder is gone -
+        moved aside instead, it would come back as an offer the moment a save
+        changed show.xml. And the live one keeps its afternoon without the
+        marker, which a later save writing those very bytes could otherwise
+        match, making real work look superseded. */
+    CHECK_FALSE (temp.folder.getChildFile ("recovery.previous.2").exists());
+    CHECK (nameIn (live) == "Its save never landed");
+    CHECK_FALSE (supersededIn (live).exists());
+    CHECK (nameIn (Bundle::recoveryFolder (temp.folder)) == "This session's work");
+    CHECK_FALSE (supersededIn (Bundle::recoveryFolder (temp.folder)).exists());
+    CHECK (session.offeredRecovery == live);
+    CHECK (session.writeError.empty());
+}
+
+TEST_CASE ("a save never marks an earlier session's unanswered offer: in recovery/ or moved aside, it stays offered")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  §14.10's rule, held against the marker: a save retires this session's
+        own `recovery/` and the folder it recovered from, and says nothing about
+        somebody else's afternoon. A guard rather than a repair - before H6b
+        nothing marked anything - so it cannot fail first; a marker in either
+        folder here would hide an afternoon nobody has answered. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+    abandonAnAfternoon (temp.folder, "Somebody else's afternoon");
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+    REQUIRE (session.offeredRecovery == Bundle::recoveryFolder (temp.folder));
+
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    //  Saved while the offer still sits in recovery/.
+    REQUIRE (document.setAttribute (houseToHalfName, "Saved first").ok);
+    REQUIRE (wiring.invoke ("document.save", {}, 50).applied);
+    wiring.settleNow();
+
+    CHECK_FALSE (supersededIn (Bundle::recoveryFolder (temp.folder)).exists());
+    CHECK (Bundle::offeredRecovery (temp.folder) == Bundle::recoveryFolder (temp.folder));
+    CHECK (nameIn (Bundle::recoveryFolder (temp.folder)) == "Somebody else's afternoon");
+
+    //  Moved aside by this session's first autosave, then saved over again.
+    const auto aside = temp.folder.getChildFile ("recovery.previous.1");
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Autosaved").ok);
+    REQUIRE (wiring.invoke ("document.autosave", {}, 150).applied);
+    wiring.settleNow();
+    REQUIRE (session.offeredRecovery == aside);
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Saved again").ok);
+    REQUIRE (wiring.invoke ("document.save", {}, 200).applied);
+    wiring.settleNow();
+
+    CHECK_FALSE (Bundle::recoveryFolder (temp.folder).exists());
+    CHECK_FALSE (supersededIn (aside).exists());
+    CHECK (Bundle::offeredRecovery (temp.folder) == aside);
+    CHECK (nameIn (aside) == "Somebody else's afternoon");
+}
+
+TEST_CASE ("an autosave that finds its own recovery/ marked clears it before it writes: a show a landed save superseded goes, a live one only loses the marker")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  WHAT A TIDY-UP THAT FAILED LEAVES, in this session: the folder a save
+        meant to delete, marked. Planted by hand, after the session's first
+        write, so that what answers it is the autosave and not the settling at
+        a session's start; the Windows case below makes the same folder the
+        real way. Either way the next autosave must not write its show under a
+        marker it did not write - a marker naming show.xml would hide it. */
+
+    //--------------------------------------------------------------------------
+    /*  THE SAVE LANDED: the marker names show.xml, and the folder holds a show
+        older than it. It goes - its show first, then the marker - and the
+        autosave writes this session's work, which is offered again. */
+    {
+        TempBundle temp { "minimal" };
+        temp.copyFixture();
+
+        ShowDocument document;
+        REQUIRE (Bundle::open (temp.folder, document).ok);
+
+        DocumentSession session { temp.folder, document.showRevision() };
+        Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+        REQUIRE (document.setAttribute (houseToHalfName, "The autosave before the save").ok);
+        REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+        wiring.settleNow();
+
+        writeBytes (supersededIn (Bundle::recoveryFolder (temp.folder)),
+                    markerFor (readBytes (Bundle::showFile (temp.folder))));
+        CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+
+        REQUIRE (document.setAttribute (houseToHalfName, "The autosave after it").ok);
+        REQUIRE (wiring.invoke ("document.autosave", {}, 20).applied);
+        wiring.settleNow();
+
+        CHECK_FALSE (supersededIn (Bundle::recoveryFolder (temp.folder)).exists());
+        CHECK (nameIn (Bundle::recoveryFolder (temp.folder)) == "The autosave after it");
+        CHECK (Bundle::offeredRecovery (temp.folder) == Bundle::recoveryFolder (temp.folder));
+        CHECK (session.writeError.empty());
+    }
+
+    //--------------------------------------------------------------------------
+    /*  THE SAVE NEVER LANDED: the marker names a show that is nowhere, and the
+        folder holds work newer than show.xml - the only copy of it on the disk.
+        Only the marker goes. So an autosave that then fails - a directory where
+        its temp goes - leaves that work where it was, still offered, rather
+        than a folder emptied for bytes that never came. */
+    {
+        TempBundle temp { "minimal" };
+        temp.copyFixture();
+
+        ShowDocument document;
+        REQUIRE (Bundle::open (temp.folder, document).ok);
+
+        DocumentSession session { temp.folder, document.showRevision() };
+        Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+        REQUIRE (document.setAttribute (houseToHalfName, "Work newer than the show").ok);
+        REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+        wiring.settleNow();
+
+        writeBytes (supersededIn (Bundle::recoveryFolder (temp.folder)),
+                    markerFor (readBytes (Bundle::showFile (temp.folder)) + "<!-- never landed -->\n"));
+        REQUIRE (Bundle::temporaryFor (Bundle::recoveryShowFile (temp.folder)).createDirectory().wasOk());
+
+        REQUIRE (document.setAttribute (houseToHalfName, "An autosave that cannot land").ok);
+        REQUIRE (wiring.invoke ("document.autosave", {}, 20).applied);
+        wiring.settleNow();
+
+        CHECK (session.writeError.rfind ("document.autosave at tick 20: ", 0) == 0);
+        CHECK_FALSE (supersededIn (Bundle::recoveryFolder (temp.folder)).exists());
+        CHECK (nameIn (Bundle::recoveryFolder (temp.folder)) == "Work newer than the show");
+        CHECK (Bundle::offeredRecovery (temp.folder) == Bundle::recoveryFolder (temp.folder));
+    }
+}
+
+#if JUCE_WINDOWS
+TEST_CASE ("a tidy-up that cannot take recovery/show.xml takes nothing else, so the folder stays marked and offered by nothing, and the next save finishes it (Windows)")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  THE SHOW FIRST, AND ALONE IF IT WILL NOT GO (H6b). Something holding
+        recovery/show.xml without sharing its deletion - a scanner, an editor -
+        when a save that landed tidies up. Deleting what else it could would
+        take the marker and leave the old show bare: offered at the next start
+        as if no save had happened. JUCE opens a file for writing sharing its
+        reads alone, which is the holder here; POSIX has no such lock. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "The autosave before the save").ok);
+    REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+    wiring.settleNow();
+
+    {
+        juce::FileOutputStream holder { Bundle::recoveryShowFile (temp.folder) };
+        REQUIRE (holder.openedOk());
+
+        REQUIRE (document.setAttribute (houseToHalfName, "Saved while it was held").ok);
+        CHECK (wiring.invoke ("document.save", {}, 20).applied);
+        wiring.settleNow();
+
+        //  The save landed; the tidy-up is not the save's, and says nothing.
+        CHECK (nameInBundle (temp.folder) == "Saved while it was held");
+        CHECK_FALSE (isDirty (document, session));
+        CHECK (session.writeError.empty());
+
+        CHECK (Bundle::recoveryShowFile (temp.folder).existsAsFile());
+        CHECK (supersededIn (Bundle::recoveryFolder (temp.folder)).existsAsFile());
+        CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+    }
+
+    /*  LET GO, AND SAVED AGAIN - a save that then fails on show.xml, a
+        directory where its temp goes. Found superseded already, the folder is
+        deleted before anything is written, as the tidy-up after the first save
+        meant it to be. The case after next holds it through that second save
+        as well. */
+    REQUIRE (Bundle::temporaryFor (Bundle::showFile (temp.folder)).createDirectory().wasOk());
+
+    REQUIRE (document.setAttribute (houseToHalfName, "A save that cannot land").ok);
+    CHECK (wiring.invoke ("document.save", {}, 30).applied);
+    wiring.settleNow();
+
+    CHECK (nameInBundle (temp.folder) == "Saved while it was held");
+    CHECK (session.writeError.rfind ("document.save at tick 30: ", 0) == 0);
+    CHECK_FALSE (Bundle::recoveryFolder (temp.folder).exists());
+    CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+}
+#endif
+
+//==============================================================================
+/*  THE FIXER'S CASES (fixer of H6b, namespace draft §23.5): what review found
+    the cases above could not tell apart, and two holes it found in the marks. */
+
+TEST_CASE ("a save that stops at its own show.xml has already marked recovery/ - with the show it was about to write, which is nowhere, so the autosave is still the offer")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  THE MARK GOES DOWN BEFORE show.xml, and this is the case that can tell.
+        Stopped after its show.xml - state.xml blocked, the case at the head of
+        this block - a save leaves the same folder marked whether it marked
+        before its show.xml or after it. Stopped AT show.xml, a mark written only
+        once show.xml had landed is not there at all. After is the order that
+        reopens the window H6's driver found: a kill between show.xml landing
+        and the mark going down leaves the autosave from before the save on
+        offer. And the mark this save leaves hides nothing - it names a show that
+        never reached the disk - so the autosave, newer than the show.xml still
+        there, is still what the next start is offered. A guard: it passes on
+        the code it was written against, and fails when the marking is moved
+        after the save's first write. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Autosaved before the save").ok);
+    REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+    wiring.settleNow();
+    REQUIRE (nameIn (Bundle::recoveryFolder (temp.folder)) == "Autosaved before the save");
+
+    const auto shownBefore = readBytes (Bundle::showFile (temp.folder));
+    REQUIRE (Bundle::temporaryFor (Bundle::showFile (temp.folder)).createDirectory().wasOk());
+
+    REQUIRE (document.setAttribute (houseToHalfName, "A save that stops at show.xml").ok);
+    const auto aboutToWrite = CanonicalXml::write (document);
+
+    CHECK (wiring.invoke ("document.save", {}, 20).applied);
+    wiring.settleNow();
+
+    CHECK (readBytes (Bundle::showFile (temp.folder)) == shownBefore);
+    CHECK (session.writeError.rfind ("document.save at tick 20: ", 0) == 0);
+
+    const auto marker = supersededIn (Bundle::recoveryFolder (temp.folder));
+    REQUIRE (marker.existsAsFile());
+    CHECK (readBytes (marker) == markerFor (aboutToWrite));
+    CHECK (readBytes (marker) != markerFor (shownBefore));
+
+    CHECK (Bundle::offeredRecovery (temp.folder) == Bundle::recoveryFolder (temp.folder));
+    CHECK (nameIn (Bundle::recoveryFolder (temp.folder)) == "Autosaved before the save");
+}
+
+TEST_CASE ("a save marks the recovery.previous.N/ it recovered from as well, so a save stopped after its show.xml leaves that afternoon offered by nothing")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  THE CONSUMED FOLDER'S HALF OF THE MARK. The operator recovered an
+        afternoon from aside and saved over it; the save's show.xml landed and
+        the rest did not - state.xml blocked, where a kill would do the same -
+        so nothing was tidied away. The folder recovered from is as outgrown as
+        this session's own `recovery/`: adopting it again would take the show
+        back past the save. A guard: it passes on the code it was written
+        against, and fails without the consumed folder among what a save marks,
+        which no case before it could tell - a save that lands deletes that
+        folder, mark or none. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+    abandonAnAfternoon (temp.folder, "The afternoon recovered from aside");
+
+    const auto aside = temp.folder.getChildFile ("recovery.previous.1");
+    REQUIRE (Bundle::recoveryFolder (temp.folder).moveFileTo (aside));
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+    REQUIRE (session.offeredRecovery == aside);
+
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    REQUIRE (wiring.invoke ("document.recover", {}, 10).applied);
+    REQUIRE (wiring.writer.consumed() == aside);
+    REQUIRE (document.getAttribute (houseToHalfName) == std::string ("The afternoon recovered from aside"));
+
+    REQUIRE (Bundle::temporaryFor (Bundle::stateFile (temp.folder)).createDirectory().wasOk());
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Saved over the recovered afternoon").ok);
+    CHECK (wiring.invoke ("document.save", {}, 20).applied);
+    wiring.settleNow();
+
+    //  show.xml landed; the save as a whole did not, so nothing was tidied away.
+    CHECK (nameInBundle (temp.folder) == "Saved over the recovered afternoon");
+    CHECK (session.writeError.rfind ("document.save at tick 20: ", 0) == 0);
+    CHECK (aside.isDirectory());
+    CHECK (wiring.writer.consumed() == aside);
+
+    REQUIRE (supersededIn (aside).existsAsFile());
+    CHECK (readBytes (supersededIn (aside)) == markerFor (readBytes (Bundle::showFile (temp.folder))));
+    CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+}
+
+TEST_CASE ("a session's first write answers the marks in every recovery.previous.N/, offered or not: a superseded one goes, a live one loses its mark")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  THE NUMBERED FOLDERS' HALF OF THE ANSWER, which the case above that
+        answers `recovery/` cannot tell apart from answering the offers alone:
+        a superseded `recovery.previous.N/` is no offer, and an answer that
+        went through the offers would never reach it. The first write here is
+        an autosave, which touches no numbered folder of its own accord, so what
+        deletes it can only be the answer. A guard: it passes on the code it was
+        written against, and fails when the answer asks only the offers. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto live = temp.folder.getChildFile ("recovery.previous.1");
+    const auto outgrown = temp.folder.getChildFile ("recovery.previous.2");
+
+    abandonAnAfternoon (temp.folder, "Its save never landed");
+    REQUIRE (Bundle::recoveryFolder (temp.folder).moveFileTo (live));
+    abandonAnAfternoon (temp.folder, "Its save landed");
+    REQUIRE (Bundle::recoveryFolder (temp.folder).moveFileTo (outgrown));
+
+    const auto shown = readBytes (Bundle::showFile (temp.folder));
+    writeBytes (supersededIn (live), markerFor (shown + "<!-- the save that never landed -->\n"));
+    writeBytes (supersededIn (outgrown), markerFor (shown));
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+
+    //  Judged at open: the superseded folder above is passed over, the live one below offered.
+    CHECK (session.offeredRecovery == live);
+
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "This session's work").ok);
+    REQUIRE (wiring.invoke ("document.autosave", {}, 150).applied);
+    wiring.settleNow();
+
+    CHECK_FALSE (outgrown.exists());
+    CHECK (nameIn (live) == "Its save never landed");
+    CHECK_FALSE (supersededIn (live).exists());
+    CHECK (session.offeredRecovery == live);
+    CHECK (session.writeError.empty());
+}
+
+TEST_CASE ("the marks are answered before the first write's own bytes: a first save writing the very show a live folder's mark names cannot make that afternoon look superseded")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  WHY THE ANSWER COMES FIRST. A `recovery.previous.N/` an earlier session
+        recovered from, and whose save of these very bytes was killed before
+        its show.xml landed: the mark names a show that is nowhere, and the
+        folder is a real offer. If this session's first write were a save of
+        the same bytes and the marks were answered only after it, the mark would
+        name the show.xml on the disk by then, and the answer would delete an
+        afternoon nobody has answered. A guard: it passes on the code it was
+        written against, and fails when the answer comes after the job. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto live = temp.folder.getChildFile ("recovery.previous.1");
+    abandonAnAfternoon (temp.folder, "An afternoon nobody answered");
+    REQUIRE (Bundle::recoveryFolder (temp.folder).moveFileTo (live));
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+    REQUIRE (session.offeredRecovery == live);
+
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "The same show twice").ok);
+    writeBytes (supersededIn (live), markerFor (CanonicalXml::write (document)));
+    REQUIRE (Bundle::offeredRecovery (temp.folder) == live);
+
+    REQUIRE (wiring.invoke ("document.save", {}, 20).applied);
+    wiring.settleNow();
+
+    REQUIRE (nameInBundle (temp.folder) == "The same show twice");
+    CHECK (live.isDirectory());
+    CHECK (nameIn (live) == "An afternoon nobody answered");
+    CHECK_FALSE (supersededIn (live).exists());
+    CHECK (Bundle::offeredRecovery (temp.folder) == live);
+    CHECK (session.offeredRecovery == live);
+}
+
+#if JUCE_WINDOWS
+TEST_CASE ("a superseded recovery.previous.N/ the first write cannot delete is carried by every save after it, so the save that lands does not bring it back as an offer (Windows)")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  FOUND IN REVIEW. A session recovered `recovery.previous.1/`, saved, and
+        died between its show.xml and the tidy-up: the folder is marked with the
+        show.xml on the disk and rightly offered by nothing. The next session's
+        first write answers the mark by deleting it - and something holds its
+        show at that instant, as here. Before the fix only a session's own
+        `recovery/` and the folder it recovered from were marked by its saves,
+        so this session's save, landing, left the mark naming a show.xml no
+        longer on the disk: at the next start the afternoon from before two
+        saves was on offer. Now a save also marks every folder that is
+        superseded when it runs, adding its own show.xml to the mark, and the
+        folder stays outgrown - and the next session with nothing holding it
+        deletes it. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto outgrown = temp.folder.getChildFile ("recovery.previous.1");
+    abandonAnAfternoon (temp.folder, "An afternoon a landed save outgrew");
+    REQUIRE (Bundle::recoveryFolder (temp.folder).moveFileTo (outgrown));
+    writeBytes (supersededIn (outgrown), markerFor (readBytes (Bundle::showFile (temp.folder))));
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+    REQUIRE (session.offeredRecovery == juce::File());
+
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    {
+        //  JUCE opens a file for writing sharing its reads alone: its deletion is refused.
+        juce::FileOutputStream holder { outgrown.getChildFile ("show.xml") };
+        REQUIRE (holder.openedOk());
+
+        REQUIRE (document.setAttribute (houseToHalfName, "The first write, an autosave").ok);
+        REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+        wiring.settleNow();
+        REQUIRE (outgrown.isDirectory());
+
+        REQUIRE (document.setAttribute (houseToHalfName, "A save that lands").ok);
+        REQUIRE (wiring.invoke ("document.save", {}, 20).applied);
+        wiring.settleNow();
+
+        CHECK (nameInBundle (temp.folder) == "A save that lands");
+        CHECK (outgrown.isDirectory());
+    }
+
+    CHECK (Bundle::isSuperseded (temp.folder, outgrown));
+    CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+
+    {
+        ShowDocument next;
+        REQUIRE (Bundle::open (temp.folder, next).ok);
+
+        DocumentSession nextSession { temp.folder, next.showRevision() };
+        nextSession.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+        Wiring nextWiring { next, nextSession, DocumentWriter::Mode::synchronous };
+
+        REQUIRE (next.setAttribute (houseToHalfName, "The next session").ok);
+        REQUIRE (nextWiring.invoke ("document.autosave", {}, 10).applied);
+        nextWiring.settleNow();
+    }
+
+    CHECK_FALSE (outgrown.exists());
+}
+
+TEST_CASE ("a recovery/ a landed save outgrew, which nothing can delete twice running, stays outgrown when the save after it stops before its show.xml (Windows)")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  THE DOUBLE FAULT §23.5 FIRST LEFT OPEN, closed. The tidy-up after a
+        landed save could not delete `recovery/` - something holds its show -
+        and the save after it cannot either, and then stops before its own
+        show.xml lands (a kill does the same). Re-marked for that save alone,
+        the folder named a show that is nowhere: the autosave from before the
+        first save was offered, older than the show.xml on the disk. With a line
+        for each save, the first one still names the show.xml that is there. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "The autosave before two saves").ok);
+    REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+    wiring.settleNow();
+
+    std::string landed, stopped;
+
+    {
+        juce::FileOutputStream holder { Bundle::recoveryShowFile (temp.folder) };
+        REQUIRE (holder.openedOk());
+
+        REQUIRE (document.setAttribute (houseToHalfName, "The save that landed").ok);
+        REQUIRE (wiring.invoke ("document.save", {}, 20).applied);
+        wiring.settleNow();
+
+        REQUIRE (nameInBundle (temp.folder) == "The save that landed");
+        landed = readBytes (Bundle::showFile (temp.folder));
+
+        REQUIRE (Bundle::temporaryFor (Bundle::showFile (temp.folder)).createDirectory().wasOk());
+        REQUIRE (document.setAttribute (houseToHalfName, "The save that stopped").ok);
+        stopped = CanonicalXml::write (document);
+
+        CHECK (wiring.invoke ("document.save", {}, 30).applied);
+        wiring.settleNow();
+    }
+
+    CHECK (nameInBundle (temp.folder) == "The save that landed");
+    CHECK (session.writeError.rfind ("document.save at tick 30: ", 0) == 0);
+
+    REQUIRE (Bundle::recoveryFolder (temp.folder).isDirectory());
+    CHECK (readBytes (supersededIn (Bundle::recoveryFolder (temp.folder)))
+             == markerFor (landed) + markerFor (stopped));
+    CHECK (Bundle::isSuperseded (temp.folder, Bundle::recoveryFolder (temp.folder)));
+    CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+}
+#endif
+
+//==============================================================================
 TEST_CASE ("the offer at open prefers recovery/, then the highest recovery.previous.N, counted as numbers")
 {
     TempBundle temp { "minimal" };
@@ -889,8 +1525,9 @@ TEST_CASE ("the offer at open prefers recovery/, then the highest recovery.previ
 
     const auto folder = temp.folder;
 
-    /*  What is inside does not matter to the offer, which is about folders; a
-        show.xml is written so each one looks the way a real one would. */
+    /*  A show.xml in each, because since H6b (namespace draft §23.5) what is
+        inside does matter: a folder is offered only when it holds a show no
+        landed save has superseded. BundleTests.cpp asks that rule directly. */
     const auto aRecoveryAt = [] (const juce::File& at)
     {
         writeBytes (at.getChildFile ("show.xml"), "<Show/>\n");

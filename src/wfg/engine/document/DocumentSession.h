@@ -157,7 +157,10 @@ namespace wfg::doc
             answers it once: `recovery/` when it holds a show.xml - the last
             session died - and otherwise the highest-numbered
             `recovery.previous.N/`, an afternoon an earlier session moved aside
-            and nobody answered.
+            and nobody answered. A folder is offered only when it holds a
+            show.xml and no `superseded` mark names the show.xml on disk: the
+            mark a save leaves before its writes, which says a landed save has
+            outgrown that folder (2026-09-30, namespace draft §23.5).
 
             A RECORD AND NEVER A LOOK AT THE DISK, and that is the whole of why
             it is a field. This session's own autosave writes `recovery/` two

@@ -5623,6 +5623,17 @@ through to `copyInternal` then `deleteFile` (`juce_SharedCode_posix.h:409-426`),
 reintroduced by the call meant to remove it. The temp is a sibling because a copy is not a
 replace, not because siblings are tidy.
 
+*Corrected 2026-09-30, H6b (§23.5): no longer `replaceFileIn`.* On Windows that call is
+`ReplaceFile` with no backup name, whose two moves leave the file under no name between them, and
+H6's driver killed the engine there (§23.4). The temp now takes the name in one rename - on
+Windows by handle, `SetFileInformationByHandle` with `FileRenameInfoEx` and
+`FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS` on a handle opened
+write-through, and `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH` only on
+a volume that cannot rename that way; `std::rename` on POSIX, with no copy to fall back on - and a
+refused rename changes neither name. The sibling is still what makes it one rename. *(H6b first
+used `MoveFileExW` everywhere; its review found that refused by a reader that shares deletion,
+which `ReplaceFile` never was - §23.5, FO.)*
+
 **What is left when the replace itself fails is the right failure.** `replaceFileIn` returns
 before the `deleteFile()` at `juce_File.cpp:334`, so the temp survives: **the old file, whole,
 and a temp file beside it.** The show that was on disk at 18:00 is still the show on disk, and
@@ -5637,6 +5648,16 @@ reason (`Bundle.cpp:273-278`), and each becomes atomic on its own:
 
 The dangerous windows were always **inside** writes one and two, never between them, and
 temp-and-replace closes exactly those.
+
+*Corrected 2026-09-30, H6 (§23.4), and closed by H6b (§23.5).* Killing the engine during saves
+found two costs this table did not list. On Windows the replace was not one step: `ReplaceFile`,
+given no backup name, moves the old file to `<file>~RF<hex>.TMP` before it moves the new one in,
+and a kill between the two left nothing under the name - a missing `show.xml` then made `serve`
+exit 2 *has no show.xml*, and a missing manifest *not a Go.dot bundle*. And on every platform the
+save retires `recovery/` only after its three writes, so a kill after the first left the last
+autosave, older than the show just written, offered as *recovery available*; adopting it took the
+show back past the save. H6b renames in one step, and has the save mark what it will retire
+`superseded` before it writes, so that a folder a landed save has outgrown is no offer.
 
 **The retry is blind, because the API will not say what went wrong.** `replaceFileIn` returns
 `bool` and swallows `GetLastError`, so "retry on a sharing violation" is a distinction no code
@@ -5657,7 +5678,11 @@ delays the next write and nothing an operator can feel. So the retry is now thre
 and 200 ms, a third of a second in all - before the same honest refusal; a failure that survives
 that long is still not a transient one. Not a loop, for the reason above. The same conversation
 reaffirmed that the lock does not touch the save (§9, decision W); what changes is that show mode
-on either client does not OFFER one.
+on either client does not OFFER one. *(2026-09-30, H6b: the rename now says why it failed, and the
+refusal's sentence carries the Windows error number; the retries still do not ask. And what stops
+it is still only a holder that does not share deletion, as above: the rename by handle, with POSIX
+semantics, takes the name from under one that does, where the `MoveFileExW` H6b first put here
+was refused by every holder there was - §23.5, FO.)*
 
 **The reason gets its word in 5.1 and does not get its sentence.** `reason::writeFailed`
 replaces `document.save`'s `reason::badAddress` (`Bundle.cpp:307`) with the debt rather than
@@ -5782,7 +5807,10 @@ said so, during a performance, is §14.11's nightmare arriving through this subs
 | `document.discardRecovery` | deletes the folder — *since 2026-09-11, the offered one, wherever it lives, as a job on the writer* | `no-recovery` likewise; refusing an empty gesture is cheaper than pretending it worked |
 | `wfg serve --recover` | applies the recovery before the first publish | for scripts and for the black-box driver, which has no person to click. It goes in the **usage string** as well as the parser (`Console.cpp:2421-2423`): `--device` and `--device-type` are parsed at `:1891-1923` and appear in no usage line, an omission already one phase old, and the usage string is what an operator reads at 04:12 |
 
-A successful `document.save` deletes `recovery/`, because the work has become the show. A clean
+A successful `document.save` deletes `recovery/`, because the work has become the show. *(2026-09-30,
+H6: after its three writes, not with them, so a kill in between left the older autosave on offer
+(§23.4); since H6b the save marks the folder `superseded` before it writes, and a folder so marked
+by a save that landed is no offer (§23.5).)* A clean
 exit deletes it **only when the document is not dirty** (`Console.cpp:2315-2329`, after
 `ticks.stop()` has joined the only writer) — a tidy shutdown with unsaved work is the case the
 folder exists for. *(Corrected 2026-09-11: both delete only this session's own `recovery/` — never
@@ -5847,7 +5875,9 @@ commands a synchronous writer that is never started, because a replay has no GO 
 and a thread there would only add nondeterminism; the record is identical either way, as §14.14
 promised. **Shutdown drains the writer** before the clean-exit tidy-up asks whether the document
 is dirty (`finishSession`), so a save queued at Ctrl-C lands; a kill loses what was queued, and the
-atomic write leaves every file old and whole or new and whole.
+atomic write leaves every file old and whole or new and whole. *(2026-09-30: true of the bytes, and
+since H6b of the names and the offer too; until then a kill could leave a file under no name on
+Windows, and an outgrown autosave on offer - §23.4-23.5.)*
 
 **An earlier session's unanswered recovery is moved aside, and the autosave keeps running.** The
 rule, whole:
@@ -5855,7 +5885,10 @@ rule, whole:
 - `recovery/` is always this session's own autosave target.
 - The recovery a session **offers** — what `/godot/document/recovery` and the banner are about — is
   `recovery/` if `recovery/show.xml` exists, because then the last session died; otherwise the
-  highest-numbered `recovery.previous.N/`, if there is one.
+  highest-numbered `recovery.previous.N/`, if there is one. *(Corrected 2026-09-30, H6b - §23.5: a
+  folder is offered only when it holds a show.xml that no landed save has marked `superseded`,
+  `recovery.previous.N/` included, which had been offered by its name whatever was left in it; a
+  folder passed over hides nothing below it.)*
 - The first time this session needs to autosave while the offer still sits in `recovery/`, the
   writer **renames** it to the next `recovery.previous.N/` — in queue order, before the autosave's
   bytes — remembers where the offer now lives, and autosaves as usual. N is a counter, never a
@@ -13289,3 +13322,437 @@ replays record for record under both locales.
 **Owed to the bench:** Esc on the MADIface with a bed; a mic cue with a reverb inside a group that
 holds another group, Esc and then a real double Esc (two presses) on it; and a mic cue in a scene's
 header with the pointer resting on the scene - the gate shut until GO.
+
+### 23.4 A save killed halfway through a write (H6)
+
+**What it means.** Go.dot writes every file of a show so that a process dying at any instant should
+cost nothing: the bytes go to a temporary name first, and only a finished, flushed file takes the
+real name. Until this stage nothing had tested that by killing the engine while it wrote. Killed 151
+times while saves and autosaves were in flight, it never left a torn file: every byte it found was
+whole. What it lost was names and order. On Windows the swap had a moment when the file had no name
+at all, and a kill there left a show that would not open until somebody renamed a file by hand. And
+on every platform a save retired the autosave it superseded only after its own three writes, so a
+kill in between left that older autosave offered as recovery: adopt it, and the show went back past
+the save. Both are closed by H6b (§23.5), whose fixes this driver failed first on.
+
+**The gap.** Phase 5's only crash test (`phase5_document.py`) waits for the autosave's record and
+both of its files before it kills the process. It proves that a finished autosave survives a crash,
+and says nothing about one half done. `DocumentWriter.h` claimed more: a kill loses what was queued,
+and "the atomic write leaves every file either old and whole or new and whole". §14.10's table said
+a crash inside or after the show.xml write costs nothing. Both rested on reading
+`writeBytesAtomically` and the save job.
+
+**What was built.** Black-box only; nothing in `src/` changed in this stage.
+
+- `tests/blackbox/crash_during_write.py`, stdlib only. Red on every run against the engine it found
+  the two holes in, it was held back from ctest until the fixes landed, and registered with them
+  (§23.5): `blackbox.crash-write.C` and `.fr_FR`, 300 s each, not serial.
+- `tests/fixtures/bundles/crash-write/`: one list of four cues, `goDebounce="0"`, a `preWait="0.25"`
+  so the French run has a decimal to break, no mounts, no lock. It passes `schema.fixtures`.
+- `common.Server(recover=True)`, which passes `--recover`. No driver had started `serve` with it
+  before.
+
+**How it asks.**
+
+- *Calibration.* A fresh copy gets 8 000 characters of notes on each of three cues, the fourth cue
+  is renamed `H6-calibration`, and the show is saved. The show.xml that save writes (24 478 bytes)
+  becomes the template: every later show.xml must be exactly those bytes with one name in the hole.
+- *Twenty kills*, from seed 20260930, all planned before the first. The seed fixes each kill's delay
+  and how its victim starts. What the kill lands in depends on the machine, so a red is known by the
+  disk state the run prints, not by its kill number.
+  - A victim opens the folder, either with `--recover` or plain (kills 8, 9, 10, 14 and 18). A plain
+    start leaves any offer standing, so its first autosave moves the offer to a
+    `recovery.previous.N/`.
+  - One UDP socket then sends, every 5 ms, a rename to a marker never used before and a write
+    command: every third a `document.save`, the rest `document.autosave`. The writer's queue never
+    empties.
+  - The kill is armed once the victim's own log holds three applied write records, and lands
+    uniform(0, 0.5 s) later: TerminateProcess on Windows, SIGKILL elsewhere.
+- *The disk, with nothing running.*
+  - show.xml is the template with a marker the victim started with, adopted or was sent: nothing
+    torn, mixed or gone backwards. An adopted offer that was stale (below) is not a marker show.xml
+    may hold.
+  - state.xml and the manifest are there and parse.
+  - Every recovery show.xml is the template with a marker somebody sent, the folder the engine will
+    offer is worked out from the disk by the engine's own rule, and no recovery show.xml was left
+    under no name.
+  - The offer is never older than a show.xml its own session saved. Each victim's states are
+    ordered: the offer it adopted, then every marker it was sent. An offer in `recovery/`, or in the
+    `recovery.previous.N/` that victim adopted, holding one earlier than show.xml's is a *stale
+    offer*. An earlier session's unanswered offer, which a later save leaves standing by design
+    (§14.10), is not.
+  - Temps may be anywhere. Go.dot's are `<file>.tmp-<pid>`; Windows' own were `<file>~RF<hex>.TMP`.
+    They are classified and counted, never read. A `~RF` is known by its name, since a plain
+    victim's move-aside carries earlier ones into `recovery.previous.N/`. *(Since H6b's review, one
+    a kill strands fails the run: only `ReplaceFile` makes them - §23.5, FS.)*
+  - A problem fails once. The same state seen again by a later look prints as *still*; the same
+    fault struck again by a later kill leaves new evidence and fails again.
+- *The next process, twice.*
+  - A plain start must announce the offer exactly when the disk holds one, naming its folder, and
+    publish show.xml's name (never a temp's) with the dot out. Then `document.recover` must be
+    applied (a record in the log, no refusal counted, nothing left on offer, the offer's name on
+    screen, the dot lit), or refused `no-recovery` when nothing is offered.
+  - A `--recover` start must open instead of exiting 2, say `recovery adopted` or `nothing to
+    recover`, and publish what it adopted.
+  - When the offer is stale, what the adoption puts on screen is printed as a note, not counted as a
+    pass: the offer itself has already failed.
+  - Every session is killed, never stopped: on POSIX a stop is a clean exit that drains the writer.
+- *At the end*, a `--recover` start renames the cue and saves, and a plain reopen reads the save
+  back.
+- *That there was something to test.* The victims must have applied client autosaves, and at least
+  one kill must have left an offer in `recovery/` that its own victim wrote. Without both, every
+  recovery check passes on an empty folder. A copy of the driver that sends saves in place of
+  autosaves fails both.
+- *Controls*, sixteen as H6 built them (H6b changed one and added eleven, §23.5), so the net can go
+  red:
+  - a show.xml cut in half is flagged, and stops `serve` (*could not be loaded*);
+  - an offered `recovery/show.xml` cut in half stops `serve --recover` (*could not be read*), which
+    also proves the new keyword reaches the binary;
+  - each of these is named: a displaced show (under a temp's name, or under a `~RF` name), a
+    recovery show under no name, a torn previous offer, a show gone backwards, and a stale offer (in
+    `recovery/`, and in the `recovery.previous.N/` its session adopted);
+  - an earlier session's unanswered offer beside a later save is not;
+  - a `~RF` carried into `recovery.previous.N/` with its folder is not counted against the next
+    kill;
+  - two whole temps planted as process 1 are never read and never touched.
+
+**What it found (1): a save could leave an older autosave on offer, on every platform.**
+`DocumentWriter`'s save job wrote show.xml, state.xml and the manifest (`Bundle::save`). Only then
+did it delete this session's `recovery/` (`Bundle::discardRecovery`) and any `recovery.previous.N/`
+the operator adopted (`deleteConsumedRecovery`). A kill after show.xml's replace and before
+`recovery/show.xml` was deleted left the last autosave, older than the show just written, where
+`serve` offered it as *recovery available*: "the most recent afternoon there is"
+(`Bundle::offeredRecovery`). `document.recover`, or `--recover`, adopted it with the dot lit, and
+the edits made between that autosave and the save were gone from the screen; the next save made the
+loss permanent. A save whose show.xml landed and whose state.xml write failed left the same state
+with no kill at all.
+
+- *How often.* 32 kills in 151 over this stage's eight runs (21%), in every run. The first runs,
+  which passed it, show 69 in 341. About one 20-kill run in a hundred is free of it.
+- *What an operator met.* A crash just after Ctrl-S, a restart that says *recovery available*, and a
+  recovery that quietly undoes the last edits.
+- *Where.* The order is the writer's, not the file system's, so Linux and macOS had it too.
+
+**What it found (2): on Windows a save could leave a file with no name.** JUCE's `replaceFileIn`
+calls `ReplaceFileW` with no backup name. The files the kills stranded show what that call does, in
+four steps: it creates an empty `<file>~RF<hex>.TMP`, moves the old file onto that name, moves the
+new file into place, and deletes the `~RF`. All three states in between turned up: an empty `~RF`
+beside an untouched file, a whole one holding the old bytes beside the new file, and a whole one
+beside no file at all. The last is the problem. The old bytes were whole under the `~RF` name and the
+new ones whole under Go.dot's temp, but nothing was under the name `open` reads. `DocumentWriter.h`'s
+claim held for the bytes and not for the names.
+
+- *How often.* 10 kills in 151 over this stage's runs: `recovery/show.xml` 3, state.xml 3, the
+  manifest 2, **show.xml itself** 1, `recovery/state.xml` 1. With the first runs (9 in 315) that is
+  about one kill in twenty-five, so a 20-kill run met it about every other time.
+- *What an operator met*, each seen from the shipped binary:
+  - no show.xml: `serve` exits 2, *has no show.xml*. Final set, C run 1, kill 20: the old bytes whole
+    under `show.xml~RF1acecbf.TMP`, the new whole under `show.xml.tmp-37516`;
+  - no manifest: `serve` exits 2, *has no crash-write.wfg; it is not a Go.dot bundle*;
+  - no `recovery/show.xml`: `--recover` says *nothing to recover*, `/godot/document/recovery` reads
+    false, and the last autosave sits on the disk with nothing offering it;
+  - no state.xml: the standby comes back at its default (§3.20: not lost work).
+- *Where.* POSIX `rename(2)` has no such moment, so the window was a Windows one. Defender scanning
+  each rename is the likely reason it was wide enough for a random kill to find.
+
+**The numbers.** The Windows box, a Debug build frozen on 2026-09-30, before H6b - the fail-first
+evidence for both of its fixes:
+
+| run | time | result | kills | a temp of the victim's left | inside ReplaceFile | under no name | stale offers | offer after the kill: recovery/ / recovery.previous.N/ / none |
+|---|---|---|---|---|---|---|---|---|
+| C, 1 | 15.9 s | red, 6 of 366; stopped at kill 20: show.xml under no name, and `serve` refused the folder | 20 | 18 (16 whole, 2 empty) | 3 | show.xml | 4 | 17 / 1 / 2 |
+| C, 2 | 16.6 s | red, 1 of 405 | 20 | 18 (whole) | 5 | `recovery/state.xml` (said, not failed) | 1 | 19 / 1 / 0 |
+| C, 3 | 10.1 s | red, 6 of 231; stopped at kill 12: the manifest under no name, and `serve` refused the folder | 12 | 10 (whole) | 3 | the manifest | 4 | 12 / 0 / 0 |
+| fr-FR | 17.3 s | red, 4 of 399 | 20 | 17 (16 whole, 1 empty) | 3 | none | 4 | 20 / 0 / 0 |
+
+- *A second set* with the same checks, run minutes earlier: C 16.7 s, 17.2 s and 15.8 s, fr-FR
+  17.9 s. All four red, over 79 kills: 19 stale offers, 7 files under no name.
+- *Over the eight runs*: 151 kills, of which 135 left a temp of the victim's. Every one was whole or
+  empty, never partial: JUCE hands a file over 16 KB to one `WriteFile`, and TerminateProcess does
+  not cut one short. On Linux a SIGKILL can cut a write between pages, which the driver would call
+  partial and ignore.
+  - 27 kills landed inside ReplaceFile: 16 stranded a whole `~RF`, 11 an empty one.
+  - The offer after the kill was in `recovery/` 140 times, in a `recovery.previous.N/` 6 times, and
+    nowhere 5 times.
+- *Runtime.* A locale takes about 17 s here, far under the 120 s at which the two restarts would have
+  been alternated.
+- *A correction.* The first runs counted two `~RF` files twice: carried into `recovery.previous.N/`
+  by a move-aside, then counted against the next kill. The driver tells them apart by name.
+
+**The decisions.** Letters follow H2's; EQ stays skipped.
+
+| | Decision | Whose |
+|---|---|---|
+| EV | **The driver asks for the autosaves itself**, with `/godot/cmd/document/autosave` - the autosave nobody asks for, in §14.10's title. It is the same handler, writer and files. The engine's own autosave waits for two seconds of quiet that a stream of edits never gives, so without it the writer would be idle at nearly every kill | implementer's call, as the stage ruled |
+| EW | **Its own fixture**, `crash-write`, not a copy of `waits`, so a change to that one cannot move this test | implementer's call, as the stage ruled |
+| EX | **Two restarts after every kill**: a plain one with `document.recover`, and a `--recover` one (the next victim's own start, or one of its own before a plain victim) | implementer's call, as the stage ruled; alternating them was the fallback above 120 s a locale, and a locale takes 17 |
+| EY | **The kill lands uniform(0, 0.5 s) after arming** | implementer's call, as the stage ruled |
+| EZ | **A file left under no name, or a torn previous offer, fails the run** and is reported as an engine finding. A displaced show.xml or manifest stops the loop, after one more restart that records what `serve` says | implementer's call; the stage ruled that an engine finding is never relaxed |
+| FA | **A stale offer fails the run too**, without stopping it, and what its adoption puts on screen is said and not passed | implementer's call after review. It made the driver red on nearly every run on every platform until H6b; since H6b the engine cannot leave one, so a red from it is a regression, and it stays a failure (settled 2026-09-30, once H6b landed) |
+| FB | **ReplaceFile's `~RF` files are classified and counted by name, never a failure in themselves**; a missing file beside a whole one is | implementer's call; since H6b one a kill strands fails (FS) |
+| FC | **A recovery state.xml under no name is said and counted, not failed** (§3.20: losing it is not losing work). A recovery show.xml under no name fails, because the offer goes with it | implementer's call |
+| FD | **The run must show it tested the recovery half**: autosaves applied, and an offer in `recovery/` its own victim wrote | implementer's call after review |
+| FE | **Not registered with ctest until the engine closed both windows**, then registered in the same change as the fixes (H6b). No `WILL_FAIL`, no retry | review, 2026-09-30: a job red on every push would teach re-running, and would hide every other regression behind it |
+
+**Not built in this stage**: the two engine fixes, which are H6b's (§23.5); tidying the stranded
+`.tmp-<pid>` files, which nothing deletes outside `recovery/`, so a bundle folder collects one per
+killed process; and a way to make a replace fail on purpose.
+
+### 23.5 A mark before the save, and one rename: the two holes closed (H6b)
+
+**What it means.** A save now says, before it writes, which recovery folders it is about to make
+obsolete, so that if the engine dies half way the next start can tell an autosave the save has
+outgrown from one it has not: it offers the second and never the first. A folder a save outgrew
+and could not delete stays outgrown through every save after it. And on Windows a file now takes
+its name in one step, so a kill never finds it under no name - and a program reading the file at
+that moment, a `wfg validate` of the same folder or an indexer, stops no save, as it never did
+before. `blackbox.crash-write.C` and `.fr_FR` are in ctest from this change, and green.
+
+**The fixes.**
+
+- **A save marks what it will retire, before it writes** (FF). Just before show.xml, the save job
+  writes a file `superseded` into this session's own `recovery/` and into a `recovery.previous.N/`
+  it recovered from - never into an earlier session's unanswered offer, which a save says nothing
+  about (§14.10). It holds one line: `show.xml`, the byte count and the SHA-256 of the show.xml the
+  save is about to write (`Bundle::fingerprintOf`), written by the same atomic write as every other
+  file - and a line more for each later save that finds the folder outgrown and cannot delete it
+  (FQ). Then the three writes, and the deletions as before. A kill after show.xml has landed leaves
+  folders whose mark names the show.xml on the disk; a kill before leaves marks naming a show that
+  is nowhere, over folders that are newer than the show.xml still there.
+- **An offer is judged against its mark, and needs a show** (FG). `Bundle::offeredRecovery`,
+  `hasRecovery` and `previousRecoveries` offer a folder only when it holds a show.xml and no mark
+  with a whole line naming the bundle's own show.xml (`isSuperseded`). A folder passed over hides
+  nothing below it: the next one down is the newest afternoon there is. `recovery.previous.N/`
+  needs its show too now, which closes the window H6 left open - a kill inside its deletion, file
+  by file, left a folder offered by its name with nothing in it to adopt. `wfg validate` and `wfg
+  tree` read the same functions, so they say the same.
+- **The first write of a session answers the marks** (FH). At the writer's first job, before its
+  own bytes: a folder whose mark names show.xml is deleted, and a folder whose mark names anything
+  else keeps its show and loses the mark (`Bundle::resolveAllSuperseded`). It cannot wait past that
+  job, which may be a save of those very bytes: the second folder's mark would then name the
+  show.xml on the disk, and hide real work. The superseded folder goes in the same breath, as
+  litter; one that will not go is kept outgrown by every save after (FP) - where, as first built,
+  this deletion was all that kept it so past the first save that landed. The decision drew this
+  "at the first open"; it is the writer's first job because registration is not an open - `wfg
+  commands` registers the bundle commands against its working directory - because the serve verb's
+  open is not this stage's file, and because the writer is the one thread that writes in a bundle:
+  nothing lands between, every verb that writes gets it, and the verbs that only look submit
+  nothing and change nothing.
+- **Deletion takes the show first, and stops if it will not go** (FI). Every deletion of a recovery
+  folder - the tidy-up after a save, the consumed folder, a discard, the answers above - goes
+  through `discardRecoveryAt`, which deletes show.xml first and, if that fails, nothing else. A
+  folder cut short by a kill is then no offer; and one whose show something is holding keeps its
+  mark, so it stays superseded instead of coming back bare.
+- **An autosave answers a mark in its own folder the same way** (FJ): the tidy-up after a save in
+  this session could not finish. Naming show.xml, the folder goes, its show first; naming anything
+  else - a save that stopped before its show.xml - only the mark goes, and the autosave then writes.
+  A folder it cannot clear gets nothing written into it, with the reason at `writeError`, and the
+  autosave is owed again.
+- **A save that finds a folder already superseded deletes it** (FK) instead of marking it again, and
+  whatever of it will not go gains a line for the show.xml this save is about to write, beside the
+  line it has (FQ) - so it is outgrown whichever show.xml is on the disk when the save ends.
+- **Every save carries every folder already superseded** (FP, found in review). Besides its own
+  `recovery/` and the folder it recovered from, the save marks each folder whose mark names the
+  show.xml on the disk now (`Bundle::supersededFolders`), whoever's it was: one a landed save
+  outgrew, which the tidy-up after it or a first job's answer could not delete because something
+  held its show. As first built, the answer at a session's first write was that folder's one
+  chance: a `recovery.previous.N/` it could not delete then was marked by nothing after, and the
+  session's next save that landed left its mark naming a show.xml no longer on the disk - the
+  afternoon from before two saves on offer at the next start, from one crash and one moment's hold.
+  An earlier session's unanswered offer is never superseded, so this reaches none.
+- **A mark holds a line per save** (FQ, found in review). `isSuperseded` asks whether any whole line
+  names show.xml; a line cut short matches nothing. As first built a save re-marking a folder it
+  could not delete replaced the line, and killed before its own show.xml landed it left a mark
+  naming a show that is nowhere, over an afternoon older than the show that is there - the double
+  fault this section first left open. With both lines, the older one still names the show.xml the
+  kill left.
+- **One rename** (FL). `writeBytesAtomically` renames the temp over the target in one step, and
+  `std::rename` on POSIX, where `replaceFileIn`'s copy-and-delete fallback - whose Linux copy deletes
+  the destination first - is gone with it. On Windows it renames by handle (FO, found in review):
+  the temp opened for `DELETE`, sharing everything, with `FILE_FLAG_WRITE_THROUGH`, then
+  `SetFileInformationByHandle` with `FileRenameInfoEx` and `FILE_RENAME_FLAG_REPLACE_IF_EXISTS |
+  FILE_RENAME_FLAG_POSIX_SEMANTICS`; `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING |
+  MOVEFILE_WRITE_THROUGH` only where the volume answers that it does not know the request - invalid
+  parameter, not supported, invalid function: a FAT or exFAT stick, some network shares, an old
+  Windows. The first build used `MoveFileExW` everywhere, and review found it refused, error 5,
+  while any other handle was open on the target, however it shared: without POSIX semantics NTFS
+  keeps the name of an open file taken until its last handle closes. JUCE's own `FileInputStream`
+  shares deletion, so a `wfg validate` or `wfg tree` of the folder a serve was saving made that save
+  fail, and so could an indexer or a sync client; `ReplaceFile`, which moves the target aside first,
+  never did. A probe on this box put all three side by side: with a holder sharing deletion,
+  `ReplaceFileW` and the rename by handle succeeded and `MoveFileExW` answered 5; with one that does
+  not share it, all three refused. The 20/60/200 ms retries stay, blind; the refusal's sentence
+  carries the Windows error number, with words for a sharing violation ("the file is open in another
+  program") and for 5 ("open in another program, or access denied", which is what a volume without
+  POSIX semantics says for a held file) - the system's own sentence is in the machine's code page,
+  and ends up in a string clients read as UTF-8. Attributes: `ReplaceFile` kept the target's, a
+  rename gives it the temp's. Nothing needs them - the folder icon's `desktop.ini` and
+  `.go.dot-folder.ico` are written by `app/FolderIcon.cpp` itself, hidden and system, never through
+  this function - and the READONLY the icon puts on the show folder is a note to Explorer that stops
+  no rename inside it, which a test now holds.
+- **A mark that cannot be written does not stop the save** (FN): the show is what was asked for, and
+  a missing mark costs only what every save risked before this change.
+
+**The driver, since the rule changed under it** (FM). Its `offered_folder` mirrors
+`Bundle::offeredRecovery` and would have expected offers the engine now rightly declines, so it
+follows the new rule: a folder is an offer when it holds a show.xml and no `superseded` mark naming
+show.xml, fingerprinted by the driver itself from the format. The mark is a known name in a
+recovery folder, and its temp a known temp. The torn-offer detector gives way - no offer the mirror
+reads off the disk can be torn now, and an engine that offered one anyway would disagree with the
+mirror at the next start's announcement. Its control changes to match - the mirror must offer
+nothing in a `recovery.previous.N/` holding only a state.xml - and a new one asks the engine: `serve
+--recover` there must start, announce nothing and have nothing to recover. Three more are new: a
+`recovery/` marked with the show.xml on the disk is offered by nothing, to the mirror and to `serve
+--recover`; and its twin, a mark naming another show, hides nothing. Twenty controls in all. Its
+docstring loses "run by hand"; the ctest block is H6's, with its section fixed.
+
+**And what review found the driver could not see** (FR, FS). Following the engine's rule, the
+mirror agrees with an engine that hides a folder it should not, so no restart check could fail on
+it. Two checks now ask the other way round:
+
+- *A hidden offer.* A folder passed over for its mark must be one a landed save outgrew: its show a
+  state of a session that also put a show.xml no older on the disk - one some look saw there, this
+  one included - in a folder that session's saves retire, its own `recovery/` or the
+  `recovery.previous.N/` it adopted from. Anything else is an afternoon hidden that should stand.
+- *The afternoon a plain victim left standing.* After the kill it must still be on offer, moved
+  aside or not. The hidden-offer check alone was not enough, and a mutation showed why: a build
+  whose save also marked the unanswered offer passed every other check, because the next save
+  found the marked folder superseded and deleted it (FP) - the afternoon did not hide, it vanished.
+  Only asking for it by name sees that.
+- *A `~RF` a kill strands fails* (FS): only `ReplaceFile` makes them, and H6b took it out.
+
+Seven control checks are new: the mark naming show.xml on its second line hides the folder, to the
+mirror and to `serve --recover`; the twin gets a copy of its own - it used to reuse the folder an
+engine had just been started on - and is asked of the engine too, whose `--recover` must adopt it
+and publish its show; a mark over work newer than the show.xml it names, and one over an earlier
+session's unanswered offer, are each named a hidden offer; and the offer-gone control also fails
+the `~RF` its kill stranded. Twenty-seven control checks in all.
+
+**What was built.** `src/wfg/engine/document/Bundle.{h,cpp}` (the mark, the offer rule, the rename,
+the deletion), `DocumentWriter.{h,cpp}` (the save's marks, the first job's answer, the autosave's),
+`tests/BundleTests.cpp`, `tests/DocumentWriterTests.cpp`, `tests/blackbox/crash_during_write.py`,
+and `tests/CMakeLists.txt` (`blackbox.crash-write.C` and `.fr_FR`, 300 s, not serial). Review then
+added the rename by handle and `holdsLine` (Bundle.cpp), `supersededFolders` (Bundle.h), the
+carry in the save job (DocumentWriter.cpp), eight cases and the driver's two checks. No handler
+changed, so no record and no fixture log did.
+
+**Tests**, each written first. Failed on the code before this change, under C and fr-FR alike:
+
+- `BundleTests`: a folder whose mark names show.xml is offered by nothing - in `recovery/`, moved
+  aside, and above a live one; a `recovery.previous.N/` with no show.xml is offered by nothing and
+  hides nothing below it; a replace another handle refuses leaves the old show, the new one beside
+  it, and names the Windows error (Windows).
+- `DocumentWriterTests`: a save stopped after its show.xml - state.xml blocked - leaves `recovery/`
+  marked with exactly the show.xml on the disk, and nothing offered; a session's first write
+  deletes a superseded folder and unmarks a live one, and the live one is the offer; an autosave
+  finding its folder marked clears it before it writes - a superseded show goes, a live one keeps
+  its show through an autosave that then fails; a tidy-up that cannot take `recovery/show.xml` takes
+  nothing else, so the folder stays marked and offered by nothing, and the next save - failing on
+  show.xml - deletes it rather than marking it again (Windows).
+
+Three are guards, and pass on the old code by construction: a mark naming another show, or no
+show at all, hides nothing; a save into a show folder the icon has marked read-only replaces every
+file (Windows); and a save never marks an earlier session's unanswered offer, in `recovery/` or
+moved aside.
+
+The driver is the fail-first evidence at the black box: against the engine before this change -
+the build of `e089691` frozen - the driver as this change's first build left it went red, 5 of
+407 checks under C (20.2 s) and 7 of 198 under fr-FR: both new engine controls (`serve --recover`
+exited 2 on the folder with no show, and adopted the superseded one), stale offers at kills 06 and
+10, and `recovery/show.xml` under no name at kill 17. (The driver as it finally stands is red there
+too, with more of its own checks: the figures below.)
+
+*The review's cases*, written first against the first build - `MoveFileExW`, one line a mark, no
+carry - under C and fr-FR alike. Five failed on it, 19 assertions in each locale:
+
+- `BundleTests`: a mark holds a line for every save that named its folder, and any whole line
+  naming show.xml hides it (a line cut short hides nothing); a save and an autosave land over files
+  somebody is reading, and the readers go on reading the bytes they opened (Windows) - on the first
+  build both were refused, "Windows error 5, access denied"; and the refusal case above now also
+  asks for the words "open in another program", which the first build's "access denied" lacked.
+- `DocumentWriterTests` (Windows): a superseded `recovery.previous.N/` the first write cannot
+  delete is carried by the save after it, stays outgrown once that save lands, and goes at the
+  next session's first write; and a `recovery/` nothing can delete twice running stays outgrown
+  when the save after it stops before its show.xml, its mark holding both saves' lines.
+
+Four are guards, which pass on the first build as on this one; each was shown to fail on the
+regression it is there for, in a build mutated for the purpose and then restored byte for byte. A
+save that stops AT its own show.xml has already marked `recovery/`, with the show it was about to
+write, and the autosave is still offered: it fails when the marks go down only once show.xml has
+landed - where the state.xml-blocked case above still passes, which is why it was written. A save
+stopped after its show.xml has marked the `recovery.previous.N/` it recovered from: it fails
+without the consumed folder among the marks, which no earlier case could see, since a save that
+lands deletes that folder mark or none. A first write answers every `recovery.previous.N/`,
+offered or not: it fails when the answer asks only the offers, where the case above answering
+`recovery/` still passes. And a first save writing the very show a live folder's mark names leaves
+that afternoon offered: it fails when the answer comes after the job's own bytes.
+
+At the black box: against the first build's binary the driver as it now stands went red, 1 of 398
+checks - `serve --recover` adopted a folder whose mark names show.xml on its second line. Against a
+build whose save also marked the offer - the regression review named - it went red, 2 of 388: the
+afternoons the plain victims left standing at kills 09 and 10 were on offer nowhere. Against the
+build of `e089691` it is red in both locales: 14 of 333 under C, stopped at kill 17 with the
+manifest under no name, and 8 of 420 under fr-FR, stranded `~RF` files among them.
+
+**The numbers, after.** The Windows box, Debug, through ctest, on the engine as it now stands:
+
+| run | time | result | kills left a temp of the victim's | inside ReplaceFile | under no name | stale offers | offer after the kill: recovery/ / recovery.previous.N/ / none | afternoons left standing, still on offer |
+|---|---|---|---|---|---|---|---|---|
+| C, 1 | 16.5 s | ok, 407 checks | 13 (whole) | 0 | 0 | 0 | 11 / 5 / 4 | 5 of 5 |
+| C, 2 | 16.5 s | ok, 393 checks | 15 (whole) | 0 | 0 | 0 | 10 / 3 / 7 | 3 of 3 |
+| C, 3 | 17.1 s | ok, 396 checks | 16 (15 whole, 1 empty) | 0 | 0 | 0 | 13 / 1 / 6 | 2 of 2 |
+| fr-FR | 17.4 s | ok, 407 checks | 10 (9 whole, 1 empty) | 0 | 0 | 0 | 12 / 4 / 4 | 5 of 5 |
+
+Both locales passed once more inside the wider ctest run (16.5 s and 16.9 s), beside
+`blackbox.phase1`, `blackbox.phase5`, every `wfg.replay` and the schema gates, 70 of 70. The first
+build's four runs read the same way: 395, 383, 403 and 379 checks, nothing stale, nothing under no
+name. No `~RF` file was stranded in the 160 kills of those eight runs, where 27 of 151 stranded one
+before. Fewer kills now find a temp of the victim's on the disk - 54 of 80 here, 51 of 80 on the
+first build, against 135 of 151 - because the new bytes no longer wait under the temp's name through
+`ReplaceFile`'s own moves; the run still checks that some kill landed inside a write. "None" is
+commoner as the offer after a kill (21 of 80, against 5 of 151): that is the superseded folders, no
+longer offered. And hints, not measurements: M23's writer median read 9.5 ms with the rename by
+handle, 6.7 ms on the first build's `MoveFileExW`, and 28 and 83 ms in two earlier Debug runs with
+`ReplaceFile` - its time on this box is the tick thread's Debug snapshot, not the rename.
+
+**What a pass does not say.** That no kill found a window this time, and one remains that the
+random kills cannot reach: a power cut rather than a kill, which on POSIX can take back a rename the
+directory was never made to keep, since nothing fsyncs it. Nor does the driver hold a file, so what
+a save does with a folder something is holding - carried, its mark a line longer - is the unit
+tests' to ask. Beside them, one gap by design: a session that writes nothing answers no mark, so a
+superseded folder it found stays on the disk - offered by nothing while show.xml is unchanged, but
+offered again if show.xml is changed by hand, or by a checkout, before any session writes. *(The
+double fault this paragraph first named - a superseded folder nothing could delete twice running,
+and the save after it killed before its own show.xml - is closed by FQ.)*
+
+**Not done**, from review: deleting at the first write a `recovery.previous.N/` that holds no
+show.xml. It is offered by nothing and harms nothing, and one left by the engine before H6b can hold
+the only copy of an afternoon under a temp's or a `~RF`'s name, which a person can still rename by
+hand.
+
+**The decisions.** FF, FG, FI and FL are the stage's design as ruled; FO to FS came from the
+stage's review, three skeptics a finding; the rest are the implementer's, and all are the author's
+to overrule.
+
+| | Decision | Whose |
+|---|---|---|
+| FF | **A save marks what it will retire before it writes**: `superseded`, one line naming the show.xml about to be written by its byte count and SHA-256, in this session's own `recovery/` and a `recovery.previous.N/` it recovered from, never in an earlier session's offer | implementer's call, as the stage ruled |
+| FG | **An offer needs a show.xml and no mark naming the show.xml on disk**, `recovery.previous.N/` included; a folder passed over hides none below it | implementer's call, as the stage ruled |
+| FH | **The marks are answered at the writer's first job**, not at open: a superseded folder deleted, a live one unmarked | implementer's call; the stage drew "at the first open" and allowed a better place |
+| FI | **A recovery folder is deleted show first, and not at all past a show that will not go** | implementer's call, as the stage ruled; stopping there is the implementer's |
+| FJ | **An autosave answers a mark in its own folder as the first job does**: matching show.xml, the folder goes; matching nothing, only the mark | implementer's call; the stage drew "the show, then the mark" whatever the mark said, which would empty a live folder for an autosave that might then fail |
+| FK | **A save that finds a folder already superseded deletes it**, and adds its own show.xml to the mark of what will not go | implementer's call; "adds" rather than "marks for", since FQ |
+| FL | **One rename**: `std::rename` on POSIX, and on Windows one rename that replaces (by handle, FO), the retries kept, the Windows error number in the sentence | implementer's call, as the stage ruled; `std::rename` over `replaceFileIn` on POSIX is the implementer's pick of the two it allowed; the first build's `MoveFileExW` gave way to FO |
+| FM | **The driver's mirror follows the engine's offer rule**, the torn-offer detector gives way to a control on the engine, and four controls are new | implementer's call; without it the driver would expect offers the engine rightly declines |
+| FN | **A mark that cannot be written does not stop the save** | implementer's call, as the tidy-up's failure never did |
+| FO | **The Windows rename is by handle, with POSIX semantics** - `FileRenameInfoEx`, `FILE_RENAME_FLAG_REPLACE_IF_EXISTS \| FILE_RENAME_FLAG_POSIX_SEMANTICS`, the handle write-through - and `MoveFileExW` only where the volume does not know the request; error 5 worded "open in another program, or access denied" | the fixer's call, after review: `MoveFileExW` was refused by a reader sharing deletion, which `ReplaceFile` never was |
+| FP | **Every save also marks each folder superseded when it runs**, whoever's it was | the fixer's call, after review: a `recovery.previous.N/` the first write could not delete came back as an offer once a save landed |
+| FQ | **A mark holds a line per save; any whole line naming show.xml hides the folder** | the fixer's call, after review; it closes the double fault FK first left open |
+| FR | **The driver asks for hidden offers**: a folder passed over for its mark must be outgrown by a landed save of a session that held it, from a folder that session's saves retire; and the afternoon a plain victim left standing must still be on offer after it | the fixer's call, after review: the mirror follows the engine's rule, so nothing else could see an afternoon hidden or lost |
+| FS | **A `~RF` a kill strands fails the run** | the fixer's call, from review: only `ReplaceFile` makes one, and H6b took it out |
+
+**Owed.** The first CI runs on Linux and macOS: the POSIX rename is compiled only there, and the
+driver should be green there too - no `~RF`, and the stale offer closed on every platform. The
+rename by handle's fallback to `MoveFileExW` has not met a FAT stick or a network share here. And
+the gap by design above closes with one call to `Bundle::resolveAllSuperseded` in the serve verb's
+open (`Console.cpp`, not this stage's file). Nothing to the bench.

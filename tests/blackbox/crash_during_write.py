@@ -38,14 +38,21 @@ show.xml is byte for byte the template with a marker the victim started with,
 adopted, or was sent - so nothing torn, nothing mixed, and nothing gone
 backwards; state.xml and the manifest parse; `recovery/show.xml` and every
 `recovery.previous.N/show.xml` are the template with some marker ever sent; the
-folder the engine will offer holds a show.xml, and no recovery show.xml was
-left by the kill under no name; the offer is never OLDER than a show.xml the
-same session saved, because a save retires that session's `recovery/` and
-adopting what it left would take the show back past the save; and temps
-(`<name>.tmp-<pid>`) may be anywhere, because nothing reads them, and are
-counted by whose they are - as are the `<name>~RF<hex>.TMP` files Windows' own
-`ReplaceFile` strands when the kill lands inside it, which are the evidence that
-a kill reached the replace itself.
+folder the engine will offer - one holding a show no landed save has marked
+`superseded` (H6b) - is worked out from the disk the engine's way, and no
+recovery show.xml was left by the kill under no name; the offer is never OLDER
+than a show.xml the same session saved, because a save retires that session's
+`recovery/` and adopting what it left would take the show back past the save;
+and, the other way round, a folder passed over for its mark is one a landed
+save outgrew - a state of a session that put a show.xml no older on the disk,
+in a folder that session's saves retire - and never a later afternoon, or an
+earlier session's unanswered one, hidden; and the afternoon a plain victim
+left standing is still on offer after it, moved aside or not, never hidden or
+gone. Temps (`<name>.tmp-<pid>`) may be
+anywhere, because nothing reads them, and are counted by whose they are; the
+`<name>~RF<hex>.TMP` files Windows' own `ReplaceFile` stranded when a kill
+landed inside it were counted too, until H6b took `ReplaceFile` out of the
+engine - one a kill strands now fails the run.
 
 AND OF THE NEXT PROCESS, twice. A plain start must open, announce the offer
 exactly when the disk holds one (naming its folder), publish show.xml's marker
@@ -76,46 +83,53 @@ half must be flagged by the inspection and must stop `serve` ("could not be
 loaded"); a `recovery/show.xml` cut in half must stop `serve --recover` ("could
 not be read"), which is also the proof that `recover=True` reaches the binary; a
 displaced show (under a temp's name, or under ReplaceFile's), a recovery show
-under no name, a torn offer, a show gone backwards, and an offer older than the
-show its own session saved - in `recovery/` or in the folder that session
-adopted - must each be named by the inspection, while an earlier session's
-unanswered offer, which a later save leaves standing on purpose, must not; and
+under no name and the `~RF` its kill stranded, a show gone backwards, and an
+offer older than the show its own session saved - in `recovery/` or in the
+folder that session adopted - must each be named by the inspection, while an
+earlier session's unanswered offer, which a later save leaves standing on
+purpose, must not; a `recovery.previous.N/` with no show in it, and a
+`recovery/` whose `superseded` mark names the show.xml on the disk - on its
+first line or a later one - must be offered by nothing - by the mirror, and by
+the engine, whose `--recover` start must have nothing to recover - while a mark
+naming any other show hides nothing, and the engine's `--recover` adopts that
+folder; a mark over work newer than the show.xml it names, and one over an
+earlier session's unanswered offer, must each be named as a hidden offer; and
 two whole temps planted with process id 1 - which is never the engine's - must
 be ignored by the first start, which must find nothing to recover and open on
 `H6-calibration`.
 
-WHAT IT FOUND, AND WHAT A PASS DOES NOT SAY. Two ENGINE findings, 2026-09-30.
+WHAT IT FOUND, AND WHAT CLOSED IT. Two ENGINE findings, 2026-09-30, both closed
+by H6b the same day (namespace draft §23.4-23.5), which is when ctest began to
+run this driver, as `blackbox.crash-write.C` and `.fr_FR`.
 
 The stale offer, on every platform, since the order is the writer's and not the
 file system's. A save writes show.xml, state.xml and the manifest, and only then
 deletes the session's `recovery/` (DocumentWriter.cpp's save job) or the
-`recovery.previous.N/` it adopted. A kill in between leaves the last autosave -
-older than the show.xml just written - where the next start offers it as
-`recovery available`, and adopting it quietly takes the show back past the save.
-About one kill in five landed there on the Windows box, so today this driver is
-red on nearly every run.
+`recovery.previous.N/` it adopted. A kill in between left the last autosave -
+older than the show.xml just written - where the next start offered it as
+`recovery available`, and adopting it quietly took the show back past the save:
+about one kill in five on the Windows box, so this driver was red on nearly
+every run. Now the save marks those folders `superseded`, naming the show.xml it
+is about to write, before it writes; a folder whose mark names the show.xml on
+the disk is no offer, and the next session's first write deletes it.
 
 The file under no name, on Windows. `ReplaceFile`, given no backup name, is
 four steps and not one: it creates an empty `<file>~RF<hex>.TMP`, moves the old
 file onto that name, moves the new one into place, and deletes the first.
-Between its two moves the file is under no name `open` reads, and a kill there
-leaves it so: the old bytes whole under the `~RF` name, the new ones whole under
-the temp's. On the manifest `serve` then refuses the folder as not a bundle; on
-show.xml it refuses a folder with no show; and on `recovery/show.xml` it offers
-nothing at all. DocumentWriter.h's claim holds for the bytes and not for the
-names.
+Between its two moves the file was under no name `open` reads, and a kill there
+left it so: the old bytes whole under the `~RF` name, the new ones whole under
+the temp's. On the manifest `serve` then refused the folder as not a bundle; on
+show.xml it refused a folder with no show; and on `recovery/show.xml` it offered
+nothing at all. Now the engine renames in one step: by handle, with POSIX
+semantics, and with `MoveFileExW` only where the volume cannot do that.
 
-This driver goes red on both, as it must, rather than being re-run until
-green. Until the engine closes both it is run by hand, and ctest does not run
-it (namespace draft §23). Once it passes, a pass will say only that no kill
-found a window this time, and there are two more the random kills are unlikely
-to reach: `ReplaceFile` failing outright (ERROR_UNABLE_TO_MOVE_REPLACEMENT,
-Bundle.cpp above `writeBytesAtomically`), which leaves the same state for the
-20-280 ms of Go.dot's own retries and which nothing here provokes; and a kill
-inside the deletion of a consumed or discarded `recovery.previous.N/`, file by
-file, which can leave a folder still offered by its name with no show.xml in
-it - only a victim that adopted one deletes one, once, in well under a
-millisecond. Either is an engine finding too.
+A red here is the engine's, never a flake to re-run. A pass says only that no
+kill found a window this time, and there is one the random kills cannot reach:
+a power cut rather than a kill, which on POSIX can undo a rename the directory
+was never made to keep, since nothing fsyncs it. Nor does this driver hold a
+file, so the folders something holds while a save runs - carried by every save
+after, their marks a line longer each time - are the unit tests' to ask
+(DocumentWriterTests.cpp). Either is an engine finding too.
 
 Exit codes as the rest of the suite: 0 everything held, 1 something did not,
 2 the harness could not run.
@@ -215,9 +229,21 @@ SAVE = common.osc_encode("/godot/cmd/document/save")
 AUTOSAVE = common.osc_encode("/godot/cmd/document/autosave")
 
 #  Bundle::temporaryFor names a temp `<file>.tmp-<pid>`; Bundle::previousRecoveries
-#  takes a folder `recovery.previous.<up to 18 digits>`, by its name alone.
-TEMP = re.compile(r"(show\.xml|state\.xml|crash-write\.wfg)\.tmp-([0-9]+)")
+#  takes a folder `recovery.previous.<up to 18 digits>` by its name, and since
+#  H6b offers it only when it holds a show no landed save has superseded.
+TEMP = re.compile(r"(show\.xml|state\.xml|crash-write\.wfg|superseded)\.tmp-([0-9]+)")
 PREVIOUS = re.compile(r"recovery\.previous\.([0-9]{1,18})")
+
+#  THE MARK A SAVE LEAVES IN WHAT IT WILL RETIRE (H6b, namespace draft §23.5):
+#  `superseded`, in `recovery/` or a `recovery.previous.N/`, written before the
+#  save writes show.xml and naming the show.xml it is about to write -
+#  `show.xml <bytes> sha256:<hex>` and a newline (Bundle::fingerprintOf) - and
+#  a line more for each later save that found the folder outgrown and could not
+#  delete it (Bundle::markSuperseded). A folder with a whole line naming the
+#  show.xml on the disk was outgrown by a save that landed, and the engine
+#  offers it no more.
+SUPERSEDED = "superseded"
+FINGERPRINT = re.compile(rb"(?:show\.xml [0-9]+ sha256:[0-9a-f]{64}\n)+")
 
 #  AND WINDOWS' OWN. `ReplaceFile` is not one step: given no backup name -
 #  and JUCE gives none - it creates an empty `<file>~RF<hex>.TMP` beside the
@@ -230,7 +256,12 @@ PREVIOUS = re.compile(r"recovery\.previous\.([0-9]{1,18})")
 #  and never deletes one outside `recovery/`, so beside a target each is litter
 #  rather than damage; and a kill that strands one is a kill that landed INSIDE
 #  the replace, which is the moment "old and whole or new and whole" is most in
-#  doubt. So they are counted, and what they hold is said.
+#  doubt. So they are counted, and what they hold is said. Since H6b the engine
+#  renames in one step and strands none, and only `ReplaceFile` makes them: one
+#  a kill strands now is the old replace come back, and fails the run
+#  (`stranded-rf`, fixer of H6b). One a move-aside carried into a
+#  `recovery.previous.N/` is the same file, failed where it was stranded, and is
+#  only counted.
 SWAP = re.compile(r"(show\.xml|state\.xml|crash-write\.wfg)~RF[0-9A-Fa-f]+\.TMP", re.IGNORECASE)
 
 #  Process ids that are never the engine's: 1 is init on POSIX and no process
@@ -364,6 +395,9 @@ def temp_state(template: Template, base: str, data: bytes) -> str:
         held = template.marker_of(data)
         return f"whole ({held})" if held else f"partial ({len(data)} bytes)"
 
+    if base == SUPERSEDED:
+        return "whole" if FINGERPRINT.fullmatch(data) else f"partial ({len(data)} bytes)"
+
     whole = parses_as(data, "State") if base == STATE else parses_as(data, "Bundle")
     return "whole" if whole else f"partial ({len(data)} bytes)"
 
@@ -384,14 +418,49 @@ def recovery_folders(bundle: Path) -> "list[Path]":
     return first + [folder for _, folder in numbered]
 
 
+def fingerprint(show: bytes) -> bytes:
+    """What a `superseded` mark holds for these show.xml bytes, spelled here
+    from the format and not asked of the engine (Bundle::fingerprintOf)."""
+    return f"{SHOW} {len(show)} sha256:{hashlib.sha256(show).hexdigest()}\n".encode("ascii")
+
+
+def superseded(bundle: Path, folder: Path) -> bool:
+    """Bundle::isSuperseded: one whole line of the folder's mark names the
+    show.xml on the disk, so a save that wrote it landed. No mark, or no
+    show.xml, is not; a line cut short, with no newline, names nothing."""
+    mark = read_settled(folder / SUPERSEDED) if (folder / SUPERSEDED).is_file() else None
+    shown = read_settled(bundle / SHOW) if (bundle / SHOW).is_file() else None
+
+    if mark is None or shown is None:
+        return False
+
+    #  Split on the newline alone, as the engine does (Bundle.cpp's `holdsLine`):
+    #  what follows the last one is a line cut short.
+    whole = [line + b"\n" for line in mark.split(b"\n")[:-1]]
+
+    return fingerprint(shown) in whole
+
+
+def holds_offer(bundle: Path, folder: Path) -> bool:
+    """What makes a recovery folder an offer since H6b: a show.xml, and no mark
+    saying a landed save has outgrown it."""
+    return (folder / SHOW).is_file() and not superseded(bundle, folder)
+
+
 def offered_folder(bundle: Path) -> "Path | None":
     """Bundle::offeredRecovery, read off the same disk the same way: `recovery/`
-    when a show.xml is in it, otherwise the `recovery.previous.N/` with the
-    highest number - by its NAME, whatever is inside - otherwise nothing."""
-    if (bundle / RECOVERY_DIR / SHOW).is_file():
+    when it is an offer, otherwise the `recovery.previous.N/` with the highest
+    number that is one, otherwise nothing.
+
+    Until H6b a `recovery.previous.N/` was offered by its NAME, whatever was
+    inside, and a folder a landed save had outgrown was offered like any other:
+    this driver found both, as the torn offer and the stale offer below, and
+    the engine now passes over either - so this mirror does."""
+    if holds_offer(bundle, bundle / RECOVERY_DIR):
         return bundle / RECOVERY_DIR
 
-    previous = [folder for folder in recovery_folders(bundle) if folder.name != RECOVERY_DIR]
+    previous = [folder for folder in recovery_folders(bundle)
+                if folder.name != RECOVERY_DIR and holds_offer(bundle, folder)]
 
     return previous[-1] if previous else None
 
@@ -483,11 +552,13 @@ class Finding:
 def inspect(bundle: Path, template: Template, allowed_show: "set[str]",
             allowed_any: "set[str]", victim_pid: "int | None" = None,
             before: "dict[str, bytes] | None" = None,
-            owner: "dict[str, Session] | None" = None) -> Finding:
+            owner: "dict[str, Session] | None" = None,
+            landed: "set[str] | None" = None) -> Finding:
     """Looks at every file the engine could have been writing, and says what is
     wrong. `allowed_show` is what show.xml may hold, `allowed_any` what a
-    recovery folder may, and `owner` which session each marker was sent to. A
-    temp is the victim's when its process id is the victim's and it was not
+    recovery folder may, `owner` which session each marker was sent to, and
+    `landed` every marker show.xml has been seen to hold, this look's included.
+    A temp is the victim's when its process id is the victim's and it was not
     already there, byte for byte, before the victim started: Windows reuses
     process ids, and an earlier process's temp with the same number is not
     evidence of where this kill landed."""
@@ -534,6 +605,17 @@ def inspect(bundle: Path, template: Template, allowed_show: "set[str]",
         else:
             finding.other_temps[key] = state
 
+    #  A `~RF` THIS KILL STRANDED is `ReplaceFile` come back (fixer of H6b):
+    #  nothing else makes one, and H6b took it out of `writeBytesAtomically`.
+    #  Not fatal - the displaced file it can leave is failed on its own below -
+    #  and failed once, where it was stranded; carried on by a move-aside it is
+    #  the same file, and only counted.
+    for key, state in sorted(finding.new_stranded.items()):
+        finding.problem("stranded-rf",
+                        f"{key} ({state}) was stranded by this kill: a temp only ReplaceFile makes, "
+                        f"so ReplaceFile is back in writeBytesAtomically, where H6b took it out. "
+                        f"An engine finding, not a flake", subject=f"{key} {state}")
+
     def of(base: str) -> "list[tuple[str, str]]":
         """Every temp of one file in the bundle's own folder, anybody's."""
         every = list(finding.victim_temps.items()) + list(finding.other_temps.items()) \
@@ -549,13 +631,14 @@ def inspect(bundle: Path, template: Template, allowed_show: "set[str]",
 
     def displaced(base: str) -> "tuple[bool, str, str]":
         """THE DISPLACED FILE: no target, and a whole copy of it under another
-        name beside it. Bundle.cpp's note above `writeBytesAtomically` names one
-        way - ReplaceFile's ERROR_UNABLE_TO_MOVE_REPLACEMENT leaves the new bytes
-        under the temp's name until the 20/60/200 ms retry moves them - and a
-        kill between ReplaceFile's own two moves is another, seen on the
-        manifest on 2026-09-30: the old bytes under its `~RF` name, the new under
-        the temp's. Either way `open` looks for neither. The third answer is the
-        evidence - the whole copies by name - for the problem's identity."""
+        name beside it. Until H6b there were two ways: ReplaceFile's
+        ERROR_UNABLE_TO_MOVE_REPLACEMENT left the new bytes under the temp's
+        name until the 20/60/200 ms retry moved them, and a kill between
+        ReplaceFile's own two moves - seen on the manifest on 2026-09-30 - left
+        the old bytes under its `~RF` name, the new under the temp's. The
+        engine's rename is one step now and should leave neither. Either way
+        `open` looks for neither. The third answer is the evidence - the whole
+        copies by name - for the problem's identity."""
         whole = [key for key, state in of(base) if state.startswith("whole")]
 
         if not whole:
@@ -631,7 +714,7 @@ def inspect(bundle: Path, template: Template, allowed_show: "set[str]",
         offered = folder == finding.offer
 
         for entry in folder.iterdir():
-            if entry.name not in (SHOW, STATE) and not TEMP.fullmatch(entry.name) \
+            if entry.name not in (SHOW, STATE, SUPERSEDED) and not TEMP.fullmatch(entry.name) \
                     and not SWAP.fullmatch(entry.name):
                 finding.unknown_names.append(f"{folder.name}/{entry.name}")
 
@@ -695,33 +778,28 @@ def inspect(bundle: Path, template: Template, allowed_show: "set[str]",
                 finding.notes.append(f"{said}; the recovered standby would come back at its "
                                      f"default (the same engine finding, in the file §3.20 lets go)")
 
-    #  A TORN OFFER: a folder offered by its name with no show in it. Only a
-    #  `recovery.previous.N/` can be one - `recovery/` is offered only when its
-    #  show.xml is there - and a kill inside the deletion of a consumed or
-    #  discarded one, file by file, is how one would come about.
-    #  `serve --recover` exits 2 on it and `document.recover` refuses it.
-    if finding.offer is not None and not (finding.offer / SHOW).is_file():
-        inside = sorted(entry.name for entry in finding.offer.iterdir())
-        finding.problem("torn-offer",
-                        f"{finding.offer.name}/ is offered by its name and holds no {SHOW} "
-                        f"(it holds {inside or 'nothing'}): a kill inside the deletion of a "
-                        f"consumed or discarded recovery.previous.N/. An engine finding "
-                        f"(Bundle::previousRecoveries lists folders by name), not a flake",
-                        fatal=True, subject=f"{finding.offer.name} {inside}")
+    #  A TORN OFFER - a `recovery.previous.N/` offered by its name with no show
+    #  in it, left by a kill inside its deletion - was a check here until H6b.
+    #  The engine offers only a folder that holds a show now, and so does
+    #  `offered_folder`, so no offer read off the disk can be torn: an engine
+    #  that offered one anyway disagrees with the mirror, and `announced` says
+    #  so at the next start. The controls ask the engine directly.
 
     #  A STALE OFFER: the next start offers an autosave OLDER than a show.xml
     #  the same session saved. A save writes show.xml, state.xml and the
     #  manifest, and only then deletes the session's `recovery/` - or the
     #  `recovery.previous.N/` it adopted, which is consumed (DocumentWriter.cpp,
     #  the save job) - because the work has become the show (§14.10). A kill
-    #  in between leaves the last autosave where `serve` offers it as the most
+    #  in between left the last autosave where `serve` offered it as the most
     #  recent afternoon there is, and `document.recover` or `--recover` then
-    #  takes the show back past the save, with the dot lit to invite saving the
-    #  loss for good. "Older" is decided inside one session only (`Session`):
-    #  an EARLIER session's unanswered offer is left standing by a later save
-    #  on purpose, and is not this. Not fatal: every file is whole and every
-    #  later start opens, so the loop goes on and counts. An engine finding,
-    #  not a flake.
+    #  took the show back past the save, with the dot lit to invite saving the
+    #  loss for good. Since H6b the save marks those folders `superseded` before
+    #  it writes, so a folder it outgrew is no offer: one that is offered
+    #  anyway is that mark missing or misread. "Older" is decided inside one
+    #  session only (`Session`): an EARLIER session's unanswered offer is left
+    #  standing by a later save on purpose, and is not this. Not fatal: every
+    #  file is whole and every later start opens, so the loop goes on and
+    #  counts. An engine finding, not a flake.
     if owner and finding.offer is not None and finding.offer_marker is not None \
             and finding.show_marker is not None:
         session = owner.get(finding.show_marker)
@@ -734,8 +812,48 @@ def inspect(bundle: Path, template: Template, allowed_show: "set[str]",
                             f"{finding.stale}: the save's {SHOW} landed and the offer outlived "
                             f"it, so recovering it takes the show back past the save. An engine "
                             f"finding (DocumentWriter.cpp's save job retires the offer only after "
-                            f"all three writes), not a flake",
+                            f"all three writes, and marks it {SUPERSEDED} before them - a mark "
+                            f"missing or misread), not a flake",
                             subject=f"{finding.offer_marker} under {finding.show_marker}")
+
+    #  A HIDDEN OFFER (fixer of H6b): the stale offer turned inside out. Since
+    #  H6b the engine passes over a folder whose `superseded` mark names
+    #  show.xml, and so does `offered_folder` - by the same rule, so every
+    #  restart check above agrees with an engine that hides a folder it should
+    #  not have, and cannot see it. A mark on an earlier session's unanswered
+    #  offer, or one written over an afternoon newer than the save that landed,
+    #  would silently lose the most recent work there is. So a folder passed
+    #  over must be one a landed save OUTGREW: its show a state of some session
+    #  that also put a show.xml on the disk no older than it - one seen by a
+    #  look, this one included - and the folder that session's saves retire,
+    #  its own `recovery/` or the `recovery.previous.N/` it adopted from.
+    #  Anything else is an afternoon hidden that should stand. Not fatal.
+    if owner is not None:
+        sessions = list({id(each): each for each in owner.values()}.values())
+        shows = set(landed or ()) | ({finding.show_marker} if finding.show_marker else set())
+
+        for folder in recovery_folders(bundle):
+            if not (folder / SHOW).is_file() or not superseded(bundle, folder):
+                continue
+
+            held = template.marker_of(read_settled(folder / SHOW))
+
+            if held is None:
+                continue  # not a state anybody wrote: failed as torn above
+
+            outgrown = [shown for each in sessions
+                        if held in each.states and folder.name in (RECOVERY_DIR, each.adopted_from)
+                        for shown in shows
+                        if shown in each.states and (shown == held or each.older(held, shown))]
+
+            if not outgrown:
+                finding.problem("hidden-offer",
+                                f"{folder.name}/ holds {held} and is passed over for a {SUPERSEDED} "
+                                f"mark naming {SHOW}, but no save that landed had outgrown it: no "
+                                f"session that held {held} put a {SHOW} as new on the disk, from a "
+                                f"folder its saves retire. An afternoon hidden that should stand - "
+                                f"an engine finding, not a flake",
+                                subject=f"{folder.name}/ {held} hidden")
 
     return finding
 
@@ -1000,6 +1118,7 @@ class Run:
         self.template: "Template | None" = None
         self.sent_ever: "set[str]" = set()
         self.owner: "dict[str, Session]" = {}
+        self.landed: "set[str]" = set()
         self.rows: "list[dict]" = []
         self.stopped_at: "int | None" = None
         self.finding: "Finding | None" = None
@@ -1014,9 +1133,19 @@ class Run:
         has put right, is the same finding and not a second one, so it is only
         said again; what is new is kept for the caller. A problem's identity
         carries its evidence (`Finding.problem`), so the same fault struck
-        again by a later kill is new, and fails again."""
+        again by a later kill is new, and fails again.
+
+        EVERY show.xml A LOOK SEES IS A SAVE THAT LANDED, and is kept: a folder
+        the engine passes over for its mark must have been outgrown by one of
+        them (`inspect`, the hidden offer). Only a session's save changes
+        show.xml - a victim's, or the final one's - and the look after it sees
+        its last."""
         finding = inspect(self.bundle, self.template, allowed_show, self.allowed_any(),
-                          owner=self.owner, **options)
+                          owner=self.owner, landed=self.landed, **options)
+
+        if finding.show_marker is not None:
+            self.landed.add(finding.show_marker)
+
         seen = set(known.keys) if known is not None else set()
 
         for key, problem in zip(finding.keys, finding.problems):
@@ -1195,6 +1324,9 @@ class Run:
         report.check("displaced-recovery-show" in finding.kinds and not finding.fatal,
                      "control: inspect() flags a recovery/show.xml under no name, its offer gone",
                      "; ".join(finding.problems) or "it found nothing wrong")
+        report.check("stranded-rf" in finding.kinds,
+                     "control: and fails the ~RF that kill stranded, which only ReplaceFile makes",
+                     "; ".join(finding.problems) or "it found nothing wrong")
 
         # A `~RF` an earlier kill stranded in recovery/, carried to
         # recovery.previous.1/ when a plain victim's first autosave moved the
@@ -1212,17 +1344,21 @@ class Run:
                      "counted as stranded by the kill after",
                      f"found {finding.stranded}; counted as this kill's: {finding.new_stranded}")
 
-        # A torn offer: a recovery.previous.N/ offered by its name, no show in it.
+        # What a kill inside the deletion of a recovery.previous.N/, file by
+        # file, would leave: the folder, with no show in it. Offered by its name
+        # until H6b, it was the torn offer - `--recover` exited 2 on it. Now the
+        # engine offers only a folder holding a show, and so does the mirror;
+        # asked of the engine itself, since no look at the disk can tell.
         torn_previous = copy("torn-previous")
         folder = torn_previous / "recovery.previous.1"
         folder.mkdir()
         (folder / STATE).write_bytes((torn_previous / STATE).read_bytes())
         finding = inspect(torn_previous, template, {CALIBRATION}, {CALIBRATION})
 
-        report.check("torn-offer" in finding.kinds and finding.fatal and finding.offer == folder,
-                     "control: inspect() flags a recovery.previous.N/ offered with no show.xml "
-                     "in it",
-                     "; ".join(finding.problems) or "it found nothing wrong")
+        report.check(finding.offer is None and not finding.problems,
+                     "control: inspect() offers no recovery.previous.N/ with no show.xml in it",
+                     "; ".join(finding.problems) or f"it offers {finding.offer_name()}")
+        self.nothing_to_recover(torn_previous, "a recovery.previous.N/ with no show.xml in it")
 
         # A show that went backwards: a whole state, but not one allowed.
         finding = inspect(self.bundle, template, {PLANTED}, {CALIBRATION})
@@ -1276,6 +1412,82 @@ class Run:
                      "which the design keeps standing",
                      "; ".join(finding.problems) or f"the offer holds {finding.offer_marker}")
 
+        # The stale offer as H6b leaves it: the same recovery/ from before the
+        # save, now marked `superseded` with the show.xml that save wrote. No
+        # offer, to the mirror or to the engine - which before H6b adopted it
+        # and took the show back past the save.
+        marked = copy("superseded")
+        (marked / SHOW).write_bytes(template.bytes_for(late))
+        (marked / RECOVERY_DIR / SHOW).write_bytes(template.bytes_for(early))
+        (marked / RECOVERY_DIR / SUPERSEDED).write_bytes(fingerprint(template.bytes_for(late)))
+        finding = inspect(marked, template, {late}, {early, late}, owner=owner)
+
+        report.check(finding.offer is None and not finding.problems,
+                     "control: inspect() offers no folder whose superseded mark names show.xml - "
+                     "and passes it as rightly hidden, outgrown by a save of its own session",
+                     "; ".join(finding.problems) or f"it offers {finding.offer_name()}")
+        self.nothing_to_recover(marked, "a recovery/ a landed save superseded")
+
+        # The same folder carried by a later save (fixer of H6b): a landed save
+        # outgrew it and nothing could delete it, so the save after added its
+        # own line. Hidden by whichever line names show.xml, here the second -
+        # to the mirror, and to the engine.
+        lines = copy("superseded-lines")
+        (lines / SHOW).write_bytes(template.bytes_for(late))
+        (lines / RECOVERY_DIR / SHOW).write_bytes(template.bytes_for(early))
+        (lines / RECOVERY_DIR / SUPERSEDED).write_bytes(
+            fingerprint(template.bytes_for(marker(99, 6))) + fingerprint(template.bytes_for(late)))
+        finding = inspect(lines, template, {late}, {early, late}, owner=owner)
+
+        report.check(finding.offer is None and not finding.problems,
+                     "control: inspect() offers no folder whose mark names show.xml on its second "
+                     "line",
+                     "; ".join(finding.problems) or f"it offers {finding.offer_name()}")
+        self.nothing_to_recover(lines, "a recovery/ whose mark names show.xml on its second line")
+
+        # And the twin: a mark naming any other show - its save never landed -
+        # hides nothing, so the mirror's comparison is not an "any mark" rule.
+        # In a copy of its own, so that nothing the engine started on `marked`
+        # did can matter, and asked of the engine too: `--recover` adopts it.
+        twin = copy("superseded-twin")
+        (twin / SHOW).write_bytes(template.bytes_for(late))
+        (twin / RECOVERY_DIR / SHOW).write_bytes(template.bytes_for(early))
+        (twin / RECOVERY_DIR / SUPERSEDED).write_bytes(fingerprint(template.bytes_for(early)))
+        finding = inspect(twin, template, {late}, {early, late})
+
+        report.check(finding.offer == twin / RECOVERY_DIR,
+                     "control: but one whose mark names another show is offered",
+                     f"it offers {finding.offer_name()}")
+        self.adopted_at_start(twin, "a recovery/ whose mark names another show", early)
+
+        # A HIDDEN OFFER (fixer of H6b): a mark no landed save could have left,
+        # which the engine and the mirror both honour, so only this check sees
+        # it. Over work NEWER than the show.xml the mark names - the afternoon
+        # after the save, hidden as if the save had outgrown it...
+        hidden = copy("hidden-later")
+        (hidden / SHOW).write_bytes(template.bytes_for(early))
+        (hidden / RECOVERY_DIR / SHOW).write_bytes(template.bytes_for(late))
+        (hidden / RECOVERY_DIR / SUPERSEDED).write_bytes(fingerprint(template.bytes_for(early)))
+        finding = inspect(hidden, template, {early}, {early, late}, owner=owner)
+
+        report.check("hidden-offer" in finding.kinds and finding.offer is None
+                     and not finding.fatal,
+                     "control: inspect() flags a folder hidden by a mark over work newer than the "
+                     "show.xml it names",
+                     "; ".join(finding.problems) or "it found nothing wrong")
+
+        # ... and over an earlier session's unanswered offer, which no save of a
+        # later session says anything about (§14.10).
+        hidden = copy("hidden-theirs")
+        (hidden / SHOW).write_bytes(template.bytes_for(late))
+        (hidden / RECOVERY_DIR / SHOW).write_bytes(template.bytes_for(theirs))
+        (hidden / RECOVERY_DIR / SUPERSEDED).write_bytes(fingerprint(template.bytes_for(late)))
+        finding = inspect(hidden, template, {late}, {early, late, theirs}, owner=owner)
+
+        report.check("hidden-offer" in finding.kinds and finding.offer is None,
+                     "control: and one hidden over an earlier session's unanswered offer",
+                     "; ".join(finding.problems) or "it found nothing wrong")
+
         # And the real folder, temps planted, has nothing wrong with it.
         finding = inspect(self.bundle, template, {CALIBRATION}, {CALIBRATION})
 
@@ -1285,6 +1497,43 @@ class Run:
                      "; ".join(finding.problems) or f"temps: {finding.other_temps}")
 
         return planted
+
+    def nothing_to_recover(self, bundle: Path, what: str) -> None:
+        """A `--recover` start on a folder in which the engine must offer
+        nothing: it starts rather than exiting 2, announces nothing, and says
+        it has nothing to recover."""
+        try:
+            server = Server(bundle, locale=self.locale, recover=True)
+        except HarnessError as problem:
+            self.report.check(False, f"control: serve --recover starts on {what}, with nothing "
+                                     f"to recover", str(problem).strip())
+            return
+
+        with dying(server):
+            told = [line for line in server.notices if "recovery available" in line]
+
+            self.report.check("wfg: nothing to recover" in server.notices and not told,
+                              f"control: serve --recover starts on {what}, announces nothing and "
+                              f"has nothing to recover",
+                              " | ".join(server.notices))
+
+    def adopted_at_start(self, bundle: Path, what: str, held: str) -> None:
+        """A `--recover` start on a folder whose offer holds `held`: it starts
+        rather than exiting 2, says it adopted the offer, and publishes it."""
+        try:
+            server = Server(bundle, locale=self.locale, recover=True)
+        except HarnessError as problem:
+            self.report.check(False, f"control: serve --recover starts on {what}, and adopts it",
+                              str(problem).strip())
+            return
+
+        with dying(server):
+            self.report.check("wfg: recovery adopted" in server.notices,
+                              f"control: serve --recover adopts {what}",
+                              " | ".join(server.notices))
+            self.report.check(doc.reads(server, NAME, held),
+                              f"control: and publishes {held}, the offer's",
+                              f"the name reads {doc.value_of(server, NAME)!r}")
 
     # --- 2 ------------------------------------------------------------------
     def kill_loop(self) -> None:
@@ -1344,6 +1593,7 @@ class Run:
             before = temps_of(self.bundle)
             recover = not leave
             adopted = finding.offer_marker if recover and finding.offer is not None else None
+            standing = finding.offer_marker if leave and finding.offer is not None else None
             session = Session(adopted, finding.offer.name if adopted else None)
             at_start = finding.show_marker
             victim_log = self.room / f"victim-{k:02d}.wfglog"
@@ -1390,6 +1640,27 @@ class Run:
             if not after.problems:
                 report.check(True, f"{label}: every file is one of the states written - "
                                    f"{describe(after)}")
+
+            #    AND THE AFTERNOON A PLAIN VICTIM LEFT STANDING IS STILL ON OFFER
+            #    (fixer of H6b). An earlier session's unanswered offer is left
+            #    standing by a save on purpose (§14.10) and moved aside by the
+            #    first autosave, never deleted and never marked. The hidden-offer
+            #    check sees a mark on it only while the mark still matches: the
+            #    next save that finds a folder superseded deletes it, so an
+            #    engine that marked the offer loses the afternoon outright -
+            #    which only asking for it by name can see. Seen so on 2026-09-30:
+            #    a build whose save marked the offer passed every other check.
+            if standing is not None:
+                kept = [f"{folder.name}/" for folder in recovery_folders(self.bundle)
+                        if holds_offer(self.bundle, folder)
+                        and self.template.marker_of(read_settled(folder / SHOW)) == standing]
+
+                report.check(bool(kept),
+                             f"{label}: the afternoon it left standing, {standing}, is still on "
+                             f"offer ({', '.join(kept) or 'nowhere'})",
+                             f"no recovery folder offers {standing} any more: an earlier session's "
+                             f"unanswered afternoon, gone or hidden by this victim - an engine "
+                             f"finding, not a flake")
 
             self.rows.append({"k": k, "delay": delay, "mode": "plain" if leave else "recover",
                               "pid": pid, **stream, "temps": dict(after.victim_temps),

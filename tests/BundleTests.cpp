@@ -31,6 +31,7 @@
 
 #include "TestSupport.h"
 
+#include <wfg/engine/app/FolderIcon.h>
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/Bundle.h>
@@ -42,6 +43,7 @@
 #include <wfg/engine/document/Schema.h>
 
 #include <juce_core/juce_core.h>
+#include <juce_cryptography/juce_cryptography.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -204,6 +206,36 @@ namespace
     bool canUndoIn (const ShowDocument& document)
     {
         return document.history (UndoDomain::document).canUndo();
+    }
+
+    /*  WHAT A `superseded` MARKER HOLDS, spelled out here rather than asked of
+        the engine (H6b, namespace draft §23.5): `show.xml`, the byte count and
+        the SHA-256 of the show.xml a save was about to write, on one line. By
+        hand, like the fixture, because a marker the engine both wrote and
+        judged would prove only that the engine agrees with itself. */
+    std::string markerFor (const std::string& show)
+    {
+        return "show.xml " + std::to_string (show.size()) + " sha256:"
+             + juce::SHA256 (show.data(), show.size()).toHexString().toStdString() + "\n";
+    }
+
+    juce::File supersededIn (const juce::File& recovery)
+    {
+        return recovery.getChildFile ("superseded");
+    }
+
+    /*  Every problem a write reported, as one line for a check's message: a
+        doctest INFO inside a loop is gone before the check after the loop.
+        Only the Windows cases below use it, so elsewhere it is unused - and
+        the strict Linux build treats an unused function as an error. */
+    [[maybe_unused]] std::string problemsOf (const ReadResult& result)
+    {
+        std::string text;
+
+        for (const auto& problem : result.problems)
+            text += (text.empty() ? "" : "; ") + problem;
+
+        return text.empty() ? std::string ("(none)") : text;
     }
 }
 
@@ -1319,6 +1351,338 @@ TEST_CASE ("M23: an autosave of a 500-cue show - the tick thread's snapshot and 
                      << " ms, worst " << onTheWriter.worst
                      << " ms; the threshold for the tick thread is a quarter tick, 5 ms");
 }
+
+//==============================================================================
+/*  H6b: AN OFFER A LANDED SAVE HAS SUPERSEDED IS NO OFFER (namespace draft
+    §23.5).
+
+    `blackbox/crash_during_write.py` killed the engine between a save's
+    show.xml and the tidy-up after it, and the next start offered the autosave
+    from BEFORE the save as "recovery available" - adopt it, and the show went
+    back past the save. A save now writes a `superseded` marker into every
+    folder it will retire before it writes show.xml, and an offer is judged
+    against it. These cases stand on the disk, by hand, the folders a kill
+    leaves, marker and all, and ask what the next session would be offered. The
+    writer's half - which folders get a marker, and when - is
+    DocumentWriterTests.cpp's. */
+
+TEST_CASE ("recovery: a folder whose marker names the show.xml on disk was superseded by a save that landed, and nothing offers it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto live = temp.folder.getChildFile ("recovery.previous.1");
+    const auto stale = temp.folder.getChildFile ("recovery.previous.2");
+
+    //  An afternoon nobody answered, moved aside, and offered while nothing beats it.
+    abandonAnAfternoon (temp.folder, "An afternoon nobody answered");
+    REQUIRE (Bundle::recoveryFolder (temp.folder).moveFileTo (live));
+    REQUIRE (Bundle::offeredRecovery (temp.folder) == live);
+
+    //--------------------------------------------------------------------------
+    /*  IN `recovery/`: the autosave from before the save, and the marker naming
+        the show.xml that save wrote - which is the bundle's own now. The show
+        in the folder is whole; what makes it no offer is that it is older than
+        the show it would replace. */
+    abandonAnAfternoon (temp.folder, "The afternoon before the save");
+    writeBytes (supersededIn (Bundle::recoveryFolder (temp.folder)),
+                markerFor (readBytes (Bundle::showFile (temp.folder))));
+
+    CHECK_FALSE (Bundle::hasRecovery (temp.folder));
+    CHECK (Bundle::offeredRecovery (temp.folder) == live);
+
+    //--------------------------------------------------------------------------
+    /*  MOVED ASIDE, THE SAME - a `recovery.previous.N/` a session adopted and
+        then saved over is consumed, and that save marks it too - and ABOVE the
+        live one: passed over, not in the way. The newest afternoon there is is
+        the next one down. */
+    REQUIRE (Bundle::recoveryFolder (temp.folder).moveFileTo (stale));
+
+    CHECK (Bundle::offeredRecovery (temp.folder) == live);
+
+    const auto listed = Bundle::previousRecoveries (temp.folder);
+    REQUIRE (listed.size() == 1u);
+    CHECK (listed[0] == live);
+
+    //  Alone, it is nothing to offer at all.
+    REQUIRE (live.deleteRecursively());
+    CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+    CHECK (Bundle::previousRecoveries (temp.folder).empty());
+}
+
+TEST_CASE ("recovery: a marker naming any other show hides nothing - the save that wrote it never landed")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  THE OTHER HALF OF THE RULE, which is what keeps it from costing anybody
+        an afternoon. A kill after the marker and before show.xml leaves the
+        folder marked for a show that never reached the disk: the autosave in it
+        is newer than the show.xml it would replace, and it is exactly what the
+        next start should offer. So is a marker that is not one at all. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+    abandonAnAfternoon (temp.folder, "The afternoon a stopped save left");
+
+    const auto shown = readBytes (Bundle::showFile (temp.folder));
+    auto sameLength = shown;
+    sameLength.back() = sameLength.back() == 'x' ? 'y' : 'x';
+
+    for (const auto& marker : { markerFor (shown + "<!-- the save that never landed -->\n"),
+                                markerFor (sameLength),
+                                markerFor (shown).substr (0, 20),
+                                std::string ("superseded\n"),
+                                std::string() })
+    {
+        INFO ("marker: " << marker);
+        writeBytes (supersededIn (Bundle::recoveryFolder (temp.folder)), marker);
+
+        CHECK (Bundle::hasRecovery (temp.folder));
+        CHECK (Bundle::offeredRecovery (temp.folder) == Bundle::recoveryFolder (temp.folder));
+    }
+}
+
+TEST_CASE ("recovery: a mark holds a line for every save that named its folder, and one whole line naming the show.xml on disk hides it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  A FOLDER A LANDED SAVE OUTGREW AND THAT WILL NOT GO - something holds
+        its show - is carried by every save after it (fixer of H6b, namespace
+        draft §23.5): each adds a line for the show.xml it is about to write to
+        the lines already there, so the folder stays outgrown whether that save
+        lands or is killed before its show.xml. With one line, replaced, a save
+        killed there left the mark naming a show that is nowhere, over an
+        afternoon older than the show that is there - on offer, and adopting it
+        took the show back past a save. Any whole line will do, wherever it is;
+        a line cut short matches nothing, as a mark that is not one never did. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+    abandonAnAfternoon (temp.folder, "An afternoon two saves outgrew");
+
+    const auto shown = readBytes (Bundle::showFile (temp.folder));
+    const auto landed = markerFor (shown);
+    const auto neverLanded = markerFor (shown + "<!-- a save that never landed -->\n");
+
+    for (const auto& marker : { landed + neverLanded,
+                                neverLanded + landed,
+                                neverLanded + landed + neverLanded })
+    {
+        INFO ("marker: " << marker);
+        writeBytes (supersededIn (Bundle::recoveryFolder (temp.folder)), marker);
+
+        CHECK_FALSE (Bundle::hasRecovery (temp.folder));
+        CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+    }
+
+    for (const auto& marker : { neverLanded + markerFor (shown + "x"),
+                                neverLanded + landed.substr (0, landed.size() - 1),
+                                neverLanded + landed.substr (0, 30) })
+    {
+        INFO ("marker: " << marker);
+        writeBytes (supersededIn (Bundle::recoveryFolder (temp.folder)), marker);
+
+        CHECK (Bundle::hasRecovery (temp.folder));
+        CHECK (Bundle::offeredRecovery (temp.folder) == Bundle::recoveryFolder (temp.folder));
+    }
+}
+
+TEST_CASE ("recovery: a recovery.previous.N/ with no show.xml in it is offered by nothing - a kill inside its deletion leaves nothing to adopt")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  A folder deleted file by file and killed half way. Offered by its name,
+        it was the torn offer H6's driver was built to catch: `serve --recover`
+        exited 2 on it and `document.recover` refused, with the folder still in
+        the banner. A show is what makes a folder an offer, as it always was for
+        `recovery/`. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto show = readBytes (Bundle::showFile (temp.folder));
+    const auto state = readBytes (Bundle::stateFile (temp.folder));
+
+    const auto emptied = temp.folder.getChildFile ("recovery.previous.2");
+    writeBytes (emptied.getChildFile ("state.xml"), state);
+
+    CHECK (Bundle::offeredRecovery (temp.folder) == juce::File());
+    CHECK (Bundle::previousRecoveries (temp.folder).empty());
+
+    //  Nor does it hide one below it that still holds its show.
+    const auto whole = temp.folder.getChildFile ("recovery.previous.1");
+    writeBytes (whole.getChildFile ("show.xml"), show);
+    writeBytes (whole.getChildFile ("state.xml"), state);
+
+    CHECK (Bundle::offeredRecovery (temp.folder) == whole);
+
+    const auto listed = Bundle::previousRecoveries (temp.folder);
+    REQUIRE (listed.size() == 1u);
+    CHECK (listed[0] == whole);
+
+    //  Its name is still taken: the next move aside goes above it.
+    CHECK (Bundle::nextPreviousRecovery (temp.folder) == temp.folder.getChildFile ("recovery.previous.3"));
+}
+
+#if JUCE_WINDOWS
+TEST_CASE ("bundle: a save into a show folder the icon has marked read-only replaces every file, and the marking stays (Windows)")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  H6b RENAMES ONE STEP where `ReplaceFile` stood - by handle, with POSIX
+        semantics - and a show folder the window has saved carries READONLY,
+        which on a folder only tells Explorer to read desktop.ini
+        (app/FolderIcon.h). A rename into it must not care. A guard rather than
+        a repair: `ReplaceFile` managed it too, so this cannot fail on the code
+        before H6b. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    //  Declared after the bundle, so it is undone first: a read-only folder will not be deleted.
+    struct Unmark
+    {
+        juce::File folder;
+        ~Unmark() { folder.setReadOnly (false, true); }
+    } unmark { temp.folder };
+
+    wfg::app::markShowFolder (temp.folder);
+    REQUIRE (wfg::app::isMarkedShowFolder (temp.folder));
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+    REQUIRE (document.setAttribute (houseToHalfName, "Saved into a marked folder").ok);
+
+    const auto saved = Bundle::save (temp.folder, document);
+    REQUIRE_MESSAGE (saved.ok, "problems: " << problemsOf (saved));
+
+    const auto autosaved = Bundle::saveRecovery (temp.folder, document);
+    CHECK_MESSAGE (autosaved.ok, "problems: " << problemsOf (autosaved));
+
+    ShowDocument reopened;
+    REQUIRE (Bundle::open (temp.folder, reopened).ok);
+    CHECK (reopened.getAttribute (houseToHalfName) == std::string ("Saved into a marked folder"));
+    CHECK (readBytes (Bundle::recoveryShowFile (temp.folder)) == CanonicalXml::write (document));
+
+    CHECK (tempsIn (temp.folder).empty());
+    CHECK (tempsIn (Bundle::recoveryFolder (temp.folder)).empty());
+
+    CHECK (wfg::app::isMarkedShowFolder (temp.folder));
+    CHECK (temp.folder.getChildFile ("desktop.ini").isHidden());
+    CHECK (temp.folder.getChildFile (".go.dot-folder.ico").isHidden());
+}
+
+TEST_CASE ("bundle: a replace somebody else's handle refuses leaves the old show, the new one beside it, and says which Windows error (Windows)")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  THE HONEST REFUSAL, with its reason (H6b). Something holding show.xml
+        without sharing its deletion - an editor, a sync client, a scanner -
+        refuses the rename that would replace it, through all three retries.
+        What is left must be what it always was, the old show whole and the new
+        one beside it; and since the rename says why where `replaceFileIn`
+        swallowed it, the sentence says so too - in words an operator can act
+        on, because the likeliest reason is another program (fixer of H6b: the
+        first build said "access denied", which is what `MoveFileExW` reported
+        for every holder). */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto showXml = Bundle::showFile (temp.folder);
+    const auto before = readBytes (showXml);
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+    REQUIRE (document.setAttribute (houseToHalfName, "Held off the disk").ok);
+
+    ReadResult saved;
+
+    {
+        //  JUCE opens a file for writing sharing its reads alone (juce_Files_windows.cpp).
+        juce::FileOutputStream holder { showXml };
+        REQUIRE (holder.openedOk());
+
+        saved = Bundle::save (temp.folder, document);
+    }
+
+    INFO ("problems: " << problemsOf (saved));
+
+    CHECK_FALSE (saved.ok);
+    CHECK (readBytes (showXml) == before);
+    CHECK (readBytes (Bundle::temporaryFor (showXml)) == CanonicalXml::write (document));
+    CHECK (mentions (saved.problems, "Windows error"));
+    CHECK (mentions (saved.problems, "open in another program"));
+}
+
+TEST_CASE ("bundle: a save and an autosave land over files somebody is reading, and the readers go on reading what they opened (Windows)")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  A READER THAT SHARES DELETION STOPS NO WRITE, as it never stopped
+        `ReplaceFile` (fixer of H6b, namespace draft §23.5). JUCE's own
+        FileInputStream opens a file that way (juce_Files_windows.cpp), so a
+        `wfg validate` or a `wfg tree` run on a bundle a serve is saving holds
+        one, and readers of other kinds do the same. `MoveFileExW`, which H6b
+        first put where `ReplaceFile` stood, is refused while ANY handle is open
+        on the target, sharing or not - error 5, through all three retries - so
+        a save or an autosave made while one was open did not land, and the dot
+        stayed lit. A rename by handle with POSIX semantics takes the name from
+        under the reader, who goes on reading the file it opened. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+    REQUIRE (Bundle::saveRecovery (temp.folder, document).ok);
+
+    const auto showXml = Bundle::showFile (temp.folder);
+    const auto recoveryShow = Bundle::recoveryShowFile (temp.folder);
+    const auto shownBefore = readBytes (showXml);
+    const auto keptBefore = readBytes (recoveryShow);
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Saved under two readers").ok);
+
+    /*  To the end of the file the handle has open, never "the file's length":
+        a FileInputStream asks that of the NAME (juce_FileInputStream.cpp), which
+        by then is the new file. */
+    const auto readToTheEnd = [] (juce::FileInputStream& stream)
+    {
+        std::string bytes;
+        char buffer[4096];
+
+        for (int got = stream.read (buffer, static_cast<int> (sizeof (buffer))); got > 0;
+             got = stream.read (buffer, static_cast<int> (sizeof (buffer))))
+            bytes.append (buffer, static_cast<std::size_t> (got));
+
+        return bytes;
+    };
+
+    ReadResult saved, autosaved;
+    std::string readUnderTheSave, readUnderTheAutosave;
+
+    {
+        juce::FileInputStream showReader { showXml };
+        juce::FileInputStream recoveryReader { recoveryShow };
+        REQUIRE (showReader.openedOk());
+        REQUIRE (recoveryReader.openedOk());
+
+        saved = Bundle::save (temp.folder, document);
+        autosaved = Bundle::saveRecovery (temp.folder, document);
+
+        readUnderTheSave = readToTheEnd (showReader);
+        readUnderTheAutosave = readToTheEnd (recoveryReader);
+    }
+
+    CHECK_MESSAGE (saved.ok, "save: " << problemsOf (saved));
+    CHECK_MESSAGE (autosaved.ok, "autosave: " << problemsOf (autosaved));
+
+    CHECK (readBytes (showXml) == CanonicalXml::write (document));
+    CHECK (readBytes (recoveryShow) == CanonicalXml::write (document));
+    CHECK (readUnderTheSave == shownBefore);
+    CHECK (readUnderTheAutosave == keptBefore);
+
+    CHECK (tempsIn (temp.folder).empty());
+    CHECK (tempsIn (Bundle::recoveryFolder (temp.folder)).empty());
+}
+#endif
 
 //==============================================================================
 TEST_CASE ("bundle: folderFor - a folder is itself, a manifest is its folder, anything else is nothing")

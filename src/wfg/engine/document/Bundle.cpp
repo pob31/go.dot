@@ -23,13 +23,26 @@
 #include <juce_cryptography/juce_cryptography.h>
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #if defined (_WIN32)
+ #include <cstring>          // std::memcpy
+ #include <cwchar>           // std::wcslen
  #include <process.h>        // _getpid
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>        // SetFileInformationByHandle, MoveFileExW, GetLastError
 #else
+ #include <cerrno>
+ #include <cstdio>           // std::rename
+ #include <system_error>
  #include <unistd.h>         // getpid
 #endif
 
@@ -42,6 +55,7 @@ namespace wfg::doc
         constexpr const char* namespacesDir = "namespaces";
         constexpr const char* recoveryDir   = "recovery";
         constexpr const char* previousPrefix = "recovery.previous.";
+        constexpr const char* supersededName = "superseded";
         constexpr const char* manifestSuffix = ".wfg";
         constexpr const char* manifestRoot  = "Bundle";
 
@@ -65,6 +79,84 @@ namespace wfg::doc
                 return -1;
 
             return digits.getLargeIntValue();
+        }
+
+        /*  Every `recovery.previous.N/` in the bundle, lowest N first, whatever
+            is in it - `previousRecoveries` narrows it to the ones that are
+            offers, and the settling of markers at a session's first write
+            (`resolveAllSuperseded`) needs the rest too. */
+        std::vector<juce::File> numberedPrevious (const juce::File& folder)
+        {
+            std::vector<std::pair<juce::int64, juce::File>> numbered;
+
+            for (const auto& child : folder.findChildFiles (juce::File::findDirectories, false,
+                                                            juce::String (previousPrefix) + "*"))
+                if (const auto number = previousNumberOf (child.getFileName()); number >= 0)
+                    numbered.emplace_back (number, child);
+
+            /*  By the number and not by the name, or `recovery.previous.10` would
+                sort before `recovery.previous.9` and the newest afternoon would be
+                offered second. */
+            std::sort (numbered.begin(), numbered.end(),
+                       [] (const auto& a, const auto& b) { return a.first < b.first; });
+
+            std::vector<juce::File> folders;
+            folders.reserve (numbered.size());
+
+            for (const auto& entry : numbered)
+                folders.push_back (entry.second);
+
+            return folders;
+        }
+
+        /*  WHAT MAKES A RECOVERY FOLDER AN OFFER (H6b, namespace draft §23.5):
+            a show.xml, and no marker saying a save that landed has outgrown
+            it. The show is the question and the state beside it is not asked
+            about - a folder holding only a state.xml describes a standby for a
+            show nobody wrote down, which is nothing to adopt; the reverse is a
+            perfectly good recovery whose standby comes back at its default,
+            exactly as a bundle with no state.xml opens. */
+        bool holdsOffer (const juce::File& folder, const juce::File& recovery)
+        {
+            return recovery.getChildFile (showFileName).existsAsFile()
+                && ! Bundle::isSuperseded (folder, recovery);
+        }
+
+        /*  A file's bytes as they are, or nothing when there is no file to read. */
+        std::optional<std::string> bytesOf (const juce::File& file)
+        {
+            juce::MemoryBlock block;
+
+            if (! file.existsAsFile() || ! file.loadFileAsData (block))
+                return std::nullopt;
+
+            if (block.getSize() == 0)
+                return std::string();
+
+            return std::string (static_cast<const char*> (block.getData()), block.getSize());
+        }
+
+        /*  Whether a `superseded` mark holds `line` - a fingerprint, newline
+            and all - as one of its WHOLE lines. A mark holds one line per save
+            that named its folder, oldest first (`Bundle::markSuperseded` says
+            why there can be more than one); a line cut short, with no newline
+            at its end, is no line and matches nothing. */
+        bool holdsLine (const std::string& mark, const std::string& line)
+        {
+            for (std::size_t at = 0; at < mark.size();)
+            {
+                const auto end = mark.find ('\n', at);
+
+                if (end == std::string::npos)
+                    return false;
+
+                if (mark.compare (at, end + 1 - at, line) == 0)
+                    return true;
+
+                at = end + 1;
+            }
+
+            return false;
         }
 
         std::string manifestText()
@@ -141,6 +233,120 @@ namespace wfg::doc
             return result;
         }
 
+       #if defined (_WIN32)
+        /*  THE WINDOWS RENAME, BY HANDLE AND WITH POSIX SEMANTICS (fixer of
+            H6b, namespace draft §23.5). The temp is opened for DELETE, sharing
+            everything, and renamed over the target with
+            FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS:
+            one rename, like `MoveFileExW`, and never `ReplaceFile`'s two moves.
+
+            POSIX SEMANTICS ARE THE POINT. Without them NTFS will not replace a
+            target anybody has open, however the holder shares it, because the
+            name of a file that is open stays taken until the last handle
+            closes. `MoveFileExW` - what H6b first put here - is that plain
+            rename, and review found it refused with error 5 by a reader that
+            shares deletion: JUCE's own FileInputStream, so a `wfg validate` or
+            `wfg tree` of the bundle a serve is saving, and readers of other
+            kinds. `ReplaceFile` never was, because it moves the target aside
+            first, which such a holder allows. With POSIX semantics the name is
+            taken from under the reader at once, the reader goes on reading the
+            file it opened, and only a holder that does not share deletion
+            refuses the rename - as it refused `ReplaceFile`.
+
+            FILE_FLAG_WRITE_THROUGH on the handle is what MOVEFILE_WRITE_THROUGH
+            asks of `MoveFileExW`: the rename on the disk before the call
+            returns, which a writer thread can wait for.
+
+            The Windows error, ERROR_SUCCESS when the name moved. */
+        DWORD renameByHandle (const juce::File& from, const juce::File& to)
+        {
+            const auto source = from.getFullPathName();
+            const auto target = to.getFullPathName();
+            const auto* const name = target.toWideCharPointer();
+            const auto nameBytes = std::wcslen (name) * sizeof (wchar_t);
+
+            const auto handle = CreateFileW (source.toWideCharPointer(), DELETE | SYNCHRONIZE,
+                                             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                             nullptr, OPEN_EXISTING, FILE_FLAG_WRITE_THROUGH, nullptr);
+
+            if (handle == INVALID_HANDLE_VALUE)
+                return GetLastError();
+
+            /*  FILE_RENAME_INFO ends in the name, so it is allocated with room
+                for all of it: `sizeof` counts one character of the name, which
+                is the room for its terminator, and `calloc` has made that nought. */
+            const auto size = sizeof (FILE_RENAME_INFO) + nameBytes;
+            juce::HeapBlock<FILE_RENAME_INFO> info;
+            info.calloc (size, 1);
+
+            info->Flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
+            info->RootDirectory = nullptr;
+            info->FileNameLength = static_cast<DWORD> (nameBytes);
+            std::memcpy (info->FileName, name, nameBytes);
+
+            const auto code = SetFileInformationByHandle (handle, FileRenameInfoEx, info.get(),
+                                                          static_cast<DWORD> (size)) != 0
+                                ? static_cast<DWORD> (ERROR_SUCCESS)
+                                : GetLastError();
+
+            CloseHandle (handle);
+            return code;
+        }
+       #endif
+
+        /*  THE RENAME THAT REPLACES, one step on every platform (H6b;
+            `writeBytesAtomically` below argues why it must be one). False, with
+            `why` saying what the platform said, when the names are as they
+            were before the call.
+
+            ON WINDOWS, BY HANDLE (`renameByHandle`), and by `MoveFileExW` with
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH only where the
+            volume cannot rename that way: a FAT or exFAT stick, some network
+            shares, a Windows older than the flag. Those answer that they do not
+            know the request - invalid parameter, not supported, invalid
+            function - which is not how a held file answers; a refusal for any
+            other reason is not retried the old way, and keeps its own number,
+            the more telling of the two.
+
+            THE NUMBER, and words for the two a holder gives: a sharing
+            violation, and access denied - which is also what a volume without
+            POSIX semantics says for a file somebody has open, so it names that
+            first. The system's own sentence is in the language and code page of
+            the machine, and this one ends up in a published string that a
+            client reads as UTF-8. */
+        bool renameOver (const juce::File& from, const juce::File& to, std::string& why)
+        {
+           #if defined (_WIN32)
+            auto code = renameByHandle (from, to);
+
+            if (code == static_cast<DWORD> (ERROR_INVALID_PARAMETER)
+                || code == static_cast<DWORD> (ERROR_NOT_SUPPORTED)
+                || code == static_cast<DWORD> (ERROR_INVALID_FUNCTION))
+                code = MoveFileExW (from.getFullPathName().toWideCharPointer(),
+                                    to.getFullPathName().toWideCharPointer(),
+                                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0
+                         ? static_cast<DWORD> (ERROR_SUCCESS)
+                         : GetLastError();
+
+            if (code == static_cast<DWORD> (ERROR_SUCCESS))
+                return true;
+
+            why = "Windows error " + std::to_string (code);
+
+            if (code == static_cast<DWORD> (ERROR_SHARING_VIOLATION))
+                why += ", the file is open in another program";
+            else if (code == static_cast<DWORD> (ERROR_ACCESS_DENIED))
+                why += ", open in another program, or access denied";
+           #else
+            if (std::rename (from.getFullPathName().toRawUTF8(), to.getFullPathName().toRawUTF8()) == 0)
+                return true;
+
+            why = std::generic_category().message (errno);
+           #endif
+
+            return false;
+        }
+
         /*  A SAVE THAT CANNOT BE HALF-WRITTEN (PRD §4.3, namespace draft §14.10).
 
             What this replaced opened the real file, sought to zero, truncated
@@ -159,46 +365,49 @@ namespace wfg::doc
             is byte-identical" is checkable at all. The temp is written exactly
             as the target used to be.
 
-            THE SAME DIRECTORY IS THE LOAD-BEARING PART, and JUCE is the reason.
-            `replaceFileIn` (juce_File.cpp:323-336) has three branches. A target
-            that exists reaches `replaceInternal`: `ReplaceFile` on Windows and
-            `rename(2)` on POSIX, which is atomic within one filesystem. Across
-            a volume boundary the rename fails and JUCE falls back to a copy and
-            a delete - and on Linux that copy deletes the destination FIRST and
-            streams the bytes afterwards, which is the very hazard this function
-            exists to remove, brought back by the call meant to remove it. A
-            sibling is on the target's own volume. The second branch is a target
-            that does not exist yet, which `replaceFileIn` hands to
-            `moveFileTo`: the first save into a folder with no show.xml is a
-            move, and nothing here claims it is atomic - there was no old file
-            for it to destroy. The third, a temp that IS the target, cannot
-            happen with a name that differs from the target's.
+            ONE RENAME, AND THE SAME DIRECTORY IS WHAT MAKES IT ONE. The temp
+            takes the target's name in a single rename that replaces whatever
+            was there (`renameOver`): on Windows a rename by handle with POSIX
+            semantics, `MoveFileExW` where the volume cannot do that, and
+            `rename(2)` on POSIX. Within one volume each is one directory entry
+            changing what it points at, so at every instant the name reads the
+            old file, whole, or the new one, whole - and a sibling is on its
+            target's volume by construction. A target that does not exist yet,
+            the first save into a folder, is the same call and the same promise.
+
+            *Corrected 2026-09-30, H6b (namespace draft §23.5), and the
+            correction is the reason for the paragraph above.* Until then this
+            was JUCE's `replaceFileIn`, and on Windows that is `ReplaceFile`
+            with no backup name, which is four steps and not one: it makes an
+            empty `<file>~RF<hex>.TMP`, moves the old file onto that name, moves
+            the new one into place, and deletes the first. Between its two moves
+            the file is under no name at all. H6's driver
+            (`blackbox/crash_during_write.py`) killed the engine there in about
+            one kill in twenty-five - on show.xml, the manifest, state.xml and
+            the recovery files - leaving the old bytes whole under the `~RF`
+            name, the new ones whole under the temp's, and `serve` refusing a
+            folder with no show.xml or no manifest. The bytes were always whole;
+            the names were not. On POSIX `replaceFileIn` was `rename(2)` too,
+            but a rename it could not make fell through to JUCE's copy and
+            delete, whose Linux copy deletes the destination first - the hazard
+            this function exists to remove, brought back by the call meant to
+            remove it. `std::rename` has no fallback: it renames, or it refuses
+            and changes nothing.
+
+            The rename asks to be on the disk before it returns (`renameByHandle`
+            says how), which a writer thread can wait for. READONLY on a show
+            folder - the folder icon sets it (app/FolderIcon.h) - is a note to
+            Explorer, and stops no rename inside the folder.
 
             WHAT A FAILURE LEAVES is the old target, whole, and the temp beside
-            it. The target is never opened for writing here; `replaceFileIn`
-            returns before its own `deleteFile()` when the replace fails, so the
-            temp survives it too. That is the right failure: the show that was
-            on disk at 18:00 is still the show on disk, and nothing an operator
-            trusted has become shorter. The temp is left rather than deleted
-            because nothing reads it - `open` reads show.xml by name,
+            it. The target is never opened for writing here, and a refused
+            rename changes neither name. That is the right failure: the show
+            that was on disk at 18:00 is still the show on disk, and nothing an
+            operator trusted has become shorter. The temp is left rather than
+            deleted because nothing reads it - `open` reads show.xml by name,
             `contentHash` lists its files by name, and the manifest search is
             for `*.wfg` - and because the next save from this process truncates
             it and uses it again.
-
-            TWO EXCEPTIONS, NEITHER OF THEM THIS FUNCTION'S, both worth writing
-            down rather than finding. On POSIX a rename that fails for ANY
-            reason, not only a volume boundary, falls through to JUCE's same
-            copy-and-delete, so "the old target, whole" rests on rename(2) not
-            refusing a same-directory replace in a folder where the copy's own
-            delete would then succeed - and it has no ordinary reason to, the
-            two needing the same permission on the same directory. On Windows,
-            `ReplaceFile` documents one failure (ERROR_UNABLE_TO_MOVE_REPLACEMENT)
-            after which, when no backup name was given - and JUCE gives none -
-            the replaced file no longer exists and the replacement keeps its own
-            name. The old show is gone then and the new one is not lost but
-            displaced: whole, flushed, under the temp's name. The retry below,
-            finding no target, becomes a plain move that puts it where it
-            belongs.
 
             WHAT THIS DOES NOT DO is make the RENAME durable on POSIX, which
             takes an fsync of the directory and JUCE offers none. After a power
@@ -212,12 +421,12 @@ namespace wfg::doc
             const auto temp = Bundle::temporaryFor (target);
 
             /*  THE STREAM IS SCOPED, and the closing brace is load-bearing: it
-                is what closes the temp before the replace below. JUCE opens
+                is what closes the temp before the rename below. JUCE opens
                 files for writing with FILE_SHARE_READ and no FILE_SHARE_DELETE
-                (juce_Files_windows.cpp:429-433), and `ReplaceFile` has to move
-                the temp, so a handle still open on it here would make our own
-                save fail on Windows - and pass on POSIX, where nobody would
-                notice until a Windows user did. */
+                (juce_Files_windows.cpp:429-433), and the rename has to move the
+                temp, so a handle still open on it here would make our own save
+                fail on Windows - and pass on POSIX, where nobody would notice
+                until a Windows user did. */
             {
                 juce::FileOutputStream stream { temp };
 
@@ -276,19 +485,28 @@ namespace wfg::doc
                 return false;
             }
 
-            if (temp.replaceFileIn (target))
+            std::string why;
+
+            if (renameOver (temp, target, why))
                 return true;
 
-            /*  BLIND RETRIES, because the API will not say what went wrong.
-                `replaceFileIn` returns a bool and swallows GetLastError, so
-                "retry on a sharing violation" is a distinction nothing here can
-                make.
+            /*  BLIND RETRIES, STILL. Until H6b the API would not say what went
+                wrong - `replaceFileIn` returned a bool and swallowed
+                GetLastError - and now it does, and the sentence at the bottom
+                carries it. The retries still do not ask, because every reason
+                a rename into its own directory is refused here is somebody
+                else holding the target, and that is worth a third of a second
+                whatever its number.
 
                 THE FILE AT RISK IS THE TARGET, NOT THE TEMP, and the obvious
                 guess is the wrong way round. The temp is ours and was closed
-                above; `ReplaceFile` fails while ANOTHER process holds show.xml
+                above; the rename fails while ANOTHER process holds show.xml
                 open without FILE_SHARE_DELETE - an editor somebody left it open
                 in, a search indexer, a sync client uploading the previous save.
+                A holder that does share deletion stops nothing, as it never
+                stopped `ReplaceFile`: POSIX semantics take the name from under
+                it (`renameByHandle`), where the plain `MoveFileExW` H6b first
+                put here was refused by every holder there was (fixer of H6b).
                 Those hold on for milliseconds and let go - and a virus scanner
                 holds a freshly written file for longer than one tick, which a
                 shared Windows runner showed on 2026-09-17 (be46383's run: the
@@ -317,12 +535,12 @@ namespace wfg::doc
             {
                 juce::Thread::sleep (pauseMs);
 
-                if (temp.replaceFileIn (target))
+                if (renameOver (temp, target, why))
                     return true;
             }
 
             error = "could not replace " + target.getFullPathName().toStdString()
-                  + " with " + temp.getFullPathName().toStdString()
+                  + " with " + temp.getFullPathName().toStdString() + " (" + why + ")"
                   + "; whatever was there is untouched, and the new bytes are beside it";
             return false;
         }
@@ -379,34 +597,25 @@ namespace wfg::doc
     bool Bundle::hasRecovery (const juce::File& folder)
     {
         /*  The SHOW is the question, and the state beside it is not asked
-            about. A recovery folder holding only a state.xml describes a
-            standby position for a show nobody wrote down, which is nothing to
-            adopt; the reverse - a show with no state - is a perfectly good
-            recovery whose standby comes back at its default, exactly as a
-            bundle with no state.xml opens. */
-        return recoveryShowFile (folder).existsAsFile();
+            about (`holdsOffer` says why) - and since H6b a show a landed save
+            has superseded is not asked about either. */
+        return holdsOffer (folder, recoveryFolder (folder));
     }
 
     std::vector<juce::File> Bundle::previousRecoveries (const juce::File& folder)
     {
-        std::vector<std::pair<juce::int64, juce::File>> numbered;
+        /*  THE OFFERS ONLY (H6b). A folder with no show in it - a deletion
+            killed half way - or one a landed save has superseded is no offer,
+            and listing it would have `offeredRecovery` offer it and `wfg
+            validate` call it unsaved work. */
+        auto folders = numberedPrevious (folder);
 
-        for (const auto& child : folder.findChildFiles (juce::File::findDirectories, false,
-                                                        juce::String (previousPrefix) + "*"))
-            if (const auto number = previousNumberOf (child.getFileName()); number >= 0)
-                numbered.emplace_back (number, child);
-
-        /*  By the number and not by the name, or `recovery.previous.10` would
-            sort before `recovery.previous.9` and the newest afternoon would be
-            offered second. */
-        std::sort (numbered.begin(), numbered.end(),
-                   [] (const auto& a, const auto& b) { return a.first < b.first; });
-
-        std::vector<juce::File> folders;
-        folders.reserve (numbered.size());
-
-        for (const auto& entry : numbered)
-            folders.push_back (entry.second);
+        folders.erase (std::remove_if (folders.begin(), folders.end(),
+                                       [&folder] (const juce::File& previous)
+                                       {
+                                           return ! holdsOffer (folder, previous);
+                                       }),
+                       folders.end());
 
         return folders;
     }
@@ -427,13 +636,120 @@ namespace wfg::doc
         /*  `recovery/` FIRST, because a show.xml there means the LAST session
             died with work in it - the most recent afternoon there is, and the
             one an operator restarting after a crash is looking for. Only when
-            there is none does an older, moved-aside one come up, newest first. */
+            there is none does an older, moved-aside one come up, newest first.
+            Neither is an offer once a landed save has superseded it (H6b). */
         if (hasRecovery (folder))
             return recoveryFolder (folder);
 
         const auto previous = previousRecoveries (folder);
 
         return previous.empty() ? juce::File() : previous.back();
+    }
+
+    //==============================================================================
+    juce::File Bundle::supersededFile (const juce::File& recovery)
+    {
+        return recovery.getChildFile (supersededName);
+    }
+
+    std::string Bundle::fingerprintOf (const std::string& show)
+    {
+        /*  Compared whole, as one line. The hash is what decides; the byte
+            count beside it is there so that somebody who finds the file can
+            see at a glance which show.xml it means. Both are plain ASCII from
+            an integer and hex, so no locale can spell them another way. */
+        return std::string (showFileName) + " " + std::to_string (show.size()) + " sha256:"
+             + juce::SHA256 (show.data(), show.size()).toHexString().toStdString() + "\n";
+    }
+
+    bool Bundle::isSuperseded (const juce::File& folder, const juce::File& recovery)
+    {
+        const auto mark = bytesOf (supersededFile (recovery));
+
+        if (! mark.has_value())
+            return false;
+
+        const auto show = bytesOf (showFile (folder));
+
+        return show.has_value() && holdsLine (*mark, fingerprintOf (*show));
+    }
+
+    bool Bundle::markSuperseded (const juce::File& folder, const juce::File& recovery,
+                                 const std::string& fingerprint)
+    {
+        /*  ALREADY SUPERSEDED means a save that landed outgrew this folder and
+            what came after could not delete it - something held its show: the
+            tidy-up after that save, or a session's first write answering the
+            mark. It is deleted now, as it should have been.
+
+            WHAT WILL NOT GO KEEPS ITS LINES AND GAINS THIS SAVE'S (fixer of
+            H6b, namespace draft §23.5), so that it is outgrown whichever
+            show.xml is on the disk when this save ends: the one the older line
+            names if the save is killed before its show.xml, its own if it
+            lands. The first build replaced the line instead, and a save killed
+            before its show.xml then left a mark naming a show that is nowhere
+            over an afternoon older than the show that is there - on offer at
+            the next start. A line already there is not written twice. */
+        std::string lines = fingerprint;
+
+        if (isSuperseded (folder, recovery))
+        {
+            discardRecoveryAt (recovery);
+
+            if (! recovery.isDirectory())
+                return true;
+
+            auto kept = bytesOf (supersededFile (recovery)).value_or (std::string());
+
+            if (holdsLine (kept, fingerprint))
+                return true;
+
+            if (! kept.empty() && kept.back() != '\n')
+                kept += '\n';
+
+            lines = kept + fingerprint;
+        }
+
+        if (! recovery.isDirectory())
+            return true;
+
+        std::string error;
+        return writeBytesAtomically (supersededFile (recovery), lines, error);
+    }
+
+    std::vector<juce::File> Bundle::supersededFolders (const juce::File& folder)
+    {
+        std::vector<juce::File> outgrown;
+
+        if (const auto own = recoveryFolder (folder); isSuperseded (folder, own))
+            outgrown.push_back (own);
+
+        for (const auto& previous : numberedPrevious (folder))
+            if (isSuperseded (folder, previous))
+                outgrown.push_back (previous);
+
+        return outgrown;
+    }
+
+    bool Bundle::resolveSuperseded (const juce::File& folder, const juce::File& recovery)
+    {
+        const auto marker = supersededFile (recovery);
+
+        if (! marker.existsAsFile())
+            return true;
+
+        if (isSuperseded (folder, recovery))
+            return discardRecoveryAt (recovery);
+
+        return marker.deleteFile();
+    }
+
+    void Bundle::resolveAllSuperseded (const juce::File& folder)
+    {
+        resolveSuperseded (folder, recoveryFolder (folder));
+
+        for (const auto& previous : numberedPrevious (folder))
+            resolveSuperseded (folder, previous);
     }
 
     juce::File Bundle::temporaryFor (const juce::File& target)
@@ -723,6 +1039,17 @@ namespace wfg::doc
             always INSIDE writes one and two, never between them, and those are
             what the temp-and-replace closes.
 
+            *Corrected 2026-09-30, H6 and H6b (namespace draft §23.4-23.5).*
+            Killing the engine inside saves found two costs this paragraph did
+            not count. On Windows the replace itself left a file under no name
+            for an instant - any of the three - which `writeBytesAtomically`
+            now closes with one rename. And after the first write, the autosave
+            from before this save was still on offer: the folders a save
+            retires go after its three writes, so a kill between offered work
+            older than the show.xml just written. `DocumentWriter` now marks
+            those folders `superseded` before it calls this, and an offer is
+            judged against the mark.
+
             THE MANIFEST IS THE ONE FILE NOT IN THE SNAPSHOT, and it need not
             be: `manifestText` is a pure function of the format version, read
             from a table built once behind a function-local static and never
@@ -855,6 +1182,11 @@ namespace wfg::doc
             reporting the ordinary case. */
         if (! recovery.exists())
             return true;
+
+        /*  THE SHOW FIRST, AND ALONE IF IT WILL NOT GO (H6b; Bundle.h says
+            why). A kill after this line leaves a folder that is no offer. */
+        if (! recovery.getChildFile (showFileName).deleteFile())
+            return false;
 
         return recovery.deleteRecursively();
     }

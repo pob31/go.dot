@@ -28,6 +28,10 @@
           recovery.previous.N/
                           an earlier session's recovery, moved aside unanswered
                           so that this session's autosave could run (PR 5.5)
+          <either>/superseded
+                          the save that will retire the folder, named before it
+                          writes, so an offer it has outgrown is known - and each
+                          save after it while the folder will not go (H6b)
 
     A FOLDER RATHER THAN AN ARCHIVE, because everything in it is text that
     someone will eventually want to diff, grep, or put under version control -
@@ -178,7 +182,8 @@ namespace wfg::doc
         juce::File recoveryStateFile (const juce::File& folder);
 
         /** Whether `recovery/` holds anything to adopt: a `recovery/show.xml`,
-            which is the file the state beside it is meaningless without. */
+            which is the file the state beside it is meaningless without - and,
+            since H6b, one no landed save has superseded (`isSuperseded`). */
         bool hasRecovery (const juce::File& folder);
 
         /*  THE RECOVERY A SESSION OPENING THIS BUNDLE OFFERS, or an empty File
@@ -189,17 +194,100 @@ namespace wfg::doc
             died with work in it; otherwise the highest-numbered
             `recovery.previous.N/`, an afternoon an earlier session moved aside
             unanswered - newest first, so the one offered is the one most
-            recently abandoned, and the others wait their turn. A
-            `recovery.previous.N/` is offered as a FOLDER, whatever is left in
-            it: `document.discardRecovery` deletes a folder, and one whose show
-            has gone is still something to delete; `document.recover` asks for
-            the show inside and refuses when it is not there. */
+            recently abandoned, and the others wait their turn.
+
+            *Corrected 2026-09-30, H6b (namespace draft §23.5).* A folder is
+            offered only when it holds a show.xml that no landed save has
+            superseded - `recovery.previous.N/` included, which until then was
+            offered as a folder, whatever was left in it. A kill inside its
+            deletion left one holding no show, offered by its name: `--recover`
+            exited 2 on it and `document.recover` refused, with the banner
+            still up. And a kill between a save's show.xml and the tidy-up
+            after it left the autosave from before that save on offer, where
+            adopting it took the show back past the save. A folder passed over
+            for either reason hides nothing below it. */
         juce::File offeredRecovery (const juce::File& folder);
 
-        /*  Every `recovery.previous.N/` in the bundle, lowest N first. Folders
-            only: a file that happens to carry the name is nothing anybody
-            moved aside. */
+        /*  Every `recovery.previous.N/` in the bundle that is an offer by
+            `offeredRecovery`'s rule, lowest N first. Folders only: a file that
+            happens to carry the name is nothing anybody moved aside. Since H6b
+            a folder with no show in it, or one a landed save superseded, is not
+            listed either - `wfg validate` names what this lists as unsaved
+            work, and neither is. `nextPreviousRecovery` still counts every
+            name. */
         std::vector<juce::File> previousRecoveries (const juce::File& folder);
+
+        //======================================================================
+        /*  `superseded`, IN A RECOVERY FOLDER: THE SAVE THAT WILL RETIRE IT
+            (H6b, namespace draft §23.5).
+
+            A save makes this session's work the show, and so retires this
+            session's `recovery/` and any `recovery.previous.N/` it recovered
+            from - after its three writes, because until they have landed those
+            folders are the only copy of the work. A kill in between used to
+            leave them on offer, older than the show.xml just written, and
+            adopting one took the show back past the save. So BEFORE it writes,
+            the save puts in each a `superseded` file naming the show.xml it is
+            about to write (`fingerprintOf`). If that show.xml lands, the marker
+            names the bundle's own and the folder is no offer; if the save is
+            killed before it, the marker names a show that is nowhere, and the
+            folder - newer than the show.xml still there - is exactly what the
+            next start should offer.
+
+            Lines of text and nothing else a reader needs: `show.xml`, the byte
+            count and the SHA-256 of those bytes - one line for the save that
+            marked the folder, and one more for each save after it that found
+            the folder outgrown and could not delete it (`markSuperseded`). A
+            line torn, empty or foreign matches nothing, so it hides nothing -
+            the way round that costs an afternoon is the one to rule out.
+
+            Never written into an earlier session's unanswered offer, which a
+            save says nothing about (§14.10). */
+        juce::File supersededFile (const juce::File& recovery);
+
+        /*  What a marker's line holds for these show.xml bytes: `show.xml
+            <bytes> sha256:<hex>` and a newline. */
+        std::string fingerprintOf (const std::string& show);
+
+        /*  Whether one whole line of `recovery`'s marker names the show.xml
+            `folder` holds now: a save that wrote it landed, and the folder is
+            older than the show. False with no marker, or no show.xml to
+            compare. Reads show.xml only when there is a marker to read it
+            against. */
+        bool isSuperseded (const juce::File& folder, const juce::File& recovery);
+
+        /*  THE SAVE'S HALF: marks `recovery` as retired by the show.xml whose
+            fingerprint is given, atomically, before that show.xml is written.
+            A folder already superseded - a deletion that failed earlier - is
+            deleted instead, as it should have been; what cannot be deleted of
+            it keeps the lines its mark has and gains this one, so it stays
+            superseded whether the save about to write lands or is killed
+            first. A folder that is not there is left not there. False when a
+            marker was needed and could not be written. */
+        bool markSuperseded (const juce::File& folder, const juce::File& recovery,
+                             const std::string& fingerprint);
+
+        /*  EVERY RECOVERY FOLDER SUPERSEDED NOW - `recovery/`, then each
+            `recovery.previous.N/` lowest N first, whose mark names the show.xml
+            on the disk. A save marks these too, whoever's they were (fixer
+            of H6b): a folder a landed save outgrew and nothing could delete
+            stops matching the moment the next show.xml lands, and comes back
+            as an offer, unless that save names itself in its mark as well. An
+            earlier session's unanswered offer is never among them, because
+            no landed save ever marked it. */
+        std::vector<juce::File> supersededFolders (const juce::File& folder);
+
+        /*  THE ANSWER TO A MARKER FOUND LATER, by the first write of a session
+            and by an autosave in its own folder. Matching show.xml, a save
+            landed: the folder is deleted, its show first. Matching nothing,
+            no save that named it landed: the folder is still somebody's work,
+            and only the marker goes, so that no later save can match it by
+            writing those very bytes. True when no marker is left. */
+        bool resolveSuperseded (const juce::File& folder, const juce::File& recovery);
+
+        /*  `resolveSuperseded` on `recovery/` and on every
+            `recovery.previous.N/`, offered or not. */
+        void resolveAllSuperseded (const juce::File& folder);
 
         /*  Where the next move aside goes: `recovery.previous.N/` with N one
             past the highest in use.
@@ -268,8 +356,16 @@ namespace wfg::doc
             gone afterwards, which includes it never having been there. */
         bool discardRecovery (const juce::File& folder);
 
-        /** The same for a recovery folder named outright, which is how an offer
-            living in a `recovery.previous.N/` is discarded. */
+        /*  The same for a recovery folder named outright, which is how an offer
+            living in a `recovery.previous.N/` is discarded.
+
+            ITS SHOW FIRST, AND ALONE IF IT WILL NOT GO (H6b). A folder is an
+            offer while it holds a show.xml, and a deletion goes file by file
+            in whatever order the directory lists them: a kill half way could
+            leave the show and take its state or its marker. With the show gone
+            first, a folder cut short is no offer at all; and a show that will
+            not go - held by a scanner, an editor - keeps everything beside it,
+            the marker saying it is superseded included. */
         bool discardRecoveryAt (const juce::File& recovery);
 
         /*  ADOPTS THE RECOVERY THIS SESSION OFFERS: `document.recover`'s act and

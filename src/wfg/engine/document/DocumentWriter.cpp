@@ -16,19 +16,24 @@
 
 #include <wfg/engine/document/DocumentWriter.h>
 
+#include <algorithm>
 #include <iterator>
 #include <utility>
+#include <vector>
 
 namespace wfg::doc
 {
     namespace
     {
-        /*  One tick at 50 Hz, the pause `writeBytesAtomically` takes before
-            its one blind retry, and for the same reason: the platform will not
-            say why a rename failed, and the likeliest cause is another process
-            - an indexer, a virus scanner, a sync client - holding a file inside
-            the folder for a few milliseconds. It is paid on this thread, never
-            on the one GO shares. */
+        /*  One tick at 50 Hz, the first of the pauses `writeBytesAtomically`
+            takes, for the same kind of cause: JUCE's `moveFileTo` does not say
+            why a rename failed, and the likeliest cause is another process - an
+            indexer, a virus scanner, a sync client - holding a file inside the
+            folder for a few milliseconds. It is paid on this thread, never on
+            the one GO shares. *(2026-09-30, fixer of H6b: this said "its one
+            blind retry", because the platform would not say why - true of the
+            move aside still, and of neither half of that since the file
+            renames took three pauses and began to say why.)* */
         constexpr int moveRetryPauseMs = 20;
 
         /*  Every problem a write reported, as one line. Most carry one; a copy
@@ -280,6 +285,12 @@ namespace wfg::doc
             setConsumed (juce::File());
     }
 
+    bool DocumentWriter::firstJob()
+    {
+        const std::lock_guard<std::mutex> lock { guard };
+        return ! std::exchange (markersSettled, true);
+    }
+
     //==========================================================================
     void DocumentWriter::run()
     {
@@ -361,6 +372,32 @@ namespace wfg::doc
 
     WriteCompletion DocumentWriter::write (const WriteJob& job)
     {
+        /*  THE FIRST JOB FIRST ANSWERS WHAT AN EARLIER SESSION'S SAVES LEFT
+            MARKED (H6b, namespace draft §23.5). A save killed after its marks
+            leaves folders the next open must judge, and `offeredRecovery`
+            judges them without touching anything: a mark naming the show.xml
+            on the disk is a save that landed, a mark naming anything else one
+            that did not. What cannot wait past this session's first write is
+            the ANSWER to the second kind, because that write may be a save of
+            those very bytes: the mark would name the show.xml on the disk the
+            moment it landed, and hide real work. So that folder loses its mark
+            here, before anything is written. The first kind is deleted in the
+            same breath, because it is litter; one that will not go is kept
+            outgrown by every save after it, which marks it too (the save job,
+            below). *(2026-09-30, fixer of H6b: until then this deletion was all
+            that kept such a folder outgrown past the first save, and a folder
+            something held at that instant came back as an offer once the save
+            landed.)*
+
+            HERE AND NOT AT OPEN, because this is the one thread that writes in
+            the bundle and every write passes through it: nothing can land in
+            between, every verb that writes gets it - `serve`, the window,
+            `replay`'s `--out` - and the verbs that only look, `validate` and
+            `tree`, submit nothing and change nothing. The saveAs job names its
+            destination; the bundle it came from is its `source`. */
+        if (firstJob())
+            Bundle::resolveAllSuperseded (job.kind == WriteJob::Kind::saveAs ? job.source : job.folder);
+
         WriteCompletion done;
         done.kind = job.kind;
         done.revision = job.snapshot.revision;
@@ -370,6 +407,61 @@ namespace wfg::doc
         {
             case WriteJob::Kind::save:
             {
+                /*  WHAT THIS SAVE WILL RETIRE IS MARKED BEFORE IT WRITES (H6b,
+                    namespace draft §23.5): this session's own `recovery/`, and
+                    a `recovery.previous.N/` it recovered from - never an
+                    earlier session's unanswered offer, which it says nothing
+                    about (§14.10). The folders go after the three writes below,
+                    because until those have landed they hold the only copy of
+                    the work. H6's driver killed the engine in between in about
+                    one kill in five, and the next start offered the autosave
+                    from before the save: adopted, it took the show back past
+                    it. With the marks, a kill after show.xml has landed leaves
+                    folders that name it, and nothing offers them; a kill before
+                    leaves marks naming a show that is nowhere, and the folders
+                    - newer than the show.xml still there - are offered, rightly.
+
+                    AND EVERY FOLDER ALREADY SUPERSEDED, whoever's it was (fixer
+                    of H6b): one a landed save outgrew, which the tidy-up after
+                    it or a first job's answer could not delete because
+                    something held its show. Its mark names the show.xml on the
+                    disk now, and would name nothing once this save's show.xml
+                    landed - the folder back on offer, older than two saves.
+                    Marked again, it gains this save's line beside the one it
+                    has (Bundle.h, `markSuperseded`), and is deleted first if it
+                    will go by now. An earlier session's unanswered offer is
+                    never superseded, so this reaches none.
+
+                    A mark that cannot be written does not stop the save: the
+                    show is what somebody asked for, and a missing mark costs
+                    only what every save risked before H6b, the older autosave
+                    offered if the engine dies in the next few milliseconds. */
+                const auto ownRecovery = Bundle::recoveryFolder (job.folder);
+                std::vector<juce::File> retiring;
+
+                const auto retire = [&retiring] (const juce::File& folderToRetire)
+                {
+                    if (std::find (retiring.begin(), retiring.end(), folderToRetire) == retiring.end())
+                        retiring.push_back (folderToRetire);
+                };
+
+                if (offer() != ownRecovery && ownRecovery.isDirectory())
+                    retire (ownRecovery);
+
+                if (const auto adopted = consumed(); adopted != juce::File() && adopted.isDirectory())
+                    retire (adopted);
+
+                for (const auto& outgrown : Bundle::supersededFolders (job.folder))
+                    retire (outgrown);
+
+                if (! retiring.empty())
+                {
+                    const auto fingerprint = Bundle::fingerprintOf (job.snapshot.show);
+
+                    for (const auto& retired : retiring)
+                        Bundle::markSuperseded (job.folder, retired, fingerprint);
+                }
+
                 const auto written = Bundle::save (job.folder, job.snapshot);
 
                 done.landed = written.ok;
@@ -449,6 +541,29 @@ namespace wfg::doc
                         setOffer (aside);
                         done.offerMovedTo = aside;
                     }
+                }
+
+                /*  AND A MARK IN ITS OWN FOLDER IS ANSWERED BEFORE ITS BYTES GO
+                    IN (H6b): a save earlier in this session marked `recovery/`
+                    and its tidy-up could not finish. Written under that mark,
+                    this autosave would carry a save's verdict it never had - a
+                    mark naming show.xml would hide this session's newest work
+                    from the next start. So the mark is answered as the first
+                    write of a session answers one: naming show.xml, the save
+                    landed and the folder goes, its old show first; naming
+                    anything else, the save never landed, the show in the folder
+                    is newer than show.xml, and only the mark goes - so that an
+                    autosave which then fails leaves that work where it was,
+                    still offered, rather than a folder emptied for bytes that
+                    never came. A folder that cannot be cleared is written
+                    nothing, and the autosave is owed again. */
+                if (const auto ownRecovery = Bundle::recoveryFolder (job.folder);
+                    ! Bundle::resolveSuperseded (job.folder, ownRecovery))
+                {
+                    done.problem = "could not clear the superseded mark in "
+                                 + ownRecovery.getFullPathName().toStdString()
+                                 + "; nothing was written there";
+                    break;
                 }
 
                 const auto written = Bundle::saveRecovery (job.folder, job.snapshot);

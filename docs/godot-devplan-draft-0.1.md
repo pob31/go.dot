@@ -772,6 +772,32 @@ discontinuity, and each stop level does exactly its guarantee and nothing more.
 **Needs from the author:** the Go Doh! inventory of in-flight objects (PRD
 §4.4, deferred); the Esc-as-pause decision (§3.29).
 
+**Built** (the hardening plan, stage by stage in namespace draft §23):
+
+- **H0, 2026-09-30 — the real-time safety job can go red** (§23.1). It could
+  not: its reports went to a log nobody was shown. RTSan in Clang 20 ignores
+  `log_path`, so the gate reads ctest's `LastTest.log`, the harness reads a
+  driver's `wfg` stderr, and `rtsan.control` proves the gate hears a planted
+  report. First real measurement: no report anywhere in the suite.
+- **H1 and H2, 2026-09-30 — the two stop levels held to §4.4** (§23.2-23.3).
+  Esc brings a scene down the way it would have ended: members stopped, not
+  killed, so nested footers run innermost-first and a mic's tail rings; a
+  double Esc cuts a footer already running and is read from above, and follows
+  a stop that has already landed. A scene that was only made ready is given
+  back, never footered, and Esc and double Esc leave the standby's preparation
+  standing.
+- **H6 and H6b, 2026-09-30 — crash-safe saving, killed halfway through a
+  write.** `blackbox.crash-write.{C,fr_FR}` kills the engine at twenty seeded
+  points while saves and autosaves are in flight (§23.4). It found a save
+  leaving the older autosave on offer, on every platform (about one kill in
+  five), and on Windows `ReplaceFile` leaving a file under no name (about one
+  in twenty-five, show.xml included). Both are closed (§23.5): a save marks
+  what it will retire `superseded` before it writes - and every save after it
+  carries a folder it could not delete - and a file takes its name in one
+  rename, on Windows by handle with POSIX semantics, so that a program reading
+  the file stops no save. The driver is registered with the fixes it failed
+  first on.
+
 ---
 
 ## Phase 11 — Integrations · M

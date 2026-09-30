@@ -60,7 +60,9 @@
     deleted once the work it held has landed somewhere safe, which only this
     thread can know has happened. So both live here, under the lock, and every
     job that touches a recovery folder reads them when it runs rather than when
-    it was queued.
+    it was queued. A third since H6b: whether the first job has been performed,
+    because that job first answers the `superseded` marks an earlier session's
+    saves left (`write` says why there).
 
     IT NEVER TOUCHES THE DOCUMENT OR THE SESSION. A job is plain values - the
     snapshot's two strings and its revision, the folders it names, the tick it
@@ -207,6 +209,14 @@ namespace wfg::doc
             kill loses what was queued, and that is accepted: the atomic write
             leaves every file either old and whole or new and whole.
 
+            *Corrected 2026-09-30, H6 and H6b (namespace draft §23.4-23.5).* It
+            held for the bytes and not, until H6b, for the names or the offer.
+            Killed inside saves, the engine left on Windows a file under no name
+            at all - `ReplaceFile`'s two moves, now one rename - and on every
+            platform the autosave from before a save still offered after that
+            save's show.xml had landed - now marked `superseded` before the save
+            writes (`write`, the save job).
+
             Never concurrent with `submit`: the thread that submits has been
             joined before this is called. */
         void stop();
@@ -313,6 +323,10 @@ namespace wfg::doc
             recovery, if there is one. On the performing thread. */
         void deleteConsumedRecovery();
 
+        /*  True once, for the first job performed: `write` settles the
+            bundle's `superseded` marks before it (H6b). */
+        bool firstJob();
+
         void run();
 
         const Mode mode;
@@ -344,6 +358,7 @@ namespace wfg::doc
         bool threadRunning = false;
         juce::File offerLocation;
         juce::File consumedLocation;
+        bool markersSettled = false;
 
         /*  HOW MANY COMPLETIONS ARE WAITING, AS A HINT AND NEVER A GUARANTEE.
             The after-tick asks fifty times a second and the answer is almost
