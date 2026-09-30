@@ -150,7 +150,7 @@ namespace wfg
             menu's "Open .wfg files with this Go.dot", which is `wfg associate`
             from the window. Answers a sentence for the foot. Empty elsewhere:
             Windows has its installer and the Mac its app. */
-        std::function<std::string()> associate;
+        std::function<std::string()> associate {};
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

@@ -4982,18 +4982,18 @@ namespace
                     which asks first and refuses in show mode. */
                 if (application.has_value())
                 {
-                    application->onOpen = [&client, &target, &launchAnother] (const juce::String& path)
+                    application->onOpen = [&client, &target, &launchAnother] (const juce::String& opened)
                     {
-                        if (! juce::File::isAbsolutePath (path))
+                        if (! juce::File::isAbsolutePath (opened))
                             return;
 
-                        if (wfg::doc::Bundle::folderFor (juce::File (path)) == target)
+                        if (wfg::doc::Bundle::folderFor (juce::File (opened)) == target)
                         {
                             client->bringToFront();
                             return;
                         }
 
-                        if (const auto refused = launchAnother (path.toStdString(), false); ! refused.empty())
+                        if (const auto refused = launchAnother (opened.toStdString(), false); ! refused.empty())
                             std::cerr << "wfg serve: " << refused << std::endl;
                     };
 
