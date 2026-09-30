@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Go.dot's app icon for macOS, full detail: 64 px and up. The tile sits
+    on Apple's icon grid, 824 of 1024 with room for the shadow.
+    Source for scripts/make-icons.py, which renders every PNG, .icns and .ico
+    from it; edit this, never the renders.
+    SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="184"/></clipPath>
+    <radialGradient id="stone" cx="0.38" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.5" stop-color="#F1EDE4"/>
+      <stop offset="1" stop-color="#C4BCAB"/>
+    </radialGradient>
+  </defs>
+  <rect x="100" y="114" width="824" height="824" rx="184" fill="#000000" fill-opacity="0.22"/>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="#1C2226"/>
+  <g stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="10" clip-path="url(#tile)">
+    <path d="M122 0V1024M382 0V1024M642 0V1024M902 0V1024"/>
+    <path d="M0 122H1024M0 382H1024M0 642H1024M0 902H1024"/>
+  </g>
+  <circle cx="392" cy="660" r="122" fill="#000000" fill-opacity="0.45"/>
+  <circle cx="382" cy="642" r="122" fill="url(#stone)"/>
+  <circle cx="642" cy="382" r="56" fill="#4CC38A"/>
+</svg>

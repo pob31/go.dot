@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Go.dot's menu bar glyph: the stone and the dot on an 18 pt square.
+    A macOS template image, so black on transparent and nothing else - the
+    system tints it for a light or a dark menu bar.
+    Source for scripts/make-icons.py, which renders every PNG, .icns and .ico
+    from it; edit this, never the renders.
+    SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18">
+  <circle cx="7" cy="11" r="6" fill="#000000"/>
+  <circle cx="14.5" cy="3.5" r="2.25" fill="#000000"/>
+</svg>

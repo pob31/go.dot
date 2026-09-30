@@ -120,3 +120,12 @@ patches/tracktion_engine/series text eol=lf
 *.plist   text eol=lf
 *.plist.in text eol=lf
 *.c       text eol=lf
+
+# The icons (packaging/icons/). The SVGs are the sources and are text, kept LF
+# for the same honest-diff reason as the sources above. Their renders are
+# binary, and saying so stops Git ever trying to diff or convert a PNG, .icns or
+# .ico that happens to look like text to its heuristic.
+*.svg  text eol=lf
+*.png  binary
+*.icns binary
+*.ico  binary
