@@ -145,6 +145,12 @@ namespace wfg
             listens (monitor/TrafficTap.h). Null with no engine sockets; every
             reader checks. */
         monitor::TrafficTap* traffic = nullptr;
+
+        /*  LINUX: .wfg SHOWS OPEN WITH THIS COPY (app/Associate.h) - the File
+            menu's "Open .wfg files with this Go.dot", which is `wfg associate`
+            from the window. Answers a sentence for the foot. Empty elsewhere:
+            Windows has its installer and the Mac its app. */
+        std::function<std::string()> associate;
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

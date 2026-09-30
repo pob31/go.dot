@@ -69,6 +69,8 @@ add_executable(wfg_tests
     LocaleTests.cpp
     OscValueTests.cpp
     OpenShowsTests.cpp
+    FolderIconTests.cpp
+    AssociateTests.cpp
     CommandTests.cpp
     EventLogTests.cpp
     EngineTests.cpp

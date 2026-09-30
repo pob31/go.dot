@@ -118,6 +118,12 @@ if(WIN32)
     install(TARGETS wfg_windows_launcher RUNTIME DESTINATION . COMPONENT wfg)
 elseif(NOT APPLE)
     install(PROGRAMS "${_wfg_packaging}/go.dot.sh" DESTINATION . COMPONENT wfg)
+
+    # The app's and the .wfg page's PNGs, which `wfg associate` copies into the
+    # desktop's icon theme (src/wfg/engine/app/Associate.h). Not the folder's
+    # or the menu bar's: Linux has a use for neither.
+    install(DIRECTORY "${_wfg_packaging}/icons/png/" DESTINATION icons COMPONENT wfg
+            FILES_MATCHING PATTERN "go.dot-[0-9]*.png" PATTERN "go.dot-document-*.png")
 endif()
 
 # THE MSVC RUNTIME, next to wfg.exe. The CRT is /MD on purpose (the root

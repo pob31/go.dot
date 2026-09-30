@@ -17,6 +17,8 @@
 #include <wfg/engine/Console.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/app/Associate.h>
+#include <wfg/engine/app/FolderIcon.h>
 #include <wfg/engine/app/OpenShows.h>
 #include <wfg/engine/app/StartupReport.h>
 #include <wfg/engine/app/WindowApplication.h>
@@ -1319,6 +1321,29 @@ namespace
         so it cannot catch a mistake both halves share. scripts/validate-show.py
         runs the generated grammar through lxml for the other half.
     */
+    /*  `wfg associate [--remove]`: LINUX, .wfg SHOWS OPEN WITH THIS COPY OF
+        GO.DOT (app/Associate.h) - or no longer do. For this user only, under
+        $XDG_DATA_HOME, pointing at the folder this wfg is in, so it wants the
+        test build's folder with go.dot.sh beside it. Elsewhere it says who
+        does it instead, and fails: a verb that exits 0 having done nothing
+        is the one the ConsoleApplication comment at the bottom warns about. */
+    int runAssociate (const juce::ArgumentList& args)
+    {
+       #if JUCE_LINUX
+        const auto program = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+        const auto result = wfg::app::associate (args.containsOption ("--remove"), program,
+                                                 wfg::app::defaultDataHome());
+
+        (result.ok ? std::cout : std::cerr) << "wfg associate: " << result.said << std::endl;
+        return result.ok ? 0 : 2;
+       #else
+        (void) args;
+        std::cerr << "wfg associate: this is Linux's. On Windows the installer makes .wfg a Go.dot show;"
+                     " on the Mac, Go.dot.app does." << std::endl;
+        return 2;
+       #endif
+    }
+
     int runValidate (const juce::ArgumentList& args)
     {
         const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
@@ -3499,6 +3524,12 @@ namespace
         parameters.setSender (&sender);
         probe.start();
 
+        /*  A SAVED SHOW LOOKS LIKE ONE (app/FolderIcon.h): after a save or a
+            copy lands, on the writer's thread, its folder gets the show icon.
+            The window's alone - a headless serve's folders are a script's. */
+        if (wantWindow)
+            writer.setAfterLanding ([] (const juce::File& folder) { wfg::app::markShowFolder (folder); });
+
         /*  The writer with the other workers, and before the clock: the tick
             thread is the only thing that hands it work, so from the first tick
             there is a thread to take it. */
@@ -4825,6 +4856,9 @@ namespace
                     if (const auto saved = wfg::doc::Bundle::save (folder, fresh); ! saved.ok)
                         return "could not write the new show: "
                                  + (saved.problems.empty() ? std::string ("unknown") : saved.problems.front());
+
+                    //  Saved, so it looks like a show from the start (app/FolderIcon.h).
+                    wfg::app::markShowFolder (folder);
                 }
                 else if (! wfg::doc::Bundle::manifestFile (folder).existsAsFile())
                 {
@@ -4927,6 +4961,15 @@ namespace
                 clientHost.takes = &takePictures;
                 clientHost.openSettingsAtStart = showSettingsAtStart;
                 clientHost.traffic = &traffic;
+
+               #if JUCE_LINUX
+                clientHost.associate = []
+                {
+                    const auto program = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                           .getParentDirectory();
+                    return wfg::app::associate (false, program, wfg::app::defaultDataHome()).said;
+                };
+               #endif
 
                 client = makeClient (clientHost);
 
@@ -5151,6 +5194,16 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       [] (const juce::ArgumentList& args)
                       {
                           if (const auto code = runCanon (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
+    app.addCommand ({ "associate",
+                      "associate [--remove]",
+                      "Linux: makes .wfg shows open with this copy of Go.dot, for this user - or takes that back",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runAssociate (args); code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 

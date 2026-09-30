@@ -104,7 +104,7 @@ namespace wfg::client
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
-            menuWaveform, menuSurfaces, menuNetworkMonitor
+            menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate
         };
 
         class Window final : public wfg::Client,
@@ -665,7 +665,8 @@ namespace wfg::client
                     case menuRevert:
                     case menuShowSettings:
                     case menuSurfaces:
-                    case menuNetworkMonitor: break;
+                    case menuNetworkMonitor:
+                    case menuAssociate: break;
                     
                 }
 
@@ -720,6 +721,9 @@ namespace wfg::client
                         changes nothing, under the lock or not. */
                     case menuNetworkMonitor: return host.traffic != nullptr;
 
+                    //  Linux's, where the console gives one (Console.h, `associate`).
+                    case menuAssociate: return host.associate != nullptr;
+
                     /*  Offered for a media cue, and for shutting the panel
                         whatever is picked - a panel that could be opened and
                         not closed from the same place would be a trap. */
@@ -755,6 +759,14 @@ namespace wfg::client
                     addMenuItem (menu, menuSave, "Save");
                     addMenuItem (menu, menuSaveAs, "Save as...");
                     addMenuItem (menu, menuRevert, "Revert to saved...");
+
+                    /*  LINUX ONLY: a tarball cannot tell the desktop what a .wfg
+                        is, so this copy says so when asked (app/Associate.h).
+                        Windows has its installer and the Mac its app. */
+                   #if JUCE_LINUX
+                    menu.addSeparator();
+                    addMenuItem (menu, menuAssociate, "Open .wfg files with this Go.dot");
+                   #endif
                 }
                 else if (index == 1)
                 {
@@ -844,6 +856,10 @@ namespace wfg::client
                         break;
                     case menuNetworkMonitor:
                         openNetworkMonitor();
+                        break;
+                    case menuAssociate:
+                        if (host.associate)
+                            shell->transport.setNotice (juce::String (host.associate()));
                         break;
                     case menuSurfaces:
                         /*  MADE ONCE AND KEPT, as the settings window is: closing it

@@ -19,7 +19,11 @@
 #
 #     ./go.dot.sh                         the empty show
 #     ./go.dot.sh ~/shows/Tuesday         a show of your own
+#     ./go.dot.sh ~/shows/Tuesday/Tuesday.wfg   the same, by its .wfg
 #     ./go.dot.sh ~/shows/Tuesday --recover
+#
+# `wfg associate` makes a double-clicked .wfg run this script with it, for
+# this user (README.txt, and src/wfg/engine/app/Associate.h).
 
 set -euo pipefail
 
@@ -28,7 +32,12 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 show="$here/Untitled"
 first=(--show-settings)
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
-    show="$(cd "$1" && pwd)"
+    # A folder, or a file in one - the .wfg - which wfg takes for its folder.
+    if [ -d "$1" ]; then
+        show="$(cd "$1" && pwd)"
+    else
+        show="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+    fi
     shift
     first=()
 fi

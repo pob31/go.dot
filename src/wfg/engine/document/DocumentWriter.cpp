@@ -343,7 +343,23 @@ namespace wfg::doc
     }
 
     //==========================================================================
+    void DocumentWriter::setAfterLanding (std::function<void (const juce::File& folder)> toCall)
+    {
+        afterLanding = std::move (toCall);
+    }
+
     WriteCompletion DocumentWriter::perform (const WriteJob& job)
+    {
+        auto done = write (job);
+
+        if (afterLanding && done.landed
+              && (job.kind == WriteJob::Kind::save || job.kind == WriteJob::Kind::saveAs))
+            afterLanding (job.folder);
+
+        return done;
+    }
+
+    WriteCompletion DocumentWriter::write (const WriteJob& job)
     {
         WriteCompletion done;
         done.kind = job.kind;

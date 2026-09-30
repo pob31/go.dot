@@ -89,6 +89,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -282,12 +283,27 @@ namespace wfg::doc
         void setConsumed (const juce::File& where);
         juce::File consumed() const;
 
+        /*  AFTER A SAVE OR A COPY HAS LANDED: the folder it landed in, on the
+            performing thread and never the tick thread. For what the window
+            does to a show folder it has written (app/FolderIcon.h) - disk work,
+            so it belongs on the disk's thread. Not after an autosave, which
+            writes recovery/ and is nobody's gesture.
+
+            Set once, before `start`; nothing reads it concurrently with that.
+            Empty, which is every writer but a windowed serve's, it does nothing. */
+        void setAfterLanding (std::function<void (const juce::File& folder)> toCall);
+
     private:
         /*  The slow part, on whichever thread performs: the writer in the
             background mode, the caller otherwise - and never both at once, which
             is what makes the jobs' effects on the disk land in queue order.
             Takes the lock only to read or move the offer above. */
         WriteCompletion perform (const WriteJob& job);
+
+        //  The write itself; `perform` is it and then `afterLanding`.
+        WriteCompletion write (const WriteJob& job);
+
+        std::function<void (const juce::File& folder)> afterLanding;
 
         /*  Performs everything queued on the calling thread. Only when no
             thread is running, which the callers establish. */

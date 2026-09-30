@@ -58,6 +58,12 @@ open in a window is brought forward instead of being opened twice.
             Built on Ubuntu 24.04; it needs ALSA, FreeType, fontconfig and
             the X11 libraries, which a desktop install already has.
 
+            To open a show's .wfg with a double-click, choose "Open .wfg
+            files with this Go.dot" in the File menu, or run
+            ./wfg associate  - for you alone, pointing at this folder: run
+            it again if you move the folder, and ./wfg associate --remove
+            to take it away.
+
 The web client is served beside the window: the log (on Linux, the terminal)
 prints its address (http://localhost:<port>/ui). A tablet on the same network can open it with
 this machine's address in place of localhost.

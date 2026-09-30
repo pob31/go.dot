@@ -7654,7 +7654,10 @@ and never in the show (§4.10), a file naming the holder's process. A serve that
 brings the holder's window forward and exits 0; Open answers "already open: its window is in front".
 Where the system will not say which window that is (Linux, for now) both say the show is already open.
 `serve` and Open also take the show's `.wfg` for its folder, and a windowed serve that cannot start says
-why in the system's alert, since a double-click leaves nobody reading stderr.
+why in the system's alert, since a double-click leaves nobody reading stderr. And a show saved from the
+window looks like one (`app/FolderIcon.h`): on Windows a hidden `desktop.ini` and icon inside it, on the
+Mac the Finder's own custom icon - presentation, read by nothing that reads a show, and set by the
+window alone, never by a headless serve, a replay or a test.
 
 **A FADE THAT STOPS WHEN IT ARRIVES (2026-09-18).** *"Something else I think I haven't seen, a tick box to
 stop a media file once a fade has completed."* There was none, and reading the code for it found the
