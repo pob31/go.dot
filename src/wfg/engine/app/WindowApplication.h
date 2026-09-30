@@ -55,6 +55,14 @@ namespace wfg::app
             reaches the MessageManager; once; never undone. */
         static void declareStandalone();
 
+        /*  THE MAC'S LAUNCH, FINISHED BEFORE THE SHOW IS CHOSEN: NSApp runs
+            until it has finished launching and then stops, which is when a
+            file double-clicked to start Go.dot has been handed over - to
+            anotherInstanceStarted, so `onOpen` must be listening. The loop
+            JUCE runs afterwards is the ordinary one. Everywhere else a file
+            arrives on the command line, and this does nothing. */
+        static void finishLaunching();
+
         WindowApplication() = default;
 
         /*  A file the system asked Go.dot to open: one call per file, on the

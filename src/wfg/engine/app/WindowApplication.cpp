@@ -25,6 +25,13 @@ namespace wfg::app
         juce::JUCEApplicationBase::createInstance = [] () -> juce::JUCEApplicationBase* { return nullptr; };
     }
 
+   #if ! JUCE_MAC
+    void WindowApplication::finishLaunching()
+    {
+        //  WindowApplication_mac.mm is the Mac's; nothing is handed over late elsewhere.
+    }
+   #endif
+
     const juce::String WindowApplication::getApplicationName()
     {
         //  Also the Linux window's class: a desktop entry's StartupWMClass.

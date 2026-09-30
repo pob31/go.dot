@@ -30,5 +30,52 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Go.dot plays live inputs as cues and records takes from them.</string>
+
+    <!--
+        A .wfg IS A GO.DOT SHOW: the manifest in a show's folder, which a
+        double-click opens (the show is the folder around it). Declared here,
+        exported because Go.dot is the program that defines it, with the page
+        icon (Resources/Go.dot-document.icns) Finder draws it with.
+    -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>@WFG_MACOS_BUNDLE_ID@.show</string>
+            <key>UTTypeDescription</key>
+            <string>Go.dot show</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+                <string>public.content</string>
+            </array>
+            <key>UTTypeIconFile</key>
+            <string>Go.dot-document</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>wfg</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Go.dot show</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>@WFG_MACOS_BUNDLE_ID@.show</string>
+            </array>
+            <key>CFBundleTypeIconFile</key>
+            <string>Go.dot-document</string>
+        </dict>
+    </array>
 </dict>
 </plist>

@@ -56,9 +56,12 @@ if(APPLE)
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/Go.dot-Info.plist"
             DESTINATION "${_wfg_contents}" RENAME Info.plist COMPONENT wfg)
     install(FILES "${_wfg_packaging}/macos/launch.sh" DESTINATION "${_wfg_res}" COMPONENT wfg)
-    # Info.plist's CFBundleIconFile. Windows carries its icon inside wfg.exe
-    # (src/CMakeLists.txt); Linux's waits for a desktop entry to name it.
-    install(FILES "${_wfg_packaging}/icons/Go.dot.icns" DESTINATION "${_wfg_res}" COMPONENT wfg)
+    # Info.plist's CFBundleIconFile, and the .wfg page its document type names.
+    # Windows carries its icons inside wfg.exe and Go.dot.exe; Linux's wait for
+    # a desktop entry to name them.
+    install(FILES "${_wfg_packaging}/icons/Go.dot.icns"
+                  "${_wfg_packaging}/icons/Go.dot-document.icns"
+            DESTINATION "${_wfg_res}" COMPONENT wfg)
     set(_wfg_res_prefix "${_wfg_res}/")
 else()
     # The resource prefix is EMPTY here, not "./": CMake 3.31 warns (CMP0177)

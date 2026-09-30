@@ -47,6 +47,11 @@ log="$logs/go.dot-$(date +%Y%m%d-%H%M%S).log"
 # THE EMPTY SHOW OPENS ON ITS SHOW SETTINGS (--show-settings), as go.dot.sh's
 # does: the first thing anybody starting from nothing needs is the interface.
 #
+# UNLESS A SHOW WAS DOUBLE-CLICKED (--yield-to-opened). Finder does not hand
+# the file over on the command line: it starts the app and then says which
+# file, so this script cannot know. wfg finishes the launch before choosing,
+# and a show handed over takes the empty one's place, settings and all.
+#
 # --ui is resolved against the working directory, so run from Resources.
 cd "$resources"
-exec "$contents/MacOS/wfg" serve "$support/Untitled" --window --ui=console --show-settings >"$log" 2>&1
+exec "$contents/MacOS/wfg" serve "$support/Untitled" --window --ui=console --show-settings --yield-to-opened >"$log" 2>&1

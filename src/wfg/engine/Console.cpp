@@ -2301,7 +2301,8 @@ namespace
 
         useEngineFolderOption (args);
 
-        const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
+        //  Not const: a show handed over at launch takes its place (below, `--yield-to-opened`).
+        auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
 
         if (path.isEmpty())
         {
@@ -2353,6 +2354,41 @@ namespace
         {
             std::cerr << "wfg serve: this build has no window" << std::endl;
             return 2;
+        }
+
+        /*  The application the system talks to (app/WindowApplication.h):
+            made where the show is claimed, below, or here when the launch
+            has to be finished first. */
+        std::optional<wfg::app::WindowApplication> application;
+
+        /*  `--yield-to-opened`: THE SHOW NAMED IS THE EMPTY ONE, AND A SHOW THE
+            SYSTEM HANDS OVER AT LAUNCH TAKES ITS PLACE. The Mac app's launcher
+            passes it (packaging/macos/launch.sh). Finder starts an app and only
+            then says which file it was double-clicked for, once the app's loop
+            has begun - and by then serve has loaded a show and made a window.
+            So the launch is finished first, with the application listening,
+            and the show chosen after: the one handed over, or the empty one.
+            Its show settings were for the empty show, and go with it.
+
+            More than one handed over: the first here, the rest as Open show...
+            opens them, once there is a window to open them from. Elsewhere
+            than the Mac there is nothing to finish, and the flag does nothing. */
+        auto showSettingsAtStart = args.containsOption ("--show-settings");
+        std::vector<juce::String> openedAtLaunch;
+
+        if (wantWindow && args.containsOption ("--yield-to-opened"))
+        {
+            application.emplace();
+            application->onOpen = [&openedAtLaunch] (const juce::String& opened) { openedAtLaunch.push_back (opened); };
+            wfg::app::WindowApplication::finishLaunching();
+            application->onOpen = nullptr;
+
+            if (! openedAtLaunch.empty())
+            {
+                path = openedAtLaunch.front();
+                openedAtLaunch.erase (openedAtLaunch.begin());
+                showSettingsAtStart = false;
+            }
         }
 
         /*  `--midi-in=<device>`, repeatable, because a rig has a surface and a
@@ -2493,7 +2529,6 @@ namespace
             And the application the system talks to (app/WindowApplication.h),
             made here and given its jobs once there is a window to do them. */
         std::unique_ptr<wfg::app::OpenShow> openShow;
-        std::optional<wfg::app::WindowApplication> application;
 
         if (wantWindow)
         {
@@ -2513,7 +2548,8 @@ namespace
                 return 2;
             }
 
-            application.emplace();
+            if (! application.has_value())
+                application.emplace();
         }
 
         //  --- the document -----------------------------------------------
@@ -4843,10 +4879,11 @@ namespace
 
                     /*  NOR `--show-settings`, which was about THIS show's
                         first moment: a show opened from here has its settings
-                        already, and a new one is given the flag below. */
+                        already, and a new one is given the flag below. Nor
+                        `--yield-to-opened`, which was about this launch. */
                     if (text.startsWith ("--http-port") || text.startsWith ("--osc-port")
                           || text.startsWith ("--log") || text == "--recover"
-                          || text == "--show-settings")
+                          || text == "--show-settings" || text == "--yield-to-opened")
                         continue;
 
                     command.add (text);
@@ -4888,7 +4925,7 @@ namespace
                     asked on the window's thread, which is the one an interface
                     is changed on, so the host cannot go from under it. */
                 clientHost.takes = &takePictures;
-                clientHost.openSettingsAtStart = args.containsOption ("--show-settings");
+                clientHost.openSettingsAtStart = showSettingsAtStart;
                 clientHost.traffic = &traffic;
 
                 client = makeClient (clientHost);
@@ -4918,6 +4955,9 @@ namespace
                     };
 
                     application->onQuit = [&client] { client->requestClose(); };
+
+                    for (const auto& opened : openedAtLaunch)
+                        application->onOpen (opened);
                 }
             }
 
@@ -5178,7 +5218,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--hosted [--render=<wav>] [--input-wav=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
-                      " [--window [--theme=<file>] [--show-settings]] [--engine-folder=<dir>]",
+                      " [--window [--theme=<file>] [--show-settings] [--yield-to-opened]] [--engine-folder=<dir>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [&makeClient] (const juce::ArgumentList& args)

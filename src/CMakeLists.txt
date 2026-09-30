@@ -328,10 +328,10 @@ add_library(wfg::engine ALIAS wfg_engine)
 # header that ever takes the same name wins silently.
 target_include_directories(wfg_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
-# The Mac's half of app/Raise.h, which needs AppKit; Raise.cpp compiles to
-# nothing there.
+# The Mac's halves of app/Raise.h and app/WindowApplication.h, which need
+# AppKit; Raise.cpp compiles to nothing there.
 if(APPLE)
-    target_sources(wfg_engine PRIVATE wfg/engine/app/Raise_mac.mm)
+    target_sources(wfg_engine PRIVATE wfg/engine/app/Raise_mac.mm wfg/engine/app/WindowApplication_mac.mm)
 endif()
 
 # wfg::thirdparty is PUBLIC on purpose. The engine's own public headers name no
