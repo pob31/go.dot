@@ -14,8 +14,13 @@
     <string>@WFG_MACOS_BUNDLE_ID@</string>
     <key>CFBundleExecutable</key>
     <string>Go.dot</string>
+    <!--
+        THE ICONS ARE NAMED WITH .icns: "Go.dot" already reads as a name with
+        an extension (".dot"), so macOS does not add ".icns" to it and looks
+        for a file called Go.dot, which is not there - no icon at all.
+    -->
     <key>CFBundleIconFile</key>
-    <string>Go.dot</string>
+    <string>Go.dot.icns</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -50,7 +55,7 @@
                 <string>public.content</string>
             </array>
             <key>UTTypeIconFile</key>
-            <string>Go.dot-document</string>
+            <string>Go.dot-document.icns</string>
             <key>UTTypeTagSpecification</key>
             <dict>
                 <key>public.filename-extension</key>
@@ -74,7 +79,7 @@
                 <string>@WFG_MACOS_BUNDLE_ID@.show</string>
             </array>
             <key>CFBundleTypeIconFile</key>
-            <string>Go.dot-document</string>
+            <string>Go.dot-document.icns</string>
         </dict>
     </array>
 </dict>

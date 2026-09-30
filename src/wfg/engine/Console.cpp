@@ -2316,13 +2316,19 @@ namespace
         if (args.containsOption ("--window"))
             wfg::app::WindowApplication::declareStandalone();
 
-        const juce::ScopedJuceInitialiser_GUI juceForTheVerb;
-
        #if JUCE_MAC
-        /*  Before the window can exist, not inside the loop helper where it
-            used to be: a Component on macOS wants NSApp already there. */
+        /*  NSApp BEFORE JUCE, as JUCE's own main() has it. Starting JUCE makes
+            its application delegate and hands it to NSApp - `[NSApp
+            setDelegate:]` in juce_MessageManager_mac.mm - and before this line
+            NSApp is nil, so the delegate went nowhere and nothing macOS says
+            to an application reached Go.dot: a double-clicked .wfg was
+            refused ("cannot open files in the Go.dot show format") and Cmd-Q
+            quit on the spot, running show or not (the author's Mac mini,
+            2026-09-30). It also has to be before the window, which wants NSApp. */
         juce::initialiseNSApplication();
        #endif
+
+        const juce::ScopedJuceInitialiser_GUI juceForTheVerb;
 
         useEngineFolderOption (args);
 

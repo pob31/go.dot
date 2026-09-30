@@ -246,6 +246,13 @@ jobs:
             case " $archs " in *" x86_64 "*) ;; *) echo "::error::no x86_64 slice in $bin"; exit 1;; esac
           done
           plutil -lint Go.dot.app/Contents/Info.plist
+          # Every icon Info.plist names is in Resources under exactly that name:
+          # a name without .icns went unfound once, and the app had no icon.
+          for key in CFBundleIconFile UTExportedTypeDeclarations.0.UTTypeIconFile CFBundleDocumentTypes.0.CFBundleTypeIconFile; do
+            icon=$(plutil -extract "$key" raw Go.dot.app/Contents/Info.plist)
+            echo "$key: $icon"
+            test -f "Go.dot.app/Contents/Resources/$icon" || { echo "::error::Info.plist $key names $icon, which is not in Resources"; exit 1; }
+          done
           "$macos/wfg" --version
           "$macos/wfg" selftest
           "$macos/wfg" validate Go.dot.app/Contents/Resources/Untitled
