@@ -640,8 +640,12 @@ client), an empty show in `Untitled/`, a launcher (`Go.dot.exe` or `go.dot.sh`)
 and a `README.txt` for the tester. macOS gets the same inside `Go.dot.app`, in a
 DMG that is **signed with the author's Developer ID, notarized and stapled** by
 `scripts/package-macos.sh`, from the secrets in the protected `go-dot`
-environment. Windows and Linux are not signed. `cmake/WfgInstall.cmake` is the
-list; the extra files live in `packaging/`.
+environment. Windows also gets that folder as an **Inno Setup installer**
+(`packaging/windows/go.dot.iss`), which adds the Start menu entry, the
+uninstaller and the `.wfg` file type, so a double-clicked show opens in Go.dot;
+the workflow installs it, checks it and uninstalls it before uploading. Windows
+and Linux are not signed. `cmake/WfgInstall.cmake` is the list; the extra files
+live in `packaging/`.
 
 - **To publish one**, bump `project(VERSION)` in the root `CMakeLists.txt` if
   needed and push a tag whose numbers match it:

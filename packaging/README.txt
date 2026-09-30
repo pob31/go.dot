@@ -1,8 +1,8 @@
 Go.dot - test build
 ===================
 
-This is an early build for testing and comments. It is not an installer, the
-Windows and Linux builds are not signed, and it is not ready to run a show. Please do try it, and please
+This is an early build for testing and comments. The Windows and Linux builds
+are not signed, and it is not ready to run a show. Please do try it, and please
 tell us what you find:
 
     https://github.com/pob31/go.dot/issues
@@ -27,9 +27,14 @@ a show remembers the one it was saved with. A new show opens on its settings.
 Open show... takes a show's folder or its .wfg, and a show that is already
 open in a window is brought forward instead of being opened twice.
 
-  Windows   Double-click Go.dot.exe, or drop a show folder or its .wfg on
-            it. SmartScreen will warn that the publisher is unknown: choose
-            "More info", then "Run anyway".
+  Windows   Two downloads, the same Go.dot. The setup (-setup.exe) installs
+            it for you alone, or for everybody if you choose, adds it to the
+            Start menu, and makes a double-click on a show's .wfg open it; it
+            is taken away again from Settings > Apps. The zip installs
+            nothing: unzip it anywhere and double-click Go.dot.exe, or drop a
+            show folder or its .wfg on it. Either way SmartScreen will warn
+            that the publisher is unknown: choose "More info", then "Run
+            anyway".
 
             The first time, it copies the empty show to
             %APPDATA%\Go.dot\Untitled and opens that. Each launch writes its

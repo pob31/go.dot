@@ -124,9 +124,11 @@ patches/tracktion_engine/series text eol=lf
 *.plist.in text eol=lf
 *.c       text eol=lf
 
-# wfg.exe's resources (src/wfg/app/wfg.rc.in). rc.exe reads an LF file as well
-# as a CRLF one, so it is LF like the sources around it.
+# The Windows resources (src/wfg/app/wfg.rc.in, packaging/windows/launcher.rc.in)
+# and the installer's script (packaging/windows/go.dot.iss). rc.exe and Inno
+# Setup read an LF file as well as a CRLF one, so they are LF like the sources.
 *.rc.in   text eol=lf
+*.iss     text eol=lf
 
 # The icons (packaging/icons/). The SVGs are the sources and are text, kept LF
 # for the same honest-diff reason as the sources above. Their renders are

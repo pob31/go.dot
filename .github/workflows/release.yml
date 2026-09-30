@@ -295,10 +295,59 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path "stage/$env:PKG" -DestinationPath "$env:PKG.zip"
 
+      # The installer (packaging/windows/go.dot.iss): the same folder as the zip,
+      # plus the .wfg file type, a Start menu entry and an uninstaller. Inno
+      # Setup is on the runner image today; if an image drops it, Chocolatey is.
+      - name: Build the installer
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Null }
+          }
+          & $iscc /Qp "/DStage=$PWD\stage\$env:PKG" "/DAppVersion=$env:VERSION" "/O$PWD" packaging\windows\go.dot.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC exited $LASTEXITCODE" }
+          if (-not (Test-Path "$env:PKG-setup.exe")) { throw "$env:PKG-setup.exe was not made" }
+
+      # What a tester's double-click relies on: installed for this user, the
+      # installed copy runs, a .wfg is a Go.dot show - and after the uninstall,
+      # none of it is left. The uninstaller finishes from a copy of itself, so
+      # the last check waits for it.
+      - name: Smoke-test the installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'go.dot-installed'
+          $setup = Start-Process (Resolve-Path "$env:PKG-setup.exe") -Wait -PassThru `
+                     -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=$dir"
+          if ($setup.ExitCode -ne 0) { throw "setup exited $($setup.ExitCode)" }
+          $command = (Get-ItemProperty 'HKCU:\Software\Classes\GoDot.Show\shell\open\command').'(default)'
+          if ($command -notlike "*Go.dot.exe*") { throw "a .wfg does not open with Go.dot.exe: $command" }
+          if ((Get-ItemProperty 'HKCU:\Software\Classes\.wfg').'(default)' -ne 'GoDot.Show') { throw '.wfg is not a GoDot.Show' }
+          foreach ($run in @(@('--version'), @('validate', "$dir\Untitled"))) {
+            & "$dir\wfg.exe" @run
+            if ($LASTEXITCODE -ne 0) { throw "installed wfg $run exited $LASTEXITCODE" }
+          }
+          $uninstall = Start-Process "$dir\unins000.exe" -Wait -PassThru `
+                         -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if ($uninstall.ExitCode -ne 0) { throw "uninstall exited $($uninstall.ExitCode)" }
+          $gone = $false
+          for ($i = 0; $i -lt 60 -and -not $gone; $i++) {
+            Start-Sleep -Seconds 1
+            $gone = -not (Test-Path 'HKCU:\Software\Classes\GoDot.Show') -and -not (Test-Path "$dir\wfg.exe")
+          }
+          if (-not $gone) { throw 'the file type or the program outlived the uninstall' }
+
       - uses: actions/upload-artifact@v5
         with:
           name: ${{ env.PKG }}
-          path: ${{ env.PKG }}.zip
+          path: |
+            ${{ env.PKG }}.zip
+            ${{ env.PKG }}-setup.exe
           retention-days: 14
           if-no-files-found: error
 
@@ -337,12 +386,13 @@ jobs:
           **A test build, not a release.** The macOS app is signed and notarized; the
           Windows and Linux builds are not signed. Each download's `README.txt` says
           how to start it.
-          Please report what you find in the issues, with the archive's name, your OS
-          and audio device, and what the terminal printed.
+          Please report what you find in the issues, with the download's name, your OS
+          and audio device, and the log (its `README.txt` says where each system keeps it).
 
           | Platform | Archive |
           |---|---|
-          | Windows 10/11 x64 | `*-windows-x64.zip` — run `Go.dot.exe` |
+          | Windows 10/11 x64 | `*-windows-x64-setup.exe` — installs Go.dot and opens `.wfg` shows with it |
+          | Windows 10/11 x64, no install | `*-windows-x64.zip` — unzip and run `Go.dot.exe` |
           | macOS 13.3+, Apple silicon and Intel | `*-macos-universal.dmg` — drag Go.dot to Applications |
           | Linux x86_64 (glibc of Ubuntu 24.04 or newer) | `*-linux-x86_64.tar.gz` — run `./go.dot.sh` |
           EOF
