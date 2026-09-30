@@ -284,7 +284,7 @@ jobs:
           foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') {
             if (-not (Test-Path $dll)) { throw "$dll is missing beside wfg.exe" }
           }
-          if (-not (Test-Path 'Go.dot.cmd')) { throw 'Go.dot.cmd is missing' }
+          if (-not (Test-Path 'Go.dot.exe')) { throw 'Go.dot.exe is missing' }
           if (-not (Test-Path 'console/index.html')) { throw 'console/ is missing' }
           foreach ($run in @(@('--version'), @('selftest'), @('validate', 'Untitled'))) {
             & ./wfg.exe @run
@@ -342,7 +342,7 @@ jobs:
 
           | Platform | Archive |
           |---|---|
-          | Windows 10/11 x64 | `*-windows-x64.zip` — run `Go.dot.cmd` |
+          | Windows 10/11 x64 | `*-windows-x64.zip` — run `Go.dot.exe` |
           | macOS 13.3+, Apple silicon and Intel | `*-macos-universal.dmg` — drag Go.dot to Applications |
           | Linux x86_64 (glibc of Ubuntu 24.04 or newer) | `*-linux-x86_64.tar.gz` — run `./go.dot.sh` |
           EOF

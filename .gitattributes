@@ -32,6 +32,7 @@ CMakeLists.txt text eol=lf
 # — but the same "keep diffs honest" reason as above.
 *.h    text eol=lf
 *.cpp  text eol=lf
+*.mm   text eol=lf
 *.md   text eol=lf
 *.html text eol=lf
 *.js   text eol=lf
@@ -113,9 +114,11 @@ patches/tracktion_engine/series text eol=lf
 # apply a superproject's attributes across a submodule boundary. JUCE and
 # Tracktion Engine carry their own.
 
-# The Windows launcher (packaging/). A .cmd is read by cmd.exe, which mis-parses
-# labels and `if` blocks in an LF file, so it is the one file in the repo
-# checked out CRLF. The .plist and .c files under packaging/macos are LF.
+# The launchers (packaging/). The .plist and .c files under packaging/ are LF.
+# A .cmd would be read by cmd.exe, which mis-parses labels and `if` blocks in an
+# LF file, so one would be checked out CRLF - there is none since Go.dot.exe
+# (packaging/windows/launcher.c) replaced Go.dot.cmd, and the rule stays for the
+# next one.
 *.cmd     text eol=crlf
 *.plist   text eol=lf
 *.plist.in text eol=lf

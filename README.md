@@ -636,7 +636,7 @@ Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …
 
 `.github/workflows/release.yml` makes one download per platform for people to
 try. Windows and Linux get a folder: the `wfg` binary, `console/` (the web
-client), an empty show in `Untitled/`, a launcher (`Go.dot.cmd` or `go.dot.sh`)
+client), an empty show in `Untitled/`, a launcher (`Go.dot.exe` or `go.dot.sh`)
 and a `README.txt` for the tester. macOS gets the same inside `Go.dot.app`, in a
 DMG that is **signed with the author's Developer ID, notarized and stapled** by
 `scripts/package-macos.sh`, from the secrets in the protected `go-dot`

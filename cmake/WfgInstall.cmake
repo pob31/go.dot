@@ -85,11 +85,34 @@ install(FILES
     "${_wfg_packaging}/README.txt"
     DESTINATION . COMPONENT wfg)
 
-# One launcher per platform, and only that platform's: a .cmd in a Linux tarball
-# is noise a tester has to think about. PROGRAMS, not FILES, so the shell script
-# arrives executable. macOS's launcher is the app itself, above.
+# One launcher per platform, and only that platform's. macOS's launcher is the
+# app itself, above.
+#
+# WINDOWS: Go.dot.exe (packaging/windows/launcher.c), a window program that
+# starts wfg.exe with no console and its output in a log - wfg.exe is a console
+# program, and started from Explorer it would bring a black window with it. It
+# carries the app icon, the .wfg page icon the installer's file type points at,
+# and the name "Open with" shows. C, like the Mac's launcher, and WIN32 so the
+# linker makes it a window program.
+#
+# LINUX: the shell script, as PROGRAMS rather than FILES so it arrives
+# executable.
 if(WIN32)
-    install(PROGRAMS "${_wfg_packaging}/Go.dot.cmd" DESTINATION . COMPONENT wfg)
+    set(WFG_ICON_APP "${_wfg_packaging}/icons/Go.dot.ico")
+    set(WFG_ICON_DOCUMENT "${_wfg_packaging}/icons/Go.dot-document.ico")
+    configure_file("${_wfg_packaging}/windows/launcher.rc.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/Go.dot-launcher.rc" @ONLY)
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/Go.dot-launcher.rc"
+                                PROPERTIES OBJECT_DEPENDS "${WFG_ICON_APP};${WFG_ICON_DOCUMENT}")
+    unset(WFG_ICON_APP)
+    unset(WFG_ICON_DOCUMENT)
+
+    add_executable(wfg_windows_launcher WIN32
+        "${_wfg_packaging}/windows/launcher.c"
+        "${CMAKE_CURRENT_BINARY_DIR}/Go.dot-launcher.rc")
+    set_target_properties(wfg_windows_launcher PROPERTIES OUTPUT_NAME "Go.dot")
+    target_link_libraries(wfg_windows_launcher PRIVATE shell32 user32)
+    install(TARGETS wfg_windows_launcher RUNTIME DESTINATION . COMPONENT wfg)
 elseif(NOT APPLE)
     install(PROGRAMS "${_wfg_packaging}/go.dot.sh" DESTINATION . COMPONENT wfg)
 endif()

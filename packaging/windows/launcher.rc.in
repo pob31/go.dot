@@ -1,0 +1,60 @@
+/*
+    This file is part of Go.dot - https://github.com/pob31/go.dot
+
+    Copyright (C) 2026 Pierre-Olivier Boulant
+
+    Go.dot is free software: you can redistribute it and/or modify it under the
+    terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later
+    version. Go.dot is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+    or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+    (LICENSE, at the repository root) for more details.
+
+    SPDX-License-Identifier: GPL-3.0-or-later
+*/
+
+/*
+    Go.dot.exe's resources, configured by cmake/WfgInstall.cmake.
+
+    ICON 1 is the app, which Explorer, the Start menu and the installer's
+    shortcuts show. ICON 2 is the .wfg page: the installer's DefaultIcon for
+    the file type is "Go.dot.exe",-2, this resource by its number.
+
+    FileDescription is the name "Open with" and the taskbar's menu give the
+    program. ASCII only: rc.exe reads this in the machine's code page.
+*/
+
+#include <winver.h>
+
+1 ICON "@WFG_ICON_APP@"
+2 ICON "@WFG_ICON_DOCUMENT@"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Pierre-Olivier Boulant"
+            VALUE "FileDescription",  "Go.dot"
+            VALUE "FileVersion",      "@PROJECT_VERSION@"
+            VALUE "InternalName",     "Go.dot"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 Pierre-Olivier Boulant. GPL-3.0-or-later."
+            VALUE "OriginalFilename", "Go.dot.exe"
+            VALUE "ProductName",      "Go.dot"
+            VALUE "ProductVersion",   "@PROJECT_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

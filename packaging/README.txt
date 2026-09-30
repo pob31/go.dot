@@ -8,8 +8,8 @@ tell us what you find:
     https://github.com/pob31/go.dot/issues
 
 A report is most useful with the build's name (the archive's name, or the
-first line of `wfg --version`), your OS, your audio device, and the text the
-terminal window printed.
+first line of `wfg --version`), your OS, your audio device, and the log -
+where each system keeps it is below.
 
 
 Starting it
@@ -18,16 +18,22 @@ Starting it
 On Windows and Linux a launcher sits beside the binary; on macOS the launcher
 is the app. With nothing else it opens the empty show "Untitled", in a window,
 on your system's default audio interface, with its show settings open so you
-can pick another. On Windows and Linux, give the launcher a show folder to
-open that instead.
+can pick another. On Windows and Linux, give the launcher a show folder, or
+the show's .wfg, to open that instead.
 
 In the window, "New show...", "Open show..." and "Save as..." work on show
 folders anywhere you like; "Show settings..." picks the audio interface, and
 a show remembers the one it was saved with. A new show opens on its settings.
+Open show... takes a show's folder or its .wfg, and a show that is already
+open in a window is brought forward instead of being opened twice.
 
-  Windows   Double-click Go.dot.cmd, or drop a show folder on it.
-            SmartScreen will warn that the publisher is unknown: choose
+  Windows   Double-click Go.dot.exe, or drop a show folder or its .wfg on
+            it. SmartScreen will warn that the publisher is unknown: choose
             "More info", then "Run anyway".
+
+            The first time, it copies the empty show to
+            %APPDATA%\Go.dot\Untitled and opens that. Each launch writes its
+            log to %APPDATA%\Go.dot\logs - attach the newest one to a report.
 
   macOS     Open the .dmg and drag Go.dot to Applications, then open it
             like any app. It is signed and notarized, so macOS opens it
@@ -47,8 +53,8 @@ a show remembers the one it was saved with. A new show opens on its settings.
             Built on Ubuntu 24.04; it needs ALSA, FreeType, fontconfig and
             the X11 libraries, which a desktop install already has.
 
-The web client is served beside the window: the terminal prints its address
-(http://localhost:<port>/ui). A tablet on the same network can open it with
+The web client is served beside the window: the log (on Linux, the terminal)
+prints its address (http://localhost:<port>/ui). A tablet on the same network can open it with
 this machine's address in place of localhost.
 
 
