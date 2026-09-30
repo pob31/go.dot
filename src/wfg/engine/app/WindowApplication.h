@@ -45,6 +45,7 @@
 #include <juce_events/juce_events.h>
 
 #include <functional>
+#include <string>
 
 namespace wfg::app
 {
@@ -62,6 +63,13 @@ namespace wfg::app
             JUCE runs afterwards is the ordinary one. Everywhere else a file
             arrives on the command line, and this does nothing. */
         static void finishLaunching();
+
+        /*  THE MAC: who NSApp's delegate is, by class - JUCE's is
+            "JUCEAppDelegate_..." - or "none". For the log, because whether
+            macOS's "open this file" and "quit" reach Go.dot at all turns on
+            it, and it cannot be seen any other way from outside. Empty
+            elsewhere. */
+        static std::string describeSystemDelegate();
 
         WindowApplication() = default;
 

@@ -2419,6 +2419,13 @@ namespace
             wfg::app::WindowApplication::finishLaunching();
             application->onOpen = nullptr;
 
+            //  For the log: whether a double-click's file reached Go.dot is otherwise invisible.
+            if (openedAtLaunch.empty())
+                std::cerr << "wfg: nothing handed over at launch" << std::endl;
+
+            for (const auto& opened : openedAtLaunch)
+                std::cerr << "wfg: handed over at launch: " << opened.toStdString() << std::endl;
+
             openedAtLaunchCount = openedAtLaunch.size();
 
             if (! openedAtLaunch.empty())
@@ -2588,6 +2595,15 @@ namespace
 
             if (! application.has_value())
                 application.emplace();
+
+            /*  FOR THE LOG, which on a double-click is the only witness: the
+                show this window is for, and on the Mac who macOS talks to -
+                JUCE's delegate, or nobody, in which case neither "open this
+                file" nor "quit" can reach Go.dot (app/WindowApplication.h). */
+           #if JUCE_MAC
+            std::cerr << "wfg: macOS delegate " << wfg::app::WindowApplication::describeSystemDelegate() << std::endl;
+           #endif
+            std::cerr << "wfg: show " << target.getFullPathName().toStdString() << std::endl;
         }
 
         //  --- the document -----------------------------------------------

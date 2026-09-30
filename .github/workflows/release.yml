@@ -259,6 +259,51 @@ jobs:
           test -f Go.dot.app/Contents/Resources/launch.sh
           test -f Go.dot.app/Contents/Resources/console/index.html
 
+      # WHAT macOS SAYS TO THE APP, tried the way a person does it, because
+      # nothing else here can: the app registered with LaunchServices, a show's
+      # .wfg opened with it as a Finder double-click opens it (`open -a`), and
+      # then "quit" as Cmd-Q sends it. On the author's Mac mini both went past
+      # Go.dot twice (2026-09-30) - the file refused, Cmd-Q quitting at once.
+      # The log is the witness (launch.sh writes it; serve says who macOS's
+      # delegate is, what was handed over at launch and which show it opened),
+      # and it is printed whole whatever happens.
+      - name: Probe a double-click and a quit
+        shell: bash
+        run: |
+          set -uo pipefail
+          app="$PWD/stage/$PKG/Go.dot.app"
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
+          show="$RUNNER_TEMP/Probe Show"
+          rm -rf "$show" ~/Library/Logs/Go.dot
+          cp -R "$app/Contents/Resources/Untitled" "$show"
+          mv "$show/Untitled.wfg" "$show/Probe Show.wfg"
+
+          open -a "$app" "$show/Probe Show.wfg"
+          for i in $(seq 1 30); do
+            log=$(ls -t ~/Library/Logs/Go.dot/*.log 2>/dev/null | head -1)
+            if [ -n "$log" ] && grep -q '^wfg: show ' "$log"; then break; fi
+            sleep 1
+          done
+          sleep 5
+          echo "--- the log after the double-click"; cat "$log" || true
+
+          window_up=0; grep -q '^wfg: http ' "$log" && window_up=1
+          osascript -e 'tell application id "com.github.pob31.godot" to quit' >/dev/null 2>&1 &
+          sleep 5
+          if pgrep -f 'MacOS/wfg serve' >/dev/null; then asked=1; else asked=0; fi
+          echo "--- the log after quit"; cat "$log" || true
+          pkill -f 'MacOS/wfg serve' || true
+
+          failed=0
+          grep -q "^wfg: handed over at launch: $show/Probe Show.wfg" "$log" \
+            || { echo "::error::the double-clicked .wfg was not handed to Go.dot"; failed=1; }
+          grep -q "^wfg: show $show\$" "$log" \
+            || { echo "::error::Go.dot did not open the double-clicked show"; failed=1; }
+          if [ "$window_up" = 1 ] && [ "$asked" = 0 ]; then
+            echo "::error::quit ended Go.dot without asking"; failed=1
+          fi
+          exit $failed
+
       - name: Import the Developer ID certificate
         if: env.HAVE_CERT == 'true'
         uses: apple-actions/import-codesign-certs@v6

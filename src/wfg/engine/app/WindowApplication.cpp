@@ -30,6 +30,11 @@ namespace wfg::app
     {
         //  WindowApplication_mac.mm is the Mac's; nothing is handed over late elsewhere.
     }
+
+    std::string WindowApplication::describeSystemDelegate()
+    {
+        return {};
+    }
    #endif
 
     const juce::String WindowApplication::getApplicationName()

@@ -22,6 +22,16 @@
 
 namespace wfg::app
 {
+    std::string WindowApplication::describeSystemDelegate()
+    {
+        @autoreleasepool
+        {
+            id delegate = NSApp != nil ? [NSApp delegate] : nil;
+            return delegate != nil ? std::string ([NSStringFromClass ([delegate class]) UTF8String])
+                                   : std::string ("none");
+        }
+    }
+
     void WindowApplication::finishLaunching()
     {
         @autoreleasepool
