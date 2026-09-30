@@ -228,8 +228,12 @@ TEST_CASE ("show settings UI: the Inputs tab makes named inputs, and a hand patc
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
 
+    /*  EACH SIDE WHOLE, OUTPUTS FIRST (author, 2026-09-30): the outputs and
+        their patch, then the inputs and theirs, in the same order. */
     const auto names = tabs->getTabNames();
-    CHECK (names.indexOf ("Inputs") == names.indexOf ("Outputs") + 1);
+    CHECK (names.indexOf ("Output patch") == names.indexOf ("Outputs") + 1);
+    CHECK (names.indexOf ("Inputs") == names.indexOf ("Output patch") + 1);
+    CHECK (names.indexOf ("Input patch") == names.indexOf ("Inputs") + 1);
     tabs->setCurrentTabIndex (names.indexOf ("Inputs"));
 
     for (const auto& [label, width] : { std::pair<const char*, int> { "+ mono input", 1 },
@@ -527,9 +531,11 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
 
+    //  The last tab that sets anything; only the Getting started words come after it.
     const auto names = tabs->getTabNames();
     REQUIRE (names.contains ("Playback"));
-    CHECK (names.indexOf ("Playback") == names.size() - 1);
+    CHECK (names.indexOf ("Playback") == names.size() - 2);
+    CHECK (names[names.size() - 1] == "Getting started");
     tabs->setCurrentTabIndex (names.indexOf ("Playback"));
 
     auto* page = tabs->getCurrentContentComponent();
@@ -595,6 +601,55 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     The author found it by looking: two program changes, then a note-on, and
     the note-on's words stuck to everything picked afterwards.
 */
+TEST_CASE ("show settings UI: Getting started names every other tab, in order, and goes to it")
+{
+    /*  Author, 2026-09-30: "Should we add a 'Getting started' tab in the
+        settings window explaining what people should do? And what each tab is
+        for..." - as the last tab, Audio staying the first. */
+    Rig rig;
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    const auto names = tabs->getTabNames();
+    CHECK (names[0] == "Audio");
+    REQUIRE (names[names.size() - 1] == "Getting started");
+    CHECK (tabs->getCurrentTabIndex() == 0);    // the window still opens on Audio
+
+    tabs->setCurrentTabIndex (names.size() - 1);
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    //  A button for every other tab, in the strip's own order.
+    std::vector<juce::String> listed;
+
+    const std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+    {
+        if (auto* b = dynamic_cast<juce::Button*> (&at))
+            listed.push_back (b->getButtonText());
+
+        for (auto* child : at.getChildren())
+            walk (*child);
+    };
+
+    walk (*page);
+
+    std::vector<juce::String> others;
+
+    for (int at = 0; at < names.size() - 1; ++at)
+        others.push_back (names[at]);
+
+    CHECK (listed == others);
+
+    //  And pressing one goes there.
+    auto* rack = button (*page, "Rack");
+    REQUIRE (rack != nullptr);
+    rack->onClick();
+    CHECK (tabs->getCurrentTabIndex() == names.indexOf ("Rack"));
+}
+
 TEST_CASE ("inspector UI: a MIDI cue's labels follow the type when the panel is reused")
 {
     Rig rig;
@@ -685,7 +740,7 @@ TEST_CASE ("show settings UI: the Network tab declares devices and switches the 
         configures rather than after "Interface", which the network tab could
         equally have claimed. */
     CHECK (tabs->getTabNames()[0] == "Audio");
-    CHECK (tabs->getTabNames().indexOf ("Network") > tabs->getTabNames().indexOf ("Output patch"));
+    CHECK (tabs->getTabNames().indexOf ("Network") > tabs->getTabNames().indexOf ("Input patch"));
 
     tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
 

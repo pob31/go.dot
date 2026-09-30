@@ -30,7 +30,9 @@ CMake property to have stayed edited.
       immutable snapshot the HTTP route serves the page's waveforms from, and
       is not anything the tick thread owns; and since Phase 9c the takes'
       pictures, built from the recorders' peaks, which the audio thread writes
-      as atomics any thread may read
+      as atomics any thread may read; and the network monitor's tap, drained
+      once a pass while the monitor listens - bytes the socket, page and MIDI
+      threads copied off the wire, nothing the tick thread owns
   (d) the model half and the public header name no JUCE type at all - they are
       std only, as Engine.h is, so they can be tested with no window
 
@@ -130,6 +132,29 @@ def main():
     if unnamed:
         failures.append("(c) snapshot() is called on something that is not a door: "
                         + ", ".join(unnamed))
+
+    # The fourth door, argued in Console.h (ClientHost::traffic): the network
+    # monitor's tap, which is DRAINED rather than snapshotted - bytes from the
+    # wire handed over once, to one reader. The same rule in its own words:
+    # one call site, through the host.
+    drains = []
+
+    for p in files:
+        for m in re.finditer(r"(?:[A-Za-z_][A-Za-z0-9_]*(?:\.|->))*traffic->drain\s*\(", code[p]):
+            line = code[p].count("\n", 0, m.start()) + 1
+            where = "%s:%d" % (p.relative_to(REPO_ROOT), line)
+
+            if not m.group(0).startswith("host.traffic->"):
+                unnamed.append(where)
+                failures.append("(c) the traffic tap is drained other than through the host: " + where)
+            else:
+                drains.append(where)
+
+    if len(drains) != 1:
+        failures.append("(c) the network monitor's tap is drained at %d sites, not one: %s"
+                        % (len(drains), ", ".join(drains) or "none"))
+    else:
+        sites["the network monitor's tap"] = drains
 
     if not any(f.startswith("(c)") for f in failures):
         print("  ok  (c) one call site per door: %s"

@@ -4696,6 +4696,126 @@ namespace wfg::client::ui
             std::function<void (Event)> send;
             Field debounce, panicFade;
         };
+
+        /*  WHAT TO DO FIRST, AND WHAT EACH TAB IS FOR (author, 2026-09-30:
+            "Should we add a 'Getting started' tab in the settings window
+            explaining what people should do? And what each tab is for..." -
+            as the LAST tab, so Audio stays the first thing the window shows).
+
+            Every tab in the order a show is set up, each a button that goes
+            there and one sentence on what it holds. Words only: nothing here
+            is a setting, and a tab that changed the show would be a tab this
+            list had to explain too. */
+        class GettingStartedPage final : public juce::Component
+        {
+        public:
+            GettingStartedPage (const model::Theme& themeToUse, std::function<void (const juce::String&)> goToTab)
+                : goTo (std::move (goToTab))
+            {
+                intro.setText ("A show needs to know what it plays through before it plays anything. Work down"
+                               " this list once for each show - everything on these tabs is saved with it, so"
+                               " a show carried to another machine only needs its Audio and patches looked at"
+                               " again. The tabs with nothing for your show can be left as they are.",
+                               juce::dontSendNotification);
+
+                outro.setText ("Then close this window and build the show: the Add row over the cue list makes"
+                               " cues, a sound file dropped on the list becomes a media cue, and Space is GO."
+                               " Show settings... in the Show menu brings this window back.",
+                               juce::dontSendNotification);
+
+                const std::pair<const char*, const char*> tabs[] {
+                    { "Audio",        "The interface the show plays through, its sample rate and buffer size."
+                                      " Choose it first: GO turns yellow once the audio is running." },
+                    { "Outputs",      "The show's own outputs - mono or stereo, direct or mixes - which cues"
+                                      " are routed to by name, never by hardware channel." },
+                    { "Output patch", "Where each output lands on the interface's physical outputs: a new venue"
+                                      " is a new patch, and no cue changes." },
+                    { "Inputs",       "Named inputs for mic cues and live sampling - Voix solo, Keys - mono or"
+                                      " stereo. Nothing to do for a show that only plays files." },
+                    { "Input patch",  "Which physical inputs feed each named input." },
+                    { "Network",      "The devices the show talks to over OSC - a desk, a processor, a video"
+                                      " server - and where their addresses begin." },
+                    { "MIDI",         "The MIDI ports cues send to and triggers listen on." },
+                    { "Surfaces",     "Control surfaces and what their faders, pads and dials do, and the DCAs"
+                                      " that trim groups of cues." },
+                    { "Plugins",      "Scanning this machine for plugins, and the set a cue's FX can switch in." },
+                    { "Rack",         "Rack channels: chains of plugins that mic cues play through, and the"
+                                      " ones that sample." },
+                    { "Playback",     "How GO and Esc behave: the least time between two GOs, and how long"
+                                      " the panic fade takes." },
+                };
+
+                for (const auto& [name, what] : tabs)
+                {
+                    auto step = std::make_unique<Step>();
+                    step->go.setButtonText (name);
+                    step->go.setTooltip (juce::String ("Go to the ") + name + " tab");
+                    step->go.setWantsKeyboardFocus (false);
+                    step->go.onClick = [this, tab = juce::String (name)] { if (goTo) goTo (tab); };
+
+                    step->what.setText (what, juce::dontSendNotification);
+                    step->what.setJustificationType (juce::Justification::centredLeft);
+                    step->what.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
+                    step->what.setMinimumHorizontalScale (1.0f);
+
+                    inner.addAndMakeVisible (step->go);
+                    inner.addAndMakeVisible (step->what);
+                    steps.push_back (std::move (step));
+                }
+
+                for (auto* words : { &intro, &outro })
+                {
+                    words->setJustificationType (juce::Justification::topLeft);
+                    words->setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                    inner.addAndMakeVisible (*words);
+                }
+
+                /*  IT SCROLLS, because it is taller than the window opens at
+                    and the last words are the ones that say what to do next
+                    (author, looking at it: the last button squashed and the
+                    closing sentence gone). */
+                viewport.setViewedComponent (&inner, false);
+                viewport.setScrollBarsShown (true, false);
+                addAndMakeVisible (viewport);
+            }
+
+            void resized() override
+            {
+                viewport.setBounds (getLocalBounds());
+
+                const auto width = juce::jmax (300, viewport.getWidth() - viewport.getScrollBarThickness());
+                auto area = juce::Rectangle<int> (0, 0, width, 10000).reduced (22);
+
+                intro.setBounds (area.removeFromTop (58));
+                area.removeFromTop (8);
+
+                for (auto& step : steps)
+                {
+                    auto line = area.removeFromTop (34);
+                    step->go.setBounds (line.removeFromLeft (120).reduced (0, 3));
+                    line.removeFromLeft (14);
+                    step->what.setBounds (line);
+                }
+
+                area.removeFromTop (12);
+                outro.setBounds (area.removeFromTop (58));
+
+                inner.setSize (width, outro.getBottom() + 22);
+            }
+
+        private:
+            struct Step
+            {
+                juce::TextButton go;
+                juce::Label what;
+            };
+
+            std::function<void (const juce::String&)> goTo;
+            juce::Viewport viewport;
+            juce::Component inner;
+            juce::Label intro, outro;
+            std::vector<std::unique_ptr<Step>> steps;
+        };
     }
 
     class ShowSettingsWindow::Panel final : public juce::Component
@@ -4768,6 +4888,14 @@ namespace wfg::client::ui
             rackPage = std::make_unique<RackPage> (theme, send);
             playback = std::make_unique<PlaybackPage> (theme, send);
 
+            /*  A tab named in the list is found by its name, so the list and
+                the strip cannot come apart when a tab moves. */
+            gettingStarted = std::make_unique<GettingStartedPage> (theme, [this] (const juce::String& name)
+            {
+                if (const auto at = tabs.getTabNames().indexOf (name); at >= 0)
+                    tabs.setCurrentTabIndex (at);
+            });
+
             /*  THE FIRST HAND EDIT OF THE OUTPUT PATCH IS WHAT SETTLES IT
                 (PRD §6.2). Sent BEFORE the edit lands, so that the engine's own
                 rule - a layout command materialises the patch it had before
@@ -4813,13 +4941,18 @@ namespace wfg::client::ui
                 network, and two tabs named after the thing they configure read
                 better than one named after a word both could use. */
             tabs.addTab ("Audio", background, &interfacePage, false);
-            tabs.addTab ("Outputs", background, outputList.get(), false);
 
-            /*  BESIDE THE OUTPUTS: the other side of the interface, named the
-                same way and read the same way (Phase 9b). */
+            /*  EACH SIDE OF THE INTERFACE WHOLE, the outputs first: what the
+                show's outputs are and then where they land on the hardware,
+                then the same two for the inputs, in the same order (author,
+                2026-09-30: "keep the output and output patch first and the
+                input and input patch second, but in a similar order"). The
+                inputs are the other side, named and read the same way
+                (Phase 9b). */
+            tabs.addTab ("Outputs", background, outputList.get(), false);
+            tabs.addTab ("Output patch", background, outputs.get(), false);
             tabs.addTab ("Inputs", background, inputList.get(), false);
             tabs.addTab ("Input patch", background, inputs.get(), false);
-            tabs.addTab ("Output patch", background, outputs.get(), false);
             tabs.addTab ("Network", background, network.get(), false);
             tabs.addTab ("MIDI", background, midi.get(), false);
 
@@ -4835,9 +4968,14 @@ namespace wfg::client::ui
                 scan found, and the scan is on the tab before (Phase 9b). */
             tabs.addTab ("Rack", background, rackPage.get(), false);
 
-            /*  LAST: the two numbers that say how GO and Esc behave, set once
-                a show is otherwise ready to run (2026-09-28). */
+            /*  AFTER THE RACK: the two numbers that say how GO and Esc behave,
+                set once a show is otherwise ready to run (2026-09-28). */
             tabs.addTab ("Playback", background, playback.get(), false);
+
+            /*  AND LAST, what to do first (author, 2026-09-30): Audio stays the
+                tab the window opens on, and this is where somebody looks when
+                they do not know which tab they want. */
+            tabs.addTab ("Getting started", background, gettingStarted.get(), false);
             for (auto* component : std::initializer_list<juce::Component*> { &enabled, &type, &output, &input,
                      &buffer, &typeLabel, &outputLabel, &inputLabel, &bufferLabel, &rate, &explanation, &rescan })
                 interfacePage.addAndMakeVisible (*component);
@@ -5161,6 +5299,7 @@ namespace wfg::client::ui
         std::unique_ptr<PluginsPage> plugins;
         std::unique_ptr<RackPage> rackPage;
         std::unique_ptr<PlaybackPage> playback;
+        std::unique_ptr<GettingStartedPage> gettingStarted;
         bool settled = false;
 
         /*  The input patch's own regime, the twin of `settled` (Phase 9b). */
@@ -5184,9 +5323,31 @@ namespace wfg::client::ui
     {
         panel = std::make_unique<Panel> (theme, snapshot, std::move (send), [this] { closeButtonPressed(); });
         setUsingNativeTitleBar (true); setResizable (true, false); setResizeLimits (740, 550, 1500, 1100);
-        setContentNonOwned (panel.get(), true); centreWithSize (880, 650); setVisible (true);
+        setContentNonOwned (panel.get(), true);
+
+        /*  TALL ENOUGH FOR THE GETTING STARTED LIST WHOLE (author, 2026-09-30:
+            "the playback button ... was slightly squashed. Can the settings
+            pop up window be slightly taller"); the page scrolls on a screen
+            that cannot give it this much. */
+        centreWithSize (880, 740);
+        setAlwaysOnTop (true);
+        setVisible (true);
+       #if ! JUCE_LINUX
+        startTimerHz (4);
+       #endif
     }
-    ShowSettingsWindow::~ShowSettingsWindow() { panel->stopTest(); clearContentComponent(); }
+    ShowSettingsWindow::~ShowSettingsWindow() { stopTimer(); panel->stopTest(); clearContentComponent(); }
+
+    /*  ON TOP WHILE GO.DOT IS IN FRONT, and an ordinary window the moment
+        another program is: four looks a second, and a change only when the
+        answer moves. */
+    void ShowSettingsWindow::timerCallback()
+    {
+        const auto wanted = isVisible() && juce::Process::isForegroundProcess();
+
+        if (wanted != isAlwaysOnTop())
+            setAlwaysOnTop (wanted);
+    }
     void ShowSettingsWindow::refresh (const tree::TreeSnapshot& snapshot) { panel->refresh (snapshot); }
     void ShowSettingsWindow::closeButtonPressed() { panel->stopTest(); setVisible (false); }
     bool ShowSettingsWindow::keyPressed (const juce::KeyPress& key)

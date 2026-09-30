@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/Look.h>
 
+#include <wfg/client/ui/Icons.h>
+
 namespace wfg::client::ui
 {
     Look::Look (const model::Theme& theme)
@@ -44,6 +46,62 @@ namespace wfg::client::ui
     {
         static const juce::Identifier id { "wfgCaption" };
         return id;
+    }
+
+    const juce::Identifier& Look::icon()
+    {
+        static const juce::Identifier id { "wfgIcon" };
+        return id;
+    }
+
+    const juce::Identifier& Look::iconColour()
+    {
+        static const juce::Identifier id { "wfgIconColour" };
+        return id;
+    }
+
+    const juce::Identifier& Look::iconOnly()
+    {
+        static const juce::Identifier id { "wfgIconOnly" };
+        return id;
+    }
+
+    namespace
+    {
+        /*  AN ICON BUTTON'S PARTS, measured once so the drawing and the width
+            a row asks for cannot disagree: the picture's side, the gap after
+            it, the word without its list mark, and the mark's own width and gap. */
+        struct IconButtonParts
+        {
+            juce::String word;
+            bool opensList = false;
+            float side = 0.0f, gap = 0.0f, markWidth = 0.0f, markGap = 0.0f, wordWidth = 0.0f;
+        };
+
+        IconButtonParts partsOf (const juce::TextButton& button, const juce::Font& font, float type)
+        {
+            IconButtonParts parts;
+
+            const auto marker = juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"));
+            parts.opensList = button.getButtonText().endsWith (marker);
+            parts.word = parts.opensList ? button.getButtonText().dropLastCharacters (marker.length()).trimEnd()
+                                         : button.getButtonText();
+
+            parts.side = juce::jmin (static_cast<float> (button.getHeight()) * 0.56f, 15.0f * type);
+            parts.gap = parts.side * 0.35f;
+            parts.markWidth = parts.opensList ? parts.side * 0.5f : 0.0f;
+            parts.markGap = parts.opensList ? parts.gap : 0.0f;
+            parts.wordWidth = static_cast<float> (juce::GlyphArrangement::getStringWidthInt (font, parts.word));
+
+            return parts;
+        }
+    }
+
+    int Look::iconButtonWidth (juce::TextButton& button)
+    {
+        const auto parts = partsOf (button, getTextButtonFont (button, button.getHeight()), type);
+
+        return juce::roundToInt (parts.side + parts.gap + parts.wordWidth + parts.markGap + parts.markWidth + 8.0f);
     }
 
     juce::Font Look::getTextButtonFont (juce::TextButton& button, int buttonHeight)
@@ -84,6 +142,77 @@ namespace wfg::client::ui
 
             g.setFont (small);
             g.drawFittedText (line, area, juce::Justification::centred, 1, 1.0f);
+            return;
+        }
+
+        if (button.getProperties().contains (icon()))
+        {
+            /*  THE PICTURE, THEN THE WORDS, centred as a pair so the button
+                still reads as one thing. The picture keeps its colour when the
+                button is disabled, halved like the words.
+
+                A TRAILING ▾ IS THE LIST'S MARK and is drawn apart from the
+                words (author, 2026-09-30: "the drop down arrow is hidden when
+                the full width of the button is not shown ... Can the icon and
+                arrow be visible at all times"). When everything fits, the three
+                stand together in the middle; when it does not, the picture
+                holds the left edge, the mark the right, and only the WORD gives
+                way between them. A row of these drops every word at once
+                (`iconOnly`) rather than leave half-words; the picture says the
+                kind and the mark says a list opens, and the tooltip keeps the
+                word. */
+            const auto picture = static_cast<model::Icon> (static_cast<int> (button.getProperties()[icon()]));
+            const auto tint = juce::Colour (static_cast<juce::uint32> (static_cast<juce::int64> (button.getProperties()[iconColour()])));
+            const auto font = getTextButtonFont (button, button.getHeight());
+            const auto parts = partsOf (button, font, type);
+            const auto showWord = ! static_cast<bool> (button.getProperties()[iconOnly()]);
+
+            const auto opensList = parts.opensList;
+            const auto& text = parts.word;
+            const auto side = parts.side;
+            const auto gap = showWord ? parts.gap : 0.0f;
+            const auto markWidth = parts.markWidth;
+            const auto markGap = parts.markGap;
+            const auto textWidth = showWord ? parts.wordWidth : 0.0f;
+            const auto alpha = button.isEnabled() ? 1.0f : 0.5f;
+            const auto ink = button.findColour (button.getToggleState() ? juce::TextButton::textColourOnId
+                                                                        : juce::TextButton::textColourOffId)
+                               .withMultipliedAlpha (alpha);
+
+            auto area = button.getLocalBounds().toFloat()
+                            .reduced (juce::jmin (4.0f, static_cast<float> (button.getWidth()) * 0.08f), 0.0f);
+            area = area.withSizeKeepingCentre (juce::jmin (area.getWidth(), side + gap + textWidth + markGap + markWidth),
+                                               area.getHeight());
+
+            icons::draw (g, picture, area.removeFromLeft (side), tint.withMultipliedAlpha (alpha));
+
+            if (opensList)
+            {
+                /*  A small triangle pointing down, drawn rather than typed so
+                    it is the same size whatever the word beside it does. */
+                const auto mark = area.removeFromRight (markWidth);
+                const auto c = mark.getCentre();
+                const auto half = markWidth * 0.5f;
+
+                juce::Path triangle;
+                triangle.addTriangle (c.x - half, c.y - half * 0.55f, c.x + half, c.y - half * 0.55f,
+                                      c.x, c.y + half * 0.65f);
+
+                g.setColour (ink);
+                g.fillPath (triangle);
+                area.removeFromRight (markGap);
+            }
+
+            area.removeFromLeft (gap);
+
+            //  The word only when a letter or two of it can be read; an ellipsis alone says nothing.
+            if (showWord && area.getWidth() >= font.getHeight())
+            {
+                g.setColour (ink);
+                g.setFont (font);
+                g.drawText (text, area, juce::Justification::centredLeft, true);
+            }
+
             return;
         }
 

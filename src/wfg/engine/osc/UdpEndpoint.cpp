@@ -16,6 +16,8 @@
 
 #include <wfg/engine/osc/UdpEndpoint.h>
 
+#include <wfg/engine/monitor/TrafficTap.h>
+
 #include <juce_core/juce_core.h>
 
 namespace wfg::osc
@@ -133,6 +135,12 @@ namespace wfg::osc
             datagram.senderIp = senderIp.toStdString();
             datagram.senderPort = senderPort;
 
+            //  Shown to the monitor as it arrived, before anybody has judged it.
+            if (auto* watching = tap.load (std::memory_order_acquire); watching != nullptr && watching->isListening())
+                watching->record (monitor::Direction::in, monitor::Medium::osc, monitor::Road::udp,
+                                  monitor::peerText (datagram.senderIp, senderPort).view(),
+                                  datagram.bytes.data(), datagram.bytes.size());
+
             received.fetch_add (1, std::memory_order_relaxed);
             onDatagram (std::move (datagram));
         }
@@ -153,6 +161,12 @@ namespace wfg::osc
 
         const auto written = target->write (juce::String (host), destinationPort,
                                             data, static_cast<int> (size));
+
+        //  What left, shown to the monitor: a send the socket refused did not cross the wire.
+        if (written == static_cast<int> (size))
+            if (auto* watching = tap.load (std::memory_order_acquire); watching != nullptr && watching->isListening())
+                watching->record (monitor::Direction::out, monitor::Medium::osc, monitor::Road::udp,
+                                  monitor::peerText (host, destinationPort).view(), data, size);
 
         return written == static_cast<int> (size);
     }

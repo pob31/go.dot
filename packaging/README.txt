@@ -17,12 +17,13 @@ Starting it
 
 On Windows and Linux a launcher sits beside the binary; on macOS the launcher
 is the app. With nothing else it opens the empty show "Untitled", in a window,
-on your system's default audio interface. On Windows and Linux, give the
-launcher a show folder to open that instead.
+on your system's default audio interface, with its show settings open so you
+can pick another. On Windows and Linux, give the launcher a show folder to
+open that instead.
 
 In the window, "New show...", "Open show..." and "Save as..." work on show
 folders anywhere you like; "Show settings..." picks the audio interface, and
-a show remembers the one it was saved with.
+a show remembers the one it was saved with. A new show opens on its settings.
 
   Windows   Double-click Go.dot.cmd, or drop a show folder on it.
             SmartScreen will warn that the publisher is unknown: choose

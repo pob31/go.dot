@@ -16,6 +16,8 @@
 
 #include <wfg/engine/midi/MidiSender.h>
 
+#include <wfg/engine/monitor/TrafficTap.h>
+
 #include <algorithm>
 
 namespace wfg::midi
@@ -217,11 +219,7 @@ namespace wfg::midi
                 A hundred-byte dump holds this for about thirty milliseconds on
                 Windows and nothing above it notices - outside `boundMutex`,
                 which the tick thread's `isBound` takes. */
-            const juce::MidiMessage message { next.bytes.data(),
-                                              static_cast<int> (next.bytes.size()) };
-
-            device->sendMessageNow (message);
-            delivered.fetch_add (1, std::memory_order_relaxed);
+            deliver (*device, next.bytes);
         }
 
         /*  WHATEVER IS STILL QUEUED GOES, because a show that is closing has
@@ -242,11 +240,19 @@ namespace wfg::midi
             if (device == nullptr)
                 continue;
 
-            const juce::MidiMessage message { item.bytes.data(),
-                                              static_cast<int> (item.bytes.size()) };
-
-            device->sendMessageNow (message);
-            delivered.fetch_add (1, std::memory_order_relaxed);
+            deliver (*device, item.bytes);
         }
+    }
+
+    void MidiSender::deliver (juce::MidiOutput& device, const Bytes& bytes)
+    {
+        const juce::MidiMessage message { bytes.data(), static_cast<int> (bytes.size()) };
+
+        device.sendMessageNow (message);
+        delivered.fetch_add (1, std::memory_order_relaxed);
+
+        if (auto* watching = tap.load (std::memory_order_acquire); watching != nullptr && watching->isListening())
+            watching->record (monitor::Direction::out, monitor::Medium::midi, monitor::Road::midi,
+                              device.getName().toStdString(), bytes.data(), bytes.size());
     }
 }

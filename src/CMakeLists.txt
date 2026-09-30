@@ -280,6 +280,8 @@ add_library(wfg_engine STATIC
     wfg/engine/osc/OscValue.h
     wfg/engine/osc/SenderGate.h
     wfg/engine/osc/UdpEndpoint.cpp
+    wfg/engine/monitor/TrafficTap.h
+    wfg/engine/monitor/TrafficTap.cpp
     wfg/engine/osc/UdpEndpoint.h
     wfg/engine/oscquery/EngineNamespace.cpp
     wfg/engine/oscquery/EngineNamespace.h
@@ -391,6 +393,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Take.cpp
     wfg/client/model/FxEditor.h
     wfg/client/model/FxEditor.cpp
+    wfg/client/model/Traffic.h
+    wfg/client/model/Traffic.cpp
     wfg/client/model/Timeline.h
     wfg/client/model/Timeline.cpp
     wfg/client/model/View.h
@@ -399,6 +403,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Reorder.cpp
     wfg/client/model/Selection.h
     wfg/client/model/Selection.cpp
+    wfg/client/model/Icons.h
+    wfg/client/model/Icons.cpp
     wfg/client/model/Inspector.h
     wfg/client/model/Inspector.cpp
     wfg/client/model/LoadToTime.h
@@ -438,12 +444,16 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/WaveformEditorComponent.h
     wfg/client/ui/Look.h
     wfg/client/ui/Look.cpp
+    wfg/client/ui/Icons.h
+    wfg/client/ui/Icons.cpp
     wfg/client/ui/CueListComponent.h
     wfg/client/ui/CueListComponent.cpp
     wfg/client/ui/MainWindow.h
     wfg/client/ui/MainWindow.cpp
     wfg/client/ui/InspectorComponent.h
     wfg/client/ui/InspectorComponent.cpp
+    wfg/client/ui/NetworkMonitorWindow.h
+    wfg/client/ui/NetworkMonitorWindow.cpp
     wfg/client/ui/HistoryPanelComponent.h
     wfg/client/ui/HistoryPanelComponent.cpp
     wfg/client/ui/UndoPanelComponent.h

@@ -20,10 +20,118 @@
 
 #include <wfg/engine/osc/OscValue.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace wfg::client::ui
 {
+    /*  A DRAWER'S HEAD, drawn rather than made of a label and a button: one
+        thing to press, carrying three tellings of one state - the twist's
+        direction, the rows under it or not, and while shut how many there are
+        (§4.8: a shape and a number, never a colour alone). The icon says which
+        drawer it is before the word does. */
+    class InspectorComponent::DrawerHead final : public juce::Component,
+                                                 public juce::SettableTooltipClient
+    {
+    public:
+        explicit DrawerHead (const model::Theme& themeToUse) : look (themeToUse)
+        {
+            setWantsKeyboardFocus (false);
+            setMouseClickGrabsKeyboardFocus (false);
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        }
+
+        void set (const juce::String& wordToUse, model::Icon iconToUse, const std::string& accentToUse,
+                  bool shutToUse, int countToUse, bool idleToUse)
+        {
+            if (wordToUse == word && iconToUse == icon && accentToUse == accent && shutToUse == shut
+                  && countToUse == count && idleToUse == idle)
+                return;
+
+            word = wordToUse;
+            icon = iconToUse;
+            accent = accentToUse;
+            shut = shutToUse;
+            count = countToUse;
+            idle = idleToUse;
+
+            setTooltip (shut ? "Opens this drawer" : "Shuts this drawer");
+            repaint();
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            auto area = getLocalBounds();
+            const auto height = area.getHeight();
+
+            //  A band, and a rule along its top: a drawer reads as the front of something.
+            g.setColour (Look::colour (look, "panel-high").withAlpha (over ? 0.95f : 0.6f));
+            g.fillRect (area);
+            g.setColour (Look::colour (look, "rule"));
+            g.fillRect (area.removeFromTop (1));
+
+            area.removeFromLeft (height / 5);
+
+            /*  THE TWIST, DRAWN: right when shut, down when open, as every
+                other thing in this window that opens does. */
+            {
+                const auto twist = area.removeFromLeft (height * 2 / 3).toFloat();
+                const auto side = static_cast<float> (height) * 0.2f;
+                const auto c = twist.getCentre();
+
+                juce::Path triangle;
+
+                if (shut)
+                    triangle.addTriangle (c.x - side * 0.6f, c.y - side, c.x - side * 0.6f, c.y + side,
+                                          c.x + side * 0.9f, c.y);
+                else
+                    triangle.addTriangle (c.x - side, c.y - side * 0.6f, c.x + side, c.y - side * 0.6f,
+                                          c.x, c.y + side * 0.9f);
+
+                g.setColour (Look::colour (look, "ink-dim"));
+                g.fillPath (triangle);
+            }
+
+            const auto iconSide = static_cast<float> (height) * 0.62f;
+            icons::draw (g, icon, area.removeFromLeft (height).toFloat().withSizeKeepingCentre (iconSide, iconSide),
+                         Look::colour (look, accent.c_str()));
+
+            area.removeFromLeft (height / 6);
+
+            const auto font = Look::font (look, 11.5f);
+            const auto text = word.toUpperCase();
+
+            g.setFont (font);
+            g.setColour (Look::colour (look, idle ? "ink-off" : "ink-dim"));
+            g.drawText (text, area, juce::Justification::centredLeft, true);
+
+            /*  SHUT, IT SAYS HOW MUCH IS IN IT - and when none of it means
+                anything for this cue, says that too, which is why it shut. */
+            if (shut && count > 0)
+            {
+                area.removeFromLeft (juce::GlyphArrangement::getStringWidthInt (font, text) + height / 3);
+
+                g.setFont (Look::font (look, 11.0f));
+                g.setColour (Look::colour (look, "ink-off"));
+                g.drawText (juce::String (count) + (count == 1 ? " row" : " rows")
+                              + (idle ? juce::String (", not for this cue") : juce::String()),
+                            area, juce::Justification::centredLeft, true);
+            }
+        }
+
+        void mouseEnter (const juce::MouseEvent&) override { over = true; repaint(); }
+        void mouseExit (const juce::MouseEvent&) override { over = false; repaint(); }
+
+
+    private:
+        const model::Theme& look;
+        juce::String word;
+        model::Icon icon = model::Icon::none;
+        std::string accent = "ink-faint";
+        bool shut = false, idle = false, over = false;
+        int count = 0;
+    };
+
     /*  ONE ROW OF THE PANEL: a name, and whatever the node says its value
         should be edited with. A heading carries no field and draws itself. */
     struct InspectorComponent::Line
@@ -32,6 +140,11 @@ namespace wfg::client::ui
         bool isHeading = false;
         bool isDetail = false;
         juce::String headingText;
+
+        /*  WHICH DRAWER THE LINE IS IN - its block's heading, or "details" -
+            and, for a heading, the drawer's own head. */
+        std::string drawer;
+        std::unique_ptr<DrawerHead> head;
 
         juce::Label name;
         juce::Label box;                    ///< editable in place, for text and numbers
@@ -108,20 +221,14 @@ namespace wfg::client::ui
         closeButton.onClick = [this] { if (actions.close) actions.close(); };
         addAndMakeVisible (closeButton);
 
-        detailsButton.setWantsKeyboardFocus (false);
-        detailsButton.getProperties().set (Look::glyphButton(), true);
-        detailsButton.onClick = [this]
-        {
-            detailsOpen = ! detailsOpen;
-            sayWhetherDetailsAreOpen();
-            layOut();
-        };
-        sayWhetherDetailsAreOpen();
         /*  THE FOLD'S HEAD LIVES AMONG THE LINES, not at the foot of the
             pane: the author found it "sitting at the bottom of the window"
             (2026-09-18), a screen away from the fields it folds. It stands
-            where the details begin, so opening it puts them right under it. */
-        content.addAndMakeVisible (detailsButton);
+            where the details begin, so opening it puts them right under it.
+            Since 2026-09-30 it is one drawer among the others, drawn as they
+            are and twisting the way they do. */
+        detailsHead = std::make_unique<DrawerHead> (theme);
+        content.addAndMakeVisible (*detailsHead);
 
         viewport.setViewedComponent (&content, false);
         viewport.setScrollBarsShown (true, false);
@@ -182,6 +289,22 @@ namespace wfg::client::ui
         if (hit == nullptr)
             return;
 
+        /*  A PRESS ON A DRAWER'S HEAD opens or shuts it - heard here, with
+            every other press on the panel, rather than by the head itself,
+            so a test can press one as it presses a number. */
+        if (hit == detailsHead.get())
+        {
+            toggleDrawer ("details");
+            return;
+        }
+
+        for (auto& line : lines)
+            if (line->head != nullptr && hit == line->head.get())
+            {
+                toggleDrawer (line->drawer);
+                return;
+            }
+
         for (auto& line : lines)
         {
             if (hit != &line->name && hit != &line->box && ! line->box.isParentOf (hit))
@@ -196,34 +319,152 @@ namespace wfg::client::ui
 
     InspectorComponent::~InspectorComponent() = default;
 
-    /*  A TOGGLE THAT DOES NOT SAY WHICH WAY IT IS SET is a control somebody has
-        to press to find out (author, 2026-09-18: "the details toggle doesn't
-        show different states"). It said `details` open and `details` shut, so
-        the only way to read it was to look at whether any details were there -
-        which is exactly what somebody is pressing it to change.
-
-        THE SAME TWIST THE BANDS USE, pointing down when the fold is open and
-        right when it is shut: the window has one convention for a thing that
-        opens, and a panel that invented a second would be two conventions for
-        one idea. A SHAPE and not a colour (§4.8), like theirs. */
-    void InspectorComponent::sayWhetherDetailsAreOpen()
-    {
-        /*  IT POINTS THE WAY THE PANEL OPENS, and this fold is at the FOOT of
-            the panel - so open is UP, towards the rows it revealed, and shut is
-            down (author, 2026-09-18: "details is at the bottom and should be
-            pointing up when expanded").
-
-            The bands in the cue list point the other way for the same reason:
-            they head their section, so their rows appear BELOW them. One rule,
-            two directions, and the rule is where the content goes. */
-        detailsButton.setButtonText (juce::String (juce::CharPointer_UTF8 (detailsOpen ? "\xe2\x96\xb4"
-                                                                                      : "\xe2\x96\xbe"))
-                                       + "  details");
-    }
-
     int InspectorComponent::rowHeight() const noexcept
     {
         return juce::roundToInt (theme.row * theme.type);
+    }
+
+    //==========================================================================
+    //  The drawers
+    bool InspectorComponent::isShut (const std::string& drawer) const
+    {
+        if (const auto chosen = drawerChosen.find (drawer); chosen != drawerChosen.end())
+            return chosen->second;
+
+        //  The details start shut, as the fold always did.
+        if (drawer == "details")
+            return true;
+
+        /*  A DRAWER NOBODY HAS TOUCHED IS OPEN, unless not one of its rows
+            means anything for this cue - greyed, every one - when it starts
+            shut and says so on its head. Opening it by hand keeps it open. */
+        auto rows = 0, idle = 0;
+
+        for (const auto& line : lines)
+            if (! line->isHeading && line->drawer == drawer)
+            {
+                ++rows;
+
+                if (! line->field.applies)
+                    ++idle;
+            }
+
+        return rows > 0 && idle == rows;
+    }
+
+    void InspectorComponent::toggleDrawer (const std::string& drawer)
+    {
+        drawerChosen[drawer] = ! isShut (drawer);
+        layOut();
+    }
+
+    std::string InspectorComponent::drawerStates() const
+    {
+        std::string out;
+
+        for (const auto& line : lines)
+        {
+            if (line->isHeading)
+                out += line->drawer + (isShut (line->drawer) ? "=shut;" : "=open;");
+            else if (! line->field.applies)
+                out += "~";     // a row that went grey can change what a shut head says
+        }
+
+        return out + (isShut ("details") ? "details=shut" : "details=open");
+    }
+
+    //==========================================================================
+    //  The panel bar
+    int InspectorComponent::panelBarHeight() const noexcept
+    {
+        const auto row = rowHeight();
+        return panelButtons.empty() ? 0 : row + row / 3;
+    }
+
+    void InspectorComponent::rebuildPanels (const std::vector<model::Field>& panels)
+    {
+        std::vector<std::string> words;
+
+        for (const auto& panel : panels)
+            words.push_back (panel.value);
+
+        if (words == panelWords)
+            return;
+
+        for (auto& button : panelButtons)
+            removeChildComponent (button.get());
+
+        panelButtons.clear();
+        panelWords = words;
+
+        for (const auto& panel : panels)
+        {
+            /*  THE WORD IS THE LABEL'S FIRST: "Waveform, in and out points"
+                reads "Waveform" on the button and in full on the tooltip. */
+            const auto label = juce::String (panel.label);
+            const auto word = label.upToFirstOccurrenceOf (",", false, false).trim();
+
+            auto button = std::make_unique<IconButton> (model::iconForPanel (panel.value), word);
+            button->setTooltip ("Opens at the foot of the window, on this cue: " + label
+                                  + ". Pressed again, shuts it.");
+
+            //  The subject is the button's; which cue it opens on is read when pressed.
+            button->onClick = [this, subject = panel.value]
+            {
+                if (actions.openPanel)
+                    actions.openPanel (drawnCue, subject);
+            };
+
+            addAndMakeVisible (*button);
+            panelButtons.push_back (std::move (button));
+        }
+
+        applyTheme (theme);
+    }
+
+    void InspectorComponent::lightPanels()
+    {
+        for (std::size_t at = 0; at < panelButtons.size() && at < panelWords.size(); ++at)
+            panelButtons[at]->setToggleState (! footWord.empty() && panelWords[at] == footWord
+                                                && ! drawnCue.empty() && footCue == drawnCue,
+                                              juce::dontSendNotification);
+    }
+
+    void InspectorComponent::showFoot (const std::string& subject, const std::string& cueId)
+    {
+        if (subject == footWord && cueId == footCue)
+            return;
+
+        footWord = subject;
+        footCue = cueId;
+        lightPanels();
+    }
+
+    //==========================================================================
+    //  The head
+    void InspectorComponent::readHead (const model::Inspection& inspection)
+    {
+        const auto valueOf = [&inspection] (const char* name)
+        {
+            for (const auto& block : inspection.blocks)
+                for (const auto& field : block.fields)
+                    if (field.name == name)
+                        return field.mixed ? std::string {} : field.value;
+
+            return std::string {};
+        };
+
+        const auto icon = model::iconFor (inspection.kind, valueOf ("mode"), valueOf ("verb"));
+        const auto accent = model::accentFor (inspection.kind);
+        const auto colour = valueOf ("colour");
+
+        if (icon == headIcon && accent == headAccent && colour == headColour)
+            return;
+
+        headIcon = icon;
+        headAccent = accent;
+        headColour = colour;
+        repaint (headIconBox.expanded (8));
     }
 
     void InspectorComponent::applyTheme (const model::Theme& themeToUse)
@@ -249,12 +490,31 @@ namespace wfg::client::ui
                                                       : juce::Colours::transparentBlack);
         }
 
+        /*  THE PANEL BAR IN THE CUE'S ACCENT, so the bar over a media cue and
+            the bar over a fade are told apart at the same glance the icon in
+            the head is. */
+        for (auto& button : panelButtons)
+        {
+            button->setColours (Look::colour (theme, "ink"), Look::colour (theme, "panel-high"),
+                                Look::colour (theme, headAccent.empty() ? "ink-faint" : headAccent.c_str()));
+            button->setTextHeight (Look::font (theme, 12.0f).getHeight());
+        }
+
         resized();
         repaint();
     }
 
     void InspectorComponent::show (const model::Inspection& inspection)
     {
+        /*  THE HEAD AND THE PANEL BAR FIRST, whichever way the rows go: both
+            are about which cue this is, not about its rows. */
+        const auto accentWas = headAccent;
+        readHead (inspection);
+        rebuildPanels (inspection.panels);
+
+        if (headAccent != accentWas)
+            applyTheme (theme);
+
         /*  REBUILT ONLY WHEN THE CUE OR ITS SHAPE CHANGES. A value moving is a
             `setText` on a line that already exists; a different cue is a
             different panel. Counting the fields catches the case that matters
@@ -263,6 +523,7 @@ namespace wfg::client::ui
         if (shapeOf (inspection) != drawnShape)
         {
             rebuild (inspection);
+            lightPanels();
             return;
         }
 
@@ -270,6 +531,7 @@ namespace wfg::client::ui
             addressed, and the address is the cue's - so the identifier moves
             here, before the values do, and the buttons read it when pressed. */
         drawnCue = inspection.cueId;
+        lightPanels();
 
         heading.setText (headingFor (inspection), juce::dontSendNotification);
 
@@ -428,6 +690,12 @@ namespace wfg::client::ui
 
         for (const auto& field : inspection.details)
             update (field);
+
+        /*  A ROW GOING GREY CAN SHUT A DRAWER NOBODY TOUCHED, or open one:
+            picking a sampler member after a cue outside any group keeps the
+            panel and changes what its sampler rows mean. Relaid only then. */
+        if (drawerStates() != laidDrawers)
+            layOut();
     }
 
     void InspectorComponent::commitField (const model::Field& field, const std::string& text)
@@ -538,21 +806,23 @@ namespace wfg::client::ui
             took it too - and it vanished the first time a cue was picked
             (author, 2026-09-18: "the detail button has disappeared"). Put
             back before the lines are, so it is there for `layOut` to place. */
-        content.addAndMakeVisible (detailsButton);
+        content.addAndMakeVisible (*detailsHead);
 
         drawnCue = inspection.cueId;
         drawnShape = shapeOf (inspection);
+        drawnKind = inspection.kind;
 
         heading.setText (headingFor (inspection),
                          juce::dontSendNotification);
 
-        detailsButton.setVisible (! inspection.details.empty());
+        detailsHead->setVisible (! inspection.details.empty());
 
-        const auto addLine = [this] (const model::Field& field, bool detail)
+        const auto addLine = [this] (const model::Field& field, bool detail, const std::string& drawer)
         {
             auto line = std::make_unique<Line>();
             line->field = field;
             line->isDetail = detail;
+            line->drawer = drawer;
 
             line->name.setText (nameOf (field), juce::dontSendNotification);
             line->name.setTooltip (juce::String (field.description));
@@ -840,19 +1110,23 @@ namespace wfg::client::ui
 
         for (const auto& block : inspection.blocks)
         {
+            /*  EVERY BLOCK IS A DRAWER, headed by what opens and shuts it. The
+                head is remembered by the block's heading, so the drawer a hand
+                shut stays shut on the next cue that has one. */
             auto head = std::make_unique<Line>();
             head->isHeading = true;
-            head->headingText = juce::String (block.heading).toUpperCase();
-            head->name.setText (head->headingText, juce::dontSendNotification);
-            content.addAndMakeVisible (head->name);
+            head->headingText = juce::String (block.heading);
+            head->drawer = block.heading;
+            head->head = std::make_unique<DrawerHead> (theme);
+            content.addAndMakeVisible (*head->head);
             lines.push_back (std::move (head));
 
             for (const auto& field : block.fields)
-                addLine (field, false);
+                addLine (field, false, block.heading);
         }
 
         for (const auto& field : inspection.details)
-            addLine (field, true);
+            addLine (field, true, "details");
 
         applyTheme (theme);
         layOut();
@@ -865,21 +1139,63 @@ namespace wfg::client::ui
         const auto width = juce::jmax (120, viewport.getWidth() - 16);
         const auto nameWidth = juce::jmax (60, width * 2 / 5);
 
-        auto y = pad;
+        auto y = pad / 2;
         auto detailsPlaced = false;
+        auto shut = false;
+
+        /*  A DRAWER'S HEAD across the whole width, with a little air above it,
+            saying whether it is shut, how many rows it holds, and whether any
+            of them means anything for this cue. */
+        const auto placeHead = [this, &y, &shut, row, pad, width] (DrawerHead& head, const std::string& drawer)
+        {
+            auto rowsIn = 0, idle = 0;
+
+            for (const auto& other : lines)
+                if (! other->isHeading && other->drawer == drawer)
+                {
+                    ++rowsIn;
+
+                    if (! other->field.applies)
+                        ++idle;
+                }
+
+            shut = isShut (drawer);
+
+            const auto accent = drawer == "what it does" ? model::accentFor (drawnKind) : std::string ("ink-faint");
+            const auto mode = [this]
+            {
+                for (const auto& other : lines)
+                    if (other->field.name == "mode")
+                        return other->field.value;
+
+                return std::string {};
+            }();
+
+            head.set (juce::String (drawer), model::iconForDrawer (drawer, drawnKind, mode), accent,
+                      shut, rowsIn, rowsIn > 0 && idle == rowsIn);
+
+            const auto gap = pad / 2;
+            head.setBounds (0, y + gap, width + pad, row);
+            y += gap + row + (shut ? 0 : pad / 2);
+        };
 
         for (auto& line : lines)
         {
-            /*  The details button heads the first detail line, open or shut,
-                so it is always just under the last ordinary field. */
-            if (line->isDetail && ! detailsPlaced && detailsButton.isVisible())
+            /*  The details' head leads the first detail line, open or shut,
+                so it is always just under the last ordinary drawer. */
+            if (line->isDetail && ! detailsPlaced && detailsHead->isVisible())
             {
-                detailsButton.setBounds (pad, y + pad / 2, juce::jmin (width, row * 4), row);
-                y += row + pad;
+                placeHead (*detailsHead, "details");
                 detailsPlaced = true;
             }
 
-            const auto hidden = line->isDetail && ! detailsOpen;
+            if (line->isHeading && line->head != nullptr)
+            {
+                placeHead (*line->head, line->drawer);
+                continue;
+            }
+
+            const auto hidden = shut;
 
             line->name.setVisible (! hidden);
             /*  ASKED OF THE CONTROL AND NOT OF THE OTHER COMPONENTS' VISIBILITY,
@@ -950,13 +1266,6 @@ namespace wfg::client::ui
             if (hidden)
                 continue;
 
-            if (line->isHeading)
-            {
-                line->name.setBounds (pad, y + pad, width, row);
-                y += row + pad;
-                continue;
-            }
-
             if (opens)
             {
                 line->opener.setBounds (pad, y + 1, width - pad, row - 2);
@@ -1011,6 +1320,7 @@ namespace wfg::client::ui
         }
 
         content.setSize (juce::jmax (width, viewport.getWidth()), y + pad);
+        laidDrawers = drawerStates();
     }
 
     void InspectorComponent::paint (juce::Graphics& g)
@@ -1022,6 +1332,22 @@ namespace wfg::client::ui
 
         g.setColour (Look::colour (theme, "rule"));
         g.fillRect (0, 0, 1, getHeight());
+
+        /*  THE CUE'S ICON BEFORE ITS NAME, in its kind's accent - the same
+            picture its row wears in the list, so the eye carries one across
+            to the other - and its own colour as a tab before that. */
+        if (headIcon != model::Icon::none)
+            icons::draw (g, headIcon, headIconBox.toFloat().reduced (2.0f),
+                         Look::colour (theme, headAccent.c_str()));
+
+        if (const auto own = model::colourFromHex (headColour); own.has_value())
+        {
+            const auto tab = headIconBox.withX (headIconBox.getX() - 7).withWidth (4)
+                                 .withSizeKeepingCentre (4, headIconBox.getHeight() * 3 / 4);
+
+            g.setColour (juce::Colour (static_cast<juce::uint32> (*own)));
+            g.fillRoundedRectangle (tab.toFloat(), 2.0f);
+        }
     }
 
     void InspectorComponent::resized()
@@ -1032,7 +1358,56 @@ namespace wfg::client::ui
 
         auto top = area.removeFromTop (row + row / 3).withTrimmedTop (row / 3);
         closeButton.setBounds (top.removeFromRight (row).reduced (2));
+        headIconBox = top.removeFromLeft (row).reduced (2);
+        top.removeFromLeft (row / 6);
         heading.setBounds (top);
+
+        /*  THE PANEL BAR, UNDER THE NAME AND OVER THE ROWS - where the eye
+            lands first, and out of the scrolling so it is there whichever
+            drawer somebody has scrolled to. Three ways to lay it, tried in
+            order: equal widths that all carry their words; each as wide as its
+            word, the room left shared out; and, where not even that fits,
+            equal widths with the pictures alone - every button dropping its
+            word together, so the bar never reads half one way and half the
+            other. Capped so a wide inspector does not stretch them into slabs. */
+        if (! panelButtons.empty())
+        {
+            auto bar = area.removeFromTop (panelBarHeight()).reduced (0, row / 6);
+            const auto count = static_cast<int> (panelButtons.size());
+            const auto gap = row / 4;
+            const auto room = bar.getWidth() - gap * (count - 1);
+
+            std::vector<int> wanted;
+            auto widest = 0, total = 0;
+
+            for (auto& button : panelButtons)
+            {
+                wanted.push_back (button->idealWidth (bar.getHeight()));
+                widest = juce::jmax (widest, wanted.back());
+                total += wanted.back();
+            }
+
+            std::vector<int> widths;
+            auto wordsFit = true;
+
+            if (widest * count <= room)
+                widths.assign (panelButtons.size(), juce::jmin (row * 4, room / juce::jmax (1, count)));
+            else if (total <= room)
+                for (const auto one : wanted)
+                    widths.push_back (one + (room - total) / count);
+            else
+            {
+                wordsFit = false;
+                widths.assign (panelButtons.size(), room / juce::jmax (1, count));
+            }
+
+            for (std::size_t at = 0; at < panelButtons.size(); ++at)
+            {
+                panelButtons[at]->setWordShown (wordsFit);
+                panelButtons[at]->setBounds (bar.removeFromLeft (widths[at]));
+                bar.removeFromLeft (gap);
+            }
+        }
 
         viewport.setBounds (area);
         layOut();

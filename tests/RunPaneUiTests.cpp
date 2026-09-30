@@ -14,6 +14,8 @@
 #include <wfg/client/ui/SurfacePanelComponent.h>
 #include <wfg/client/ui/NewCueBarComponent.h>
 #include <wfg/client/ui/NewCueMenu.h>
+#include <wfg/client/ui/Look.h>
+#include <wfg/client/ui/NetworkMonitorWindow.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/NewCueMenus.h>
 
@@ -25,6 +27,7 @@
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/command/Event.h>
+#include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/plugin/EditorHost.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -35,6 +38,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -689,6 +693,70 @@ TEST_CASE ("range table: every slice shows its times, and the arrow gives the ne
     CHECK (written.back().second != "0");
 }
 
+TEST_CASE ("range table: a cue with no ranges shows the whole file, and looping it makes the range")
+{
+    /*  The author, 2026-09-30: "Could we have the complete range already there
+        by default. It makes looping a media much easier this way." */
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::tuple<std::string, double, double>> made;
+
+    ui::RangeTableComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value)
+    { written.emplace_back (address, value); };
+    actions.createRange = [&] (const std::string& cueId, double in, double out)
+    { made.emplace_back (cueId, in, out); };
+
+    ui::RangeTableComponent table (model::Theme {}, actions);
+    table.setSize (table.wantedWidth(), 160);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 30.0;
+    table.show (reading);
+
+    //  One row, the whole file, and nothing written just for showing it.
+    std::vector<juce::ToggleButton*> toggles;
+
+    for (auto* button : buttonsUnder (table))
+        if (auto* toggle = dynamic_cast<juce::ToggleButton*> (button))
+            toggles.push_back (toggle);
+
+    REQUIRE (toggles.size() == 1);
+    CHECK_FALSE (toggles[0]->getToggleState());
+    CHECK (made.empty());
+    CHECK (written.empty());
+
+    //  For ever, ticked: the range over the whole file first, and nothing on it yet.
+    toggles[0]->setToggleState (true, juce::sendNotificationSync);
+
+    REQUIRE (made.size() == 1);
+    CHECK (std::get<0> (made[0]) == "CUE00001");
+    CHECK (std::get<1> (made[0]) == doctest::Approx (0.0));
+    CHECK (std::get<2> (made[0]) == doctest::Approx (30.0));
+    CHECK (written.empty());
+
+    //  The tree has the range: the change lands on it, once.
+    reading.ranges = { { "RNG00001", "", 0.0, 30.0, 1, 0 } };
+    table.show (reading);
+
+    REQUIRE (written.size() == 1);
+    CHECK (written[0].first == "/godot/range/RNG00001/loops");
+    CHECK (written[0].second == "0");
+
+    table.show (reading);
+    CHECK (written.size() == 1);
+
+    //  A file whose length is not known yet has no whole to show.
+    model::FootReading unknown = reading;
+    unknown.ranges.clear();
+    unknown.fileLength = 0.0;
+    table.show (unknown);
+
+    CHECK (buttonsUnder (table).size() == 1u);   // the plus in the head, and no row
+}
+
 TEST_CASE ("inspector: an opener is a button that asks the window to open the panel, not a field")
 {
     /*  The author, 2026-09-21: "the controls to show the waveform, the send
@@ -713,9 +781,9 @@ TEST_CASE ("inspector: an opener is a button that asks the window to open the pa
     inspection.kind = "media";
     inspection.count = 1;
 
-    model::Block block { "what it does", model::openersFor ("media", "CUE00001") };
-    REQUIRE_FALSE (block.fields.empty());
-    inspection.blocks.push_back (block);
+    //  Since 2026-09-30 a bar at the head of the panel, not rows among the fields.
+    inspection.panels = model::openersFor ("media", "CUE00001");
+    REQUIRE_FALSE (inspection.panels.empty());
 
     inspector.show (inspection);
 
@@ -738,6 +806,121 @@ TEST_CASE ("inspector: an opener is a button that asks the window to open the pa
 
     //  And it is a door, not a decision: nothing was written.
     CHECK (written.empty());
+
+    /*  LIT WHILE ITS PANEL IS OPEN ON THIS CUE, and only then (author,
+        2026-09-30: the toggles "at the top"): the window says what the foot
+        shows, and the button for it stays pressed. */
+    CHECK_FALSE (door->getToggleState());
+    inspector.showFoot ("waveform", "CUE00001");
+    CHECK (door->getToggleState());
+    inspector.showFoot ("waveform", "CUE00002");
+    CHECK_FALSE (door->getToggleState());
+    inspector.showFoot ("eq", "CUE00001");
+    CHECK_FALSE (door->getToggleState());
+
+    auto* eq = buttonTipped (inspector, "Opens at the foot of the window, on this cue: EQ");
+    REQUIRE (eq != nullptr);
+    CHECK (eq->getToggleState());
+    inspector.showFoot ({}, {});
+    CHECK_FALSE (eq->getToggleState());
+}
+
+TEST_CASE ("inspector: every block is a drawer, and a drawer of rows that mean nothing here starts shut")
+{
+    /*  The author, 2026-09-30: "We can also make more drawers for things." */
+    ui::InspectorComponent inspector (model::Theme {}, {});
+    inspector.setSize (320, 600);
+
+    const auto field = [] (std::string name, bool applies)
+    {
+        model::Field made;
+        made.address = "/godot/cue/CUE00001/" + name;
+        made.name = name;
+        made.label = name;
+        made.typeTags = "d";
+        made.value = "0";
+        made.writable = true;
+        made.applies = applies;
+        return made;
+    };
+
+    model::Inspection inspection;
+    inspection.cueId = "CUE00001";
+    inspection.cueName = "The bed";
+    inspection.kind = "media";
+    inspection.count = 1;
+    inspection.blocks.push_back ({ "what it does", { field ("level", true) } });
+    inspection.blocks.push_back ({ "sampler", { field ("initialLevel", false), field ("releaseFade", false) } });
+    inspector.show (inspection);
+
+    const auto labelled = [&inspector] (const juce::String& word) -> juce::Label*
+    {
+        juce::Label* found = nullptr;
+
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+        {
+            for (auto* child : at.getChildren())
+            {
+                if (auto* label = dynamic_cast<juce::Label*> (child); label != nullptr && found == nullptr)
+                    if (label->getText() == word)
+                        found = label;
+
+                walk (*child);
+            }
+        };
+
+        walk (inspector);
+        return found;
+    };
+
+    //  A drawer's head is a thing with a tooltip saying what a press does to it.
+    const auto headSaying = [&inspector] (const juce::String& tip) -> juce::Component*
+    {
+        juce::Component* found = nullptr;
+
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+        {
+            for (auto* child : at.getChildren())
+            {
+                if (auto* tips = dynamic_cast<juce::SettableTooltipClient*> (child);
+                      tips != nullptr && found == nullptr && dynamic_cast<juce::Button*> (child) == nullptr
+                        && dynamic_cast<juce::Label*> (child) == nullptr && tips->getTooltip() == tip)
+                    found = child;
+
+                walk (*child);
+            }
+        };
+
+        walk (inspector);
+        return found;
+    };
+
+    auto* level = labelled ("level");
+    auto* initial = labelled ("initialLevel");
+    REQUIRE (level != nullptr);
+    REQUIRE (initial != nullptr);
+
+    //  What the cue does is open; the sampler's rows, greyed every one, start shut.
+    CHECK (level->isVisible());
+    CHECK_FALSE (initial->isVisible());
+
+    //  Pressing the open head shuts it, and the next press opens it again.
+    auto* open = headSaying ("Shuts this drawer");
+    REQUIRE (open != nullptr);
+    inspector.pressedOn (open);
+    CHECK_FALSE (level->isVisible());
+
+    inspector.pressedOn (open);
+    CHECK (level->isVisible());
+
+    //  A shut drawer opened by hand stays open, greyed or not.
+    auto* shut = headSaying ("Opens this drawer");
+    REQUIRE (shut != nullptr);
+    inspector.pressedOn (shut);
+    CHECK (initial->isVisible());
+
+    inspector.show (inspection);
+    CHECK (initial->isVisible());
 }
 
 TEST_CASE ("inspector: a press on a number puts it on the master dial, and its line wears the dial")
@@ -2643,8 +2826,13 @@ TEST_CASE ("new-cue bar: four buttons open their list under themselves, the rest
     const auto buttons = buttonsUnder (bar);
     REQUIRE (buttons.size() == model::cueKinds().size());
 
+    /*  THE KIND AND NOTHING BEFORE IT (2026-09-30): "Add" is said once, at the
+        head of the row, and not as a plus on every button. */
     for (auto* button : buttons)
-        CHECK_FALSE (button->getButtonText().startsWith ("+ start"));
+    {
+        CHECK_FALSE (button->getButtonText().startsWith ("+"));
+        CHECK_FALSE (button->getButtonText().startsWith ("start"));
+    }
 
     // A click, as the button delivers it (triggerClick posts, and this build runs no nested loop).
     for (auto* button : buttons)
@@ -2702,4 +2890,144 @@ TEST_CASE ("new-cue bar: four buttons open their list under themselves, the rest
     CHECK (ui::choiceOfMenuItem (1) == std::make_pair (0, false));
     CHECK (ui::choiceOfMenuItem (2) == std::make_pair (0, true));
     CHECK (ui::choiceOfMenuItem (7) == std::make_pair (3, false));
+
+    /*  SQUEEZED, the words give way and the pictures and list marks do not
+        (author, 2026-09-30: "Can the icon and arrow be visible at all
+        times"). Drawn at three widths through the window's own look; with
+        WFG_SNAPSHOT_DIR set, each is written out to be looked at. */
+    const model::Theme theme;
+    ui::Look look (theme);
+    bar.setLookAndFeel (&look);
+
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    for (const auto width : { 1400, 760, 420 })
+    {
+        bar.setBounds (0, 0, width, bar.preferredHeight());
+
+        const auto picture = bar.createComponentSnapshot (bar.getLocalBounds());
+        CHECK (picture.isValid());
+
+        //  Every word or none: wide, all of them; squeezed, not one.
+        auto wordless = 0;
+
+        for (auto* button : buttonsUnder (bar))
+            if (static_cast<bool> (button->getProperties()[ui::Look::iconOnly()]))
+                ++wordless;
+
+        if (width == 1400)
+            CHECK (wordless == 0);
+        else if (width == 420)
+            CHECK (wordless == static_cast<int> (model::cueKinds().size()));
+        else
+            CHECK ((wordless == 0 || wordless == static_cast<int> (model::cueKinds().size())));
+
+        if (dir.isNotEmpty())
+        {
+            const auto file = juce::File (dir).getChildFile ("new-cue-bar-" + juce::String (width) + ".png");
+            file.getParentDirectory().createDirectory();
+            file.deleteFile();
+
+            juce::FileOutputStream out (file);
+            juce::PNGImageFormat().writeImageToStream (picture, out);
+        }
+    }
+
+    bar.setLookAndFeel (nullptr);
+}
+
+TEST_CASE ("network monitor: opening listens, shutting stops, and the filters choose the lines")
+{
+    /*  The author, 2026-09-30: a network monitor "similar to the one in
+        WFS-DIY", reached from the Show menu. The engine keeps nothing while
+        nobody watches, so what is asserted first is that the window switches
+        the listening on and off; then that lines arrive and filter. */
+    std::vector<bool> heard;
+
+    ui::NetworkMonitorWindow::Actions actions;
+    actions.listen = [&heard] (bool on) { heard.push_back (on); };
+
+    ui::NetworkMonitorWindow window (model::Theme {}, actions);
+
+    window.open();
+    REQUIRE_FALSE (heard.empty());
+    CHECK (heard.back());
+    CHECK (window.listening());
+
+    const auto midi = [] (wfg::monitor::Direction direction, std::uint8_t status)
+    {
+        wfg::monitor::Capture capture;
+        capture.wallMicros = 1'000'000;
+        capture.direction = direction;
+        capture.medium = wfg::monitor::Medium::midi;
+        capture.road = wfg::monitor::Road::midi;
+        capture.size = 3;
+        capture.fullSize = 3;
+        capture.bytes[0] = status;
+        capture.bytes[1] = 60;
+        capture.bytes[2] = 100;
+        return capture;
+    };
+
+    window.add ({ midi (wfg::monitor::Direction::in, 0x90), midi (wfg::monitor::Direction::out, 0xB0),
+                  midi (wfg::monitor::Direction::in, 0x80) }, 0);
+
+    CHECK (window.lineCount() == 3u);
+    CHECK (window.shownCount() == 3u);
+    CHECK (window.shownRow (0).address == "note on");
+
+    model::TrafficFilter onlyOut;
+    onlyOut.in = false;
+    window.setFilter (onlyOut);
+    REQUIRE (window.shownCount() == 1u);
+    CHECK (window.shownRow (0).address == "control change");
+
+    /*  WITH WFG_SNAPSHOT_DIR SET, a picture of it with some OSC beside the
+        MIDI, every filter open, to be looked at. */
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isNotEmpty())
+    {
+        window.setFilter ({});
+
+        const auto osc = [] (wfg::monitor::Direction direction, wfg::monitor::Road road,
+                             std::string_view peer, const wfg::osc::Packet& packet)
+        {
+            std::string error;
+            const auto bytes = wfg::osc::encode (packet, error).value_or (std::vector<std::uint8_t> {});
+
+            wfg::monitor::Capture capture;
+            capture.wallMicros = 1'759'230'000'000'000;
+            capture.direction = direction;
+            capture.road = road;
+            capture.size = static_cast<std::uint16_t> (bytes.size());
+            capture.fullSize = static_cast<std::uint32_t> (bytes.size());
+            capture.peerLength = static_cast<std::uint8_t> (peer.size());
+            std::copy (peer.begin(), peer.end(), capture.peer);
+            std::copy (bytes.begin(), bytes.end(), capture.bytes);
+            return capture;
+        };
+
+        window.add ({ osc (wfg::monitor::Direction::out, wfg::monitor::Road::udp, "192.168.1.20:9000",
+                           wfg::osc::Packet::message ("/desk/fader/1", { wfg::osc::Value::float32 (0.75f) })),
+                      osc (wfg::monitor::Direction::in, wfg::monitor::Road::udp, "192.168.1.20:9000",
+                           wfg::osc::Packet::message ("/godot/cmd/go")),
+                      osc (wfg::monitor::Direction::out, wfg::monitor::Road::page, "127.0.0.1:51234",
+                           wfg::osc::Packet::message ("/godot/transport/standby", { wfg::osc::Value::string ("P4MED003") })) }, 3);
+
+        window.setSize (1180, 420);
+        const auto picture = window.createComponentSnapshot (window.getLocalBounds());
+        const auto file = juce::File (dir).getChildFile ("network-monitor.png");
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+        juce::FileOutputStream out (file);
+        juce::PNGImageFormat().writeImageToStream (picture, out);
+    }
+
+    //  Shut, it stops the engine recording and keeps its lines.
+    const auto keptBefore = window.lineCount();
+    window.closeButtonPressed();
+    CHECK_FALSE (heard.back());
+    CHECK_FALSE (window.listening());
+    CHECK (window.lineCount() == keptBefore);
 }

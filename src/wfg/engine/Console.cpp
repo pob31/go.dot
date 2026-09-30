@@ -65,6 +65,7 @@
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
 #include <wfg/engine/osc/SenderGate.h>
+#include <wfg/engine/monitor/TrafficTap.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/oscquery/EngineNamespace.h>
 #include <wfg/engine/oscquery/OscQueryServer.h>
@@ -2454,6 +2455,13 @@ namespace
             themePath = themeFile.getFullPathName().toStdString();
         }
 
+        //  `--show-settings`: the show settings window, opened with the window (Console.h).
+        if (args.containsOption ("--show-settings") && ! wantWindow)
+        {
+            std::cerr << "wfg serve: --show-settings is the window's; give --window too" << std::endl;
+            return 2;
+        }
+
         const juce::File target { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
 
         if (! target.isDirectory())
@@ -3120,7 +3128,14 @@ namespace
         wfg::osc::SenderGate senders;
         std::atomic<std::uint64_t> refusedDatagrams { 0 };
 
+        /*  THE NETWORK MONITOR'S TAP (monitor/TrafficTap.h), declared before
+            every socket and port that records into it for the reason given
+            above: each has a thread of its own, and the tap must outlive them
+            all. It records nothing until a window listens. */
+        wfg::monitor::TrafficTap traffic;
+
         wfg::osc::UdpEndpoint udp;
+        udp.setTap (&traffic);
 
         wfg::oscquery::EngineNamespace nameSpace { engine, parameters, touches, udp };
 
@@ -3139,6 +3154,7 @@ namespace
             does have, and the remedy is to read it. */
         wfg::midi::MidiInputs midiIn;
         midiIn.sendTo (engine);
+        midiIn.setTap (&traffic);
 
         for (const auto& name : midiInputNames)
             midiIn.open (name);
@@ -3162,6 +3178,7 @@ namespace
             run with `no-port` while the rest of the show runs, because a rig
             that has not been patched yet is a rehearsal. */
         wfg::midi::MidiSender midiOut;
+        midiOut.setTap (&traffic);
 
         /*  WHAT EACH PORT TURNED OUT TO BE PLUGGED INTO, published from here
             and stored nowhere (§4.10). Declared before the bindings below so
@@ -3481,6 +3498,7 @@ namespace
                                      : 5010;
 
         wfg::oscquery::OscQueryServer server;
+        server.setTap (&traffic);
 
         if (clientDirectory != juce::File())
             server.serveClientFrom (clientDirectory);
@@ -4756,12 +4774,20 @@ namespace
                         if (! bundleSeen) { bundleSeen = true; continue; }   // the bundle positional
                     }
 
+                    /*  NOR `--show-settings`, which was about THIS show's
+                        first moment: a show opened from here has its settings
+                        already, and a new one is given the flag below. */
                     if (text.startsWith ("--http-port") || text.startsWith ("--osc-port")
-                          || text.startsWith ("--log") || text == "--recover")
+                          || text.startsWith ("--log") || text == "--recover"
+                          || text == "--show-settings")
                         continue;
 
                     command.add (text);
                 }
+
+                //  A show that did not exist a moment ago opens on its settings.
+                if (createNew)
+                    command.add ("--show-settings");
 
                 command.add ("--http-port=" + juce::String (httpPort));
                 command.add ("--osc-port=" + juce::String (oscPort));
@@ -4795,6 +4821,8 @@ namespace
                     asked on the window's thread, which is the one an interface
                     is changed on, so the host cannot go from under it. */
                 clientHost.takes = &takePictures;
+                clientHost.openSettingsAtStart = args.containsOption ("--show-settings");
+                clientHost.traffic = &traffic;
 
                 client = makeClient (clientHost);
 
@@ -5048,7 +5076,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--hosted [--render=<wav>] [--input-wav=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
-                      " [--window [--theme=<file>]] [--engine-folder=<dir>]",
+                      " [--window [--theme=<file>] [--show-settings]] [--engine-folder=<dir>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [&makeClient] (const juce::ArgumentList& args)

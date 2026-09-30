@@ -76,6 +76,12 @@ namespace wfg::client::model
     /** Whether a subject of this kind re-points itself when the pick moves. */
     bool followsPick (Subject::Kind);
 
+    /*  THE WORD A SUBJECT GOES BY - "waveform", "sends", "eq" - which is what
+        an inspector's panel button carries and what `model::iconForPanel`
+        reads, and the way back from it. Empty and `none` for each other. */
+    std::string wordFor (Subject::Kind);
+    Subject::Kind subjectKindFor (const std::string& word);
+
     /*  Everything the foot needs for one pass, read while the window has its
         snapshot open. Only the fields the OPEN subject uses are filled: a shut
         panel costs one comparison, and a waveform does not pay for a reading

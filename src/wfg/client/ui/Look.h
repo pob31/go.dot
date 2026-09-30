@@ -68,6 +68,23 @@ namespace wfg::client::ui
             on the button; empty or absent draws the text alone. */
         static const juce::Identifier& caption();
 
+        /*  A BUTTON THAT WEARS AN ICON before its text (2026-09-30: the kinds'
+            pictures on the new-cue row, so a kind is learnt once and known in
+            the list, the inspector and the foot alike). `icon` is a
+            `model::Icon` as an int and `iconColour` its colour as 0xAARRGGBB;
+            a button without the first draws its text alone. */
+        static const juce::Identifier& icon();
+        static const juce::Identifier& iconColour();
+
+        /*  AN ICON BUTTON DRAWN WITHOUT ITS WORD - its picture, and its list
+            mark if it opens one - which a row of them sets on every button at
+            once when any word would not fit, so a squeezed row reads as
+            pictures rather than as half-words. */
+        static const juce::Identifier& iconOnly();
+
+        /** How wide an icon button must be to show its picture, its word and its mark whole. */
+        int iconButtonWidth (juce::TextButton& button);
+
         void drawButtonText (juce::Graphics& g, juce::TextButton& button,
                              bool shouldDrawButtonAsHighlighted,
                              bool shouldDrawButtonAsDown) override;

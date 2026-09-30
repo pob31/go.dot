@@ -123,6 +123,29 @@ namespace wfg::client::model
         std::string loops;        ///< a group's sequence: manual, automatic, timeline; empty otherwise
         std::string preset;      ///< the ancestor group this cue is a preset of, when it is one
 
+        /*  WHAT THE ROW'S MARKS ARE READ FROM (author, 2026-09-30: icons for
+            "type of cue or group and their important settings"), each as the
+            tree spells it and each empty where the kind has no such row, so
+            `model::marksFor` says nothing about a setting a cue cannot have.
+
+            `colour` is the cue's own decoration, `#rrggbb` - somebody's
+            decision, drawn as a small tab and never as the only telling.
+            `advance` and `play` are a group's: on GO or after the one before,
+            and how many members a round plays. `members` counts its `order`.
+            `rate` and `rateMode` are a media cue's speed, or the speed a fade
+            takes its target to when `rateOn`. `dca` is the NAME of the DCA
+            the cue answers to, for a mark that reads as the desk does. */
+        std::string colour;
+        std::string advance;
+        std::string play;
+        std::size_t members = 0;
+        std::string rate;
+        std::string rateMode;
+        std::string dca;
+        bool lane = false;           ///< a media cue with a level lane drawn over its file
+        bool rateOn = false;         ///< a fade that moves its target's speed
+        bool stopWhenDone = false;   ///< a fade that stops what it faded, once it arrives
+
         int depth = 0;           ///< 0 at the top of the list; a group's members are one deeper
         bool isGroup = false;
 

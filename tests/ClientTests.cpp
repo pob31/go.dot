@@ -50,6 +50,9 @@
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
+#include <wfg/client/model/Icons.h>
+#include <wfg/client/model/Traffic.h>
+#include <wfg/engine/osc/OscCodec.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
@@ -1243,6 +1246,345 @@ TEST_CASE ("client: a group folds like a section does, and a fold is a reason to
     show.toggle (group.id);
     CHECK (show.refresh (*snapshot, listId));
     CHECK (show.rows().size() == openRows);
+}
+
+//==============================================================================
+TEST_CASE ("client: every kind wears an icon and an accent the theme declares")
+{
+    /*  The author, 2026-09-30: "Could we add some glyphs/icons (not the
+        standard emoticons please) ... cue list (type of cue or group and their
+        important settings) ... We can also use small colour accents." */
+    const model::Theme theme;
+    const auto& names = model::Theme::colourNames();
+
+    for (const auto& kind : model::cueKinds())
+    {
+        INFO ("kind " << kind);
+        CHECK (model::iconFor (kind) != model::Icon::none);
+
+        const auto accent = model::accentFor (kind);
+        CHECK (accent == "kind-" + kind);
+        CHECK (std::find (names.begin(), names.end(), accent) != names.end());
+    }
+
+    //  A start cue acts on a cue, and wears the transport's accent; a kind nobody knows, the ink's.
+    CHECK (model::iconFor ("start") == model::Icon::start);
+    CHECK (model::accentFor ("start") == "kind-transport");
+    CHECK (model::iconFor ("somethingNew") == model::Icon::none);
+    CHECK (model::accentFor ("somethingNew") == "ink-faint");
+
+    //  A group is known by its mode, a transport cue by its verb.
+    CHECK (model::iconFor ("group", "timeline") == model::Icon::timeline);
+    CHECK (model::iconFor ("group", "sampler") == model::Icon::sampler);
+    CHECK (model::iconFor ("group", "sequence") == model::Icon::sequence);
+    CHECK (model::iconFor ("transport", {}, "hard") == model::Icon::stop);
+    CHECK (model::iconFor ("transport", {}, "fade") == model::Icon::stopFade);
+    CHECK (model::iconFor ("transport", {}, "record") == model::Icon::record);
+    CHECK (model::iconFor ("transport", {}, "advance") == model::Icon::advance);
+    CHECK (model::iconFor ("transport", {}, "afterIteration") == model::Icon::stopAfter);
+
+    //  Every panel at the foot, both ways between a subject and its word.
+    for (const auto kind : { model::Subject::Kind::waveform, model::Subject::Kind::sends,
+                             model::Subject::Kind::timeline, model::Subject::Kind::curve,
+                             model::Subject::Kind::eq, model::Subject::Kind::fx, model::Subject::Kind::take })
+    {
+        const auto word = model::wordFor (kind);
+        INFO ("panel " << word);
+        CHECK (model::subjectKindFor (word) == kind);
+
+        /*  A picture for each - but the EQ and the FX, which are their own
+            letters (author, 2026-09-30: "EQ toggle can show EQ rather than
+            the Gaussian bump. Same for FX"). */
+        const auto lettered = kind == model::Subject::Kind::eq || kind == model::Subject::Kind::fx;
+        CHECK ((model::iconForPanel (word) == model::Icon::none) == lettered);
+    }
+
+    CHECK (model::wordFor (model::Subject::Kind::none).empty());
+    CHECK (model::subjectKindFor ("nonsense") == model::Subject::Kind::none);
+
+    //  "What it does" wears the cue's own picture: what a cue does is what kind it is.
+    CHECK (model::iconForDrawer ("what it does", "media") == model::Icon::media);
+    CHECK (model::iconForDrawer ("what it does", "group", "sampler") == model::Icon::sampler);
+    CHECK (model::iconForDrawer ("sampler", "media") == model::Icon::sampler);
+
+    //  A cue's own colour is the theme's spelling, and nothing else.
+    CHECK (model::colourFromHex ("#ff8800") == std::optional<std::uint32_t> (0xFFFF8800u));
+    CHECK_FALSE (model::colourFromHex ("orange").has_value());
+    CHECK_FALSE (model::colourFromHex ("").has_value());
+}
+
+TEST_CASE ("client: the network monitor reads OSC and MIDI as lines a person can follow")
+{
+    /*  The author, 2026-09-30: a network monitor "similar to the one in
+        WFS-DIY", OSC and MIDI, in and out. The window decodes what the engine
+        kept, with the engine's own codec. */
+    const auto captured = [] (monitor::Direction direction, monitor::Medium medium, monitor::Road road,
+                              std::string_view peer, const std::vector<std::uint8_t>& bytes,
+                              std::size_t fullSize = 0)
+    {
+        monitor::Capture capture;
+        capture.wallMicros = 1'000'000;
+        capture.direction = direction;
+        capture.medium = medium;
+        capture.road = road;
+        capture.size = static_cast<std::uint16_t> (std::min (bytes.size(), monitor::maxBytes));
+        capture.fullSize = static_cast<std::uint32_t> (fullSize > 0 ? fullSize : bytes.size());
+        capture.peerLength = static_cast<std::uint8_t> (peer.size());
+        std::copy (peer.begin(), peer.end(), capture.peer);
+        std::copy (bytes.begin(), bytes.begin() + capture.size, capture.bytes);
+        return capture;
+    };
+
+    std::string error;
+    const auto message = osc::encode (osc::Packet::message ("/desk/fader/1",
+                                                            { osc::Value::float32 (0.75f),
+                                                              osc::Value::string ("Voix"),
+                                                              osc::Value::int32 (3) }), error);
+    REQUIRE (message.has_value());
+
+    auto rows = model::describe (captured (monitor::Direction::out, monitor::Medium::osc, monitor::Road::udp,
+                                           "192.168.1.20:9000", *message));
+    REQUIRE (rows.size() == 1u);
+    CHECK_FALSE (rows[0].incoming);
+    CHECK_FALSE (rows[0].midi);
+    CHECK (rows[0].road == "udp");
+    CHECK (rows[0].peer == "192.168.1.20:9000");
+    CHECK (rows[0].address == "/desk/fader/1");
+    CHECK (rows[0].types == "fsi");
+    CHECK (rows[0].arguments == "0.75  \"Voix\"  3");
+    CHECK (rows[0].problem.empty());
+
+    //  A bundle is a line per message in it.
+    const auto bundle = osc::encode (osc::Packet::bundle ({}, { osc::Packet::message ("/a", { osc::Value::int32 (1) }),
+                                                                osc::Packet::message ("/b") }), error);
+    REQUIRE (bundle.has_value());
+    rows = model::describe (captured (monitor::Direction::in, monitor::Medium::osc, monitor::Road::page,
+                                      "127.0.0.1:51000", *bundle));
+    REQUIRE (rows.size() == 2u);
+    CHECK (rows[0].address == "/a");
+    CHECK (rows[1].address == "/b");
+    CHECK (rows[1].road == "page");
+
+    //  What the engine would refuse is a line saying why, with its address when it can be read.
+    std::vector<std::uint8_t> broken { '/', 'x', 0, 0, ',', 'f', 0, 0 };    // promises a float, carries none
+    rows = model::describe (captured (monitor::Direction::in, monitor::Medium::osc, monitor::Road::udp,
+                                      "10.0.0.5:8000", broken));
+    REQUIRE (rows.size() == 1u);
+    CHECK (rows[0].address == "/x");
+    CHECK_FALSE (rows[0].problem.empty());
+
+    //  Cut by the monitor, not by the sender: said so, and not called the sender's fault.
+    rows = model::describe (captured (monitor::Direction::out, monitor::Medium::osc, monitor::Road::udp,
+                                      "10.0.0.5:8000", *message, 2000));
+    REQUIRE (rows.size() == 1u);
+    CHECK (rows[0].address == "/desk/fader/1");
+    CHECK (rows[0].problem.find ("only the first") != std::string::npos);
+
+    //  MIDI: the message's name, then its channel from one and its numbers.
+    rows = model::describe (captured (monitor::Direction::in, monitor::Medium::midi, monitor::Road::midi,
+                                      "D700", { 0x91, 60, 100 }));
+    REQUIRE (rows.size() == 1u);
+    CHECK (rows[0].midi);
+    CHECK (rows[0].address == "note on");
+    CHECK (rows[0].arguments == "ch 2  60  100");
+
+    model::TrafficRow midiRow;
+    model::describeMidi (std::vector<std::uint8_t> { 0x90, 60, 0 }.data(), 3, midiRow);
+    CHECK (midiRow.address == "note off");      // a note on at nought velocity is a note off
+    model::describeMidi (std::vector<std::uint8_t> { 0xB0, 7, 127 }.data(), 3, midiRow);
+    CHECK (midiRow.address == "control change");
+    CHECK (midiRow.arguments == "ch 1  7  127");
+    model::describeMidi (std::vector<std::uint8_t> { 0xC5, 12 }.data(), 2, midiRow);
+    CHECK (midiRow.address == "program change");
+    CHECK (midiRow.arguments == "ch 6  12");
+    model::describeMidi (std::vector<std::uint8_t> { 0xE0, 0, 64 }.data(), 3, midiRow);
+    CHECK (midiRow.arguments == "ch 1  0");     // the middle of the wheel
+    model::describeMidi (std::vector<std::uint8_t> { 0xF0, 0x00, 0x20, 0x32, 0xF7 }.data(), 5, midiRow);
+    CHECK (midiRow.address == "sysex");
+    CHECK (midiRow.arguments == "5 bytes  F0 00 20 32 F7");
+
+    //  The filters: each switch, and a text found in the address, the values or the peer.
+    model::TrafficRow in;
+    in.incoming = true; in.road = "udp"; in.address = "/desk/fader"; in.peer = "10.0.0.5:8000";
+    model::TrafficRow page = in;
+    page.road = "page";
+    model::TrafficRow note;
+    note.incoming = false; note.midi = true; note.road = "midi"; note.address = "note on"; note.peer = "Pads";
+
+    model::TrafficFilter all;
+    CHECK (all.matches (in));
+    CHECK (all.matches (page));
+    CHECK (all.matches (note));
+
+    auto onlyOut = all;
+    onlyOut.in = false;
+    CHECK_FALSE (onlyOut.matches (in));
+    CHECK (onlyOut.matches (note));
+
+    auto noPage = all;
+    noPage.page = false;
+    CHECK (noPage.matches (in));
+    CHECK_FALSE (noPage.matches (page));
+
+    auto noMidi = all;
+    noMidi.midi = false;
+    CHECK_FALSE (noMidi.matches (note));
+
+    auto text = all;
+    text.text = "FADER";
+    CHECK (text.matches (in));
+    CHECK_FALSE (text.matches (note));
+    text.text = "pads";
+    CHECK (text.matches (note));
+
+    //  CSV: a header, and a field with a comma or a quote quoted.
+    model::TrafficRow tricky = in;
+    tricky.arguments = "\"a, b\"";
+    const auto csv = model::csvOf ({ tricky }, [] (std::int64_t) { return std::string ("12:00:00.000"); });
+    CHECK (csv.rfind ("time,direction,medium,road,peer,address,types,arguments,problem\n", 0) == 0);
+    CHECK (csv.find ("12:00:00.000,in,osc,udp,10.0.0.5:8000,/desk/fader,,\"\"\"a, b\"\"\",\n") != std::string::npos);
+}
+
+TEST_CASE ("client: a row's important settings are marks, and the ordinary case says nothing")
+{
+    const auto iconsOf = [] (const model::Row& row)
+    {
+        std::vector<model::Icon> out;
+
+        for (const auto& mark : model::marksFor (row))
+            out.push_back (mark.icon);
+
+        return out;
+    };
+
+    model::Row plain;
+    plain.kind = "media";
+    plain.rate = "1";
+    CHECK (model::marksFor (plain).empty());
+
+    model::Row group;
+    group.kind = "group";
+    group.isGroup = true;
+    group.mode = "sequence";
+    group.loops = "1";
+    group.selection = "sequential";
+    group.advance = "manual";
+    group.play = "0";
+    group.members = 5;
+    CHECK (model::marksFor (group).empty());
+
+    //  For ever, then shuffled, then two of five, then one after another with no GO.
+    group.loops = "0";
+    group.selection = "shuffle";
+    group.play = "2";
+    group.advance = "auto";
+    CHECK (iconsOf (group) == std::vector<model::Icon> { model::Icon::forever, model::Icon::shuffle,
+                                                         model::Icon::subset, model::Icon::follow });
+    CHECK (model::marksFor (group)[2].text == "2 of 5");
+
+    //  A count beside the loop; all five a round is the ordinary case.
+    group.loops = "3";
+    group.play = "5";
+    CHECK (model::marksFor (group).front() == model::Mark { model::Icon::loop, "3", "plays 3 rounds" });
+
+    const auto allFive = iconsOf (group);
+    CHECK (std::find (allFive.begin(), allFive.end(), model::Icon::subset) == allFive.end());
+
+    //  A timeline's members start together: `advance` is a sequence's question.
+    group.mode = "timeline";
+    CHECK (iconsOf (group).back() != model::Icon::follow);
+
+    //  A speed, as the window writes one - and its mode says which picture.
+    model::Row media;
+    media.kind = "media";
+    media.rate = "0.5";
+    media.rateMode = "varispeed";
+    REQUIRE (model::marksFor (media).size() == 1u);
+    CHECK (model::marksFor (media)[0].icon == model::Icon::speed);
+    CHECK (model::marksFor (media)[0].text == "\xc3\x97" "0.5");
+
+    media.rateMode = "timestretch";
+    CHECK (model::marksFor (media)[0].icon == model::Icon::stretch);
+
+    media.rate = "0";
+    CHECK (model::marksFor (media)[0].text == "\xc3\x97" "0");
+
+    //  Disabled first, then how it plays, then what it answers to, then the preset's pin.
+    media.enabled = false;
+    media.lane = true;
+    media.dca = "Band";
+    media.preset = "GRP00001";
+    CHECK (iconsOf (media) == std::vector<model::Icon> { model::Icon::disabled, model::Icon::stretch,
+                                                         model::Icon::lane, model::Icon::dca,
+                                                         model::Icon::preset });
+    CHECK (model::marksFor (media)[3].text == "Band");
+
+    //  The header's reading of a preset says "preset" in words already, and wears no pin.
+    media.derived = true;
+    CHECK (iconsOf (media).back() != model::Icon::preset);
+
+    //  A fade: the speed it takes its target to, and that it stops what it faded.
+    model::Row fade;
+    fade.kind = "fade";
+    fade.rateOn = true;
+    fade.rate = "1";
+    fade.stopWhenDone = true;
+    CHECK (iconsOf (fade) == std::vector<model::Icon> { model::Icon::speed, model::Icon::stop });
+    CHECK (model::marksFor (fade)[0].text == "\xc3\x97" "1");
+
+    //  Every mark carries the words it stands for (§4.8).
+    for (const auto& row : { group, media, fade })
+        for (const auto& mark : model::marksFor (row))
+            CHECK_FALSE (mark.meaning.empty());
+}
+
+TEST_CASE ("client: a row reads what its marks are drawn from")
+{
+    Rig rig;
+
+    const auto media = rig.document.createCue ("7K2QM9X4", 0, "media", "Slow bed");
+    const auto fade = rig.document.createCue ("7K2QM9X4", 1, "fade", "Speed up");
+    REQUIRE (media.ok);
+    REQUIRE (fade.ok);
+
+    const auto set = [&rig] (const std::string& cueId, const char* row, const char* value)
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + cueId + "/" + row, value).ok);
+    };
+
+    set (media.id, "rate", "0.5");
+    set (media.id, "rateMode", "timestretch");
+    set (media.id, "colour", "#ff8800");
+    set (fade.id, "rateOn", "true");
+    set (fade.id, "rate", "2");
+    set (fade.id, "stopWhenDone", "true");
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, "7K2QM9X4"));
+
+    const auto rowOf = [&show] (const std::string& id)
+    {
+        const auto at = show.indexOf (id);
+        REQUIRE (at >= 0);
+        return show.rows()[static_cast<std::size_t> (at)];
+    };
+
+    const auto bed = rowOf (media.id);
+    CHECK (bed.colour == "#ff8800");
+    CHECK (bed.rateMode == "timestretch");
+    CHECK_FALSE (bed.lane);
+    REQUIRE_FALSE (model::marksFor (bed).empty());
+    CHECK (model::marksFor (bed)[0].icon == model::Icon::stretch);
+    CHECK (model::marksFor (bed)[0].text == "\xc3\x97" "0.5");
+
+    const auto faster = rowOf (fade.id);
+    CHECK (faster.rateOn);
+    CHECK (faster.stopWhenDone);
+    REQUIRE (model::marksFor (faster).size() == 2u);
+    CHECK (model::marksFor (faster)[0].text == "\xc3\x97" "2");
 }
 
 //==============================================================================
@@ -2840,6 +3182,15 @@ TEST_CASE ("client: the plus cuts where the playhead stands, and declines where 
     CHECK (first.in == doctest::Approx (0.0));
     CHECK (first.out == doctest::Approx (30.0));
 
+    /*  WHEREVER THE HEAD IS, the edges included (2026-09-30): the head starts
+        at nought, and the first range is not a cut. */
+    for (const auto seconds : { 0.0, 30.0 })
+    {
+        const auto atEdge = model::addAt ({}, seconds, 30.0);
+        CHECK (atEdge.kind == model::RangeAdd::Kind::create);
+        CHECK (atEdge.out == doctest::Approx (30.0));
+    }
+
     /*  IN A GAP, a range from the head to whatever comes next - §3.24 lets a
         cue's regions be neither contiguous nor in file order, so a gap is an
         ordinary place to be and not a fault. */
@@ -2896,7 +3247,7 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     /*  THREE SINCE PHASE 9a: the waveform, the EQ - the second of the four
         the author named, drawn at the foot as a response a hand can shape -
         and the signal chain, whose boxes open each plugin's own window. */
-    REQUIRE (onMedia.size() == 3);
+    REQUIRE (onMedia.size() >= 3);
     CHECK (onMedia[0].control == model::Control::opener);
     CHECK (onMedia[0].value == "waveform");
     CHECK (onMedia[0].address == "B3N8R5TW");
@@ -2910,6 +3261,14 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     CHECK (onMedia[2].address == "B3N8R5TW");
     CHECK (onMedia[2].label.find ("FX") != std::string::npos);
     CHECK_FALSE (onMedia[2].writable);
+
+    /*  AND THE SEND LEVELS, since the panels became a bar at the head of the
+        inspector (2026-09-30): every panel a cue has, in the order its sound
+        goes - where it is sent last. */
+    REQUIRE (onMedia.size() == 4);
+    CHECK (onMedia[3].control == model::Control::opener);
+    CHECK (onMedia[3].value == "sends");
+    CHECK (onMedia[3].label.find ("Sends") != std::string::npos);
 
     //  An opener is a door and not a decision: it writes nothing.
     CHECK_FALSE (onMedia[0].writable);
@@ -2940,37 +3299,26 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     for (const auto* kind : { "wait", "message", "osc" })
         CHECK (model::openersFor (kind, "B3N8R5TW").empty());
 
-    //  And they arrive at the end of what the cue DOES, after that kind's own rows.
+    /*  AND THEY ARRIVE AS THE PANEL BAR, not among the rows (author,
+        2026-09-30: "the toggles for the foot panels in the inspector should be
+        at the top to make opening the panel really quick"): the inspection
+        carries them apart, in the order `openersFor` gives, and no block holds
+        a door. */
     Rig rig ("phase4");
     const auto snapshot = rig.publish (0);
     const auto inspection = model::inspect (*snapshot, "P4MED001");
 
-    auto found = false;
+    REQUIRE (inspection.panels.size() == onMedia.size());
+
+    for (std::size_t at = 0; at < onMedia.size(); ++at)
+        CHECK (inspection.panels[at].value == onMedia[at].value);
 
     for (const auto& block : inspection.blocks)
-    {
-        if (block.fields.empty())
-            continue;
+        for (const auto& field : block.fields)
+            CHECK (field.control != model::Control::opener);
 
-        if (block.fields.back().control == model::Control::opener)
-        {
-            found = true;
-            CHECK (block.heading == "what it does");
-        }
-
-        /*  Nowhere else in the block, which is what "at the end" means: the
-            openers are a run at the back - two on a media cue since Phase 9a -
-            and no row sits among them or after them. */
-        auto tail = block.fields.size();
-
-        while (tail > 0 && block.fields[tail - 1].control == model::Control::opener)
-            --tail;
-
-        for (std::size_t at = 0; at < tail; ++at)
-            CHECK (block.fields[at].control != model::Control::opener);
-    }
-
-    CHECK (found);
+    //  Several cues at once have no bar: a panel is about one cue.
+    CHECK (model::inspectMany (*snapshot, { "P4MED001", "P4MED002" }).panels.empty());
 }
 
 TEST_CASE ("client: a zoomed bar reads finer frames of a shorter span, not the same ones wider")
@@ -5583,10 +5931,10 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
     CHECK (first[2] == "shortName");
 
     /*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS, in the order a
-        press happens, and straight after the last of those. */
-    const std::vector<std::string> wanted { "level", "startOffset", "dca", "initialLevel", "release",
-                                            "secondPress", "velocity", "velocityFloor", "pressure",
-                                            "releaseFade" };
+        press happens - in a drawer of their own since 2026-09-30 ("we can also
+        make more drawers for things"), straight after what the cue does. The
+        DCA stays behind with what the cue does: it trims any cue. */
+    const std::vector<std::string> wanted { "level", "startOffset", "dca" };
     const auto does = namesUnder (panel, "what it does");
 
     std::vector<std::string> seen;
@@ -5596,6 +5944,23 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
             seen.push_back (name);
 
     CHECK (seen == wanted);
+
+    const std::vector<std::string> pressed { "strip", "initialLevel", "release", "secondPress", "velocity",
+                                             "velocityFloor", "pressure", "releaseFade" };
+    CHECK (namesUnder (panel, "sampler") == pressed);
+
+    for (const auto& name : pressed)
+        CHECK (positionOf (does, name) == does.size());
+
+    //  The drawer comes straight after what the cue does, and before its place in the list.
+    std::vector<std::string> headings;
+
+    for (const auto& block : panel.blocks)
+        headings.push_back (block.heading);
+
+    const auto doesAt = positionOf (headings, "what it does");
+    REQUIRE (doesAt + 1 < headings.size());
+    CHECK (headings[doesAt + 1] == "sampler");
 
     /*  The speed and its mode straight after where the file starts, then the
         sampler's rows (namespace draft §22.7). */
@@ -6298,12 +6663,23 @@ TEST_CASE ("client: a mic cue is inspected by its input and its channel, and its
     CHECK (fieldNamed ("fadeIn") != nullptr);
     CHECK (fieldNamed ("level") != nullptr);
 
-    //  No file, and the EQ's rows are the panel's, behind its opener.
+    /*  No file, and the EQ's rows are the panel's, behind its opener - which
+        is in the panel bar since 2026-09-30, beside the FX, the sends and the
+        take, and no waveform: a live input has nothing recorded to draw. */
     CHECK (fieldNamed ("file") == nullptr);
     CHECK (fieldNamed ("eqB1Freq") == nullptr);
-    CHECK (fieldNamed ("eq") != nullptr);
-    CHECK (fieldNamed ("fx") != nullptr);
-    CHECK (fieldNamed ("waveform") == nullptr);
+
+    const auto panelNamed = [&panel] (const std::string& subject)
+    {
+        return std::any_of (panel.panels.begin(), panel.panels.end(),
+                            [&subject] (const model::Field& field) { return field.value == subject; });
+    };
+
+    CHECK (panelNamed ("eq"));
+    CHECK (panelNamed ("fx"));
+    CHECK (panelNamed ("sends"));
+    CHECK (panelNamed ("take"));
+    CHECK_FALSE (panelNamed ("waveform"));
 
     /*  ITS FX ARE ITS CHANNEL'S: one strip, the channel's test gain, the
         fixture's Fx switched in - and the set, which is empty, is not asked. */

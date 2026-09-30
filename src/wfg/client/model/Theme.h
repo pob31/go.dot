@@ -40,12 +40,17 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace wfg::client::model
 {
+    /*  "#rrggbb" or "#rrggbbaa" as 0xAARRGGBB, the one spelling a theme file
+        and a cue's own `colour` row both use; nothing for anything else. */
+    std::optional<std::uint32_t> colourFromHex (std::string_view text);
+
     struct Theme
     {
         /** Every font size is multiplied by this. The page's `--type`. */

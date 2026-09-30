@@ -44,6 +44,9 @@ fi
 
 log="$logs/go.dot-$(date +%Y%m%d-%H%M%S).log"
 
+# THE EMPTY SHOW OPENS ON ITS SHOW SETTINGS (--show-settings), as go.dot.sh's
+# does: the first thing anybody starting from nothing needs is the interface.
+#
 # --ui is resolved against the working directory, so run from Resources.
 cd "$resources"
-exec "$contents/MacOS/wfg" serve "$support/Untitled" --window --ui=console >"$log" 2>&1
+exec "$contents/MacOS/wfg" serve "$support/Untitled" --window --ui=console --show-settings >"$log" 2>&1

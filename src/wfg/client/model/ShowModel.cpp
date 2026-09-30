@@ -324,6 +324,36 @@ namespace wfg::client::model
         if (row.kind == "transport")
             row.verb = attribute (snapshot, cueId, "verb");
 
+        /*  WHAT THE MARKS BESIDE THE NAME ARE READ FROM, by address and only
+            for the kinds that carry each row: a handful of binary searches per
+            cue, paid at show-change rate like everything else in this walk. */
+        row.colour = attribute (snapshot, cueId, "colour");
+
+        if (const auto dcaId = attribute (snapshot, cueId, "dca"); ! dcaId.empty())
+        {
+            const auto dcaName = text (snapshot, "/godot/dca/" + dcaId + "/name");
+            row.dca = dcaName.empty() ? dcaId : dcaName;
+        }
+
+        if (row.kind == "media")
+        {
+            row.rate = attribute (snapshot, cueId, "rate");
+            row.rateMode = attribute (snapshot, cueId, "rateMode");
+
+            //  A list, so `text` answers nothing for it: asked by how many values it holds.
+            if (const auto* lane = snapshot.find ("/godot/cue/" + cueId + "/levelLane"))
+                row.lane = ! lane->values.empty();
+        }
+
+        if (row.kind == "fade")
+        {
+            row.rateOn = flag (snapshot, "/godot/cue/" + cueId + "/rateOn") == Flag::yes;
+            row.stopWhenDone = flag (snapshot, "/godot/cue/" + cueId + "/stopWhenDone") == Flag::yes;
+
+            if (row.rateOn)
+                row.rate = attribute (snapshot, cueId, "rate");
+        }
+
         if (row.isGroup)
         {
             row.mode = attribute (snapshot, cueId, "mode");
@@ -335,6 +365,9 @@ namespace wfg::client::model
                 being silently read as its opposite. */
             row.selection = attribute (snapshot, cueId, "selection");
             row.loops = attribute (snapshot, cueId, "loops");
+            row.advance = attribute (snapshot, cueId, "advance");
+            row.play = attribute (snapshot, cueId, "play");
+            row.members = words (attribute (snapshot, cueId, "order")).size();
         }
 
         /*  A GROUP FOLDS LIKE A SECTION DOES, and by its own identifier: it

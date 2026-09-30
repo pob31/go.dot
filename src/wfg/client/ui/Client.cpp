@@ -66,6 +66,7 @@
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/ui/Look.h>
+#include <wfg/client/ui/NetworkMonitorWindow.h>
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
 #include <wfg/client/ui/MainWindow.h>
@@ -103,7 +104,7 @@ namespace wfg::client
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
-            menuWaveform, menuSurfaces
+            menuWaveform, menuSurfaces, menuNetworkMonitor
         };
 
         class Window final : public wfg::Client,
@@ -307,22 +308,7 @@ namespace wfg::client
                     if (shell == nullptr || cueId.empty())
                         return;
 
-                    auto wanted = model::Subject::Kind::none;
-
-                    if (subject == "waveform")
-                        wanted = model::Subject::Kind::waveform;
-                    else if (subject == "sends")
-                        wanted = model::Subject::Kind::sends;
-                    else if (subject == "timeline")
-                        wanted = model::Subject::Kind::timeline;
-                    else if (subject == "curve")
-                        wanted = model::Subject::Kind::curve;
-                    else if (subject == "eq")
-                        wanted = model::Subject::Kind::eq;
-                    else if (subject == "fx")
-                        wanted = model::Subject::Kind::fx;
-                    else if (subject == "take")
-                        wanted = model::Subject::Kind::take;
+                    const auto wanted = model::subjectKindFor (subject);
 
                     if (wanted == model::Subject::Kind::none)
                         return;
@@ -660,7 +646,8 @@ namespace wfg::client
                         once it is open, and needs no key of its own to open. */
                     case menuRevert:
                     case menuShowSettings:
-                    case menuSurfaces: break;
+                    case menuSurfaces:
+                    case menuNetworkMonitor: break;
                     
                 }
 
@@ -710,6 +697,10 @@ namespace wfg::client
                     /*  OFFERED UNDER THE LOCK TOO: riding a fader and pressing a
                         pad are playing the show, not editing it. */
                     case menuSurfaces:  return true;
+
+                    /*  Whenever the engine has a tap to read: watching the wire
+                        changes nothing, under the lock or not. */
+                    case menuNetworkMonitor: return host.traffic != nullptr;
 
                     /*  Offered for a media cue, and for shutting the panel
                         whatever is picked - a panel that could be opened and
@@ -800,6 +791,11 @@ namespace wfg::client
                         desk the mouse can play (decision AB). Beside the
                         settings, where the surfaces it draws are declared. */
                     addMenuItem (menu, menuSurfaces, "Surfaces...");
+
+                    /*  WHAT CROSSED THE WIRE (author, 2026-09-30): OSC and MIDI,
+                        in and out, in a window of its own. */
+                    menu.addSeparator();
+                    addMenuItem (menu, menuNetworkMonitor, "Network monitor...");
                 }
 
                 return menu;
@@ -826,14 +822,10 @@ namespace wfg::client
                     case menuUndoHistory: toggleUndoHistory(); break;
                     case menuWaveform:  toggleWaveform(); break;
                     case menuShowSettings:
-                        if (latest)
-                        {
-                            if (! audioSettings)
-                                audioSettings = std::make_unique<ui::ShowSettingsWindow> (theme, *latest,
-                                    [this] (Event event) { send (std::move (event)); }, [this] { panic(); });
-                            audioSettings->setVisible (true);
-                            audioSettings->toFront (true);
-                        }
+                        openShowSettings();
+                        break;
+                    case menuNetworkMonitor:
+                        openNetworkMonitor();
                         break;
                     case menuSurfaces:
                         /*  MADE ONCE AND KEPT, as the settings window is: closing it
@@ -1098,6 +1090,46 @@ namespace wfg::client
                 send (gesture::dial (address));
             }
 
+            /*  THE SHOW SETTINGS WINDOW, made once and kept: closing it hides
+                it, and the next open is the same window. From the menu, and
+                once at start when the console was told to. */
+            void openShowSettings()
+            {
+                if (! latest)
+                    return;
+
+                if (! audioSettings)
+                    audioSettings = std::make_unique<ui::ShowSettingsWindow> (theme, *latest,
+                        [this] (Event event) { send (std::move (event)); }, [this] { panic(); });
+
+                audioSettings->setVisible (true);
+                audioSettings->toFront (true);
+            }
+
+            bool openedSettingsAtStart = false;
+
+            /*  THE NETWORK MONITOR, made once and kept like the settings: shut,
+                it keeps its lines and the engine records nothing; opened, it
+                switches the listening back on. */
+            void openNetworkMonitor()
+            {
+                if (host.traffic == nullptr)
+                    return;
+
+                if (! networkMonitor)
+                {
+                    ui::NetworkMonitorWindow::Actions monitorActions;
+                    monitorActions.listen = [tap = host.traffic] (bool on) { tap->setListening (on); };
+                    monitorActions.panic = [this] { panic(); };
+
+                    networkMonitor = std::make_unique<ui::NetworkMonitorWindow> (theme, std::move (monitorActions));
+                }
+
+                networkMonitor->open();
+            }
+
+            std::vector<wfg::monitor::Capture> trafficArrived;
+
             /*  RULE 2's ONE CALL SITE. A pointer copy, never null, and the
                 snapshot is only ever swapped whole. */
             void pass()
@@ -1112,6 +1144,26 @@ namespace wfg::client
                     replaces it. */
                 latest = snapshot;
                 if (audioSettings) audioSettings->refresh (*snapshot);
+
+                /*  THE FOURTH DOOR'S ONE CALL SITE (Console.h, `traffic`): what
+                    crossed the wire since the last pass, while the monitor is
+                    open and recording - and nothing read otherwise. */
+                if (networkMonitor != nullptr && networkMonitor->listening() && host.traffic != nullptr)
+                {
+                    trafficArrived.clear();
+                    host.traffic->drain (trafficArrived);
+                    networkMonitor->add (trafficArrived, host.traffic->dropped());
+                }
+
+                /*  A SHOW THAT HAS JUST BEEN MADE, or the empty one a launcher
+                    opens, starts on its settings (`--show-settings`,
+                    Console.h) - once, on the first pass with a reading to
+                    build them from. */
+                if (host.openSettingsAtStart && ! openedSettingsAtStart)
+                {
+                    openedSettingsAtStart = true;
+                    openShowSettings();
+                }
 
                 /*  THE VIRTUAL SURFACE, from the same pointer: rule 2's one call
                     site feeds every window. It reads nothing while hidden. */
@@ -1420,6 +1472,11 @@ namespace wfg::client
 
                 if (inspecting && ! loadingToTime && ! browsingUndo)
                     shell->inspector.show (model::inspectMany (*snapshot, selection.ids()));
+
+                /*  WHICH PANEL IS OPEN AT THE FOOT, and on which cue, so the
+                    inspector's panel buttons are lit while theirs is. */
+                shell->inspector.showFoot (model::wordFor (shell->footSubject().kind),
+                                           shell->footSubject().objectId);
 
                 /*  THE MASTER DIAL'S NUMBER, marked wherever it is drawn. */
                 const auto dialed = model::text (*snapshot, "/godot/surface/dial");
@@ -2352,6 +2409,7 @@ namespace wfg::client
             std::unique_ptr<ui::MainWindow> window;
             std::unique_ptr<ui::ShowSettingsWindow> audioSettings;
             std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
+            std::unique_ptr<ui::NetworkMonitorWindow> networkMonitor;   // Show > Network monitor...
             ui::Shell* shell = nullptr;                     // owned by the window
 
             /*  The plugins' own windows, each a helper process. Declared after

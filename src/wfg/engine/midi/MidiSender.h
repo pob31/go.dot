@@ -54,6 +54,8 @@
 #include <thread>
 #include <vector>
 
+namespace wfg::monitor { class TrafficTap; }
+
 namespace wfg::midi
 {
     class MidiSender final : public MidiSink
@@ -108,8 +110,17 @@ namespace wfg::midi
         /** Whether a port name has a device behind it. */
         bool isBound (const std::string& portName) const;
 
+        /*  THE NETWORK MONITOR'S TAP: every message as it actually leaves, on
+            the sending thread, named by the device it went to. Null records
+            nothing. */
+        void setTap (monitor::TrafficTap* tapToUse) noexcept { tap.store (tapToUse, std::memory_order_release); }
+
     private:
         void run();
+
+        /** What `run` sends, shown to the monitor on its way. */
+        void deliver (juce::MidiOutput& device, const Bytes& bytes);
+        std::atomic<monitor::TrafficTap*> tap { nullptr };
 
         /*  SHARED, SO A PORT CAN BE REBOUND WHILE THE SHOW RUNS (2026-09-25):
             the sending thread takes its own reference under `boundMutex` and

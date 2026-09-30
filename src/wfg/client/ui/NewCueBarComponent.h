@@ -77,6 +77,9 @@ namespace wfg::client::ui
         int rowHeight() const noexcept;
         juce::String tooltipFor (const std::string& kind) const;
 
+        /** Where the row's one word, "Add", stands: before the first button. */
+        juce::Rectangle<int> labelArea() const;
+
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NewCueBarComponent)
     };
 }

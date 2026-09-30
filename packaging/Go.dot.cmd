@@ -20,7 +20,9 @@ rem with the engine's log in it, which is what a tester's report wants.
 setlocal
 set "HERE=%~dp0"
 set "SHOW=%HERE%Untitled"
+set "FIRST=--show-settings"
 if not "%~1"=="" set "SHOW=%~f1"
+if not "%~1"=="" set "FIRST="
 
 rem No --device, deliberately: a bare --device means "the system default" and
 rem overrides the interface a show has saved, and the window's New and Open pass
@@ -29,6 +31,10 @@ rem empty one beside this file says "the system default".
 rem
 rem --ui is resolved against the working directory, so run from beside the binary.
 cd /d "%HERE%"
-"%HERE%wfg.exe" serve "%SHOW%" --window --ui=console
+rem
+rem The empty show opens on its show settings (--show-settings): the first thing
+rem anybody starting from nothing needs is the interface to play through. A show
+rem dropped on this file opens as it was saved.
+"%HERE%wfg.exe" serve "%SHOW%" --window --ui=console %FIRST%
 if errorlevel 1 pause
 endlocal

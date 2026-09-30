@@ -1,6 +1,7 @@
 /* Go.dot — Copyright (C) 2026 Pierre-Olivier Boulant
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <wfg/client/ui/FootPanelComponent.h>
+#include <wfg/client/ui/Icons.h>
 
 #include <wfg/client/ui/Look.h>
 
@@ -319,13 +320,22 @@ namespace wfg::client::ui
                 break;
         }
 
-        if (! reading.cueName.empty())
-            wanted += "  " + juce::String::fromUTF8 ("\xe2\x80\x94") + "  "
-                        + juce::String (reading.cueName);
+        /*  THE CUE BY NAME, AFTER A PICTURE OF ITS KIND (2026-09-30), rather
+            than joined to the panel's word by a dash: two pictures and two
+            words, each saying one thing. */
+        const auto wantedCue = juce::String (reading.cueName);
+        const auto wantedIcon = model::iconForPanel (model::wordFor (showing.kind));
+        const auto wantedCueIcon = reading.cueName.empty() ? model::Icon::none : model::iconFor (reading.cueKind);
+        const auto wantedAccent = model::accentFor (reading.cueKind);
 
-        if (wanted != title)
+        if (wanted != title || wantedCue != titleCue || wantedIcon != titleIcon
+              || wantedCueIcon != cueIcon || wantedAccent != cueAccent)
         {
             title = wanted;
+            titleCue = wantedCue;
+            titleIcon = wantedIcon;
+            cueIcon = wantedCueIcon;
+            cueAccent = wantedAccent;
             repaint();
         }
 
@@ -386,9 +396,31 @@ namespace wfg::client::ui
 
         head.removeFromRight (row);   // the close button's place
 
-        g.setColour (Look::colour (theme, "ink-dim"));
-        g.setFont (Look::font (theme, 13.0f));
+        /*  WHAT IT IS, THEN WHOSE: the panel's picture and word, and the cue's
+            kind as a picture in its accent before the cue's name. */
+        const auto iconSide = static_cast<float> (row) * 0.58f;
+        const auto font = Look::font (theme, 13.0f);
+        const auto ink = Look::colour (theme, "ink-dim");
+
+        icons::draw (g, titleIcon, head.removeFromLeft (row).toFloat().withSizeKeepingCentre (iconSide, iconSide),
+                     ink);
+        head.removeFromLeft (row / 8);
+
+        g.setColour (ink);
+        g.setFont (font);
         g.drawText (title, head, juce::Justification::centredLeft, true);
+
+        if (titleCue.isNotEmpty())
+        {
+            auto after = head.withTrimmedLeft (juce::GlyphArrangement::getStringWidthInt (font, title) + row / 2);
+
+            icons::draw (g, cueIcon, after.removeFromLeft (row).toFloat().withSizeKeepingCentre (iconSide, iconSide),
+                         Look::colour (theme, cueAccent.c_str()));
+            after.removeFromLeft (row / 8);
+
+            g.setColour (Look::colour (theme, "ink"));
+            g.drawText (titleCue, after, juce::Justification::centredLeft, true);
+        }
 
         if (note.isNotEmpty())
         {

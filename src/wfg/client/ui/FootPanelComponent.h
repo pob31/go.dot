@@ -27,6 +27,7 @@
 */
 
 #include <wfg/client/model/Foot.h>
+#include <wfg/client/model/Icons.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CurveEditorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
@@ -160,6 +161,13 @@ namespace wfg::client::ui
 
         model::Subject showing;
         juce::String title, note;
+
+        /*  THE TITLE'S PICTURES (2026-09-30): what the panel is, and what kind
+            of cue it is about in that kind's accent - the same two pictures
+            the inspector's panel bar and the cue's row wear. */
+        juce::String titleCue;
+        model::Icon titleIcon = model::Icon::none, cueIcon = model::Icon::none;
+        std::string cueAccent = "ink-faint";
 
         std::unique_ptr<WaveformEditorComponent> waveform;
         std::unique_ptr<SendMixerComponent> sends;

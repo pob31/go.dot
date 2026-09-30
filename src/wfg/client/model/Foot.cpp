@@ -26,6 +26,34 @@
 
 namespace wfg::client::model
 {
+    std::string wordFor (Subject::Kind kind)
+    {
+        switch (kind)
+        {
+            case Subject::Kind::waveform:  return "waveform";
+            case Subject::Kind::sends:     return "sends";
+            case Subject::Kind::timeline:  return "timeline";
+            case Subject::Kind::curve:     return "curve";
+            case Subject::Kind::eq:        return "eq";
+            case Subject::Kind::fx:        return "fx";
+            case Subject::Kind::take:      return "take";
+            case Subject::Kind::none:      break;
+        }
+
+        return {};
+    }
+
+    Subject::Kind subjectKindFor (const std::string& word)
+    {
+        for (const auto kind : { Subject::Kind::waveform, Subject::Kind::sends, Subject::Kind::timeline,
+                                 Subject::Kind::curve, Subject::Kind::eq, Subject::Kind::fx,
+                                 Subject::Kind::take })
+            if (wordFor (kind) == word)
+                return kind;
+
+        return Subject::Kind::none;
+    }
+
     bool followsPick (Subject::Kind kind)
     {
         switch (kind)

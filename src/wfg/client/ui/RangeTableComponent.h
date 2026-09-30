@@ -40,6 +40,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -101,6 +102,27 @@ namespace wfg::client::ui
 
         /** What the rows are, as one string: a different one is a different table. */
         std::string shapeOf() const;
+
+        /*  THE WHOLE FILE, READY (author, 2026-09-30: "Could we have the
+            complete range already there by default. It makes looping a media
+            much easier this way"). A cue with no ranges shows one standing
+            row - nought to the end of the file, once through - that the show
+            does not hold: it is what the cue plays, drawn as the range it
+            would be. Changing anything on it is the decision, and makes it:
+            `range.create` over the whole file, then the change, written to the
+            range once the tree has it.
+
+            NOT MADE BY ITSELF, which is the other way this could have gone and
+            the one §4.10 rules out: a range written on import would carry the
+            file's length as its out-point, a fact about today's file that
+            would quietly cut short a longer one put in its place. */
+        struct Pending
+        {
+            std::string cueId, attribute, value;
+        };
+
+        std::optional<Pending> pending;
+        bool standing() const noexcept;
 
         model::Theme theme;
         Actions actions;

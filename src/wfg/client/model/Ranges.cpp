@@ -272,6 +272,19 @@ namespace wfg::client::model
             return out;
         }
 
+        /*  A CUE THAT HAS SAID NOTHING YET: the whole file becomes its one
+            range, WHEREVER THE PLAYHEAD IS - asked before the edges below,
+            which are about where a cut can go and this is not a cut. The head
+            starts at nought, so asking this after them left the first range
+            unmakeable from the table until somebody moved it (2026-09-30). */
+        if (rows.empty())
+        {
+            out.kind = RangeAdd::Kind::create;
+            out.in = 0.0;
+            out.out = fileLength;
+            return out;
+        }
+
         /*  NOTHING TO DIVIDE AT EITHER END OF THE MATERIAL. A cut at nought
             would put a range of no length before it and a cut at the end one
             after it, and neither is a thing anybody meant to make. */
@@ -279,15 +292,6 @@ namespace wfg::client::model
               || seconds < 0.0 || seconds > fileLength)
         {
             out.why = "the playhead is at the edge of the file - move it into the sound";
-            return out;
-        }
-
-        //  A cue that has said nothing yet: the whole file becomes its one range.
-        if (rows.empty())
-        {
-            out.kind = RangeAdd::Kind::create;
-            out.in = 0.0;
-            out.out = fileLength;
             return out;
         }
 

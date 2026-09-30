@@ -16,9 +16,11 @@
 
 #include <wfg/client/ui/CueListComponent.h>
 
+#include <wfg/client/model/Icons.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/NewCueMenus.h>
 
+#include <wfg/client/ui/Icons.h>
 #include <wfg/client/ui/Look.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -59,52 +61,6 @@ namespace wfg::client::ui
         bool namesItsFile (const juce::StringArray& files, const model::Row& entry)
         {
             return files.size() == 1 && entry.rowKind == model::RowKind::cue && entry.kind == "media";
-        }
-
-        /*  HOW A GROUP BEHAVES, AS SHAPES. Two questions and two marks,
-            drawn only when the answer is not the default - a group that plays
-            its members once, in order, is the ordinary case and says nothing.
-
-                ↻   it loops, and the number of rounds beside it
-                ∞   it loops for ever, which is what nought rounds means
-                ⇄   its members are shuffled rather than played in order
-
-            Shapes and not colours (§4.8), and every one of them is a word in
-            the inspector as well. */
-        juce::String behaviourOf (const model::Row& row)
-        {
-            juce::String marks;
-
-            if (row.loops == "0")
-                marks << juce::String (juce::CharPointer_UTF8 ("\xe2\x86\xbb\xe2\x80\x89\xe2\x88\x9e"));
-            else if (! row.loops.empty() && row.loops != "1")
-                marks << juce::String (juce::CharPointer_UTF8 ("\xe2\x86\xbb\xe2\x80\x89"))
-                      << juce::String (row.loops);
-
-            if (row.selection == "shuffle")
-                marks << (marks.isEmpty() ? "" : "  ")
-                      << juce::String (juce::CharPointer_UTF8 ("\xe2\x87\x84"));
-
-            /*  ∥  a TIMELINE: its members start together, each after its own
-                pre-wait, so their order on screen is not their order in time.
-                Added when the author reordered one and read the result as a
-                fault (2026-09-18); the word is in the inspector's `mode`. */
-            if (row.mode == "timeline")
-                marks << (marks.isEmpty() ? "" : "  ")
-                      << juce::String (juce::CharPointer_UTF8 ("\xe2\x88\xa5"));
-
-            /*  sampler  a SAMPLER group (PRD §3.27): GO arms its members
-                onto strips and a hand plays them, in any order, any number of
-                times, so the order on screen is not an order at all. A WORD
-                where the timeline has a shape, because there is no shape that
-                already means "played from a surface" - and colour is never the
-                one carrier (§4.8). The mode's own word, and no longer "pads"
-                (2026-09-25): the author read that as a setting a fader could
-                not have. */
-            if (row.mode == "sampler")
-                marks << (marks.isEmpty() ? "" : "  ") << "sampler";
-
-            return marks;
         }
 
         juce::String sectionWord (model::Section section)
@@ -259,6 +215,13 @@ namespace wfg::client::ui
         cells.number = area.removeFromLeft (numberChars * unit);
         area.removeFromLeft (entry.depth * indent);
         area.removeFromLeft (indent);
+
+        //  A group's mode picture, in the cell after its twist, and the air after either picture.
+        if (entry.isGroup)
+            area.removeFromLeft (indent);
+
+        area.removeFromLeft (pad);
+
         cells.name = area;
         return cells;
     }
@@ -861,11 +824,49 @@ namespace wfg::client::ui
             it's pointing down"). The cell is exactly one indent wide and its
             centre IS `railAt (depth + 1)`, so centring the glyph is the whole
             of the alignment - no second arithmetic to keep in step. */
-        g.drawText (entry.isGroup
-                      ? juce::String (juce::CharPointer_UTF8 (entry.shut ? "\xe2\x96\xb8"
-                                                                        : "\xe2\x96\xbe"))
-                      : juce::String(),
-                    markCell, juce::Justification::centred, false);
+        if (entry.isGroup)
+            g.drawText (juce::String (juce::CharPointer_UTF8 (entry.shut ? "\xe2\x96\xb8" : "\xe2\x96\xbe")),
+                        markCell, juce::Justification::centred, false);
+
+        /*  WHAT THE ROW IS, AS A PICTURE BEFORE ITS NAME (author, 2026-09-30:
+            icons for the "type of cue or group ... to make things more
+            recognisable at a glance"). A cue's stands where a group's twist
+            does - the one cell a cue left empty - and a group's mode stands
+            in the cell after its twist, which is where its members' own
+            pictures stand one level in: down any container the pictures form
+            one column and the names another.
+
+            IN ITS KIND'S ACCENT, which is only ever this small: the washes and
+            bars are the state's. A disabled cue's and a preset line's are
+            dimmed with the rest of the row. The kind column still says the
+            same thing in a word (§4.8). */
+        {
+            const auto iconCell = entry.isGroup ? area.removeFromLeft (indent) : markCell;
+            const auto side = juce::jmin (static_cast<float> (indent) * 0.82f, 13.0f * static_cast<float> (theme.type));
+            auto tint = Look::colour (theme, model::accentFor (entry.kind).c_str());
+
+            if (! entry.enabled || entry.derived)
+                tint = tint.withMultipliedAlpha (0.45f);
+
+            icons::draw (g, model::iconFor (entry.kind, entry.mode, entry.verb),
+                         iconCell.toFloat().withSizeKeepingCentre (side, side), tint);
+
+            //  And a little air between the picture and the name.
+            area.removeFromLeft (pad);
+        }
+
+        /*  THE CUE'S OWN COLOUR, somebody's decision (`colour`, "a #RRGGBB
+            decoration"), as a tab at the left of the gutter - clear of the
+            standby's bar at the very edge and of its pointer in the middle.
+            A decoration and never a carrier: nothing is only said by it. */
+        if (const auto own = model::colourFromHex (entry.colour); own.has_value())
+        {
+            const auto tabHeight = juce::roundToInt (static_cast<float> (height) * 0.56f);
+
+            g.setColour (juce::Colour (static_cast<juce::uint32> (*own)));
+            g.fillRoundedRectangle (juce::Rectangle<int> (gutter.getX() + 1, (height - tabHeight) / 2, 4, tabHeight)
+                                        .toFloat(), 2.0f);
+        }
 
         /*  A GROUP'S NAME IS THE ONE AN EYE RUNS DOWN LOOKING FOR, so it is
             larger and brighter than its members' and carries its behaviour
@@ -888,22 +889,36 @@ namespace wfg::client::ui
         const auto word = entry.derived ? juce::String ("preset") : sectionWord (entry.section);
         const auto name = entry.name.empty() ? juce::String ("(unnamed)") : juce::String (entry.name);
 
-        g.drawText (word.isEmpty() ? name : name + "   " + word,
-                    area, juce::Justification::centredLeft, true);
+        const auto said = word.isEmpty() ? name : name + "   " + word;
 
-        if (entry.isGroup)
+        g.drawText (said, area, juce::Justification::centredLeft, true);
+
+        /*  AND WHAT IS SET ON IT, as marks after whatever the row said -
+            its name and its section's word both, so a group in a header does
+            not draw its loop over "header". Every cue now, not only groups
+            (author, 2026-09-30: "and their important settings"): a speed, a
+            level lane, a DCA, a fade that stops what it faded. Drawn in the
+            faint ink, one after another, and cut at the kind column rather
+            than written over it. */
+        const auto marks = model::marksFor (entry);
+
+        if (! marks.empty())
         {
-            const auto marks = behaviourOf (entry);
+            auto room = area.withTrimmedLeft (juce::jmin (area.getWidth(),
+                                                          juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(),
+                                                                                                      said) + unit));
+            const auto markHeight = juce::roundToInt (12.0f * static_cast<float> (theme.type));
+            const auto markFont = Look::font (theme, 11.5f);
 
-            if (! marks.isEmpty())
+            room = room.withSizeKeepingCentre (room.getWidth(), juce::jmin (room.getHeight(), markHeight));
+
+            for (const auto& mark : marks)
             {
-                const auto used = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(),
-                                                                            name) + unit;
+                if (room.getWidth() < markHeight)
+                    break;
 
-                g.setColour (faint);
-                g.setFont (Look::font (theme, 12.0f));
-                g.drawText (marks, area.withTrimmedLeft (juce::jmin (used, area.getWidth())),
-                            juce::Justification::centredLeft, false);
+                const auto used = icons::drawMark (g, mark, room, faint, markFont);
+                room.removeFromLeft (juce::jmin (room.getWidth(), used + pad + pad / 2));
             }
         }
 

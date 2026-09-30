@@ -44,7 +44,7 @@ namespace wfg::client::ui
     TransportComponent::TransportComponent (const model::Theme& themeToUse, Actions actionsToUse)
         : actions (std::move (actionsToUse)), theme (themeToUse)
     {
-        for (auto* label : { &showLabel, &tickLabel, &clockLabel, &rateLabel,
+        for (auto* label : { &showLabel, &clockLabel, &rateLabel,
                              &listLabel, &standbyLabel, &notesLabel, &statusLabel, &errorLabel,
                              &noticeLabel, &dialLabel })
         {
@@ -53,7 +53,7 @@ namespace wfg::client::ui
             addAndMakeVisible (label);
         }
 
-        for (auto* label : { &tickLabel, &clockLabel, &rateLabel })
+        for (auto* label : { &clockLabel, &rateLabel })
             label->setJustificationType (juce::Justification::centredRight);
 
         /*  NO BUTTON TAKES THE KEYBOARD, so Space stays this component's. A
@@ -101,7 +101,7 @@ namespace wfg::client::ui
         showLabel.setFont (Look::font (theme, 16.0f));
         showLabel.setColour (juce::Label::textColourId, ink);
 
-        for (auto* label : { &tickLabel, &clockLabel, &rateLabel })
+        for (auto* label : { &clockLabel, &rateLabel })
         {
             label->setFont (Look::font (theme, 13.0f));
             label->setColour (juce::Label::textColourId, dim);
@@ -161,7 +161,6 @@ namespace wfg::client::ui
         showLabel.setText (text (reading.show)
                              + (reading.dirty == model::Flag::yes ? "   ● unsaved" : ""),
                            juce::dontSendNotification);
-        tickLabel.setText ("tick " + text (reading.tick), juce::dontSendNotification);
         clockLabel.setText (text (reading.clock), juce::dontSendNotification);
         rateLabel.setText (text (reading.rate), juce::dontSendNotification);
         listLabel.setText (reading.listId.empty() ? juce::String ("no list")
@@ -281,13 +280,10 @@ namespace wfg::client::ui
             than measured afterwards, so the two cannot drift without this
             number visibly changing. */
         const auto rows = row                       // padding, top and bottom
-                        + row                       // show, tick, clock, rate
+                        + row                       // show, lock, error or notice, dial, clock, rate
                         + row / 2
-                        + (bannerShowing ? row * 3 + row / 2 : 0)
-                        + row / 2
-                        + row * 2                   // the standby, and GO
-                        + row / 2
-                        + row;                      // the foot: the lock word, and the error or the notice
+                        + (bannerShowing ? row * 4 : 0)
+                        + row * 2;                  // the standby, and GO
 
         return rows;
     }
@@ -341,11 +337,36 @@ namespace wfg::client::ui
 
         auto area = getLocalBounds().reduced (pad);
 
+        /*  ONE LINE ACROSS THE TOP CARRIES EVERYTHING THAT IS SAID RATHER
+            THAN PRESSED (author, 2026-09-30: "Is the gap beneath the Go
+            button ... still needed? We lose a lot of vertical height"). The
+            show and whether it is locked on the left, which clock and rate on
+            the right, and between them what used to have a row of its own
+            under GO and was empty most of the time: the last refusal or the
+            notice in front of it, and what the master dial turns. The error
+            takes what is left and is cut rather than wrapped; its whole
+            record is its tooltip. */
         auto top = area.removeFromTop (row);
         rateLabel.setBounds (top.removeFromRight (row * 5));
         clockLabel.setBounds (top.removeFromRight (row * 3));
-        tickLabel.setBounds (top.removeFromRight (row * 4));
-        showLabel.setBounds (top);
+
+        const auto showWidth = juce::GlyphArrangement::getStringWidthInt (showLabel.getFont(), showLabel.getText())
+                                 + pad;
+        showLabel.setBounds (top.removeFromLeft (juce::jmin (showWidth, juce::jmax (row * 6, top.getWidth() / 3))));
+
+        if (statusLabel.getText().isNotEmpty())
+            statusLabel.setBounds (top.removeFromLeft (row * 4));
+        else
+            statusLabel.setBounds ({});
+
+        if (dialLabel.getText().isNotEmpty())
+            dialLabel.setBounds (top.removeFromRight (juce::jmin (row * 14, top.getWidth() / 2)));
+        else
+            dialLabel.setBounds ({});
+
+        top.removeFromLeft (pad);
+        errorLabel.setBounds (top);
+        noticeLabel.setBounds (top);
 
         /*  The row of show-wide buttons that stood here went to the menu
             (2026-09-18); the half-row of air it left stays, so the banner and
@@ -354,14 +375,12 @@ namespace wfg::client::ui
 
         if (bannerShowing)
         {
-            auto banner = area.removeFromTop (row * 3 + row / 2).withTrimmedTop (row / 2);
+            auto banner = area.removeFromTop (row * 4).withTrimmedTop (row / 2).withTrimmedBottom (row / 2);
             auto choice = banner.removeFromRight (row * 7).reduced (pad, pad);
             recoverButton.setBounds (choice.removeFromTop (row).reduced (1));
             choice.removeFromTop (pad / 2);
             discardButton.setBounds (choice.removeFromTop (row).reduced (1));
         }
-
-        area.removeFromTop (row / 2);
 
         /*  GO ON THE LEFT AND THE CUE IT WILL FIRE BESIDE IT (author,
             2026-09-18: "the Go button should be on the left with the standby
@@ -389,28 +408,10 @@ namespace wfg::client::ui
         middle.removeFromLeft (pad);
         notesLabel.setBounds (middle);
 
-        area.removeFromTop (row / 2);
-
-        /*  ONE FOOT ROW, NOT TWO (author, 2026-09-18: "what is the gap beneath
-            the GO button row for? Can we remove it?"): the lock word takes its
-            width only while there is one, and the error and the notice share
-            the rest - a notice, when there is one, stands in front of the
-            error, as it always did in meaning and now does in pixels. */
-        auto bottom = area.removeFromTop (row);
-
-        if (statusLabel.getText().isNotEmpty())
-            statusLabel.setBounds (bottom.removeFromLeft (row * 4));
-        else
-            statusLabel.setBounds ({});
-
-        /*  THE DIAL'S LINE AT THE FAR RIGHT, while it has one. */
-        if (dialLabel.getText().isNotEmpty())
-            dialLabel.setBounds (bottom.removeFromRight (juce::jmin (row * 14, bottom.getWidth() / 2)));
-        else
-            dialLabel.setBounds ({});
-
-        errorLabel.setBounds (bottom);
-        noticeLabel.setBounds (bottom);
+        /*  AND NOTHING UNDER IT. The foot row that stood here (author,
+            2026-09-18, already cut from two rows to one) is gone: its lock
+            word, error, notice and dial line are on the top line now, and the
+            cue list starts under GO. */
     }
 
     void TransportComponent::askThenRevert()

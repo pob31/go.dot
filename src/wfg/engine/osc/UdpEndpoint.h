@@ -58,6 +58,7 @@
 #include <vector>
 
 namespace juce { class DatagramSocket; }
+namespace wfg::monitor { class TrafficTap; }
 
 namespace wfg::osc
 {
@@ -128,6 +129,11 @@ namespace wfg::osc
         /** The largest datagram a single read will take. */
         static constexpr int maxDatagramSize = 65536;
 
+        /*  THE NETWORK MONITOR'S TAP, which every datagram in and every send
+            out is shown to while a monitor listens (monitor/TrafficTap.h). Set
+            once, before `start`; null records nothing. */
+        void setTap (monitor::TrafficTap* tapToUse) noexcept { tap.store (tapToUse, std::memory_order_release); }
+
     private:
         void run();
 
@@ -140,5 +146,6 @@ namespace wfg::osc
         std::atomic<int> port { 0 };
         std::atomic<std::int64_t> received { 0 };
         std::atomic<std::int64_t> errors { 0 };
+        std::atomic<monitor::TrafficTap*> tap { nullptr };
     };
 }

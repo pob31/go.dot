@@ -44,11 +44,14 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 
 #include <functional>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
+
+namespace wfg::monitor { class TrafficTap; }
 
 namespace wfg
 {
@@ -149,8 +152,15 @@ namespace wfg::midi
             thread's, as opening is. */
         void close (const std::string& portId);
 
+        /*  THE NETWORK MONITOR'S TAP: every message that arrives, named by the
+            device it came from, shown while a monitor listens. Null records
+            nothing. */
+        void setTap (monitor::TrafficTap* tapToUse) noexcept { tap.store (tapToUse, std::memory_order_release); }
+
     private:
         void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
+
+        std::atomic<monitor::TrafficTap*> tap { nullptr };
 
         /** The one road every message takes: consumer, then triggers. */
         void route (const std::string& portId, const Bytes& message);

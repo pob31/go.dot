@@ -16,6 +16,8 @@
 
 #include <wfg/engine/midi/MidiInputs.h>
 
+#include <wfg/engine/monitor/TrafficTap.h>
+
 #include <wfg/engine/Engine.h>
 
 #include <algorithm>
@@ -281,6 +283,11 @@ namespace wfg::midi
 
         const auto* raw = message.getRawData();
         const auto size = message.getRawDataSize();
+
+        //  Shown to the monitor by the device it came from, which is what a person can read.
+        if (auto* watching = tap.load (std::memory_order_acquire); watching != nullptr && watching->isListening())
+            watching->record (monitor::Direction::in, monitor::Medium::midi, monitor::Road::midi,
+                              device, raw, size > 0 ? static_cast<std::size_t> (size) : 0u);
 
         route (port, size > 0 ? Bytes (raw, raw + size) : Bytes {});
     }

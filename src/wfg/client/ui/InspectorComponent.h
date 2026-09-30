@@ -38,12 +38,15 @@
     becomes writable leaves the fold by itself.
 */
 
+#include <wfg/client/model/Icons.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Theme.h>
+#include <wfg/client/ui/Icons.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -92,6 +95,11 @@ namespace wfg::client::ui
 
         void applyTheme (const model::Theme& theme);
 
+        /*  WHICH PANEL THE FOOT HAS OPEN AND ON WHICH CUE, by the subject's
+            word: the panel bar's button for it is lit while it is this cue's
+            (author, 2026-09-30: the toggles "at the top"). Empty for none. */
+        void showFoot (const std::string& subject, const std::string& cueId);
+
         /*  THE NUMBER THE MASTER DIAL TURNS, as the tree says: its line wears
             a dial before its name and a frame round its value - a mark and a
             line, never a colour alone (§4.8). Empty marks nothing. */
@@ -108,16 +116,53 @@ namespace wfg::client::ui
     private:
         struct Line;
 
+        /*  A DRAWER'S HEAD: its twist, its icon, its name, and while it is
+            shut how many rows are in it. Pressing it opens or shuts it. */
+        class DrawerHead;
+
         /** A line's name, with the dial's mark when the dial is on it. */
         juce::String nameOf (const model::Field& field) const;
         void markDial();
         std::string dialed;
 
         void rebuild (const model::Inspection& inspection);
-
-        /** Puts the fold's own state on its button, as a twist rather than a colour. */
-        void sayWhetherDetailsAreOpen();
         void layOut();
+
+        /*  THE DRAWERS (author, 2026-09-30: "we can also make more drawers
+            for things"): every block of rows is one, and the details are one
+            more. What a hand chose is remembered by the drawer's heading for
+            as long as the window is open, so shutting "when" on one cue shuts
+            it on the next. A drawer nobody has touched is open - unless every
+            row in it means nothing for this cue, like a sampler's rows on a
+            cue that is not in a sampler group, which start shut with their
+            count showing. The details start shut, as the fold always did. */
+        std::map<std::string, bool> drawerChosen;
+        bool isShut (const std::string& drawer) const;
+        void toggleDrawer (const std::string& drawer);
+
+        /** The drawers' shut states as a string, for noticing that a refill changed one. */
+        std::string drawerStates() const;
+
+        /*  THE PANEL BAR: one button per panel this cue has at the foot, at
+            the head of the inspector and out of the scrolling, lit while its
+            panel is open on this cue. Rebuilt only when the set changes. */
+        std::vector<std::unique_ptr<IconButton>> panelButtons;
+        std::vector<std::string> panelWords;
+        void rebuildPanels (const std::vector<model::Field>& panels);
+        void lightPanels();
+        int panelBarHeight() const noexcept;
+        std::string footWord, footCue;
+
+        /*  WHAT THE HEAD IS DRAWN WITH beside its words: the cue's icon in its
+            kind's accent, and the cue's own colour as a tab, when it has one. */
+        model::Icon headIcon = model::Icon::none;
+        std::string headAccent;
+        std::string headColour;
+        void readHead (const model::Inspection& inspection);
+        juce::Rectangle<int> headIconBox;
+
+        /** The drawers' states as last laid out, so a refill relays only when one moved. */
+        std::string laidDrawers;
 
         /*  ONE COMMIT, N WRITES: a field over several cues carries every
             cue's address and each is written, which is what a batch edit is
@@ -141,7 +186,7 @@ namespace wfg::client::ui
         juce::Viewport viewport;
         juce::Component content;
         juce::Label heading;
-        juce::TextButton detailsButton { "details" };
+        std::unique_ptr<DrawerHead> detailsHead;
         juce::TextButton closeButton { "x" };
 
         std::vector<std::unique_ptr<Line>> lines;
@@ -168,7 +213,7 @@ namespace wfg::client::ui
 
         /** What the head says: the cue's name and kind, or that nothing is picked. */
         static juce::String headingFor (const model::Inspection&);
-        bool detailsOpen = false;
+        std::string drawnKind;
 
         int rowHeight() const noexcept;
 

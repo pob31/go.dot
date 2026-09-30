@@ -77,6 +77,8 @@
 #include <utility>
 #include <vector>
 
+namespace wfg::monitor { class TrafficTap; }
+
 namespace wfg::oscquery
 {
     /*  What the server needs from whatever it is serving.
@@ -301,6 +303,12 @@ namespace wfg::oscquery
             return outbound.load (std::memory_order_relaxed);
         }
 
+        /*  THE NETWORK MONITOR'S TAP: every OSC frame the page sends and every
+            value pushed to it, shown while a monitor listens. Set before
+            `start`; null records nothing. The subscriptions' text frames are
+            not OSC and are not shown. */
+        void setTap (monitor::TrafficTap* tapToUse) noexcept { tap.store (tapToUse, std::memory_order_release); }
+
     private:
         /** One text frame to every open connection, for PATH_* notifications. */
         void broadcastText (const std::string& message);
@@ -312,5 +320,6 @@ namespace wfg::oscquery
         std::atomic<int> port { 0 };
         std::atomic<std::int64_t> inbound { 0 };
         std::atomic<std::int64_t> outbound { 0 };
+        std::atomic<monitor::TrafficTap*> tap { nullptr };
     };
 }

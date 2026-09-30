@@ -28,6 +28,7 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <string>
 #include <vector>
@@ -632,11 +633,17 @@ namespace wfg::client::model
             out.push_back (std::move (field));
         };
 
+        /*  THE SEND LEVELS TOO, since they joined the bar at the head of the
+            panel (2026-09-30): one bar holding every panel a cue has, in the
+            order its sound goes - the file, its EQ, its plugins, where it is
+            sent. The button beside the direct out stays where the author asked
+            for it (2026-09-22); two doors to one room is not a trap. */
         if (kind == "media")
         {
             offer ("Waveform, in and out points", "waveform");
             offer ("EQ, four bands and two filters", "eq");
             offer ("FX, the signal chain on this cue", "fx");
+            offer ("Sends, levels into the show's mix channels", "sends");
         }
         else if (kind == "mic")
         {
@@ -645,6 +652,7 @@ namespace wfg::client::model
                 says in its own notice when the channel records nothing. */
             offer ("EQ, four bands and two filters", "eq");
             offer ("FX, its channel's plugins on this cue", "fx");
+            offer ("Sends, levels into the show's mix channels", "sends");
             offer ("Take, the loop its channel records", "take");
         }
         else if (kind == "fade")
@@ -842,7 +850,8 @@ namespace wfg::client::model
         }();
 
         Block isBlock { "what it is", {} }, whenBlock { "when", {} },
-              doesBlock { "what it does", {} }, listBlock { "in the list", {} };
+              doesBlock { "what it does", {} }, listBlock { "in the list", {} },
+              samplerBlock { "sampler", {} };
 
         for (auto& field : decided)
         {
@@ -857,6 +866,27 @@ namespace wfg::client::model
         sortInto (doesBlock.fields, kindRows);
         sortInto (listBlock.fields, saidLast);
 
+        /*  A MEDIA CUE'S SAMPLER ROWS ARE A DRAWER OF THEIR OWN (author,
+            2026-09-30: "we can also make more drawers for things"). Eight rows
+            that only a hand on a strip asks, greyed on every cue that is not a
+            sampler member - which is most of them - and they were the bottom
+            half of what a media cue does. Moved whole and in the order they
+            had, so a sampler member reads as it did, one heading further down;
+            `dca` stays behind, since a DCA trims any cue (see `samplerRows`). */
+        if (out.kind == "media")
+        {
+            std::stable_partition (doesBlock.fields.begin(), doesBlock.fields.end(),
+                                   [] (const Field& field) { return ! named (samplerRows, field.name); });
+
+            const auto firstSampler = std::find_if (doesBlock.fields.begin(), doesBlock.fields.end(),
+                                                    [] (const Field& field)
+                                                    { return named (samplerRows, field.name); });
+
+            samplerBlock.fields.assign (std::make_move_iterator (firstSampler),
+                                        std::make_move_iterator (doesBlock.fields.end()));
+            doesBlock.fields.erase (firstSampler, doesBlock.fields.end());
+        }
+
         /*  AND THE PANELS THIS CUE HAS, at the end of what it DOES and after
             the sorts, so an opener never lands in the middle of the rows a
             kind orders. The author asked for them here rather than in a menu
@@ -870,10 +900,16 @@ namespace wfg::client::model
             decision the document holds; these are doors. The window draws them
             differently for that reason - §4.8's rule applies to form as well
             as to colour. */
-        for (auto& opener : openersFor (out.kind, cueId))
-            doesBlock.fields.push_back (std::move (opener));
+        /*  SINCE 2026-09-30 THEY ARE NOT AMONG THE ROWS AT ALL but in a bar of
+            their own at the head of the panel (author: "the toggles for the
+            foot panels in the inspector should be at the top to make opening
+            the panel really quick"). At the end of what a cue does they were a
+            scroll away on any cue with a long list of rows - a media cue in a
+            sampler group most of all - and a door is quickest where the eye
+            lands first. */
+        out.panels = openersFor (out.kind, cueId);
 
-        for (auto* block : { &isBlock, &whenBlock, &doesBlock, &listBlock })
+        for (auto* block : { &isBlock, &whenBlock, &doesBlock, &samplerBlock, &listBlock })
             if (! block->fields.empty())
                 out.blocks.push_back (std::move (*block));
 

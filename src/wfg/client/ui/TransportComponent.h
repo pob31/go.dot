@@ -112,7 +112,12 @@ namespace wfg::client::ui
             author's word (2026-09-18), for the headroom and because a dimmed
             button and a tooltip say the same things where somebody is already
             looking. `statusLabel` carries only the lock word now. */
-        juce::Label showLabel, tickLabel, clockLabel, rateLabel,
+        /*  NO TICK (author, 2026-09-30: "Do we need to show the ticks?"): a
+            counter moving fifty times a second is a reading for whoever is
+            debugging the engine, and the log and the tree both carry it. What
+            an operator needs from that corner - which clock, at what rate -
+            stays. */
+        juce::Label showLabel, clockLabel, rateLabel,
                     listLabel, standbyLabel, notesLabel, statusLabel, errorLabel, noticeLabel,
                     dialLabel;
         /*  GO and PANIC, and the banner's two. Save, revert, undo, redo and

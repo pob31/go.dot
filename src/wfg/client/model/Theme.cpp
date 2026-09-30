@@ -161,6 +161,26 @@ namespace wfg::client::model
                 { "eq-3",          audio::eqBand3Colour },
                 { "eq-4",          audio::eqBand4Colour },
                 { "eq-lp",         audio::eqLowPassColour },
+
+                /*  A KIND'S ACCENT (author, 2026-09-30: "we can also use small
+                    colour accents"), worn by the kind's icon and nothing
+                    larger: never a wash or a bar, which are the STATE's -
+                    standby, running, failing - so a kind and a state cannot be
+                    mistaken for each other even where two hues sit close.
+                    Soft on purpose, and the icon's shape and the kind column's
+                    word say the same thing (§4.8). The fade's is the fade's
+                    own, which the author chose on 2026-09-21; a start cue
+                    wears the transport's, being one of the cues that act on a
+                    cue; a group and a memo stay in the ink's greys, being the
+                    two kinds that make no sound or message of their own. */
+                { "kind-memo",      0xFFA9A49C },
+                { "kind-media",     0xFF6CB4EE },
+                { "kind-mic",       0xFFD98FC0 },
+                { "kind-fade",      0xFF5FB8C9 },
+                { "kind-transport", 0xFFE08A6E },
+                { "kind-osc",       0xFFD8C26A },
+                { "kind-midi",      0xFFB59CF0 },
+                { "kind-group",     0xFFC6C1B9 },
             };
 
             return table;
@@ -205,6 +225,11 @@ namespace wfg::client::model
             // rrggbbaa on the wire, aarrggbb in memory
             return ((rgba & 0xFFu) << 24) | (rgba >> 8);
         }
+    }
+
+    std::optional<std::uint32_t> colourFromHex (std::string_view text)
+    {
+        return parseColour (text);
     }
 
     Theme::Theme()

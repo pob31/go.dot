@@ -15,6 +15,8 @@
 */
 
 #include <wfg/engine/oscquery/OscQueryServer.h>
+
+#include <wfg/engine/monitor/TrafficTap.h>
 #include <wfg/engine/oscquery/Subscriptions.h>
 
 #include <wfg/engine/json/JsonValue.h>
@@ -547,7 +549,16 @@ namespace wfg::oscquery
                 return;
 
             if (owner != nullptr)
+            {
                 owner->inbound.fetch_add (1, std::memory_order_relaxed);
+
+                //  Shown to the monitor as it arrived, a malformed frame included.
+                if (auto* watching = owner->tap.load (std::memory_order_acquire);
+                      watching != nullptr && watching->isListening())
+                    watching->record (monitor::Direction::in, monitor::Medium::osc, monitor::Road::page,
+                                      id.toStdString(), static_cast<const std::uint8_t*> (data.getData()),
+                                      data.getSize());
+            }
 
             const auto decoded = osc::decode (static_cast<const std::uint8_t*> (data.getData()),
                                               data.getSize());
@@ -708,6 +719,11 @@ namespace wfg::oscquery
                 impl->server.sendTo (juce::MemoryBlock (encoded->data(), encoded->size()),
                                      juce::String (connection.substr (3)));   // drop "ws:"
                 outbound.fetch_add (1, std::memory_order_relaxed);
+
+                if (auto* watching = tap.load (std::memory_order_acquire);
+                      watching != nullptr && watching->isListening())
+                    watching->record (monitor::Direction::out, monitor::Medium::osc, monitor::Road::page,
+                                      std::string_view (connection).substr (3), encoded->data(), encoded->size());
             }
         }
     }

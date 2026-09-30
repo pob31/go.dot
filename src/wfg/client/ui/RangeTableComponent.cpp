@@ -20,6 +20,10 @@ namespace wfg::client::ui
         model::RangeRow range;
         std::size_t at = 0;
 
+        /*  THE WHOLE FILE, standing in for a range the show does not hold yet:
+            no identifier, and a change to it is what makes one. */
+        bool standing = false;
+
         juce::Label name, in, out, length, count;
 
         /*  FOR EVER IS NOT A NUMBER, which is what makes a loop count unlike
@@ -166,6 +170,11 @@ namespace wfg::client::ui
         repaint();
     }
 
+    bool RangeTableComponent::standing() const noexcept
+    {
+        return reading.ranges.empty() && reading.fileLength > 0.0;
+    }
+
     std::string RangeTableComponent::shapeOf() const
     {
         /*  THE IDENTITY OF THE LIST AND NOT ITS VALUES: a table is rebuilt when
@@ -177,7 +186,8 @@ namespace wfg::client::ui
         for (const auto& range : reading.ranges)
             out += range.id + ";";
 
-        return out;
+        //  The whole file's row comes and goes with a length to draw it over.
+        return standing() ? std::string ("whole file") : out;
     }
 
     void RangeTableComponent::setPlayhead (double seconds)
@@ -222,6 +232,24 @@ namespace wfg::client::ui
     {
         reading = readingToUse;
 
+        /*  THE CHANGE MADE ON THE WHOLE FILE'S ROW, written to the range that
+            change made, the first pass the tree has it - before the table is
+            rebuilt around it, so the new row does not show the old value for a
+            pass. Another cue picked meanwhile drops it: it was about that cue. */
+        if (pending.has_value())
+        {
+            if (pending->cueId != reading.subject.objectId)
+                pending.reset();
+            else if (reading.ranges.size() == 1)
+            {
+                if (actions.set)
+                    actions.set (model::rangeAddress (reading.ranges.front().id, pending->attribute.c_str()),
+                                 pending->value);
+
+                pending.reset();
+            }
+        }
+
         const auto shape = shapeOf();
 
         if (shape != drawnShape || reading.subject.objectId != drawnCue)
@@ -240,16 +268,37 @@ namespace wfg::client::ui
         rows.clear();
         content.removeAllChildren();
 
-        for (std::size_t at = 0; at < reading.ranges.size(); ++at)
+        /*  THE ROWS TO BUILD: the cue's ranges, or - when it has none and its
+            length is known - the whole file, standing in for the first. */
+        auto ranges = reading.ranges;
+
+        if (standing())
+            ranges.push_back ({ {}, {}, 0.0, reading.fileLength, 1, 0 });
+
+        for (std::size_t at = 0; at < ranges.size(); ++at)
         {
             auto row = std::make_unique<Row>();
-            row->range = reading.ranges[at];
+            row->range = ranges[at];
             row->at = at;
+            row->standing = row->range.id.empty();
 
             auto* raw = row.get();
 
+            /*  ON THE WHOLE FILE'S ROW A CHANGE IS TWO THINGS IN ORDER: the
+                range over the whole file, then this change to it - held until
+                the tree has the range to write it to (`show`). */
             const auto write = [this, raw] (const char* attribute, const std::string& value)
             {
+                if (raw->standing)
+                {
+                    pending = Pending { reading.subject.objectId, attribute, value };
+
+                    if (actions.createRange)
+                        actions.createRange (reading.subject.objectId, raw->range.in, raw->range.out);
+
+                    return;
+                }
+
                 if (actions.set)
                     actions.set (model::rangeAddress (raw->range.id, attribute), value);
             };
@@ -259,7 +308,13 @@ namespace wfg::client::ui
             row->name.setTooltip ("What this range is called");
             row->name.onTextChange = [raw, write]
             {
-                write ("name", raw->name.getText().toStdString());
+                const auto typed = raw->name.getText().toStdString();
+
+                //  Leaving the whole file's own words as they were is not a decision.
+                if (raw->standing && typed == "whole file")
+                    return;
+
+                write ("name", typed);
             };
 
             /*  IN AND OUT AS TIMES. A cell that will not parse is put back to
@@ -349,6 +404,13 @@ namespace wfg::client::ui
             row->forever.onClick = commitLoops;
             row->count.onTextChange = commitLoops;
 
+            /*  THE WHOLE FILE'S ROW SAYS WHAT IT IS on every box: it is what
+                the cue plays now, and a change here is what makes it a range. */
+            if (row->standing)
+                for (auto* box : { &row->name, &row->in, &row->out, &row->count })
+                    box->setTooltip ("The whole file, as this cue plays it now: change anything"
+                                     " here and it becomes the cue's first range");
+
             row->drop.setWantsKeyboardFocus (false);
             row->drop.setTooltip ("Removes this range");
             row->drop.onClick = [this, raw]
@@ -373,6 +435,47 @@ namespace wfg::client::ui
 
     void RangeTableComponent::refresh()
     {
+        /*  THE WHOLE FILE'S ROW: its words and times, dimmed as a reading is,
+            and nothing to copy to and nothing to remove - it is not there yet. */
+        if (rows.size() == 1 && rows.front()->standing)
+        {
+            auto& row = *rows.front();
+            row.range.out = reading.fileLength;
+
+            if (! row.name.isBeingEdited())
+                row.name.setText ("whole file", juce::dontSendNotification);
+
+            if (! row.in.isBeingEdited())
+                row.in.setText (juce::String (model::timeText (row.range.in)), juce::dontSendNotification);
+
+            if (! row.out.isBeingEdited())
+                row.out.setText (juce::String (model::timeText (row.range.out)), juce::dontSendNotification);
+
+            row.length.setText (juce::String (model::timeText (row.range.length())), juce::dontSendNotification);
+
+            /*  ONCE THROUGH - or what a hand just set on it, while the range it
+                makes is on its way, so a ticked for ever does not untick itself
+                for the pass before the tree has the range. */
+            const auto loops = pending.has_value() && pending->attribute == "loops"
+                                 ? juce::String (pending->value).getIntValue() : 1;
+
+            row.forever.setToggleState (loops == loopsForever, juce::dontSendNotification);
+            row.count.setVisible (loops != loopsForever);
+
+            if (! row.count.isBeingEdited())
+                row.count.setText (juce::String (loops == loopsForever ? 1 : loops), juce::dontSendNotification);
+
+            row.copy.setEnabled (false);
+            row.drop.setEnabled (false);
+            row.drop.setTooltip ("Nothing to remove: the whole file is not a range until something on it is changed");
+
+            for (auto* box : { &row.name, &row.in, &row.out, &row.count })
+                box->setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
+
+            sayWhatThePlusWouldDo();
+            return;
+        }
+
         for (std::size_t at = 0; at < rows.size() && at < reading.ranges.size(); ++at)
         {
             auto& row = *rows[at];
@@ -508,6 +611,17 @@ namespace wfg::client::ui
                                 + juce::String (model::timeText (reading.startOffset))
                                 + " - the + above makes one",
                               area.reduced (6, 4), juce::Justification::centredLeft, 2);
+        }
+
+        /*  AND UNDER THE WHOLE FILE'S ROW, that it is not a range yet - the
+            dimmed words say so too, and this says what makes it one. */
+        if (rows.size() == 1 && rows.front()->standing)
+        {
+            g.setColour (Look::colour (theme, "ink-off"));
+            g.setFont (Look::font (theme, 11.5f));
+            g.drawFittedText ("the whole file, as it plays now - set its repeats, or anything"
+                              " else on it, and it becomes this cue's first range",
+                              area.withTrimmedTop (row).reduced (6, 4), juce::Justification::topLeft, 2);
         }
     }
 }

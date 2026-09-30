@@ -235,6 +235,12 @@ namespace wfg::client::model
         /** What the engine says back, behind the fold. */
         std::vector<Field> details;
 
+        /*  THE PANELS THIS CUE HAS AT THE FOOT, as `openersFor` offers them -
+            drawn as a bar at the head of the inspector rather than as rows
+            (author, 2026-09-30), and empty for several cues at once, since a
+            panel is about one cue. */
+        std::vector<Field> panels;
+
         /** How many cues this is about: 0, 1, or several. */
         std::size_t count = 0;
 

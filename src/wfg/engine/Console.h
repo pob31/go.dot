@@ -47,6 +47,7 @@ namespace wfg
     class Engine;
     namespace tree { class ParameterTree; }
     namespace audio { class MediaInfo; class TakePictures; }
+    namespace monitor { class TrafficTap; }
 
     /** What a compiled client is, seen from here: something alive while the loop runs. */
     struct Client
@@ -116,6 +117,24 @@ namespace wfg
             milliseconds (audio/TakePictures.h). Null with no audio side; every
             reader checks. */
         const audio::TakePictures* takes = nullptr;
+
+        /*  OPEN THE SHOW SETTINGS AS SOON AS THERE IS A WINDOW (author,
+            2026-09-30: "On a new project or a app start with no project to
+            load I would open the show settings window"): `--show-settings`,
+            given by New for the show it has just made and by the launchers
+            when they open the empty show beside them - where the first thing
+            anybody needs is the interface to play through. Never carried to
+            another show, which already has one. */
+        bool openSettingsAtStart = false;
+
+        /*  THE FOURTH DOOR (author, 2026-09-30: a network monitor "similar to
+            the one in WFS-DIY"): what crossed the wire, OSC and MIDI, in and
+            out. Not a reach past the tick thread either - it is a ring the
+            socket, page, MIDI and sending threads write bytes into and nothing
+            the model owns, drained by the window alone and only while it
+            listens (monitor/TrafficTap.h). Null with no engine sockets; every
+            reader checks. */
+        monitor::TrafficTap* traffic = nullptr;
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

@@ -26,9 +26,11 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 show="$here/Untitled"
+first=(--show-settings)
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
     show="$(cd "$1" && pwd)"
     shift
+    first=()
 fi
 
 # NO --device, deliberately. A bare --device means "the system default" and
@@ -37,6 +39,10 @@ fi
 # the default. Each show says whether to open an interface and which one; the
 # empty one beside this script says "the system default".
 #
+# THE EMPTY SHOW OPENS ON ITS SHOW SETTINGS (--show-settings): the first thing
+# anybody starting from nothing needs is the interface to play through. A show
+# of your own opens as it was saved.
+#
 # --ui is resolved against the working directory, so run from beside the binary.
 cd "$here"
-exec ./wfg serve "$show" --window --ui=console "$@"
+exec ./wfg serve "$show" --window --ui=console ${first[@]+"${first[@]}"} "$@"
