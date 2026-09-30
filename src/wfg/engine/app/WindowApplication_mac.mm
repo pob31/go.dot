@@ -32,6 +32,14 @@ namespace wfg::app
         }
     }
 
+    void WindowApplication::keepArgumentsFromAppKit()
+    {
+        @autoreleasepool
+        {
+            [[NSUserDefaults standardUserDefaults] registerDefaults: @{ @"NSTreatUnknownArgumentsAsOpen": @"NO" }];
+        }
+    }
+
     void WindowApplication::finishLaunching()
     {
         @autoreleasepool

@@ -71,6 +71,18 @@ namespace wfg::app
             elsewhere. */
         static std::string describeSystemDelegate();
 
+        /*  THE MAC: WFG'S ARGUMENTS ARE NOT FILES TO OPEN. AppKit, when an app
+            finishes launching, hands every command-line argument that does not
+            start with "-" to the application as a file it was asked to open -
+            so `wfg serve <the empty show> ...` was handed "serve" and the
+            empty show's path besides the .wfg a double-click meant, and took
+            "serve" for the show (the release job's probe saw it, 2026-09-30).
+            NSTreatUnknownArgumentsAsOpen = NO, registered before the launch
+            finishes, is the switch; Chromium sets it for the same reason.
+            Elsewhere nothing reads the command line that way, and this does
+            nothing. */
+        static void keepArgumentsFromAppKit();
+
         WindowApplication() = default;
 
         /*  A file the system asked Go.dot to open: one call per file, on the

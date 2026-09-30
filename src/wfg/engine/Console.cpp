@@ -2324,8 +2324,14 @@ namespace
             to an application reached Go.dot: a double-clicked .wfg was
             refused ("cannot open files in the Go.dot show format") and Cmd-Q
             quit on the spot, running show or not (the author's Mac mini,
-            2026-09-30). It also has to be before the window, which wants NSApp. */
+            2026-09-30). It also has to be before the window, which wants NSApp.
+
+            And before NSApp's launch finishes - in the launch step below, or
+            in the loop - AppKit is told that wfg's own arguments are not files
+            to open (app/WindowApplication.h, `keepArgumentsFromAppKit`): every
+            serve, headless ones too, since every one runs NSApp's loop. */
         juce::initialiseNSApplication();
+        wfg::app::WindowApplication::keepArgumentsFromAppKit();
        #endif
 
         const juce::ScopedJuceInitialiser_GUI juceForTheVerb;
@@ -2415,7 +2421,13 @@ namespace
         if (wantWindow && args.containsOption ("--yield-to-opened"))
         {
             application.emplace();
-            application->onOpen = [&openedAtLaunch] (const juce::String& opened) { openedAtLaunch.push_back (opened); };
+            /*  Full paths only: a file macOS hands over is always one, and a
+                word from the command line never is (keepArgumentsFromAppKit). */
+            application->onOpen = [&openedAtLaunch] (const juce::String& opened)
+            {
+                if (juce::File::isAbsolutePath (opened))
+                    openedAtLaunch.push_back (opened);
+            };
             wfg::app::WindowApplication::finishLaunching();
             application->onOpen = nullptr;
 

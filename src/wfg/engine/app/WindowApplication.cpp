@@ -35,6 +35,10 @@ namespace wfg::app
     {
         return {};
     }
+
+    void WindowApplication::keepArgumentsFromAppKit()
+    {
+    }
    #endif
 
     const juce::String WindowApplication::getApplicationName()
