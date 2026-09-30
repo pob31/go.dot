@@ -97,6 +97,16 @@ namespace wfg::doc
 
         /** `<folder>/<folder name>.wfg`. */
         juce::File manifestFile (const juce::File& folder);
+
+        /*  THE FOLDER A PATH NAMES AS A SHOW: the folder itself, or the one a
+            `.wfg` sits in - because that manifest is the file a double-click,
+            a file association and an Open dialog hand over, and the show is
+            the folder around it. Anything else, including a path that is not
+            there, is an empty File, and the caller says why in its own words.
+
+            It does not look inside. Whether the folder is a show is `open`'s
+            question, which already knows how to answer it. */
+        juce::File folderFor (const juce::File& given);
         juce::File showFile (const juce::File& folder);
         juce::File stateFile (const juce::File& folder);
         juce::File namespacesFolder (const juce::File& folder);

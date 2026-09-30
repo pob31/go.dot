@@ -334,6 +334,18 @@ namespace wfg::doc
         return folder.getChildFile (folder.getFileName() + manifestSuffix);
     }
 
+    juce::File Bundle::folderFor (const juce::File& given)
+    {
+        if (given.isDirectory())
+            return given;
+
+        //  Any case, as a file system that ignores it would hand it over.
+        if (given.existsAsFile() && given.getFileExtension().equalsIgnoreCase (manifestSuffix))
+            return given.getParentDirectory();
+
+        return {};
+    }
+
     juce::File Bundle::showFile (const juce::File& folder)
     {
         return folder.getChildFile (showFileName);

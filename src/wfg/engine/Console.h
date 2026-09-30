@@ -94,7 +94,8 @@ namespace wfg
             client should not know what a command line looks like.
 
             `createNew` makes an empty show in the folder first, which must
-            then be empty or absent. Answers a sentence for the reader when it
+            then be empty or absent. Without it, `folder` may be the show's
+            `.wfg` as well as its folder. Answers a sentence for the reader when it
             could not, and nothing when the window is on its way. */
         std::function<std::string (const std::string& folder, bool createNew)> openWindow;
 

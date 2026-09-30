@@ -1321,6 +1321,28 @@ TEST_CASE ("M23: an autosave of a 500-cue show - the tick thread's snapshot and 
 }
 
 //==============================================================================
+TEST_CASE ("bundle: folderFor - a folder is itself, a manifest is its folder, anything else is nothing")
+{
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto manifest = Bundle::manifestFile (temp.folder);
+    REQUIRE (manifest.existsAsFile());
+
+    CHECK (Bundle::folderFor (temp.folder) == temp.folder);
+    CHECK (Bundle::folderFor (manifest) == temp.folder);
+
+    //  The case a file system that ignores it would hand over.
+    const auto shouted = temp.folder.getChildFile ("Shouted.WFG");
+    REQUIRE (shouted.replaceWithText ("x"));
+    CHECK (Bundle::folderFor (shouted) == temp.folder);
+
+    //  A show's other files are not the show's name for itself.
+    CHECK (Bundle::folderFor (Bundle::showFile (temp.folder)) == juce::File());
+    CHECK (Bundle::folderFor (temp.folder.getChildFile ("absent.wfg")) == juce::File());
+    CHECK (Bundle::folderFor (temp.folder.getChildFile ("absent")) == juce::File());
+}
+
 TEST_CASE ("bundle: a missing state.xml is normal, and silent")
 {
     /*  The plan's question A, answered: standby is persisted. Its other half is

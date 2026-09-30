@@ -17,6 +17,7 @@
 #include <wfg/engine/Console.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/app/StartupReport.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/DcaTable.h>
@@ -98,6 +99,7 @@
 #include <thread>
 #include <csignal>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -2462,12 +2464,16 @@ namespace
             return 2;
         }
 
-        const juce::File target { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
+        /*  A FOLDER OR ITS `.wfg`: the manifest is what a double-click and a
+            file association hand over, and the show is the folder around it
+            (Bundle.h, `folderFor`). */
+        const juce::File given { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
+        const auto target = wfg::doc::Bundle::folderFor (given);
 
-        if (! target.isDirectory())
+        if (target == juce::File())
         {
-            std::cerr << "wfg serve: not a bundle folder: "
-                      << target.getFullPathName() << std::endl;
+            std::cerr << "wfg serve: not a show folder or a .wfg: "
+                      << given.getFullPathName() << std::endl;
             return 2;
         }
 
@@ -4696,7 +4702,14 @@ namespace
                 itself and offers it, as this one did. */
             const auto launchAnother = [&args] (const std::string& folderPath, bool createNew) -> std::string
             {
-                const juce::File folder { juce::String (folderPath) };
+                /*  Open takes the show's `.wfg` as well as its folder, which
+                    is the one an Open dialog lets a person pick inside it;
+                    New wants the folder it will fill, as it is. */
+                const juce::File chosen { juce::String (folderPath) };
+                const auto folder = createNew ? chosen : wfg::doc::Bundle::folderFor (chosen);
+
+                if (folder == juce::File())
+                    return chosen.getFileName().toStdString() + " is not a show folder or a .wfg";
 
                 if (createNew)
                 {
@@ -4870,6 +4883,10 @@ namespace
             // Start session time here rather than catching up those samples.
             sessionClock.use (*blockSource, 0);
             ticks.start();
+
+            /*  STARTED: whatever goes wrong from here is said in the window,
+                not in a box after it (app/StartupReport.h). */
+            wfg::app::StartupReport::windowIsUp();
 
             /*  The main thread from here on is JUCE's, and only JUCE's. Phase 2
                 needs a message thread for plugin scanning and device callbacks, so
@@ -5081,7 +5098,22 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       {},
                       [&makeClient] (const juce::ArgumentList& args)
                       {
-                          if (const auto code = runServe (args, makeClient); code != 0)
+                          /*  A window asked for and never reached says why in
+                              a box, for whoever double-clicked a show and has
+                              no terminal to read (app/StartupReport.h). Held
+                              out here so that every thread runServe started
+                              has stopped before std::cerr gets its buffer back. */
+                          std::optional<wfg::app::StartupReport> report;
+
+                          if (args.containsOption ("--window"))
+                              report.emplace();
+
+                          const auto code = runServe (args, makeClient);
+
+                          if (report.has_value())
+                              report->showIfFailed (code);
+
+                          if (code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 

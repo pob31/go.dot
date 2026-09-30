@@ -69,6 +69,8 @@
 # where most of the reasoning lives.
 # -----------------------------------------------------------------------------
 add_library(wfg_engine STATIC
+    wfg/engine/app/StartupReport.cpp
+    wfg/engine/app/StartupReport.h
     wfg/engine/audio/AudioSettings.cpp
     wfg/engine/audio/AudioSettings.h
     wfg/engine/audio/OutputTestSignal.h

@@ -1986,13 +1986,27 @@ namespace wfg::client
                     return;
                 }
 
+                /*  OPEN TAKES THE SHOW'S `.wfg` AS WELL AS ITS FOLDER: the
+                    console resolves either (Console.h, `openWindow`). Windows'
+                    own picker chooses folders or files and never both, so
+                    there it is a file picker - into the show's folder, then
+                    its .wfg, as any document is opened on Windows. */
+               #if JUCE_WINDOWS
+                const auto openFlags = juce::FileBrowserComponent::canSelectFiles;
+               #else
+                const auto openFlags = juce::FileBrowserComponent::canSelectDirectories
+                                         | juce::FileBrowserComponent::canSelectFiles;
+               #endif
+
                 chooser = std::make_unique<juce::FileChooser> (
                             createNew ? "Choose an empty folder for the new show"
-                                      : "Choose a show's folder",
-                            mediaFolder().getParentDirectory().getParentDirectory());
+                                      : "Choose a show (its folder or its .wfg)",
+                            mediaFolder().getParentDirectory().getParentDirectory(),
+                            createNew ? juce::String() : juce::String ("*.wfg"));
 
                 chooser->launchAsync (juce::FileBrowserComponent::openMode
-                                        | juce::FileBrowserComponent::canSelectDirectories,
+                                        | (createNew ? juce::FileBrowserComponent::canSelectDirectories
+                                                     : openFlags),
                                       [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
                                        this, createNew] (const juce::FileChooser& answered)
                                       {
@@ -2005,7 +2019,9 @@ namespace wfg::client
                                                                                 createNew);
 
                                           shell->transport.setNotice (refused.empty()
-                                                                        ? "opening " + folder.getFileName() + " in a new window"
+                                                                        ? "opening " + (folder.hasFileExtension ("wfg") ? folder.getFileNameWithoutExtension()
+                                                                                                                        : folder.getFileName())
+                                                                            + " in a new window"
                                                                         : juce::String (refused));
                                       });
             }
