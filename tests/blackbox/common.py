@@ -490,7 +490,8 @@ class Server:
                  proxy_deadline_us: "int | None" = None,
                  engine_folder: "Path | None" = None,
                  input_wav: "Path | None" = None,
-                 env: "dict | None" = None):
+                 env: "dict | None" = None,
+                 recover: bool = False):
         argv = [str(find_binary()), "serve", str(bundle), "--http-port=0", "--osc-port=0"]
         if sample_rate is not None:
             argv.append(f"--sample-rate={sample_rate}")
@@ -545,6 +546,16 @@ class Server:
             argv.append("--window")
         if theme is not None:
             argv.append(f"--theme={theme}")
+
+        # --recover adopts what an earlier session left behind - recovery/, or
+        # the newest recovery.previous.N/ when there is none - before the first
+        # publish: the answer to the offer for a script with nobody to click
+        # (namespace draft section 14.10). A recovery that cannot be read stops
+        # the start with exit 2, and that surfaces below as the HarnessError
+        # every early exit raises: "serve exited 2 before it was ready", with
+        # serve's own sentence from stderr after it.
+        if recover:
+            argv.append("--recover")
 
         if log is not None:
             argv.append(f"--log={log}")

@@ -1,0 +1,16 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="H6DSK001" name="Written while it dies">
+      <Cue id="H6WRT001" name="Renamed at every step" number="1"/>
+      <Cue id="H6WRT002" name="Ballast one" number="2" preWait="0.25"/>
+      <Cue id="H6WRT003" name="Ballast two" number="3"/>
+      <Cue id="H6WRT004" name="Ballast three" number="4"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="0"/>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>
