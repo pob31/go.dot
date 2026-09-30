@@ -562,6 +562,49 @@ jobs:
         # preset's flags would do nothing at all. halt_on_error=0 so that one
         # violation does not hide the next - the point of the first run is the
         # whole list, not the first line of it.
+        #
+        # AND EVERY REPORT GOES TO A FILE (2026-09-30), because until this date
+        # the job could not go red. With halt_on_error=0 a process that reports
+        # a violation carries on and exits 0, so its test passes; and ctest's
+        # --output-on-failure shows the output of FAILED tests only, so the
+        # report was printed into a log nobody was shown. 134 tests passed on
+        # 45e1664 with not one report line in the job's log, which proves
+        # nothing either way. log_path is the sanitizers' common flag: each
+        # process writes <path>.<pid>, which catches a `wfg` started by a Python
+        # driver and every helper it starts too - their stderr goes wherever
+        # the driver sends it. The directory has to exist first; the sanitizer
+        # opens a file and does not make folders.
         env:
-          RTSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/rtsan-suppressions.txt:halt_on_error=0
-        run: ctest --test-dir build/rtsan -C Debug --output-on-failure
+          RTSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/rtsan-suppressions.txt:halt_on_error=0:log_path=${{ runner.temp }}/rtsan/report
+        run: |
+          mkdir -p "${{ runner.temp }}/rtsan"
+          ctest --test-dir build/rtsan -C Debug --output-on-failure
+
+      - name: Fail on any sanitizer report
+        # The gate the step above cannot be. A file that names the sanitizer is
+        # a violation somebody's test walked into, whether or not that test
+        # passed; anything else a process wrote there is shown but is not one.
+        # Each report is printed here, in the log, where it can be read.
+        if: always()
+        run: |
+          shopt -s nullglob
+          reports=("${{ runner.temp }}"/rtsan/report.*)
+          found=0
+          for file in "${reports[@]}"; do
+            echo "::group::$(basename "$file")"
+            cat "$file"
+            echo "::endgroup::"
+            if grep -q "RealtimeSanitizer" "$file"; then
+              found=$((found + 1))
+            fi
+          done
+          echo "${#reports[@]} file(s) written, ${found} holding a sanitizer report"
+          test "$found" -eq 0
+
+      - name: Keep the sanitizer's reports
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: rtsan-reports
+          path: ${{ runner.temp }}/rtsan/
+          if-no-files-found: ignore
