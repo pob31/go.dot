@@ -31,7 +31,9 @@
       - a show folder or a .wfg given to it (a double-click on a .wfg, a
         drop on this file, the installer's association): that show;
       - nothing: the empty show, copied once to %APPDATA%\Go.dot\Untitled
-        and opened from there with its show settings (--show-settings).
+        and opened from there with its show settings (--show-settings), and
+        giving way (--yield-to-opened): while nothing has been done in it, the
+        first show New or Open starts takes its window's place.
         Copied because beside this file is Program Files once installed,
         where a save would be refused - the Mac copies it out of its bundle
         for the same reason.
@@ -194,7 +196,7 @@ int WINAPI WinMain (HINSTANCE instance, HINSTANCE previous, LPSTR ignored, int s
             return 1;
         }
 
-        extra = L" --show-settings";
+        extra = L" --show-settings --yield-to-opened";
     }
 
     if (arguments != NULL)

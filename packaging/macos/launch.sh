@@ -50,7 +50,9 @@ log="$logs/go.dot-$(date +%Y%m%d-%H%M%S).log"
 # UNLESS A SHOW WAS DOUBLE-CLICKED (--yield-to-opened). Finder does not hand
 # the file over on the command line: it starts the app and then says which
 # file, so this script cannot know. wfg finishes the launch before choosing,
-# and a show handed over takes the empty one's place, settings and all.
+# and a show handed over takes the empty one's place, settings and all. The
+# empty show goes on giving way after that: while nothing has been done in it,
+# the first show New or Open starts takes its window's place.
 #
 # --ui is resolved against the working directory, so run from Resources.
 cd "$resources"

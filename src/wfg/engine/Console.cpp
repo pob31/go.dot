@@ -2397,9 +2397,14 @@ namespace
 
             More than one handed over: the first here, the rest as Open show...
             opens them, once there is a window to open them from. Elsewhere
-            than the Mac there is nothing to finish, and the flag does nothing. */
+            than the Mac there is nothing to finish here.
+
+            And on every system the empty show goes on giving way: while nothing
+            has been done in it, the first show New or Open starts takes its
+            place (Console.h, `emptyShowAtStart`). */
         auto showSettingsAtStart = args.containsOption ("--show-settings");
         std::vector<juce::String> openedAtLaunch;
+        std::size_t openedAtLaunchCount = 0;
 
         if (wantWindow && args.containsOption ("--yield-to-opened"))
         {
@@ -2407,6 +2412,8 @@ namespace
             application->onOpen = [&openedAtLaunch] (const juce::String& opened) { openedAtLaunch.push_back (opened); };
             wfg::app::WindowApplication::finishLaunching();
             application->onOpen = nullptr;
+
+            openedAtLaunchCount = openedAtLaunch.size();
 
             if (! openedAtLaunch.empty())
             {
@@ -4960,15 +4967,25 @@ namespace
                     is changed on, so the host cannot go from under it. */
                 clientHost.takes = &takePictures;
                 clientHost.openSettingsAtStart = showSettingsAtStart;
+
+                //  Not when a show handed over at launch has already taken its place.
+                clientHost.emptyShowAtStart = args.containsOption ("--yield-to-opened")
+                                                && openedAtLaunchCount == 0;
                 clientHost.traffic = &traffic;
 
                #if JUCE_LINUX
-                clientHost.associate = []
+                /*  Not once the .deb is installed: it has told the desktop
+                    for everybody (scripts/package-linux-deb.sh), and a copy
+                    of it for one user would only shadow it. */
+                if (! juce::File ("/usr/share/applications/go.dot.desktop").existsAsFile())
                 {
-                    const auto program = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
-                                           .getParentDirectory();
-                    return wfg::app::associate (false, program, wfg::app::defaultDataHome()).said;
-                };
+                    clientHost.associate = []
+                    {
+                        const auto program = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                               .getParentDirectory();
+                        return wfg::app::associate (false, program, wfg::app::defaultDataHome()).said;
+                    };
+                }
                #endif
 
                 client = makeClient (clientHost);

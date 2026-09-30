@@ -643,8 +643,11 @@ DMG that is **signed with the author's Developer ID, notarized and stapled** by
 environment. Windows also gets that folder as an **Inno Setup installer**
 (`packaging/windows/go.dot.iss`), which adds the Start menu entry, the
 uninstaller and the `.wfg` file type, so a double-clicked show opens in Go.dot;
-the workflow installs it, checks it and uninstalls it before uploading. Windows
-and Linux are not signed. `cmake/WfgInstall.cmake` is the list; the extra files
+the workflow installs it, checks it and uninstalls it before uploading. Linux
+likewise gets a **.deb** (`scripts/package-linux-deb.sh`): the folder in
+`/opt/go.dot`, `/usr/bin/go.dot`, the menu entry, the icons and the `.wfg` type,
+installed, checked and removed by the workflow the same way. Windows and Linux
+are not signed. `cmake/WfgInstall.cmake` is the list; the extra files
 live in `packaging/`.
 
 - **To publish one**, bump `project(VERSION)` in the root `CMakeLists.txt` if

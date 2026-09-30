@@ -137,6 +137,13 @@ namespace wfg
             another show, which already has one. */
         bool openSettingsAtStart = false;
 
+        /*  THIS WINDOW IS ON THE LAUNCHER'S EMPTY SHOW (`--yield-to-opened`),
+            which gives way (author, 2026-09-30): while nothing has been done
+            in it, the show that New or Open starts takes its place, and this
+            window goes, rather than being left beside it. Only the launchers
+            pass the flag, and only for the empty show they chose. */
+        bool emptyShowAtStart = false;
+
         /*  THE FOURTH DOOR (author, 2026-09-30: a network monitor "similar to
             the one in WFS-DIY"): what crossed the wire, OSC and MIDI, in and
             out. Not a reach past the tick thread either - it is a ring the

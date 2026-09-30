@@ -149,10 +149,42 @@ jobs:
         # tar, not zip: it keeps the executable bits on wfg and go.dot.sh.
         run: tar -C stage -czf "$PKG.tar.gz" "$PKG"
 
+      # The package (scripts/package-linux-deb.sh): the same folder in /opt,
+      # plus the .wfg file type, the menu entry and the icons for everybody.
+      - name: Build the package
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: bash scripts/package-linux-deb.sh "stage/$PKG" "$VERSION" "$PKG.deb"
+
+      # What a tester's double-click relies on: apt installs it with its
+      # dependencies, the desktop's databases know the type afterwards, the
+      # installed copy runs - and removing it takes all of it away.
+      - name: Smoke-test the package
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends "./$PKG.deb"
+          test -x /opt/go.dot/wfg
+          test "$(readlink -f /usr/bin/go.dot)" = /opt/go.dot/go.dot.sh
+          grep -q 'MimeType=application/x-go.dot-show;' /usr/share/applications/go.dot.desktop
+          grep -q '<glob pattern="\*.wfg"/>' /usr/share/mime/packages/go.dot.xml
+          test -f /usr/share/icons/hicolor/256x256/mimetypes/application-x-go.dot-show.png
+          if [ -d /usr/share/mime/application ]; then
+            test -f /usr/share/mime/application/x-go.dot-show.xml   # the trigger ran
+          fi
+          /opt/go.dot/wfg --version
+          /opt/go.dot/wfg validate /opt/go.dot/Untitled
+          sudo apt-get remove -y go.dot
+          test ! -e /opt/go.dot
+          test ! -e /usr/share/applications/go.dot.desktop
+          test ! -e /usr/bin/go.dot
+
       - uses: actions/upload-artifact@v5
         with:
           name: ${{ env.PKG }}
-          path: ${{ env.PKG }}.tar.gz
+          path: |
+            ${{ env.PKG }}.tar.gz
+            ${{ env.PKG }}.deb
           retention-days: 14
           if-no-files-found: error
 
@@ -394,7 +426,8 @@ jobs:
           | Windows 10/11 x64 | `*-windows-x64-setup.exe` — installs Go.dot and opens `.wfg` shows with it |
           | Windows 10/11 x64, no install | `*-windows-x64.zip` — unzip and run `Go.dot.exe` |
           | macOS 13.3+, Apple silicon and Intel | `*-macos-universal.dmg` — drag Go.dot to Applications |
-          | Linux x86_64 (glibc of Ubuntu 24.04 or newer) | `*-linux-x86_64.tar.gz` — run `./go.dot.sh` |
+          | Ubuntu 24.04 or newer, x86_64 | `*-linux-x86_64.deb` — `sudo apt install ./<file>.deb`, then Go.dot is in the applications menu and opens `.wfg` shows |
+          | Linux x86_64, no install (glibc of Ubuntu 24.04 or newer) | `*-linux-x86_64.tar.gz` — run `./go.dot.sh` |
           EOF
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \

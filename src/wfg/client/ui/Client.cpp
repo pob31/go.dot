@@ -2057,6 +2057,16 @@ namespace wfg::client
                                                                                                                         : folder.getFileName())
                                                                             + " in a new window"
                                                                         : juce::String (refused));
+
+                                          /*  THE LAUNCHER'S EMPTY SHOW GIVES WAY (Console.h,
+                                              `emptyShowAtStart`): the show on its way takes
+                                              this window's place while nothing has been done
+                                              here - nothing to save, and nothing to undo, so
+                                              an empty show somebody worked in and saved is
+                                              never closed under them. A refusal leaves it. */
+                                          if (refused.empty() && host.emptyShowAtStart && host.quit
+                                                && ! last.hasSomethingToSave() && last.canUndo == model::Flag::no)
+                                              host.quit();
                                       });
             }
 

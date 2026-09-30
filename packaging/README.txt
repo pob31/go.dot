@@ -54,9 +54,21 @@ open in a window is brought forward instead of being opened twice.
             The command-line tool is inside the app:
                 /Applications/Go.dot.app/Contents/MacOS/wfg --version
 
-  Linux     ./go.dot.sh  (or ./go.dot.sh ~/shows/Tuesday)
-            Built on Ubuntu 24.04; it needs ALSA, FreeType, fontconfig and
+  Linux     Two downloads, the same Go.dot, built on Ubuntu 24.04. The
+            package (.deb) installs it for everybody:
+                sudo apt install ./go.dot-<version>-linux-x86_64.deb
+            and then Go.dot is in the applications menu, `go.dot` starts it
+            from a terminal, and a double-click on a show's .wfg opens it;
+            `sudo apt remove go.dot` takes it away. The tarball installs
+            nothing: unpack it and run ./go.dot.sh (or ./go.dot.sh
+            ~/shows/Tuesday). Either needs ALSA, FreeType, fontconfig and
             the X11 libraries, which a desktop install already has.
+
+            The first time, it copies the empty show to
+            ~/.local/share/Go.dot/Untitled and opens that. Started from the
+            menu or a double-click, each launch writes its log to
+            ~/.local/state/Go.dot/logs - attach the newest one to a report;
+            from a terminal, the terminal shows it.
 
             A multichannel interface: a desktop running PipeWire holds it,
             and ALSA then offers only two channels. Use JACK instead:
@@ -66,13 +78,13 @@ open in a window is brought forward instead of being opened twice.
             installed, so every channel is there and the desktop keeps its
             sound.
 
-            To open a show's .wfg with a double-click, choose "Open .wfg
-            files with this Go.dot" in the File menu, or run
-            ./wfg associate  - for you alone, pointing at this folder: run
-            it again if you move the folder, and ./wfg associate --remove
-            to take it away.
+            From the tarball, to open a show's .wfg with a double-click,
+            choose "Open .wfg files with this Go.dot" in the File menu, or
+            run ./wfg associate  - for you alone, pointing at this folder:
+            run it again if you move the folder, and ./wfg associate
+            --remove to take it away. The package does this for you.
 
-The web client is served beside the window: the log (on Linux, the terminal)
+The web client is served beside the window: the log (or the terminal)
 prints its address (http://localhost:<port>/ui). A tablet on the same network can open it with
 this machine's address in place of localhost.
 
