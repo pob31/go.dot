@@ -365,8 +365,20 @@ namespace
         bool stop (int track) override
         {
             stops.push_back (track);
-            playing.erase (track);
+
+            /*  A real rack channel goes on sounding after a stop while its
+                plugins ring out (decision CG); `ringsOnStop` lets a test keep
+                it sounding, as HostPlayer's isPlaying does. */
+            if (! (ringsOnStop && isRack (track)))
+                playing.erase (track);
+
             return true;
+        }
+
+        bool isRack (int track) const
+        {
+            return std::any_of (rack.begin(), rack.end(),
+                                [track] (const auto& entry) { return entry.second == track; });
         }
 
         bool stopAtSample (int track, int, std::int64_t) override  { return stop (track); }
@@ -412,6 +424,7 @@ namespace
 
         std::map<std::string, int> rack { { "MC000011", 2 } };
         std::int64_t samples = 0;
+        bool ringsOnStop = false;
 
         std::vector<cue::ArmRequest> arms, armed;
         std::vector<std::pair<int, std::int64_t>> launches;
@@ -667,6 +680,229 @@ TEST_CASE ("mic: Esc lets the tail ring out, and a kill does not")
 
         CHECK (rig.audio.kills == std::vector<int> { 2 });
     }
+}
+
+namespace
+{
+    /*  A scene of one mic cue on Vox 1, fired by name and opened: the group
+        MC000090 (automatic) holding MC000091, and a stop cue MC000092 aimed at
+        the group. The standby is moved off the fixture's own mic cue first, so
+        that no arm of its holds the channel. */
+    void openScene (RunRig& rig)
+    {
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("MC000001"), "MC000006").ok);
+
+        REQUIRE (rig.document.createCue ("MC000001", 2, "group", "Scene", "MC000090").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/MC000090/advance", "auto").ok);
+        REQUIRE (rig.document.createCue ("MC000090", 0, "mic", "Voix groupe", "MC000091").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/MC000091/input", "MC000021").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/MC000091/channel", "MC000011").ok);
+
+        REQUIRE (rig.document.createCue ("MC000001", 3, "transport", "Scene out", "MC000092").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/MC000092/target", "MC000090").ok);
+
+        rig.tickOnce();
+        rig.tickOnce();
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string ("MC000090") });
+        REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.arms.empty(); }));
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.opens.empty(); }));
+    }
+}
+
+TEST_CASE ("mic: Esc on a group lets its mic member's tail ring out, and a double Esc cuts it")
+{
+    /*  THE SAME PAIR ONE LEVEL IN (namespace draft §23, 2026-09-30). A stopping
+        group ended its members with `run.kill`, so a mic cue inside a scene was
+        cut dead by Esc - its reverb reset - where Esc on the same cue alone lets
+        the tail ring (CG). Now the group stops its members the way it was
+        stopped itself: Esc rings out, at the cue's own level, and only a double
+        Esc cuts. */
+    for (const auto* how : { "run.stopAll", "run.killAll" })
+    {
+        INFO (std::string (how));
+        RunRig rig;
+
+        /*  A CUT, so what reaches the voice is the group's stop itself: with a
+            panic fade the fade's own end would stop the member either way. */
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+
+        openScene (rig);
+
+        const auto cut = std::string (how) == "run.killAll";
+
+        rig.submitAndTick (how);
+        REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.stops.empty() || ! rig.audio.kills.empty(); }, 20));
+
+        if (cut)
+        {
+            CHECK (rig.audio.kills == std::vector<int> { 2 });
+            CHECK (rig.audio.stops.empty());
+        }
+        else
+        {
+            CHECK (rig.audio.stops == std::vector<int> { 2 });
+            CHECK (rig.audio.kills.empty());
+            CHECK_FALSE (rig.runOf ("MC000091")->killed);
+
+            /*  AND THE TAIL IS HEARD: the output stays at the cue's level while
+                the channel rings, the input shut behind it. */
+            CHECK (rig.audio.levels[2] > -60.0);
+        }
+
+        CHECK (rig.tickUntil ([&rig] { return rig.runOf ("MC000090")->isFinished(); }));
+    }
+}
+
+TEST_CASE ("mic: a real double Esc - Esc, then Esc again inside the panic fade - kills a group's mic member")
+{
+    /*  EVERY DOUBLE ESC IS TWO PRESSES. The client and the D700 send
+        `run.stopAll` on the first and `run.killAll` on the second, within 750 ms,
+        so the kill lands inside the panic fade Esc began - with the member
+        already on its way out, stopped by its group and held by the fade. The
+        kill reaches it through its group's job a tick later, and the stop that
+        the fade's letting go makes due was issued in between, on the member's
+        own mark: a stop, not a kill, and the reverb rang through the press that
+        promises everything is cut (CN). Read from above now: a run under a
+        killed group is cut however it was asked to stop (namespace draft
+        §23.2). */
+    RunRig rig;                                          // the show's own panic fade: a second
+    openScene (rig);
+
+    rig.submitAndTick ("run.stopAll");
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.audio.stops.empty());                   // still fading
+    REQUIRE (rig.audio.kills.empty());
+
+    rig.submitAndTick ("run.killAll");
+    REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.stops.empty() || ! rig.audio.kills.empty(); }, 20));
+
+    CHECK (rig.audio.kills == std::vector<int> { 2 });
+    CHECK (rig.audio.stops.empty());
+    CHECK (rig.tickUntil ([&rig] { return rig.runOf ("MC000090")->isFinished(); }));
+}
+
+TEST_CASE ("mic: a double Esc after Esc's stop has landed still cuts the tail it left ringing - alone or in a group")
+{
+    /*  THE SECOND PRESS AFTER THE FIRST HAS DONE ITS WORK (namespace draft
+        §23.2). With the panic fade at nought - or any fade shorter than the gap
+        between the two presses - Esc's stop reaches the mic cue before the
+        double Esc does: its input shut, its reverb ringing out, as Esc
+        promises (CG). The stop had been issued, and a run whose stop was
+        issued was passed over for good, so the kill that followed never
+        reached the audio side and the tail rang through the press that
+        promises everything is cut (CN). A kill after a stop now goes through,
+        once. */
+    for (const bool inAGroup : { false, true })
+    {
+        INFO ((inAGroup ? "a group's member" : "a cue on its own"));
+        RunRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+        rig.audio.ringsOnStop = true;
+
+        const std::string cue = inAGroup ? "MC000091" : "MC000002";
+
+        if (inAGroup)
+            openScene (rig);
+        else
+            REQUIRE (rig.fireAndLaunch (cue) != nullptr);
+
+        rig.submitAndTick ("run.stopAll");
+        REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.stops.empty(); }, 20));
+        CHECK (rig.audio.kills.empty());
+
+        for (int n = 0; n < 5; ++n)                      // the tail rings on
+            rig.tickOnce();
+
+        REQUIRE_FALSE (rig.runOf (cue)->isFinished());
+
+        rig.submitAndTick ("run.killAll");
+        CHECK (rig.tickUntil ([&rig] { return ! rig.audio.kills.empty(); }, 20));
+        CHECK (rig.audio.kills == std::vector<int> { 2 });
+        CHECK (rig.tickUntil ([&rig, &cue] { return rig.runOf (cue)->isFinished(); }, 20));
+
+        for (int n = 0; n < 5; ++n)                      // and only once
+            rig.tickOnce();
+
+        CHECK (rig.audio.kills.size() == 1u);
+    }
+}
+
+TEST_CASE ("mic: a stop cue aimed at a group stops its mic member rather than killing it - behind the group's silenced level")
+{
+    /*  A STOP, NOT A KILL, which is what the group's graceful stop now sends
+        (namespace draft §23.2): the input shut and the channel left to ring.
+
+        WHAT IS HEARD OF IT IS NOTHING, AND THAT IS A KNOWN GAP (§23.2, gap a),
+        not this rule: a stop cue aimed at a group moves the GROUP's own level -
+        to silence at once for the `hard` verb - and a group's level trims every
+        run under it, so the member's output is already at silence when its
+        input is shut. Pinned as it is, so that the day the gap is ruled on this
+        is the line that says so. */
+    RunRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+    openScene (rig);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("MC000092") });
+    REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.stops.empty() || ! rig.audio.kills.empty(); }, 20));
+
+    CHECK (rig.audio.stops == std::vector<int> { 2 });
+    CHECK (rig.audio.kills.empty());
+    CHECK_FALSE (rig.runOf ("MC000091")->killed);
+
+    CHECK (rig.audio.levels[2] <= -60.0);               // gap (a): the tail rings behind silence
+
+    CHECK (rig.tickUntil ([&rig] { return rig.runOf ("MC000090")->isFinished(); }));
+}
+
+TEST_CASE ("mic: a mic cue in the header of a scene the horizon prepares is armed with its gate shut, and opens at GO")
+{
+    /*  A PREPARATION IS ANTICIPATION, WHICH NOBODY HEARS (§13.1, §18.5): a mic
+        cue made ready is its channel claimed and its plugins set, the gate
+        shut. The horizon launched every header cue but a media one, so a mic
+        cue in a scene's header opened its gate while the pointer was only
+        resting on the scene - an open microphone before any GO, and one no Esc
+        was stopping, since what was only made ready is left alone (namespace
+        draft §23.3). It is armed now, as a media cue is, and the GO that
+        enters the scene opens it. */
+    RunRig rig;
+
+    REQUIRE (rig.document.createCue ("MC000001", 2, "group", "Scene", "MC000090").ok);   // manual
+    REQUIRE (rig.document.createCue ("MC000090", 0, "memo", "Line", "MC000094").ok);
+
+    const auto header = rig.document.createRole ("MC000090", "header");
+    REQUIRE (header.ok);
+    REQUIRE (rig.document.createCue (header.id, 0, "mic", "Voix entree", "MC000093").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000093/input", "MC000021").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000093/channel", "MC000011").ok);
+
+    //  The standby on the scene: the horizon prepares it, and the fixture's own mic lets go of Vox 1.
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("MC000001"), "MC000090").ok);
+    REQUIRE (rig.tickUntil ([&rig] { return rig.runOf ("MC000093") != nullptr; }));
+    REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.arms.empty(); }));
+    rig.audio.completeArms (rig.engine);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    //  MADE READY: the channel its own, on its track, and the gate shut.
+    const auto* mic = rig.runOf ("MC000093");
+    REQUIRE (mic != nullptr);
+
+    const auto micId = mic->id;
+    CHECK (mic->state == cue::runState::armed);
+    CHECK (mic->track == 2);
+    CHECK_FALSE (mic->prepare.empty());
+    CHECK (rig.audio.opens.empty());
+
+    //  GO enters the scene, and its header opens that very run.
+    rig.submitAndTick ("go");
+    CHECK (rig.tickUntil ([&rig] { return ! rig.audio.opens.empty(); }, 20));
+    CHECK (rig.runOf ("MC000093")->id == micId);
 }
 
 TEST_CASE ("mic: a fade that stops a mic cue closes its input over the fade and leaves its level")

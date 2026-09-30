@@ -28,10 +28,12 @@ input again on every pass round the loop, as a looper's overdub does, and
 `take.undo` takes the whole layer off again. `take.keep` writes the take into
 the show's media as a float WAV named after its channel (stage 9c.6), and Keep
 as cue adds a media cue after the mic cue that plays it. Esc lets go of the
-channel and the take is held, silent and kept; the mic cue "Scene 5 loop", whose GO loops the
-take it finds, plays it again with its input heard through as well. Clear
-empties the channel, and a double Esc ends it. And `wfg replay` reproduces the
-session with no audio at all.
+channel and the take is held, silent and kept; the channel passes to the mic
+cue "Scene 5 loop", armed ahead at standby and left ready by Esc (namespace
+draft 23.3), and its GO launches that very run, loops the take it finds and
+plays it again with its input heard through as well. Clear empties the
+channel, and a double Esc ends it. And `wfg replay` reproduces the session
+with no audio at all.
 """
 
 import argparse
@@ -120,6 +122,31 @@ def wait_for_frames(render: Path, frames: int, timeout: float = 30.0) -> bool:
 
 def take_word(server: Server) -> str:
     return value_of(server, f"/godot/slot/{CHANNEL}/take") or ""
+
+
+def holder_other_than(server: Server, run: "str | None"):
+    """The run holding the channel, once it is one other than `run`; None before."""
+    now = value_of(server, f"/godot/slot/{CHANNEL}/holder")
+    return now if now and now != run else None
+
+
+def unfinished_runs_of(server: Server, cue: str) -> "list[str]":
+    """Every run of `cue` the tree publishes that has not finished."""
+    status, body = common.http_get(server.http_port, "/godot/run")
+    if status != 200:
+        return []
+    try:
+        contents = common.json.loads(body).get("CONTENTS") or {}
+    except Exception:
+        return []
+    out = []
+    for run_id, node in contents.items():
+        leaves = node.get("CONTENTS") or {}
+        of = ((leaves.get("cue") or {}).get("VALUE") or [None])[0]
+        state = ((leaves.get("state") or {}).get("VALUE") or [None])[0]
+        if of == cue and state not in ("done", "failed"):
+            out.append(run_id)
+    return out
 
 
 def number(server: Server, row: str) -> float:
@@ -302,10 +329,15 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
                 report.equal(value_of(server, f"/godot/cue/{made[0]}/file"), "takes/Looper take 2.wav",
                              "playing the file it wrote")
 
-            # ESC: the channel let go of, and the take held - silent, and kept.
+            # ESC: the channel let go of, and the take held - silent, and kept. The
+            # channel passes to the cue waiting for it: Scene 5 loop, armed ahead at
+            # standby, which Esc leaves ready - it is not running, and the pointer has
+            # not moved (namespace draft 23.3).
             send(server, "/godot/cmd/run/stopAll")
-            freed = common.wait_until(lambda: not value_of(server, f"/godot/slot/{CHANNEL}/holder"), timeout=5.0)
-            report.check(freed, "Esc frees the channel once the tail has rung out")
+            waiting = common.wait_until(lambda: holder_other_than(server, holder), timeout=5.0)
+            report.check(bool(waiting), "Esc lets go of the channel once the tail has rung out", str(waiting))
+            report.equal(value_of(server, f"/godot/run/{waiting}/cue") if waiting else None, SCENE_5,
+                         "and it passes to Scene 5 loop, armed ahead at standby and left ready by Esc")
             report.equal(wait_for(server, f"/godot/slot/{CHANNEL}/take", "held"), "held",
                          "and the take is held, not lost")
             marks["held"] = clock_frame(server)
@@ -321,10 +353,16 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
             report.check(wait_for_frames(render, marks["held"] + int(RATE * 1.0)), "the render runs on, held")
 
             # SCENE 5: a later mic cue loops the take it finds, its input heard through as well.
+            # The run the standby armed ahead already holds the channel, so what says GO
+            # acted is that run sounding - and then that nothing else of the cue was made.
             send(server, "/godot/cmd/go")
-            again = common.wait_until(lambda: value_of(server, f"/godot/slot/{CHANNEL}/holder") or None,
-                                      timeout=10.0)
-            report.check(bool(again) and again != holder, "GO on Scene 5 loop takes the channel", str(again))
+            sounding = wait_for(server, f"/godot/run/{waiting}/state", "playing") if waiting else None
+            report.equal(sounding, "playing",
+                         "GO on Scene 5 loop launches the run the standby armed ahead, and it sounds")
+            again = value_of(server, f"/godot/slot/{CHANNEL}/holder")
+            report.equal(again, waiting, "and that run plays on the channel")
+            report.equal(unfinished_runs_of(server, SCENE_5), [waiting] if waiting else [],
+                         "and no second run of the cue was made beside it")
             report.equal(wait_for(server, f"/godot/slot/{CHANNEL}/take", "looping"), "looping",
                          "and loops the take it found: onGo is loop")
             marks["scene5"] = clock_frame(server)

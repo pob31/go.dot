@@ -1195,6 +1195,13 @@ namespace wfg::cue
             `onGo` says, once the cue both has GO and holds the channel. */
         void takeOnGo (const std::string& runId, const std::string& channelId);
 
+        /*  THE GO HALF OF IT, for either road a GO reaches a mic run by - fired
+            cold (`fireKind`), or armed ahead by the standby and launched
+            (`armInternal`, 2026-09-30): now when the run holds its channel,
+            and when the claim lands otherwise. Nothing on a channel that does
+            not sample, or with no take table. */
+        void applyTakeOnGo (const juce::ValueTree& cue, const std::string& runId);
+
         /** A channel let go, the take held; and a waiting cue's GO acted on. */
         void takeReleased (const std::string& slotId, const std::string& toRun);
 
@@ -1319,6 +1326,39 @@ namespace wfg::cue
         void advanceWaits (Engine& engine, std::int64_t tick);
         void armStandby (Engine& engine);
         void advanceGroups (Engine& engine);
+
+        /*  A PREPARATION GIVEN BACK, as records: every value the block under
+            `runId` pre-sent is written back with an ordinary `node.set`, and
+            then `run.revoke` ends the block and everything in it. The pointer
+            moving away does it (`armStandby`), and so does a group stopped
+            while it was only being made ready (`advanceGroups`, 2026-09-30).
+
+            HOOKS ONLY. It submits, and a handler that submitted would put the
+            records in a replay twice - once from the log and once from itself.
+            The handlers that revoke (`audio.apply`, `audio.clockMoved`) call
+            `revokePrepared` and put nothing back.
+
+            AND THE BLOCK'S NETWORK JOBS ARE SETTLED HERE, so that a pre-send
+            whose answer is read later in this same tick writes nothing. */
+        void submitRevocation (Engine& engine, const std::string& runId);
+
+        /*  ONE MEMBER OF A STOPPING GROUP, ended the way the group is ending:
+            `run.stop` when it was stopped, `run.kill` when it was killed, once
+            a member rather than once a tick, and `run.done` for a post-wait a
+            kill finds (namespace draft §23.2). Hook-side, as it submits. */
+        void endMember (Engine& engine, const Run& member, bool graceful);
+
+        /*  WHAT SOMEBODY ASKED FOR INSIDE A BLOCK THAT NEVER STARTED, ended the
+            way the block is (`endMember`), and answering whether any of it is
+            still unfinished - which holds the block's revocation back
+            (namespace draft §23.3). */
+        bool endAskedForIn (Engine& engine, const std::string& blockRun, bool graceful);
+
+        /*  WHETHER A RUN IS UNDER A KILL: any run above it that skips its
+            footer. A killed group reaches its members through its own job, a
+            tick after the press, and a member is being killed in that tick all
+            the same (namespace draft §23.2). */
+        bool underAKill (const Run& run) const;
 
         /*  A SAMPLER GROUP'S MEMBERS PHASE, every tick: arm every member that
             has no run onto its strip, let a closing group finish, end the idle
@@ -1450,6 +1490,12 @@ namespace wfg::cue
             a replay runs no hooks - and it does not need to, because the arm it
             would have asked for is a record in the log. */
         std::string armedStandby;
+
+        /*  BLOCKS THE POINTER LEFT WITH SOMETHING PLAYING IN THEM - a member
+            fired by name - which are given back once that has gone
+            (`armStandby`, namespace draft §23.3). Hook state: the revocation
+            it leads to is a record in the log. */
+        std::vector<std::string> blocksToGiveBack;
 
         /*  The tick being processed, so a stop fired inside a command
             handler can be scheduled against the same clock the tick hook

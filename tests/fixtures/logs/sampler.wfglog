@@ -63,7 +63,11 @@ A 69 17 engine run.kill s:"YV3KST15"
 A 70 18 engine run.ended s:"YV3KST15"
 #
 # THE STOP CUE AIMED AT BANK A disarms it: its members are killed, it ends,
-# and the strip Rain held goes to the member that was waiting.
+# and the strip Rain held goes to the member that was waiting. (2026-09-30,
+# namespace draft 23.2: a session recorded today would stop the members rather
+# than kill them, and the bank would be ended by its own job once they had
+# gone, not by the stop cue at 94; replayed, these logged records still
+# reproduce the session.)
 A 93 19 udp:127.0.0.1:52623 go s:"PRP0QWSQ"
 A 94 20 engine run.kill s:"BPDDSN4A"
 A 94 21 engine run.kill s:"G8M6D5YN"

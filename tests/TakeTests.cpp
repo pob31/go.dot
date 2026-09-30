@@ -535,6 +535,85 @@ TEST_CASE ("take: GO does what the cue's onGo says - now, or when the channel fr
     CHECK (verbs.back() == TakeVerb::loop);
 }
 
+TEST_CASE ("take: GO on a mic cue the standby armed ahead does what its onGo says, once")
+{
+    /*  THE ORDINARY GO, and the one that did nothing to the take (namespace
+        draft §23, 2026-09-30). A mic cue at standby is armed ahead - its channel
+        claimed, the gate shut - and GO on it launches that run rather than
+        firing the cue afresh. That road never reached the take: `onGo` was acted
+        on only where a cue is fired cold, so Scene 5's GO found the take held
+        and left it silent.
+
+        WITH A PRE-WAIT the GO arrives at the cue when the wait is over, through
+        the road a cue fired cold takes - so the take waits with its cue, and
+        the loop is asked for there and not a second time. */
+    for (const auto* wait : { "0", "0.2" })
+    {
+        INFO ("preWait " << wait);
+        Rig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/TK000008/preWait", wait).ok);
+        REQUIRE (rig.fireAndLaunch ("TK000002") != nullptr);
+
+        //  A take, recorded and closed, then held when its cue lets go of the channel.
+        REQUIRE (rig.applied ("take.record", { text (looper) }));
+        REQUIRE (rig.applied ("take.record", { text (looper) }));
+        rig.audio.reports.push_back ({ looper, "pressed", 3.0 });
+        rig.tickOnce();
+        rig.tickOnce();
+        REQUIRE (rig.take().state == "looping");
+
+        REQUIRE (rig.applied ("run.stop", { text (rig.runOf ("TK000002")->id) }));
+        REQUIRE (rig.tickUntil ([&rig] { return rig.runOf ("TK000002")->isFinished(); }));
+        REQUIRE (rig.take().state == "held");
+
+        //  The standby on Scene 5 loop, whose onGo is loop: armed ahead, the channel its own.
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("TK000001"), "TK000008").ok);
+        REQUIRE (rig.tickUntil ([&rig]
+        {
+            const auto* run = rig.runOf ("TK000008");
+            return run != nullptr && run->track >= 0;
+        }));
+
+        const auto armedId = rig.runOf ("TK000008")->id;
+        CHECK_FALSE (rig.runOf ("TK000008")->prepare.empty());
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+
+        const auto loops = [&rig]
+        {
+            return std::count_if (rig.audio.posts.begin(), rig.audio.posts.end(),
+                                  [] (const TakePlayer::Posted& posted)
+                                  {
+                                      return posted.channel == looper && posted.verb == TakeVerb::loop;
+                                  });
+        };
+
+        const auto loopsBefore = loops();
+
+        //  GO launches that very run, and loops the take it found - after the wait, when there is one.
+        REQUIRE (rig.applied ("go"));
+        CHECK (rig.runOf ("TK000008")->id == armedId);
+
+        if (std::string (wait) == "0")
+        {
+            CHECK (rig.runOf ("TK000008")->launchRequested);
+        }
+        else
+        {
+            CHECK (rig.runOf ("TK000008")->state == cue::runState::waiting);
+            CHECK (rig.take().state == "held");
+            REQUIRE (rig.tickUntil ([&rig] { return rig.take().state == "looping"; }, 30));
+        }
+
+        CHECK (rig.take().state == "looping");
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (loops() == loopsBefore + 1);
+    }
+}
+
 TEST_CASE ("take: the cue letting go holds the take, a first pass closed as it stood - Esc and a double Esc alike")
 {
     Rig rig;

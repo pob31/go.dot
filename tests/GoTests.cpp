@@ -3916,6 +3916,467 @@ TEST_CASE ("panic fade: a GO while a manual group fades out starts the scene aga
 }
 
 //==============================================================================
+/*  THE STOP LEVELS HELD TO THEIR LAW (namespace draft §23, 2026-09-30).
+
+    ESC BRINGS A SCENE DOWN THE WAY IT WOULD HAVE ENDED ANYWAY. A group asked
+    to stop ended its members with `run.kill`, which marks each of them "skip
+    your footer" - so a scene inside a scene, aborted by Esc, never gave back
+    what it held, and PRD §4.4's "Esc runs footers" was true of the outermost
+    level only. Now a graceful stop stops the members and only a kill kills
+    them; the parent already waits for every member before its own footer, so
+    the innermost comes down first (PRD: "nested scopes tear down
+    innermost-first"). */
+namespace
+{
+    /*  The rig's group with a group inside it, ahead of its memos, each with a
+        footer of its own. The inner group's one member waits out a long
+        pre-wait, which holds the whole scene in its members until somebody
+        stops it. */
+    struct NestedRig : GroupRig
+    {
+        NestedRig()
+        {
+            inner = document.createCue (groupId, 0, "group", "Inner").id;
+            setCue (inner, "advance", "auto");
+
+            deep = document.createCue (inner, 0, "memo", "Deep").id;
+            setCue (deep, "preWait", "10");
+
+            innerRelease = document.createCue (roleOf (inner, "footer"), 0, "memo", "Inner release").id;
+            outerRelease = document.createCue (roleOf (groupId, "footer"), 0, "memo", "Outer release").id;
+        }
+
+        /** GO on the outer group, ticked on until the inner group's member exists. */
+        void start()
+        {
+            setStandby (groupId);
+            REQUIRE (submitAndTick ("go").rejected == 0);
+            REQUIRE (tickUntil ([this] { return ! runOf (deep).empty(); }));
+
+            outerRun = runOf (groupId);
+            innerRun = runOf (inner);
+
+            REQUIRE_FALSE (outerRun.empty());
+            REQUIRE_FALSE (innerRun.empty());
+            REQUIRE (runs.find (innerRun)->parent == outerRun);
+        }
+
+        std::string inner, deep, innerRelease, outerRelease, outerRun, innerRun;
+    };
+}
+
+TEST_CASE ("stop levels: Esc brings a nested group down innermost-first, and both footers run")
+{
+    NestedRig rig;
+    rig.start();
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+    CHECK (rig.runToCompletion (rig.outerRun) < 400);
+
+    /*  BOTH FOOTERS RAN, the inner scene's as well as the outer's: §4.4's "Esc
+        runs footers" at every level, not only the one Esc reached. */
+    const auto innerReleaseRun = rig.runOf (rig.innerRelease);
+    const auto outerReleaseRun = rig.runOf (rig.outerRelease);
+
+    CHECK_FALSE (innerReleaseRun.empty());
+    REQUIRE_FALSE (outerReleaseRun.empty());
+
+    /*  INNERMOST FIRST: the inner scene had ended before the outer one's
+        footer began, because the outer waits for every member it has. */
+    CHECK (rig.runs.find (rig.innerRun)->endedAtTick
+             <= rig.runs.find (outerReleaseRun)->launchRequestedAtTick);
+
+    /*  STOPPED, NOT KILLED: neither the inner group nor its member carries a
+        kill's marks - so nothing reads this as the operator's kill, and a
+        persistent cue down here would not be suspended by it. */
+    for (const auto& id : { rig.innerRun, rig.runOf (rig.deep) })
+    {
+        INFO ("run " << id);
+        CHECK_FALSE (rig.runs.find (id)->killed);
+        CHECK_FALSE (rig.runs.find (id)->skipFooter);
+    }
+
+    /*  AND NOTHING WAS KILLED AT ALL: a graceful stop, all the way down. */
+    const auto records = LogFile::parse (rig.engine.log().contents()).records;
+
+    CHECK (std::none_of (records.begin(), records.end(),
+                         [] (const auto& record) { return record.command == "run.kill"; }));
+}
+
+TEST_CASE ("stop levels: a double Esc on a nested group runs neither footer, and a stop cue aimed at the outer group runs both")
+{
+    NestedRig rig;
+
+    SUBCASE ("double Esc: every level killed, no footer anywhere")
+    {
+        rig.start();
+
+        REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+        CHECK (rig.runToCompletion (rig.outerRun) < 400);
+
+        CHECK (rig.runOf (rig.innerRelease).empty());
+        CHECK (rig.runOf (rig.outerRelease).empty());
+
+        /*  The immediate path is the one it always was: a group that skips its
+            footer kills its members, and they skip theirs. */
+        CHECK (rig.runs.find (rig.innerRun)->skipFooter);
+
+        /*  AND IT CARRIES `killed`, WHICH IS A KNOWN GAP AND NOT A RULE (namespace
+            draft §23.2, gap c): a member killed by its group is marked as the
+            running pane's kill, and a persistent cue sounding as one would be
+            suspended by a double Esc, against §18.8. Pinned so that the day the
+            gap is ruled on, this line is the one that says so. */
+        CHECK (rig.runs.find (rig.innerRun)->killed);
+    }
+
+    SUBCASE ("a stop cue aimed at the outer group is graceful, as Esc is")
+    {
+        const auto stopId = rig.document.createCue (rig.listId, 3, "transport", "Abort").id;
+        rig.setCue (stopId, "target", rig.groupId);
+
+        rig.start();
+
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (stopId) }).rejected == 0);
+        CHECK (rig.runToCompletion (rig.outerRun) < 400);
+
+        CHECK_FALSE (rig.runOf (rig.innerRelease).empty());
+        CHECK_FALSE (rig.runOf (rig.outerRelease).empty());
+        CHECK_FALSE (rig.runs.find (rig.innerRun)->killed);
+    }
+}
+
+TEST_CASE ("stop levels: a nested group whose member holds its post-wait still comes down")
+{
+    /*  ONE STOP A MEMBER, NOT ONE A TICK. A stopping group sent its stop to every
+        member still running on every tick. A member holding its post-wait
+        answers a stop with `run.ended`, which starts its post-wait again - and
+        the next tick stopped it again, for ever: the scene never came down.
+        Graceful teardown of nested groups makes that an ordinary show, so a
+        member is now asked once, and one already on its way out is left to
+        finish. */
+    NestedRig rig;
+    rig.setCue (rig.deep, "preWait", "0");
+    rig.setCue (rig.deep, "postWait", "0.2");            // ten ticks
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto id = rig.runOf (rig.deep);
+        return ! id.empty() && rig.runs.find (id)->state == cue::runState::postWait;
+    }));
+
+    const auto outerRun = rig.runOf (rig.groupId);
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+    CHECK (rig.runToCompletion (outerRun) < 400);
+    CHECK_FALSE (rig.runOf (rig.innerRelease).empty());
+}
+
+TEST_CASE ("stop levels: a double Esc cuts a footer that is already running")
+{
+    /*  §4.4: a double Esc is immediate and skips footers - a footer Esc had
+        already started among them. A group's stop was only acted on before its
+        footer began, so a footer holding a pre-wait played on to its end
+        through the press that promises everything is dropped. */
+    GroupRig rig;
+    rig.setCue (rig.first, "preWait", "10");             // hold the group in its members
+
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+    rig.setCue (closing, "preWait", "10");               // and in its footer, once it gets there
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    const auto groupRun = rig.runOf (rig.groupId);
+
+    //  Esc: the member comes down, and the footer begins and holds.
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto id = rig.runOf (closing);
+        return ! id.empty() && rig.runs.find (id)->state == cue::runState::waiting;
+    }, 50));
+
+    //  Double Esc: the footer is cut, and the scene is over within a few ticks.
+    REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+    CHECK (rig.runToCompletion (groupRun, 10) < 10);
+    CHECK (rig.runs.find (rig.runOf (closing))->isFinished());
+}
+
+TEST_CASE ("Esc: a group a stop cue is fading out is never handed back, however long its member takes")
+{
+    /*  A FADE WHOSE RUN IS STOPPED GIVES ITS TARGET BACK - the rule for a stop
+        cue killed on its own, where the operator asked nothing of the cue - and
+        Esc stops a stop cue's run with every other root. For a VOICE that is
+        §21.4's hole, closed by the panic fade. For a GROUP it put the scene
+        back to `playing` while its member was still ending, and once the member
+        had gone the scene played its next one, after Esc. A group's `stopping`
+        belongs to its own job, which has already asked its members to stop. */
+    GroupRig rig;
+    rig.setCue (rig.first, "postWait", "1");             // fifty ticks to finish, once it has fired
+
+    const auto stopId = rig.document.createCue (rig.listId, 3, "transport", "Preshow out").id;
+    rig.setCue (stopId, "target", rig.groupId);
+    rig.setCue (stopId, "verb", "fade");
+    rig.setCue (stopId, "duration", "20");
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto id = rig.runOf (rig.first);
+        return ! id.empty() && rig.runs.find (id)->state == cue::runState::postWait;
+    }));
+
+    const auto groupRun = rig.runOf (rig.groupId);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string (stopId) });
+    rig.tickOnce();
+    REQUIRE (rig.runs.find (groupRun)->state == cue::runState::stopping);
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+
+    CHECK (rig.runToCompletion (groupRun) < 400);
+    CHECK (rig.runOf (rig.second).empty());               // the sequence never carried on
+}
+
+TEST_CASE ("stop levels: a member a killed stop cue hands back is killed again, not left playing")
+{
+    /*  ONCE A MEMBER, UNLESS IT CAME BACK. A killed group kills its members once
+        each - and one of them here is a stop cue fading another member out. A
+        stop cue whose own run is killed hands its target back its level and
+        `playing`, so the member it was fading is playing again after the kill
+        reached it. Asked only once, it would play on to the end of its file
+        with the scene waiting for it; it is killed again. (Passes on the code
+        before the once-a-member rule, which killed every member every tick: it
+        is here so that the rule does not take that away.) */
+    GroupRig rig;
+    rig.setCue (rig.groupId, "mode", "timeline");
+
+    const auto bed = rig.document.createCue (rig.groupId, 0, "media", "Bed").id;
+    rig.setCue (bed, "file", "bed.wav");
+
+    const auto out = rig.document.createCue (rig.groupId, 1, "transport", "Bed out").id;
+    rig.setCue (out, "target", bed);
+    rig.setCue (out, "verb", "fade");
+    rig.setCue (out, "duration", "10");
+    rig.setCue (out, "preWait", "0.2");                  // once the bed is sounding
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (bed).empty(); }));
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto bedRun = rig.runOf (bed);
+    const auto track = rig.runs.find (bedRun)->track;
+    REQUIRE (track >= 0);
+    rig.audio.playing.insert (track);
+
+    //  The stop cue fires, and the bed is on its way out over ten seconds.
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (bedRun)->state == cue::runState::stopping; }));
+    REQUIRE (rig.audio.playing.count (track) == 1u);
+
+    const auto groupRun = rig.runOf (rig.groupId);
+    REQUIRE (rig.submitAndTick ("run.kill", { osc::Value::string (groupRun) }).rejected == 0);
+
+    CHECK (rig.runToCompletion (groupRun, 20) < 20);
+    CHECK (rig.audio.playing.count (track) == 0u);
+}
+
+TEST_CASE ("stop levels: with no audio side, a stop cue aimed at a group still runs its footer")
+{
+    /*  A FADE THAT ENDS IN A STOP SAYS THE END ITSELF when there is no audio
+        side to report it - for a sound. It said it for a group too, and so
+        ended the scene on the spot: no member stopped in order, no footer. A
+        `wfg serve` without `--hosted` runs shows of memos and network cues, and
+        its footers are exactly where a scene gives the desk back. */
+    GroupRig rig;
+    rig.runner.setPlayer (nullptr);
+
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+    rig.setCue (rig.first, "preWait", "10");             // hold the group in its members
+
+    const auto stopId = rig.document.createCue (rig.listId, 3, "transport", "Abort").id;
+    rig.setCue (stopId, "target", rig.groupId);
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    const auto groupRun = rig.runOf (rig.groupId);
+
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (stopId) }).rejected == 0);
+    CHECK (rig.runToCompletion (groupRun) < 400);
+    CHECK_FALSE (rig.runOf (closing).empty());
+}
+
+TEST_CASE ("stop levels: a double Esc during Esc's teardown cuts the inner scene's footer, and runs no outer one")
+{
+    /*  EVERY REAL DOUBLE ESC IS TWO PRESSES: the client and the D700 send
+        `run.stopAll` on the first and `run.killAll` on the second, inside 750 ms
+        - so the kill always lands on a teardown Esc has started. Here the inner
+        scene's footer has begun and holds, and the second press has to cut it
+        and leave the outer footer unrun. (A guard: it passes on the code before
+        the kill was read from above too. A rule that passed over every member
+        already on its way out would fail it.) */
+    NestedRig rig;
+    rig.setCue (rig.innerRelease, "preWait", "10");      // the inner footer holds once it begins
+    rig.start();
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto id = rig.runOf (rig.innerRelease);
+        return ! id.empty() && rig.runs.find (id)->state == cue::runState::waiting;
+    }, 50));
+
+    REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+    CHECK (rig.runToCompletion (rig.outerRun, 20) < 20);
+    CHECK (rig.runOf (rig.outerRelease).empty());
+    CHECK (rig.runs.find (rig.runOf (rig.innerRelease))->isFinished());
+}
+
+TEST_CASE ("stop levels: a scene whose parent the second press kills does not begin its footer in that tick")
+{
+    /*  THE KILL IS READ FROM ABOVE (namespace draft §23.2). A killed group
+        reaches its members through its own job, a tick after the press - and a
+        scene inside it that read only its OWN mark in that tick was still being
+        stopped gracefully. Its last member ending in the same drain as the
+        second press, it began its footer, and the footer's cues were spawned and
+        launched under a double Esc that promises none runs. */
+    NestedRig rig;
+    rig.start();
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+
+    //  Esc reaches the inner scene's member...
+    REQUIRE (rig.tickUntil ([&]
+    {
+        return rig.runs.find (rig.runOf (rig.deep))->state == cue::runState::stopping;
+    }, 20));
+
+    //  ...and the second press lands in the drain that ends it.
+    REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+    CHECK (rig.runToCompletion (rig.outerRun, 20) < 20);
+
+    CHECK (rig.runOf (rig.innerRelease).empty());
+    CHECK (rig.runOf (rig.outerRelease).empty());
+}
+
+TEST_CASE ("stop levels: a double Esc never waits out a post-wait")
+{
+    /*  §4.4: the double Esc is immediate. A kill wrote `stopping` over a
+        post-wait, and the `run.ended` that followed began the post-wait again
+        from nought - so a member thirty seconds into a thirty-second post-wait
+        held its voice, its slots and its scene for thirty more, and a cue killed
+        in its pre-wait began a post-wait nothing had reached. A kill asks
+        nothing of the cue: a post-wait under way is ended, and none is begun
+        (namespace draft §23.2). */
+    SUBCASE ("a member holding its post-wait is ended, and its voice given back")
+    {
+        GroupRig rig;
+
+        const auto bed = rig.document.createCue (rig.groupId, 0, "media", "Bed").id;
+        rig.setCue (bed, "file", "bed.wav");
+        rig.setCue (bed, "postWait", "30");
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (bed).empty(); }));
+
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.audio.launches.empty(); }));
+
+        const auto bedRun = rig.runOf (bed);
+        const auto voice = rig.runs.find (bedRun)->track;
+        REQUIRE (voice >= 0);
+
+        rig.audio.playing.insert (voice);                 // it sounds...
+        rig.tickOnce();
+        rig.tickOnce();
+        rig.audio.playing.erase (voice);                  // ...and reaches its end
+
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (bedRun)->state == cue::runState::postWait; }));
+        REQUIRE (rig.runs.isTrackBusy (voice));           // a post-wait holds its voice
+
+        const auto groupRun = rig.runOf (rig.groupId);
+
+        REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+        CHECK (rig.runToCompletion (groupRun, 10) < 10);
+        CHECK_FALSE (rig.runs.isTrackBusy (voice));
+    }
+
+    SUBCASE ("a member killed in its pre-wait begins no post-wait")
+    {
+        GroupRig rig;
+        rig.setCue (rig.first, "preWait", "10");
+        rig.setCue (rig.first, "postWait", "30");
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto id = rig.runOf (rig.first);
+            return ! id.empty() && rig.runs.find (id)->state == cue::runState::waiting;
+        }));
+
+        const auto groupRun = rig.runOf (rig.groupId);
+
+        REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+        CHECK (rig.runToCompletion (groupRun, 10) < 10);
+    }
+
+    SUBCASE ("a cue on its own, killed in its pre-wait, begins no post-wait")
+    {
+        Rig rig;
+        rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/preWait", "10");
+        rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/postWait", "30");
+
+        rig.setStandby (rig.memoId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto memoRun = rig.runOf (rig.memoId);
+        REQUIRE_FALSE (memoRun.empty());
+        REQUIRE (rig.runs.find (memoRun)->state == cue::runState::waiting);
+
+        REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (memoRun)->isFinished(); }, 10));
+    }
+
+    SUBCASE ("a footer's cue holding its post-wait, cut by the second press")
+    {
+        GroupRig rig;
+        rig.setCue (rig.first, "preWait", "10");         // hold the group in its members
+
+        const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+        rig.setCue (closing, "postWait", "30");
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+        const auto groupRun = rig.runOf (rig.groupId);
+
+        //  Esc: the member comes down, and the footer's cue fires and holds its post-wait.
+        REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto id = rig.runOf (closing);
+            return ! id.empty() && rig.runs.find (id)->state == cue::runState::postWait;
+        }, 50));
+
+        REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+        CHECK (rig.runToCompletion (groupRun, 10) < 10);
+        CHECK (rig.runs.find (rig.runOf (closing))->isFinished());
+    }
+}
+
+//==============================================================================
 /*  THE LEAST TIME BETWEEN TWO GOs (PRD §3.7's GO debounce, a show setting
     since 2026-09-28, author: "a 'time between' Go's"). */
 TEST_CASE ("go: inside the least time between two GOs a GO is refused, and the standby does not move")
@@ -4738,6 +5199,356 @@ TEST_CASE ("prepare: a member armed ahead inside a running scene still fires whe
                                             return run.cue == later;
                                         });
     CHECK (runsFor == 1);
+}
+
+//==============================================================================
+/*  A SCENE THAT NEVER STARTED HAS NO FOOTER, AND ESC LEAVES THE STANDBY ALONE
+    (namespace draft §23, 2026-09-30).
+
+    A footer is where a scene gives back what it took, so a group stopped while
+    it was only being made ready ran a footer that released things it never
+    took - and, being `stopping`, was no longer found by the path that puts back
+    what the horizon pre-sent. A group stopped while prepared is now given back
+    the way the pointer moving away gives one back: what it pre-sent put back,
+    then revoked, no footer.
+
+    AND ESC STOPS WHAT IS RUNNING. The standby's preparation - its arm, its
+    prepared block - is not running and the pointer has not moved, so it is
+    still wanted: Esc and a double Esc leave it, and the next GO is as instant as
+    it would have been. */
+TEST_CASE ("prepare: Esc and a double Esc leave a prepared scene standing, and GO still adopts it")
+{
+    for (const auto* level : { "run.stopAll", "run.killAll" })
+    {
+        INFO (std::string (level));
+        PrepareRig rig;
+
+        rig.setStandby (rig.sound);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+        REQUIRE (rig.prepared (rig.groupId) != nullptr);
+
+        const auto preparedId = rig.prepared (rig.groupId)->id;
+        const auto armedId = rig.runOf (rig.sound);
+        const auto voice = rig.runs.find (armedId)->track;
+        REQUIRE (voice >= 0);
+
+        REQUIRE (rig.submitAndTick (level).rejected == 0);
+
+        for (int n = 0; n < 60; ++n)                     // past a panic fade of a second
+            rig.tickOnce();
+
+        //  STILL READY: the block, its member's voice, and nothing of its own exit.
+        REQUIRE (rig.prepared (rig.groupId) != nullptr);
+        CHECK (rig.prepared (rig.groupId)->id == preparedId);
+        CHECK (rig.runs.find (armedId)->state == cue::runState::armed);
+        CHECK (rig.runs.isTrackBusy (voice));
+        CHECK (rig.runOf (rig.closing).empty());
+        CHECK (rig.runOf (rig.opening).empty());
+
+        //  AND THE NEXT GO TAKES THAT BLOCK, and launches the member it armed.
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto* live = rig.runs.liveRunOf (rig.groupId);
+        REQUIRE (live != nullptr);
+        CHECK (live->id == preparedId);
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (armedId)->launchRequested; }));
+    }
+}
+
+TEST_CASE ("Esc: the standby's armed cue stays armed, and GO launches that very run")
+{
+    for (const auto* level : { "run.stopAll", "run.killAll" })
+    {
+        INFO (std::string (level));
+        Rig rig;
+
+        rig.setStandby (rig.mediaId);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.mediaId).empty(); }));
+
+        const auto armedId = rig.runOf (rig.mediaId);
+        const auto voice = rig.runs.find (armedId)->track;
+        REQUIRE (voice >= 0);
+
+        REQUIRE (rig.submitAndTick (level).rejected == 0);
+
+        for (int n = 0; n < 60; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runs.find (armedId)->state == cue::runState::armed);
+        CHECK (rig.runs.isTrackBusy (voice));
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (armedId)->launchRequested; }));
+
+        const auto runsFor = std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                                            [&rig] (const cue::Run& run) { return run.cue == rig.mediaId; });
+        CHECK (runsFor == 1);
+    }
+}
+
+TEST_CASE ("prepare: a scene prepared inside a running one is given back when Esc stops the running one, and runs no footer of its own")
+{
+    /*  The running scene is stopped the Esc way, and stops its members - one of
+        which is the next scene, prepared under it by the horizon and never
+        entered. That one is revoked, its armed member with it; the running
+        scene's own footer runs. */
+    ManualRig rig;
+
+    const auto inner = rig.document.createCue (rig.groupId, 1, "group", "Inner").id;     // manual, the default
+    const auto rain = rig.document.createCue (inner, 0, "media", "Rain").id;
+    rig.setCue (rain, "file", "rain.wav");
+
+    const auto innerRelease = rig.document.createCue (rig.roleOf (inner, "footer"), 0, "memo", "Inner release").id;
+    const auto outerRelease = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Outer release").id;
+
+    rig.setStandby (rig.first);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    const auto outerRun = rig.runOf (rig.groupId);
+
+    //  The pointer walked into the inner scene, and the horizon prepared it under the running one.
+    REQUIRE (rig.standby() == rain);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (inner) != nullptr
+                                          && ! rig.runOf (rain).empty(); }));
+
+    const auto innerRun = rig.runs.preparedRunOf (inner)->id;
+    REQUIRE (rig.runs.find (innerRun)->parent == outerRun);
+
+    const auto armed = rig.runOf (rain);
+    const auto voice = rig.runs.find (armed)->track;
+    REQUIRE (voice >= 0);
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (outerRun)->isFinished(); }));
+
+    CHECK (rig.runOf (innerRelease).empty());             // never started, so nothing to release
+    CHECK_FALSE (rig.runOf (outerRelease).empty());       // the running scene's footer ran
+
+    for (const auto& id : { innerRun, armed })
+    {
+        INFO ("run " << id);
+        CHECK (rig.runs.find (id)->state == cue::runState::done);
+        CHECK (rig.runs.find (id)->warning == cue::runWarning::revoked);
+    }
+
+    CHECK_FALSE (rig.runs.isTrackBusy (voice));
+}
+
+TEST_CASE ("prepare: a stop aimed at a prepared scene's run gives it back, and runs no footer")
+{
+    /*  By its run, since a stop cue aimed at the CUE finds nothing running and
+        is §3.8's silent no-op. A stop and a kill end it alike: a revocation is
+        not a footer, and what was made ready is let go of either way. */
+    for (const auto* verb : { "run.stop", "run.kill" })
+    {
+        INFO (std::string (verb));
+        PrepareRig rig;
+
+        rig.setStandby (rig.sound);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+        REQUIRE (rig.prepared (rig.groupId) != nullptr);
+
+        const auto preparedId = rig.prepared (rig.groupId)->id;
+        const auto armedId = rig.runOf (rig.sound);
+        const auto voice = rig.runs.find (armedId)->track;
+        REQUIRE (voice >= 0);
+
+        REQUIRE (rig.submitAndTick (verb, { osc::Value::string (preparedId) }).rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (preparedId)->isFinished(); }, 20));
+
+        CHECK (rig.runs.find (preparedId)->warning == cue::runWarning::revoked);
+        CHECK (rig.runs.find (armedId)->warning == cue::runWarning::revoked);
+        CHECK_FALSE (rig.runs.isTrackBusy (voice));
+        CHECK (rig.runOf (rig.closing).empty());
+        CHECK (rig.runOf (rig.opening).empty());
+    }
+}
+
+//==============================================================================
+/*  A BLOCK CAN HOLD A SOUND, and then it is not only made ready (namespace draft
+    §23.3). The horizon arms a scene's first member under the block it prepares,
+    and a cue fired by name - a surface's button, a start cue, a trigger - that
+    finds its armed run launches it where it stands: under a block no GO has
+    entered. Esc and a double Esc spared the block, and a stop reaching it gave
+    it back, the sounding member with it, on the model alone. */
+namespace
+{
+    /*  A member the horizon armed, fired by name and let sound: the armed run
+        launched where it stands, and the voice it holds. */
+    int soundByName (Rig& rig, const std::string& cueId)
+    {
+        const auto armedId = rig.runOf (cueId);
+        REQUIRE_FALSE (armedId.empty());
+
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (cueId) }).rejected == 0);
+        REQUIRE (rig.runOf (cueId) == armedId);            // that run, not a second
+
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armedId)->state == cue::runState::playing; }));
+
+        const auto voice = rig.runs.find (armedId)->track;
+        REQUIRE (voice >= 0);
+
+        rig.audio.playing.insert (voice);
+        rig.tickOnce();
+        return voice;
+    }
+}
+
+TEST_CASE ("prepare: a member fired by name out of a prepared scene is stopped by Esc and a double Esc")
+{
+    /*  The scene at standby, prepared and holding; one member of it fired by
+        name and sounding. Esc stops what is running, so the block is not left
+        standing around it: the member is stopped the way the press stops, on
+        its voice, and then the block is given back. A cut, so that what reaches
+        the voice is the press itself - a panic fade reaches a sounding voice
+        whoever holds it. */
+    for (const auto* level : { "run.stopAll", "run.killAll" })
+    {
+        INFO (std::string (level));
+        PrepareRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+
+        rig.setStandby (rig.sound);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+        REQUIRE (rig.prepared (rig.groupId) != nullptr);
+
+        const auto blockId = rig.prepared (rig.groupId)->id;
+        const auto soundRun = rig.runOf (rig.sound);
+        const auto voice = soundByName (rig, rig.sound);
+        REQUIRE (rig.runs.find (soundRun)->parent == blockId);
+
+        REQUIRE (rig.submitAndTick (level).rejected == 0);
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (soundRun)->isFinished(); }, 20));
+
+        //  STOPPED ON ITS VOICE, and not given back behind the voice's back.
+        CHECK (std::count (rig.audio.stopped.begin(), rig.audio.stopped.end(), voice) >= 1);
+        CHECK (rig.runs.find (soundRun)->warning != cue::runWarning::revoked);
+        CHECK_FALSE (rig.runs.isTrackBusy (voice));
+
+        //  And then the block, which never started: given back, with no footer.
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (blockId)->isFinished(); }, 20));
+        CHECK (rig.runs.find (blockId)->warning == cue::runWarning::revoked);
+        CHECK (rig.runOf (rig.closing).empty());
+    }
+}
+
+TEST_CASE ("prepare: Esc on a running scene stops a member fired by name out of the scene prepared inside it")
+{
+    /*  THE SAME ONE LEVEL IN, where it was worse. The running scene stopped the
+        prepared one, which gave itself back - its sounding member revoked with
+        it, on the model and nowhere else. The panic fade bringing the member
+        down then found its target over and stopped nothing, and the voice
+        played on to the end of its file with no run owning it, out of reach of
+        any later Esc. What was asked for inside the block is now stopped first,
+        the way its scene was, and the block is given back once it has gone. */
+    for (const auto* level : { "run.stopAll", "run.killAll" })
+    {
+        INFO (std::string (level));
+        ManualRig rig;
+
+        const auto inner = rig.document.createCue (rig.groupId, 1, "group", "Inner").id;     // manual, the default
+        const auto rain = rig.document.createCue (inner, 0, "media", "Rain").id;
+        rig.setCue (rain, "file", "rain.wav");
+
+        const auto innerRelease = rig.document.createCue (rig.roleOf (inner, "footer"), 0, "memo", "Inner release").id;
+
+        rig.setStandby (rig.first);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+        const auto outerRun = rig.runOf (rig.groupId);
+
+        REQUIRE (rig.standby() == rain);
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (inner) != nullptr
+                                              && ! rig.runOf (rain).empty(); }));
+
+        const auto innerRun = rig.runs.preparedRunOf (inner)->id;
+        const auto rainRun = rig.runOf (rain);
+        const auto voice = soundByName (rig, rain);
+        REQUIRE (rig.runs.find (rainRun)->parent == innerRun);
+
+        REQUIRE (rig.submitAndTick (level).rejected == 0);                // the panic fade: a second
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (rainRun)->isFinished(); }, 100));
+
+        CHECK (std::count (rig.audio.stopped.begin(), rig.audio.stopped.end(), voice) >= 1);
+        CHECK (rig.runs.find (rainRun)->warning != cue::runWarning::revoked);
+        CHECK_FALSE (rig.runs.isTrackBusy (voice));
+
+        //  The scene prepared inside is given back once its member has gone, with no footer of its own.
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (outerRun)->isFinished(); }));
+        CHECK (rig.runs.find (innerRun)->warning == cue::runWarning::revoked);
+        CHECK (rig.runOf (innerRelease).empty());
+    }
+}
+
+TEST_CASE ("prepare: the pointer moving away leaves a member fired by name playing, and gives its scene back once it has gone")
+{
+    /*  The pointer moving away gives back what was only made ready, and a
+        member fired by name is not that: somebody asked for it. Revoked with its
+        block, as it was, it ended on the model alone - the voice played on with
+        no run owning it, and no Esc could reach it. The block now waits for what
+        was asked for inside it and is given back once that has gone, whether it
+        ends on its own or Esc ends it. */
+    for (const auto* how : { "on its own", "Esc" })
+    {
+        INFO (std::string (how));
+        PrepareRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+
+        rig.setStandby (rig.sound);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+        REQUIRE (rig.prepared (rig.groupId) != nullptr);
+
+        const auto blockId = rig.prepared (rig.groupId)->id;
+        const auto soundRun = rig.runOf (rig.sound);
+        const auto voice = soundByName (rig, rig.sound);
+
+        //  Away, to a cue outside the block: the member plays on, and the block waits for it.
+        rig.setStandby (rig.after);
+        rig.tickOnce();
+        rig.tickOnce();
+
+        CHECK_FALSE (rig.runs.find (soundRun)->isFinished());
+        CHECK (rig.runs.isTrackBusy (voice));
+        CHECK_FALSE (rig.runs.find (blockId)->isFinished());
+
+        if (std::string (how) == "Esc")
+            REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+        else
+            rig.audio.playing.erase (voice);
+
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (soundRun)->isFinished(); }, 20));
+        CHECK (rig.runs.find (soundRun)->warning != cue::runWarning::revoked);
+        CHECK_FALSE (rig.runs.isTrackBusy (voice));
+
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (blockId)->isFinished(); }, 20));
+        CHECK (rig.runs.find (blockId)->warning == cue::runWarning::revoked);
+        CHECK (rig.runOf (rig.closing).empty());
+    }
+}
+
+TEST_CASE ("prepare: a seek on the standby's armed cue asks for it")
+{
+    /*  A SEEK LAUNCHES, so it is asking. It was the one road to a launch that
+        left the `prepare` mark on: the standby's arm, scrubbed, played while
+        still reading as made ready in case - and whether Esc spared it then
+        turned on a flag the launching hook clears, which a replay never
+        clears. */
+    Rig rig;
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.mediaId).empty(); }));
+
+    const auto armedId = rig.runOf (rig.mediaId);
+    REQUIRE_FALSE (rig.runs.find (armedId)->prepare.empty());
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (armedId),
+                                              osc::Value::float64 (1.0) }).rejected == 0);
+
+    CHECK (rig.runs.find (armedId)->prepare.empty());
+    CHECK_FALSE (rig.runs.find (armedId)->onlyPrepared());
 }
 
 //==============================================================================

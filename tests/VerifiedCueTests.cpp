@@ -859,6 +859,250 @@ TEST_CASE ("prepare: the pointer leaving puts the desk back, as an ordinary writ
     CHECK (set->args[1] == osc::Value::float32 (0.2f));
 }
 
+//==============================================================================
+/*  A SCENE THAT NEVER STARTED, STOPPED (namespace draft §23, 2026-09-30): given
+    back the way the pointer moving away gives one back - what it pre-sent put
+    back on the desk first, then revoked - and never through its footer, which
+    would release what it never took. Esc itself leaves the standby's scene
+    alone: it is not running, and the pointer has not moved. */
+namespace
+{
+    /*  Ticks until the desk holds `wanted`, or the patience runs out. The
+        pre-send's read crosses a socket, so how long it takes is the operating
+        system's business. */
+    void tickUntilDeskHolds (VerifiedRig& rig, float wanted)
+    {
+        for (int n = 0; n < 600; ++n)
+        {
+            if (const auto* now = rig.mounts.valueOf ("/desk/fader");
+                now != nullptr && *now == osc::Value::float32 (wanted))
+                return;
+
+            rig.tickOnce();
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+        }
+    }
+
+    /*  Where a record stands in the session's log: the first one of that
+        command whose first argument is `first`, or the end. */
+    std::size_t recordIndex (VerifiedRig& rig, const char* command, const std::string& first)
+    {
+        const auto records = LogFile::parse (rig.engine.log().contents()).records;
+
+        for (std::size_t n = 0; n < records.size(); ++n)
+            if (records[n].command == command && ! records[n].args.empty()
+                  && records[n].args[0].isString() && records[n].args[0].getString() == first)
+                return n;
+
+        return records.size();
+    }
+}
+
+TEST_CASE ("prepare: Esc on a running act takes back the scene prepared inside it, putting the desk back first")
+{
+    /*  A double Esc as well: a revocation is not a footer, so the killed act's
+        prepared scene gives the desk back as the stopped one does. */
+    for (const auto* level : { "run.stopAll", "run.killAll" })
+    {
+        INFO (std::string (level));
+        VerifiedRig rig;
+        rig.anticipate();
+        rig.device.target.says ({ osc::Value::float32 (0.2f) });
+        REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+        //  An act (manual) opening with a memo, then a scene (manual) whose header pre-sends.
+        const auto act = rig.document.createCue (rig.listId, rig.index++, "group", "Act").id;
+        const auto opening = rig.document.createCue (act, 0, "memo", "Opening").id;
+        const auto scene = rig.document.createCue (act, 1, "group", "Scene").id;
+        const auto inside = rig.document.createCue (scene, 0, "memo", "Inside").id;
+
+        const auto header = rig.document.createRole (scene, "header");
+        REQUIRE (header.ok);
+
+        const auto presend = rig.document.createCue (header.id, 0, "osc", "Position the source").id;
+        rig.document.setAttribute ("/godot/cue/" + presend + "/address", "/desk/fader");
+        rig.document.setAttribute ("/godot/cue/" + presend + "/value", "f:0.8");
+        rig.document.setAttribute ("/godot/cue/" + presend + "/wait", "none");
+        rig.document.setAttribute ("/godot/cue/" + presend + "/timeout", "5");
+
+        const auto footer = rig.document.createRole (scene, "footer");
+        REQUIRE (footer.ok);
+        const auto release = rig.document.createCue (footer.id, 0, "memo", "Release").id;
+
+        //  GO on the opening: the act runs, the pointer walks into the scene, and the horizon prepares it.
+        rig.setStandby (opening);
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+
+        REQUIRE (rig.document.findById (rig.listId)[juce::Identifier ("standby")].toString().toStdString()
+                   == inside);
+
+        tickUntilDeskHolds (rig, 0.8f);
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+        const auto* ready = rig.runs.preparedRunOf (scene);
+        REQUIRE (ready != nullptr);
+        const auto sceneRun = ready->id;
+
+        const auto* actRun = rig.runs.liveRunOf (act);
+        REQUIRE (actRun != nullptr);
+        CHECK (rig.runs.find (sceneRun)->parent == actRun->id);
+
+        //  Esc: the act comes down, and the scene it was holding is given back.
+        rig.engine.submit ("cli", level, {});
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+        CHECK (rig.runs.find (sceneRun)->warning == cue::runWarning::revoked);
+        CHECK (rig.runOf (release) == nullptr);
+
+        //  PUT BACK FIRST, then revoked: a client watching sees the desk go back before the scene goes.
+        const auto restored = recordIndex (rig, "node.set", "/desk/fader");
+        const auto revoked = recordIndex (rig, "run.revoke", sceneRun);
+        const auto end = LogFile::parse (rig.engine.log().contents()).records.size();
+
+        CHECK (restored < end);
+        CHECK (revoked < end);
+        CHECK (restored < revoked);
+    }
+}
+
+TEST_CASE ("prepare: a scene stopped while only prepared puts the desk back and runs no footer, and Esc leaves it prepared")
+{
+    for (const auto* how : { "run.stop", "run.kill", "run.stopAll" })
+    {
+        INFO (std::string (how));
+        VerifiedRig rig;
+        rig.anticipate();
+        rig.device.target.says ({ osc::Value::float32 (0.2f) });
+        REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+        const PreparedScene scene { rig, "f:0.8", "none" };
+
+        const auto footer = rig.document.createRole (scene.group, "footer");
+        REQUIRE (footer.ok);
+        const auto release = rig.document.createCue (footer.id, 0, "memo", "Release").id;
+
+        rig.setStandby (scene.group);
+        tickUntilDeskHolds (rig, 0.8f);
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+        const auto* block = rig.runs.preparedRunOf (scene.group);
+        REQUIRE (block != nullptr);
+        const auto blockId = block->id;
+
+        if (std::string (how) != "run.stopAll")
+        {
+            //  Stopped or killed by its run: the desk put back, the block revoked, no footer.
+            rig.engine.submit ("cli", how, { osc::Value::string (blockId) });
+
+            for (int n = 0; n < 5; ++n)
+                rig.tickOnce();
+
+            REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+            CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+            CHECK (rig.runs.find (blockId)->warning == cue::runWarning::revoked);
+            CHECK (rig.runOf (release) == nullptr);
+            continue;
+        }
+
+        //  Esc: nothing running, so nothing stopped - the block and its value stay.
+        rig.engine.submit ("cli", "run.stopAll", {});
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
+        CHECK (rig.runs.preparedRunOf (scene.group)->id == blockId);
+
+        //  And GO adopts it: the pre-send was its execution, and does not run again.
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+
+        const auto* live = rig.runs.liveRunOf (scene.group);
+        REQUIRE (live != nullptr);
+        CHECK (live->id == blockId);
+
+        const auto presends = std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                                             [&scene] (const cue::Run& run) { return run.cue == scene.cue; });
+        CHECK (presends == 1);
+    }
+}
+
+TEST_CASE ("prepare: a read that comes back after its scene was given back writes nothing")
+{
+    /*  A PRE-SEND ASKS FIRST AND WRITES WHEN THE ANSWER COMES, and a scene can be
+        given back in between. Its run was finished by the revocation, but the
+        job asking for it went on: when the answer landed it wrote the new value
+        to the desk - after the revocation, with nothing left to put it back.
+        The test answers the read itself, so that it arrives when the test says.
+
+        THE SAME TICK IS THE NARROW CASE: an answer taken in the drain that also
+        stops the scene is there to be read in the very tick the scene is given
+        back, before the revocation has been applied - the job read it, wrote,
+        and the restore it would need was never asked for. */
+    for (const auto* how : { "the pointer moving away", "a stop aimed at it",
+                             "a stop aimed at it, answered in the same drain" })
+    {
+        INFO (std::string (how));
+        VerifiedRig rig;
+        rig.anticipate();
+        rig.runner.setMounts (&rig.mounts, &rig.sender, nullptr);
+
+        const PreparedScene scene { rig, "f:0.8", "none" };
+
+        rig.setStandby (scene.group);
+
+        //  The pre-send is out, asking what the desk holds, and nobody has answered.
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        const auto* presend = rig.runOf (scene.cue);
+        REQUIRE (presend != nullptr);
+        REQUIRE (presend->restoreAtom.empty());
+        REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
+
+        const auto blockId = rig.runs.preparedRunOf (scene.group)->id;
+        const auto together = std::string (how) == "a stop aimed at it, answered in the same drain";
+
+        const auto answer = [&rig]
+        {
+            rig.engine.submit ("mount:K3PV7WRB", "mount.readback",
+                               { osc::Value::string ("K3PV7WRB"), osc::Value::string ("/desk/fader"),
+                                 osc::Value::float32 (0.2f) });
+        };
+
+        if (std::string (how) == "the pointer moving away")
+            rig.document.setAttribute (cue::standbyAddressOf (rig.listId), scene.after);
+        else
+            rig.engine.submit ("cli", "run.stop", { osc::Value::string (blockId) });
+
+        if (together)
+            answer();
+
+        for (int n = 0; n < 20 && ! rig.runs.find (blockId)->isFinished(); ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.runs.find (blockId)->isFinished());
+
+        //  And now the answer arrives, when it has not already.
+        if (! together)
+            answer();
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.mounts.valueOf ("/desk/fader") == nullptr);   // nothing written to the desk
+    }
+}
+
 TEST_CASE ("prepare: a block whose pre-sent value came back equal says verified")
 {
     /*  The one word of §13.6's six that means the DESK AGREES, rather than that

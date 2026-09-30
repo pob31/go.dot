@@ -51,6 +51,14 @@ namespace wfg::cue
         return out;
     }
 
+    bool RunTable::askedForUnder (const std::string& runId) const
+    {
+        const auto under = descendantsOf (runId);
+
+        return std::any_of (under.begin(), under.end(),
+                            [] (const Run* run) { return ! run->isFinished() && run->prepare.empty(); });
+    }
+
     bool RunTable::allChildrenFinished (const std::string& parentRun) const
     {
         return std::all_of (runs.begin(), runs.end(),

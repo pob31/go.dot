@@ -98,8 +98,15 @@ namespace wfg::cue
             same interface channels waits for the release rather than racing it.
 
             It runs on the way out however the group is leaving - the end of its
-            members, or a stop cue aimed at it. The one thing that skips it is
-            `run.kill`, which is the emergency path and asks nothing of the cue. */
+            members, a stop cue aimed at it, Esc, or its parent stopping, which
+            stops it rather than killing it (2026-09-30, namespace draft §23).
+            What skips it is a kill - `run.kill`, a double Esc, or any group
+            above it that was killed, read from above rather than waited for -
+            which is the emergency path and asks nothing of the cue, and which
+            cuts a footer already running. A group stopped while it was only
+            `preparing` or `prepared` has none: it is revoked, what it pre-sent
+            put back, because it never took anything to release - once what
+            somebody asked for inside it has been ended. */
         inline constexpr const char* footer = "footer";
 
         /*  There is deliberately no `complete`. One was declared here and never

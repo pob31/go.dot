@@ -112,8 +112,19 @@ namespace wfg::cue
                                 Applied a second time it is idempotent the way
                                 the rest of this file is: a run already holding
                                 its post-wait keeps the deadline it has rather
-                                than restarting it. */
-                            if (run->postWaitTicks > 0 && ! run->isWaiting())
+                                than restarting it.
+
+                                NOT FOR A KILL (2026-09-30, namespace draft
+                                §23.2). A run that skips its footer was killed -
+                                the running pane's kill, a double Esc, a killed
+                                group's member - and a kill asks nothing of the
+                                cue, its post-wait included. It wrote `stopping`
+                                over the wait, so this began it again from
+                                nought: a double Esc held a member's voice, its
+                                slots and its scene for a whole post-wait more,
+                                and began one for a cue killed before it had
+                                even fired. */
+                            if (run->postWaitTicks > 0 && ! run->isWaiting() && ! run->skipFooter)
                             {
                                 run->state = runState::postWait;
                                 run->dueTick = context.tick + run->postWaitTicks;
@@ -466,7 +477,10 @@ namespace wfg::cue
             the members come down and the FOOTER RUNS, because that is where a
             scene gives back what it was holding. `afterMember` and
             `afterIteration` are the two boundaries a group was going to reach
-            anyway, which is how an infinite loop is left without a cut.
+            anyway, which is how an infinite loop is left without a cut. A scene
+            the horizon had only made ready runs no footer: it took nothing, and
+            its job gives it back instead, what it pre-sent put back (2026-09-30,
+            namespace draft §23.3).
 
             `fade` is deliberately absent. A fade needs a run of its own to
             report through - it takes time, and something has to say when it
@@ -476,7 +490,8 @@ namespace wfg::cue
             panic. */
         registry.add ({ "run.stop",
                         "Stops one run: now, at the end of the member playing, or at the end of"
-                        " this round. The footer runs either way.",
+                        " this round. The footer runs either way; a scene that was only made"
+                        " ready is given back instead, with no footer.",
                         { { "run", 's', false }, { "verb", 's', true } },
                         true,
                         [&runs] (CommandContext&, const std::vector<osc::Value>& args)
@@ -515,8 +530,9 @@ namespace wfg::cue
 
         //----------------------------------------------------------------------
         registry.add ({ "run.kill",
-                        "Stops a run now. The primitive Esc and double-Esc will use; it runs no"
-                        " footers and asks nothing of the cue.",
+                        "Stops a run now: the running pane's kill, and what a killed group sends"
+                        " its members. It runs no footers and asks nothing of the cue, its"
+                        " post-wait included.",
                         { { "run", 's', false } },
                         true,
                         [&runs] (CommandContext&, const std::vector<osc::Value>& args)
@@ -601,6 +617,23 @@ namespace wfg::cue
             counts as a root, so nothing is left standing because its parent
             finished first.
 
+            EXCEPT WHAT WAS ONLY MADE READY (2026-09-30, namespace draft §23).
+            The standby's arm and the block its horizon prepared are not
+            running, and the pointer has not moved: their readiness is still
+            wanted, and stopping them only made the next GO pay the disk and the
+            pre-sends again with the operator's hand already down. Both keys
+            leave them, the double one too - a preparation is anticipation,
+            which nobody hears. `Run::onlyPrepared` is the test, the same one
+            the pointer moving away revokes by.
+
+            UNLESS SOMEBODY REACHED INTO THE BLOCK. A member fired by name out
+            of a prepared scene launches where the horizon armed it, under a
+            block no GO entered - a block that sounds, which no root's stop
+            reached while the block was spared. So a block with anything asked
+            for under it (`RunTable::askedForUnder`) is stopped like any root,
+            and its job stops what was asked for, the way the press stops,
+            before it gives the block back.
+
             AN EMPTY TABLE IS APPLIED AND DOES NOTHING. Esc on a silent show is
             not a mistake, and the hand that pressed it needs no error to read.
             The third level, Go Doh!, stays deferred in the law itself.
@@ -612,13 +645,13 @@ namespace wfg::cue
             that needs only the run table, and a rig with no Runner has it. */
         registry.add ({ "run.stopAll",
                         "Stops every run now, gracefully: Esc. Members come down in order and"
-                        " every footer runs.",
+                        " every footer runs; the standby's preparation is left ready.",
                         {},
                         true,
                         [&runs, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             if (stopDiagnostics) stopDiagnostics();
-                            stopEveryRoot (runs, false);
+                            stopEveryRoot (runs, false, true);
                             return Outcome::ok (args);
                         } });
 
@@ -632,24 +665,25 @@ namespace wfg::cue
             show until a load-to-time. `run.kill` still sets both. */
         registry.add ({ "run.killAll",
                         "Drops every run now: double Esc. No footer runs, and the world is left"
-                        " as it was.",
+                        " as it was; the standby's preparation is left ready.",
                         {},
                         true,
                         [&runs, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             if (stopDiagnostics) stopDiagnostics();
-                            stopEveryRoot (runs, true);
+                            stopEveryRoot (runs, true, true);
                             return Outcome::ok (args);
                         } });
     }
 
-    void stopEveryRoot (RunTable& runs, bool immediate)
+    void stopEveryRoot (RunTable& runs, bool immediate, bool spareHorizon)
     {
         std::vector<std::string> roots;
 
         for (const auto& run : runs.all())
             if (! run.isFinished()
-                  && (run.parent.empty() || runs.find (run.parent) == nullptr))
+                  && (run.parent.empty() || runs.find (run.parent) == nullptr)
+                  && ! (spareHorizon && run.onlyPrepared() && ! runs.askedForUnder (run.id)))
                 roots.push_back (run.id);
 
         for (const auto& id : roots)

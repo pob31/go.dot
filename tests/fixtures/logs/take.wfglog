@@ -16,7 +16,10 @@
 # same ones; that edit autosaves, so the replay is given somewhere to save to. Esc lets
 # go of the channel and the take is held; GO on "Scene 5 loop" (onGo loop) takes the
 # channel and loops the take it found; take.clear empties it and a double Esc ends the
-# run. Recorded from a real `wfg serve --hosted --input-wav` of a copy of
+# run. (2026-09-30, namespace draft 23.3: Esc now leaves the standby's arm of "Scene 5
+# loop" ready, so a session recorded today would not end it at 515 - the channel would
+# pass to it, and GO would launch it; replayed, that logged record still ends it on the
+# same tick.) Recorded from a real `wfg serve --hosted --input-wav` of a copy of
 # tests/fixtures/bundles/take fed a steady level at its first input, driven over OSC by
 # tests/blackbox/phase9c_take.py --keep-log.
 # bundle take sha256:4804455ab4d41acd12321e31733699ce7f89eb5c2269225807171501b172af4e

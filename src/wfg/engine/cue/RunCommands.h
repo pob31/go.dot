@@ -74,6 +74,15 @@ namespace wfg::cue
         Esc does, no footer. `run.stopAll` and `run.killAll` are this, and so
         is the one other command that has to stop everything -
         `audio.clockMoved`, when the interface's clock moved under the show
-        (PRD §6.2). For a handler only: the table's writer. */
-    void stopEveryRoot (RunTable& runs, bool immediate);
+        (PRD §6.2). For a handler only: the table's writer.
+
+        `spareHorizon` LEAVES WHAT WAS ONLY MADE READY (2026-09-30, namespace
+        draft §23): a root that `Run::onlyPrepared` - the standby's arm, the
+        block its horizon prepared - is not running, and the two keys stop what
+        is running. Not a block somebody reached into, though: one with a run
+        asked for under it (`RunTable::askedForUnder`) - a member fired by name
+        and sounding - is stopped like any root. The clock's move passes
+        nothing: it has revoked every preparation already, and stops everything
+        that is left. */
+    void stopEveryRoot (RunTable& runs, bool immediate, bool spareHorizon = false);
 }

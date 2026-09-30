@@ -393,6 +393,16 @@ namespace wfg::cue
                             this is that GO - whether it goes straight to a
                             launch or into a pre-wait first. */
                         armed->prepare.clear();
+
+                        /*  A MIC CUE'S TAKE HEARS THIS GO TOO (2026-09-30).
+                            `onGo` was acted on in `fireKind` alone, which a cue
+                            armed ahead never reaches when it has no pre-wait -
+                            so GO on the ordinary standby, the armed one, left
+                            the take as it was: Scene 5's loop never looped.
+                            With a pre-wait the GO arrives through `fireNow`
+                            and `fireKind` answers it there, once. */
+                        if (kind == "mic" && armed->preWaitTicks <= 0)
+                            applyTakeOnGo (cue, live->id);
                     }
 
                 return live->id;
@@ -779,8 +789,25 @@ namespace wfg::cue
 
             used.back() = made;
 
-            if (auto* child = runs.find (made))
-                child->prepare = preparedness::armed;
+            auto* child = runs.find (made);
+
+            if (child == nullptr)
+                continue;
+
+            child->prepare = preparedness::armed;
+
+            /*  A MIC CUE IS ARMED HERE, AS A MEDIA CUE IS BY SPAWNING
+                (2026-09-30, namespace draft §23.3): its channel claimed or
+                queued for, its plugins set, the gate shut - which is what
+                `isPreparable` has always said preparing one means. The
+                preparing phase launched it instead, and a preparation opened a
+                live microphone into the show before any GO. Here and not in
+                `spawnChild`, because a group's ordinary member is armed when
+                it is launched, and a claim taken at spawning would queue a
+                sequence's next mic cue ahead of its time. */
+            if (child->kind == "mic")
+                if (const auto micCue = document.findById (cueId); micCue.isValid())
+                    armMic (engine, micCue, made);
         }
 
         return true;
@@ -844,14 +871,20 @@ namespace wfg::cue
             if (child == nullptr)
                 return false;
 
-            if (child->kind == "media")
+            if (child->kind == "media" || child->kind == "mic")
             {
                 /*  ARMED IS AS FAR AS A MEDIA PREPARE GOES, and `failed` is as
                     settled as armed: a cue whose file is missing has finished
                     being got ready, badly, and holding the whole block for it
                     would mean one absent sound stopped the scene from ever
                     being prepared. The row says `partial`. */
-                if (child->track < 0 && ! child->isFinished())
+                /*  A MIC CUE THE SAME (2026-09-30): its arm is its whole
+                    preparation. One queued behind its channel's holder holds no
+                    track until that one lets go, and has got as far as it can -
+                    the block says `pending`, as `settledWord` finds. */
+                const auto queued = child->kind == "mic" && ! child->pending.empty();
+
+                if (child->track < 0 && ! child->isFinished() && ! queued)
                     return false;
 
                 continue;
@@ -1688,10 +1721,19 @@ namespace wfg::cue
         run->advanceRequested = false;
         run->sawPlaying = false;
         run->stopIssued = false;
+        run->killIssued = false;
         run->armConfirmed = false;
         run->launchedAtSample = 0;
         run->launchRequested = true;
         run->launchRequestedAtTick = tick;
+
+        /*  AND A SEEK IS ASKING FOR IT (2026-09-30, namespace draft §23.3): it
+            launches the run, so the standby's arm scrubbed stops being a
+            preparation, as a GO or a fire by name makes it stop. It was the one
+            road to a launch that left the mark on - and Esc, which spares what
+            was made ready and not asked for, would have spared a cue that was
+            playing. */
+        run->prepare.clear();
 
         if (run->state == runState::stopping)
             run->state = runState::playing;
@@ -2518,20 +2560,7 @@ namespace wfg::cue
             /*  ITS TAKE, AS ITS ROW SAYS (decision CF): now if the channel is
                 the cue's already - claimed at GO, or ahead in standby - and when
                 the claim lands otherwise, which the release says. */
-            if (takes != nullptr)
-            {
-                const auto channelId = textOf (cue, "channel");
-
-                if (samplingChannelOf (document, channelId).samples())
-                    if (auto* armed = runs.find (runId))
-                    {
-                        if (std::find (armed->claims.begin(), armed->claims.end(), channelId) != armed->claims.end())
-                            takeOnGo (runId, channelId);
-                        else
-                            armed->takeOnGoPending = true;
-                    }
-            }
-
+            applyTakeOnGo (cue, runId);
             return;
         }
 
@@ -2889,6 +2918,25 @@ namespace wfg::cue
             takes->press (channelId, TakeVerb::loop, channel.layers);
         else if (word == "clear")
             takes->press (channelId, TakeVerb::clear, channel.layers);
+    }
+
+    void Runner::applyTakeOnGo (const juce::ValueTree& cue, const std::string& runId)
+    {
+        if (takes == nullptr)
+            return;
+
+        const auto channelId = textOf (cue, "channel");
+
+        if (! samplingChannelOf (document, channelId).samples())
+            return;
+
+        if (auto* run = runs.find (runId))
+        {
+            if (std::find (run->claims.begin(), run->claims.end(), channelId) != run->claims.end())
+                takeOnGo (runId, channelId);
+            else
+                run->takeOnGoPending = true;
+        }
     }
 
     void Runner::takeReleased (const std::string& slotId, const std::string& toRun)
@@ -5111,6 +5159,12 @@ namespace wfg::cue
     {
         for (auto& job : sending)
         {
+            /*  SETTLED ALREADY THIS TICK, by a revocation decided before this
+                ran (`submitRevocation`, 2026-09-30): nothing more is read,
+                written or reported for it. */
+            if (job.finished)
+                continue;
+
             /*  Killed while it waited. A network cue holds no voice either, so
                 the same gap as a fade's: `stopping` with nothing to act on it.
                 A `verified` cue that somebody gave up on is the case - the
@@ -5121,6 +5175,20 @@ namespace wfg::cue
             if (selfRun != nullptr && selfRun->state == runState::stopping)
             {
                 engine.submit (origin::engine, "run.ended", one (job.self));
+                job.finished = true;
+                continue;
+            }
+
+            /*  ALREADY OVER BY ANOTHER ROAD: revoked with the scene that held
+                it, or ended by a jump. Nothing more is written and nothing is
+                reported (2026-09-30, namespace draft §23). A pre-send still
+                asking what the desk held used to go on asking, and wrote its
+                value when the answer came - after the revocation that should
+                have put the desk back, with nothing left to put it back again.
+                A revocation reaches its runs without passing through
+                `stopping`, which is why the branch above never saw it. */
+            if (selfRun != nullptr && selfRun->isFinished())
+            {
                 job.finished = true;
                 continue;
             }
@@ -5422,9 +5490,17 @@ namespace wfg::cue
 
             if (selfRun != nullptr && selfRun->state == runState::stopping)
             {
+                /*  NEVER A GROUP (2026-09-30, namespace draft §23). A group's
+                    `stopping` is its job's, which asked its members to stop on
+                    the first tick of it; handed back to `playing` with a member
+                    still on its way out, the scene played its next member once
+                    that one had gone - after Esc, which stops the stop cue's run
+                    with every other root. The hand-back is about a voice, which
+                    `enforceStops` would otherwise cut at once. */
                 if (job.stopWhenDone)
                     if (auto* held = runs.find (job.heldRun()))
-                        if (held->state == runState::stopping && ! held->stopIssued)
+                        if (held->state == runState::stopping && ! held->stopIssued
+                              && ! held->isGroup())
                             held->state = runState::playing;
 
                 job.retired = true;
@@ -5531,8 +5607,14 @@ namespace wfg::cue
 
                 /*  With no audio side the sound cannot report its own end, so
                     the stop says it. A replay has to reach the same state as
-                    the session it reproduces. */
-                if (audio == nullptr)
+                    the session it reproduces.
+
+                    A SOUND'S END, NOT A SCENE'S (2026-09-30, namespace draft
+                    §23): a group has no sound to report, and ending it here
+                    ended the scene on the spot - its members not stopped in
+                    order, its footer never run - in every `wfg serve` without
+                    `--hosted`. Its own job ends it, through the footer. */
+                if (audio == nullptr && ! target->isGroup())
                     engine.submit (origin::engine, "run.ended", one (target->id));
             }
 
@@ -6050,26 +6132,79 @@ namespace wfg::cue
                 the channels held by a scene that has gone.
 
                 `run.kill` SKIPS IT: the immediate path, which "runs no footers
-                and asks nothing of the cue", and which Phase 10's double-Esc
-                will be built on. The two are told apart by the flag `run.kill`
-                sets, because both write the same `stopping` state and the state
-                alone cannot say which was meant. */
-            if (run->state == runState::stopping && job.phase != groupPhase::footer)
+                and asks nothing of the cue" - the double Esc's. The two are
+                told apart by the flag `run.kill` and `run.killAll` set, because
+                both write the same `stopping` state and the state alone cannot
+                say which was meant.
+
+                A FOOTER ALREADY RUNNING IS LEFT TO FINISH by a graceful stop,
+                which asked for exactly that - and CUT by a kill (2026-09-30,
+                namespace draft §23). A double Esc pressed while Esc's footer
+                holds is still §4.4's immediate level, and it skips footers,
+                that one included: the branch used to stand aside for any footer,
+                and the scene played its release to the end through the press
+                that promises everything is dropped.
+
+                AND THE KILL IS READ FROM ABOVE (2026-09-30, namespace draft
+                §23.2). A killed group reaches its members through its own job, a
+                tick after the press - so a scene inside one, Esc's graceful stop
+                already on it, read its own unmarked flag for that tick and could
+                begin its footer under the double Esc that promises none. Every
+                double Esc is two presses, Esc first, which made that tick an
+                ordinary one. A group under a killed one ends as a kill, whatever
+                it was told itself. */
+            if (run->state == runState::stopping)
             {
-                for (const auto* child : runs.childrenOf (job.run))
-                    if (! child->isFinished())
-                        engine.submit (origin::engine, "run.kill", one (child->id));
+                const auto graceful = ! run->skipFooter && ! underAKill (*run);
 
-                if (! runs.allChildrenFinished (job.run))
-                    continue;
-
-                if (run->skipFooter || ! beginPhase (engine, job, group, groupPhase::footer))
+                if (job.phase != groupPhase::footer || ! graceful)
                 {
-                    engine.submit (origin::engine, "run.ended", one (job.run));
-                    job.retired = true;
-                }
+                    /*  A GROUP THAT NEVER STARTED HAS NO FOOTER (2026-09-30,
+                        namespace draft §23). Stopped while the horizon was still
+                        making it ready - a scene prepared inside one that Esc is
+                        bringing down, or a stop aimed at the prepared run - it
+                        has taken nothing a footer would give back, and running
+                        one would release things it never held. It is given back
+                        the way the pointer moving away gives a block back: what
+                        it pre-sent put back first, then revoked, the whole block
+                        with it. A kill is given back the same way - a revocation
+                        is not a footer.
 
-                continue;
+                        BUT WHAT SOMEBODY ASKED FOR INSIDE IT IS STOPPED FIRST.
+                        A block can hold a sound: a member fired by name out of
+                        it launches where the horizon armed it, and a revocation
+                        ends a run on the model alone - that voice played on with
+                        no run owning it, out of every later Esc's reach. So each
+                        such run is ended the way the group is ending, and the
+                        block is given back once they have all gone. What is left
+                        is only made ready, and `run.revoke` ends the rest of the
+                        block, nested prepared groups included, without asking
+                        any member to stop: a member stopped on the way would end
+                        by another road with its job still running. */
+                    if (job.phase == groupPhase::preparing || job.phase == groupPhase::prepared)
+                    {
+                        if (endAskedForIn (engine, job.run, graceful))
+                            continue;
+
+                        submitRevocation (engine, job.run);
+                        job.retired = true;
+                        continue;
+                    }
+
+                    for (const auto* child : runs.childrenOf (job.run))
+                        endMember (engine, *child, graceful);
+
+                    if (! runs.allChildrenFinished (job.run))
+                        continue;
+
+                    if (! graceful || ! beginPhase (engine, job, group, groupPhase::footer))
+                    {
+                        engine.submit (origin::engine, "run.ended", one (job.run));
+                        job.retired = true;
+                    }
+
+                    continue;
+                }
             }
 
             /*  THE HORIZON AT WORK, and then holding.
@@ -6103,7 +6238,15 @@ namespace wfg::cue
                     /*  A media prepare is an arm and is never launched: being
                         armed and not sounding is the whole of what preparing a
                         media cue means. */
-                    if (child->kind == "media")
+                    /*  NOR A MIC CUE'S (2026-09-30, namespace draft §23.3): its
+                        preparation is its arm - the channel claimed, the
+                        plugins set, the gate shut - made in `beginPreparation`.
+                        Launched here, a mic cue in a scene's header opened its
+                        gate while the pointer was only resting on the scene;
+                        and so did the pointer's own mic member, which the
+                        horizon puts under the block ahead of the GO. The GO
+                        that enters the scene launches either. */
+                    if (child->kind == "media" || child->kind == "mic")
                         continue;
 
                     if (std::find (job.prepared.begin(), job.prepared.end(), child->cue)
@@ -6655,10 +6798,11 @@ namespace wfg::cue
     {
         /*  A GROUP THE HORIZON IS HOLDING IS NOT A GROUP THAT HAS FINISHED
             ANYTHING. Nothing routes here from the two prepare phases today -
-            `advanceGroups` returns before it can - and this says so at the door
-            rather than leaving it to a reading of a loop three hundred lines
-            long. What it would otherwise do is run the group's footer and end
-            the scene before anybody pressed GO. */
+            `advanceGroups` returns before it can, and one that is stopped is
+            revoked there rather than ended (2026-09-30) - and this says so at
+            the door rather than leaving it to a reading of a loop three hundred
+            lines long. What it would otherwise do is run the group's footer and
+            end the scene before anybody pressed GO. */
         if (job.phase == groupPhase::preparing || job.phase == groupPhase::prepared)
             return;
 
@@ -6710,6 +6854,43 @@ namespace wfg::cue
                                ? list[juce::Identifier ("standby")].toString().toStdString()
                                : std::string {};
 
+        /*  A BLOCK THE POINTER LEFT WITH SOMETHING PLAYING IN IT, given back
+            once that has gone (2026-09-30, namespace draft §23.3) - asked every
+            tick, above the gate below, because what it waits for is the end of
+            a cue and not a move of the pointer. Let go of instead when the block
+            ended by another road, was entered by a GO, or is wanted again: the
+            pointer back in it. */
+        /*  Given back in this tick, so the loop below - which reads the table
+            before this tick's `run.revoke` is applied - does not give the same
+            block back twice, restores and all. */
+        std::vector<std::string> givenBack;
+
+        if (! blocksToGiveBack.empty())
+        {
+            const auto wantedAgain = horizonRootFor (list, standby);
+            std::vector<std::string> stillPlaying;
+
+            for (const auto& blockId : blocksToGiveBack)
+            {
+                const auto* block = runs.find (blockId);
+
+                if (block == nullptr || ! block->onlyPrepared()
+                      || block->cue == wantedAgain || block->cue == standby)
+                    continue;
+
+                if (runs.askedForUnder (blockId))
+                {
+                    stillPlaying.push_back (blockId);
+                    continue;
+                }
+
+                submitRevocation (engine, blockId);
+                givenBack.push_back (blockId);
+            }
+
+            blocksToGiveBack = std::move (stillPlaying);
+        }
+
         if (standby == armedStandby)
             return;
 
@@ -6743,45 +6924,32 @@ namespace wfg::cue
                 the moment anybody asks for that cue - a GO, a `cue.fire`, a
                 group adopting it - so a cue somebody fired is never in this
                 set, however recently it was armed. The mark IS the difference
-                between "made ready in case" and "wanted". */
-            const auto abandoned = snapshot.state == runState::armed
-                                     && ! snapshot.prepare.empty()
-                                     && ! snapshot.launchRequested;
-
-            if ((snapshot.state != runState::preparing && ! abandoned)
+                between "made ready in case" and "wanted", and
+                `Run::onlyPrepared` is that test with `preparing` beside it -
+                the same one Esc leaves alone by (2026-09-30). */
+            if (! snapshot.onlyPrepared()
                  || ! snapshot.parent.empty()
                  || snapshot.cue == keep
-                 || snapshot.cue == standby)
+                 || snapshot.cue == standby
+                 || std::find (givenBack.begin(), givenBack.end(), snapshot.id) != givenBack.end())
                 continue;
 
-            /*  WHAT WAS PRE-SENT GOES BACK FIRST, and it goes back as an
-                ORDINARY WRITE.
-
-                §13.1: anticipation is only as good as its revocation, and a
-                revocation of a value on somebody else's desk is putting the old
-                one there. `node.set` is how any client writes a mounted node,
-                so this is that command with the value the target held before
-                the horizon touched it - read before the write, kept on the run.
-
-                An ordinary command rather than a private path, because a replay
-                then reproduces the restore exactly as it reproduces every other
-                write: the record is in the log with the value in it, and the
-                mounted tree comes out the same with no network in the room.
-
-                BEFORE the revocation, so that a client watching sees the desk
-                put back and then the runs end, rather than a scene vanishing
-                and a value changing afterwards for no visible reason. */
-            for (const auto* run : runs.descendantsOf (snapshot.id))
+            /*  NOT WHILE SOMETHING IN IT PLAYS (2026-09-30, namespace draft
+                §23.3). A member fired by name out of the block launched where
+                the horizon armed it, and a revocation ends everything under a
+                block on the model alone: the voice would play on with no run
+                owning it, out of reach of any Esc. It is somebody's cue now and
+                plays on; the block waits for it, above. */
+            if (runs.askedForUnder (snapshot.id))
             {
-                if (run->restoreAddress.empty())
-                    continue;
+                if (std::find (blocksToGiveBack.begin(), blocksToGiveBack.end(), snapshot.id)
+                      == blocksToGiveBack.end())
+                    blocksToGiveBack.push_back (snapshot.id);
 
-                if (const auto value = osc::Value::fromAtom (run->restoreAtom))
-                    engine.submit (origin::engine, "node.set",
-                                   { osc::Value::string (run->restoreAddress), *value });
+                continue;
             }
 
-            engine.submit (origin::engine, "run.revoke", one (snapshot.id));
+            submitRevocation (engine, snapshot.id);
         }
 
         if (standby.empty())
@@ -6849,6 +7017,153 @@ namespace wfg::cue
 
             engine.submit (origin::engine, "audio.arm", one (id));
         }
+    }
+
+    void Runner::submitRevocation (Engine& engine, const std::string& runId)
+    {
+        /*  WHAT WAS PRE-SENT GOES BACK FIRST, and it goes back as an ORDINARY
+            WRITE.
+
+            §13.1: anticipation is only as good as its revocation, and a
+            revocation of a value on somebody else's desk is putting the old one
+            there. `node.set` is how any client writes a mounted node, so this
+            is that command with the value the target held before the horizon
+            touched it - read before the write, kept on the run.
+
+            An ordinary command rather than a private path, because a replay then
+            reproduces the restore exactly as it reproduces every other write:
+            the record is in the log with the value in it, and the mounted tree
+            comes out the same with no network in the room.
+
+            EVERY DESCENDANT, finished ones included: a pre-send whose wait was
+            `none` finished the moment it had written, and it is exactly the
+            one with something to put back.
+
+            BEFORE the revocation, so that a client watching sees the desk put
+            back and then the runs end, rather than a scene vanishing and a value
+            changing afterwards for no visible reason. */
+        for (const auto* run : runs.descendantsOf (runId))
+        {
+            if (run->restoreAddress.empty())
+                continue;
+
+            if (const auto value = osc::Value::fromAtom (run->restoreAtom))
+                engine.submit (origin::engine, "node.set",
+                               { osc::Value::string (run->restoreAddress), *value });
+        }
+
+        /*  AND NOTHING OF THE BLOCK IS WRITTEN FROM HERE ON (2026-09-30,
+            namespace draft §23.3). A pre-send still asking what the desk held
+            can have its answer in this very tick - taken in the drain that
+            stopped the scene - and `advanceSends`, which runs after this, read
+            it and wrote the value out with the `run.revoke` still unapplied:
+            the desk left holding what a scene that is not coming put there,
+            with no restore asked for, the value to restore having been learned
+            a moment too late. Every job of the block is settled here, by the
+            hook that decided; the jobs are the hooks' own, so a replay is
+            untouched. */
+        for (auto& job : sending)
+            if (inAncestryOf (runId, job.self))
+                job.finished = true;
+
+        engine.submit (origin::engine, "run.revoke", one (runId));
+    }
+
+    void Runner::endMember (Engine& engine, const Run& member, bool graceful)
+    {
+        /*  THE MEMBERS ARE ENDED THE WAY THE GROUP WAS (2026-09-30, namespace
+            draft §23): stopped when it was stopped, killed only when it was
+            killed. It used to kill them either way, so a scene inside a scene
+            skipped its footer under Esc - the releasing §4.4 promises, lost one
+            level down - and a mic cue inside one was cut dead, its reverb
+            reset, where Esc lets it ring (CG, CN). The group waits for every
+            member before its own footer, so the innermost comes down first.
+
+            ONCE A MEMBER, NOT ONCE A TICK. A member already on its way out is
+            left to finish - `stopping`, or holding its post-wait, which answers
+            a second stop by starting the post-wait again, for ever. A kill
+            passes over only a member that is stopping AND already killed, so a
+            double Esc during Esc's teardown still reaches the members Esc had
+            only stopped.
+
+            AND ASKED AGAIN IF IT CAME BACK. A stop cue whose own run is ended
+            hands its target back its level and `playing` (the rule for a fade
+            killed on its own, in `advanceFades`), and a stop cue that is a
+            member here is ended with the rest - so a member it was fading can
+            be back to `playing` after this reached it, and has to be reached
+            again, or it plays on to the end of its file with the scene waiting
+            for it.
+
+            A POST-WAIT A KILL FINDS IS OVER. The member's sound has ended and
+            what it holds is the wait - its voice and its slots with it - and a
+            kill asks nothing of the cue: `run.done`, the post-wait's own ending,
+            lets all of it go on the spot. `run.kill` would only have written
+            `stopping` over the wait. Under Esc a post-wait still runs out, as
+            the member's own way of completing. */
+        if (member.isFinished())
+            return;
+
+        if (! graceful && member.state == runState::postWait)
+        {
+            engine.submit (origin::engine, "run.done", one (member.id));
+            return;
+        }
+
+        const auto onItsWay = member.state == runState::stopping
+                                || member.state == runState::postWait;
+
+        if (onItsWay && (graceful || member.skipFooter))
+            return;
+
+        engine.submit (origin::engine, graceful ? "run.stop" : "run.kill", one (member.id));
+    }
+
+    bool Runner::endAskedForIn (Engine& engine, const std::string& blockRun, bool graceful)
+    {
+        /*  ONLY THE OUTERMOST OF WHAT WAS ASKED FOR: a group fired by name in
+            there ends its own members, and runs its own footer when it was
+            stopped, so what is under it is its job's. What holds the block back
+            is anything asked for that has not finished, at any depth. */
+        auto unfinished = false;
+
+        for (const auto* under : runs.descendantsOf (blockRun))
+        {
+            if (under->isFinished() || ! under->prepare.empty())
+                continue;
+
+            unfinished = true;
+
+            if (const auto* above = runs.find (under->parent);
+                above != nullptr && above->id != blockRun && ! above->isFinished()
+                  && above->prepare.empty())
+                continue;
+
+            endMember (engine, *under, graceful);
+        }
+
+        return unfinished;
+    }
+
+    bool Runner::underAKill (const Run& run) const
+    {
+        /*  BOUNDED BY THE TABLE, as `applyLevels`' walk up is: a `parent` that
+            pointed at itself would otherwise hang the tick. */
+        auto at = run.parent;
+
+        for (std::size_t guard = 0; guard <= runs.all().size() && ! at.empty(); ++guard)
+        {
+            const auto* above = runs.find (at);
+
+            if (above == nullptr)
+                return false;
+
+            if (above->skipFooter)
+                return true;
+
+            at = above->parent;
+        }
+
+        return false;
     }
 
     std::vector<std::string> Runner::armablesFor (const juce::ValueTree& cue) const
@@ -8381,10 +8696,33 @@ namespace wfg::cue
 
         for (const auto& snapshot : runs.all())
         {
-            if (snapshot.state != runState::stopping
-                  || snapshot.track < 0
-                  || snapshot.stopIssued)
+            if (snapshot.state != runState::stopping || snapshot.track < 0)
                 continue;
+
+            const auto cut = snapshot.skipFooter || underAKill (snapshot);
+
+            /*  A STOP ALREADY ISSUED IS NOT THE LAST WORD WHEN A KILL COMES
+                AFTER IT (2026-09-30, namespace draft §23.2). With the panic
+                fade at nought - or any fade shorter than the gap between the
+                two presses - Esc's stop reaches a mic cue before the second
+                press does: its input shut and its reverb ringing out, as Esc
+                promises (CG). This loop used to pass over a run whose stop was
+                issued, for good, so the kill that followed never reached the
+                audio side and the tail rang through the press that promises
+                everything is cut (CN). Now it goes through, once: on a rack
+                channel it cuts the tail; on a voice it is the stop again. */
+            if (snapshot.stopIssued)
+            {
+                if (cut && ! snapshot.killIssued)
+                {
+                    if (auto* run = runs.find (snapshot.id))
+                        run->killIssued = true;
+
+                    audio->kill (snapshot.track);
+                }
+
+                continue;
+            }
 
             const auto held = std::any_of (running.begin(), running.end(),
                                            [&snapshot] (const FadeJob& job)
@@ -8397,13 +8735,24 @@ namespace wfg::cue
                 continue;
 
             if (auto* run = runs.find (snapshot.id))
+            {
                 run->stopIssued = true;
+                run->killIssued = cut;
+            }
 
             /*  A KILL IS NOT A STOP ON A RACK CHANNEL (Phase 9b, decision CN):
                 a double Esc, or the pane's own kill, silences a mic cue at once
                 with nothing left ringing, where Esc lets its tail ring out. On a
-                voice the two are the same stop, as they always were. */
-            if (snapshot.skipFooter)
+                voice the two are the same stop, as they always were.
+
+                AND A RUN UNDER A KILLED GROUP IS CUT, however it was asked to
+                stop (2026-09-30, namespace draft §23.2). Every double Esc is two
+                presses, so its kill lands on members Esc has already stopped and
+                a panic fade is holding: the kill lets the fade go, this issues
+                the stop now due - on the member's own mark, a tick before its
+                group's kill reaches it - and the reverb rang on through the
+                press that promises everything is cut. */
+            if (cut)
                 audio->kill (snapshot.track);
             else
                 audio->stop (snapshot.track);
@@ -8523,7 +8872,15 @@ namespace wfg::cue
 
             WRAPPED, NOT REWRITTEN, so what the earlier registration carries -
             the output test it stops, since 2026-09-21 - comes with it; and a
-            rig that registered the run commands alone keeps the plain ones. */
+            rig that registered the run commands alone keeps the plain ones.
+
+            AND WHAT THE STANDBY MADE READY IS LEFT READY by both (2026-09-30,
+            namespace draft §23): the plain handlers pass `spareHorizon`, so the
+            standby's arm and its prepared block are not among the roots
+            stopped - unless somebody reached into the block and something in
+            it sounds, which makes it a root like any other. Nothing here needs
+            to know: the panic fade takes whatever is sounding, wherever it
+            is. */
         for (const auto* level : { "run.stopAll", "run.killAll" })
         {
             const auto* plain = registry.find (level);
@@ -8537,7 +8894,7 @@ namespace wfg::cue
             if (graceful)
                 specialised.description = "Stops every run now, gracefully: Esc. What is sounding fades to"
                                           " silence over audio/panicFade first; members come down in order"
-                                          " and every footer runs.";
+                                          " and every footer runs; the standby's preparation is left ready.";
 
             specialised.handler = [&runner, graceful, before = plain->handler]
                                   (CommandContext& context, const std::vector<osc::Value>& args)
@@ -8944,8 +9301,9 @@ namespace wfg::cue
 
         //----------------------------------------------------------------------
         registry.add ({ "run.revoke",
-                        "The pointer moved away before a GO: give back everything the horizon"
-                        " was holding for this run, and finish it.",
+                        "A scene that was only made ready is given back: the pointer moved away"
+                        " before a GO, or the scene was stopped before it began. Gives back"
+                        " everything the horizon was holding for this run, and finishes it.",
                         { { "run", 's', false } },
                         true,
                         [&engine, &runner] (CommandContext& context,

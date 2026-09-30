@@ -148,7 +148,13 @@ namespace wfg::cue
 
         /*  The horizon prepared this run and the pointer moved away before a
             GO. Phase 4's revocation (PR 4.5); declared here so the enum does
-            not grow under a client that has already read it. */
+            not grow under a client that has already read it.
+
+            OR THE SCENE THAT HELD IT WAS STOPPED BEFORE IT BEGAN (2026-09-30,
+            namespace draft §23): a group stopped or killed while it was only
+            being made ready is given back the same way - what it pre-sent put
+            back, no footer - because it has not taken anything a footer would
+            give back. */
         inline constexpr const char* revoked = "revoked";
 
         /*  The cue ran and nothing left the machine, because the device it is
@@ -910,7 +916,15 @@ namespace wfg::cue
 
             A stop cue is the first; `run.kill` is the second. Both write
             `stopping`, because both are true statements about the run - so the
-            state alone cannot say which was meant, and this is what does. */
+            state alone cannot say which was meant, and this is what does.
+
+            A GROUP PASSES THE DIFFERENCE DOWN (2026-09-30, namespace draft
+            §23): stopped, it stops its members and they run their footers;
+            with this set, it kills them. It used to kill them either way, so
+            Esc ran the footer of the outermost scene and of nothing inside it.
+            And it is READ FROM ABOVE by the hooks (`Runner::underAKill`): a
+            member's own mark arrives a tick after its group's, and in that tick
+            it is already being killed. */
         bool skipFooter = false;
 
         /*  WHETHER `run.kill` ENDED IT, which `skipFooter` alone cannot say
@@ -920,7 +934,12 @@ namespace wfg::cue
             load-to-time re-solves - so the operator never fights the machine
             over a bed they just stopped - while a double Esc suspends nothing
             and the next GO restores the section. Written by the handler, so a
-            replay has it. */
+            replay has it.
+
+            ONE EXCEPTION, KNOWN AND NOT YET RULED ON (namespace draft §23.2): a
+            group a double Esc kills still ends its members with `run.kill`, so
+            they carry this mark - and a persistent cue sounding as one of them
+            would be suspended by the double Esc. */
         bool killed = false;
 
         /*  Started by the persistent assertion rather than by anybody. Published
@@ -938,6 +957,15 @@ namespace wfg::cue
             one was meant. Issuing it once is also the only version that can be
             described in one sentence. */
         bool stopIssued = false;
+
+        /*  Whether that stop was a KILL, for the one case where a stop is not
+            the end of it (namespace draft §23.2, 2026-09-30): Esc's stop
+            lands, the input shuts and the reverb rings on, and then the second
+            press arrives. The kill must still reach the audio side - a double
+            Esc promises nothing is left ringing (CN) - and it must reach it
+            once, for the same reason the stop does. Hook state, like the
+            stop's. */
+        bool killIssued = false;
 
         bool isFinished() const noexcept
         {
@@ -967,6 +995,38 @@ namespace wfg::cue
         bool holdsTrack() const noexcept
         {
             return track >= 0 && ! isFinished();
+        }
+
+        /*  MADE READY IN CASE, AND NOT ASKED FOR: a horizon's block, still being
+            got ready or holding, or a cue armed ahead - the standby's arm, or
+            one a surface asked for - that no GO has reached yet.
+
+            THE `prepare` MARK IS THE WHOLE OF THE SECOND HALF, for the reason
+            `armStandby` gives: `askedFor` clears it the moment anybody asks for
+            the cue, so a run somebody fired is never in this set however
+            recently it was armed. The mark is the difference between "made
+            ready in case" and "wanted".
+
+            AND NOTHING BESIDE IT. Every road to a launch clears the mark - a
+            GO, a fire by name, a group adopting the run, and a seek, the one
+            that did not until 2026-09-30 - so the test reads the mark alone. It
+            read `launchRequested` beside it, which the launching hook clears
+            again: a run could leave this set in a session and stay in it on
+            that session's replay, which runs no hooks.
+
+            ABOUT THE RUN ALONE. A block of these can still hold something
+            somebody asked for - a member fired by name, launched where the
+            horizon armed it - so whatever spares or gives back a block asks
+            `RunTable::askedForUnder` as well.
+
+            Esc and a double Esc leave these alone (2026-09-30, namespace draft
+            §23): they stop what is running, a preparation is not running, and
+            the pointer has not moved - so it is still wanted, and the next GO
+            is as instant as it would have been. */
+        bool onlyPrepared() const noexcept
+        {
+            return state == runState::preparing
+                     || (state == runState::armed && ! prepare.empty());
         }
     };
 
@@ -1018,11 +1078,22 @@ namespace wfg::cue
         void create (std::string id, std::string cueId, std::string kind,
                      std::string parentRun = {});
 
-        /*  Every unfinished child of a group run, in the order they were
-            spawned. Answered by scanning rather than by trusting the parent's
-            own list, because the two could disagree and only one of them is
-            what the runs actually say. */
+        /*  Every child of a group run, in the order they were spawned -
+            FINISHED ONES INCLUDED, which is what every caller that asks "is it
+            over" tests for itself (2026-09-30: this said "unfinished", and the
+            code has never skipped a finished child). Answered by scanning
+            rather than by trusting the parent's own list, because the two could
+            disagree and only one of them is what the runs actually say. */
         std::vector<const Run*> childrenOf (const std::string& parentRun) const;
+
+        /*  WHETHER ANYBODY ASKED FOR SOMETHING UNDER THIS RUN: an unfinished
+            descendant with no `prepare` mark. A block the horizon made ready
+            holds only marked runs - its pre-sends, its arms, the groups nested
+            in it - until somebody reaches in: a member fired by name, launched
+            where it was armed; a group in it fired by name; a seek. Esc spares,
+            and a revocation gives back, only a block where nobody has
+            (2026-09-30, namespace draft §23.3). */
+        bool askedForUnder (const std::string& runId) const;
 
         /*  Every run under this one, at any depth, outermost first.
 

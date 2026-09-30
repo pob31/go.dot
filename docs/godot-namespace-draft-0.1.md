@@ -1275,7 +1275,7 @@ One that does not comes back moved a second time, and only then is the engine to
 
 | Command | Arguments | Effect | Refused |
 |---|---|---|---|
-| `audio.clockMoved` | `i` sampleRate `i` bufferSize | the engine's own, from its watchdog, logged like `audio.connection`. Revokes prepared runs; stops every live root the Esc way (`run.stopAll`'s walk, now `cue::stopEveryRoot`); writes `rateMoved` and `rateMovedTick`; asks the Console to follow. The stop is made in the handler, because the scheduler runs before the commands on each tick: a `run.stopAll` sent from here would reach a group one tick after it had seen its member fall silent on the new graph and started the next one | `audio-not-reconnecting` outside an outage; `bad-value` for a rate or block of nought |
+| `audio.clockMoved` | `i` sampleRate `i` bufferSize | the engine's own, from its watchdog, logged like `audio.connection`. Revokes prepared runs; stops every live root the Esc way (`run.stopAll`'s walk, now `cue::stopEveryRoot`; *2026-09-30, H2: `run.stopAll` now leaves the standby's preparation ready, and this does not ask it to - it has revoked every preparation already, §23.3*); writes `rateMoved` and `rateMovedTick`; asks the Console to follow. The stop is made in the handler, because the scheduler runs before the commands on each tick: a `run.stopAll` sent from here would reach a group one tick after it had seen its member fall silent on the new graph and started the next one | `audio-not-reconnecting` outside an outage; `bad-value` for a rate or block of nought |
 
 The Console's follow (`DeviceAudioDriver::followClock`) takes the callback out, stops the
 AudioHost and brings it up again on the device as it runs — the rate, block and channels it
@@ -1653,7 +1653,7 @@ Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's ar
 | `run.spawn` | `s` parentRun, `s` cue, `[s run]` | the scheduler created a child run — armed if media, idle otherwise. The generated ID is the record's last argument, as every generated ID is |
 | `run.launch` | `s` run | the scheduler started a run: its pre-wait begins; the due tick is the record's tick plus the wait |
 | `run.fire` | `s` run | a pre-wait elapsed: the kind's fire path runs — media requests its launch, a fade, osc or memo fires at once. Its own record, because a replay runs no hook and skips no handler |
-| `run.done` | `s` run | a post-wait elapsed; the run reports done to its parent. Written only when there *was* a post-wait — `run.ended` sets `done` directly when the run copied none |
+| `run.done` | `s` run | a post-wait elapsed; the run reports done to its parent. Written only when there *was* a post-wait — `run.ended` sets `done` directly when the run copied none. *(2026-09-30, H1: or when the run was killed, which asks nothing of its post-wait; and a killed group ends a member's post-wait under way with this record, §23.2)* |
 | `run.round` | `s` run, `h` seed, `s` ids… | a shuffle group materialised a round. The round is the data; a replay never consults the RNG |
 | `run.range` | `s` run, `i` index | a ranged media run entered a range — at launch, at a placed boundary, or on an advance — reported when the boundary is *placed*, the `run.started` rule |
 | `run.late` | `s` run, `i` blocks | §11.4 declared it and nothing ever produced it. From Phase 3 the intended launch tick is kept on the run and the hook reports the shortfall — a GO before its arm, a range boundary its re-arm missed |
@@ -1666,8 +1666,8 @@ Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's ar
 | `run.advance` | `/godot/cmd/run/advance` | `s` run | leave the current range at the end of its current pass (§12.9) |
 | `run.prune`, `run.unprune` | `/godot/cmd/run/prune`, `…/unprune` | `s` run, `s` cue, `s` scope | scope `round` (this round only) or `group` (every round of this run). Run-local; clicking again reinstates if not already passed (§3.6) |
 | `run.kill` | unchanged | `s` run | **now kills a run with no track** — a fade, an osc wait, a group and every descendant — immediately, and runs no footer |
-| `run.stopAll` | `/godot/cmd/run/stopAll` | — | *(2026-09-18)* §4.4's **Esc**: `run.stop hard` applied to every root run, so members come down in order and every footer runs. An empty table is applied and does nothing |
-| `run.killAll` | `/godot/cmd/run/killAll` | — | *(2026-09-18)* §4.4's **double Esc**: `run.kill` applied to every root run; no footer runs. Which of the two a press means is the client's reading of a hand, and each reading is one of these two records |
+| `run.stopAll` | `/godot/cmd/run/stopAll` | — | *(2026-09-18)* §4.4's **Esc**: `run.stop hard` applied to every root run, so members come down in order and every footer runs. An empty table is applied and does nothing. *(2026-09-30, H2: every root except one that was only made ready - the standby's arm, the block its horizon prepared - which is left ready, §23.3; a block with a run somebody asked for under it, such as a member fired by name, is stopped like any root)* |
+| `run.killAll` | `/godot/cmd/run/killAll` | — | *(2026-09-18)* §4.4's **double Esc**: `run.kill` applied to every root run; no footer runs. Which of the two a press means is the client's reading of a hand, and each reading is one of these two records. *(2026-09-30, H2: the standby's preparation is left ready here too, on the same terms, §23.3)* |
 | `run.solo` | `/godot/cmd/run/solo` | `s` run, `[T on]` | *(2026-09-25, at the author's direction)* a sampler clip soloed on its strip: while it holds, a press on any other strip of its bank - a touch, a pad, a fire by name - is applied and starts nothing. Without `on` it toggles, and the value it came to is what is logged. It lets go by itself when the clip stops (its end, a stop, a kill, a release); a clip that has stopped takes none; a run that is no sampler clip: `bad-value`. The SOLO button of a Mackie strip sends it |
 | `run.seek` | `/godot/cmd/run/seek` | `s` run, `d` seconds, `[s made…]` | *(2026-09-18)* a scrub settling: a **media** run is moved to that second of its file - the voice stopped and asked for again on the same track, at the level a fade had brought it to, the run keeping its identifier - and a **group** run is re-seated at that second of its own timeline under the same group run, its members built again from the solver's answer for the scene at that second (over, sounding at their offset, or waiting for their due tick), which is what brings a member already over back. Nothing beside the group is touched. The identifiers a group seek draws ride on the applied arguments as a jump's do. A ranged media run lands at the start of the range holding the second. A fade, a wait, a message: `bad-value`; a run that is over: applied and nothing |
 | `record.start` | `/godot/cmd/record/start` | — | *(2026-09-19)* the live recorder on: from now every applied `go`, `cue.fire` and `trigger.fire` on any list is kept with its tick, unbounded, beside the sixty-four-step history |
@@ -1682,7 +1682,9 @@ descendant and runs no footer. Esc and double-Esc in Phase 10 are these two path
 *(Bound early, 2026-09-18, at the author's asking — "Panic is missing and Esc key is not bound":
 `run.stopAll` and `run.killAll` are those two paths over every root run, and both clients bind Esc
 and a second Esc within 750 ms to them; the desktop has a PANIC button beside GO as well. Go Doh!
-stays deferred, as §4.4 itself says.)*
+stays deferred, as §4.4 itself says.)* *(2026-09-30, H1: as built, a group asked to stop killed its
+members whichever way it was asked, so a group inside a group skipped its footer under a stop cue
+and under Esc. It now stops them when it was stopped and kills them only when it was killed, §23.2.)*
 
 ### 12.5 Groups — `/godot/cue/<id>` grows, and two children appear
 
@@ -2584,7 +2586,7 @@ origin `engine`:
 | Command | Args | When |
 |---|---|---|
 | `run.prepare` | `s` cue, `[s run]` | the horizon reached a cue or a group and made it ready: a group run is created in `preparing` and its header's preparable cues run under it. The generated ID is the record's last argument, as every generated ID is |
-| `run.revoke` | `s` run | the horizon left before a GO: the pre-sent values are put back, the claims released, the run and its children ended |
+| `run.revoke` | `s` run | the horizon left before a GO: the pre-sent values are put back, the claims released, the run and its children ended. *(2026-09-30, H2: also a group stopped or killed while it was only prepared, submitted by its own job, §23.3)* |
 | `run.assert` | `s` cue, `[s run]` | a persistent cue was found not running, or found disagreeing with the world, and was re-asserted (§13.11) |
 
 Two operator commands:
@@ -9357,7 +9359,9 @@ change the way Phase 5's views did.
    sounding ones play out; voices go to waiting members before a finished member re-arms, never
    more asks a tick than free tracks. **Two things differ from what §16.5 promised, and both are the
    author's to rule on:** a stop cue aimed at a sampler group kills its sounding clips at once
-   rather than fading each (the existing group stop kills children; Esc does the same), and GO on a
+   rather than fading each (the existing group stop kills children; Esc does the same - *2026-09-30,
+   H1: a group's stop now stops its children and only a kill kills them, §23.2; on a voice the two
+   are one stop, so the clips still stop at once rather than fade*), and GO on a
    running *non*-sampler group at the top of a list still starts a second scene — decision N says a
    live group is ignored, the comment beside `armInternal` says so too, and the code does not. Only
    the sampler refresh was added; the general fix waits for the author.
@@ -11095,6 +11099,11 @@ rather than making it again - a live input has no offset to be relaunched at, an
 have waited behind its own ringing channel. A mic cue inside a group is rebuilt with the group, as
 its members are. **At standby** a mic cue is armed ahead as a media cue is (`audio.arm` takes one):
 its channel claimed or queued, its plugins set, the gate shut; the pointer moving on lets it go.
+*(2026-09-30, H2: inside a scene the horizon was preparing it was not. A mic cue in the scene's
+header, and the pointer's own mic member put under the block, were launched with the header's
+network cues, and the gate opened while the pointer was only resting on the scene. The header's mic
+cue is armed now, the gate shut; the member waits unopened; the GO that enters the scene opens
+either, §23.3.)*
 **The persistent section asserts it** as it asserts media, and a double Esc silences it without
 suspending it - the next GO brings it back. **Its DCA trims it** (`dcaChainOf`). Left to 9b.7:
 the refusal of Load now naming the mic cue that holds it, which the button can say from the run
@@ -12308,11 +12317,13 @@ wins"): each does its Runner half first and then exactly what the run-table regi
 stop cue's `fade` verb runs - to silence over `panicFade`, then the stop - with no cue behind it
 (`reportsSelf = false`, a sampler release's shape). A fade already on the run gives way from wherever
 its level has got to. Then every root is asked to stop, as before. A group's members are already
-fading, so the group's graceful stop (which kills its children) waits for them, and its footer runs
+fading, so the group's graceful stop (which kills its children - *2026-09-30, H1: which stops them,
+and kills them only when the group was killed, §23.2*) waits for them, and its footer runs
 when they have gone: §4.4's *"same code path as normal completion, entered early"*, at the speed the
 show chose. A mic cue is faded at its input, as a stop cue's fade does it (§18.5): the voice goes and
 the channel's reverb rings on. Nothing armed, waiting or in its pre-wait is faded; it has nothing to
-fade and stops at once, as it always did.
+fade and stops at once, as it always did. *(2026-09-30, H2: except what was only made ready - the
+standby's arm and its prepared block - which Esc and a double Esc now leave ready, §23.3.)*
 
 **A run already on its way out keeps whichever stop lands first.** A ten-second fade-and-stop is
 brought down with everything else; a stop due sooner than the panic's lands where it was going to.
@@ -12353,6 +12364,9 @@ All three were found by this change's tests, and all three are closed by it:
 Each was checked by disabling its fix and running its case against the old path: all three failed
 as described. The same rule aimed at a GROUP (a stop cue fading a scene, then Esc) was checked the
 same way and was not broken - the group is a root the press stops - so it keeps a test and no fix.
+*(2026-09-30, H1: it was broken whenever a member was still ending - holding its post-wait, a tail
+ringing: the group was handed back to `playing` and played its next member after Esc. A group is no
+longer handed back, §23.2.)*
 
 ### 21.5 The decisions
 
@@ -12950,3 +12964,328 @@ exact zeros unjudged (fb12d4f) stays, harmless. The other lever, the prime on th
 It lists what is Tracktion's own in patch 0002: the Lagrange reader's per-block rounding, the stretcher's prime at speeds other than one, its prime before the file is cached, its
 lost place after a cache miss, a slot rebuilt mid-play restarting its reader, and this loop above
 the stretcher.
+
+## 23. The stop levels held to their law
+
+Written from 2026-09-30, one subsection per stage of the hardening plan as it lands. Devplan
+Phase 10 is "timecode, panic, hardening", and most of it waits on something: timecode on the tick
+derivation, Go Doh! and the revert of a GO on the list of everything a GO leaves in flight, Esc as a
+pause on its own ruling. What waits on nothing is the two stop levels Go.dot already ships. Read
+against PRD §4.4 they fell short in several places, and this section records each gap, its fix and
+the decisions taken on the way. Nothing here changes the law - PRD §4 and `CLAUDE.md` are untouched -
+it makes the code keep it.
+
+### 23.1 The real-time safety gate (H0)
+
+**What it means.** The CI job that runs the suite under the real-time sanitizer (RTSan: the check
+that the audio thread never allocates, locks or waits) is meant to fail when anything reports a
+violation. It could not. The first repair, 1a1fc35, could not either, and 54adeaf is the one that
+can - as below.
+
+**Why it could not.** The job runs with `halt_on_error=0`, so that one violation does not hide the
+next. A process that walks into a lock or an allocation on the audio thread then prints a report,
+carries on, and exits 0: its test passes. And `ctest --output-on-failure` prints the output of
+failed tests only. So a report went into a log nobody was shown, and a `wfg` started by a Python
+driver printed its reports wherever the driver sent its output. 134 tests passed on 45e1664 with
+not one report line in the job's log, which proves nothing either way.
+
+**The first repair, and why it could not hear either (1a1fc35).** It sent every report to a file
+through `log_path`, the sanitizers' common flag, and failed the job on any file that named the
+sanitizer. Clang 20's RTSan reads `log_path` and never applies it: its start-up (`__rtsan_init`)
+does not set the report path, as ASan's and UBSan's do. No file was ever written, and the step was
+green because it had nothing to read - "0 file(s) written" on 914f742's run, which again proved
+nothing. A gate that is green because it is deaf looks exactly like one that is green because the
+code is clean.
+
+**What the job does now (54adeaf):**
+
+- **The gate reads everything the tests printed.** ctest writes the whole output of every test,
+  passed or failed, to `Testing/Temporary/LastTest.log`. A step after the tests fails the job if the
+  sanitizer's name appears anywhere in it, and names each test that printed a report; the log is
+  kept as the `rtsan-lasttest-log` artifact. That covers the unit suite, the replays, and any helper
+  process that inherited a test's output. `halt_on_error=0` stays, so a red run holds the whole
+  list.
+- **A driver's own `wfg` is heard too.** A `wfg` that a Python driver starts writes its stderr to a
+  pipe the driver holds and nobody read after the ports. `common.Server.stop()` now reads what is
+  left of it - on a thread with a deadline, since a helper can outlive the engine holding the pipe -
+  prints any sanitizer report into the test's output, where the gate sees it, and fails the driver;
+  `run_wfg()` echoes one likewise.
+- **A control proves the gate can hear.** `tests/RtsanControl.cpp`, built only by the rtsan preset,
+  makes one allocation inside a `WFG_AUDIO_THREAD` function on purpose, and `rtsan.control`
+  (`tests/rtsan_control.py`) passes only if the sanitizer reported it. The planted report stays
+  inside that wrapper, so it never trips the gate itself.
+
+**Its first real run may be red** on violations that were always there. That red is the measurement
+the job was written for, not a regression: anything of Go.dot's is fixed, never suppressed, and
+anything in Tracktion or JUCE is written down here before any suppression is added. There is no
+Clang 20 on the Windows development machine, so the first real run is CI's: 54adeaf's.
+
+### 23.2 Esc brings a scene down the way it would have ended (H1)
+
+**The gap.** A group asked to stop ended its members with `run.kill`, whichever way it had been
+asked. `run.kill` marks a run to skip its footer (`skipFooter`) and as the operator's kill
+(`killed`). So under Esc, or a stop cue aimed at the outer scene:
+
+- **a scene inside a scene never ran its footer**, and never gave back what it held. §4.4 promises
+  that Esc runs footers, and the PRD that nested scopes tear down innermost-first; both held for the
+  outermost level only;
+- **a mic cue inside a scene was cut dead**, its reverb reset, where Esc on the same cue alone lets
+  the tail ring (§18.5, CG and CN);
+- **a member's lane ride was dropped** (`recordLane` drops a ride on a run that skips its footer;
+  DM keeps it for Esc);
+- **each member carried the `killed` mark**, which the persistent assertion reads as the operator's
+  kill from the running pane (decision S).
+
+**The fix**, in the stopping branch of the group job (`Runner::advanceGroups`):
+
+- **A group that was stopped stops its members** (`run.stop`, hard), and they run their footers.
+  Only a group that was killed kills them. The group already waits for every member before its own
+  footer, so the innermost scene comes down first, footer and all, and the outer footer runs after
+  it (EI).
+- **A member is asked once, not every tick** (EJ). The branch re-sent its stop to every unfinished
+  member on every tick. A member holding its post-wait answers a stop with `run.ended`, which starts
+  the post-wait again (`RunCommands.cpp`, `run.ended`), and the next tick stopped it again: the
+  scene never came down. It was there before this stage, with `run.kill`, and graceful teardown of
+  nested scenes makes it an ordinary show. Now a member already `stopping` or holding its post-wait
+  is left to finish under a stop; a kill passes over only a member already stopping under a kill,
+  and ends a post-wait (ES), so a double Esc during Esc's teardown still reaches the members Esc had
+  only stopped. A member that comes back is asked again: a stop cue ended with the rest of its scene
+  hands the member it was fading back to `playing` (the rule for a fade killed on its own), and asked
+  only once that member would play on to the end of its file with the scene waiting for it. It also
+  takes fifty records a second out of the log during a panic fade.
+- **A group is never handed back to `playing`** (EK). A fade whose own run is stopped gives its
+  target back its level - the rule for a stop cue killed on its own, where the operator asked
+  nothing of the cue - and Esc stops a stop cue's run with every other root. For a voice that is
+  §21.4's first hole, closed by the panic fade. For a group it put the scene back to `playing` while
+  a member was still ending, and once the member had gone the scene played its next member, after
+  Esc. §21.4 found the group case "not broken" because its member ended on the next tick; a member in
+  its post-wait, or a tail ringing, is the case that shows it. A group's `stopping` belongs to its
+  job, which has already asked its members to stop.
+- **A double Esc cuts a footer that is already running** (EL). The branch stood aside for any group
+  in its footer, so a footer that Esc had started - a release cue with a pre-wait - played on to its
+  end through the press that promises everything is dropped. Now a group in its footer that has been
+  killed kills the footer's runs and ends.
+- **With no audio side, a stop cue aimed at a group leaves the group's ending to its job** (EM). A
+  fade that ends in a stop says the end itself when there is no audio side to report it, which is
+  right for a sound. It said it for a group too, and so ended the scene on the spot - no member
+  stopped in order, no footer - in every `wfg serve` without `--hosted`, which is where a show of
+  network cues is rehearsed.
+- **The kill is read from above** (ER; found in this stage's review). Every real double Esc is two
+  presses - the client and the D700 send `run.stopAll` on the first and `run.killAll` on the second,
+  inside 750 ms - so its kill always lands on a teardown Esc has begun. A killed group reaches its
+  members through its own job, a tick after the press, and in that tick each read its own mark
+  alone. `enforceStops` issued the stop the kill had just made due, by letting go of the panic fade:
+  a stop and not a kill, so a mic member's reverb rang through the press that promises it is cut
+  (CN). And a scene inside, its last member ending in that drain, began its footer. A run under a
+  killed group is now cut however it was asked to stop, and a group under one ends as a kill
+  (`Runner::underAKill`).
+- **And a kill after a stop that has already landed still goes through** (ER, found by the stage's
+  final check). With the panic fade at nought - or any fade shorter than the gap between the two
+  presses - Esc's stop reaches a mic cue before the double Esc does, alone or in a group: the input
+  shut, the reverb ringing out, as Esc promises. `enforceStops` passed over any run whose stop was
+  issued, for good, so the kill that followed never reached the audio side. It now goes through
+  once (`Run::killIssued`): on a rack channel it cuts the tail; on a voice it is the stop again.
+- **A kill ends a post-wait and begins none** (ES; found in the review). A kill wrote `stopping`
+  over a run's post-wait, and the `run.ended` that followed began it again from nought - so a double
+  Esc held a member's voice, its slots and its scene for a whole post-wait more (EJ had only stopped
+  it happening for ever), and a cue killed in its pre-wait began a post-wait it had never reached.
+  `run.ended` now finishes a killed run at once, a handler change (§23.3 says what it means for a
+  replay); and a group's kill ends a member's post-wait already under way with `run.done`, the
+  post-wait's own ending, which lets its voice and slots go on the spot.
+
+**Not changed, and worth knowing:**
+
+- **A stop cue with the `fade` verb aimed at a group stops its members at once**, rather than fading
+  them over its duration: the group is `stopping` from the first tick of the fade, and its job stops
+  its members on the next. What fades over the duration is the group's own level - and a group's
+  level trims every run under it, its footer's included, so a footer's own sound plays under that
+  fade (and under silence at once, for a `hard` stop cue - which is why a mic member of a group a
+  hard stop cue is aimed at is stopped rather than killed, and rings behind a level already at
+  silence). Recorded as a known gap; out of this stage, and the author's to rule on.
+- **Under Esc a member's post-wait still runs out** before its group's footer: Esc is the path of
+  normal completion entered early, and a post-wait is part of how a member completes. A member that
+  has just begun a thirty-second post-wait keeps its voice and its slots, and its scene waits for
+  it, for that half-minute. Whether Esc should end a post-wait at once, as a kill now does (ES), is
+  the author's to rule on. The same holds for a member Esc stops while it is still in its PRE-wait:
+  it never fired, yet the `run.ended` that ends it begins its full post-wait, and its scene waits
+  for that too (a media member armed during the pre-wait keeps its voice meanwhile). ES spares only
+  a killed run; the author's to rule on with the rest.
+- **Under a double Esc a group's members still get `run.kill`**, which marks them `killed` as well as
+  skipping their footers. §18.8 took `killed` off `run.killAll`'s roots so that a double Esc suspends
+  no persistent cue; a persistent media or mic cue sounding as a member of a group would still be
+  suspended by one.
+
+**Tests.** `GoTests`: Esc on a group inside a group runs both footers, innermost first, and kills
+nothing; a double Esc on it runs neither and kills the inner group (its `killed` pinned as the third
+item above); a stop cue aimed at the outer group runs both; a member holding its post-wait no longer
+holds the scene for ever; a double Esc cuts a footer Esc had started; a group a stop cue is fading is
+not handed back while its member holds its post-wait; with no audio side a stop cue aimed at a group
+runs its footer; a scene whose parent the second press kills begins no footer in that tick (ER); a
+double Esc never waits out a post-wait - a member holding one, its voice freed; a member, and a cue
+on its own, killed in their pre-waits; a footer's cue holding one (ES). `MicTests`: Esc on a group
+stops its mic member, whose tail is heard at the cue's level, and a double Esc kills it; a real double
+Esc, Esc and then Esc inside the panic fade, kills it too (ER); with the panic fade at nought, a
+double Esc after Esc's stop has landed still cuts the tail it left ringing, alone or in a group, and
+only once (ER); a hard stop cue aimed at the group stops it rather than killing it, behind the
+group's silenced level (the first item above, pinned).
+Each failed first: the ones this stage began with on the code before it, the ones its review added
+(ER, ES) on the stage's first version. Two are guards rather than repairs. A member a killed stop cue
+hands back is killed again: the old code passed it by killing every member every tick, and a rule
+that asked each member once and never again fails it, which is why EJ asks again a member that came
+back. And a double Esc during Esc's teardown cuts the inner footer Esc had begun and runs no outer
+one, which a rule passing over every member already on its way out would fail.
+
+### 23.3 A scene that never started has no footer, and Esc leaves the standby alone (H2)
+
+**The gap.**
+
+- **A group stopped while the horizon was only making it ready** (§3.12: its header's values
+  pre-sent, its first sounds armed, the pointer on it or inside it) was torn down like a live one:
+  its members killed, and its footer run. A footer gives back what a scene took, and this one had
+  taken nothing. Being `stopping`, it was also no longer found by the one path that puts back what a
+  block pre-sent, `armStandby`'s revocation, so the pre-sent values stayed on the desk. It happens
+  when Esc brings down a running scene whose next scene the horizon had prepared inside it, and when
+  a stop is aimed at a prepared run.
+- **Esc and a double Esc stopped every root**, the standby's own preparation among them: its arm,
+  its prepared block. The pointer had not moved, so the next GO paid the disk and the pre-sends again
+  with the operator's hand already down.
+- **A block could hold a sound, and nothing that gave it back asked** (found in this stage's
+  review). A member fired by name out of a prepared scene - a surface's button, a start cue, a
+  trigger - launches where the horizon armed it, under a block no GO has entered; and the horizon
+  itself launched a mic cue in a scene's header, its gate open before any GO. A revocation ends such
+  a run on the model alone, so when the pointer moved away the voice played on with no run owning
+  it, out of every later Esc's reach. The stage's first version made it worse: Esc and a double Esc
+  spared the block around the sound, and a stop reaching the block gave it back the same way.
+
+**The fix.**
+
+- **A group stopped or killed while it is `preparing` or `prepared` is given back** the way the
+  pointer moving away gives a block back: every value the block pre-sent written back with an
+  ordinary `node.set`, then `run.revoke`, which ends the block and everything in it with
+  `warning = revoked`. No footer runs. The two are submitted by the group's own job, without asking
+  the made-ready members to stop - `run.revoke` ends the whole block, nested prepared groups
+  included (what somebody asked for inside it is stopped first, ET, below). The
+  restore-then-revoke is one helper now, `Runner::submitRevocation`, lifted out of `armStandby`,
+  which calls it too; a hook's, never a handler's. `runWarning::revoked` gains its second meaning:
+  the scene that held the run was stopped before it began (EN). What somebody asked for inside the
+  block is ended first, the way the block is being ended, and the block given back once it has all
+  gone (ET).
+- **And a pre-send still asking what the desk held writes nothing once its block is given back**
+  (EN). A revocation reaches its runs without passing through `stopping`, so the job that asked went
+  on asking, and when the answer landed it wrote the new value - after the revocation that should
+  have put the desk back, with nothing left to put it back again. That was already so for the pointer
+  moving away; this stage made it common. `advanceSends` now finishes, silently, a job whose run has
+  finished by another road; and `submitRevocation` settles the block's jobs itself, because an answer
+  taken in the drain that stopped the scene is there to be read in the very tick the block is given
+  back, before the `run.revoke` is applied - the review's narrower case of the same hole.
+- **Esc and a double Esc leave what was only made ready** (EO): a root that is `preparing`, or
+  `armed` with a `prepare` mark - the standby's arm, its prepared block, or a cue a surface armed -
+  with nothing asked for under it (ET). `Run::onlyPrepared` is the test, and `armStandby`'s
+  revocation uses the same one. It is a flag on `cue::stopEveryRoot` that both keys' handlers pass;
+  the Runner's wrappers keep delegating to them, so the output test they stop still stops. Roots
+  only: a preparation made inside a running scene goes with that scene - a prepared group is
+  revoked, as above, and a member armed ahead under it is stopped with the rest - and the pointer,
+  which has not moved, does not prepare it again until it does. The next GO enters the scene afresh,
+  as it always has after Esc (DP).
+- **GO on a mic cue the standby armed ahead acts on its take's `onGo`** (EP). `onGo` was acted on in
+  `fireKind` alone, which a cue armed ahead never reaches when it has no pre-wait: `armInternal`
+  launches the armed run and returns. So GO on the ordinary standby - the armed one - left the take as
+  it was. The black-box driver `phase9c_take.py` exposed it once Esc stopped ending the standby's arm:
+  its "Scene 5 loop" never looped.
+- **A block somebody reached into is not only made ready** (ET). `RunTable::askedForUnder` says
+  whether a block holds an unfinished run with no `prepare` mark - a member fired by name, a group in
+  it fired by name, a cue a seek launched; every road to a launch clears the mark, the seek since
+  this review. Such a block is stopped by Esc and a double Esc like any root instead of being spared.
+  Its job, when it is stopped or killed while prepared, ends what was asked for in it the way it is
+  itself ending - the outermost of it only, since a group fired by name in there ends its own - and
+  gives the block back once all of it has gone. And the pointer moving away leaves it playing - it is
+  somebody's cue now - and `armStandby`, above its gate, gives the block back on the tick it has
+  gone. `Run::onlyPrepared` reads the mark alone now: it read `launchRequested` beside it, a field
+  the launching hook clears again, so a seeked arm could leave the set in a session and stay in it on
+  that session's replay.
+- **A mic cue a scene's header prepares is armed, never opened** (EU). The horizon launched every
+  header cue but a media one, so a mic cue in a scene's header had its gate open while the pointer
+  was only resting on the scene - a live microphone before any GO, in a block Esc now spares. It is
+  armed in `beginPreparation`, as spawning arms a media cue: its channel claimed or queued for, its
+  plugins set, the gate shut. It counts as ready once it holds its track, or waits in its channel's
+  queue (the block then says `pending`), and the GO that enters the scene launches that run. The
+  pointer's own mic member, put under the block ahead of the GO, is no longer launched with the
+  header either; it waits, unarmed as before, for that GO.
+
+**What `audio.clockMoved` does is unchanged.** It revokes every prepared run itself, in its handler
+(`revokePrepared`), before it stops what is left, so the job's new rule never sees one - and a
+handler cannot put pre-sent values back, since the `node.set`s would reach a replay twice. So a clock
+move revokes a prepared block without a footer, as it always did, and without putting its values
+back, as it always did. The plan's line that this stage covers the clock move holds for "no footer"
+and not for "put back"; the second would need that handler to hand its prepared groups to their jobs
+instead, and is left for a ruling. A block somebody reached into is revoked there as well, what was
+asked for in it with it; the clock's move rebuilds the whole graph, so no voice outlives it.
+
+**What changed that a test could see.** `phase9c_take.py`: after Esc, the channel no longer goes
+empty - it passes to the run the standby armed ahead for Scene 5, which was queued for it and which
+Esc now leaves ready - and GO launches that same run, which loops the take. The driver says so now.
+Two fixture logs hold an engine `run.ended` for the standby's arm right after Esc or a double Esc
+(`take.wfglog` at tick 515, `persistent.wfglog` at 79); a session recorded today would not have it.
+Both still replay record for record, and so does every fixture log here, under both locales.
+
+**The handler changes, and which logs they could replay differently.** Five, across H1 and H2. The
+filter in `stopEveryRoot` (EO, ET): its record is applied with the same arguments, and in the two
+logs above the logged `run.ended` is re-injected and ends the run on the same tick. `armInternal`
+acting on a mic cue's `onGo` (EP): a log with a GO on a mic cue armed ahead whose `onGo` is not
+`wait` would now change the take where it used to leave it - no fixture has one. `run.ended`
+finishing a killed run instead of beginning its post-wait (ES): a log with a kill on a run that has a
+post-wait - no fixture has one, and the later `run.done` such a log holds is applied, as a no-op, to
+the run already over. `beginPreparation` arming a header's mic cue (EU): no fixture has one. And
+`seekMedia` clearing the mark, which no record's outcome reads. Everything else here is a hook's
+decision, leaving as `run.stop`, `run.kill`, `run.done`, `node.set` and `run.revoke` records a replay
+re-injects.
+
+**Tests.** `GoTests`: Esc and a double Esc leave a prepared scene standing and GO adopts it; they
+leave the standby's armed media cue armed, and GO launches that run; a scene prepared inside a
+running one is revoked when Esc stops the running one, with no footer of its own; a stop and a kill
+aimed at a prepared run revoke it, with no footer; a member fired by name out of a prepared scene is
+stopped by Esc and by a double Esc, on its voice, and the block given back after it (ET); Esc on a
+running scene stops such a member of the scene prepared inside it, whose voice used to play on
+unowned (ET); the pointer moving away leaves such a member playing and gives its scene back once it
+has gone, on its own or by Esc (ET); a seek on the standby's armed cue asks for it. `MicTests`: a mic
+cue in a prepared scene's header is armed with its gate shut, and the GO that enters the scene opens
+that run (EU). `VerifiedCueTests`, against a scripted OSCQuery device: Esc and a double Esc on a
+running act put the desk back before they revoke the scene prepared inside it; a prepared scene
+stopped or killed by its run puts the desk back with no footer, and Esc leaves it prepared for GO to
+adopt; a read answered after its scene was given back writes nothing, nor one answered in the drain
+that stopped it (EN). `TakeTests`: GO on a mic cue armed ahead loops the take its `onGo` names,
+once - after its pre-wait, when it has one. Each repair failed first: the ones this stage began with
+on the code before it - the first read-back case in both its forms once H2 revoked blocks without the
+`advanceSends` change, which is how that change was shown to be needed - and the ones its review
+added on the stage's first version. The killed scenes, the killed act and the pre-wait are coverage.
+
+**The decisions (H1 and H2).** All the implementer's - ER to EU from the stage's review - and the
+author's to overrule. EQ is skipped: it is the equaliser everywhere else in this document.
+
+| | Decision | Whose |
+|---|---|---|
+| EI | **A group's members are ended the way the group was**: stopped when it was stopped, and they run their footers; killed only when it was killed | implementer's call; §4.4 and §12.4 drew it, and the code had not followed |
+| EJ | **One stop a member, not one a tick**: a member already stopping or holding its post-wait is left to finish under a stop, and a kill passes over only one already stopping under a kill (a post-wait it ends, ES); a member handed back to `playing` is asked again | implementer's call |
+| EK | **A group is never handed back to `playing`** when the stop cue fading it has its own run stopped | implementer's call |
+| EL | **A double Esc cuts a footer already running**: its runs killed, the group ended | implementer's call (§4.4, *"skips footers"*) |
+| EM | **With no audio side, a stop cue aimed at a group leaves the ending to the group's job**, footer and all | implementer's call |
+| EN | **A group stopped or killed while only prepared is revoked**: its pre-sent values put back, no footer, `warning = revoked`; a pre-send whose block is given back writes nothing, from the tick it is given back | implementer's call |
+| EO | **Esc and a double Esc leave what was only made ready**: the standby's arm and prepared block, or any cue armed ahead and not asked for, with nothing asked for under it (ET) | implementer's call, the double Esc included: a preparation is anticipation, which nobody hears |
+| EP | **GO on a mic cue armed ahead acts on its take's `onGo`**, as GO on one fired cold does | implementer's call (decision CF's reach) |
+| ER | **A kill is read from above, and it follows a stop that has landed**: a run under a killed group is cut however it was asked to stop, a group under one begins no footer, and a kill arriving after a run's stop was issued still reaches the audio side, once | implementer's call (§4.4; every double Esc is two presses, and lands on Esc's teardown) |
+| ES | **A kill ends a post-wait and begins none**: `run.ended` finishes a killed run at once, and a killed group ends a member's post-wait under way with `run.done`. Under Esc a post-wait still runs out | implementer's call; whether Esc should end one too is the author's |
+| ET | **A block somebody reached into is not only made ready**: with a run asked for under it - a member fired by name, a group fired by name, a seek - Esc and a double Esc stop it like any root; a stop reaching it ends what was asked for first, the way it is ending, and revokes it after; the pointer moving away leaves that playing and gives the block back once it has gone | implementer's call |
+| EU | **A mic cue a header prepares is armed, never opened**: its channel claimed, its plugins set, the gate shut, until the GO that enters its scene | implementer's call (`isPreparable` and §18.5 already said so) |
+
+**Not built: a replay fixture of the Esc cases**, which the plan listed. It would pin the handler
+half only - a replay re-injects the logged `run.stop`, `run.revoke` and `node.set` records and runs
+no hooks, so the hooks' decisions are the unit tests' to prove - and the half it could pin, the
+filter in `stopEveryRoot`, needs registering in `tests/CMakeLists.txt`, which another session was
+changing, uncommitted, in this shared checkout while this stage was built. It is owed: on
+`bundles/phase4`, for instance, `standby.set`, `run.prepare`, `run.stopAll` with no `run.ended` or
+`run.revoke` after it, then a `go` that adopts the prepared run. Every fixture log here still
+replays record for record under both locales.
+
+**Owed to the bench:** Esc on the MADIface with a bed; a mic cue with a reverb inside a group that
+holds another group, Esc and then a real double Esc (two presses) on it; and a mic cue in a scene's
+header with the pointer resting on the scene - the gate shut until GO.

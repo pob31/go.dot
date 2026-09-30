@@ -36,7 +36,9 @@ A 21 9 engine run.late s:"SZ299WBW" i:7
 # DOUBLE ESC. Everything stops, footers skipped - the armed scene and the bed.
 # Nothing is suspended: for the next second and a half nothing puts the bed
 # back, because the check is human-paced, and nothing forbids the next press
-# from doing so.
+# from doing so. (2026-09-30, namespace draft 23.3: a double Esc now leaves the
+# standby's arm ready, so a session recorded today would not end the armed
+# scene at 79; replayed, that logged record still ends it on the same tick.)
 A 78 10 udp:127.0.0.1:58985 run.killAll
 A 79 11 engine run.ended s:"WGR8AD3W"
 A 80 12 engine run.ended s:"SZ299WBW"
