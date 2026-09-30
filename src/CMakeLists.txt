@@ -511,6 +511,19 @@ target_link_libraries(wfg_client_ui
 # -----------------------------------------------------------------------------
 add_executable(wfg wfg/app/Main.cpp)
 
+# THE WINDOWS ICON AND VERSION, compiled into wfg.exe (wfg/app/wfg.rc.in says
+# what each is for). Configured rather than written with a relative path,
+# because rc.exe looks for the .ico from the build directory, not from the .rc's.
+# OBJECT_DEPENDS, so a new render of the icon rebuilds the resource.
+if(WIN32)
+    set(WFG_ICON_ICO "${PROJECT_SOURCE_DIR}/packaging/icons/Go.dot.ico")
+    configure_file(wfg/app/wfg.rc.in "${CMAKE_CURRENT_BINARY_DIR}/wfg.rc" @ONLY)
+    target_sources(wfg PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/wfg.rc")
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/wfg.rc"
+                                PROPERTIES OBJECT_DEPENDS "${WFG_ICON_ICO}")
+    unset(WFG_ICON_ICO)
+endif()
+
 # wfg::engine carries wfg::thirdparty PUBLIC; wfg::client_ui is the window
 # main() hands the console. wfg::warnings is named again because it is PRIVATE
 # on every library and so does not propagate; that is deliberate, not an

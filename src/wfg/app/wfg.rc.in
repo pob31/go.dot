@@ -1,0 +1,62 @@
+/*
+    This file is part of Go.dot - https://github.com/pob31/go.dot
+
+    Copyright (C) 2026 Pierre-Olivier Boulant
+
+    Go.dot is free software: you can redistribute it and/or modify it under the
+    terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later
+    version. Go.dot is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+    or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+    (LICENSE, at the repository root) for more details.
+
+    SPDX-License-Identifier: GPL-3.0-or-later
+*/
+
+/*
+    wfg.exe's Windows resources, configured by src/CMakeLists.txt.
+
+    THE ICON is the one Explorer, the taskbar and Alt-Tab show. JUCE gives
+    every window it opens the executable's first icon (ExtractAssociatedIcon
+    in juce_Windowing_windows.cpp), so the main window, the settings and the
+    plugin editors' helper all carry it with no code of ours.
+
+    THE VERSION BLOCK is where Task Manager and the taskbar's menu find a
+    program's name. Without it they say "wfg.exe".
+
+    ASCII only: rc.exe reads this in the machine's code page.
+*/
+
+#include <winver.h>
+
+1 ICON "@WFG_ICON_ICO@"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "Pierre-Olivier Boulant"
+            VALUE "FileDescription",  "Go.dot"
+            VALUE "FileVersion",      "@PROJECT_VERSION@"
+            VALUE "InternalName",     "wfg"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 Pierre-Olivier Boulant. GPL-3.0-or-later."
+            VALUE "OriginalFilename", "wfg.exe"
+            VALUE "ProductName",      "Go.dot"
+            VALUE "ProductVersion",   "@PROJECT_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

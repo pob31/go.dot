@@ -121,6 +121,10 @@ patches/tracktion_engine/series text eol=lf
 *.plist.in text eol=lf
 *.c       text eol=lf
 
+# wfg.exe's resources (src/wfg/app/wfg.rc.in). rc.exe reads an LF file as well
+# as a CRLF one, so it is LF like the sources around it.
+*.rc.in   text eol=lf
+
 # The icons (packaging/icons/). The SVGs are the sources and are text, kept LF
 # for the same honest-diff reason as the sources above. Their renders are
 # binary, and saying so stops Git ever trying to diff or convert a PNG, .icns or
