@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Go.dot's document icon, for a .wfg show file, full detail: 64 px and
+    up. A page with the app icon's tile on it and the extension beneath,
+    the extension drawn as outlines (IBM Plex Mono Medium) so the render
+    never depends on the fonts of the machine running the script.
+    Source for scripts/make-icons.py, which renders every PNG, .icns and .ico
+    from it; edit this, never the renders.
+    SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="184"/></clipPath>
+    <radialGradient id="stone" cx="0.38" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.5" stop-color="#F1EDE4"/>
+      <stop offset="1" stop-color="#C4BCAB"/>
+    </radialGradient>
+  </defs>
+  <path d="M236 64H680L828 212V920Q828 960 788 960H236Q196 960 196 920V104Q196 64 236 64Z" transform="translate(0 12)" fill="#000000" fill-opacity="0.14"/>
+  <path d="M236 64H680L828 212V920Q828 960 788 960H236Q196 960 196 920V104Q196 64 236 64Z" fill="#FFFFFF" stroke="#CFC9BC" stroke-width="8"/>
+  <path d="M680 64V172Q680 212 720 212H828Z" fill="#E9E4D8" stroke="#CFC9BC" stroke-width="8" stroke-linejoin="round"/>
+  <g transform="translate(292 300) scale(0.534) translate(-100 -100)">
+    <rect x="100" y="100" width="824" height="824" rx="184" fill="#1C2226"/>
+    <g stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="10" clip-path="url(#tile)">
+      <path d="M122 0V1024M382 0V1024M642 0V1024M902 0V1024"/>
+      <path d="M0 122H1024M0 382H1024M0 642H1024M0 902H1024"/>
+    </g>
+    <circle cx="392" cy="660" r="122" fill="#000000" fill-opacity="0.45"/>
+    <circle cx="382" cy="642" r="122" fill="url(#stone)"/>
+    <circle cx="642" cy="382" r="56" fill="#4CC38A"/>
+  </g>
+  <path d="M424.8 880 420 813H429.4L431.8 852L432.9 869.2H433.6L441.2 829.2H451.9L459.5 869.2H460.2L461.3 852L463.8 813H472.8L468 880H453.6L446.8 841.2H446L439.2 880Z M491.5 880V813H534.6V822H502.2V841.5H531.6V850.5H502.2V880Z M590.1 870.8H589.4Q588.5 872.8 587.3 874.7Q586.1 876.5 584.4 878Q582.6 879.4 580.1 880.3Q577.6 881.2 574.3 881.2Q563.9 881.2 558.6 872.2Q553.3 863.3 553.3 847Q553.3 829.9 559.4 820.9Q565.4 811.8 577.9 811.8Q582.8 811.8 586.5 813.2Q590.2 814.5 592.8 816.8Q595.4 819 597.1 822.1Q598.8 825.1 599.9 828.4L590.2 831.7Q589.4 829.5 588.4 827.5Q587.5 825.6 586.1 824Q584.7 822.5 582.7 821.6Q580.8 820.8 578 820.8Q571 820.8 567.9 826.2Q564.7 831.6 564.7 840.8V851.5Q564.7 856.1 565.4 859.9Q566.1 863.8 567.7 866.5Q569.2 869.2 571.8 870.8Q574.3 872.3 578 872.3Q583.8 872.3 587 868.8Q590.1 865.3 590.1 859.8V853.8H577.1V845.7H599.9V880H590.1Z" fill="#1C2226"/>
+</svg>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Go.dot's show folder icon, the small cut: 32 px and under. No grid,
+    and a bigger stone and dot.
+    Source for scripts/make-icons.py, which renders every PNG, .icns and .ico
+    from it; edit this, never the renders.
+    SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="stone" cx="0.38" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.5" stop-color="#F1EDE4"/>
+      <stop offset="1" stop-color="#C4BCAB"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 236Q120 180 176 180H392Q424 180 444 204L470 236H848Q904 236 904 292V804Q904 860 848 860H176Q120 860 120 804Z" fill="#11161A"/>
+  <rect x="120" y="300" width="784" height="560" rx="56" fill="#252D32"/>
+  <circle cx="430" cy="640" r="130" fill="url(#stone)"/>
+  <circle cx="660" cy="430" r="72" fill="#4CC38A"/>
+</svg>

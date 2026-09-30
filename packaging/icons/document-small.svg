@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Go.dot's document icon, the small cut: 32 px and under. No label and
+    no grid, a heavier page edge, and the small cut of the app icon's tile.
+    Source for scripts/make-icons.py, which renders every PNG, .icns and .ico
+    from it; edit this, never the renders.
+    SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="stone" cx="0.38" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.5" stop-color="#F1EDE4"/>
+      <stop offset="1" stop-color="#C4BCAB"/>
+    </radialGradient>
+  </defs>
+  <path d="M236 64H680L828 212V920Q828 960 788 960H236Q196 960 196 920V104Q196 64 236 64Z" fill="#FFFFFF" stroke="#A9A293" stroke-width="28"/>
+  <path d="M680 64V172Q680 212 720 212H828Z" fill="#E9E4D8" stroke="#A9A293" stroke-width="28" stroke-linejoin="round"/>
+  <g transform="translate(232 290) scale(0.68) translate(-100 -100)">
+    <rect x="100" y="100" width="824" height="824" rx="184" fill="#1C2226"/>
+    <circle cx="400" cy="624" r="170" fill="url(#stone)"/>
+    <circle cx="672" cy="352" r="96" fill="#4CC38A"/>
+  </g>
+</svg>

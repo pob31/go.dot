@@ -14,9 +14,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Go.dot's icons, rendered from the SVG sources in packaging/icons/.
 
-Produces: packaging/icons/Go.dot.icns   macOS app icon
-          packaging/icons/Go.dot.ico    Windows app icon
-          packaging/icons/png/go.dot-<N>.png          Linux (hicolor) sizes
+Produces: packaging/icons/Go.dot.icns, Go.dot.ico             the app
+          packaging/icons/Go.dot-document.icns, .ico            a .wfg file
+          packaging/icons/Go.dot-folder.icns, .ico              a show folder
+          packaging/icons/png/go.dot[-document|-folder]-<N>.png  Linux sizes
           packaging/icons/png/GoDotMenuBarTemplate.png and @2x
          Exits 0 when every file was written, 1 with a sentence saying why not.
 Usage:   python3 scripts/make-icons.py
@@ -26,13 +27,15 @@ Build requirements: python3, Pillow (`pip install pillow`) and `rsvg-convert`
 The renders are committed so the build never needs either tool. Run this after
 changing an SVG, and commit the SVG and its renders together.
 
-TWO CUTS OF ONE ICON. The full-detail drawing (the grid, the stone, the dot)
-is used from 48 or 64 px up. At 32 px and under its dot is a pixel wide and the
-grid is mush, so those sizes come from the small cut: no grid, a bigger stone
-and a bigger dot. Which sizes take which cut is SMALL_MAX below.
+TWO CUTS OF EVERY ICON. The full-detail drawing (the grid, the stone, the dot,
+the document's label) is used from 48 or 64 px up. At 32 px and under its dot is
+a pixel wide and the grid is mush, so those sizes come from the small cut,
+<name>-small.svg: no grid, no label, a bigger stone and a bigger dot. Which sizes
+take which cut is SMALL_MAX below.
 
-TWO SHAPES. macOS draws its tile on Apple's icon grid, with a margin the Dock
-expects (app.svg). Windows and Linux fill the square (app-square.svg).
+TWO SHAPES OF THE APP ICON. macOS draws its tile on Apple's icon grid, with a
+margin the Dock expects (app.svg). Windows and Linux fill the square
+(app-square.svg). The document and the folder are one drawing everywhere.
 
 THE MENU BAR GLYPH is a macOS template image: black on transparent, which the
 system tints for a light or a dark menu bar. The file name must end in
@@ -66,10 +69,10 @@ def render(svg: Path, size: int) -> bytes:
         check=True, capture_output=True).stdout
 
 
-def app_png(shape: str, size: int) -> bytes:
-    """The app icon at `size`, in the cut that suits it. shape: "" or "-square"."""
+def icon_png(name: str, size: int) -> bytes:
+    """<name>.svg at `size`, or <name>-small.svg when `size` wants the small cut."""
     cut = "-small" if size <= SMALL_MAX else ""
-    return render(ICONS / f"app{shape}{cut}.svg", size)
+    return render(ICONS / f"{name}{cut}.svg", size)
 
 
 def main() -> int:
@@ -87,18 +90,24 @@ def main() -> int:
 
     PNG.mkdir(exist_ok=True)
 
-    # macOS. Pillow picks each .icns slot's image by pixel size from these, so
-    # the 32 px render serves both 32 and 16@2x, and 64 both 64 and 32@2x.
-    mac = [image(app_png("", s)) for s in MACOS_SIZES]
-    mac[-1].save(ICONS / "Go.dot.icns", append_images=mac[:-1])
+    # (file stem, drawing for macOS, drawing for Windows and Linux)
+    icons = (("Go.dot", "app", "app-square"),
+             ("Go.dot-document", "document", "document"),
+             ("Go.dot-folder", "folder", "folder"))
 
-    # Windows. Each size is its own render, not a resize of the largest.
-    win = [image(app_png("-square", s)) for s in WINDOWS_SIZES]
-    win[-1].save(ICONS / "Go.dot.ico", sizes=[(s, s) for s in WINDOWS_SIZES],
-                 append_images=win[:-1])
+    for stem, mac_name, square_name in icons:
+        # macOS. Pillow picks each .icns slot's image by pixel size from these,
+        # so the 32 px render serves both 32 and 16@2x, and 64 both 64 and 32@2x.
+        mac = [image(icon_png(mac_name, s)) for s in MACOS_SIZES]
+        mac[-1].save(ICONS / f"{stem}.icns", append_images=mac[:-1])
 
-    for s in LINUX_SIZES:
-        (PNG / f"go.dot-{s}.png").write_bytes(app_png("-square", s))
+        # Windows. Each size is its own render, not a resize of the largest.
+        win = [image(icon_png(square_name, s)) for s in WINDOWS_SIZES]
+        win[-1].save(ICONS / f"{stem}.ico", sizes=[(s, s) for s in WINDOWS_SIZES],
+                     append_images=win[:-1])
+
+        for s in LINUX_SIZES:
+            (PNG / f"{stem.lower()}-{s}.png").write_bytes(icon_png(square_name, s))
 
     (PNG / "GoDotMenuBarTemplate.png").write_bytes(render(ICONS / "menubar.svg", 18))
     (PNG / "GoDotMenuBarTemplate@2x.png").write_bytes(render(ICONS / "menubar.svg", 36))

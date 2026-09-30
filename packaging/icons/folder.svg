@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Go.dot's show folder icon, full detail: 64 px and up. A slate folder
+    with the played stone and the next point on its front.
+    Source for scripts/make-icons.py, which renders every PNG, .icns and .ico
+    from it; edit this, never the renders.
+    SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <clipPath id="front"><rect x="120" y="300" width="784" height="560" rx="56"/></clipPath>
+    <radialGradient id="stone" cx="0.38" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.5" stop-color="#F1EDE4"/>
+      <stop offset="1" stop-color="#C4BCAB"/>
+    </radialGradient>
+  </defs>
+  <path d="M120 236Q120 180 176 180H392Q424 180 444 204L470 236H848Q904 236 904 292V804Q904 860 848 860H176Q120 860 120 804Z" transform="translate(0 12)" fill="#000000" fill-opacity="0.16"/>
+  <path d="M120 236Q120 180 176 180H392Q424 180 444 204L470 236H848Q904 236 904 292V804Q904 860 848 860H176Q120 860 120 804Z" fill="#11161A"/>
+  <rect x="120" y="300" width="784" height="560" rx="56" fill="#252D32"/>
+  <g stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="6" clip-path="url(#front)">
+    <path d="M316 0V1024M455 0V1024M594 0V1024M733 0V1024"/>
+    <path d="M0 364H1024M0 503H1024M0 642H1024M0 781H1024"/>
+  </g>
+  <circle cx="461" cy="652" r="87" fill="#000000" fill-opacity="0.45"/>
+  <circle cx="455" cy="642" r="87" fill="url(#stone)"/>
+  <circle cx="594" cy="503" r="40" fill="#4CC38A"/>
+</svg>
