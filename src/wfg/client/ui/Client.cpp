@@ -129,7 +129,7 @@ namespace wfg::client
                 actions.panic           = [this] { panic(); };
                 actions.undo            = [this] { send (gesture::undo()); };
                 actions.redo            = [this] { send (gesture::redo()); };
-                actions.save            = [this] { send (gesture::save()); };
+                actions.save            = [this] { save(); };
                 actions.revert          = [this] { send (gesture::revert()); };
                 actions.recover         = [this] { send (gesture::recover()); };
                 actions.discardRecovery = [this] { send (gesture::discardRecovery()); };
@@ -837,8 +837,10 @@ namespace wfg::client
                 {
                     case menuNew:       chooseShowFolder (true); break;
                     case menuOpen:      chooseShowFolder (false); break;
-                    case menuSave:      send (gesture::save()); break;
-                    case menuSaveAs:    chooseSaveAsFolder(); break;
+                    case menuSave:      save(); break;
+                    case menuSaveAs:    if (host.emptyShowAtStart) chooseWhereTheEmptyShowLives();
+                                        else chooseSaveAsFolder();
+                                        break;
                     case menuRevert:    shell->transport.askThenRevert(); break;
                     case menuUndo:      send (gesture::undo()); break;
                     case menuRedo:      send (gesture::redo()); break;
@@ -1523,6 +1525,7 @@ namespace wfg::client
             void timerCallback() override
             {
                 pass();
+                followTheEmptyShowsSave();
             }
 
             /*  THE ONE WAY OUT OF THIS CLIENT INTO THE SHOW (§14.16, rule 1).
@@ -2035,7 +2038,7 @@ namespace wfg::client
                 chooser = std::make_unique<juce::FileChooser> (
                             createNew ? "Choose an empty folder for the new show"
                                       : "Choose a show (its folder or its .wfg)",
-                            mediaFolder().getParentDirectory().getParentDirectory(),
+                            showsFolder(),
                             createNew ? juce::String() : juce::String ("*.wfg"));
 
                 chooser->launchAsync (juce::FileBrowserComponent::openMode
@@ -2070,6 +2073,135 @@ namespace wfg::client
                                       });
             }
 
+            /*  WHERE A SHOW DIALOG STARTS (author, 2026-10-01: "Can they
+                default in the document folder?"). Beside the show this window
+                is on - where a person's shows are, once they have one - except
+                on the launcher's empty show, which lives in Go.dot's own folder
+                (Application Support, %APPDATA%, ~/.local/share), a place nobody
+                should be sent to keep their work: then the Documents folder. */
+            juce::File showsFolder() const
+            {
+                const auto documents = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+
+                if (host.emptyShowAtStart)
+                    return documents;
+
+                const auto beside = mediaFolder().getParentDirectory().getParentDirectory();
+                return beside.isDirectory() ? beside : documents;
+            }
+
+            /*  SAVE: in place - except on the launcher's empty show, which is
+                saved where its maker chooses (below), not into Go.dot's folder. */
+            void save()
+            {
+                if (host.emptyShowAtStart)
+                    chooseWhereTheEmptyShowLives();
+                else
+                    send (gesture::save());
+            }
+
+            /*  THE EMPTY SHOW, SAVED, MOVES TO WHERE IT WAS SAVED (author,
+                2026-10-01: "ask where, then continue there"), as an untitled
+                document does. A folder is chosen, starting in Documents, and
+                the show is written there - one `document.saveAs`, the copy the
+                engine already knows how to make. Once the copy is on the disk,
+                the empty show is put back to empty with `document.revert`, so
+                its autosave does not offer the same work again at the next
+                launch; once it is clean, the saved show opens in a window of
+                its own and this one goes, as the empty show gives way to any
+                show New or Open starts. Followed from the timer
+                (followTheEmptyShowsSave), because the copy is written on the
+                engine's writer, which says when one fails and not when one lands. */
+            void chooseWhereTheEmptyShowLives()
+            {
+                chooser = std::make_unique<juce::FileChooser> ("Choose where to keep this show", showsFolder());
+
+                chooser->launchAsync (juce::FileBrowserComponent::saveMode
+                                        | juce::FileBrowserComponent::canSelectDirectories
+                                        | juce::FileBrowserComponent::warnAboutOverwriting,
+                                      [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
+                                       this] (const juce::FileChooser& answered)
+                                      {
+                                          const auto folder = answered.getResult();
+
+                                          if (safe == nullptr || folder == juce::File())
+                                              return;
+
+                                          send (gesture::saveAs (folder.getFullPathName().toStdString()));
+                                          savingTheEmptyShow = EmptyShowSave { folder, juce::Time::getCurrentTime(),
+                                                                               last.writeError, false };
+                                          shell->transport.setNotice ("saving the show to " + folder.getFileName());
+                                      });
+            }
+
+            /*  On every pass while the empty show is being saved somewhere. */
+            void followTheEmptyShowsSave()
+            {
+                if (! savingTheEmptyShow.has_value())
+                    return;
+
+                auto& saving = *savingTheEmptyShow;
+                const auto waited = juce::Time::getCurrentTime() - saving.since;
+
+                if (! saving.reverting)
+                {
+                    //  A new sentence from the writer is this copy failing.
+                    if (! last.writeError.empty() && last.writeError != saving.errorBefore)
+                    {
+                        shell->transport.setNotice ("the show was not saved: " + juce::String (last.writeError));
+                        savingTheEmptyShow.reset();
+                        return;
+                    }
+
+                    if (copyLanded (saving.folder, saving.since))
+                    {
+                        send (gesture::revert());
+                        saving.reverting = true;
+                        saving.since = juce::Time::getCurrentTime();
+                        return;
+                    }
+                }
+                else if (last.dirty == model::Flag::no)
+                {
+                    const auto folder = saving.folder;
+                    const auto refused = host.openWindow (folder.getFullPathName().toStdString(), false);
+                    savingTheEmptyShow.reset();
+
+                    if (refused.empty() && host.quit)
+                        host.quit();
+                    else
+                        shell->transport.setNotice (refused.empty() ? "saved to " + folder.getFileName()
+                                                                    : juce::String (refused));
+                    return;
+                }
+
+                if (waited.inSeconds() > 20.0)
+                {
+                    shell->transport.setNotice (saving.reverting
+                                                  ? "saved to " + saving.folder.getFileName()
+                                                      + ", but the empty show did not come back"
+                                                  : "the show did not arrive in " + saving.folder.getFileName());
+                    savingTheEmptyShow.reset();
+                }
+            }
+
+            /*  The copy is on the disk: its manifest, show.xml and state.xml,
+                each written since the save was asked for. Each is written whole
+                or not at all (Bundle's atomic writes), so a file that is there
+                is a file that is finished. */
+            static bool copyLanded (const juce::File& folder, juce::Time since)
+            {
+                const auto earliest = since - juce::RelativeTime::seconds (2.0);
+
+                for (const auto& file : { folder.getChildFile (folder.getFileName() + ".wfg"),
+                                          folder.getChildFile ("show.xml"),
+                                          folder.getChildFile ("state.xml") })
+                    if (! file.existsAsFile() || file.getLastModificationTime() < earliest)
+                        return false;
+
+                return true;
+            }
+
             /*  SAVE AS: a folder, and one `document.saveAs` on it. The engine
                 writes the copy and keeps this session on the show it opened,
                 which is what the command was drawn to do (§14.10); the foot
@@ -2078,7 +2210,7 @@ namespace wfg::client
             {
                 chooser = std::make_unique<juce::FileChooser> (
                             "Choose an empty folder for the copy",
-                            mediaFolder().getParentDirectory().getParentDirectory());
+                            showsFolder());
 
                 chooser->launchAsync (juce::FileBrowserComponent::saveMode
                                         | juce::FileBrowserComponent::canSelectDirectories
@@ -2704,6 +2836,20 @@ namespace wfg::client
 
             /** The open file dialogue, which must outlive the call that launched it. */
             std::unique_ptr<juce::FileChooser> chooser;
+
+            /*  The launcher's empty show on its way to where it was saved
+                (chooseWhereTheEmptyShowLives): the folder, since when, what the
+                writer had already said before, and whether the copy has landed
+                and the empty show is being put back. */
+            struct EmptyShowSave
+            {
+                juce::File folder;
+                juce::Time since;
+                std::string errorBefore;
+                bool reverting = false;
+            };
+
+            std::optional<EmptyShowSave> savingTheEmptyShow;
         };
     }
 
