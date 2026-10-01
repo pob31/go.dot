@@ -959,8 +959,8 @@ armed-verified`.
 Own processors may receive tick N+1 values during tick N as OSC bundles with
 timetags, erasing network jitter. Third parties get plain send-on-change.
 
-A generous prepare horizon is also what gives **Go Doh!** (§4.4) something to
-recover.
+A generous prepare horizon is also what gives **Go Doh!** (§4.4, §3.32)
+something to recover.
 
 ### 3.13 Non-linear rehearsal: the state solver
 
@@ -2722,6 +2722,227 @@ block of a loop with sixteen layers costs 56 µs of its 2667; a wrap on a sine s
 the sine does; and a take starts on the sample Rec was placed at. What waits for the bench is the
 D700's own buttons and the page's law for a point.
 
+### 3.32 Go Doh! — taking back the last GO
+
+*Added in 0.8, at the author's direction (2026-09-30), with his answers of that evening and of
+2026-10-01 — the decisions, the inventory of everything a GO leaves in flight and the named
+limitations are `docs/godot-namespace-draft-0.1.md` §24.* Each of the author's rules below names the
+day he decided it; what is the implementer's call is marked so, and is the author's to overrule.
+
+GO was pressed before its moment — a line misheard, a standby taken for a go — and the cue is
+already playing. Esc would stop it, and everything else running, footers (§3.6) and all, and leave
+the pointer past it. **Go Doh!** takes that GO back instead: the pointer returns to the cue, what
+the GO started is held where it is, and what it changed is put back — inside Go.dot always, and on
+another department's device only where that device, or the cue, says take back (below). The next GO,
+the one the operator meant — called here the **corrected GO** — carries on.
+
+It is §4.4's third level of stop, aimed at the failure that happens weekly: a trigger fired ahead of
+time. Of §3.7's triggers, this version takes back GO alone (the author, 2026-09-30); a timecode,
+clock, OSC, MIDI, fader or pad trigger fired early is a later version's to take back, and one fired
+after the GO makes Doh! refuse (below). And it answers §4.5's revert of a GO: honest that the audio
+already escaped, and whole in Go.dot where nothing has been heard yet. By the author's choice
+(2026-10-01), §4.5's re-assertion of pre-GO state stops at a device left to its operator, where
+re-asserting it would *"do more damage than the light operator handling the damage"*.
+
+Below, a **scene** is a group (§3.6) that one GO starts from its row, and an **act** is a manual
+sequence group the operator is stepping through, GO by GO.
+
+**A gesture of its own** (the author, 2026-09-30). Go Doh! is a named command, `go.doh` (§4.11),
+with its own button and its own key, and Undo never touches a GO. On the desktop the button,
+labelled **Doh!**, sits directly to the left of PANIC (the desktop's Esc; pressed twice, a double
+Esc), and the Show menu carries it too. While a GO can still be taken back, the button names its
+cue; its key is **F9**, one press however long it is held *(implementer's calls: no text editing and
+no walk through the list reaches F9, and it is far from GO's Space bar; the key and the button's
+look are the author's at first look)*. On the D700 it waits for a bench session, and is never a
+double press of PLAY *(implementer's call)*: a double press is the very fault it mends.
+
+**The last GO, inside its window** (the author, 2026-09-30). It takes back the last GO only, and
+only for a set time after it: `/godot/list/dohWindow`, a show setting on Show settings > Playback,
+directly after the GO debounce (§3.7). The window is ten seconds unless the show says otherwise,
+from nought to sixty, and nought turns Go Doh! off *(implementer's call)*. Which GO counts as the
+last, where Doh! acts and what forgets the GO are implementer's calls too: the last GO is the last
+one that fired something, on whichever list — a refused GO, or one with nothing in standby, is none;
+Doh! acts on the list that GO moved, whichever list has focus by then; and a jump on that list
+(load-to-time, §3.13) forgets the GO, having rewritten the history it lived in. A press that cannot
+be acted on is refused, and the transport line says why: too late, nothing to take back, pressed
+again too soon, the cue gone or no longer one the pointer may stand on (§3.5), or, in the author's
+words, *"a trigger fired after the last GO"* (below). Doh! is accepted under the show lock, which
+stops editing and not the show, and while the interface is reconnecting, as Esc is (§6.2): the
+pointer goes back at once, and the rest waits for the device *(implementer's calls)*.
+
+**A trigger after the GO** (the author, 2026-09-30, evening). After a trigger other than GO (§3.7),
+or a fire by name, on the same list following the GO, Doh! is refused with a sentence — *"a trigger
+fired after the last GO"* — so a correct GO is never undone by mistake. Taking back triggers is for
+a later version. A sampler pad (§3.27) counts: a pad fired by name or by a trigger, and a hand on a
+pad of the bank the GO armed, since that GO is being played *(implementer's reading, the author's to
+overrule)*; the GO's own start cues firing their targets do not *(implementer's call)*.
+
+**What goes back on the list.** The pointer returns to the cue the GO fired — §4.5's "restores
+standby". With it *(implementer's calls)*: the list's record that it ran out (§3.5) is as it was
+before the GO; the GO debounce forgets the mistaken GO, so the corrected GO is never refused as too
+soon; the list's history (§3.13) loses the GO and records the Doh! in its place, so a later jump
+does not bring back what was taken back; the strips, slots and voices the GO's runs held (§3.9e,
+§3.27) are let go as those runs come down, by the ordinary rules — §4.5's "releases bindings"; and
+the list's persistent section (§3.29) is checked again at the restored pointer, so a bed the GO's
+stop had suspended comes back — §4.5's "re-asserts pre-GO state".
+
+**Was any of it heard?** What the GO started is sorted by one question: had any of it reached the
+room yet? It has when a media or mic cue it started has begun to play, or when a MIDI cue it started
+has gone out to a port that **plays sound** — a toggle on each MIDI port, on its row in
+Show settings > MIDI and saved with the show, because nothing on the wire tells a synth from a
+lighting desk (the author, 2026-10-01, morning: *"Should we have a toggle for this rather than
+assume?"*). It is off unless set *(implementer's call, as is its place)*. Lighting, OSC, and MIDI to
+any other port are never heard, however long a scene of them has visibly run, and whether a cue was
+heard never depends on the Go Doh! setting below.
+
+- **Heard: paused, and carried on** (the author, 2026-09-30). It comes down over the panic fade
+  (`/godot/audio/panicFade`, the one Esc uses) with no footer and no post-wait, and nothing is
+  killed — a mic's tail rings as under Esc *(implementer's call)*. The corrected GO carries it on
+  from where it was when Doh! was pressed, the part that faded heard again *(implementer's call)*,
+  and brings it in over a **0.1 s de-click** — just long enough not to click — rather than a fade-in
+  (the author, 2026-09-30, evening). A paused media cue is armed again at that point as soon as its
+  old voice is free, so the corrected GO is as instant as any armed GO, and a GO pressed while a
+  sound is still fading brings that same sound back up, unless something else has asked it to stop
+  since *(implementer's calls)*. A heard scene is paused with everything in it and set going again
+  at the corrected GO: what had finished stays finished, what was sounding comes back where it was,
+  what was due is due at its remaining time, and what it had fired — stops (§3.8), fades on cues
+  outside it — fires again from its start *(implementer's calls)*. Its sends follow the Go Doh!
+  setting (below); those sent again go out as a burst at the corrected GO, one tick apart per
+  address *(implementer's call, the author's to overrule)*.
+- **Not heard: taken back exactly** (the author, 2026-09-30, evening — §4.5's *"fully recoverable"*,
+  and the common case). A cue still in its pre-wait, a sound still arming, a scene whose header had
+  made no sound yet, a scene of lighting or OSC cues only: each is handed back as it was before the
+  GO — the same armed sound, the same prepared scene with its values still on the desk — and the
+  corrected GO is the rehearsed one, its pre-wait counted again and its header run again, sending
+  nothing of what had already reached a device left to its operator (below). This is what §3.12's
+  horizon gives Go Doh! to recover: the GO had only committed what was prepared, and the commit is
+  handed back.
+- **Only what plays is held.** A fade, a stop, a memo, or an OSC or MIDI cue the GO fired is not:
+  what it did is put back — an OSC or MIDI cue's only where it can be, on a device that takes back —
+  and the corrected GO fires it again from its start *(implementer's call)*. An OSC or MIDI cue left
+  to its operator runs again with its timing and sends nothing (below).
+- **A second Doh!** means the corrected GO starts the cue from the top (the author, 2026-09-30,
+  evening): a short effect caught part-way carries on, and a second press is how to have it whole.
+  It leaves nothing armed at the old point for a GO to launch. A press within the GO debounce
+  (`/godot/list/goDebounce`) of the Doh! before it is refused as a bounce or a held key, so it is
+  never taken for the second press *(implementer's call)*.
+
+**What the GO changed elsewhere is put back as it was** (the author, 2026-09-30): a cue it stopped
+or faded comes back to where it would be now, fading in — over the panic fade, where a paused sound
+arrives over the de-click (the author, 2026-09-30, evening) — and each value it wrote on a desk goes
+back to what the desk held before the GO, on a device that takes back (below). With it
+*(implementer's calls)*: speeds and DCA trims (§3.28) it moved return to where they would be; a stop
+it issued that has not landed is called off; a sampler bank it closed opens again; a Rec or a Loop
+it pressed on a sampling channel (§3.31) is undone by its exact inverse; and what somebody else has
+changed since — a hand on the desk, another cue's fade — is left alone and named. **An act the GO
+ended**, by firing its last member or stopping its last sounding one, is brought back to life with
+its footer undone, so the corrected GO joins it: its header does not run again, and its footer runs
+once, after it *(implementer's reading, the author's to overrule)*.
+
+**What reached a device is its operator's** (the author, 2026-10-01). His case: *"on a show I had
+OSC cues sent to the light board that triggered the lights, sometimes sequences, not just a simple
+change of levels. This could mean moving heads had been repositioning before being lit that would
+fly back to the beginning of a sequence. In this case fixing with Doh would really do more damage
+than the light operator handling the damage."* Asked, he answered *"I would have a default per
+device that can be overriden at cue level"*; when nobody chose, *"Always leave to its operator"*;
+and on sending again, *"a cue level toggle to override the recall with a Doh rather than hard
+rules"*. So:
+
+- **Every network device and every MIDI port has a Go Doh! setting**: **leave** — to its operator,
+  the default for every device whatever its kind — or **take back**. Each OSC and MIDI cue — and any
+  cue kind that comes to send to a device — follows its device, or overrides it either way. The
+  setting is saved with the show, and set on the device's row in Show settings (the Network devices
+  and MIDI tabs) and in the cue's inspector *(its place, the implementer's call)*.
+- **Leave**: nothing the cue sent to that device is put back, the corrected GO does not send it
+  again, and Doh! names the device and the cue as left to its operator. The corrected GO still runs
+  the cue, its pre-wait and post-wait with it, so the scene around it keeps its timing; it sends
+  nothing *(implementer's call)*.
+- **Take back**: what the cue wrote is put back where it can be — a value on a device that describes
+  itself (§3.11) — and the corrected GO sends the cue again. This is the author's answer of
+  2026-09-30, evening, now for these devices and cues only: what cannot be taken back — a MIDI
+  message, an OSC event (§3.3), anything sent to an opaque device (§3.11) — is sent again by the
+  corrected GO, which behaves exactly like a first GO for it, and Doh! names it
+  *"could not be taken back"*.
+- **Only what had already left is concerned** *(implementer's reading, the author's to confirm)*.
+  What the early GO had not sent yet is no device's: it goes out on the corrected GO's clock,
+  whatever the setting, so a lighting scene like the author's, caught part-way, leaves its first
+  cues to the light operator and sends the rest at their time. What the standby pre-sent ahead of a
+  GO follows §3.12's rule whatever the setting, unless the GO had committed it and its scene is then
+  paused or ended: then it goes back only for a cue that takes back. Only a device declared
+  anticipatable (§3.3) is ever pre-sent to, so a lighting desk sees none.
+- **What Go.dot plays and processes inside itself is always taken back** — media, mics, levels,
+  speeds, DCA trims, the cues it stopped. The setting is only about what leaves Go.dot for a device,
+  and it is Go Doh!'s alone: a jump, a fire by name, a trigger, Esc and a double Esc send and stop
+  as they always have *(implementer's call)*.
+- **It is read once**, when Doh! is pressed, and Doh! says then what will happen; a setting changed
+  afterwards changes the next Doh!, not this one *(implementer's call)*.
+
+*Three readings of his answer are the implementer's, and the author's to confirm:* **one setting
+with two consequences** — put back, and sent again — where he may want two (splitting it later adds
+settings, and old show logs still replay); every device leaving by default, **Go.dot's own external
+processors included** (§3.11; a WFS-DIY among them); and a **second Doh! that keeps what was left**
+to an operator while it forgets the resume.
+
+**What could not be put back is said once** *(implementer's call)*, after the Doh!, on the transport
+line and in the log: what could not be taken back and will be sent again, every device and cue left
+to its operator, a value somebody else has changed since, a Rec, Loop or Clear that cannot be
+undone, a scene that comes back only once it has ended, and a scene or an act that could not be
+brought back.
+
+**The list remembers the resume** *(implementer's calls)* and shows which cue the corrected GO will
+carry on. Reading ahead with the arrows keeps it; a GO on another cue of the list, a jump, the cue
+fired by name or by a trigger, or a second Doh! forgets it — the second Doh! the resume only, never
+what was left to an operator.
+
+**The three levels of stop, side by side** (§4.4; namespace draft §21 for the panic fade, §23 for
+Esc and double Esc as built):
+
+| Level | What it stops | Footers | What it puts back | The next GO |
+|---|---|---|---|---|
+| **Esc** — graceful abort | every running cue; what sounds fades out over the panic fade first | run, as at a normal end | nothing | fires the standby, which Esc left where it was |
+| **Double Esc** — immediate | everything Go.dot originates, at once, live effects included | skipped | nothing: the world may be left in a state nobody declared | fires the standby |
+| **Go Doh!** — recovery | what the last GO started, inside its window: heard, faded out over the panic fade and paused; not heard, handed back as it was before the GO | none run; a footer the GO set off is taken back with it | the pointer and the history; what the GO changed — inside Go.dot always, on a device when it takes back | carries the paused cue on, or starts what nobody heard over with its full timing |
+
+**A Doh! never undoes an Esc** *(implementer's calls)*: after an Esc between the GO and the Doh!,
+only the pointer and the values on devices that take back go back, and what reached a device left to
+its operator is not sent again. An Esc or a double Esc after the Doh! leaves the resume standing,
+and a double Esc during a Doh!'s fade cuts, as it always does.
+
+**Replayed as it ran.** Every choice a Doh! makes — what was heard, what to pause, what to put back,
+what was left to an operator — is taken from what §3.15's one ordered path carries (the show, the
+commands and the engine's own logged reports), never from what the audio side happened to be doing
+at that instant, so a session with a Doh! in it replays from its log exactly as it ran.
+
+**Two faults are corrected alongside it**, each in its own commit, before the pause and the resume
+are built (the author, 2026-10-01, morning: *"Fix it, own commit"*). Go Doh!'s resume stands on both: a jump into the middle of a scene (§3.13) lands in the round it is in,
+rather than playing that round again or, after a manual group's last member, sending the pointer
+round the group again instead of on to the next cue; and a GO on a scene inside a running act takes
+the block the standby prepared there (§3.12), rather than starting a second copy beside it.
+
+**Named limitations**, each recorded in namespace draft §24 against the decision it leaves intact. A
+resumed sound lands up to one launch latency (40–80 ms) past the press point, the faded part heard
+again; a mic has no position, and opens again with its old tail cut; a ranged cue (§3.24) resumes at
+the in-point of the range it was in; positions follow the cue's own speed, not a speed fade moving
+in the window; a sound that ran out by itself before the Doh! starts from the top, and one whose
+length the log does not know resumes at the press point even near its end. Inside a resumed scene
+the sounding members arm at the corrected GO and land about 0.4 s late against its due ones, and a
+note whose note-on and note-off had both gone to a port that takes back is sent again as a blip.
+Scenes that loop or shuffle, sampler banks, a scene heard before it reached its members and one in
+its footer start from the top, and a start cue's target starts again from its top. A synth note a
+paused scene holds rings through the pause, and whether Doh! should send it a note-off is put to the
+author, not built. MIDI, OSC events and anything sent to an opaque device are never put back, and,
+on a device that takes back, a hand on the desk that no read-back saw is overridden. Of the scenes
+the GO stopped, only a timeline or an automatic sequence that plays once and in order comes back,
+and only after it has ended and its footer has run, unless a GO on the list comes first; what that
+footer did elsewhere stands, and is named. A manual or sampler group the GO stopped, and a member of
+an automatic sequence or a timeline, are named rather than relaunched. An act the GO ended that
+loops, sits under an automatic sequence or a timeline, or that another hand stopped, is left ended
+and named; a Clear, and a first pass or a layer that a Rec or Loop closed, cannot be undone. A cue
+left to its operator is held back once, on the corrected GO's first run of it: a scene that starts
+over and loops sends it in its later rounds. With a plugin's own window in front (§3.18), F9 stays
+in that window, which hands back only Space and Esc; the Doh! button still works. The namespace
+draft lists the rest.
+
 ---
 
 ## 4. Constraints as law
@@ -2741,8 +2962,7 @@ D700's own buttons and the page's law for a point.
      may be left in a state nobody declared; that is the price of an emergency.
    - **Go Doh! — recovery.** Aimed at the failure that actually happens weekly:
      a trigger fired ahead of time. Recovery-oriented, not destructive.
-     *Specification deferred* until the full inventory of in-flight objects
-     exists.
+     Specified in §3.32 *(added in 0.8, at the author's direction, 2026-09-30)*.
 5. **Undo of a GO is *revert*, not undo.** Restores standby, releases bindings,
    re-asserts pre-GO state; honest that the audio already escaped. A double-GO
    caught inside the anticipation window is fully recoverable and is the common
@@ -3323,7 +3543,7 @@ notice nothing; the designer should notice everything.
 | `wfg` | binary / package |
 | **Didi** | cue list pane (the one that remembers) |
 | **Gogo** | running cues pane (pure present tense, no history) |
-| **Go Doh!** | early-trigger recovery |
+| **Go Doh!** | early-trigger recovery: taking back the last GO (§3.32) |
 | *Rien à faire.* | empty cue list / idle state |
 | *They do not move.* | show complete, all silent |
 | *Répétition* | shipped demo/tutorial show |
