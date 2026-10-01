@@ -1137,10 +1137,28 @@ namespace wfg::cue
             is gapless in one channel. */
         std::vector<std::string> armablesFor (const juce::ValueTree& cue) const;
 
-        /*  The outermost group of the block the pointer is in, or empty when it
-            is not in one. What a horizon prepares, and therefore what a moving
-            pointer leaves behind. */
-        std::string horizonRootFor (const juce::ValueTree& list, const std::string& cueId) const;
+        /*  Every group a pointer at this cue stands in, outermost first, with
+            the cue itself last when it is a group, or nothing when it is in
+            none: the chain `prepareStandby` builds or descends through, by
+            identifier. What a horizon prepares, and therefore what a moving
+            pointer leaves behind - its first is the outermost group of the
+            block the pointer is in. (It answered with that first alone, as
+            `horizonRootFor`, until a block under a running act could be left
+            behind too: 2026-10-01, namespace draft §23.9.) */
+        std::vector<std::string> horizonGroupsFor (const juce::ValueTree& list,
+                                                   const std::string& cueId) const;
+
+        /*  WHETHER THE POINTER HAS LEFT THIS PREPARATION BEHIND, `horizon` being
+            `horizonGroupsFor` of the cue it is on. A run made ready in case and
+            not the pointer's own: at the top of a list, when it is not the
+            block the pointer is in; under another run (2026-10-01, namespace
+            draft §23.9), when it is a block nobody adopted whose scene is not
+            one the pointer stands in, and its parent is neither being stopped
+            nor a preparation left behind too - or an arm under a manual group
+            playing its members, which takes only what a GO asks for (ID). What
+            `armStandby` gives back. */
+        bool leftBehind (const Run& run, const std::string& standby,
+                         const std::vector<std::string>& horizon) const;
 
         /*  The groups between a cue and its list, outermost first, with the cue
             itself last when it is a group. What a GO would create, and
@@ -1221,7 +1239,12 @@ namespace wfg::cue
             inside it, through `armInternal` when the pointer is on it, and
             through `fireKind` when its own parent's job launches it - and three
             copies of this would be three things to keep in step in the one
-            place where being out of step means a scene created twice.
+            place where being out of step means a scene created twice. (And a
+            fourth since 2026-10-01, namespace draft §23.9: `fireStandby`'s
+            member path, when the pointer is on the row of a scene made ready
+            under an act that is running, or under the block of a group the same
+            GO enters - adopted as the descent adopts a block under a running
+            group, left for that group's job to launch.)
 
             `enters` IS THE WHOLE OF THE THIRD DOOR. Only the OUTERMOST group a
             press touches starts; the rest are told where the pointer entered

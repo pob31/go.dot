@@ -591,17 +591,96 @@ namespace wfg::cue
         return ancestors;
     }
 
-    std::string Runner::horizonRootFor (const juce::ValueTree& list,
-                                        const std::string& cueId) const
+    std::vector<std::string> Runner::horizonGroupsFor (const juce::ValueTree& list,
+                                                       const std::string& cueId) const
     {
-        const auto chain = descentTo (list, cueId);
+        /*  THE SAME CHAIN `prepareStandby` BUILDS, by identifier: the groups
+            between the cue and the list, outermost first, and the cue itself
+            when it is a group. */
+        std::vector<std::string> out;
 
-        if (! chain.empty())
-            return chain.front()[idProperty].toString().toStdString();
+        for (const auto& group : descentTo (list, cueId))
+            out.push_back (group[idProperty].toString().toStdString());
 
-        const auto cue = document.findById (cueId);
+        if (const auto cue = document.findById (cueId);
+            cue.isValid() && cue.getType().toString() == "Group")
+            out.push_back (cueId);
 
-        return cue.isValid() && cue.getType().toString() == "Group" ? cueId : std::string {};
+        return out;
+    }
+
+    bool Runner::leftBehind (const Run& run, const std::string& standby,
+                             const std::vector<std::string>& horizon) const
+    {
+        /*  ONLY WHAT WAS MADE READY IN CASE, and never the pointer's own cue. */
+        if (! run.onlyPrepared() || run.cue == standby)
+            return false;
+
+        /*  AT THE TOP OF A LIST, a block or an arm is left once it is not the
+            block the pointer is in - the outermost of its groups (§13.6). */
+        if (run.parent.empty())
+            return horizon.empty() || run.cue != horizon.front();
+
+        /*  AND UNDER ANOTHER RUN (2026-10-01, namespace draft §23.9, J2): a
+            scene the horizon made ready under an act that is running - or
+            inside a block the pointer is still in - once it is not one of the
+            groups the pointer stands in. Only the top of a list was looked at,
+            so a scene made ready under an act kept its voices and its pre-sends
+            for as long as the act ran, and after.
+
+            A BLOCK, AND ONLY ONE NOBODY HAS ADOPTED: its mark is the test. A GO
+            that adopts a block under a running group clears the mark and leaves
+            it `preparing` until that group's job launches it, a tick later - the
+            GO's scene by then, nothing left behind. And so does a GO that
+            enters the block's parent on the block's own row (IC).
+
+            NOR ONE THAT GOES WITH ITS PARENT: under a preparation the pointer
+            has left too, which is given back whole, or under a group being
+            stopped, whose own job gives it back. */
+        const auto* above = runs.find (run.parent);
+
+        if (above != nullptr && above->state == runState::stopping)
+            return false;
+
+        /*  AN ARM, ONLY UNDER A MANUAL GROUP PLAYING ITS MEMBERS (2026-10-01,
+            namespace draft §23.9, ID). The pointer on a sound inside an act
+            that is running arms it under the act, marked; such a group takes
+            only the members a GO asks for, so one the pointer passed over is
+            never taken, and held its voice while the act ran - and after. Not
+            the pointer's own, which was asked for at the top.
+
+            And no other arm under another run: the horizon arms a scene's first
+            sounds under the scene, and once a GO has entered it they wait there
+            for its members to ask for them, the GO having moved the pointer on.
+            So does a sound a GO entered an act at while the act's header runs -
+            which is why the group must be in its members phase, where whatever
+            it was told to enter at has already been asked for. */
+        if (run.state == runState::armed)
+        {
+            if (above == nullptr || ! above->isGroup()
+                  || ! isManualGroup (document.findById (above->cue)))
+                return false;
+
+            return std::any_of (scheduled.begin(), scheduled.end(),
+                                [above] (const GroupJob& job)
+                                {
+                                    return job.run == above->id && ! job.retired
+                                             && job.phase == groupPhase::members;
+                                });
+        }
+
+        if (run.state != runState::preparing || run.prepare.empty())
+            return false;
+
+        const auto wanted = [&horizon] (const std::string& cueId)
+        {
+            return std::find (horizon.begin(), horizon.end(), cueId) != horizon.end();
+        };
+
+        if (above != nullptr && above->state == runState::preparing && ! wanted (above->cue))
+            return false;
+
+        return ! wanted (run.cue);
     }
 
     void Runner::revokePrepared (Engine& engine, std::int64_t tick, const std::string& runId)
@@ -2497,6 +2576,57 @@ namespace wfg::cue
             return used;
         }
 
+        /*  A SCENE THE HORIZON MADE READY UNDER THE ACT IS ADOPTED, not
+            entered cold beside it (2026-10-01, namespace draft §23.9, J2).
+
+            The pointer stands on the row of a scene that plays itself - a
+            timeline, an automatic sequence - inside an act already running, and
+            the horizon has prepared that scene under the act: its header run
+            ahead, its first sounds armed. This road reached none of the doors
+            that adopt a block, so it spawned a second run of the scene beside
+            it, which entered cold - its sounds armed again with the hand
+            already down, its header sent a second time - while the block held
+            its voices and its pre-sends for as long as the act ran.
+
+            ADOPTED THE WAY THE DESCENT ADOPTS A BLOCK UNDER A RUNNING GROUP:
+            told where the pointer entered - nowhere inside it, so at its first
+            member - stamped with this GO, and left standing for the act's job
+            to launch on the next tick, as it launches every member; the launch
+            lets the block's job out of its hold (`fireKind`, the third door).
+            One launcher, as for any member: entered here as well, the act's
+            own launch would arrive at a scene already running, and put one
+            with a pre-wait back into `waiting` over its running header.
+
+            NOTHING IS DRAWN, so the record carries nothing for it: a replay
+            reaches the same block by the same road, the `run.prepare` that made
+            it being in the log above this record. And only the block under THIS
+            act - one prepared anywhere else is not the scene this act would
+            play, and the GO enters the scene cold as it always has.
+
+            AND WHEN THIS GO ENTERED THE SCENE'S PARENT AS WELL (2026-10-01,
+            namespace draft §23.9, IC), by adopting the block the horizon made
+            of it - an act's first scene, a manual scene's first line inside a
+            running act - which is why this comes before the return below. The
+            parent was told to enter at this scene, and the scene's block was
+            left marked for the parent's job to ask for when its members begin.
+            With nothing in the parent's header they begin on the next tick, in
+            time; with a line in it, or with the parent itself waiting for a
+            running act to launch it, they begin later, and the pointer this GO
+            moved on found the block first - a scene nobody had asked for - and
+            gave it back with its sounds and its desk values. The parent's
+            members then began on a revoked run, and the scene the operator
+            GO'd never played. Adopted here, it is this GO's
+            from the press, and the parent's job takes it when its turn comes,
+            as it takes any member it was told to enter at. A parent this GO
+            CREATED has no block under it, so nothing changes for that one. */
+        if (const auto* ready = runs.preparedRunOf (cueId);
+            ready != nullptr && ready->parent == parentRun)
+        {
+            const auto adopted = ready->id;
+            adoptPrepared (adopted, {}, false, tick);
+            return used;
+        }
+
         /*  Entering the group is the whole of this GO: the header runs and the
             job fires the member at the far end of it. */
         if (createdGroup)
@@ -2685,6 +2815,19 @@ namespace wfg::cue
                 {
                     other.enterAt = run->enterAt;
                     other.phase = groupPhase::entering;
+
+                    /*  AND A SAMPLER GROUP TAKES OVER AS IT ARMS, here as in
+                        the other two roads in (2026-10-01, namespace draft
+                        §23.9): a bank the horizon made ready on an act's row,
+                        adopted by the GO there, is launched by the act through
+                        this door alone - and so is one an act nobody had
+                        entered launches as its first row. Let out of the hold
+                        and nothing more, a bank that takes over the whole desk
+                        armed beside the bank it should have closed. Only ever
+                        after a GO: a block is launched by its parent's members,
+                        and not by its parent's preparation (IE). */
+                    if (textOf (cue, "mode") == "sampler")
+                        takeOverFrom (runId, cue);
                 }
 
                 return;
@@ -7863,6 +8006,19 @@ namespace wfg::cue
                     if (child->kind == "media" || child->kind == "mic")
                         continue;
 
+                    /*  NOR A BLOCK NESTED IN THIS ONE (2026-10-01, namespace
+                        draft §23.9, IE). The horizon makes the next scene down
+                        the pointer's chain under this block, and it is not a
+                        header cue to pre-send: it waits for a GO as this one
+                        does. Launched here, it was let out of its hold through
+                        `fireKind`'s third door and played, with no GO pressed,
+                        whenever this block's header had anything to take ahead
+                        - a bed, a pre-send - and since IB a sampler bank so
+                        launched closed the others as well. Its parent's members
+                        launch it, once a GO has entered the parent. */
+                    if (child->isGroup())
+                        continue;
+
                     if (std::find (job.prepared.begin(), job.prepared.end(), child->cue)
                           != job.prepared.end())
                         continue;
@@ -7874,10 +8030,19 @@ namespace wfg::cue
                     engine.submit (origin::engine, "run.launch", one (child->id));
                 }
 
+                /*  AN ADOPTED BLOCK STAYS ADOPTED (2026-10-01, namespace draft
+                    §23.9). A GO that adopts a block under a running group clears
+                    its mark and leaves it here until that group's job launches
+                    it, a tick later; marked again in that tick, it read as a
+                    scene nobody had asked for - which the pointer moving on
+                    gives back, the GO's own scene and its desk value with it,
+                    and which a group's job does not take. */
                 if (preparationSettled (job))
                 {
                     job.phase = groupPhase::prepared;
-                    run->prepare = settledWord (job, group);
+
+                    if (! run->prepare.empty())
+                        run->prepare = settledWord (job, group);
                 }
 
                 continue;
@@ -8481,15 +8646,16 @@ namespace wfg::cue
 
         if (! blocksToGiveBack.empty())
         {
-            const auto wantedAgain = horizonRootFor (list, standby);
+            /*  Wanted again, or adopted: `leftBehind` asks both, of a block at
+                the top of a list and of one under an act alike. */
+            const auto horizon = horizonGroupsFor (list, standby);
             std::vector<std::string> stillPlaying;
 
             for (const auto& blockId : blocksToGiveBack)
             {
                 const auto* block = runs.find (blockId);
 
-                if (block == nullptr || ! block->onlyPrepared()
-                      || block->cue == wantedAgain || block->cue == standby)
+                if (block == nullptr || ! leftBehind (*block, standby, horizon))
                     continue;
 
                 if (runs.askedForUnder (blockId))
@@ -8561,11 +8727,19 @@ namespace wfg::cue
             got ready for a GO that is not coming. Its voices and its slots go
             back.
 
+            AND A SCENE MADE READY UNDER AN ACT THAT IS RUNNING (2026-10-01,
+            namespace draft §23.9, J2): the horizon prepares the pointer's scene
+            under the act when the act is live, so a block can be left behind
+            with a parent. Only the parentless were looked at, and a scene the
+            pointer passed over inside a running act held its voices and its
+            pre-sends until the act ended - and after. `leftBehind` is the test,
+            for both.
+
             Submitted rather than done here, because a hook decides and a
             handler applies: `wfg replay` runs no hooks, so a revocation that
             happened only inside one would be missing from every replay - and
             the replay would then hold voices the session let go of. */
-        const auto keep = horizonRootFor (list, standby);
+        const auto horizon = horizonGroupsFor (list, standby);
 
         for (const auto& snapshot : runs.all())
         {
@@ -8584,10 +8758,7 @@ namespace wfg::cue
                 between "made ready in case" and "wanted", and
                 `Run::onlyPrepared` is that test with `preparing` beside it -
                 the same one Esc leaves alone by (2026-09-30). */
-            if (! snapshot.onlyPrepared()
-                 || ! snapshot.parent.empty()
-                 || snapshot.cue == keep
-                 || snapshot.cue == standby
+            if (! leftBehind (snapshot, standby, horizon)
                  || std::find (givenBack.begin(), givenBack.end(), snapshot.id) != givenBack.end())
                 continue;
 

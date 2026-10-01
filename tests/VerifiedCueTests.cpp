@@ -1791,3 +1791,298 @@ TEST_CASE ("go.doh: a pre-send whose read-back had not come back by the Doh is n
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
     CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
 }
+
+//==============================================================================
+/*  A SCENE MADE READY UNDER AN ACT THAT IS RUNNING (2026-10-01, namespace draft
+    §23.9, J2). The pointer on the row of a scene that plays itself, inside an
+    act already running: the horizon prepares the scene under the act, its
+    header pre-sent to the desk. The GO on that row now adopts that block, as a
+    GO on a scene at the top of a list always has; until J2 it spawned a second
+    run of the scene beside it, which entered cold and sent its header a second
+    time, while the block kept its pre-send. And the pointer moving away gave
+    back only a block at the top of a list, so a scene made ready under an act
+    held its desk value for as long as the act ran, and after. */
+namespace
+{
+    /*  An act - a manual group - of two scenes that play themselves and a line
+        after them, the second scene's header pre-sending the desk's fader and
+        a line two seconds in holding it open; and a line after the act. */
+    struct SceneInAnAct
+    {
+        explicit SceneInAnAct (VerifiedRig& rig)
+        {
+            act = rig.document.createCue (rig.listId, rig.index++, "group", "Act").id;
+
+            first = rig.document.createCue (act, 0, "group", "Scene one").id;
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + first + "/advance", "auto").ok);
+            rig.document.createCue (first, 0, "memo", "Opening");
+
+            scene = rig.document.createCue (act, 1, "group", "Scene two").id;
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+
+            const auto header = rig.document.createRole (scene, "header");
+            REQUIRE (header.ok);
+            presend = rig.document.createCue (header.id, 0, "osc", "Position the source").id;
+
+            const auto base = "/godot/cue/" + presend + "/";
+            REQUIRE (rig.document.setAttribute (base + "address", "/desk/fader").ok);
+            REQUIRE (rig.document.setAttribute (base + "value", "f:0.8").ok);
+            REQUIRE (rig.document.setAttribute (base + "wait", "none").ok);
+            REQUIRE (rig.document.setAttribute (base + "timeout", "5").ok);
+
+            const auto line = rig.document.createCue (scene, 0, "memo", "Line").id;
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + line + "/preWait", "2").ok);
+
+            later = rig.document.createCue (act, 2, "memo", "Later").id;
+            after = rig.document.createCue (rig.listId, rig.index++, "memo", "After").id;
+        }
+
+        /*  GO on scene one's row enters the act, and the walk stands on scene
+            two's row - a scene that plays itself is entered whole - where the
+            horizon makes it ready under the act. */
+        void enter (VerifiedRig& rig) const
+        {
+            rig.setStandby (first);
+            rig.engine.submit ("cli", "go", {});
+            rig.tickOnce();
+
+            REQUIRE (rig.document.getAttribute (cue::standbyAddressOf (rig.listId))
+                       == std::optional<std::string> (scene));
+            REQUIRE (rig.runs.liveRunOf (act) != nullptr);
+        }
+
+        std::string act, first, scene, presend, later, after;
+    };
+
+    std::size_t runsOf (VerifiedRig& rig, const std::string& cueId)
+    {
+        return static_cast<std::size_t> (std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                                                        [&cueId] (const cue::Run& run) { return run.cue == cueId; }));
+    }
+}
+
+TEST_CASE ("prepare: a GO on a scene's row inside a running act adopts the scene made ready there, its header sent once")
+{
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    const SceneInAnAct shape { rig };
+    shape.enter (rig);
+
+    //  The horizon makes scene two ready under the act, its header pre-sent.
+    tickUntilDeskHolds (rig, 0.8f);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+    const auto* ready = rig.runs.preparedRunOf (shape.scene);
+    REQUIRE (ready != nullptr);
+    const auto block = ready->id;
+    const auto actRun = rig.runs.liveRunOf (shape.act)->id;
+    REQUIRE (rig.runs.find (block)->parent == actRun);
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+    rig.engine.submit ("cli", "go", {});                    // scene two's row
+    rig.tickOnce();
+    ticksOf (rig, 10);
+
+    //  Adopted: the same run, playing under the act, and no second run of the scene beside it.
+    const auto* live = rig.runs.liveRunOf (shape.scene);
+    REQUIRE (live != nullptr);
+    CHECK (live->id == block);
+    CHECK (live->parent == actRun);
+    CHECK (runsOf (rig, shape.scene) == 1u);
+
+    //  Its header's pre-send was its execution: not run again, not sent again, never put back.
+    CHECK (runsOf (rig, shape.presend) == 1u);
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+    CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+}
+
+TEST_CASE ("prepare: the pointer leaving a scene made ready inside a running act gives it back, the desk put back first")
+{
+    for (const auto* where : { "a later line of the act", "a line after the act" })
+    {
+        INFO (std::string (where));
+        VerifiedRig rig;
+        rig.anticipate();
+        rig.device.target.says ({ osc::Value::float32 (0.2f) });
+        REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+        const SceneInAnAct shape { rig };
+        shape.enter (rig);
+
+        tickUntilDeskHolds (rig, 0.8f);
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+        const auto* ready = rig.runs.preparedRunOf (shape.scene);
+        REQUIRE (ready != nullptr);
+        const auto block = ready->id;
+
+        //  Away, without a GO.
+        rig.setStandby (std::string (where) == "a line after the act" ? shape.after : shape.later);
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+        CHECK (rig.runs.find (block)->isFinished());
+        CHECK (rig.runs.find (block)->warning == cue::runWarning::revoked);
+
+        //  PUT BACK FIRST, then revoked; and the act, which is running, left alone.
+        const auto restored = recordIndex (rig, "node.set", "/desk/fader");
+        const auto revoked = recordIndex (rig, "run.revoke", block);
+        const auto end = LogFile::parse (rig.engine.log().contents()).records.size();
+
+        CHECK (restored < end);
+        CHECK (revoked < end);
+        CHECK (restored < revoked);
+        CHECK (rig.runs.liveRunOf (shape.act) != nullptr);
+    }
+}
+
+TEST_CASE ("prepare: a scene adopted under a running act whose header settles in the tick after the GO stays adopted")
+{
+    /*  THE MARK IS WHAT THE GIVE-BACK READS, so an adopted block must never get
+        it back. A block the GO adopts under a running act keeps `preparing`
+        until the act's job launches it, a tick later - and its own job, finding
+        its header settled in that same tick, marked it prepared again: the
+        pointer had moved on, so the give-back took the GO's own scene back and
+        put its desk value back with it. The desk's answer is given by hand
+        here, so the header settles in exactly that tick. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.runner.setMounts (&rig.mounts, &rig.sender, nullptr);
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    const SceneInAnAct shape { rig };
+    shape.enter (rig);
+
+    //  The horizon has made scene two ready under the act; its pre-send is asking what the desk holds.
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    const auto* ready = rig.runs.preparedRunOf (shape.scene);
+    REQUIRE (ready != nullptr);
+    const auto block = ready->id;
+    REQUIRE (rig.runOf (shape.presend) != nullptr);
+    REQUIRE (rig.runOf (shape.presend)->restoreAtom.empty());
+
+    //  The answer lands; the pre-send writes, and ends in the drain that applies the GO.
+    rig.engine.submit ("mount:K3PV7WRB", "mount.readback",
+                       { osc::Value::string ("K3PV7WRB"), osc::Value::string ("/desk/fader"),
+                         osc::Value::float32 (0.2f) });
+    rig.tickOnce();
+
+    /*  THE TIMING THIS CASE IS ABOUT, pinned: the pre-send still out when the
+        GO is pressed, and ended in the GO's own drain - the block adopted and
+        waiting for the act's job, its mark cleared - so its job settles it a
+        tick after the adoption. A pre-send ending a tick earlier would settle
+        the block before the GO, and the case would pass without reaching IA. */
+    REQUIRE_FALSE (rig.runOf (shape.presend)->isFinished());
+
+    rig.engine.submit ("cli", "go", {});                    // scene two's row
+    rig.tickOnce();
+    REQUIRE (rig.runOf (shape.presend)->isFinished());
+    REQUIRE (rig.runs.find (block)->state == cue::runState::preparing);
+    REQUIRE (rig.runs.find (block)->prepare.empty());
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    const auto* live = rig.runs.liveRunOf (shape.scene);
+    REQUIRE (live != nullptr);
+    CHECK (live->id == block);
+    CHECK (rig.runs.find (block)->warning != cue::runWarning::revoked);
+    CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+}
+
+/*  THE SAME SCENE AS THE ACT'S FIRST, THE GO ENTERING THE ACT ON ITS ROW
+    (2026-10-01, namespace draft §23.9, IC). The act has not been entered: the
+    horizon makes the act ready and the scene inside it, the scene's header
+    pre-sent; the GO enters the act by adopting its block, and the act's header
+    - a line the horizon could not take ahead - runs before its members. The
+    scene's own block waited, marked, for those members to ask for it, and the
+    pointer the GO had moved on gave it back in the meantime: the desk put back
+    under the GO that had sent it, and the scene, revoked, never played. */
+TEST_CASE ("prepare: a GO entering an act on its first scene's row plays the scene made ready there, the desk left as it was sent")
+{
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    const auto act = rig.document.createCue (rig.listId, rig.index++, "group", "Act").id;
+    const auto actHeader = rig.document.createRole (act, "header");
+    REQUIRE (actHeader.ok);
+    const auto opening = rig.document.createCue (actHeader.id, 0, "memo", "House to half").id;
+
+    const auto scene = rig.document.createCue (act, 0, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+
+    const auto header = rig.document.createRole (scene, "header");
+    REQUIRE (header.ok);
+    const auto presend = rig.document.createCue (header.id, 0, "osc", "Position the source").id;
+
+    const auto base = "/godot/cue/" + presend + "/";
+    REQUIRE (rig.document.setAttribute (base + "address", "/desk/fader").ok);
+    REQUIRE (rig.document.setAttribute (base + "value", "f:0.8").ok);
+    REQUIRE (rig.document.setAttribute (base + "wait", "none").ok);
+    REQUIRE (rig.document.setAttribute (base + "timeout", "5").ok);
+
+    const auto line = rig.document.createCue (scene, 0, "memo", "Line").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + line + "/preWait", "2").ok);
+
+    const auto later = rig.document.createCue (act, 1, "memo", "Later").id;
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    rig.setStandby (scene);
+    tickUntilDeskHolds (rig, 0.8f);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+    const auto* actReady = rig.runs.preparedRunOf (act);
+    const auto* ready = rig.runs.preparedRunOf (scene);
+    REQUIRE (actReady != nullptr);
+    REQUIRE (ready != nullptr);
+    const auto actBlock = actReady->id;
+    const auto block = ready->id;
+    REQUIRE (rig.runs.find (block)->parent == actBlock);
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+    rig.engine.submit ("cli", "go", {});                    // the scene's row, entering the act
+    rig.tickOnce();
+    REQUIRE (rig.document.getAttribute (cue::standbyAddressOf (rig.listId))
+               == std::optional<std::string> (later));
+    ticksOf (rig, 10);
+
+    //  The act's header ran first; the scene is the block, under the act's, and nothing was put back.
+    CHECK (runsOf (rig, opening) == 1u);
+
+    const auto* live = rig.runs.liveRunOf (scene);
+    REQUIRE (live != nullptr);
+    CHECK (live->id == block);
+    CHECK (live->parent == actBlock);
+    CHECK (rig.runs.find (block)->warning != cue::runWarning::revoked);
+    CHECK (recordsOf (rig, "run.revoke", block) == 0u);
+    CHECK (runsOf (rig, scene) == 1u);
+    CHECK (runsOf (rig, presend) == 1u);
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+    CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+    //  And it plays: its line comes, under the block.
+    for (int n = 0; n < 200 && rig.runOf (line) == nullptr; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.runOf (line) != nullptr);
+    CHECK (rig.runOf (line)->parent == block);
+}

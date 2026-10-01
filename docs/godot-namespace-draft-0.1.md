@@ -2913,7 +2913,10 @@ whose entire subject is that slots are scarce.
 **Rollback is a record and the handler does the work itself.** The hook that notices needs no new
 state to do it: `armedStandby` already holds the cue the pointer was on until the moment it is
 reassigned, so the hook asks `preparedRunOf` for that cue and submits `run.revoke` against what it
-gets, outermost run only, since the chain is parented.
+gets, outermost run only, since the chain is parented. *(2026-10-01, J2, §23.9: and a block under
+another run - a scene made ready under a running act, or inside a block the pointer is still in -
+when it is not one of the groups the pointer stands in, and an arm under a manual group playing its
+members when the pointer has passed it; `Runner::leftBehind` is the test.)*
 
 The handler then queues the restore value for every node the horizon pre-sent, releases every claim,
 and **ends the prepared run and its children itself** — state, track, `endedAtTick`,
@@ -2981,6 +2984,13 @@ takes a nested one when its parent's job launches it. The third exists because *
 group a press touches may start**: an inner one that started at adoption would spawn its member on
 the next tick while its parent was still running the header that comes first — the scene beginning
 from the inside out, which is the failure PR 3.4 was written about, returning by another road.
+*(2026-10-01, J2, §23.9: and a fourth. A GO on the row of a scene the horizon made ready under an act
+that is running took none of the three - it spawned a second run of the scene beside the block -
+and `fireStandby`'s member path now adopts that block, leaving it for the act's job to launch, as the
+descent leaves one under a running group; and so it does the scene's block when the same GO enters
+the scene's parent by the descent (IC), which left it marked for the parent's members to ask for. The
+third door now also makes a sampler bank's takeover, which the other two always made; and a block's
+preparing phase no longer launches the block nested in it (IE), so that door opens only after a GO.)*
 
 **And parenting the arms had a second cost the section did not see: a promise looks exactly like a
 member.** A phase takes charge of the children of its own cues and launches them, and a horizon
@@ -14243,6 +14253,244 @@ with it:
 | HW | **A shuffling run with no seed of its own yet draws one** at its next round, whichever round it is on, and the log records it | implementer's call keeping the `group,seed` row's promise, which HU alone would have broken for every jump into a shuffle nobody seeded |
 | HX | **A seek on a scene the walk cannot time changes nothing**: when the solver places nothing under the scene - one that loops, shuffles or plays some of its members, a timeline with a header, a manual group - `seekGroup` returns before ending anything, and the seek is applied with the scene's members, round and step as they were | implementer's call on the J1 review's finding: HV alone had a scrub end such a scene where the hand put it, footer and all, where before J1 it started its round over; a log holding a seek on such a scene replays differently, and no fixture holds a seek |
 
+### 23.9 A GO on a scene's row inside a running act plays the scene made ready there (J2)
+
+**What it means.** An act is running - the operator GOing its scenes one by one - and the pointer
+stands on the next scene's row: a scene that plays itself, a timeline or an automatic sequence. Go.dot
+has already made that scene ready under the act: its header's values pre-sent to the desk, its first
+sounds armed. The GO now plays *that* scene, at once, on the voices held for it, its header's
+pre-sends counted as done. Until J2 it started a second copy of the scene beside the one made ready:
+the copy entered cold - its sounds armed again with the operator's hand already down, about 0.4 s
+late, its header sent to the desk a second time - while the scene made ready kept its voices and its
+desk values for as long as the act ran, and after. And the pointer walking away from a scene made
+ready inside a running act now gives it back - its voices, its slots and the values it pre-sent - as
+it has always given back a scene at the top of a list. The second of the two faults the Go Doh! design
+found, fixed in its own commit at the author's word (2026-10-01: *"fix it, own commit"*), after D1
+rather than before it; Go Doh! builds on it (§24, HM): such a GO is an adoption like the others, so a
+Doh finds the block stamped with it.
+
+The same holds when that GO also enters the scene's parent on the scene's row - an act nobody had
+entered yet, on its first scene; a manual scene inside a running act, on its first line - where the
+first build of the give-back took the GO's own scene back before the parent reached it (IC). A sound
+the pointer passes over inside a running act now lets its voice go (ID). And a scene made ready
+inside an act nobody has entered no longer starts by itself, with no GO pressed, while the act's
+header is got ready (IE). Those three were found by the review of the first build, the third older
+than J2.
+
+**The gap.**
+
+- **That GO went through none of the doors** (§13.6). A GO reaches a scene the horizon prepared
+  through the descent across the groups between the pointer and the list, through `armInternal` when
+  the pointer is on a scene at the top of a list, or through `fireKind` when a parent's job launches a
+  nested one. A scene's row inside a running act is none of these: `fireStandby` finds the act live,
+  and the cue - a group - goes down the member path, which spawned a fresh run under the act.
+  `liveRunOf`, the only question that path asks, skips a `preparing` run by definition, so nothing on
+  it saw the block. The fresh scene ran its whole header - the pre-sends again - and spawned its
+  members, each media member armed afresh beside the arm the horizon held.
+- **Nothing gave such a block back.** `armStandby` gives back what the pointer leaves, but it looked
+  only at runs with no parent, and the horizon prepares a scene under the act whenever the act is
+  running. Such a block went only with its act's own teardown (§23.3), so its voices, its slots and
+  its pre-sent values were held while the act ran on - and by nothing, once the act had ended another
+  way.
+- **And one the fix had to close, found writing it.** A block adopted under a running group stays
+  `preparing`, its mark cleared, until that group's job launches it a tick later. Its own job, finding
+  its preparation settled in that tick - a pre-send's answer landing - marked it prepared again: a
+  scene nobody had asked for, to everything that reads the mark. The descent's adoption of a manual
+  scene under a running act has always had that tick, harmless while the act's job - ahead of the
+  block's in the scheduler's list - took the block before the block's own job marked it again; the
+  give-back below reads the mark later in that same tick, and would have taken the GO's own scene back,
+  its desk value with it.
+- **And a second, in the door the adoption leads to.** A block left for its act's job comes in through
+  `fireKind`'s third door, which let the group out of its hold and did nothing more - not the takeover
+  a sampler bank makes as it arms (PRD §3.27), which the other two roads in both make. A bank on a
+  running act's row, adopted, would have armed beside the bank it should have closed, where the cold
+  road had closed it. The door already had that hole for a bank that is the first row of an act no GO
+  had entered yet, adopted with the act and launched by it.
+- **And the give-back as first built took the GO's own scene** (the review, 2026-10-01). A GO on a
+  scene's row that also enters the scene's parent - an act nobody had entered, on its first scene, or
+  a manual scene inside a running act, on its first line - adopts the parent through the descent, told
+  to enter at the scene, and returned there: the scene's own block kept its mark, left for the parent's
+  job to ask for when its members begin. That is the next tick when the parent has nothing left in its
+  header and later when it has - a memo, a fade, a header the horizon could not take - and a parent
+  adopted under a running act is launched by the act's job a tick after the GO before it begins
+  anything. The GO had moved the pointer on, so `leftBehind` found the block marked, under a parent
+  neither stopping nor left behind, and not one the pointer stands in: given back, its sounds freed and
+  its desk values put back, on the tick after the GO. The parent's members then found the revoked run
+  (`unclaimedFor` asks a cue and a claim, not whether the run is over), asked for it, and launched
+  nothing; the scene never played, and a parent whose only member it was went straight to its footer.
+- **A sound passed over in a running act kept its voice** (the review, older than J2). The pointer on a
+  media or mic line of an act that is running arms it under the act, marked. A manual group takes only
+  the members a GO asks for, so an arm the pointer walked past was never taken - and HZ, like the rule
+  before it, left every arm under another run alone: its voice was held while the act ran, and after.
+  §13.1's scrolling that emptied the rack, one level in.
+- **A scene made ready inside an act nobody has entered played with no GO** (the review, older than
+  J2). A header the horizon can take ahead - a bed, a pre-send - puts the act's block in its preparing
+  phase, which launches what it pre-sends; and it launched every child of the block that was not a
+  media or mic cue, the block of the scene nested under it among them. `fireKind`'s third door let that
+  scene out of its hold, and it played - its sounds launched - while the pointer only rested on its
+  row. Since IB, a sampler bank so launched also closed the other banks.
+
+**The fix**, in `Runner::fireStandby`, `armStandby` (`leftBehind`), `advanceGroups` and `fireKind`:
+
+- **A GO on a scene's row inside a running act adopts the block** (HY). On `fireStandby`'s member
+  path, when `preparedRunOf` the cue is a block whose parent is that act, it goes through
+  `adoptPrepared` - stamped whole with the GO's serial, as every adoption is since D1, told it enters
+  at its first member - instead of a run being spawned beside it. It is adopted the way the descent
+  adopts a block under a running group: left standing for the act's job, which launches it on the
+  next tick as it launches every member, `fireKind`'s third door letting the block's job out of its
+  hold. One launcher, so the scene's own pre-wait still runs, and the scene starts on the tick the cold
+  one did - with its header's prepared part done and its sounds armed. Nothing is drawn, so the `go`
+  record carries no identifier for it, as for the descent's adoptions. A block prepared anywhere but
+  under that act is not this scene's, and the GO enters the scene cold as before.
+- **The pointer leaving a scene made ready under another run gives it back** (HZ). `armStandby` asks
+  `Runner::leftBehind` of every preparation, in both of its loops. At the top of a list the rule is as
+  it was. Under another run, a block - `preparing`, its mark still on - whose scene is not one of the
+  groups the pointer stands in (`horizonGroupsFor`: the chain `prepareStandby` builds, which replaces
+  `horizonRootFor`, its first element) is given back the same way: its pre-sends put back, then
+  revoked, after anything somebody launched in it has gone (ET). No arm under another run but the one
+  ID names: a scene's first sounds are armed under the scene, and once a GO has entered it they wait
+  there for its job. Nor a block under a group being stopped, whose own job gives it back, or under a
+  preparation the pointer has left too, which takes it along. Any parent, not only a running act: a scene left inside a
+  block that is itself only made ready - the pointer moving from one manual scene of an act nobody has
+  entered to another - is given back too, where it was held until the act itself was given back or,
+  once a GO had entered it, torn down.
+- **An adopted block stays adopted** (IA): `advanceGroups` writes the settled word over a block's mark
+  only while the block still carries one.
+- **A sampler bank let out of its hold takes over as it arms** (IB): `fireKind`'s third door calls
+  `takeOverFrom` for a sampler group, as a bank fired fresh and one the top-level door enters do - so
+  the bank on an act's row closes the others whichever road its GO took, and so does a bank that is an
+  act's first row. A handler's decision on handler state, as the other two roads' are.
+- **The GO adopts its own scene's block whatever road reached its parent** (IC). HY's adoption comes
+  before `fireStandby`'s return for a GO that entered a group: when `preparedRunOf` the cue is a block
+  whose parent is the run the descent ended on - adopted by this GO, or running - it is adopted at the
+  press, its mark cleared and stamped, and left for the parent's job, which takes it when its members
+  begin, as it takes any member it was told to enter at. A parent the GO created cold has no block
+  under it, so nothing changes there.
+- **An arm under a manual group playing its members is given back when the pointer has passed it**
+  (ID). `leftBehind` gives back a marked arm whose parent is a manual group - not a timeline, an
+  automatic sequence or a sampler bank - whose job is in its members phase, not stopping, and whose cue
+  is not the pointer's. In that phase whatever the group was told to enter at has already been asked
+  for, so an arm still marked there is one only the pointer wanted. Under a group still in its header -
+  the sound a GO entered an act at, waiting for the members - or under a block only made ready, an arm
+  is left as before. Asked when the pointer moves, as every give-back is: an arm left behind while its
+  act ran its header goes at the pointer's next move.
+- **A block's preparing phase launches no block nested in it** (IE). `advanceGroups`' preparing loop
+  passes over a group child as it passes over a media or mic one: the scene nested under the block
+  waits for a GO, and is launched by its parent's members once a GO has entered the parent. So
+  `fireKind`'s third door, and IB's takeover in it, open only after a GO.
+
+**What it changes for a replay.** The adoption is the `go` handler's: a log holding a GO on such a row,
+the block prepared, recorded a fresh identifier for the scene, and a replay now adopts the block and
+draws nothing - it does not replay on this commit. The takeover is `run.launch`'s handler's: a log in
+which an act launched a bank it had adopted from the horizon - a bank as an act's first row, entered
+with the act - closed no other bank and now closes them. The give-back is a hook's: its `node.set` and
+`run.revoke` records are in a new log and absent from an old one, which replays as it was recorded.
+IC's adoption is the `go` handler's too, but it draws nothing - the parent's adoption drew nothing
+either - and what it changes is a hook's: the give-back of the GO's own scene and the `run.revoke`
+and `node.set` it submitted, which an older log carries and a replay applies as recorded. ID and IE
+are hooks' (`armStandby`, `advanceGroups`): a new log has the arm's `run.revoke` and lacks the nested
+block's early `run.launch`, and an old one replays as it was recorded. Every `wfg.replay.*` fixture was run under C and fr_FR, with the black-box drivers `phase3`, `phase4`
+and `phase6-sampler`; none holds the shape, and none was re-recorded. Live, every such GO changes as
+above, and so does every walk of the pointer past a scene inside a running act.
+
+**Not changed, and worth knowing:**
+
+- **A scene the horizon had not made ready yet** - the pointer moved and GO pressed in the same tick -
+  is still entered cold, as a scene nobody prepared always is.
+- **An adopted scene's header still runs at entry what the horizon could not take ahead** (§13.6), and
+  a pre-send whose answer is still out at the GO goes on asking and writes when it lands.
+
+**Tests**, each written first and run on the code before the fix:
+
+- `GoTests` "prepare: a GO on a scene's row inside a running act adopts the scene made ready there, its
+  sound armed once" - a timeline with a media member as an act's second line: the GO's scene is the
+  block, its sound the arm the horizon made, launched; one run of each and one arm. It failed on the
+  launch (the arm never launched), the scene's id, the runs (two of each) and the arms (two). The
+  session replayed record for record with no audio side, at its end, is a net: the cold road replayed
+  as faithfully.
+- `GoTests` "prepare: the pointer leaving a scene made ready under a running act gives its voice back,
+  and moving inside one keeps it" - to a later line of the act and out of it: the block and its arm
+  revoked, the voice free, the act still running. It failed on each. The pointer walking down a manual
+  scene of the act keeps that scene's block: a net, passing before and after.
+- `GoTests` "go.doh: every run the GO creates or adopts carries its serial…" gains the SUBCASE D1 left
+  as a comment naming J2 (§24.9): the block and its arm stamped 2, one run of the scene. It failed on
+  both stamps (0) and the runs (two).
+- `GoTests` "go.doh: an unheard scene inside an older act…" pinned the cold run with a comment, *"until
+  J2 a GO on a scene's row inside a running act starts it cold"*; it now requires the GO's scene to be
+  the block the horizon made, which failed before (a fresh identifier), and passes, the rest unchanged.
+- `VerifiedCueTests` "prepare: a GO on a scene's row inside a running act adopts the scene made ready
+  there, its header sent once" - an act of two automatic scenes, the second pre-sending the desk:
+  adopted, one run of the scene and of its pre-send, one datagram, nothing put back. It failed on the
+  id, the runs (two, two) and the datagrams (two).
+- `VerifiedCueTests` "prepare: the pointer leaving a scene made ready inside a running act gives it
+  back, the desk put back first" - to a later line of the act and to a line after it: the desk back at
+  its old value, the block revoked, the restore ahead of the revocation in the log, the act running.
+  It failed on each.
+- `VerifiedCueTests` "prepare: a scene adopted under a running act whose header settles in the tick
+  after the GO stays adopted" - the desk's answer given by hand so the pre-send ends in the GO's own
+  drain: the scene plays and nothing is put back. It failed before J2 (a fresh run) and, with the
+  adoption and the give-back built but not IA, on the scene itself: revoked under the GO, its desk value
+  put back.
+- `SamplerTests` "sampler: a bank on a running act's row is the bank made ready there, and takes over
+  as it arms" - a bank that takes over the whole desk, on an act's second row, another bank armed: the
+  GO's bank is the block, one run of it, the other bank closing and its idle pad ended. With the
+  adoption disabled - the cold road, as before J2 - it failed on the bank's id and its runs (two), the
+  takeover holding; with the adoption and not IB, on the takeover and the idle pad.
+
+And the review's, each run on the first build of J2 before its fix:
+
+- `GoTests` "prepare: a GO that enters a scene's parent on the scene's row plays the scene made ready
+  there" (IC) - a timeline with a media member as the first line of an act nobody had entered, with a
+  line in the act's header and without; and as the first line of a manual scene inside a running act.
+  The GO's scene is the block, its sound launched, nothing revoked, one run of each and one arm. With
+  the act's header, it failed on the launch and then on the scene (no live run: revoked); the manual
+  scene inside the running act, run on its own, the same - its block `done` on the tick after the GO.
+  Without a header it passed: a net on the same road.
+- `VerifiedCueTests` "prepare: a GO entering an act on its first scene's row plays the scene made ready
+  there, the desk left as it was sent" (IC) - the act's header a memo, its first scene pre-sending the
+  desk: the act's header runs once, the scene is the block, its line comes, one datagram and nothing
+  put back. It failed on the scene: no live run.
+- `SamplerTests` "sampler: a bank that is the first row of an act nobody has entered takes over when
+  the GO on its row enters the act" (IB, IC) - the bank adopted with the act, launched by it, closing
+  the other bank and ending its idle pad. With a line in the act's header it failed on the pad (never
+  armed) and the bank (no live run); without one it passed, pinning IB's claim for a first row.
+- `GoTests` "prepare: the pointer passing over a sound in a running act gives its voice back" (ID) - a
+  media line of a running act passed over, to a later line and out of the act: the arm revoked, its
+  voice free, the act running. It failed on each. The sound a GO entered an act at, while the act's
+  header runs, launches and is never revoked: a net, passing before and after.
+- `GoTests` "prepare: a scene made ready inside an act nobody has entered waits for a GO while the
+  act's header is got ready" (IE) - a bed in the act's header, a timeline its first line, the pointer
+  resting there thirty ticks: both blocks still made ready, nothing asked to sound. It failed on the
+  scene's block (`playing`), its live run and its sound (launch asked for).
+- `SamplerTests` "sampler: a bank made ready inside an act nobody has entered closes nothing before a
+  GO" (IE) - the same with a bank that takes over the whole desk, another bank armed. It failed on the
+  bank's block (`playing`), its pad (armed), the other bank (closing) and that bank's idle pad (ended).
+- `GoTests` "prepare: a scene with a pre-wait, adopted on its row inside a running act, waits it before
+  it sounds" (HY) - nothing launched for 45 ticks, then the horizon's arm, 50 to 55 ticks after the
+  GO, one run of the scene and one arm. It passed on the first build, which already left the launch to
+  the act; with the adoption made to enter the scene at the GO it failed, the sound asked for two ticks
+  after the GO, over the pre-wait.
+- `GoTests` "prepare: the pointer moving between the scenes of an act nobody has entered gives back the
+  scene it left" (HZ) - from one manual scene's first line to another's: the first scene's block and
+  arm revoked, the act's block kept with the new scene inside it; and to the scene's next line, the
+  block kept. It pins HZ's reach beyond a running act, a change of the first build, and was not run
+  before J2.
+- Two cases of the first build gained a check each: `GoTests` "…its sound armed once" asks the launch
+  for no later than three ticks after the GO (the cold road's tick, the arm made ahead), and
+  `VerifiedCueTests` "…whose header settles in the tick after the GO stays adopted" pins its own
+  timing - the pre-send still out at the GO, the block `preparing` and unmarked after it - so a drift
+  of a tick cannot make it pass without reaching IA. Both passed on the first build.
+
+| | Decision | Whose |
+|---|---|---|
+| HY | **A GO on a scene's row inside a running act adopts the block the horizon made ready under that act**: stamped with the GO, entering at its first member, left for the act's job to launch as the descent leaves a block under a running group; nothing is drawn for it | the author's, 2026-10-01 ("fix it, own commit"); leaving the launch to the act is the implementer's call - the design said "entering", and entered at the GO the scene would meet the act's launch, which every member gets, already running, a pre-wait set going over its running header; a log holding such a GO replays differently, and no fixture holds one |
+| HZ | **The pointer leaving a scene made ready under another run gives it back**, as one at the top of a list: a block nobody adopted, whose scene is not one the pointer stands in, under a parent neither being stopped nor left behind itself - a running act, a block the pointer is still in, an act already over - its pre-sends put back first, once what was launched in it has gone. Arms under another run are left to their scene, but for ID's | implementer's call: the stage brief's "the same rule", read for any parent where it named the running act |
+| IA | **An adopted block stays adopted**: its job writes the settled word over its mark only while it still has one | implementer's call, found writing J2: HZ reads the mark |
+| IB | **A sampler bank let out of its hold by its parent's job takes over as it arms**, as one fired fresh and one the top-level door enters do | implementer's call, found writing J2: HY sends a bank on an act's row through that door; it also closes the hole for a bank that is an act's first row |
+| IC | **The GO adopts its own scene's block whatever road reached the scene's parent**: HY's adoption comes before the return for a GO that entered a group, so a scene whose parent the same GO adopted is the GO's from the press, left for the parent's members | the review's finding, fixed as it proposed: HZ alone gave back the GO's own scene when the GO entered its parent - an act's first scene behind a header line, a manual scene's first line inside a running act - and the scene never played. The alternative, `leftBehind` sparing a block its parent was told to enter at, keeps two rules where this keeps one |
+| ID | **An arm under a manual group playing its members is given back when the pointer has passed it** - not the pointer's own, not under a group still in its header or only made ready, not under a timeline, automatic sequence or sampler bank | the review's finding, older than J2: §23.9 had read the exclusion of arms as complete, and a manual group never takes an arm only the pointer wanted. A hook's decision |
+| IE | **A block's preparing phase launches no block nested in it**: the scene under it waits for a GO, launched by its parent's members once a GO has entered the parent | the review's finding, older than J2 and widened by IB: a header the horizon could take ahead let the nested scene out of its hold and play with no GO, and a bank so launched closed the others. Fixed at the root rather than by guarding IB's takeover alone. A hook's decision |
+
 ## 24. Go Doh! — taking back the last GO
 
 Written from 2026-10-01. PRD §3.32 is the law for Go Doh!: the third of §4.4's stops, for the GO
@@ -14638,7 +14886,10 @@ too.
 - **Built before J1 and J2**, at the author's asking (the other session's hold kept short); neither
   is needed by D1. A test written for J2's adoption of a scene row inside a running act is skipped
   with a comment naming J2, and HM's "builds on" reads "will be joined by". *(2026-10-01: J1 has
-  joined it, §23.8; no D1 test waited on it.)*
+  joined it, §23.8; no D1 test waited on it.)* *(2026-10-01: and J2, §23.9 - the skipped SUBCASE is
+  written, the serials' case stamping the adopted block whole, and the case of an unheard scene inside
+  an older act, which pinned the cold run with a comment naming J2, now requires the block the horizon
+  made.)*
 - **`go.doh` applies with no arguments in D1**: nothing is drawn before D3.
 - **A block's restore is submitted once**: `submitRestores` (the first half of `submitRevocation`)
   clears a pre-send's restore fields once it has submitted them, so a block given back inside one being given back - the next scene's, under

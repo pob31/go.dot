@@ -5445,6 +5445,506 @@ TEST_CASE ("prepare: a member armed ahead inside a running scene still fires whe
 }
 
 //==============================================================================
+/*  A SCENE'S ROW INSIDE A RUNNING ACT (2026-10-01, namespace draft §23.9, J2).
+
+    The case above, one level up. The pointer stands on the row of a scene that
+    plays itself - a timeline, an automatic sequence - inside an act already
+    running, and the horizon has made the scene ready under the act: its header
+    run ahead, its first sounds armed. A GO on that row went down the member
+    path, which spawned a SECOND run of the scene beside the block - none of the
+    adoption doors was on that road - so the scene entered cold, its sounds armed
+    again with the operator's hand already down, while the horizon's copy held
+    its voices until the act ended, and after: the pointer moving away gave back
+    only what stood at the top of a list. */
+TEST_CASE ("prepare: a GO on a scene's row inside a running act adopts the scene made ready there, its sound armed once")
+{
+    ManualRig rig;
+
+    const auto scene = rig.document.createCue (rig.groupId, 1, "group", "Storm").id;
+    rig.setCue (scene, "mode", "timeline");
+    const auto rain = rig.document.createCue (scene, 0, "media", "Rain").id;
+    rig.setCue (rain, "file", "thunder.wav");
+
+    //  Parked through the command, so the replay at the end is given the pointer too.
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.first) }).rejected == 0);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);              // into the act, on its first line
+    REQUIRE (rig.standby() == scene);                              // the walk stands on a timeline's row
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (scene) != nullptr
+                                          && ! rig.runOf (rain).empty(); }));
+
+    const auto actRun = rig.runOf (rig.groupId);
+    const auto block = rig.runs.preparedRunOf (scene)->id;
+    const auto armed = rig.runOf (rain);
+
+    REQUIRE (rig.runs.find (block)->parent == actRun);
+    REQUIRE (rig.runs.find (armed)->parent == block);
+    REQUIRE (rig.runs.find (armed)->track >= 0);                   // a voice, held ahead
+    REQUIRE (rig.audio.arms.size() == 1u);
+
+    const auto goTick = rig.tick;
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);              // the scene's row
+
+    //  The sound the horizon armed is the one that launches...
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armed)->launchRequested; }, 20));
+
+    /*  ...on the tick the cold road asked for its launch - the act's job
+        launching the scene, the scene its sound - with the arm made already:
+        the disk's 0.4 s is what the adoption saves, not a tick. */
+    CHECK (rig.runs.find (armed)->launchRequestedAtTick - goTick <= 3);
+
+    //  ...in the block it was armed in, which the act now plays: one scene, one sound, one arm.
+    const auto* live = rig.runs.liveRunOf (scene);
+    REQUIRE (live != nullptr);
+    CHECK (live->id == block);
+    CHECK (live->parent == actRun);
+
+    const auto runsFor = [&rig] (const std::string& cueId)
+    {
+        return std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                              [&cueId] (const cue::Run& run) { return run.cue == cueId; });
+    };
+
+    CHECK (runsFor (scene) == 1);
+    CHECK (runsFor (rain) == 1);
+    CHECK (rig.audio.arms.size() == 1u);
+
+    /*  AND THE SESSION REPLAYS RECORD FOR RECORD, with no audio side: the
+        adoption is the `go` handler's, decided on what the log's own
+        `run.prepare` made, so a replay adopts the same block and the record
+        names nothing drawn for it. A net - the cold road replayed as faithfully. */
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    ManualRig fresh;
+    fresh.runner.setPlayer (nullptr);
+    REQUIRE (doc::CanonicalXml::read (show, fresh.document).ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        INFO (mismatch);
+
+    CHECK (result.ok);
+    REQUIRE (fresh.runs.find (block) != nullptr);
+    CHECK (fresh.runs.find (block)->state == rig.runs.find (block)->state);
+    CHECK (fresh.runs.find (block)->parent == actRun);
+}
+
+TEST_CASE ("prepare: the pointer leaving a scene made ready under a running act gives its voice back, and moving inside one keeps it")
+{
+    /*  §13.1's bargain one level down: a scene got ready under an act and then
+        left behind holds a voice for a GO that is not coming. The give-back
+        looked only at blocks with no parent, so this one kept its voice for as
+        long as the act ran. What the pointer is still inside - a manual scene
+        of the act, walked line by line - is wanted, and is kept. */
+    SUBCASE ("away from a timeline's row: to a later line of the act, and out of the act")
+    {
+        for (const auto* where : { "a later line of the act", "a cue after the act" })
+        {
+            INFO (std::string (where));
+            ManualRig rig;
+
+            const auto scene = rig.document.createCue (rig.groupId, 1, "group", "Storm").id;
+            rig.setCue (scene, "mode", "timeline");
+            const auto rain = rig.document.createCue (scene, 0, "media", "Rain").id;
+            rig.setCue (rain, "file", "thunder.wav");
+
+            rig.setStandby (rig.first);
+            REQUIRE (rig.submitAndTick ("go").rejected == 0);
+            REQUIRE (rig.standby() == scene);
+            REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (scene) != nullptr
+                                                  && ! rig.runOf (rain).empty(); }));
+
+            const auto block = rig.runs.preparedRunOf (scene)->id;
+            const auto armed = rig.runOf (rain);
+            const auto voice = rig.runs.find (armed)->track;
+            REQUIRE (voice >= 0);
+
+            rig.setStandby (std::string (where) == "a cue after the act" ? rig.after : rig.second);
+            rig.tickOnce();
+
+            CHECK (rig.runs.find (block)->isFinished());
+            CHECK (rig.runs.find (block)->warning == cue::runWarning::revoked);
+            CHECK (rig.runs.find (armed)->warning == cue::runWarning::revoked);
+            CHECK_FALSE (rig.runs.isTrackBusy (voice));
+
+            //  The act itself is left alone: it is running, and waits for its next GO.
+            CHECK_FALSE (rig.runs.find (rig.runOf (rig.groupId))->isFinished());
+        }
+    }
+
+    SUBCASE ("inside a manual scene of the act: from one of its lines to the next")
+    {
+        ManualRig rig;
+        const auto inner = rig.document.createCue (rig.groupId, 1, "group", "Inner").id;
+        const auto one = rig.document.createCue (inner, 0, "memo", "Line one").id;
+        const auto two = rig.document.createCue (inner, 1, "memo", "Line two").id;
+
+        rig.setStandby (rig.first);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.standby() == one);                            // the walk descends into a manual scene
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (inner) != nullptr; }));
+
+        const auto block = rig.runs.preparedRunOf (inner)->id;
+        REQUIRE (rig.runs.find (block)->parent == rig.runOf (rig.groupId));
+
+        rig.setStandby (two);
+        rig.tickOnce();
+
+        REQUIRE (rig.runs.preparedRunOf (inner) != nullptr);
+        CHECK (rig.runs.preparedRunOf (inner)->id == block);
+        CHECK_FALSE (rig.runs.find (block)->isFinished());
+    }
+}
+
+/*  THE GO'S OWN SCENE, WHEN THE SAME GO ENTERS ITS PARENT (2026-10-01, namespace
+    draft §23.9, IC). The pointer on the row of a scene made ready inside a
+    group no GO has entered yet - an act's first scene, or a manual scene's first
+    line inside a running act - and the GO enters that group by adopting the
+    block the horizon made of it. The scene's own block was left marked for the
+    parent's job to ask for when its members begin, and the pointer, moved on by
+    the GO, found it on the next tick: a scene nobody had asked for, given back
+    with its sound before the parent reached it. The parent then launched a
+    revoked run, and the scene the operator GO'd never played. */
+TEST_CASE ("prepare: a GO that enters a scene's parent on the scene's row plays the scene made ready there")
+{
+    const auto runsFor = [] (const ManualRig& rig, const std::string& cueId)
+    {
+        return std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                              [&cueId] (const cue::Run& run) { return run.cue == cueId; });
+    };
+
+    const auto revokesOf = [] (ManualRig& rig, const std::string& runId)
+    {
+        const auto records = LogFile::parse (rig.engine.log().contents()).records;
+
+        return std::count_if (records.begin(), records.end(),
+                              [&runId] (const auto& record)
+                              {
+                                  return record.command == "run.revoke" && ! record.args.empty()
+                                           && record.args[0].isString() && record.args[0].getString() == runId;
+                              });
+    };
+
+    SUBCASE ("an act nobody had entered, the scene its first line")
+    {
+        /*  With a line in the act's header the horizon could not take ahead,
+            the act spends the GO's next tick in its header and its members
+            begin later; with none, they begin at once. Only the first held the
+            fault, and the second is a net on the same road. */
+        for (const auto withHeader : { true, false })
+        {
+            INFO (std::string (withHeader ? "a line in the act's header" : "nothing in the act's header"));
+            ManualRig rig;
+
+            std::string opening;
+
+            if (withHeader)
+                opening = rig.document.createCue (rig.roleOf (rig.groupId, "header"), 0, "memo", "House to half").id;
+
+            const auto scene = rig.document.createCue (rig.groupId, 0, "group", "Storm").id;
+            rig.setCue (scene, "mode", "timeline");
+            const auto rain = rig.document.createCue (scene, 0, "media", "Rain").id;
+            rig.setCue (rain, "file", "thunder.wav");
+
+            rig.setStandby (scene);
+            REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (scene) != nullptr
+                                                  && ! rig.runOf (rain).empty(); }));
+
+            const auto* act = rig.runs.preparedRunOf (rig.groupId);
+            REQUIRE (act != nullptr);
+            const auto actBlock = act->id;
+            const auto block = rig.runs.preparedRunOf (scene)->id;
+            const auto armed = rig.runOf (rain);
+            REQUIRE (rig.runs.find (block)->parent == actBlock);
+            REQUIRE (rig.runs.find (armed)->parent == block);
+
+            REQUIRE (rig.submitAndTick ("go").rejected == 0);      // enters the act, on the scene's row
+            REQUIRE (rig.standby() == rig.first);                  // and the walk goes on to the act's next line
+
+            CHECK (rig.tickUntil ([&] { return rig.runs.find (armed)->launchRequested; }));
+
+            const auto* live = rig.runs.liveRunOf (scene);
+            REQUIRE (live != nullptr);
+            CHECK (live->id == block);
+            CHECK (live->parent == actBlock);
+            CHECK (rig.runs.find (block)->warning != cue::runWarning::revoked);
+            CHECK (revokesOf (rig, block) == 0);
+            CHECK (runsFor (rig, scene) == 1);
+            CHECK (runsFor (rig, rain) == 1);
+            CHECK (rig.audio.arms.size() == 1u);
+
+            if (withHeader)
+                CHECK (runsFor (rig, opening) == 1);               // the act's header ran first, once
+        }
+    }
+
+    SUBCASE ("a manual scene inside a running act, a timeline its first line")
+    {
+        ManualRig rig;
+        const auto inner = rig.document.createCue (rig.groupId, 1, "group", "Inner").id;
+        const auto scene = rig.document.createCue (inner, 0, "group", "Storm").id;
+        rig.setCue (scene, "mode", "timeline");
+        const auto rain = rig.document.createCue (scene, 0, "media", "Rain").id;
+        rig.setCue (rain, "file", "thunder.wav");
+        const auto line = rig.document.createCue (inner, 1, "memo", "Line").id;
+
+        rig.setStandby (rig.first);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);          // into the act, on its first line
+        REQUIRE (rig.standby() == scene);                          // the walk descends into the manual scene
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (scene) != nullptr
+                                              && ! rig.runOf (rain).empty(); }));
+
+        const auto actRun = rig.runOf (rig.groupId);
+        REQUIRE (rig.runs.preparedRunOf (inner) != nullptr);
+        const auto innerBlock = rig.runs.preparedRunOf (inner)->id;
+        const auto block = rig.runs.preparedRunOf (scene)->id;
+        const auto armed = rig.runOf (rain);
+        REQUIRE (rig.runs.find (innerBlock)->parent == actRun);
+        REQUIRE (rig.runs.find (block)->parent == innerBlock);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);          // the timeline's row: enters the manual scene
+        REQUIRE (rig.standby() == line);
+
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (armed)->launchRequested; }));
+
+        REQUIRE (rig.runs.liveRunOf (inner) != nullptr);
+        CHECK (rig.runs.liveRunOf (inner)->id == innerBlock);
+
+        const auto* live = rig.runs.liveRunOf (scene);
+        REQUIRE (live != nullptr);
+        CHECK (live->id == block);
+        CHECK (live->parent == innerBlock);
+        CHECK (rig.runs.find (block)->warning != cue::runWarning::revoked);
+        CHECK (revokesOf (rig, block) == 0);
+        CHECK (runsFor (rig, scene) == 1);
+        CHECK (runsFor (rig, rain) == 1);
+        CHECK (rig.audio.arms.size() == 1u);
+    }
+}
+
+/*  ITS OWN PRE-WAIT, ONCE (2026-10-01, namespace draft §23.9, HY). A scene
+    adopted on its row inside a running act is left for the act's job to
+    launch, as every member is, and that launch is what runs a scene's
+    pre-wait. Entered at the GO instead, the scene would start its members at
+    once and the act's launch, arriving a tick later, would set it waiting over
+    a scene already playing. */
+TEST_CASE ("prepare: a scene with a pre-wait, adopted on its row inside a running act, waits it before it sounds")
+{
+    ManualRig rig;
+
+    const auto scene = rig.document.createCue (rig.groupId, 1, "group", "Storm").id;
+    rig.setCue (scene, "mode", "timeline");
+    rig.setCue (scene, "preWait", "1");
+    const auto rain = rig.document.createCue (scene, 0, "media", "Rain").id;
+    rig.setCue (rain, "file", "thunder.wav");
+
+    rig.setStandby (rig.first);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.standby() == scene);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (scene) != nullptr
+                                          && ! rig.runOf (rain).empty(); }));
+
+    const auto block = rig.runs.preparedRunOf (scene)->id;
+    const auto armed = rig.runOf (rain);
+
+    const auto goTick = rig.tick;
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);              // the scene's row
+
+    //  Nothing sounds while the scene waits its second, and the block is what waits.
+    auto waited = false;
+
+    for (int n = 0; n < 45; ++n)
+    {
+        rig.tickOnce();
+        waited = waited || rig.runs.find (block)->state == cue::runState::waiting;
+    }
+
+    CHECK (waited);
+    CHECK_FALSE (rig.runs.find (armed)->launchRequested);
+
+    //  Then the sound the horizon armed, a second after the GO and not before.
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armed)->launchRequested; }, 40));
+
+    const auto after = rig.runs.find (armed)->launchRequestedAtTick - goTick;
+    INFO ("launch requested " << after << " ticks after the GO");
+    CHECK (after >= 50);
+    CHECK (after <= 55);
+
+    REQUIRE (rig.runs.liveRunOf (scene) != nullptr);
+    CHECK (rig.runs.liveRunOf (scene)->id == block);
+    CHECK (std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                          [&scene] (const cue::Run& run) { return run.cue == scene; }) == 1);
+    CHECK (rig.audio.arms.size() == 1u);
+}
+
+/*  A SCENE INSIDE A BLOCK THAT IS ONLY MADE READY (2026-10-01, namespace draft
+    §23.9, HZ). The give-back reaches a block under any parent, not only a
+    running act: the pointer moving from one manual scene of an act nobody has
+    entered to another gives the first scene back, the act's own block kept for
+    the scene it is on now; and moving inside the scene keeps it. Until J2 such
+    a scene was held until the act itself was given back. */
+TEST_CASE ("prepare: the pointer moving between the scenes of an act nobody has entered gives back the scene it left")
+{
+    ManualRig rig;
+
+    const auto sceneA = rig.document.createCue (rig.groupId, 1, "group", "Scene A").id;
+    const auto soundA = rig.document.createCue (sceneA, 0, "media", "A one").id;
+    rig.setCue (soundA, "file", "thunder.wav");
+    const auto lineA = rig.document.createCue (sceneA, 1, "memo", "A two").id;
+
+    const auto sceneB = rig.document.createCue (rig.groupId, 2, "group", "Scene B").id;
+    const auto soundB = rig.document.createCue (sceneB, 0, "media", "B one").id;
+    rig.setCue (soundB, "file", "thunder.wav");
+
+    rig.setStandby (soundA);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (sceneA) != nullptr
+                                          && ! rig.runOf (soundA).empty(); }));
+
+    REQUIRE (rig.runs.preparedRunOf (rig.groupId) != nullptr);
+    const auto actBlock = rig.runs.preparedRunOf (rig.groupId)->id;
+    const auto blockA = rig.runs.preparedRunOf (sceneA)->id;
+    const auto armA = rig.runOf (soundA);
+    const auto voice = rig.runs.find (armA)->track;
+    REQUIRE (rig.runs.find (blockA)->parent == actBlock);
+    REQUIRE (voice >= 0);
+
+    SUBCASE ("to the other scene's first line")
+    {
+        rig.setStandby (soundB);
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (sceneB) != nullptr; }));
+        rig.tickOnce();
+
+        CHECK (rig.runs.find (blockA)->isFinished());
+        CHECK (rig.runs.find (blockA)->warning == cue::runWarning::revoked);
+        CHECK (rig.runs.find (armA)->isFinished());
+        CHECK (rig.runs.find (armA)->warning == cue::runWarning::revoked);
+
+        //  The voice it let go of is free for the scene the pointer is on now, which arms on it.
+        REQUIRE_FALSE (rig.runOf (soundB).empty());
+        CHECK (rig.runs.find (rig.runOf (soundB))->track >= 0);
+
+        //  The act's block is the one the pointer is still in, and the new scene is made ready inside it.
+        REQUIRE (rig.runs.preparedRunOf (rig.groupId) != nullptr);
+        CHECK (rig.runs.preparedRunOf (rig.groupId)->id == actBlock);
+        CHECK (rig.runs.find (actBlock)->state == cue::runState::preparing);
+        CHECK (rig.runs.preparedRunOf (sceneB)->parent == actBlock);
+    }
+
+    SUBCASE ("to the next line of the same scene")
+    {
+        rig.setStandby (lineA);
+        rig.tickOnce();
+
+        REQUIRE (rig.runs.preparedRunOf (sceneA) != nullptr);
+        CHECK (rig.runs.preparedRunOf (sceneA)->id == blockA);
+        CHECK_FALSE (rig.runs.find (blockA)->isFinished());
+        CHECK (rig.runs.preparedRunOf (rig.groupId)->id == actBlock);
+    }
+}
+
+/*  A SOUND ARMED IN A RUNNING ACT AND PASSED OVER (2026-10-01, namespace draft
+    §23.9, ID). The pointer reaching a media line of an act that is running arms
+    it under the act, marked as a promise; a manual act takes only the members a
+    GO asks for, so one the operator walked past was never taken - and the give-
+    back left every arm under another run alone, so its voice was held while the
+    act ran, and after: §13.1's scrolling that emptied the rack, one level in. */
+TEST_CASE ("prepare: the pointer passing over a sound in a running act gives its voice back")
+{
+    SUBCASE ("to a later line of the act, and out of the act")
+    {
+        for (const auto* where : { "a later line of the act", "a cue after the act" })
+        {
+            INFO (std::string (where));
+            ManualRig rig;
+            const auto sound = rig.document.createCue (rig.groupId, 1, "media", "Thunder").id;
+            rig.setCue (sound, "file", "thunder.wav");
+
+            rig.setStandby (rig.first);
+            REQUIRE (rig.submitAndTick ("go").rejected == 0);      // into the act, on its first line
+            REQUIRE (rig.standby() == sound);
+            REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (sound).empty(); }));
+
+            const auto actRun = rig.runOf (rig.groupId);
+            const auto armed = rig.runOf (sound);
+            const auto voice = rig.runs.find (armed)->track;
+            REQUIRE (rig.runs.find (armed)->parent == actRun);
+            REQUIRE_FALSE (rig.runs.find (armed)->prepare.empty());
+            REQUIRE (voice >= 0);
+
+            rig.setStandby (std::string (where) == "a cue after the act" ? rig.after : rig.second);
+            rig.tickOnce();
+
+            CHECK (rig.runs.find (armed)->isFinished());
+            CHECK (rig.runs.find (armed)->warning == cue::runWarning::revoked);
+            CHECK_FALSE (rig.runs.isTrackBusy (voice));
+            CHECK_FALSE (rig.runs.find (actRun)->isFinished());
+        }
+    }
+
+    SUBCASE ("but not the sound a GO entered the act on, while the act's header runs")
+    {
+        /*  The arm under an act whose members have not begun is the one the GO
+            entered the act at, waiting for them: a net, passing before and
+            after. */
+        ManualRig rig;
+        const auto opening = rig.document.createCue (rig.roleOf (rig.groupId, "header"), 0, "memo", "House to half").id;
+        const auto sound = rig.document.createCue (rig.groupId, 0, "media", "Thunder").id;
+        rig.setCue (sound, "file", "thunder.wav");
+
+        rig.setStandby (sound);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (sound).empty(); }));
+        const auto armed = rig.runOf (sound);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.standby() == rig.first);
+
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (armed)->launchRequested; }));
+        CHECK (rig.runs.find (armed)->warning != cue::runWarning::revoked);
+        CHECK_FALSE (rig.runOf (opening).empty());
+    }
+}
+
+/*  A SCENE INSIDE AN ACT NOBODY HAS ENTERED, WHILE THE ACT'S HEADER IS GOT READY
+    (2026-10-01, namespace draft §23.9, IE). A header the horizon can take ahead
+    puts the act's block in its preparing phase, which launches what it pre-sends
+    - and it launched every child that was not a sound, the scene's own block
+    among them: the scene let out of its hold and played, with no GO pressed. */
+TEST_CASE ("prepare: a scene made ready inside an act nobody has entered waits for a GO while the act's header is got ready")
+{
+    ManualRig rig;
+    const auto bed = rig.document.createCue (rig.roleOf (rig.groupId, "header"), 0, "media", "Bed").id;
+    rig.setCue (bed, "file", "thunder.wav");
+
+    const auto scene = rig.document.createCue (rig.groupId, 0, "group", "Storm").id;
+    rig.setCue (scene, "mode", "timeline");
+    const auto rain = rig.document.createCue (scene, 0, "media", "Rain").id;
+    rig.setCue (rain, "file", "thunder.wav");
+
+    rig.setStandby (scene);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (scene) != nullptr
+                                          && ! rig.runOf (rain).empty() && ! rig.runOf (bed).empty(); }));
+
+    const auto block = rig.runs.preparedRunOf (scene)->id;
+    const auto armed = rig.runOf (rain);
+
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    //  Still only made ready, the act's and the scene's blocks both, and nothing asked to sound.
+    CHECK (rig.runs.find (block)->state == cue::runState::preparing);
+    CHECK (rig.runs.liveRunOf (scene) == nullptr);
+    CHECK (rig.runs.preparedRunOf (rig.groupId) != nullptr);
+    CHECK (rig.runs.liveRunOf (rig.groupId) == nullptr);
+    CHECK_FALSE (rig.runs.find (armed)->launchRequested);
+    CHECK_FALSE (rig.runs.find (rig.runOf (bed))->launchRequested);
+}
+
+//==============================================================================
 /*  A SCENE THAT NEVER STARTED HAS NO FOOTER, AND ESC LEAVES THE STANDBY ALONE
     (namespace draft §23, 2026-09-30).
 
@@ -12201,11 +12701,33 @@ TEST_CASE ("go.doh: every run the GO creates or adopts carries its serial, and a
         CHECK (rig.runs.find (armedTwo)->goSerial == 2u);
     }
 
-    /*  THE DESIGN'S J2 SUBCASE - a GO on a timeline scene's row inside a running
-        act adopting the block the horizon prepared there, stamped whole - is not
-        written yet: J2, which makes that GO adopt the block, lands after D1
-        (decisions-D1.md, the order change). Today that GO enters a fresh run
-        beside the block; J2 adds the SUBCASE with its own fix. */
+    /*  THE DESIGN'S J2 SUBCASE, written with J2 (2026-10-01, namespace draft
+        §23.9): until then that GO entered a fresh run beside the block. */
+    SUBCASE ("a scene the horizon made ready under a running act, adopted whole by the GO on its row")
+    {
+        ManualRig rig;
+        const auto scene = rig.document.createCue (rig.groupId, 1, "group", "Storm").id;
+        rig.setCue (scene, "mode", "timeline");
+        const auto rain = rig.document.createCue (scene, 0, "media", "Rain").id;
+        rig.setCue (rain, "file", "thunder.wav");
+
+        rig.setStandby (rig.first);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.standby() == scene);
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (scene) != nullptr
+                                              && ! rig.runOf (rain).empty(); }));
+
+        const auto block = rig.runs.preparedRunOf (scene)->id;
+        const auto armed = rig.runOf (rain);
+        CHECK (rig.runs.find (block)->goSerial == 0u);
+        CHECK (rig.runs.find (block)->preparedAfterGo == 1);
+        CHECK (rig.runs.find (armed)->goSerial == 0u);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (rig.runs.find (block)->goSerial == 2u);
+        CHECK (rig.runs.find (armed)->goSerial == 2u);
+        CHECK (runsFor (rig, scene) == 1u);                        // the same run, none beside it
+    }
 }
 
 TEST_CASE ("go.doh: history - a Doh! step is not a firing, to the solver or to the live recorder")
@@ -12945,11 +13467,18 @@ TEST_CASE ("go.doh: an unheard scene inside an older act, its fade-and-stop let 
     REQUIRE (! actRun.empty());
 
     rig.setStandby (scene);
+    const auto* ready = rig.runs.preparedRunOf (scene);    // made ready under the act
+    REQUIRE (ready != nullptr);
+    const auto block = ready->id;
+
     REQUIRE (rig.submitAndTick ("go").rejected == 0);       // the GO a Doh! takes back
 
-    /*  THE GO'S OWN RUN OF THE SCENE: until J2 a GO on a scene's row inside a
-        running act starts it cold, beside the block the horizon made there. */
+    /*  THE GO'S OWN RUN OF THE SCENE IS THE BLOCK THE HORIZON MADE UNDER THE ACT
+        (J2, namespace draft §23.9): adopted, stamped with the GO - until J2 the
+        GO started the scene cold, beside that block. */
     const auto sceneRun = newestRunOf (rig, scene);
+    REQUIRE (sceneRun == block);
+    REQUIRE (runsFor (rig, scene) == 1u);
     REQUIRE (rig.runs.find (sceneRun)->goSerial == 2u);
     REQUIRE (rig.runs.find (sceneRun)->parent == actRun);
 

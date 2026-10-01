@@ -815,6 +815,23 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   seek into a manual group and a GO on its last member replays differently, as
   does one with a seek on a scene the engine cannot time; no fixture holds
   either.
+- **J2, 2026-10-01 — a GO on a scene's row inside a running act plays the
+  scene made ready there** (§23.9; the author's "fix it, own commit"). The GO
+  started a second copy beside it - sounds armed again with the hand down, the
+  header sent to the desk twice - while the prepared one held its voices and its
+  pre-sends for as long as the act ran, and after. The GO now adopts the block,
+  stamped with its serial, and the act launches it as it launches every member;
+  the pointer walking away from a scene made ready under a running act gives it
+  back, its desk values put back first; an adopted block is never marked
+  prepared again by its own job; and a sampler bank its act launches from the
+  hold takes over as it arms, as on every other road. A log holding such a GO
+  replays differently; no fixture holds one. The review of the first build
+  added three: the GO adopts its own scene's block also when the same GO
+  enters the scene's parent, which the first give-back had revoked before the
+  parent reached it (IC); a sound passed over in a running act gives its voice
+  back (ID); and a block's preparation no longer launches the scene nested in
+  it, which had played with no GO behind a header the horizon could take ahead
+  (IE).
 - **Go Doh! D0 and D1, 2026-10-01 — taking back the last GO** (PRD §3.32,
   namespace draft §24). D0 is the specification: PRD §3.32, §4.4's pointer to
   it, and §24's rule, inventory, decisions and limitations. D1 builds the

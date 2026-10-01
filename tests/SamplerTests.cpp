@@ -651,6 +651,149 @@ TEST_CASE ("sampler: a bank that takes over the whole desk closes the other, and
     REQUIRE (rig.tickUntil ([&rig] { return rig.liveRunOf (rig.bankA) == nullptr; }));
 }
 
+TEST_CASE ("sampler: a bank on a running act's row is the bank made ready there, and takes over as it arms")
+{
+    /*  A BANK ON AN ACT'S ROW (2026-10-01, namespace draft §23.9, J2). The
+        horizon makes it ready under the running act, and the GO on its row now
+        adopts that block, which the act launches as it launches every member -
+        through the door a prepared group nested in another comes in by. That
+        door let the group out of its hold and did nothing more, so a bank that
+        takes over the whole desk armed beside the bank it should have closed:
+        its takeover must not depend on the road the GO took. */
+    Rig rig;
+    rig.arm (rig.bankA);
+    const auto bankARun = rig.liveRunOf (rig.bankA)->id;
+    const auto idlePad = rig.liveRunOf (rig.membersOf[rig.bankA][1])->id;
+
+    const auto act = rig.document.createCue (rig.listId, 3, "group", "Act").id;
+    const auto opening = rig.document.createCue (act, 0, "memo", "Opening").id;
+    const auto bank = rig.document.createCue (act, 1, "group", "Bank C").id;
+    rig.set ("/godot/cue/" + bank + "/mode", "sampler");
+    rig.set ("/godot/cue/" + bank + "/takeover", "group");
+    const auto pad = rig.document.createCue (bank, 0, "media", "Bank C 0").id;
+    rig.set ("/godot/cue/" + pad + "/file", "clip0.wav");
+
+    //  Into the act on its opening line; the walk stands on the bank's row, made ready under the act.
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), opening).ok);
+    rig.tickOnce();
+    rig.send ("go");
+    REQUIRE (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)).value_or ("") == bank);
+    REQUIRE (rig.tickUntil ([&rig, &bank] { return rig.runs.preparedRunOf (bank) != nullptr; }));
+
+    const auto block = rig.runs.preparedRunOf (bank)->id;
+    REQUIRE (rig.liveRunOf (act) != nullptr);
+    REQUIRE (rig.runs.find (block)->parent == rig.liveRunOf (act)->id);
+
+    rig.send ("go");                                            // the bank's row
+    REQUIRE (rig.tickUntil ([&rig, &pad] { return rig.liveRunOf (pad) != nullptr; }));
+
+    //  The bank the horizon made ready, and it closed the other as it armed.
+    REQUIRE (rig.liveRunOf (bank) != nullptr);
+    CHECK (rig.liveRunOf (bank)->id == block);
+    CHECK (rig.runsOf (bank) == 1u);
+    CHECK (rig.runs.find (bankARun)->closing);
+
+    //  So Bank A, closing, ends a pad nobody is playing - a close, not a kill of what sounds.
+    CHECK (rig.tickUntil ([&rig, &idlePad] { return rig.runs.find (idlePad)->isFinished(); }));
+}
+
+TEST_CASE ("sampler: a bank that is the first row of an act nobody has entered takes over when the GO on its row enters the act")
+{
+    /*  THE OTHER ROAD INTO THE THIRD DOOR (2026-10-01, namespace draft §23.9,
+        IB and IC): the GO on the bank's row enters the act, adopting the act's
+        block, and the bank's block - adopted by the same GO - is launched by the
+        act when its members begin. With a line in the act's header those begin
+        a few ticks later, and the bank's block, left marked for them, was given
+        back by the pointer the GO had moved on: the act then launched a revoked
+        run, and the bank never armed. */
+    for (const auto withHeader : { false, true })
+    {
+        INFO (std::string (withHeader ? "a line in the act's header" : "nothing in the act's header"));
+        Rig rig;
+        rig.arm (rig.bankA);
+        const auto bankARun = rig.liveRunOf (rig.bankA)->id;
+        const auto idlePad = rig.liveRunOf (rig.membersOf[rig.bankA][1])->id;
+
+        const auto act = rig.document.createCue (rig.listId, 3, "group", "Act").id;
+
+        if (withHeader)
+        {
+            const auto header = rig.document.createRole (act, "header");
+            REQUIRE (header.ok);
+            rig.document.createCue (header.id, 0, "memo", "House to half");
+        }
+
+        const auto bank = rig.document.createCue (act, 0, "group", "Bank C").id;
+        rig.set ("/godot/cue/" + bank + "/mode", "sampler");
+        rig.set ("/godot/cue/" + bank + "/takeover", "group");
+        const auto pad = rig.document.createCue (bank, 0, "media", "Bank C 0").id;
+        rig.set ("/godot/cue/" + pad + "/file", "clip0.wav");
+        const auto later = rig.document.createCue (act, 1, "memo", "Later").id;
+
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), bank).ok);
+        rig.tickOnce();
+        REQUIRE (rig.tickUntil ([&rig, &bank] { return rig.runs.preparedRunOf (bank) != nullptr; }));
+
+        const auto block = rig.runs.preparedRunOf (bank)->id;
+        REQUIRE (rig.runs.preparedRunOf (act) != nullptr);
+        REQUIRE (rig.runs.find (block)->parent == rig.runs.preparedRunOf (act)->id);
+
+        rig.send ("go");                                        // the bank's row, entering the act
+        REQUIRE (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)).value_or ("") == later);
+
+        CHECK (rig.tickUntil ([&rig, &pad] { return rig.liveRunOf (pad) != nullptr; }));
+
+        REQUIRE (rig.liveRunOf (bank) != nullptr);
+        CHECK (rig.liveRunOf (bank)->id == block);
+        CHECK (rig.runs.find (block)->warning != cue::runWarning::revoked);
+        CHECK (rig.runsOf (bank) == 1u);
+        CHECK (rig.runs.find (bankARun)->closing);
+        CHECK (rig.tickUntil ([&rig, &idlePad] { return rig.runs.find (idlePad)->isFinished(); }));
+    }
+}
+
+TEST_CASE ("sampler: a bank made ready inside an act nobody has entered closes nothing before a GO")
+{
+    /*  A HEADER THE HORIZON TAKES AHEAD (2026-10-01, namespace draft §23.9,
+        IE): a bed in the act's header puts the act's block in its preparing
+        phase, which launched every child of the block that was not a sound -
+        the bank's own block among them, let out of its hold with no GO pressed,
+        and since IB taking over as it was: the other bank closed, its idle pad
+        ended, by a pointer resting on a row. */
+    Rig rig;
+    rig.arm (rig.bankA);
+    const auto bankARun = rig.liveRunOf (rig.bankA)->id;
+    const auto idlePad = rig.liveRunOf (rig.membersOf[rig.bankA][1])->id;
+
+    const auto act = rig.document.createCue (rig.listId, 3, "group", "Act").id;
+    const auto header = rig.document.createRole (act, "header");
+    REQUIRE (header.ok);
+    const auto bed = rig.document.createCue (header.id, 0, "media", "Bed").id;
+    rig.set ("/godot/cue/" + bed + "/file", "clip3.wav");
+
+    const auto bank = rig.document.createCue (act, 0, "group", "Bank C").id;
+    rig.set ("/godot/cue/" + bank + "/mode", "sampler");
+    rig.set ("/godot/cue/" + bank + "/takeover", "group");
+    const auto pad = rig.document.createCue (bank, 0, "media", "Bank C 0").id;
+    rig.set ("/godot/cue/" + pad + "/file", "clip0.wav");
+
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), bank).ok);
+    rig.tickOnce();
+    REQUIRE (rig.tickUntil ([&rig, &bank, &bed] { return rig.runs.preparedRunOf (bank) != nullptr
+                                                          && rig.liveRunOf (bed) != nullptr; }));
+
+    const auto block = rig.runs.preparedRunOf (bank)->id;
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (block)->state == cue::runState::preparing);
+    CHECK (rig.runs.liveRunOf (bank) == nullptr);
+    CHECK (rig.liveRunOf (pad) == nullptr);
+    CHECK_FALSE (rig.runs.find (bankARun)->closing);
+    CHECK_FALSE (rig.runs.find (idlePad)->isFinished());
+}
+
 TEST_CASE ("sampler: strip takeover takes the strips it lands on and nothing else")
 {
     Rig rig;
