@@ -803,6 +803,18 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   had always said so and the engine never read it: a cue on a bound port with
   `Tx` off went out on the cable. It now runs, sends nothing and ends
   `not-sent`, as a network device's `Tx` has made it since 2026-09-22.
+- **J1, 2026-10-01 — a jump lands in the round it is in** (§23.8; the author's
+  "fix it, own commit"). A jump seated its scene before its first round, so the
+  scene played its round again once it ended, and the GO on a manual group's
+  last member sent the pointer back to its first. A seated scene is in round
+  one now, a scene a seek re-seats keeps its own round, and a jumped shuffle
+  draws a seed of its own. And a seek on a scene the engine cannot time - one
+  that loops, a timeline with a header, a manual group - leaves it as it is,
+  where keeping its round had a scrub end it with its footer (the review's
+  finding; before J1 the scrub started its round over). A log with a jump or a
+  seek into a manual group and a GO on its last member replays differently, as
+  does one with a seek on a scene the engine cannot time; no fixture holds
+  either.
 - **Go Doh! D0 and D1, 2026-10-01 — taking back the last GO** (PRD §3.32,
   namespace draft §24). D0 is the specification: PRD §3.32, §4.4's pointer to
   it, and §24's rule, inventory, decisions and limitations. D1 builds the

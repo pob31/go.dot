@@ -1510,9 +1510,10 @@ namespace wfg::cue
                 continue;
 
             const auto standing = runFor.find (wants.cue);
-            const auto id = standing != runFor.end() ? standing->second : nextId();
+            const auto madeHere = standing == runFor.end();
+            const auto id = madeHere ? nextId() : standing->second;
 
-            if (standing == runFor.end())
+            if (madeHere)
             {
                 const auto parent = wants.ancestors.empty()
                                       ? std::string {}
@@ -1562,11 +1563,42 @@ namespace wfg::cue
                 `seed` at nought; `iterations` is otherwise set when a group is
                 FIRED and `seed` and `round` when a round is DRAWN, and a jump
                 does neither. A group adopted without them ends after one round,
-                or draws its next shuffle from a seed the show never used. */
-            run->iterations = static_cast<int> (numberOf (cue, "loops"));
-            run->seed = static_cast<std::int32_t> (numberOf (cue, "seed"));
-            run->iteration = 0;
-            run->round = membersOf (cue);
+                or draws its next shuffle from a seed the show never used.
+
+                AND THE ROUND IS THE ONE THE PLAN IS IN (J1, 2026-10-01,
+                namespace draft §23.8; the author: "fix it, own commit"). It was
+                seated at nought - no round begun - so the round a jump landed
+                in was never counted: `endOfRound` found nought below the loop
+                count and drew another, and a scene that plays once played every
+                member again. And the `go` HANDLER reads the same count, through
+                `heldForAnotherRound`, so on a manual group's last member it sent
+                the pointer back to the group's first member instead of on past
+                the group. The solver gives no round for a group - a looping one
+                is `unknown-round`, and the round it says it took is the first -
+                so a run made here is in round one.
+
+                A RUN ALREADY STANDING IN A ROUND KEEPS IT, with the count and
+                the seed it was fired with and the round it drew: the scene a
+                seek re-seats at a second of itself is in the round it was in.
+                Only a scene the walk can time comes here that way - one that
+                plays once, with no header (`seekGroup`, HX) - so what this keeps
+                is round one, as it was drawn. A standing run that never began
+                one - sought in its own pre-wait - is seated as a new one is.
+                Handler state on both sides: a replay seats the same round.
+
+                ONE SOUGHT IN THE VERY DRAIN ITS FIRST ROUND IS DRAWN IN is
+                seated here in round one, and the `run.round` already on its way
+                behind the seek counts one more: it reads round two of one, and,
+                playing once, still ends after this round. Its members spawned
+                in that same drain are the older fault beside it - they are made
+                a second time under the scene the seek has just seated. */
+            if (madeHere || run->iteration < 1)
+            {
+                run->iterations = static_cast<int> (numberOf (cue, "loops"));
+                run->seed = static_cast<std::int32_t> (numberOf (cue, "seed"));
+                run->round = membersOf (cue);
+                run->iteration = 1;
+            }
         }
 
         //----------------------------------------------------------------------
@@ -1859,6 +1891,36 @@ namespace wfg::cue
                  || std::find (wants.ancestors.begin(), wants.ancestors.end(), run->cue)
                       != wants.ancestors.end())
                 wanted.push_back (wants);
+
+        /*  NOTHING PLACED UNDER IT, NOTHING DONE (2026-10-01, the J1 review,
+            namespace draft §23.8, HX). The walk gives a scene's members their
+            seconds only when nothing in the way of the arithmetic is unknown -
+            one round, every member, in the written order, no header, and the
+            machine pacing it (§13.8) - and for any other scene the solver
+            places none of them: a scene that loops, shuffles or plays some of
+            its members, a timeline with a header, a manual group. A seek there
+            has nothing to seat, and it ended every member all the same and
+            seated the scene alone, over a job with nothing left to wait for.
+            With the seat keeping the round its scene is in (HV), a timeline in
+            its last round - where one with a header that plays once always is -
+            ran its footer there and then and ended where the hand had put it,
+            and so did a manual group in its second round, whatever its operator
+            still had to fire; before J1 both began their round again from the
+            top. An automatic sequence awaited nothing for ever, either way.
+
+            So it is applied and changes nothing - its members, its round, its
+            step - as a seek on a run that is over is: the scene plays on where
+            it was, and the head the hand dragged goes back to where the sound
+            is. The solver reads the document and the media lengths, which a
+            replay has from the log, so a replay takes the same road. */
+        const auto placedUnder = std::any_of (wanted.begin(), wanted.end(),
+                                              [&sceneCue] (const PlannedRun& other)
+                                              {
+                                                  return other.cue != sceneCue;
+                                              });
+
+        if (! placedUnder)
+            return used;
 
         /*  WHAT IT HELD IS ENDED FIRST, the way a jump ends what it abandons:
             every descendant, no footer, its jobs retired and its voices and
@@ -7495,7 +7557,16 @@ namespace wfg::cue
             log is a number somebody will one day try to interpret - as well as
             the one thing in an otherwise identical pair of sessions that
             differs. */
-        const auto seed = run->iteration > 0
+        /*  AND A SHUFFLING RUN WITH NO SEED OF ITS OWN YET DRAWS ONE, whatever
+            round it is on (J1, 2026-10-01, namespace draft §23.8). A fired run
+            has one from its first round - the group's, or one drawn then - but
+            a run a jump seated is in round one already, holding the group's
+            seed, which is nought for a shuffle nobody seeded. Read as its own,
+            every round after the jump came from nought: the same order after
+            every jump, from a seed the show never used. Nought is "no seed" -
+            `IdRegistry::drawSeed` never draws it - so it is drawn here, and the
+            record below writes it into the log, as every seed is. */
+        const auto seed = run->iteration > 0 && (run->seed != 0 || ! shuffles)
                             ? run->seed
                             : (authored != 0 ? authored : (shuffles ? ids.drawSeed() : 0));
 

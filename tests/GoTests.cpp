@@ -6633,6 +6633,673 @@ TEST_CASE ("jump: with no aim there is nothing to make true")
 }
 
 //==============================================================================
+/*  A SEAT IS IN THE ROUND ITS PLAN IS IN (J1, 2026-10-01, namespace draft
+    §23.8; the author: "fix it, own commit").
+
+    A jump builds the scene it lands in, and `seatPlan` gave every group it made
+    `iteration` nought - no round begun - beside `iterations` from the group's
+    `loops`. So the round the jump landed in was never counted. When it ended,
+    `endOfRound` found nought below one and drew ANOTHER round of a scene that
+    plays once, and every member played again. And the GO handler reads the same
+    count, through `standbyAfterFiring`: on a manual group's last member,
+    `heldForAnotherRound` saw a round still to play and sent the pointer back to
+    the group's first member instead of on past the group.
+
+    The solver gives no round for a group - a looping one is `unknown-round`,
+    and the round it says it took is the first - so a run the seat makes is in
+    round one. A run already standing, the scene a seek re-seats at a second of
+    itself, is in the round it was in, and keeps it.
+
+    AND A SEEK SEATS ONLY WHAT THE WALK CAN PLACE (HX, the J1 review). A scene
+    whose members the walk gives no seconds - one that loops, a timeline with a
+    header, a manual group - has nothing to re-seat. The seek ended every member
+    all the same and seated the scene alone, which with its round kept ended a
+    scene in its last round where the hand had put it, footer and all. It is now
+    applied and changes nothing. */
+namespace
+{
+    /** How many rounds the log says a group run drew. */
+    std::size_t roundsDrawn (JumpRig& rig, const std::string& groupRun)
+    {
+        std::size_t count = 0;
+
+        for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+            if (record.kind == LogRecord::Kind::applied && record.command == "run.round"
+                  && ! record.args.empty() && record.args[0].getString() == groupRun)
+                ++count;
+
+        return count;
+    }
+
+    /** The seed of the newest round a group run drew, or nought when none. */
+    std::int32_t newestRoundSeed (JumpRig& rig, const std::string& groupRun)
+    {
+        std::int32_t seed = 0;
+
+        for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+            if (record.kind == LogRecord::Kind::applied && record.command == "run.round"
+                  && record.args.size() > 1 && record.args[0].getString() == groupRun)
+                seed = record.args[1].getInt32();
+
+        return seed;
+    }
+
+    /** How many runs a cue has had. */
+    std::size_t runsOfCue (const JumpRig& rig, const std::string& cueId)
+    {
+        std::size_t count = 0;
+
+        for (const auto& run : rig.runs.all())
+            if (run.cue == cueId)
+                ++count;
+
+        return count;
+    }
+
+    /** The unfinished runs under a group run, in the order they were made. */
+    std::vector<std::string> unfinishedUnder (const JumpRig& rig, const std::string& groupRun)
+    {
+        std::vector<std::string> out;
+
+        for (const auto* child : rig.runs.childrenOf (groupRun))
+            if (! child->isFinished())
+                out.push_back (child->id);
+
+        return out;
+    }
+
+    /** The first record of a command applied to a run, or nothing. */
+    std::optional<LogRecord> firstApplied (JumpRig& rig, const std::string& command,
+                                           const std::string& runId)
+    {
+        for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+            if (record.kind == LogRecord::Kind::applied && record.command == command
+                  && ! record.args.empty() && record.args[0].getString() == runId)
+                return record;
+
+        return std::nullopt;
+    }
+
+    /*  `runOn` a tick at a time until a predicate holds - the audio side playing
+        its part, a launched run sounding and one whose material has run out
+        stopping. Bounded, so a scene that never ends fails the case rather than
+        hanging the suite. */
+    template <typename Predicate>
+    bool playOn (JumpRig& rig, Predicate done, std::map<std::string, std::int64_t>& since,
+                 int bound = 2500)
+    {
+        for (int n = 0; n < bound; ++n)
+        {
+            if (done())
+                return true;
+
+            runOn (rig, rig.tick + 1, 4.0, since);
+        }
+
+        return done();
+    }
+
+    /*  The session replayed record for record into a fresh rig with no audio
+        side, and the pointer read where the replay left it. A handler decision
+        is only a decision if a replay takes it the same way. Read on the
+        session's own list: the show read in replaces the fresh rig's. */
+    std::string replayedStandby (JumpRig& rig)
+    {
+        const auto show = doc::CanonicalXml::write (rig.document);
+        const auto original = LogFile::parse (rig.engine.log().contents());
+        REQUIRE (original.errors.empty());
+
+        JumpRig fresh;
+        fresh.runner.setPlayer (nullptr);
+
+        const auto loaded = doc::CanonicalXml::read (show, fresh.document);
+        REQUIRE (loaded.ok);
+
+        const auto result = replay (fresh.engine, original);
+
+        for (const auto& mismatch : result.mismatches)
+            INFO (mismatch);
+
+        CHECK (result.ok);
+        return fresh.document.findById (rig.listId)[juce::Identifier ("standby")].toString().toStdString();
+    }
+}
+
+TEST_CASE ("jump: a scene jumped into ends after the round it was in, and does not play it again")
+{
+    /*  The scene plays once, `loops` being one unless a show says otherwise.
+        Seated at round nought, it played the round the jump had put it in, drew
+        a second, and played every member again. */
+    JumpRig rig;
+    auto aimed = rig.middle;
+
+    SUBCASE ("a timeline")
+    {
+        //  JumpRig's own scene, three seconds in: one member sounding at three
+        //  seconds, one at one second, the last due in seven.
+    }
+
+    SUBCASE ("an automatic sequence, jumped into its last member")
+    {
+        /*  The LAST member, so that nothing is seated still to come: a
+            sequence spawns its next member itself, and one the seat has
+            already made waiting beside it is another fault than this one. */
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/advance", "auto").ok);
+        aimed = rig.late;
+    }
+
+    REQUIRE (rig.jumpTo (aimed, 1.0).rejected == 0);
+
+    const auto* scene = rig.liveRunOf (rig.scene);
+    REQUIRE (scene != nullptr);
+    const auto sceneRun = scene->id;
+
+    //  In the round the plan is in: the first, which is the only one.
+    CHECK (scene->iteration == 1);
+    CHECK (scene->iterations == 1);
+
+    std::map<std::string, std::int64_t> since;
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+
+    //  It ended after that round: no second round drawn, every member played once.
+    CHECK (roundsDrawn (rig, sceneRun) == 0u);
+
+    for (const auto& member : { rig.early, rig.middle, rig.late })
+    {
+        INFO ("member " << member);
+        CHECK (runsOfCue (rig, member) == 1u);
+    }
+}
+
+TEST_CASE ("jump: into a manual group, and the GO on its last member walks on rather than wrapping")
+{
+    /*  The handler's half, the one a replay reads. A manual group's last member
+        keeps the pointer only while the group has a round still to play, and a
+        group seated at round nought always had one: the GO sent the pointer back
+        to the group's first member, and the group, ending its round, drew another
+        and started that member on its own. */
+    JumpRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence").ok);
+
+    std::map<std::string, std::int64_t> since;
+
+    SUBCASE ("read from the order")
+    {
+        //  Nothing fired yet: the jump is read from the list's order.
+    }
+
+    SUBCASE ("read from the history")
+    {
+        /*  The scene entered by GO and its second member fired, then the jump
+            back into that member: what it is read from is the list's history.
+            Parked through the command, so the replay is given the pointer. The
+            second member waits two seconds before it sounds. */
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.early) }).applied == 1);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (playOn (rig, [&] { return rig.liveRunOf (rig.early) != nullptr
+                                             && rig.liveRunOf (rig.early)->state == cue::runState::playing; },
+                         since, 50));
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (playOn (rig, [&] { return rig.liveRunOf (rig.middle) != nullptr
+                                             && rig.liveRunOf (rig.middle)->state == cue::runState::playing; },
+                         since, 200));
+    }
+
+    REQUIRE (rig.jumpTo (rig.middle, 1.0).rejected == 0);
+    REQUIRE (rig.standby() == rig.late);
+
+    const auto* scene = rig.liveRunOf (rig.scene);
+    REQUIRE (scene != nullptr);
+    const auto sceneRun = scene->id;
+    CHECK (scene->iteration == 1);
+
+    //  The last member: the group has no round left, so the pointer leaves it.
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    CHECK (rig.standby() == rig.after);
+
+    //  And the group ends after that member, without starting its first again.
+    const auto firstsBefore = runsOfCue (rig, rig.early);
+
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (roundsDrawn (rig, sceneRun) == 0u);
+    CHECK (runsOfCue (rig, rig.early) == firstsBefore);
+
+    CHECK (replayedStandby (rig) == rig.standby());
+}
+
+TEST_CASE ("rounds: a scene a jump seats in the first of two rounds plays exactly one round more")
+{
+    /*  `loops` two. A jump's seat is always in the first round - the solver
+        cannot tell a looping scene's rounds apart - so the round the jump landed
+        in is counted and exactly one is left to play, whole. Seated at round
+        nought, the scene played two more. */
+    JumpRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/loops", "2").ok);
+
+    //  All three members at nought, so that a round is four seconds.
+    for (const auto& member : { rig.middle, rig.late })
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/preWait", "0").ok);
+
+    std::map<std::string, std::int64_t> since;
+
+    SUBCASE ("an automatic sequence")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/advance", "auto").ok);
+
+        REQUIRE (rig.jumpTo (rig.late, 1.0).rejected == 0);
+
+        const auto* scene = rig.liveRunOf (rig.scene);
+        REQUIRE (scene != nullptr);
+        const auto sceneRun = scene->id;
+        CHECK (scene->iteration == 1);
+        CHECK (scene->iterations == 2);
+
+        /*  COUNTED FROM THE SEAT, NOT FROM NOTHING. What the seat makes beside
+            the member it landed on is the walk's to say, and today it says
+            nothing for a chain that loops (§13.8) - a walk taught to time round
+            one of it would seat the two members before as over, and the round
+            still to play is the same either way. */
+        std::map<std::string, std::size_t> seated;
+
+        for (const auto& member : { rig.early, rig.middle, rig.late })
+            seated[member] = runsOfCue (rig, member);
+
+        CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+
+        //  One round more, whole: every member once more, and nothing else.
+        CHECK (roundsDrawn (rig, sceneRun) == 1u);
+
+        for (const auto& member : { rig.early, rig.middle, rig.late })
+        {
+            INFO ("member " << member);
+            CHECK (runsOfCue (rig, member) == seated[member] + 1u);
+        }
+    }
+
+    SUBCASE ("a manual group: the pointer wraps once, then walks on")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence").ok);
+
+        REQUIRE (rig.jumpTo (rig.middle, 1.0).rejected == 0);
+        REQUIRE (rig.standby() == rig.late);
+
+        const auto* scene = rig.liveRunOf (rig.scene);
+        REQUIRE (scene != nullptr);
+        const auto sceneRun = scene->id;
+
+        //  Round one's last member: a round is still to play, so back to the top.
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (rig.standby() == rig.early);
+
+        //  Round two, once round one's members are done; then its three members.
+        REQUIRE (playOn (rig, [&] { return roundsDrawn (rig, sceneRun) == 1u; }, since));
+
+        for (const auto* expected : { &rig.middle, &rig.late, &rig.after })
+        {
+            REQUIRE (rig.submitAndTick ("go").rejected == 0);
+            CHECK (rig.standby() == *expected);
+        }
+
+        CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+        CHECK (roundsDrawn (rig, sceneRun) == 1u);
+    }
+}
+
+TEST_CASE ("rounds: a shuffled scene jumped into draws its next round from a seed of its own")
+{
+    /*  Nobody seeded the shuffle, so each run draws a seed of its own and
+        writes it into the log (`group,seed`: "zero means a fresh one per run").
+        A run the seat makes holds the group's seed, nought - "no seed" - and,
+        seated in round one, it takes its own seed from round two on: drawn from
+        nought, every jump into the scene would shuffle the same way, from a
+        seed the show never used. It draws one at round two, as a fired run
+        does at round one. */
+    JumpRig rig;
+
+    for (const auto& [name, value] : std::vector<std::pair<std::string, std::string>> {
+             { "mode", "sequence" }, { "advance", "auto" }, { "selection", "shuffle" }, { "loops", "2" } })
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/" + name, value).ok);
+
+    REQUIRE (rig.jumpTo (rig.late, 1.0).rejected == 0);
+
+    const auto* scene = rig.liveRunOf (rig.scene);
+    REQUIRE (scene != nullptr);
+    const auto sceneRun = scene->id;
+
+    std::map<std::string, std::int64_t> since;
+    REQUIRE (playOn (rig, [&] { return roundsDrawn (rig, sceneRun) == 1u; }, since));
+
+    CHECK (newestRoundSeed (rig, sceneRun) != 0);
+}
+
+TEST_CASE ("seek: a scene that plays once, scrubbed, plays the rest of its round from there and ends")
+{
+    /*  The everyday scrub. JumpRig's scene plays once and the walk times it, so
+        a seek three seconds in re-seats its members under the scene's own run at
+        their seconds - the first three seconds in, the second one second in, the
+        last due in seven - and the scene keeps the round it is in (HV). Seated
+        at round nought, as every seat was before J1, it played that round out
+        from the second asked for, then drew another and played every member
+        again from the top. */
+    JumpRig rig;
+    std::map<std::string, std::int64_t> since;
+    std::string sceneRun;
+    std::size_t rounds = 0;
+    std::size_t runsEach = 0;
+    auto firstIn = 3.0;                 // where the seek puts the first member
+
+    SUBCASE ("scrubbed while it plays its round")
+    {
+        rig.setStandby (rig.scene);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto* scene = rig.liveRunOf (rig.scene);
+        REQUIRE (scene != nullptr);
+        sceneRun = scene->id;
+
+        //  Its round drawn, and its first member a second in.
+        REQUIRE (playOn (rig, [&] { return roundsDrawn (rig, sceneRun) == 1u; }, since));
+        playOn (rig, [] { return false; }, since, 50);
+        REQUIRE (rig.runs.find (sceneRun)->iteration == 1);
+
+        rounds = 1;
+        runsEach = 2;       // the one its round made, and the one the seek made
+    }
+
+    SUBCASE ("scrubbed in its own pre-wait, before its round has begun")
+    {
+        /*  HV's other half: a standing run that has begun no round is seated as
+            a new one is, in round one. Fired by name with a second of pre-wait,
+            and sought while it waits. */
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/preWait", "1").ok);
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.scene) }).rejected == 0);
+
+        const auto* scene = rig.liveRunOf (rig.scene);
+        REQUIRE (scene != nullptr);
+        REQUIRE (scene->state == cue::runState::waiting);
+        REQUIRE (scene->iteration == 0);
+        sceneRun = scene->id;
+
+        rounds = 0;         // the seat counts the round it is in, and nothing draws one
+        runsEach = 1;       // the seek's
+
+        //  A scene's seconds count from its entry, its own pre-wait among them
+        //  (§3.6), so three seconds in is its first member's second.
+        firstIn = 2.0;
+    }
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (3.0) }).rejected == 0);
+
+    //  In the first round: the one it was in, or the one it is seated in.
+    CHECK (rig.runs.find (sceneRun)->iteration == 1);
+
+    //  Its members seated at their seconds, under its own run.
+    const auto* first = rig.liveRunOf (rig.early);
+    REQUIRE (first != nullptr);
+    CHECK (first->parent == sceneRun);
+    CHECK (first->startOffset == doctest::Approx (firstIn));
+
+    //  The rest of that round, and no round more.
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (rig.runs.find (sceneRun)->iteration == 1);
+    CHECK (roundsDrawn (rig, sceneRun) == rounds);
+
+    for (const auto& member : { rig.early, rig.middle, rig.late })
+    {
+        INFO ("member " << member);
+        CHECK (runsOfCue (rig, member) == runsEach);
+    }
+}
+
+TEST_CASE ("seek: a manual group sought keeps its round, and the GO on its last member walks on")
+{
+    /*  The `go` HANDLER after a seek, the half a replay reads. A manual group
+        has an operator between its members and no second to seek to - the
+        clients offer it no drag - but `run.seek` takes any group run. Before J1
+        the seek's seat wrote the group's round back to nought, so the GO on its
+        last member sent the pointer back to its first, and the group, ending
+        that member, drew another round, started its first member by itself and
+        waited for GOs for ever. The walk places no member of a manual group, so
+        the seek now leaves it as it is (HX): its round, its members, and so the
+        pointer, which walks on past it. */
+    JumpRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence").ok);
+
+    std::map<std::string, std::int64_t> since;
+    std::string sceneRun;
+    std::size_t rounds = 0;
+    std::vector<std::string> walk;      // where each GO after the seek puts the pointer
+
+    SUBCASE ("in its only round, two of its members fired")
+    {
+        /*  Parked through the command, so the replay is given the pointer. The
+            second member waits two seconds before it sounds. */
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.early) }).applied == 1);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (playOn (rig, [&] { return rig.liveRunOf (rig.early) != nullptr
+                                             && rig.liveRunOf (rig.early)->state == cue::runState::playing; },
+                         since, 50));
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (playOn (rig, [&] { return rig.liveRunOf (rig.middle) != nullptr
+                                             && rig.liveRunOf (rig.middle)->state == cue::runState::playing; },
+                         since, 200));
+
+        REQUIRE (rig.liveRunOf (rig.scene) != nullptr);
+        sceneRun = rig.liveRunOf (rig.scene)->id;
+
+        rounds = 1;                     // the GO that entered it drew its round
+        walk = { rig.after };
+    }
+
+    SUBCASE ("in the second of two rounds, its first member fired")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/loops", "2").ok);
+
+        for (const auto& member : { rig.middle, rig.late })
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/preWait", "0").ok);
+
+        //  Jumped into round one and its last member GO'd: back to the top, and
+        //  round two drawn once round one is done.
+        REQUIRE (rig.jumpTo (rig.middle, 1.0).rejected == 0);
+        REQUIRE (rig.liveRunOf (rig.scene) != nullptr);
+        sceneRun = rig.liveRunOf (rig.scene)->id;
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.standby() == rig.early);
+        REQUIRE (playOn (rig, [&] { return roundsDrawn (rig, sceneRun) == 1u; }, since));
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.standby() == rig.middle);
+        REQUIRE (rig.runs.find (sceneRun)->iteration == 2);
+
+        rounds = 1;                     // round two's: the jump's seat drew none
+        walk = { rig.late, rig.after };
+    }
+
+    const auto iterationBefore = rig.runs.find (sceneRun)->iteration;
+    const auto unfinishedBefore = unfinishedUnder (rig, sceneRun);
+    REQUIRE (! unfinishedBefore.empty());
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (1.0) }).rejected == 0);
+
+    //  Left as it was: in the same round, with the same members.
+    CHECK (rig.runs.find (sceneRun)->iteration == iterationBefore);
+    CHECK (unfinishedUnder (rig, sceneRun) == unfinishedBefore);
+
+    //  And the GO on its last member takes the pointer past it.
+    for (const auto& expected : walk)
+    {
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (rig.standby() == expected);
+    }
+
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (roundsDrawn (rig, sceneRun) == rounds);
+
+    CHECK (replayedStandby (rig) == rig.standby());
+}
+
+TEST_CASE ("seek: a scene the walk cannot time is left as it is, playing where it was")
+{
+    /*  HX (namespace draft §23.8). The walk gives a scene's members their
+        seconds only when nothing in the way of the arithmetic is unknown - one
+        round, every member, in the written order, no header, the machine pacing
+        it (§13.8) - so for any other scene the solver places none of them, and a
+        seek has nothing to seat. It ended every member all the same and seated
+        the scene alone, over a job with nothing left to wait for. With the round
+        kept (HV), a timeline in its last round - where one with a header that
+        plays once always is - ran its footer and ended where the hand had put
+        it; before J1 it began its round again from the top. An automatic sequence
+        that loops awaited nothing for ever, either way. Now the seek is applied
+        and changes nothing. The clients offer the drag on all of these. */
+    JumpRig rig;
+    std::map<std::string, std::int64_t> since;
+    std::string sceneRun;
+    std::size_t rounds = 1;             // the rounds the scene draws, all told
+
+    const auto loopTwice = [&rig]
+    {
+        //  Two rounds of four seconds: every member at nought.
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/loops", "2").ok);
+
+        for (const auto& member : { rig.middle, rig.late })
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/preWait", "0").ok);
+    };
+
+    const auto goInto = [&rig, &since, &sceneRun] (std::size_t roundToReach)
+    {
+        rig.setStandby (rig.scene);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto* scene = rig.liveRunOf (rig.scene);
+        REQUIRE (scene != nullptr);
+        sceneRun = scene->id;
+
+        //  Into that round, and half a second of it played.
+        REQUIRE (playOn (rig, [&] { return roundsDrawn (rig, sceneRun) == roundToReach; }, since));
+        playOn (rig, [] { return false; }, since, 25);
+        REQUIRE (rig.runs.find (sceneRun)->iteration == static_cast<int> (roundToReach));
+    };
+
+    SUBCASE ("a timeline with a header, in the one round it plays")
+    {
+        const auto header = rig.document.createRole (rig.scene, "header");
+        REQUIRE (header.ok);
+        REQUIRE (rig.document.createCue (header.id, 0, "memo", "House to half").ok);
+
+        goInto (1);
+    }
+
+    SUBCASE ("a timeline in the first of two rounds")
+    {
+        loopTwice();
+        goInto (1);
+        rounds = 2;
+    }
+
+    SUBCASE ("a timeline in the second of two rounds")
+    {
+        loopTwice();
+        goInto (2);
+        rounds = 2;
+    }
+
+    SUBCASE ("an automatic sequence that loops, in its first round")
+    {
+        loopTwice();
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/advance", "auto").ok);
+        goInto (1);
+        rounds = 2;
+    }
+
+    const auto iterationBefore = rig.runs.find (sceneRun)->iteration;
+    const auto unfinishedBefore = unfinishedUnder (rig, sceneRun);
+    const auto madeBefore = rig.runs.childrenOf (sceneRun).size();
+    REQUIRE (! unfinishedBefore.empty());
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (3.0) }).rejected == 0);
+
+    //  A few ticks on: still playing, in the same round, with the same members -
+    //  none ended, none made.
+    playOn (rig, [] { return false; }, since, 10);
+
+    CHECK_FALSE (rig.runs.find (sceneRun)->isFinished());
+    CHECK (rig.runs.find (sceneRun)->iteration == iterationBefore);
+    CHECK (unfinishedUnder (rig, sceneRun) == unfinishedBefore);
+    CHECK (rig.runs.childrenOf (sceneRun).size() == madeBefore);
+
+    //  And on to its own end, with no round more than it has.
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (roundsDrawn (rig, sceneRun) == rounds);
+}
+
+TEST_CASE ("seek: one landing in the drain where a looping scene draws its first round changes nothing either")
+{
+    /*  A client's record goes ahead of the hook's in a drain, and the tick a
+        scene leaves `entering` is the one in which its job draws its first
+        round. A seek queued for that tick found the scene with no round begun,
+        and the seat put it in round one (J1) - and the `run.round` behind it,
+        already on its way, counted round two: a scene that loops twice played
+        one round, and not even that, since the seek had ended its members.
+        Before J1 the seat wrote nought, the record made it one, and the second
+        round played. A scene that loops is one the walk cannot time, so the
+        seek now changes nothing, whatever drain it lands in (HX). */
+    JumpRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/loops", "2").ok);
+
+    for (const auto& member : { rig.middle, rig.late })
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/preWait", "0").ok);
+
+    //  Made ready at standby, its three members armed under it, and entered.
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto* scene = rig.liveRunOf (rig.scene);
+    REQUIRE (scene != nullptr);
+    const auto sceneRun = scene->id;
+    REQUIRE (roundsDrawn (rig, sceneRun) == 0u);
+
+    const auto armedBefore = unfinishedUnder (rig, sceneRun);
+    REQUIRE (! armedBefore.empty());
+
+    //  Queued ahead of the tick in which its job draws round one.
+    REQUIRE (rig.engine.submit ("cli", "run.seek", { osc::Value::string (sceneRun),
+                                                     osc::Value::float64 (1.0) }));
+    rig.tickOnce();
+
+    //  The race, really run: the seek and the first round in one drain, the seek first.
+    const auto seekRecord = firstApplied (rig, "run.seek", sceneRun);
+    const auto roundRecord = firstApplied (rig, "run.round", sceneRun);
+    REQUIRE (seekRecord.has_value());
+    REQUIRE (roundRecord.has_value());
+    REQUIRE (seekRecord->tick == roundRecord->tick);
+    REQUIRE (seekRecord->seq < roundRecord->seq);
+
+    //  Round one counted once, and nothing it held ended.
+    CHECK (rig.runs.find (sceneRun)->iteration == 1);
+    CHECK (unfinishedUnder (rig, sceneRun) == armedBefore);
+
+    //  And both rounds play, whole.
+    std::map<std::string, std::int64_t> since;
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (roundsDrawn (rig, sceneRun) == 2u);
+
+    for (const auto& member : { rig.early, rig.middle, rig.late })
+    {
+        INFO ("member " << member);
+        CHECK (runsOfCue (rig, member) == 2u);
+    }
+}
+
+//==============================================================================
 /*  THE SEEK: scrubbing a running cue or a running scene (author, 2026-09-18).
 
     `run.seek` is one record per position the hand settles on. For a media run
