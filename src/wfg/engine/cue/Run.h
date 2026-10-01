@@ -170,6 +170,16 @@ namespace wfg::cue
             five minutes ago, and teach them to ignore the state that means
             something is actually wrong. In words, never colour alone (4.8). */
         inline constexpr const char* notSent = "not-sent";
+
+        /*  THE CUE RAN AND SENT NOTHING, because what it sends had already
+            reached a device left to its operator under a GO that Go Doh! took
+            back (2026-10-01, PRD §3.32, namespace draft §24): the corrected GO
+            runs it with a first GO's timing - its waits, its place in the
+            scene - and sends nothing, so the device acts once in all. Ended
+            the way `not-sent` ends, and for the same reason a warning and not
+            a failure: the cue did what it was asked, and the one thing it did
+            not do is what the show said not to. */
+        inline constexpr const char* leftToOperator = "left-to-operator";
     }
 
     /*  How far ahead a cue has been got ready. `/godot/cue/<id>/prepare`.
@@ -966,6 +976,97 @@ namespace wfg::cue
             once, for the same reason the stop does. Hook state, like the
             stop's. */
         bool killIssued = false;
+
+        //======================================================================
+        /*  GO DOH! (2026-10-01, PRD §3.32, namespace draft §24): what a GO
+            made, what it caused, and what taking it back did. Every field here
+            is written by a HANDLER or by a logged record and nowhere else, so
+            a replay - which runs no hook - reaches the same answers: the Doh's
+            decisions read these and never what the audio side happened to be
+            doing (§24's replay rule). */
+
+        /*  WHICH GO MADE OR ADOPTED THIS RUN, by the serial the `go` handler
+            counts - nought for a run no GO made. Stamped at creation (a run
+            made under a tagged parent inherits its parent's) and at adoption
+            (a prepared block, an armed arm, a member the GO asked for, with
+            its whole subtree). The horizon's own work carries nought whatever
+            its parent carries: a preparation is nobody's GO. */
+        std::uint64_t goSerial = 0;
+
+        /*  WHICH GO SET THIS RUN OFF WITHOUT MAKING IT: the footer of an older
+            manual group whose last member that GO fired, made while the GO is
+            still the one Go Doh! would take back. Read first - `goOfRun` - so
+            what the release did is taken back with the GO that caused it. */
+        std::uint64_t causedBy = 0;
+
+        /*  WHEN THE HORIZON MADE THIS RUN: the count of GOs applied by then,
+            or -1 on every run the horizon did not make. A preparation made
+            after GO `S` reads `S` or more, wherever it sits - which is how the
+            Doh gives the horizon's work back instead of taking it down. */
+        std::int64_t preparedAfterGo = -1;
+
+        /*  TAKEN BACK BY GO DOH!: brought down with no footer and no post-wait,
+            never killed - a mic's tail rings, as under Esc - and passed over by
+            every reader that would otherwise launch, wait on or re-arm it.
+            Not `skipFooter`, which since 2026-09-30 means CUT. */
+        bool takenBack = false;
+
+        /*  THE TICK `run.started` WAS APPLIED ON, or -1: whether this run was
+            ever heard, read from a logged record and so the same in a replay. */
+        std::int64_t startedAtTick = -1;
+
+        /*  WHETHER A STOP WAS ASKED OF IT, BY WHOM, AND WHETHER AGAIN. A
+            handler-only account of "being stopped": `state == stopping` is
+            written by hooks too (a fade-and-stop handing its target back), so
+            it cannot be read as a decision. `stopAskedBy` is the GO whose run
+            asked (nought for a command, Esc, an untagged run); the first ask is
+            kept, and a second sets `askedAgain`. Written only through
+            `askStop`; cleared by the handlers that give a run back. */
+        bool stopAsked = false;
+        std::uint64_t stopAskedBy = 0;
+        bool askedAgain = false;
+
+        /*  THE TICK THE DOH HANDED THIS RUN BACK ON - a group it brought back
+            to life - or -1. Records its own hooks submitted in that tick, on
+            the state the Doh has just undone, are applied and ignored. */
+        std::int64_t unadoptedAt = -1;
+
+        /*  WHAT IT WOULD SEND HAD ALREADY REACHED A DEVICE LEFT TO ITS OPERATOR
+            under a GO that a Doh took back: the run keeps a first GO's timing
+            and sends nothing, ending `left-to-operator`. Set at creation or
+            adoption, once per cue, from what the Doh left. */
+        bool sendsLeft = false;
+
+        /*  THE DEVICE THE DOCUMENT ROUTED THIS RUN'S SEND TO WHEN IT FIRED - a
+            Mount for an osc run, a Port for a midi one - that device declared
+            with its `tx` on; empty for none. Decided at the send, so a device
+            edited or removed before a Doh does not move what had left. */
+        std::string sentTo;
+
+        /*  AN OSC RUN A DOUBLE ESC KILLED IN THE VERY DRAIN THAT LAUNCHED IT:
+            its message was still queued when the press dropped it, so it never
+            left. Stamped from H4 on, by the commit that makes the press drop
+            the sender's queue (namespace draft §24, L31): until then such a
+            message still leaves at the tick's flush, and nothing stamps it. */
+        bool sendDropped = false;
+
+        /*  A STOP ASKED, through the one door every handler that asks one uses:
+            `stopping`, and the account above - the first ask kept, a second
+            one remembered as such. */
+        void askStop (std::uint64_t by) noexcept
+        {
+            if (stopAsked)
+            {
+                askedAgain = true;
+            }
+            else
+            {
+                stopAsked = true;
+                stopAskedBy = by;
+            }
+
+            state = runState::stopping;
+        }
 
         bool isFinished() const noexcept
         {

@@ -1099,3 +1099,51 @@ TEST_CASE ("mic: the DCA a mic cue is marked with trims it")
 
     CHECK (rig.runs.find (id)->level == doctest::Approx (before - 6.0));
 }
+
+TEST_CASE ("go.doh: a scene taken back runs no footer, and its mic member's tail rings")
+{
+    /*  PRD §3.32 (D1, 2026-10-01): Go Doh! brings what the GO started down the
+        way Esc would - a mic's input shut, its reverb left to ring - and runs no
+        footer, because a Doh is a pause and not an end. Never a kill: a naive
+        Doh that marked the scene `skipFooter` would have cut the tail dead.
+        Failed before D1: `go.doh` was an unknown command. */
+    RunRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("MC000001"), "MC000006").ok);
+
+    REQUIRE (rig.document.createCue ("MC000001", 2, "group", "Scene", "MC000090").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000090/advance", "auto").ok);
+    REQUIRE (rig.document.createCue ("MC000090", 0, "mic", "Voix groupe", "MC000091").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000091/input", "MC000021").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000091/channel", "MC000011").ok);
+
+    const auto footer = rig.document.createRole ("MC000090", "footer");
+    REQUIRE (footer.ok);
+    REQUIRE (rig.document.createCue (footer.id, 0, "memo", "Release", "MC000095").ok);
+
+    rig.tickOnce();
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("MC000001"), "MC000090").ok);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.arms.empty(); }));
+    rig.audio.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.opens.empty(); }));
+    rig.tickOnce();
+
+    /*  The GO's own runs, named: once the pointer is back on the scene the
+        horizon makes it ready again, and the newest run of either cue is that
+        preparation's. */
+    const auto scene = rig.runOf ("MC000090")->id;
+    const auto voice = rig.runOf ("MC000091")->id;
+
+    REQUIRE (rig.submitAndTick ("go.doh").rejected == 0);
+    REQUIRE (rig.tickUntil ([&rig, &scene] { return rig.runs.find (scene)->isFinished(); }, 60));
+
+    CHECK (rig.runOf ("MC000095") == nullptr);                 // no footer
+    CHECK (rig.audio.stops == std::vector<int> { 2 });         // its input shut, the tail left to ring
+    CHECK (rig.audio.kills.empty());
+    CHECK (rig.runs.find (voice)->takenBack);
+    CHECK_FALSE (rig.runs.find (voice)->killed);
+}

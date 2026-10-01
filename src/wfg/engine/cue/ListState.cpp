@@ -40,6 +40,17 @@ namespace wfg::cue
         return std::to_string (step.tick) + ":" + step.cue + ":" + std::string (1, step.origin);
     }
 
+    std::string spellDohOffer (const DohOffer& offer)
+    {
+        /*  Three words, spaces between them, as every list-shaped readout
+            here: a list and a cue are identifiers and a tick an integer, so
+            no formatter is asked and no locale reaches it. */
+        if (! offer.isSet())
+            return {};
+
+        return offer.list + " " + offer.cue + " " + std::to_string (offer.tick);
+    }
+
     ListAim readAim (const std::string& text)
     {
         const auto space = text.find (' ');

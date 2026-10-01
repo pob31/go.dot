@@ -47,16 +47,26 @@
 
 #include "TestSupport.h"
 
+#include <wfg/engine/oscquery/EngineNamespace.h>
 #include <wfg/engine/oscquery/OscQueryServer.h>
 #include <wfg/engine/oscquery/Subscriptions.h>
 #include <wfg/engine/oscquery/TimbreRoute.h>
 
+#include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
+#include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/osc/OscCodec.h>
+#include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/Node.h>
+#include <wfg/engine/tree/OscQueryJson.h>
+#include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <juce_core/juce_core.h>
@@ -1692,4 +1702,50 @@ TEST_CASE ("subscriptions: the table on its own")
     CHECK (had == std::vector<std::string> { "/b" });
     CHECK (subs.connectionCount() == 0);
     CHECK (subs.drop ("ws:127.0.0.1:1").empty());           // gone already
+}
+
+//==============================================================================
+/*  GO DOH! AT ITS ADDRESS (PRD §3.32, D1, 2026-10-01): `go.doh` is published as
+    `/godot/cmd/go/doh`, which makes `/godot/cmd/go` the first command that also
+    has contents - and it must stay GO, a write-only method node that a
+    datagram to it still fires, with `doh` inside it. Failed before D1: there
+    was no such command, so nothing lived under `/godot/cmd/go`. */
+TEST_CASE ("oscquery: go.doh is /godot/cmd/go/doh, and /godot/cmd/go is still GO, with contents")
+{
+    CHECK (oscquery::EngineNamespace::commandNameFor ("/godot/cmd/go/doh") == "go.doh");
+    CHECK (oscquery::EngineNamespace::commandNameFor ("/godot/cmd/go") == "go");
+
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (5);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    tree::MountTable mounts;
+    tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+
+    const auto* go = snapshot->find ("/godot/cmd/go");
+    REQUIRE (go != nullptr);
+    CHECK (go->kind == tree::Kind::event);
+    CHECK (go->access == tree::Access::write);
+
+    const auto* doh = snapshot->find ("/godot/cmd/go/doh");
+    REQUIRE (doh != nullptr);
+    CHECK (doh->kind == tree::Kind::event);
+
+    const auto described = json::parse (tree::OscQueryJson::describe (*snapshot, "/godot/cmd/go"));
+    REQUIRE (described.value.has_value());
+    CHECK (described.value->find ("TYPE") != nullptr);
+
+    const auto* contents = described.value->find ("CONTENTS");
+    REQUIRE (contents != nullptr);
+    CHECK (contents->find ("doh") != nullptr);
 }

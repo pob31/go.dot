@@ -70,6 +70,12 @@ namespace wfg::client::model
             case 'g': return "GO";
             case 'f': return "by name";
             case 't': return "trigger";
+
+            /*  A STRIP PRESSED (Phase 6), and A GO TAKEN BACK (PRD §3.32,
+                2026-10-01): both are steps the list took, so both have a word
+                rather than a bare letter. */
+            case 'p': return "press";
+            case 'd': return "Doh!";
             default:  return std::string (1, origin);
         }
     }
@@ -203,7 +209,7 @@ namespace wfg::client::model
         std::size_t own = steps.size();
 
         for (std::size_t n = 0; n < steps.size(); ++n)
-            if (steps[n].cue == aimCue)
+            if (steps[n].cue == aimCue && steps[n].origin != 'd')
             {
                 own = n;
                 break;
@@ -216,6 +222,10 @@ namespace wfg::client::model
 
         for (std::size_t n = own; n-- > 0;)
         {
+            /*  A Doh! fired nothing, so nothing of it sits under the cue. */
+            if (steps[n].origin == 'd')
+                continue;
+
             StepLine line;
             line.cue = steps[n].cue;
             line.origin = steps[n].origin;

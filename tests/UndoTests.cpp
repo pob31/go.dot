@@ -628,6 +628,35 @@ TEST_CASE ("undo: where the operator is standing is not an edit")
     CHECK (rig.drainUndoSteps() == 3);
 }
 
+TEST_CASE ("undo: Go Doh! is not an edit either, and Undo never touches a GO")
+{
+    /*  PRD §3.32 (the author, 2026-09-30): Go Doh! has its own key and command
+        BECAUSE Undo never touches a GO. It writes the pointer and the list's
+        `finished` flag - both state rows - and the history, which is no row at
+        all, so the stack is what it was before the GO. Failed before D1, where
+        `go.doh` was an unknown command. */
+    Rig rig;
+
+    REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+    REQUIRE (rig.apply (1, "cue.create", { text (mainList), osc::Value::int32 (0),
+                                           text ("memo"), text ("House to half"),
+                                           text (firstCue) }).applied == 1);
+    REQUIRE (rig.apply (2, "cue.create", { text (mainList), osc::Value::int32 (1),
+                                           text ("memo"), text ("Houselights out"),
+                                           text (theGroup) }).applied == 1);
+    REQUIRE (rig.apply (10, "node.set", { text (cue::standbyAddressOf (mainList)),
+                                          text (firstCue) }).applied == 1);
+    REQUIRE (rig.apply (20, "go").applied == 1);
+
+    CHECK (rig.apply (21, "go.doh").applied == 1);
+    CHECK (rig.document.getAttribute (cue::standbyAddressOf (mainList)) == std::string (firstCue));
+    CHECK (rig.undoName() == "cue.create");
+
+    /*  Three edits - the list and its two cues - and neither the press nor its
+        taking back among them. */
+    CHECK (rig.drainUndoSteps() == 3);
+}
+
 TEST_CASE ("undo: a locked show refuses undo and redo in their own handlers")
 {
     /*  Undo knocks at none of the four doors — it writes through JUCE's own

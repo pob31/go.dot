@@ -63,6 +63,11 @@ namespace wfg::client::model
         return roots.empty() ? std::string {} : roots.front();
     }
 
+    std::string DeviceRow::dohWord() const
+    {
+        return doh == "takeBack" ? "Take back" : "Leave";
+    }
+
     std::string DeviceRow::label() const
     {
         return name.empty() ? prefix : name;
@@ -107,6 +112,10 @@ namespace wfg::client::model
             else if (name == "namespace")  row.namespaceFile = text (node);
             else if (name == "sent")       row.sent = number (text (node), 0);
             else if (name == "problem")    row.problem = text (node);
+
+            /*  FAIL-SAFE, as the engine reads it (PRD §3.32): only the exact
+                word takes back; anything else leaves to the operator. */
+            else if (name == "doh")        row.doh = text (node) == "takeBack" ? "takeBack" : "leave";
         }
 
         std::vector<DeviceRow> rows;

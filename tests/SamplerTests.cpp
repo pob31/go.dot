@@ -1183,3 +1183,82 @@ TEST_CASE ("sampler: the strip menu says what each strip carries - this group, t
     rig.published ("/godot/cue/" + b[1] + "/stripNow");
     CHECK (client::model::stripChoices (*rig.snapshot, b[1]).size() == 8u);
 }
+
+//==============================================================================
+/*  GO DOH! AND THE PADS (PRD §3.32; the author, 2026-09-30, with the red team's
+    reading of his words, D1): a pad fired by name or by a trigger is a trigger
+    on the GO's list, and a hand on a pad of the bank the GO armed is that GO
+    being played - either way Doh! is refused with its sentence, and the clip
+    plays on. A pad on a bank the GO did not arm is not counted. Failed before
+    D1: `go.doh` was an unknown command. */
+TEST_CASE ("go.doh: a pad of the bank the GO armed is that GO being played, and a pad fired by name is a trigger")
+{
+    Rig rig;
+
+    SUBCASE ("a pad of a bank armed before the GO: not counted")
+    {
+        rig.arm (rig.bankA);
+
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), rig.after).ok);
+        rig.tickOnce();
+        REQUIRE (rig.send ("go").rejected == 0);
+
+        REQUIRE (rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }).rejected == 0);
+        CHECK (rig.send ("go.doh").rejected == 0);
+    }
+
+    SUBCASE ("the GO armed the bank: a hand on its pad, a fader's touch, or a fire by name refuse the Doh")
+    {
+        rig.arm (rig.bankA);
+        const auto& member = rig.membersOf[rig.bankA][0];
+
+        SUBCASE ("a hand on the pad")
+        {
+            REQUIRE (rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }).rejected == 0);
+        }
+
+        SUBCASE ("the fader's touch, which the engine presses")
+        {
+            REQUIRE (rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "engine").rejected == 0);
+        }
+
+        SUBCASE ("the member fired by name")
+        {
+            REQUIRE (rig.send ("cue.fire", { osc::Value::string (member) }).rejected == 0);
+        }
+
+        /*  AND BY A TRIGGER (§24, GI): `trigger.fire`'s own sampler branch notes
+            the press only when it was applied - a net for a road no case
+            reached. */
+        SUBCASE ("a trigger on the member")
+        {
+            const auto trigger = rig.document.createTrigger (member, "osc");
+            REQUIRE (trigger.ok);
+            rig.set ("/godot/trigger/" + trigger.id + "/address", "/pads/one");
+            REQUIRE (rig.send ("trigger.fire", { osc::Value::string (trigger.id) }).rejected == 0);
+        }
+
+        rig.sound (member);
+
+        CHECK (rig.send ("go.doh").rejected == 1);
+        CHECK (rig.engine.lastError().find ("trigger-after-go") != std::string::npos);
+
+        const auto* clip = rig.liveRunOf (member);
+        REQUIRE (clip != nullptr);
+        CHECK_FALSE (clip->takenBack);
+        CHECK (clip->state == cue::runState::playing);
+    }
+
+    SUBCASE ("a pad of another bank fired by name is a trigger on the list too")
+    {
+        rig.arm (rig.bankA);
+
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), rig.after).ok);
+        rig.tickOnce();
+        REQUIRE (rig.send ("go").rejected == 0);
+
+        REQUIRE (rig.send ("cue.fire", { osc::Value::string (rig.membersOf[rig.bankA][1]) }).rejected == 0);
+        CHECK (rig.send ("go.doh").rejected == 1);
+        CHECK (rig.engine.lastError().find ("trigger-after-go") != std::string::npos);
+    }
+}

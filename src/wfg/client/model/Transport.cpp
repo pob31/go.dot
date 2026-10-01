@@ -20,7 +20,9 @@
 
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -162,7 +164,64 @@ namespace wfg::client::model
         if (fields[4] == "go" && fields[3] == "too-soon")
             return "GO ignored: too soon after the last one (Show settings > Playback)";
 
+        /*  GO DOH!'S REFUSALS IN WORDS (PRD §3.32, 2026-10-01), each naming
+            what to do about it: the window and the debounce are Playback
+            settings, and "trigger-after-go" is the author's own sentence. A
+            window of nought is Doh! switched off, which is not "too late". */
+        if (fields[4] == "go.doh")
+        {
+            if (fields[3] == "too-late")
+                return dohWindowSeconds() > 0.0
+                         ? "Doh! ignored: the last GO is too long ago to take back (Show settings > Playback)"
+                         : "Doh! is off (Show settings > Playback)";
+
+            if (fields[3] == "nothing-to-take-back")
+                return "Doh! ignored: there is no GO it can take back";
+
+            if (fields[3] == "trigger-after-go")
+                return "Doh! ignored: a trigger fired after the last GO";
+
+            if (fields[3] == "too-soon")
+                return "Doh! ignored: pressed again too soon (Show settings > Playback)";
+        }
+
         return fields[4] + " refused: " + fields[3];
+    }
+
+    double TransportReading::dohWindowSeconds() const
+    {
+        /*  The schema's ten seconds when the show has not said. */
+        return std::max (0.0, osc::parseDouble (dohWindow).value_or (10.0));
+    }
+
+    std::string TransportReading::dohCaption() const
+    {
+        /*  "<list> <cue> <tick>", or nothing to take back. */
+        const auto parts = words (doh);
+
+        if (parts.size() != 3 || dohCue.empty())
+            return "Doh!";
+
+        const auto tickOf = [] (std::string_view digits) -> std::int64_t
+        {
+            std::int64_t value = -1;
+            const auto* end = digits.data() + digits.size();
+            return std::from_chars (digits.data(), end, value).ptr == end ? value : -1;
+        };
+
+        const auto now = tickOf (tick);
+        const auto at = tickOf (parts[2]);
+
+        /*  ON THE ENGINE'S CLOCK, fifty ticks a second, never this window's:
+            the engine's own test - inside while fewer ticks have passed than
+            the window holds - so the button stops naming the cue on the tick a
+            press would start being refused. */
+        const auto window = static_cast<std::int64_t> (std::llround (dohWindowSeconds() * 50.0));
+
+        if (now < 0 || at < 0 || now < at || now - at >= window)
+            return "Doh!";
+
+        return "Doh! " + dohCue;
     }
 
     std::string TransportReading::lockLine() const
@@ -194,7 +253,8 @@ namespace wfg::client::model
                              r.standbyNotes,
                              r.canUndo, r.canRedo, r.undoName, r.redoName,
                              r.status, r.lastError, r.rateMoved, r.rateMovedTick, r.dial, r.writeError,
-                             r.warningCount, r.warningFirst, r.revision);
+                             r.warningCount, r.warningFirst, r.revision,
+                             r.doh, r.dohCue, r.dohWindow);
         };
 
         return tie (*this) == tie (other);
@@ -260,6 +320,20 @@ namespace wfg::client::model
         if (const auto* node = snapshot.find ("/godot/document/revision"))
             if (const auto sole = node->soleValue(); sole.has_value() && sole->isInt64())
                 reading.revision = static_cast<std::uint64_t> (sole->getInt64());
+
+        /*  WHAT GO DOH! WOULD TAKE BACK (PRD §3.32), and the cue it names in
+            the words the list shows it by: its number, or its name when it has
+            none. */
+        reading.doh = text (snapshot, "/godot/list/doh");
+        reading.dohWindow = text (snapshot, "/godot/list/dohWindow");
+
+        if (const auto parts = words (reading.doh); parts.size() == 3)
+        {
+            reading.dohCue = text (snapshot, "/godot/cue/" + parts[1] + "/number");
+
+            if (reading.dohCue.empty())
+                reading.dohCue = text (snapshot, "/godot/cue/" + parts[1] + "/name");
+        }
 
         return reading;
     }

@@ -56,8 +56,10 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -120,6 +122,14 @@ namespace
 
         std::shared_ptr<const tree::TreeSnapshot> snapshot() const override
         {
+            /*  A SLOW DEVICE, when a case asks for one: the answer waits while
+                `holding` is set - for a second at the most, so a case that
+                fails while holding cannot leave the server's thread stuck. */
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (1);
+
+            while (holding.load() && std::chrono::steady_clock::now() < until)
+                std::this_thread::sleep_for (std::chrono::milliseconds (1));
+
             const std::lock_guard<std::mutex> lock { guard };
             return published;
         }
@@ -132,6 +142,7 @@ namespace
 
         mutable std::mutex guard;
         std::shared_ptr<const tree::TreeSnapshot> published;
+        std::atomic<bool> holding { false };
     };
 
     /** The scripted target, served over HTTP on a port of its own. */
@@ -1407,4 +1418,376 @@ TEST_CASE ("jump: a value the desk was seen to hold is what the diff is against"
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
     CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
     CHECK (rig.mounts.observedOf ("/desk/fader") == nullptr);
+}
+
+//==============================================================================
+/*  GO DOH! AND THE HORIZON'S PRE-SENDS (PRD §3.32, namespace draft §24; D1,
+    2026-10-01). A pre-send the GO committed - a block it adopted - is the GO's:
+    on a device left to its operator it is neither put back by the Doh nor sent
+    again by the horizon or the corrected GO. And the horizon's preparation of
+    the NEXT scene, made after the GO, is nobody's GO: the Doh gives it back the
+    way the pointer moving away does - its pre-send put back - and never takes
+    it down. Each case failed before D1, where `go.doh` was an unknown command. */
+namespace
+{
+    std::size_t recordsOf (VerifiedRig& rig, const char* command, const std::string& first)
+    {
+        const auto records = LogFile::parse (rig.engine.log().contents()).records;
+
+        return static_cast<std::size_t> (std::count_if (records.begin(), records.end(),
+                                                        [&] (const auto& record)
+                                                        {
+                                                            return record.command == command && ! record.args.empty()
+                                                                     && record.args[0].isString()
+                                                                     && record.args[0].getString() == first;
+                                                        }));
+    }
+
+    void ticksOf (VerifiedRig& rig, int count)
+    {
+        for (int n = 0; n < count; ++n)
+        {
+            rig.tickOnce();
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+        }
+    }
+}
+
+TEST_CASE ("go.doh: what the GO committed to a device left to its operator is neither put back nor pre-sent again")
+{
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    /*  The console, declared in the show as well as mounted: Go Doh!'s setting
+        is the document's. Said nothing about, so left to its operator. */
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+
+    //  What holds the scene open, and is never heard: a line two seconds in.
+    const auto hold = rig.document.createCue (scene.group, 0, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "2").ok);
+
+    auto takeBack = false;
+
+    SUBCASE ("pre-sent by the horizon, committed by the GO")
+    {
+        rig.setStandby (scene.group);
+        tickUntilDeskHolds (rig, 0.8f);
+        REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+    }
+
+    SUBCASE ("entered cold: the GO wrote it at entry")
+    {
+        rig.engine.submit ("cli", "standby.set", { osc::Value::string (scene.group) });
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+        tickUntilDeskHolds (rig, 0.8f);
+    }
+
+    SUBCASE ("entered cold, on a console that takes back: pre-sent again by the horizon")
+    {
+        takeBack = true;
+        REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+
+        rig.engine.submit ("cli", "standby.set", { osc::Value::string (scene.group) });
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+        tickUntilDeskHolds (rig, 0.8f);
+    }
+
+    ticksOf (rig, 25);                                     // half a second, the hold still waiting
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+    REQUIRE (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)) == std::optional<std::string> (scene.group));
+
+    /*  The horizon prepares the scene again at D+1 - and, on a console that
+        takes back, pre-sends again, a read-back round trip later. */
+    for (int n = 0; n < 600; ++n)
+    {
+        if (rig.runs.preparedRunOf (scene.group) != nullptr
+              && (! takeBack || rig.sender.sentFor ("K3PV7WRB") >= 2u))
+            break;
+
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    ticksOf (rig, 10);
+
+    //  Nothing put back on the console: the GO's own write stays.
+    CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
+
+    //  The horizon prepared the scene again; the cue left to the console's operator is not in it.
+    const auto* again = rig.runs.preparedRunOf (scene.group);
+    REQUIRE (again != nullptr);
+    CHECK (rig.runs.hasChildFor (again->id, scene.cue) == takeBack);
+
+    rig.engine.submit ("cli", "go", {});
+    ticksOf (rig, 10);
+
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == (takeBack ? 2u : 1u));
+}
+
+TEST_CASE ("go.doh: the next scene the horizon prepared inside the GO's own act is not the GO's - given back with its pre-send put back")
+{
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    /*  AN ACT ENTERED BY AN EARLIER GO (the design's red team B, major 3): GO 1
+        enters the act on scene one's opening line; the GO a Doh! takes back is
+        GO 2, on scene one's second line - so the act and scene one are GO 1's,
+        and the next scene's block the horizon makes under the act after GO 2
+        is a sibling of GO 2's root, not under it. */
+    const auto act = rig.document.createCue (rig.listId, rig.index++, "group", "Act").id;
+    const auto first = rig.document.createCue (act, 0, "group", "Scene one").id;
+    const auto note = rig.document.createCue (first, 0, "memo", "Opening").id;
+    const auto line = rig.document.createCue (first, 1, "memo", "Line").id;
+
+    const auto second = rig.document.createCue (act, 1, "group", "Scene two").id;
+    const auto header = rig.document.createRole (second, "header");
+    REQUIRE (header.ok);
+    const auto position = rig.document.createCue (header.id, 0, "osc", "Position the source").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + position + "/address", "/desk/fader").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + position + "/value", "f:0.8").ok);
+    rig.document.createCue (second, 0, "memo", "Next line");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    rig.setStandby (note);
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+    REQUIRE (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)) == std::optional<std::string> (line));
+
+    rig.engine.submit ("cli", "go", {});                    // the GO a Doh! will take back: scene one's line
+    rig.tickOnce();
+
+    //  The horizon prepares scene two under the act, its header pre-sent.
+    tickUntilDeskHolds (rig, 0.8f);
+    const auto* block = rig.runs.preparedRunOf (second);
+    REQUIRE (block != nullptr);
+    const auto blockId = block->id;
+
+    CHECK (block->goSerial == 0u);
+    CHECK (block->preparedAfterGo == 2);
+    REQUIRE (rig.runs.find (blockId)->parent == rig.runs.liveRunOf (act)->id);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+
+    //  At once: asked to stop, never taken back, nothing of it ended by the Doh itself.
+    CHECK (rig.runs.find (blockId)->state == cue::runState::stopping);
+    CHECK_FALSE (rig.runs.find (blockId)->takenBack);
+
+    ticksOf (rig, 5);
+
+    //  At D+1, its own job: the pre-send put back - once - then the block revoked.
+    CHECK (recordsOf (rig, "node.set", "/desk/fader") == 1u);
+    CHECK (recordsOf (rig, "run.revoke", blockId) == 1u);
+    CHECK (rig.runs.find (blockId)->warning == cue::runWarning::revoked);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+}
+
+TEST_CASE ("go.doh: an act the GO entered, nobody heard, the next scene's block under it - given back, its pre-send put back once")
+{
+    /*  THE DESIGN'S MAIN CASE OF ITS TEST 29: the act is the GO's own root, and
+        the next scene's block, which the horizon prepared under it after the
+        GO, is not the GO's. The Doh gives the act back the way a preparation is
+        given back - nobody heard it - and the block with it; the block's
+        pre-send is put back, once, though the act and the block both give it
+        back. The first build cleared that restore along with the act's own
+        leave pre-sends, as if the GO had committed it: no restore at all, and
+        the desk left at the next scene's value. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    /*  The console declared in the show and left at its default: the horizon's
+        preparation of the next scene follows §23.3's rule whatever the setting
+        (§24, L34) - given back, its pre-send put back. */
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+
+    const auto act = rig.document.createCue (rig.listId, rig.index++, "group", "Act").id;
+    const auto first = rig.document.createCue (act, 0, "group", "Scene one").id;
+    const auto line = rig.document.createCue (first, 0, "memo", "Line").id;
+
+    const auto second = rig.document.createCue (act, 1, "group", "Scene two").id;
+    const auto header = rig.document.createRole (second, "header");
+    REQUIRE (header.ok);
+    const auto position = rig.document.createCue (header.id, 0, "osc", "Position the source").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + position + "/address", "/desk/fader").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + position + "/value", "f:0.8").ok);
+    rig.document.createCue (second, 0, "memo", "Next line");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    rig.setStandby (line);
+    rig.engine.submit ("cli", "go", {});                    // into the act: this GO's own, nothing in it heard
+    rig.tickOnce();
+
+    const auto* actRun = rig.runs.liveRunOf (act);
+    REQUIRE (actRun != nullptr);
+    const auto actId = actRun->id;
+    CHECK (actRun->goSerial == 1u);
+    CHECK (actRun->parent.empty());
+
+    //  The horizon prepares scene two under the act, its header pre-sent.
+    tickUntilDeskHolds (rig, 0.8f);
+    const auto* block = rig.runs.preparedRunOf (second);
+    REQUIRE (block != nullptr);
+    const auto blockId = block->id;
+    CHECK (block->goSerial == 0u);
+    CHECK (block->preparedAfterGo == 1);
+    REQUIRE (block->parent == actId);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (actId)->takenBack);
+    CHECK_FALSE (rig.runs.find (blockId)->takenBack);
+
+    ticksOf (rig, 10);
+
+    CHECK (recordsOf (rig, "node.set", "/desk/fader") == 1u);
+    CHECK (rig.runs.find (blockId)->warning == cue::runWarning::revoked);
+    CHECK (rig.runs.find (actId)->warning == cue::runWarning::revoked);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+}
+
+TEST_CASE ("go.doh: an unheard scene's pre-send that takes back is put back before the horizon prepares the scene again, however long the scene's own fade runs")
+{
+    /*  THE GIVE-BACK'S RESTORE GOES OUT AT ONCE (§24.2): the scene nobody heard
+        is given back the way a preparation is - but the first build put its
+        pre-sends back only once everything still moving under it had finished,
+        a fade it had fired on a cue outside it among them. The horizon had
+        meanwhile prepared the scene again for the restored pointer and
+        pre-sent it, and the late restore then wrote the value from before the
+        GO over the corrected GO's own: the desk ended where the scene was not. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+
+    //  Something outside the scene for its fade to move: a timeline that holds for a minute.
+    const auto bed = rig.document.createCue (rig.listId, rig.index++, "group", "Bed").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + bed + "/mode", "timeline").ok);
+    const auto hum = rig.document.createCue (bed, 0, "memo", "Hum").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hum + "/preWait", "60").ok);
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+    const auto dip = rig.document.createCue (scene.group, 0, "fade", "Dip the bed").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/target", bed).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/level", "-20").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/duration", "3").ok);
+    rig.document.createCue (scene.group, 1, "memo", "Hold");
+
+    rig.fire (bed);
+    rig.setStandby (scene.group);
+    tickUntilDeskHolds (rig, 0.8f);
+    REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
+    const auto block = rig.runs.preparedRunOf (scene.group)->id;
+
+    rig.engine.submit ("cli", "go", {});                    // too early: the block adopted, the dip begun
+    rig.tickOnce();
+    ticksOf (rig, 25);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+    REQUIRE (rig.runs.find (block)->takenBack);
+
+    //  The scene prepared again for the restored pointer, its header pre-sent afresh.
+    const auto freshPreSent = [&rig, &scene, &block]
+    {
+        const auto* again = rig.runs.preparedRunOf (scene.group);
+
+        if (again == nullptr || again->id == block)
+            return false;
+
+        for (const auto* child : rig.runs.childrenOf (again->id))
+            if (child->cue == scene.cue && child->isFinished())
+                return true;
+
+        return false;
+    };
+
+    for (int n = 0; n < 600 && ! freshPreSent(); ++n)
+    {
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    REQUIRE (freshPreSent());
+
+    //  The corrected GO while the old dip is still moving; the old scene goes after it.
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+    ticksOf (rig, 200);
+
+    REQUIRE (rig.runs.find (block)->isFinished());
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+}
+
+TEST_CASE ("go.doh: a pre-send whose read-back had not come back by the Doh is not counted as left, and is pre-sent again")
+{
+    /*  WHAT LEFT IS DECIDED AT THE SEND (§24, HQ), and a pre-send asks before
+        it writes: one still waiting for its answer at the Doh may never have
+        written, so it is not counted as left with the desk's operator - the
+        Doh ends it, its late answer writes nothing, and the horizon pre-sends
+        the cue again for the restored pointer. Counted, the cue would have been
+        left out of the new preparation and sent nothing at the corrected GO:
+        the desk would never have had it. A net: the rule was right, and no case
+        reached it. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+    const auto hold = rig.document.createCue (scene.group, 0, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "2").ok);
+
+    //  A slow device: the pre-send's question is still out at the GO and at the Doh.
+    rig.device.target.holding = true;
+
+    rig.setStandby (scene.group);
+    ticksOf (rig, 10);
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 0u);
+
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+
+    rig.device.target.holding = false;
+
+    //  The horizon prepares the scene again, and its pre-send asks and writes.
+    for (int n = 0; n < 600 && rig.sender.sentFor ("K3PV7WRB") < 1u; ++n)
+    {
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
+    ticksOf (rig, 10);
+
+    rig.engine.submit ("cli", "go", {});
+    ticksOf (rig, 10);
+
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
 }

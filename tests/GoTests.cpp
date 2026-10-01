@@ -10780,3 +10780,1994 @@ TEST_CASE ("speed fade: a stretched cue's speed fade is held to the stretcher's 
     play (rig, 15);
     CHECK (rig.runs.find (id)->ownRate == doctest::Approx (18.75));
 }
+
+//==============================================================================
+/*  GO DOH! - TAKING BACK THE LAST GO (PRD §3.32, namespace draft §24; D1,
+    2026-10-01).
+
+    A GO pressed before its moment, taken back: the pointer, the list's
+    `finished` flag, the GO debounce and the history go back to where that GO
+    found them; what it started comes down - over the panic fade when it was
+    heard, at once when it was not - with no footer and nothing killed; what
+    the horizon made after it is given back rather than taken down; and an act
+    the GO ended is brought back to life, its footer taken down with the GO. The
+    next GO starts the cue over (a resume is D2's). Every case here failed on
+    the code before this stage, where `go.doh` was an unknown command. */
+namespace
+{
+    /*  Go Doh!, pressed as a client presses it: one named command. */
+    Engine::TickResult doh (Rig& rig)
+    {
+        return rig.submitAndTick ("go.doh");
+    }
+
+    bool refusedFor (const Rig& rig, const char* reason)
+    {
+        return rig.engine.lastError().find (reason) != std::string::npos;
+    }
+
+    std::string finishedOf (const Rig& rig)
+    {
+        return rig.document.getAttribute (cue::finishedAddressOf (rig.listId)).value_or ("");
+    }
+
+    std::size_t runsFor (const Rig& rig, const std::string& cueId)
+    {
+        return static_cast<std::size_t> (std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                                                         [&cueId] (const cue::Run& run) { return run.cue == cueId; }));
+    }
+
+    /*  The newest run of a cue, whatever its state, or empty. */
+    std::string newestRunOf (const Rig& rig, const std::string& cueId)
+    {
+        std::string out;
+
+        for (const auto& run : rig.runs.all())
+            if (run.cue == cueId)
+                out = run.id;
+
+        return out;
+    }
+
+    /*  A media cue made to sound the way the audio side would: the disk
+        answers, the launch is placed - `run.started` - and the track plays. */
+    std::string hear (Rig& rig, const std::string& cueId)
+    {
+        rig.audio.completeArms (rig.engine);
+
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto* live = rig.runs.liveRunOf (cueId);
+            return live != nullptr && live->launchedAtSample > 0;
+        }, 20));
+
+        const auto id = rig.runs.liveRunOf (cueId)->id;
+        rig.audio.playing.insert (rig.runs.find (id)->track);
+        rig.tickOnce();
+        return id;
+    }
+
+    bool endsWith (const std::string& text, const std::string& tail)
+    {
+        return text.size() >= tail.size() && text.compare (text.size() - tail.size(), tail.size(), tail) == 0;
+    }
+
+    const cue::GroupJob* liveJobOf (const Rig& rig, const std::string& runId)
+    {
+        for (const auto& job : rig.runner.groups())
+            if (job.run == runId && ! job.retired)
+                return &job;
+
+        return nullptr;
+    }
+
+    /*  THE SESSION AGAIN, FROM ITS LOG ALONE (namespace draft §24.1): a fresh
+        engine with no audio side reads the show and the records and must reach
+        the same runs - the same state, the same GO, the same cause, taken back
+        or not. A handler that decided from something a replay lacks shows
+        here, and nowhere else. */
+    void replaysTheSame (Rig& session)
+    {
+        const auto show = doc::CanonicalXml::write (session.document);
+        const auto original = LogFile::parse (session.engine.log().contents());
+        REQUIRE (original.errors.empty());
+
+        Rig fresh;
+        fresh.runner.setPlayer (nullptr);
+        REQUIRE (doc::CanonicalXml::read (show, fresh.document).ok);
+
+        const auto result = replay (fresh.engine, original);
+
+        for (const auto& mismatch : result.mismatches)
+            MESSAGE (mismatch);
+
+        CHECK (result.ok);
+
+        for (const auto& run : session.runs.all())
+        {
+            INFO ("run " << run.id << " of " << run.cue);
+            const auto* again = fresh.runs.find (run.id);
+            REQUIRE (again != nullptr);
+            CHECK (again->state == run.state);
+            CHECK (again->takenBack == run.takenBack);
+            CHECK (again->goSerial == run.goSerial);
+            CHECK (again->causedBy == run.causedBy);
+        }
+    }
+}
+
+TEST_CASE ("go.doh: takes back the last GO - the pointer, finished, the debounce, and a step that says Doh!")
+{
+    HistoryRig rig;
+    rig.park (rig.memoId);
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.standby() == rig.second);
+
+    const auto taken = rig.runner.listState().stepsTaken();
+
+    /*  Half a second between GOs from here on: the GO taken back must not make
+        the corrected one a bounce. */
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0.5").ok);
+
+    CHECK (doh (rig).rejected == 0);
+    CHECK (rig.standby() == rig.memoId);
+    CHECK (finishedOf (rig) == "false");
+
+    //  The GO's step is gone, and a step says the Doh! took its place.
+    CHECK (rig.spelled().find (":" + rig.memoId + ":g") == std::string::npos);
+    CHECK (endsWith (rig.spelled(), ":" + rig.memoId + ":d"));
+    CHECK (rig.runner.listState().stepsTaken() == taken + 1);
+
+    //  The corrected GO, well inside half a second of the one taken back.
+    CHECK (rig.submitAndTick ("go").rejected == 0);
+    CHECK_FALSE (refusedFor (rig, "too-soon"));
+    CHECK (rig.standby() == rig.second);
+    CHECK (runsFor (rig, rig.memoId) == 2u);
+}
+
+TEST_CASE ("go.doh: the end of a list is taken back, finished and all")
+{
+    Rig rig;
+    rig.setStandby (rig.memoId);                         // the last cue there is
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.standby().empty());
+    REQUIRE (finishedOf (rig) == "true");
+
+    CHECK (doh (rig).rejected == 0);
+    CHECK (rig.standby() == rig.memoId);
+    CHECK (finishedOf (rig) == "false");
+
+    CHECK (rig.submitAndTick ("go").rejected == 0);
+    CHECK (runsFor (rig, rig.memoId) == 2u);
+}
+
+TEST_CASE ("go.doh: past the window it is too-late and nothing moves; nought is off; ten by default")
+{
+    {
+        const doc::ShowDocument fresh;
+        CHECK (fresh.getAttribute ("/godot/list/dohWindow") == std::optional<std::string> ("10"));
+    }
+
+    Rig rig;
+
+    SUBCASE ("one second: forty-nine ticks after the GO is inside it, fifty is not")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/list/dohWindow", "1").ok);
+        rig.setStandby (rig.mediaId);
+
+        const auto goTick = rig.tick;
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        SUBCASE ("forty-nine")
+        {
+            while (rig.tick < goTick + 49)
+                rig.tickOnce();
+
+            CHECK (doh (rig).rejected == 0);
+            CHECK (rig.standby() == rig.mediaId);
+        }
+
+        SUBCASE ("fifty")
+        {
+            while (rig.tick < goTick + 50)
+                rig.tickOnce();
+
+            CHECK (doh (rig).rejected == 1);
+            CHECK (refusedFor (rig, "too-late"));
+            CHECK (rig.standby() == rig.memoId);
+        }
+    }
+
+    SUBCASE ("nought is off: refused at once")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/list/dohWindow", "0").ok);
+        rig.setStandby (rig.mediaId);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (doh (rig).rejected == 1);
+        CHECK (refusedFor (rig, "too-late"));
+        CHECK (rig.standby() == rig.memoId);
+    }
+}
+
+TEST_CASE ("go.doh: nothing to take back is refused, and so is a second Doh")
+{
+    Rig rig;
+
+    CHECK (doh (rig).rejected == 1);
+    CHECK (refusedFor (rig, "nothing-to-take-back"));
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (rig.standby() == rig.mediaId);
+
+    /*  ONE PRESS, ONE GO: there is no GO before it to reach for, and in this
+        stage no resume for a second press to forget. */
+    CHECK (doh (rig).rejected == 1);
+    CHECK (refusedFor (rig, "nothing-to-take-back"));
+    CHECK (rig.standby() == rig.mediaId);
+}
+
+TEST_CASE ("go.doh: a refused GO and an empty GO are not the last GO")
+{
+    SUBCASE ("a bounced GO")
+    {
+        Rig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0.5").ok);
+        rig.setStandby (rig.mediaId);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.submitAndTick ("go").rejected == 1);       // too soon
+
+        CHECK (doh (rig).rejected == 0);
+        CHECK (rig.standby() == rig.mediaId);
+    }
+
+    SUBCASE ("a GO on an empty standby, at the end of a list")
+    {
+        Rig rig;
+        rig.setStandby (rig.memoId);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.standby().empty());
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);       // applied, and fires nothing
+
+        CHECK (doh (rig).rejected == 0);
+        CHECK (rig.standby() == rig.memoId);
+    }
+}
+
+TEST_CASE ("go.doh: the lock does not stop it; it does stop the window being edited")
+{
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    REQUIRE (rig.document.isLocked());
+
+    CHECK (doh (rig).rejected == 0);
+    CHECK (rig.standby() == rig.mediaId);
+
+    const auto edit = rig.submitAndTick ("node.set", { osc::Value::string ("/godot/list/dohWindow"),
+                                                       osc::Value::float64 (5.0) });
+    CHECK (edit.rejected == 1);
+    CHECK (refusedFor (rig, "locked"));
+}
+
+TEST_CASE ("go.doh: after a fire by name or a trigger on the GO's list, Doh! is refused with its own sentence")
+{
+    SUBCASE ("by name, and by a trigger, on the list; by name on another")
+    {
+        HistoryRig rig;
+        rig.park (rig.mediaId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto fired = rig.runOf (rig.mediaId);
+        REQUIRE (! fired.empty());
+
+        auto refused = true;
+
+        SUBCASE ("a cue of the list fired by name")
+        {
+            REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.third) }).rejected == 0);
+        }
+
+        SUBCASE ("a trigger on a cue of the list")
+        {
+            const auto trigger = rig.document.createTrigger (rig.third, "osc");
+            REQUIRE (trigger.ok);
+            REQUIRE (rig.document.setAttribute ("/godot/trigger/" + trigger.id + "/address", "/desk/go").ok);
+            REQUIRE (rig.submitAndTick ("trigger.fire", { osc::Value::string (trigger.id) }).rejected == 0);
+        }
+
+        SUBCASE ("a cue of another list fired by name")
+        {
+            const auto other = rig.document.createList ("Foyer").id;
+            const auto doors = rig.document.createCue (other, 0, "memo", "Doors").id;
+            REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (doors) }).rejected == 0);
+            refused = false;
+        }
+
+        if (refused)
+        {
+            CHECK (doh (rig).rejected == 1);
+            CHECK (refusedFor (rig, "trigger-after-go"));
+            CHECK (rig.standby() == rig.memoId);                    // still past the GO
+            CHECK_FALSE (rig.runs.find (fired)->takenBack);
+        }
+        else
+        {
+            CHECK (doh (rig).rejected == 0);
+            CHECK (rig.standby() == rig.mediaId);
+        }
+    }
+
+    SUBCASE ("the GO's own start cue firing its target is the GO's, not a trigger")
+    {
+        Rig rig;
+        const auto starter = rig.document.createCue (rig.listId, 2, "start", "Start the memo").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + starter + "/target", rig.memoId).ok);
+
+        rig.setStandby (starter);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.memoId).empty(); }, 10));
+
+        CHECK (doh (rig).rejected == 0);
+        CHECK (rig.standby() == starter);
+    }
+
+    SUBCASE ("a start cue an EARLIER GO set going fires on the list after this GO: refused")
+    {
+        Rig rig;
+        const auto scene = rig.document.createCue (rig.listId, 2, "group", "Scene").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+        const auto starter = rig.document.createCue (scene, 0, "start", "Start the memo").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + starter + "/target", rig.memoId).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + starter + "/preWait", "0.4").ok);
+        const auto later = rig.document.createCue (rig.listId, 3, "memo", "Later").id;
+
+        rig.setStandby (scene);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);       // the scene, an earlier GO
+        REQUIRE (rig.standby() == later);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);       // the GO a Doh! would take back
+
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.memoId).empty(); }, 60));
+
+        CHECK (doh (rig).rejected == 1);
+        CHECK (refusedFor (rig, "trigger-after-go"));
+    }
+}
+
+TEST_CASE ("go.doh: a sound it started comes down over the panic fade, no footer, no kill")
+{
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto id = hear (rig, rig.mediaId);
+    const auto track = rig.runs.find (id)->track;
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->startedAtTick >= 0);
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    const auto* run = rig.runs.find (id);
+    CHECK (run->state == cue::runState::stopping);
+    CHECK (run->takenBack);
+    CHECK_FALSE (run->skipFooter);
+    CHECK_FALSE (run->killed);
+
+    std::vector<cue::FadeJob> on;
+
+    for (const auto& job : rig.runner.fades())
+        if (job.target == id)
+            on.push_back (job);
+
+    REQUIRE (on.size() == 1u);
+    CHECK_FALSE (on.front().reportsSelf);
+    CHECK (on.front().ticksTotal == 50);
+    CHECK (on.front().stopWhenDone);
+
+    for (int n = 0; n < 55; ++n)
+        rig.tickOnce();
+
+    CHECK (std::find (rig.audio.stopped.begin(), rig.audio.stopped.end(), track) != rig.audio.stopped.end());
+    CHECK (std::find (rig.audio.kills.begin(), rig.audio.kills.end(), track) == rig.audio.kills.end());
+    CHECK (rig.runs.find (id)->isFinished());
+}
+
+TEST_CASE ("go.doh: a cue nobody heard yet is taken back whole, and the next GO waits its full pre-wait")
+{
+    Rig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/preWait", "2").ok);
+
+    rig.setStandby (rig.mediaId);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.runs.liveRunOf (rig.mediaId) != nullptr);
+    REQUIRE (rig.runs.liveRunOf (rig.mediaId)->state == cue::runState::waiting);
+
+    for (int n = 0; n < 50; ++n)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    /*  The pointer is back on the cue, and the standby has it armed again,
+        made ready and nobody's GO. */
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto* live = rig.runs.liveRunOf (rig.mediaId);
+        return live != nullptr && live->state == cue::runState::armed
+                 && ! live->prepare.empty() && ! live->takenBack;
+    }, 10));
+
+    const auto goTick = rig.tick;
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto* live = rig.runs.liveRunOf (rig.mediaId);
+    REQUIRE (live != nullptr);
+    CHECK (live->state == cue::runState::waiting);
+    CHECK (live->dueTick == goTick + 100);
+}
+
+TEST_CASE ("go.doh: a member taken back from a running manual group leaves the group running and no footer")
+{
+    ManualRig rig;
+
+    /*  A third member that sounds: the scene's own memos would have ended. */
+    const auto bell = rig.document.createCue (rig.groupId, 3, "media", "Bell").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + bell + "/file", "bell.wav").ok);
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    rig.setStandby (rig.first);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.standby() == bell);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // the bell: the GO taken back
+
+    const auto act = rig.runOf (rig.groupId);
+    const auto old = hear (rig, bell);
+    REQUIRE (rig.runs.find (old)->parent == act);
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    CHECK_FALSE (rig.runs.find (act)->isFinished());
+    CHECK (rig.runs.find (old)->takenBack);
+    CHECK (rig.standby() == bell);
+
+    const auto* job = liveJobOf (rig, act);
+    REQUIRE (job != nullptr);
+    CHECK (std::find (job->phaseRuns.begin(), job->phaseRuns.end(), old) == job->phaseRuns.end());
+    CHECK (job->hasTaken (old));
+
+    //  Its voice fades out and goes; only then is the bell armed again, under the act.
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (old)->isFinished(); }, 60));
+    CHECK (rig.runOf (closing).empty());
+
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto* live = rig.runs.liveRunOf (bell);
+        return live != nullptr && live->id != old && live->state == cue::runState::armed;
+    }, 20));
+
+    const auto again = rig.runs.liveRunOf (bell)->id;
+    CHECK (rig.runs.find (again)->parent == act);
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (again)->launchedAtSample > 0; }, 20));
+    CHECK (rig.audio.arms.empty());                          // no new arm: the one made ahead launched
+
+    //  And the footer runs once, after it.
+    rig.audio.playing.insert (rig.runs.find (again)->track);
+    rig.tickOnce();
+    rig.audio.playing.erase (rig.runs.find (again)->track);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (act)->isFinished(); }, 60));
+    CHECK (runsFor (rig, closing) == 1u);
+}
+
+TEST_CASE ("go.doh: only the last GO's runs - even two GOs in one tick")
+{
+    Rig rig;
+    const auto rain = rig.document.createCue (rig.listId, 1, "media", "Rain").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav").ok);
+
+    rig.setStandby (rig.mediaId);
+
+    SUBCASE ("on two ticks")
+    {
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (doh (rig).rejected == 0);
+    }
+
+    SUBCASE ("in one tick")
+    {
+        REQUIRE (rig.engine.submit ("cli", "go", {}));
+        REQUIRE (rig.engine.submit ("cli", "go", {}));
+        REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+        REQUIRE (rig.tickOnce().rejected == 0);
+    }
+
+    CHECK (rig.standby() == rain);
+
+    const auto thunder = newestRunOf (rig, rig.mediaId);
+    const auto rainRun = newestRunOf (rig, rain);
+    REQUIRE (! thunder.empty());
+    REQUIRE (! rainRun.empty());
+
+    CHECK_FALSE (rig.runs.find (thunder)->takenBack);
+    CHECK_FALSE (rig.runs.find (thunder)->isFinished());
+    CHECK (rig.runs.find (thunder)->state != cue::runState::stopping);
+    CHECK (rig.runs.find (rainRun)->takenBack);
+}
+
+TEST_CASE ("go.doh: a start cue's target goes with its GO, and a fire queued behind the Doh is dropped")
+{
+    Rig rig;
+    const auto starter = rig.document.createCue (rig.listId, 2, "start", "Start the thunder").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + starter + "/target", rig.mediaId).ok);
+
+    //  Parked through the command, so the replay below is given the pointer too.
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (starter) }).rejected == 0);
+    rig.tickOnce();                                         // and the horizon sees it, as a park does
+
+    SUBCASE ("the GO and the Doh in one tick: the target's fire next tick makes nothing")
+    {
+        REQUIRE (rig.engine.submit ("cli", "go", {}));
+        REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+        REQUIRE (rig.tickOnce().rejected == 0);
+        CHECK (rig.standby() == starter);
+
+        rig.tickOnce();
+        rig.tickOnce();
+        CHECK (rig.runOf (rig.mediaId).empty());
+
+        /*  THE FIRE SAYS WHICH GO CAUSED IT, so a replay - which runs no hook -
+            reads the cause from the record and drops it the same way. */
+        const auto parsed = LogFile::parse (rig.engine.log().contents());
+        const auto fire = std::find_if (parsed.records.begin(), parsed.records.end(),
+                                        [] (const auto& record) { return record.command == "cue.fire"; });
+        REQUIRE (fire != parsed.records.end());
+        REQUIRE (fire->args.size() == 3u);
+        CHECK (fire->args[0].getString() == rig.mediaId);
+    }
+
+    SUBCASE ("a Doh three ticks later takes the target's run back with its GO")
+    {
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        rig.tickOnce();
+        rig.tickOnce();
+        rig.tickOnce();
+
+        const auto target = rig.runOf (rig.mediaId);
+        REQUIRE (! target.empty());
+        CHECK (rig.runs.find (target)->goSerial == 1u);
+
+        REQUIRE (doh (rig).rejected == 0);
+        CHECK (rig.runs.find (target)->takenBack);
+    }
+
+    /*  AND A REPLAY READS THE CAUSE OFF THE RECORD: the target's runs carry the
+        same GO, and a fire whose GO was taken back makes nothing there too. */
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    replaysTheSame (rig);
+}
+
+TEST_CASE ("go.doh: run.started stamps when it started; a run taken back stays stopping")
+{
+    Engine engine;
+    cue::RunTable runs;
+    cue::registerRunCommands (engine.commands(), runs);
+
+    runs.create ("RN000001", "CQ000001", "media");
+    REQUIRE (engine.submit ("engine", "run.started", { osc::Value::string ("RN000001") }));
+    engine.processTick (7);
+
+    CHECK (runs.find ("RN000001")->startedAtTick == 7);
+    CHECK (runs.find ("RN000001")->state == cue::runState::playing);
+
+    runs.create ("RN000002", "CQ000002", "media");
+    runs.find ("RN000002")->takenBack = true;
+    runs.find ("RN000002")->state = cue::runState::stopping;
+
+    REQUIRE (engine.submit ("engine", "run.started", { osc::Value::string ("RN000002") }));
+    engine.processTick (9);
+
+    CHECK (runs.find ("RN000002")->state == cue::runState::stopping);
+    CHECK (runs.find ("RN000002")->startedAtTick == 9);
+}
+
+TEST_CASE ("go.doh: decision N passes over a taken-back run - a GO inside the Doh fade starts the cue again")
+{
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto old = hear (rig, rig.mediaId);
+
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (rig.runs.find (old)->takenBack);
+
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    CHECK (runsFor (rig, rig.mediaId) == 2u);
+
+    const auto fresh = newestRunOf (rig, rig.mediaId);
+    REQUIRE (fresh != old);
+    CHECK_FALSE (rig.runs.find (fresh)->takenBack);
+    CHECK (rig.runs.find (fresh)->launchRequested);
+    CHECK (rig.runs.find (old)->state == cue::runState::stopping);
+}
+
+TEST_CASE ("go.doh: a child spawned into a taken-back group is done")
+{
+    GroupRig rig;
+    rig.setCue (rig.first, "preWait", "10");                 // hold the group in its members
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto groupRun = rig.runOf (rig.groupId);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    /*  A spawn its job decided before the Doh, drained after it. */
+    REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+    REQUIRE (rig.engine.submit ("engine", "run.spawn", { osc::Value::string (groupRun),
+                                                         osc::Value::string (rig.second) }));
+    const auto spawnTick = rig.tick;
+    rig.tickOnce();
+
+    const auto spawned = rig.runOf (rig.second);
+    REQUIRE (! spawned.empty());
+    CHECK (rig.runs.find (spawned)->state == cue::runState::done);
+    CHECK (rig.runs.find (spawned)->endedAtTick == spawnTick);
+    CHECK (rig.runs.find (spawned)->track < 0);
+    CHECK (rig.runs.find (groupRun)->takenBack);
+}
+
+TEST_CASE ("go.doh: an Esc after the GO - the Doh moves the pointer back and leaves the runs to Esc")
+{
+    GroupRig rig;
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+    rig.setCue (rig.first, "preWait", "10");
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    const auto groupRun = rig.runOf (rig.groupId);
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+    REQUIRE (doh (rig).rejected == 0);
+
+    CHECK_FALSE (rig.runs.find (groupRun)->takenBack);
+    CHECK (rig.standby() == rig.groupId);
+
+    REQUIRE (rig.runToCompletion (groupRun) < 400);
+    CHECK_FALSE (rig.runOf (closing).empty());               // Esc's footer ran
+}
+
+TEST_CASE ("go.doh: every run the GO creates or adopts carries its serial, and a later GO's do not")
+{
+    SUBCASE ("a prepared block, the member armed under it, and what its job spawns")
+    {
+        PrepareRig rig;
+        rig.setStandby (rig.sound);
+        REQUIRE (rig.tickUntil ([&] { return rig.prepared (rig.groupId) != nullptr
+                                              && ! rig.runOf (rig.sound).empty(); }));
+
+        const auto block = rig.prepared (rig.groupId)->id;
+        const auto armed = rig.runOf (rig.sound);
+
+        //  The horizon's work is nobody's GO, and says when it was made.
+        CHECK (rig.runs.find (block)->goSerial == 0u);
+        CHECK (rig.runs.find (block)->preparedAfterGo == 0);
+        CHECK (rig.runs.find (armed)->goSerial == 0u);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (rig.runs.find (block)->goSerial == 1u);
+        CHECK (rig.runs.find (armed)->goSerial == 1u);
+
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.opening).empty(); }));
+        CHECK (rig.runs.find (rig.runOf (rig.opening))->goSerial == 1u);
+    }
+
+    SUBCASE ("the standby's arm, launched; and the next GO's run")
+    {
+        Rig rig;
+        rig.setStandby (rig.mediaId);
+
+        const auto armed = rig.runOf (rig.mediaId);
+        REQUIRE (! armed.empty());
+        CHECK (rig.runs.find (armed)->goSerial == 0u);
+        CHECK (rig.runs.find (armed)->preparedAfterGo == -1);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (rig.runs.find (armed)->goSerial == 1u);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (rig.runs.find (rig.runOf (rig.memoId))->goSerial == 2u);
+    }
+
+    SUBCASE ("a member the horizon armed under a running act, asked for by the next GO")
+    {
+        ManualRig rig;
+        const auto one = rig.document.createCue (rig.groupId, 0, "media", "One").id;
+        const auto two = rig.document.createCue (rig.groupId, 1, "media", "Two").id;
+
+        for (const auto& id : { one, two })
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/file", "thunder.wav").ok);
+
+        rig.setStandby (one);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.standby() == two);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (two).empty(); }));
+
+        const auto armedTwo = rig.runOf (two);
+        CHECK (rig.runs.find (armedTwo)->goSerial == 0u);
+        CHECK (rig.runs.find (armedTwo)->preparedAfterGo == 1);
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (rig.runs.find (armedTwo)->goSerial == 2u);
+    }
+
+    /*  THE DESIGN'S J2 SUBCASE - a GO on a timeline scene's row inside a running
+        act adopting the block the horizon prepared there, stamped whole - is not
+        written yet: J2, which makes that GO adopt the block, lands after D1
+        (decisions-D1.md, the order change). Today that GO enters a fresh run
+        beside the block; J2 adds the SUBCASE with its own fix. */
+}
+
+TEST_CASE ("go.doh: history - a Doh! step is not a firing, to the solver or to the live recorder")
+{
+    HistoryRig rig;
+    rig.park (rig.memoId);
+
+    REQUIRE (rig.submitAndTick ("record.start").rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    /*  Without the solver's guard the `d` step reads as the cue's firing and
+        the answer is "history", read against the Doh's tick. */
+    const auto plan = cue::solveHistory (rig.document, nullptr, nullptr,
+                                         { rig.listId, rig.memoId, 0.0 },
+                                         rig.runner.listState().historyOf (rig.listId));
+    CHECK (plan.how == "order");
+
+    REQUIRE (rig.submitAndTick ("record.stop").rejected == 0);
+
+    auto targets = 0;
+
+    for (const auto& list : rig.document.root().getChildWithName (juce::Identifier ("Lists")))
+        for (const auto& take : list)
+            for (const auto& start : take)
+                if (start.getType().toString() == "Start"
+                     && rig.document.getAttribute ("/godot/cue/" + start[juce::Identifier ("id")].toString().toStdString()
+                                                   + "/target").value_or ("") == rig.memoId)
+                    ++targets;
+
+    CHECK (targets == 0);
+}
+
+TEST_CASE ("go.doh: a session with a Doh replays record for record, with no audio")
+{
+    HistoryRig session;
+    REQUIRE (session.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+    session.park (session.mediaId);
+
+    REQUIRE (session.submitAndTick ("go").rejected == 0);
+    hear (session, session.mediaId);
+
+    for (int n = 0; n < 50; ++n)
+        session.tickOnce();
+
+    REQUIRE (doh (session).rejected == 0);
+
+    //  Fired by name inside the Doh fade: a fresh run beside the one fading out.
+    REQUIRE (session.submitAndTick ("cue.fire", { osc::Value::string (session.mediaId) }).rejected == 0);
+    session.audio.completeArms (session.engine);
+
+    for (int n = 0; n < 60; ++n)
+        session.tickOnce();
+
+    REQUIRE (session.submitAndTick ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        session.tickOnce();
+
+    const auto show = doc::CanonicalXml::write (session.document);
+    const auto original = LogFile::parse (session.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    HistoryRig fresh;
+    fresh.runner.setPlayer (nullptr);
+
+    doc::ReadResult read = doc::CanonicalXml::read (show, fresh.document);
+    REQUIRE (read.ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        INFO (mismatch);
+
+    CHECK (result.ok);
+    CHECK (fresh.spelled (session.listId) == session.spelled());
+
+    for (const auto& run : session.runs.all())
+    {
+        INFO ("run " << run.id << " of " << run.cue);
+        const auto* again = fresh.runs.find (run.id);
+        REQUIRE (again != nullptr);
+        CHECK (again->state == run.state);
+        CHECK (again->takenBack == run.takenBack);
+    }
+}
+
+TEST_CASE ("go.doh: a stop cue fired by name on another list leaves the GO's sound to that stop, and the session replays")
+{
+    HistoryRig session;
+    const auto other = session.document.createList ("Effects").id;
+    const auto stopper = session.document.createCue (other, 0, "transport", "Out").id;
+    REQUIRE (session.document.setAttribute ("/godot/cue/" + stopper + "/target", session.mediaId).ok);
+
+    session.park (session.mediaId);
+    REQUIRE (session.submitAndTick ("go").rejected == 0);
+    const auto id = hear (session, session.mediaId);
+
+    REQUIRE (session.submitAndTick ("cue.fire", { osc::Value::string (stopper) }).rejected == 0);
+    CHECK (session.runs.find (id)->stopAsked);
+
+    REQUIRE (doh (session).rejected == 0);
+    CHECK_FALSE (session.runs.find (id)->takenBack);         // that stop's, footer and all
+    CHECK (session.standby() == session.mediaId);
+
+    REQUIRE (session.submitAndTick ("cue.fire", { osc::Value::string (session.mediaId) }).rejected == 0);
+
+    for (int n = 0; n < 10; ++n)
+        session.tickOnce();
+
+    const auto show = doc::CanonicalXml::write (session.document);
+    const auto original = LogFile::parse (session.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    HistoryRig fresh;
+    fresh.runner.setPlayer (nullptr);
+
+    doc::ReadResult read = doc::CanonicalXml::read (show, fresh.document);
+    REQUIRE (read.ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        INFO (mismatch);
+
+    CHECK (result.ok);
+    REQUIRE (fresh.runs.find (id) != nullptr);
+    CHECK_FALSE (fresh.runs.find (id)->takenBack);
+}
+
+TEST_CASE ("go.doh: a second press inside the GO debounce is refused too-soon and changes nothing")
+{
+    Rig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0.5").ok);
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto old = hear (rig, rig.mediaId);
+
+    REQUIRE (doh (rig).rejected == 0);
+    const auto dohTick = rig.tick - 1;
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    SUBCASE ("pressed again: a bounce, a held key, a second hand")
+    {
+        CHECK (doh (rig).rejected == 1);
+        CHECK (refusedFor (rig, "too-soon"));
+        CHECK (rig.standby() == rig.mediaId);
+        CHECK (rig.runs.find (old)->takenBack);
+
+        while (rig.tick < dohTick + 30)
+            rig.tickOnce();
+
+        CHECK (doh (rig).rejected == 1);
+        CHECK (refusedFor (rig, "nothing-to-take-back"));
+    }
+
+    SUBCASE ("a GO in between is not a bounce: the next Doh takes that GO back")
+    {
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.standby() == rig.memoId);
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (doh (rig).rejected == 0);
+        CHECK (rig.standby() == rig.mediaId);
+    }
+}
+
+TEST_CASE ("go.doh: a root another hand is already stopping is left to that stop, footer and all")
+{
+    GroupRig rig;
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+    rig.setCue (rig.first, "preWait", "10");
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    const auto groupRun = rig.runOf (rig.groupId);
+
+    SUBCASE ("the running pane's stop")
+    {
+        REQUIRE (rig.submitAndTick ("run.stop", { osc::Value::string (groupRun) }).rejected == 0);
+    }
+
+    SUBCASE ("a stop cue on another list, fired by name")
+    {
+        const auto other = rig.document.createList ("Effects").id;
+        const auto stopper = rig.document.createCue (other, 0, "transport", "Out").id;
+        rig.setCue (stopper, "target", rig.groupId);
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (stopper) }).rejected == 0);
+    }
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK_FALSE (rig.runs.find (groupRun)->takenBack);
+    CHECK (rig.standby() == rig.groupId);
+
+    REQUIRE (rig.runToCompletion (groupRun) < 400);
+    CHECK_FALSE (rig.runOf (closing).empty());
+}
+
+namespace
+{
+    /*  A timeline scene of two memos on the history rig's list, at nought and
+        three seconds - something a seek can re-seat. */
+    std::string timelineScene (HistoryRig& rig, int index)
+    {
+        const auto scene = rig.document.createCue (rig.listId, index, "group", "Scene").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+
+        rig.document.createCue (scene, 0, "memo", "One");
+        const auto later = rig.document.createCue (scene, 1, "memo", "Two").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + later + "/preWait", "3").ok);
+        return scene;
+    }
+
+    bool stepped (const HistoryRig& rig, const std::string& cueId, char origin)
+    {
+        for (const auto& step : rig.runner.listState().historyOf (rig.listId))
+            if (step.cue == cueId && step.origin == origin)
+                return true;
+
+        return false;
+    }
+}
+
+TEST_CASE ("go.doh: after a seek on the GO's scene, the GO's step is still the one erased")
+{
+    HistoryRig rig;
+    const auto scene = timelineScene (rig, 4);
+
+    rig.park (scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto sceneRun = rig.runOf (scene);
+    REQUIRE (! sceneRun.empty());
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (2.0) }).rejected == 0);
+    REQUIRE (doh (rig).rejected == 0);
+
+    CHECK_FALSE (stepped (rig, scene, 'g'));
+    CHECK (stepped (rig, scene, 'd'));
+
+    const auto plan = cue::solveHistory (rig.document, nullptr, nullptr, { rig.listId, scene, 0.0 },
+                                         rig.runner.listState().historyOf (rig.listId));
+    CHECK (plan.how == "order");
+}
+
+TEST_CASE ("go.doh: the step a start cue's target wrote under the GO goes with it, even after a seek")
+{
+    SUBCASE ("a media target")
+    {
+        HistoryRig rig;
+        const auto starter = rig.document.createCue (rig.listId, 4, "start", "Start the thunder").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + starter + "/target", rig.mediaId).ok);
+
+        rig.park (starter);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return stepped (rig, rig.mediaId, 'f'); }, 10));
+
+        REQUIRE (doh (rig).rejected == 0);
+        CHECK_FALSE (stepped (rig, starter, 'g'));
+        CHECK_FALSE (stepped (rig, rig.mediaId, 'f'));
+
+        const auto plan = cue::solveHistory (rig.document, nullptr, nullptr, { rig.listId, rig.mediaId, 0.0 },
+                                             rig.runner.listState().historyOf (rig.listId));
+        CHECK (plan.how == "order");
+    }
+
+    SUBCASE ("a timeline scene target, sought before the Doh")
+    {
+        HistoryRig rig;
+        const auto scene = timelineScene (rig, 4);
+        const auto starter = rig.document.createCue (rig.listId, 5, "start", "Start the scene").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + starter + "/target", scene).ok);
+
+        rig.park (starter);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (scene).empty(); }, 10));
+
+        REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (rig.runOf (scene)),
+                                                  osc::Value::float64 (2.0) }).rejected == 0);
+        REQUIRE (doh (rig).rejected == 0);
+
+        CHECK_FALSE (stepped (rig, starter, 'g'));
+        CHECK_FALSE (stepped (rig, scene, 'f'));
+    }
+
+    SUBCASE ("the same cue fired by another list's start cue before the GO keeps its step")
+    {
+        HistoryRig rig;
+        const auto starter = rig.document.createCue (rig.listId, 4, "start", "Start the thunder").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + starter + "/target", rig.mediaId).ok);
+
+        const auto other = rig.document.createList ("Effects").id;
+        const auto elsewhere = rig.document.createCue (other, 0, "start", "Start it from here").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + elsewhere + "/target", rig.mediaId).ok);
+
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (elsewhere) }).rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return stepped (rig, rig.mediaId, 'f'); }, 10));
+
+        rig.park (starter);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        for (int n = 0; n < 3; ++n)
+            rig.tickOnce();
+
+        REQUIRE (doh (rig).rejected == 0);
+        CHECK (stepped (rig, rig.mediaId, 'f'));
+    }
+}
+
+TEST_CASE ("go.doh: the last cue of an act taken back - the act lives on, its header is not run again, its footer runs once")
+{
+    ManualRig rig;
+    const auto opening = rig.document.createCue (rig.roleOf (rig.groupId, "header"), 0, "memo", "Pre-arm").id;
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+
+    //  Parked through the command, so the replay at the end is given the pointer too.
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.first) }).rejected == 0);
+    rig.tickOnce();                                         // and the horizon sees it, as a park does
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { const auto id = rig.runOf (rig.first);
+                                  return ! id.empty() && rig.runs.find (id)->isFinished(); }));
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { const auto id = rig.runOf (rig.second);
+                                  return ! id.empty() && rig.runs.find (id)->isFinished(); }));
+
+    const auto act = rig.runOf (rig.groupId);
+    const auto firstRun = rig.runOf (rig.first);
+    const auto secondRun = rig.runOf (rig.second);
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // the act's last member
+    REQUIRE (rig.standby() == rig.after);
+
+    SUBCASE ("pressed once the act has ended, footer and all")
+    {
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (act)->isFinished(); }));
+        REQUIRE (runsFor (rig, closing) == 1u);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        REQUIRE (doh (rig).rejected == 0);
+    }
+
+    SUBCASE ("pressed in the very tick whose hook decided the act's end")
+    {
+        REQUIRE (rig.tickUntil ([&] { const auto id = rig.runOf (closing);
+                                      return ! id.empty() && rig.runs.find (id)->isFinished(); }));
+        REQUIRE_FALSE (rig.runs.find (act)->isFinished());
+
+        const auto dohTick = rig.tick;
+        REQUIRE (doh (rig).rejected == 0);                   // the act's `run.ended` drains after it
+
+        /*  THE CASE'S OWN PREMISE, read off the log rather than assumed: the
+            act's end, decided by its job in this very tick, was applied after
+            the Doh - and ignored, the act being alive below. */
+        const auto records = LogFile::parse (rig.engine.log().contents()).records;
+        const auto named = [&act] (const LogRecord& record) { return ! record.args.empty()
+                                                                       && record.args[0].isString()
+                                                                       && record.args[0].getString() == act; };
+        const auto dohAt = std::find_if (records.begin(), records.end(), [dohTick] (const LogRecord& record)
+        {
+            return record.kind == LogRecord::Kind::applied && record.command == "go.doh" && record.tick == dohTick;
+        });
+
+        REQUIRE (dohAt != records.end());
+        CHECK (std::any_of (dohAt, records.end(), [&named, dohTick] (const LogRecord& record)
+        {
+            return record.kind == LogRecord::Kind::applied && record.command == "run.ended"
+                     && record.tick == dohTick && named (record);
+        }));
+    }
+
+    CHECK (rig.runs.find (act)->state == cue::runState::playing);
+    CHECK (rig.standby() == rig.third);
+
+    const auto* job = liveJobOf (rig, act);
+    REQUIRE (job != nullptr);
+    CHECK (job->phase == std::string (cue::groupPhase::members));
+    CHECK (job->phaseRuns == std::vector<std::string> { firstRun, secondRun });
+
+    const auto footerRun = rig.runOf (closing);
+    REQUIRE (! footerRun.empty());
+    CHECK (rig.runs.find (footerRun)->takenBack);
+    CHECK (rig.runs.find (footerRun)->causedBy == 3u);
+
+    //  The corrected GO joins the act: no header again, the footer once more.
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (act)->isFinished(); }));
+
+    CHECK (runsFor (rig, rig.groupId) == 1u);
+    CHECK (runsFor (rig, opening) == 1u);
+    CHECK (runsFor (rig, rig.third) == 2u);
+    CHECK (rig.runs.find (newestRunOf (rig, rig.third))->parent == act);
+    CHECK (runsFor (rig, closing) == 2u);
+    CHECK_FALSE (rig.runs.find (newestRunOf (rig, closing))->takenBack);
+
+    /*  AND A REPLAY BRINGS THE ACT BACK THE SAME WAY: the stale end of the
+        Doh's own tick ignored by the tick the log keeps, not by a hook. */
+    replaysTheSame (rig);
+}
+
+TEST_CASE ("go.doh: an act whose end ended the act above it brings both back, innermost first")
+{
+    Rig rig;
+    const auto outer = rig.document.createCue (rig.listId, 2, "group", "Act").id;
+    const auto inner = rig.document.createCue (outer, 0, "group", "Scene").id;
+    const auto one = rig.document.createCue (inner, 0, "memo", "One").id;
+    const auto two = rig.document.createCue (inner, 1, "memo", "Two").id;
+
+    const auto innerRelease = rig.document.createCue (rig.document.createRole (inner, "footer").id, 0,
+                                                      "memo", "Scene release").id;
+    const auto outerRelease = rig.document.createCue (rig.document.createRole (outer, "footer").id, 0,
+                                                      "memo", "Act release").id;
+
+    rig.setStandby (one);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { const auto id = rig.runOf (one);
+                                  return ! id.empty() && rig.runs.find (id)->isFinished(); }));
+    REQUIRE (rig.standby() == two);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto outerRun = rig.runOf (outer);
+    const auto innerRun = rig.runOf (inner);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (outerRun)->isFinished(); }));
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.runs.find (innerRun)->state == cue::runState::playing);
+    CHECK (rig.runs.find (outerRun)->state == cue::runState::playing);
+    CHECK (rig.standby() == two);
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (outerRun)->isFinished(); }));
+
+    CHECK (runsFor (rig, outer) == 1u);
+    CHECK (runsFor (rig, inner) == 1u);
+    CHECK (runsFor (rig, innerRelease) == 2u);
+    CHECK (runsFor (rig, outerRelease) == 2u);
+    CHECK_FALSE (rig.runs.find (newestRunOf (rig, innerRelease))->takenBack);
+    CHECK_FALSE (rig.runs.find (newestRunOf (rig, outerRelease))->takenBack);
+}
+
+TEST_CASE ("go.doh: an act that loops is not brought back, and its next round is left alone")
+{
+    ManualRig rig;
+    rig.setCue (rig.groupId, "loops", "2");
+
+    rig.setStandby (rig.first);
+
+    for (int press = 0; press < 3; ++press)
+    {
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+    }
+
+    const auto act = rig.runOf (rig.groupId);
+    const auto lastOfRoundOne = newestRunOf (rig, rig.third);
+    REQUIRE_FALSE (rig.runs.find (act)->isFinished());
+
+    const auto before = rig.runs.all().size();
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.runs.find (lastOfRoundOne)->takenBack);
+
+    for (std::size_t n = 0; n < before; ++n)
+    {
+        const auto& run = rig.runs.all()[n];
+
+        if (run.id != lastOfRoundOne && run.goSerial != 3u)
+            CHECK_FALSE (run.takenBack);
+    }
+
+    CHECK_FALSE (rig.runs.find (act)->takenBack);
+    CHECK (rig.runs.find (act)->unadoptedAt < 0);
+}
+
+TEST_CASE ("go.doh: a seek withdraws a stop whatever the hook did, and the session replays")
+{
+    HistoryRig session;
+    const auto other = session.document.createList ("Effects").id;
+    const auto fadeOut = session.document.createCue (other, 0, "fade", "Fade it out").id;
+
+    for (const auto& [name, value] : std::vector<std::pair<std::string, std::string>> {
+             { "target", session.mediaId }, { "level", "-40" }, { "duration", "5" }, { "stopWhenDone", "true" } })
+        REQUIRE (session.document.setAttribute ("/godot/cue/" + fadeOut + "/" + name, value).ok);
+
+    session.park (session.mediaId);
+    REQUIRE (session.submitAndTick ("go").rejected == 0);
+    const auto id = hear (session, session.mediaId);
+
+    REQUIRE (session.submitAndTick ("cue.fire", { osc::Value::string (fadeOut) }).rejected == 0);
+    const auto fadeRun = newestRunOf (session, fadeOut);
+    REQUIRE (session.runs.find (id)->stopAsked);
+
+    //  The fade's own run killed: its hook hands the sound back to playing, with no record.
+    REQUIRE (session.submitAndTick ("run.kill", { osc::Value::string (fadeRun) }).rejected == 0);
+    session.tickOnce();
+    session.tickOnce();
+
+    REQUIRE (session.submitAndTick ("run.seek", { osc::Value::string (id),
+                                                  osc::Value::float64 (1.0) }).rejected == 0);
+    CHECK_FALSE (session.runs.find (id)->stopAsked);
+
+    REQUIRE (doh (session).rejected == 0);
+    CHECK (session.runs.find (id)->takenBack);
+
+    REQUIRE (session.submitAndTick ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        session.tickOnce();
+
+    const auto show = doc::CanonicalXml::write (session.document);
+    const auto original = LogFile::parse (session.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    HistoryRig fresh;
+    fresh.runner.setPlayer (nullptr);
+
+    doc::ReadResult read = doc::CanonicalXml::read (show, fresh.document);
+    REQUIRE (read.ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        INFO (mismatch);
+
+    CHECK (result.ok);
+    REQUIRE (fresh.runs.find (id) != nullptr);
+    CHECK (fresh.runs.find (id)->takenBack);
+}
+
+TEST_CASE ("go.doh: a scene taken back is prepared again whole once its member's voice is free")
+{
+    PrepareRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    rig.setStandby (rig.sound);
+    REQUIRE (rig.tickUntil ([&] { return rig.prepared (rig.groupId) != nullptr
+                                          && ! rig.runOf (rig.sound).empty(); }));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    const auto block = rig.prepared (rig.groupId)->id;
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto old = hear (rig, rig.sound);
+
+    const auto prepares = [&rig]
+    {
+        const auto parsed = LogFile::parse (rig.engine.log().contents());
+        return std::count_if (parsed.records.begin(), parsed.records.end(),
+                              [] (const auto& record) { return record.command == "run.prepare"; });
+    };
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.runs.find (block)->takenBack);
+    CHECK (rig.runs.find (old)->takenBack);
+
+    //  A fresh block at D+1; the member waits for the old voice before it is armed.
+    REQUIRE (rig.tickUntil ([&] { return rig.prepared (rig.groupId) != nullptr
+                                          && rig.prepared (rig.groupId)->id != block; }, 10));
+    const auto fresh = rig.prepared (rig.groupId)->id;
+    const auto before = prepares();
+
+    rig.tickOnce();
+    CHECK_FALSE (rig.runs.hasChildFor (fresh, rig.sound));
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (old)->isFinished(); }, 60));
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.hasChildFor (fresh, rig.sound); }, 10));
+    CHECK (prepares() > before);
+
+    const auto again = newestRunOf (rig, rig.sound);
+    CHECK (rig.runs.find (again)->parent == fresh);
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (again)->launchedAtSample > 0; }, 30));
+    CHECK (rig.audio.arms.empty());
+}
+
+TEST_CASE ("go.doh: what the horizon made after the GO on another list is not given back")
+{
+    Rig rig;
+    const auto foyer = rig.document.createList ("Foyer").id;
+    const auto scene = rig.document.createCue (foyer, 0, "group", "Doors").id;
+    const auto rain = rig.document.createCue (scene, 0, "media", "Rain").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav").ok);
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    REQUIRE (rig.document.setAttribute ("/godot/list/focus", foyer).ok);
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (foyer), rain).ok);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.preparedRunOf (scene) != nullptr; }, 10));
+
+    const auto block = rig.runs.preparedRunOf (scene)->id;
+    CHECK (rig.runs.find (block)->preparedAfterGo == 1);
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)) == std::optional<std::string> (rig.mediaId));
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK_FALSE (rig.runs.find (block)->isFinished());
+    CHECK (rig.runs.find (block)->state == cue::runState::preparing);
+}
+
+//==============================================================================
+/*  GO DOH!, AFTER ITS REVIEW (2026-10-01, D1). Each case pins a road the first
+    build of D1 left open and failed on that build - or, where it says it is a
+    net, pins a road that was already right and that no case reached, so that it
+    stays right. */
+TEST_CASE ("go.doh: an unheard scene whose next member was spawned and not yet launched is given back, not held for ever")
+{
+    /*  A SEQUENCE SPAWNS ITS NEXT MEMBER A TICK BEFORE IT LAUNCHES IT, and a
+        Doh drained in between finds that member armed: here a fade, which the
+        Doh leaves alone and whose launch it then refuses. Nothing would ever
+        end it, and the scene waited on it before giving itself back - for
+        ever, its pre-sends never put back, an act around it never ending. */
+    Rig rig;
+    const auto scene = rig.document.createCue (rig.listId, 2, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+
+    rig.document.createCue (scene, 0, "memo", "Line");
+    const auto dip = rig.document.createCue (scene, 1, "fade", "Dip").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/target", rig.mediaId).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/level", "-20").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/duration", "1").ok);
+    rig.document.createCue (scene, 2, "memo", "Last");
+
+    rig.setStandby (scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto sceneRun = rig.runOf (scene);
+
+    //  The tick whose drain spawned the fade; its launch is the next tick's hook's.
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (dip).empty(); }, 20));
+    const auto dipRun = rig.runOf (dip);
+    REQUIRE (rig.runs.find (dipRun)->state == cue::runState::armed);
+
+    //  The Doh drains before that launch.
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.runs.find (dipRun)->takenBack);
+
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (sceneRun)->isFinished(); }, 60));
+    CHECK (rig.runs.find (dipRun)->isFinished());
+    CHECK (rig.runs.find (sceneRun)->warning == cue::runWarning::revoked);
+}
+
+TEST_CASE ("go.doh: an unheard scene whose fade-and-stop on a cue outside it then loses its job to a double Esc still goes")
+{
+    /*  THE DOH LEAVES A FADE THE GO FIRED TO RUN - its target is not the GO's -
+        and the scene it sits in waited for it before giving itself back. A
+        double Esc then dropped the fade's job, and its run sat `playing` with
+        nothing to end it: the scene waited for ever, through the press that
+        promises everything stops. */
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    rig.startMedia();                                         // the bed, fired by name, sounding
+
+    const auto scene = rig.document.createCue (rig.listId, 4, "group", "Lights out").id;
+    rig.setCue (scene, "mode", "timeline");
+    const auto out = rig.document.createCue (scene, 0, "fade", "Bed out").id;
+    rig.setCue (out, "target", rig.mediaId);
+    rig.setCue (out, "level", "-40");
+    rig.setCue (out, "duration", "3");
+    rig.setCue (out, "stopWhenDone", "true");
+    const auto hold = rig.document.createCue (scene, 1, "memo", "Hold").id;
+    rig.setCue (hold, "preWait", "5");
+
+    rig.setStandby (scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto sceneRun = rig.runOf (scene);
+
+    REQUIRE (rig.tickUntil ([&] { const auto id = rig.runOf (out);
+                                  return ! id.empty() && rig.runs.find (id)->launchRequestedAtTick > 0; }, 20));
+    const auto outRun = rig.runOf (out);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (rig.runs.find (sceneRun)->takenBack);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (sceneRun)->isFinished(); }, 60));
+    CHECK (rig.runs.find (outRun)->isFinished());
+}
+
+TEST_CASE ("go.doh: an unheard scene inside an older act, its fade-and-stop let go by Esc - the scene goes, and Esc runs the act's footer")
+{
+    /*  ESC LETS GO OF A FADE-AND-STOP WHOSE STOP LANDS FIRST: the job lands it
+        held by nobody's run, and the run is ended with the rest - by its scene.
+        A scene the Doh had taken back waited for that run instead, so it never
+        went, and the act around it, which Esc was bringing down gracefully,
+        waited on the scene: its footer never ran (§4.4). */
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    rig.startMedia();
+
+    const auto act = rig.document.createCue (rig.listId, 4, "group", "Act").id;
+    const auto opening = rig.document.createCue (act, 0, "memo", "Opening").id;
+    const auto scene = rig.document.createCue (act, 1, "group", "Lights out").id;
+    rig.setCue (scene, "mode", "timeline");
+    const auto out = rig.document.createCue (scene, 0, "fade", "Bed out").id;
+    rig.setCue (out, "target", rig.mediaId);
+    rig.setCue (out, "level", "-40");
+    rig.setCue (out, "duration", "3");
+    rig.setCue (out, "stopWhenDone", "true");
+    const auto hold = rig.document.createCue (scene, 1, "memo", "Hold").id;
+    rig.setCue (hold, "preWait", "10");
+    const auto closing = rig.document.createCue (rig.document.createRole (act, "footer").id, 0, "memo", "Release").id;
+
+    rig.setStandby (opening);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // into the act: an earlier GO
+    const auto actRun = rig.runOf (act);
+    REQUIRE (! actRun.empty());
+
+    rig.setStandby (scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // the GO a Doh! takes back
+
+    /*  THE GO'S OWN RUN OF THE SCENE: until J2 a GO on a scene's row inside a
+        running act starts it cold, beside the block the horizon made there. */
+    const auto sceneRun = newestRunOf (rig, scene);
+    REQUIRE (rig.runs.find (sceneRun)->goSerial == 2u);
+    REQUIRE (rig.runs.find (sceneRun)->parent == actRun);
+
+    REQUIRE (rig.tickUntil ([&] { const auto id = newestRunOf (rig, out);
+                                  return ! id.empty() && rig.runs.find (id)->launchRequestedAtTick > 0; }, 20));
+    const auto fadeFrom = rig.runs.find (newestRunOf (rig, out))->launchRequestedAtTick;
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (rig.runs.find (sceneRun)->takenBack);
+    REQUIRE_FALSE (rig.runs.find (actRun)->isFinished());
+
+    //  Esc with the fade's stop due before the panic fade's: Esc lets go of the fade's job.
+    while (rig.tick < fadeFrom + 120)
+        rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (actRun)->isFinished(); }, 150));
+    CHECK (rig.runs.find (sceneRun)->isFinished());
+    CHECK_FALSE (rig.runOf (closing).empty());
+}
+
+TEST_CASE ("go.doh: an unheard scene taken back in its footer, a scene in that footer with it - neither waits on the other")
+{
+    /*  A FOOTER IS LEFT TO FINISH by a graceful stop, and a scene inside one
+        the Doh was giving back waited for the outer one to give it back whole:
+        an unheard scene caught in its footer, the footer holding a timeline,
+        waited on that timeline while the timeline waited on it - for ever,
+        through Esc and a double Esc. A Doh runs no footer, so a scene nobody
+        heard is given back from its footer as from anywhere else. */
+    Rig rig;
+    const auto scene = rig.document.createCue (rig.listId, 2, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    rig.document.createCue (scene, 0, "memo", "Line");
+
+    const auto release = rig.document.createCue (rig.document.createRole (scene, "footer").id, 0,
+                                                 "group", "Release").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + release + "/mode", "timeline").ok);
+    rig.document.createCue (release, 0, "memo", "Lights");
+    const auto later = rig.document.createCue (release, 1, "memo", "Later").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + later + "/preWait", "5").ok);
+
+    rig.setStandby (scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto sceneRun = rig.runOf (scene);
+
+    REQUIRE (rig.tickUntil ([&] { const auto id = rig.runOf (release);
+                                  return ! id.empty() && rig.runs.find (id)->state == cue::runState::playing; }, 40));
+    const auto releaseRun = rig.runOf (release);
+
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (rig.runs.find (sceneRun)->takenBack);
+    REQUIRE (rig.runs.find (releaseRun)->takenBack);
+
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (sceneRun)->isFinished(); }, 60));
+    CHECK (rig.runs.find (releaseRun)->isFinished());
+}
+
+TEST_CASE ("go.doh: a sound whose own scene's fade-and-stop lands first still comes down when the scene ends that fade's run")
+{
+    /*  THE STOP DUE SOONER WINS: a heard sound its scene's own fade-and-stop is
+        already taking out is given no Doh fade. But the scene then stops its
+        members - that fade's run among them - and a fade whose own run is
+        stopped hands its target back to `playing`. The scene's job, finding a
+        member playing again, stopped it at once: the sound was cut where the
+        fade had got to, short of the stop it was fading to. A sound with no such
+        job above it played on. */
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    const auto scene = rig.document.createCue (rig.listId, 4, "group", "Storm").id;
+    rig.setCue (scene, "mode", "timeline");
+    const auto bell = rig.document.createCue (scene, 0, "media", "Bell").id;
+    rig.setCue (bell, "file", "bell.wav");
+    const auto close = rig.document.createCue (scene, 1, "fade", "Bell out").id;
+    rig.setCue (close, "target", bell);
+    rig.setCue (close, "level", "-40");
+    rig.setCue (close, "duration", "2");
+    rig.setCue (close, "stopWhenDone", "true");
+    rig.setCue (close, "preWait", "1");
+
+    rig.setStandby (scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto sceneRun = rig.runOf (scene);
+    const auto bellRun = hear (rig, bell);
+
+    REQUIRE (rig.tickUntil ([&] { const auto id = rig.runOf (close);
+                                  return ! id.empty() && rig.runs.find (id)->launchRequestedAtTick > 0; }, 80));
+    const auto fadeFrom = rig.runs.find (rig.runOf (close))->launchRequestedAtTick;
+
+    //  A quarter of the fade left: its stop lands before a Doh fade would.
+    while (rig.tick < fadeFrom + 75)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (rig.runs.find (bellRun)->takenBack);
+
+    for (int n = 0; n < 60; ++n)
+    {
+        rig.tickOnce();
+        CHECK (rig.runs.find (bellRun)->state != cue::runState::playing);
+    }
+
+    //  Down where its own fade-and-stop puts it, at that fade's stop - not cut short of it.
+    CHECK (rig.runs.find (bellRun)->isFinished());
+    CHECK (rig.runs.find (bellRun)->endedAtTick >= fadeFrom + 100);
+    CHECK (rig.runs.find (sceneRun)->isFinished());
+}
+
+TEST_CASE ("esc: a cue sought during its fade-and-stop still comes down")
+{
+    /*  ESC'S OWN FADE TAKES OVER WHATEVER A SOUNDING VOICE CARRIES (§23): a
+        seek puts a fading cue back to `playing` with its fade-and-stop still
+        holding it. Go Doh!'s first build of the per-voice fade Esc shares let
+        that sooner stop stand, still held by the stop cue's own run - which Esc
+        then stops, handing the voice back to `playing`: the cue played on after
+        Esc. Esc's fade is Esc's again. */
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+    rig.setCue (rig.fadeId, "duration", "2");
+    rig.setCue (rig.fadeId, "stopWhenDone", "true");
+
+    const auto id = rig.startMedia();
+    REQUIRE (rig.fire (rig.fadeId).rejected == 0);
+    const auto fadeFrom = rig.runs.find (newestRunOf (rig, rig.fadeId))->launchRequestedAtTick;
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (id), osc::Value::float64 (1.0) }).rejected == 0);
+    REQUIRE (rig.runs.find (id)->state == cue::runState::playing);
+
+    //  The fade's stop is due before Esc's would be.
+    while (rig.tick < fadeFrom + 60)
+        rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+
+    for (int n = 0; n < 80; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->isFinished());
+}
+
+TEST_CASE ("go.doh: an act whose last member stops the act is brought back with no stop on its account - the corrected GO's stop is its own")
+{
+    /*  THE REVIVE GIVES THE ACT BACK ITS STOP ACCOUNT, as every handler that
+        gives a run back does (§24, HB). It did not: the act kept the early GO's
+        ask, so the corrected GO's own stop was only "asked again", the footer it
+        set off was nobody's - not the corrected GO's to take back, not held
+        back for a device left to its operator - and a Doh of the corrected GO
+        found the act "stopped by another hand" and left it ended. */
+    Rig rig;
+    const auto act = rig.document.createCue (rig.listId, 2, "group", "Act").id;
+    const auto one = rig.document.createCue (act, 0, "memo", "One").id;
+    rig.document.createCue (act, 1, "memo", "Two");
+    const auto out = rig.document.createCue (act, 2, "transport", "End the act").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + out + "/target", act).ok);
+    const auto closing = rig.document.createCue (rig.document.createRole (act, "footer").id, 0, "memo", "Release").id;
+    rig.document.createCue (rig.listId, 3, "memo", "After");
+
+    rig.setStandby (one);
+
+    for (int press = 0; press < 3; ++press)
+    {
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+    }
+
+    const auto actRun = rig.runOf (act);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (actRun)->isFinished(); }, 40));
+    REQUIRE (runsFor (rig, closing) == 1u);
+
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (rig.runs.find (actRun)->state == cue::runState::playing);
+    CHECK_FALSE (rig.runs.find (actRun)->stopAsked);
+    CHECK (rig.standby() == out);
+
+    //  The corrected GO: its own stop on the act, and the footer it sets off.
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (actRun)->isFinished(); }, 40));
+    REQUIRE (runsFor (rig, closing) == 2u);
+    CHECK (rig.runs.find (newestRunOf (rig, closing))->causedBy == 4u);
+
+    //  So a Doh of the corrected GO brings the act back again.
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.runs.find (actRun)->state == cue::runState::playing);
+}
+
+TEST_CASE ("go.doh: after an Esc the Doh's own step puts no persistent bed back")
+{
+    /*  A DOH NEVER UNDOES AN ESC (PRD §3.32): after one, only the pointer and
+        the values on devices that take back go back. The Doh's `d` step opened
+        the persistent section's pass all the same, and a bed Esc had brought
+        down came back at the press, before any GO. */
+    PersistentRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+    REQUIRE (rig.liveBed() != nullptr);
+
+    rig.step (rig.mediaId);                                 // the GO a Doh! takes back
+    rig.settle();
+
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.liveBed() == nullptr; }, 60));
+
+    const auto asserts = [&rig]
+    {
+        const auto parsed = LogFile::parse (rig.engine.log().contents());
+        return std::count_if (parsed.records.begin(), parsed.records.end(),
+                              [] (const LogRecord& record) { return record.command == "run.assert"; });
+    };
+
+    const auto before = asserts();
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.standby() == rig.mediaId);
+    rig.settle();
+
+    CHECK (asserts() == before);
+    CHECK (rig.liveBed() == nullptr);
+
+    //  The next GO is a step like any other: the section asserts the bed again.
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    rig.settle();
+    CHECK (asserts() > before);
+}
+
+TEST_CASE ("go.doh: a corrected GO in the Doh's own drain plays the act's member it fires")
+{
+    /*  BORN DONE ONLY FROM A RECORD OF THE DOH'S OWN TICK (§24, GZ): a spawn the
+        act's job decided before the Doh, on the state the Doh undid. The first
+        build applied the rule to every spawn under an act brought back in that
+        tick - so a GO drained with the Doh, from a script or a second hand, had
+        its member born done: the act took its last member for played and ran
+        its footer, and the corrected GO played nothing. */
+    ManualRig rig;
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+
+    rig.setStandby (rig.first);
+
+    for (int press = 0; press < 3; ++press)
+    {
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+    }
+
+    const auto act = rig.runOf (rig.groupId);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (act)->isFinished(); }, 40));
+    const auto taken = newestRunOf (rig, rig.third);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    //  The Doh and the corrected GO, in one drain.
+    REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+    REQUIRE (rig.engine.submit ("cli", "go", {}));
+    REQUIRE (rig.tickOnce().rejected == 0);
+
+    const auto again = newestRunOf (rig, rig.third);
+    REQUIRE (again != taken);
+    CHECK (rig.runs.find (again)->parent == act);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (act)->isFinished(); }, 40));
+    CHECK (rig.runs.find (again)->launchRequestedAtTick > 0);
+    CHECK (runsFor (rig, closing) == 2u);
+}
+
+TEST_CASE ("go.doh: a heard cue is armed again once its old voice has gone, and the corrected GO launches that arm")
+{
+    /*  THE TOP-LEVEL ROAD OF THE STANDBY'S WAIT FOR THE OLD VOICE (§24.2): no
+        second voice while the old one fades, an arm the moment it has gone, and
+        the corrected GO an ordinary armed launch - not a cold one, which the
+        disk would make late. A net: the road was right, and no case reached it. */
+    FadeRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    rig.setStandby (rig.mediaId);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto old = hear (rig, rig.mediaId);
+
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (rig.standby() == rig.mediaId);
+
+    const auto othersLive = [&rig, &old]
+    {
+        return std::count_if (rig.runs.all().begin(), rig.runs.all().end(), [&rig, &old] (const cue::Run& one)
+        {
+            return one.cue == rig.mediaId && one.id != old && ! one.isFinished();
+        });
+    };
+
+    for (int n = 0; n < 10; ++n)
+    {
+        rig.tickOnce();
+        CHECK (othersLive() == 0);
+    }
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (old)->isFinished(); }, 60));
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto* live = rig.runs.liveRunOf (rig.mediaId);
+        return live != nullptr && live->id != old && live->state == cue::runState::armed
+                 && ! live->prepare.empty();
+    }, 20));
+
+    const auto again = rig.runs.liveRunOf (rig.mediaId)->id;
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (again)->launchedAtSample > 0; }, 20));
+    CHECK (rig.audio.arms.empty());
+}
+
+TEST_CASE ("go.doh: the horizon's arm of the act's next member, made after the GO, is revoked by the Doh itself")
+{
+    /*  PASS H'S OTHER HALF (§24.2, GY): an arm the horizon made after the GO is
+        not the GO's, and nothing of it was heard or sent - it is revoked on the
+        spot, its voice let go, never taken back. A net: the road was right, and
+        no case reached it. */
+    ManualRig rig;
+    const auto bell = rig.document.createCue (rig.groupId, 1, "media", "Bell").id;
+    rig.setCue (bell, "file", "bell.wav");
+
+    rig.setStandby (rig.first);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // into the act, which is this GO's
+    REQUIRE (rig.standby() == bell);
+
+    const auto act = rig.runOf (rig.groupId);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (bell).empty(); }, 20));
+    const auto arm = rig.runOf (bell);
+
+    CHECK (rig.runs.find (arm)->parent == act);
+    CHECK (rig.runs.find (arm)->goSerial == 0u);
+    CHECK (rig.runs.find (arm)->preparedAfterGo == 1);
+    CHECK_FALSE (rig.runs.find (arm)->prepare.empty());
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    const auto* revoked = rig.runs.find (arm);
+    CHECK (revoked->state == cue::runState::done);
+    CHECK (revoked->warning == cue::runWarning::revoked);
+    CHECK_FALSE (revoked->takenBack);
+    CHECK (rig.runs.find (act)->takenBack);
+}
+
+TEST_CASE ("go.doh: a jump read from the history never plans the cue a Doh took back")
+{
+    /*  THE SOLVER'S PAST, NOT ONLY ITS CLOCK (§24.4): a `d` step names the cue
+        whose GO was taken back, and read as a firing it would plan that cue as
+        sounding from the moment of the Doh. The cases above pin the aimed
+        cue's own clock; here the aim is a later cue, and the past is walked. A
+        net: the guard was right, and no case reached it. */
+    HistoryRig rig;
+    const auto boom = rig.document.createCue (rig.listId, 3, "media", "Boom").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + boom + "/file", "boom.wav").ok);
+
+    const auto pointAt = [&rig] (const std::string& cueId)
+    {
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (cueId) }).rejected == 0);
+    };
+
+    pointAt (rig.second);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // Two
+    REQUIRE (rig.standby() == boom);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // Boom, too early
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (rig.standby() == boom);
+
+    pointAt (rig.third);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // Three, past it
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    const auto plan = cue::solveHistory (rig.document, nullptr, nullptr, { rig.listId, rig.third, 1.0 },
+                                         rig.runner.listState().historyOf (rig.listId));
+    CHECK (plan.how == "history");
+    CHECK (std::none_of (plan.runs.begin(), plan.runs.end(),
+                         [&boom] (const cue::PlannedRun& planned) { return planned.cue == boom; }));
+}
+
+TEST_CASE ("go.doh: a seek on a scene after a Doh moves the scene's firing, never the Doh's step")
+{
+    /*  A SEEK RE-DATES THE SCENE'S NEWEST FIRING (§24.4), and a `d` step fired
+        nothing: a scene fired by name, then GO'd too early and taken back, has
+        its `d` newest - a seek of the run fired by name must move its `f`, or a
+        later jump places the scene at the Doh. Written for the guard, which no
+        case reached, it failed first on something older than D1: `seekGroup`
+        re-dated the step through a run pointer its own seat had moved, so no
+        step moved at all. */
+    HistoryRig rig;
+    const auto scene = timelineScene (rig, 4);
+
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (scene) }).rejected == 0);
+    const auto byName = rig.runOf (scene);
+    REQUIRE (! byName.empty());
+
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (scene) }).rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // the scene again, beside the first
+    REQUIRE (doh (rig).rejected == 0);
+
+    const auto tickOf = [&rig, &scene] (char origin)
+    {
+        std::int64_t at = -1;
+
+        for (const auto& step : rig.runner.listState().historyOf (rig.listId))
+            if (step.cue == scene && step.origin == origin)
+                at = step.tick;
+
+        return at;
+    };
+
+    const auto dohStep = tickOf ('d');
+    REQUIRE (dohStep >= 0);
+    REQUIRE (tickOf ('f') >= 0);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    const auto seekTick = rig.tick;
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (byName), osc::Value::float64 (2.0) }).rejected == 0);
+
+    CHECK (tickOf ('f') == seekTick - 100);
+    CHECK (tickOf ('d') == dohStep);
+}
+
+TEST_CASE ("go.doh: a jump forgets the last GO - a Doh after it has nothing to take back")
+{
+    /*  A JUMP REWRITES THE HISTORY THE GO LIVED IN (§24.4): the record goes with
+        it, and a Doh pressed after the jump moves nothing. A net for a road no
+        case reached. */
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    REQUIRE (rig.engine.submit ("cli", "list.aim", { osc::Value::string (rig.listId),
+                                                     osc::Value::string (rig.memoId),
+                                                     osc::Value::float64 (0.0) }));
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("list.loadToTime", { osc::Value::string (rig.listId) }).rejected == 0);
+
+    const auto whereTheJumpLeftIt = rig.standby();
+
+    CHECK (doh (rig).rejected == 1);
+    CHECK (refusedFor (rig, "nothing-to-take-back"));
+    CHECK (rig.standby() == whereTheJumpLeftIt);
+}
+
+TEST_CASE ("go.doh: the GO's cue deleted before the Doh - refused at the pointer's door, and nothing moves")
+{
+    /*  THE POINTER'S OWN DOOR IS THE LAST REFUSAL (§24.4): a cue gone is no place
+        to put the pointer back, and the Doh refuses before anything - history,
+        flag, runs - has moved. A net for a road no case reached. */
+    HistoryRig rig;
+    rig.park (rig.memoId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto memoRun = rig.runOf (rig.memoId);
+    const auto history = rig.spelled();
+    const auto pointer = rig.standby();
+    const auto finished = finishedOf (rig);
+
+    REQUIRE (rig.document.remove (rig.memoId).ok);
+
+    CHECK (doh (rig).rejected == 1);
+    CHECK (rig.standby() == pointer);
+    CHECK (finishedOf (rig) == finished);
+    CHECK (rig.spelled() == history);
+    CHECK_FALSE (rig.runs.find (memoRun)->takenBack);
+}

@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -72,13 +73,39 @@ namespace wfg::cue
 
         `origin` is a letter because the node spells sixty-four of these in one
         string and a word each would be a paragraph: `g` for a GO, `f` for a cue
-        fired by name, `t` for a trigger. */
+        fired by name, `t` for a trigger, `p` for a press on a sampler strip
+        (Phase 6), and `d` for a Go Doh! (2026-10-01, PRD §3.32) - the GO it
+        took back is gone from the history, and this says it was taken back.
+        A `d` is not a firing: every reader that places what fired skips it.
+
+        `serial` IS THE GO THAT CAUSED THE STEP (namespace draft §24): the `go`
+        handler's own `g`, and the `f` a start cue's target writes under the GO
+        that fired the start cue. Nought for every other step. Not spelled in
+        the node: it is how Go Doh! finds the steps of the GO it takes back,
+        wherever a seek has moved them. */
     struct Step
     {
         std::int64_t tick = 0;
         std::string cue;
         char origin = 'g';
+        std::uint64_t serial = 0;
     };
+
+    /*  WHAT GO DOH! WOULD TAKE BACK, NOW (PRD §3.32): the list the last GO
+        moved, the cue it fired and its tick; empty when there is nothing to
+        take back. One for the whole runner and not one per list, because the
+        Doh acts on the list of the last GO whichever list has the focus.
+        Published as `/godot/list/doh`, "<list> <cue> <tick>". */
+    struct DohOffer
+    {
+        std::string list, cue;
+        std::int64_t tick = -1;
+
+        bool isSet() const noexcept { return ! list.empty(); }
+    };
+
+    /** `"<list> <cue> <tick>"`, or empty for none. */
+    std::string spellDohOffer (const DohOffer& offer);
 
     /** `<tick>:<cue>:<origin>`, which is how the node spells one. */
     std::string spellStep (const Step& step);
@@ -137,18 +164,57 @@ namespace wfg::cue
         }
 
         /*  A SCENE RE-SEATED AT A SECOND OF ITSELF (`run.seek` on a group)
-            moves its most recent step to where that second says it was fired. */
+            moves its most recent step to where that second says it was fired.
+            Its most recent FIRING: a `d` step records a Doh and fired nothing,
+            so it is passed over (2026-10-01). The step keeps its serial. */
         void refired (const std::string& list, const std::string& cue, std::int64_t firedAt)
         {
             auto& steps = histories[list];
 
             for (auto step = steps.rbegin(); step != steps.rend(); ++step)
-                if (step->cue == cue)
+                if (step->cue == cue && step->origin != 'd')
                 {
                     step->tick = firedAt;
                     return;
                 }
         }
+
+        /*  THE STEPS OF A GO THAT GO DOH! TAKES BACK, gone (2026-10-01, PRD
+            §3.32): every step carrying that GO's serial, from every list's
+            history and from the live recorder's take - the GO's own `g`, and
+            the `f` its start cues' targets wrote - wherever a `run.seek` moved
+            them, since they are found by serial and not by tick. Answers the
+            `g` among them, as it stood. `taken` does not move back: a hook
+            watches it to notice a step, and the Doh's own `d` is the next one. */
+        std::optional<Step> unstepped (std::uint64_t serial)
+        {
+            std::optional<Step> erased;
+
+            if (serial == 0)
+                return erased;
+
+            const auto carries = [serial] (const Step& step) { return step.serial == serial; };
+
+            for (auto& history : histories)
+            {
+                auto& steps = history.second;
+
+                for (const auto& step : steps)
+                    if (carries (step) && step.origin == 'g')
+                        erased = step;
+
+                steps.erase (std::remove_if (steps.begin(), steps.end(), carries), steps.end());
+            }
+
+            recorded.erase (std::remove_if (recorded.begin(), recorded.end(), carries), recorded.end());
+            return erased;
+        }
+
+        /*  WHAT GO DOH! WOULD TAKE BACK (PRD §3.32), set by the `go` handler
+            and cleared by the Doh, a jump on that list, or a GO that fires
+            nothing to take back. */
+        void setDohOffer (const DohOffer& offer) { doh = offer; }
+        const DohOffer& dohOffer() const noexcept { return doh; }
 
         /** Newest last. */
         const std::vector<Step>& historyOf (const std::string& list) const
@@ -181,7 +247,15 @@ namespace wfg::cue
         std::int64_t recordingSinceTick() const noexcept { return recordingSince; }
 
         /** A show being closed takes all of it with it: it is about a session. */
-        void clear() { aims.clear(); positions.clear(); histories.clear(); recorded.clear(); recordingSince = -1; }
+        void clear()
+        {
+            aims.clear();
+            positions.clear();
+            histories.clear();
+            recorded.clear();
+            recordingSince = -1;
+            doh = {};
+        }
 
         static constexpr std::size_t kept = 64;
 
@@ -198,5 +272,6 @@ namespace wfg::cue
         std::uint64_t taken = 0;
         std::int64_t recordingSince = -1;
         std::vector<Step> recorded;
+        DohOffer doh;
     };
 }

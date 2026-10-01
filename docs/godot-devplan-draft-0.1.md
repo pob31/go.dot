@@ -770,7 +770,9 @@ level - since filtered, the author's way (namespace draft §22.11).
 discontinuity, and each stop level does exactly its guarantee and nothing more.
 
 **Needs from the author:** the Go Doh! inventory of in-flight objects (PRD
-§4.4, deferred); the Esc-as-pause decision (§3.29).
+§4.4, deferred) - *met: the author's answers of 2026-09-30 and 2026-10-01 are in
+PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
+(§3.29).
 
 **Built** (the hardening plan, stage by stage in namespace draft §23):
 
@@ -797,6 +799,24 @@ discontinuity, and each stop level does exactly its guarantee and nothing more.
   rename, on Windows by handle with POSIX semantics, so that a program reading
   the file stops no save. The driver is registered with the fixes it failed
   first on.
+- **J3, 2026-10-01 — a MIDI port switched off sends nothing** (§23.7). Its row
+  had always said so and the engine never read it: a cue on a bound port with
+  `Tx` off went out on the cable. It now runs, sends nothing and ends
+  `not-sent`, as a network device's `Tx` has made it since 2026-09-22.
+- **Go Doh! D0 and D1, 2026-10-01 — taking back the last GO** (PRD §3.32,
+  namespace draft §24). D0 is the specification: PRD §3.32, §4.4's pointer to
+  it, and §24's rule, inventory, decisions and limitations. D1 builds the
+  command (`go.doh`), the show's window (Show settings > Playback, ten seconds),
+  the Doh! button left of PANIC and F9, its refusals in words, and the Go Doh!
+  setting - every network device and MIDI port left to its operator unless set
+  to take back, a cue overriding either way - with the MIDI port's "plays
+  sound". A Doh puts the pointer, the list's end, the GO debounce and the
+  history back, brings what the GO started down (heard: over the panic fade,
+  never killed; not heard: at once), gives back what the horizon made after
+  it, brings back to life an act the GO ended, and never has a device left to
+  its operator sent the same cue twice. Until D2 the corrected GO starts the
+  cue from the top; D2 to D5 pause and carry on, put back, report, and drive it
+  end to end.
 
 ---
 

@@ -36,13 +36,17 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/Bundle.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/log/Replay.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/tree/Mount.h>
@@ -51,10 +55,12 @@
 
 #include "TestSupport.h"
 
+#include <algorithm>
 #include <chrono>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 using namespace wfg;
@@ -976,4 +982,754 @@ TEST_CASE ("rate cap: a message that is waiting is not a message that failed")
     CHECK (sender.outcomeOf (held) == tree::MountSender::Outcome::sent);
     CHECK_FALSE (sender.stillQueued (held));
     CHECK (sender.sentFor ("M1") == 2u);
+}
+
+//==============================================================================
+/*  GO DOH! AND A DEVICE LEFT TO ITS OPERATOR (PRD §3.32, namespace draft §24;
+    the author, 2026-10-01).
+
+    His case: OSC cues to a light board that started sequences, moving heads
+    repositioning before being lit - "fixing with Doh would really do more
+    damage than the light operator handling the damage". So what reached a
+    device is left to its operator unless the device, or the cue, says take
+    back: the corrected GO runs such a cue with a first GO's timing and sends
+    nothing. Every case here failed on the code before D1, where `go.doh` was
+    an unknown command and the rows did not exist. */
+namespace
+{
+    constexpr const char* lightingDesk = "QX7DESK0";
+
+    /*  The network rig, plus the author's lighting desk: OPAQUE - no namespace,
+        nothing to read back, never anticipatable - and declared in the show as
+        well as mounted, because Go Doh!'s setting is read from the document. The
+        rig's own described console is declared in the show too, at its id. */
+    struct DohRig : NetworkRig
+    {
+        DohRig()
+        {
+            tree::MountDeclaration desk;
+            desk.id = lightingDesk;
+            desk.prefix = "/lx";
+            desk.host = "127.0.0.1";
+            desk.port = listener.port();
+            REQUIRE (mounts.declare (desk).ok);
+
+            REQUIRE (document.createMount ("/lx", "", lightingDesk).ok);
+            REQUIRE (document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+
+            /*  Where they listen, as a saved show says it: a show that names a
+                device with no port does not read back, and a replay reads the
+                show back first. */
+            for (const auto* id : { lightingDesk, "K3PV7WRB" })
+                REQUIRE (document.setAttribute ("/godot/mount/" + std::string (id) + "/port",
+                                                std::to_string (listener.port())).ok);
+
+            /*  A script presses GO, not a hand, as every rig here does. */
+            REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
+        }
+
+        void park (const std::string& cueId)
+        {
+            REQUIRE (document.setAttribute (cue::standbyAddressOf (listId), cueId).ok);
+            tickOnce();
+        }
+
+        Engine::TickResult press (const char* command, std::vector<osc::Value> args = {})
+        {
+            engine.submit ("cli", command, std::move (args));
+            runner.beforeTick (engine, tick);
+            const auto result = engine.processTick (tick++);
+            sender.flush();
+            return result;
+        }
+
+        std::string standby() const
+        {
+            return document.getAttribute (cue::standbyAddressOf (listId)).value_or ("");
+        }
+
+        /*  How many datagrams for one address have arrived - counted once
+            EVERYTHING THE SENDER PUT ON THE WIRE HAS: the sender counts what it
+            sends as it sends it, at the tick's flush, and both devices here
+            send to this one socket. So a count waits for exactly what left,
+            however long the socket's own thread takes, and is never a guess
+            made after a fixed sleep - which is either slow or flaky, and here
+            would have been both (the Listener's own rule, above). */
+        std::size_t received (const std::string& address)
+        {
+            const auto sent = sender.sentFor (lightingDesk) + sender.sentFor ("K3PV7WRB");
+            REQUIRE (listener.waitFor (sent));
+
+            std::size_t count = 0;
+
+            for (const auto& datagram : listener.all())
+            {
+                const auto decoded = osc::decode (datagram.bytes.data(), datagram.bytes.size());
+
+                if (decoded.ok && decoded.packet.address == address)
+                    ++count;
+            }
+
+            return count;
+        }
+
+        const cue::Run* newestRunOf (const std::string& cueId) const
+        {
+            const cue::Run* out = nullptr;
+
+            for (const auto& run : runs.all())
+                if (run.cue == cueId)
+                    out = &run;
+
+            return out;
+        }
+
+        void ticks (int count)
+        {
+            for (int n = 0; n < count; ++n)
+                tickOnce();
+        }
+    };
+
+    /*  THE SESSION AGAIN, FROM ITS LOG ALONE (namespace draft §24.1): what was
+        left with a device's operator is decided from the document and the
+        records - which device a send went to, which cues a corrected GO sends
+        nothing of - never from the sender or the mount table, so a fresh
+        engine reading the show and the log reaches the same runs. The warning
+        is a hook's readout and is not asked: a replay runs no hook. */
+    void replaysTheSame (DohRig& session)
+    {
+        const auto show = doc::CanonicalXml::write (session.document);
+        const auto original = LogFile::parse (session.engine.log().contents());
+        REQUIRE (original.errors.empty());
+
+        /*  The plain network rig with the desk on its mount table: the show
+            brings its own devices, at the identifiers a DohRig would already
+            have reserved. */
+        NetworkRig fresh;
+        tree::MountDeclaration desk;
+        desk.id = lightingDesk;
+        desk.prefix = "/lx";
+        desk.host = "127.0.0.1";
+        desk.port = fresh.listener.port();
+        REQUIRE (fresh.mounts.declare (desk).ok);
+
+        const auto read = doc::CanonicalXml::read (show, fresh.document);
+
+        for (const auto& problem : read.problems)
+            MESSAGE (problem);
+
+        REQUIRE (read.ok);
+
+        const auto result = replay (fresh.engine, original);
+
+        for (const auto& mismatch : result.mismatches)
+            MESSAGE (mismatch);
+
+        CHECK (result.ok);
+
+        for (const auto& run : session.runs.all())
+        {
+            INFO ("run " << run.id << " of " << run.cue);
+            const auto* again = fresh.runs.find (run.id);
+            REQUIRE (again != nullptr);
+            CHECK (again->state == run.state);
+            CHECK (again->takenBack == run.takenBack);
+            CHECK (again->sendsLeft == run.sendsLeft);
+            CHECK (again->sentTo == run.sentTo);
+        }
+    }
+}
+
+TEST_CASE ("go.doh: a lighting desk left to its operator - nothing sent again by the corrected GO")
+{
+    DohRig rig;
+    const auto lx = rig.makeOsc ("/lx/go", "i:12", "none");
+    const auto after = rig.document.createCue (rig.listId, rig.index++, "memo", "After").id;
+
+    auto preWait = false;
+
+    SUBCASE ("as it is")
+    {
+    }
+
+    SUBCASE ("with a pre-wait: the corrected GO's run waits it, then sends nothing")
+    {
+        preWait = true;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + lx + "/preWait", "1").ok);
+    }
+
+    //  Parked through the command, so the replay at the end is given the pointer too.
+    REQUIRE (rig.press ("standby.set", { osc::Value::string (lx) }).rejected == 0);
+    rig.tickOnce();                                         // and the horizon sees it, as a park does
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (60);
+    REQUIRE (rig.received ("/lx/go") == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.standby() == lx);
+    rig.ticks (2);
+    CHECK (rig.received ("/lx/go") == 1u);
+
+    const auto goTick = rig.tick;
+    REQUIRE (rig.press ("go").rejected == 0);
+    CHECK (rig.standby() == after);
+
+    /*  A FIRST GO'S TIMING: the run waits its whole second, and only then ends
+        having sent nothing. */
+    if (preWait)
+    {
+        const auto* waiting = rig.newestRunOf (lx);
+        REQUIRE (waiting != nullptr);
+        CHECK (waiting->state == cue::runState::waiting);
+        CHECK (waiting->dueTick == goTick + 50);
+        CHECK (rig.received ("/lx/go") == 1u);
+    }
+
+    rig.ticks (60);
+
+    CHECK (rig.received ("/lx/go") == 1u);
+
+    const auto* again = rig.newestRunOf (lx);
+    REQUIRE (again != nullptr);
+    CHECK (again->state == cue::runState::done);
+    CHECK (again->warning == std::string (cue::runWarning::leftToOperator));
+    CHECK (again->error.empty());
+
+    replaysTheSame (rig);
+}
+
+TEST_CASE ("go.doh: a verified cue left to its operator ends at once and asks nothing, and a second Doh keeps what was left")
+{
+    DohRig rig;
+    const auto desk = rig.makeOsc ("/desk/fader", "f:0.75", "verified");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    rig.park (desk);
+    REQUIRE (rig.press ("go").rejected == 0);
+    REQUIRE (rig.listener.waitFor (1));
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+
+    SUBCASE ("pressed once")
+    {
+    }
+
+    SUBCASE ("pressed twice: there is no resume to forget, and nothing to take back")
+    {
+        rig.ticks (40);
+        CHECK (rig.press ("go.doh").rejected == 1);
+        CHECK (rig.engine.lastError().find ("nothing-to-take-back") != std::string::npos);
+    }
+
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+
+    const auto* again = rig.newestRunOf (desk);
+    REQUIRE (again != nullptr);
+    CHECK (again->state == cue::runState::done);
+    CHECK (again->warning == std::string (cue::runWarning::leftToOperator));
+    CHECK (rig.received ("/desk/fader") == 1u);
+}
+
+TEST_CASE ("go.doh: a device that takes back gets the cue again from the corrected GO")
+{
+    DohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+
+    const auto lx = rig.makeOsc ("/lx/go", "i:12", "none");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    rig.park (lx);
+    REQUIRE (rig.press ("go").rejected == 0);
+    REQUIRE (rig.listener.waitFor (1));
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (2);
+
+    CHECK (rig.received ("/lx/go") == 2u);
+
+    const auto* again = rig.newestRunOf (lx);
+    REQUIRE (again != nullptr);
+    CHECK (again->state == cue::runState::done);
+    CHECK (again->warning.empty());
+}
+
+TEST_CASE ("go.doh: a cue overrides its device either way")
+{
+    DohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+
+    const auto scene = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+
+    const auto x = rig.document.createCue (scene, 0, "osc", "Leave it").id;
+    const auto y = rig.document.createCue (scene, 1, "osc", "Take it back").id;
+
+    for (const auto& [id, address, atom, own] : std::vector<std::tuple<std::string, std::string, std::string, std::string>> {
+             { x, "/lx/go", "i:7", "leave" }, { y, "/desk/fader", "f:0.5", "takeBack" } })
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/address", address).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/value", atom).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/doh", own).ok);
+    }
+
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    rig.park (scene);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (10);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (2);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (10);
+
+    CHECK (rig.received ("/desk/fader") == 2u);
+    CHECK (rig.received ("/lx/go") == 1u);
+
+    const auto* xAgain = rig.newestRunOf (x);
+    REQUIRE (xAgain != nullptr);
+    CHECK (xAgain->warning == std::string (cue::runWarning::leftToOperator));
+}
+
+namespace
+{
+    /*  The author's own scene: lighting cues at nought, two and four seconds
+        into a timeline, nothing in it heard. */
+    struct LightingScene
+    {
+        explicit LightingScene (DohRig& rig)
+        {
+            group = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + group + "/mode", "timeline").ok);
+
+            const char* addresses[] { "/lx/a", "/lx/b", "/lx/c" };
+            const char* offsets[] { "0", "2", "4" };
+
+            for (int n = 0; n < 3; ++n)
+            {
+                const auto id = rig.document.createCue (group, n, "osc", "Light").id;
+                REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/address", addresses[n]).ok);
+                REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/value", "i:1").ok);
+                REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/preWait", offsets[n]).ok);
+                members.push_back (id);
+            }
+
+            after = rig.document.createCue (rig.listId, rig.index++, "memo", "After").id;
+        }
+
+        std::string group, after;
+        std::vector<std::string> members;
+    };
+}
+
+TEST_CASE ("go.doh: a scene started over sends at its own time what the early GO had not sent, and nothing of what it had")
+{
+    DohRig rig;
+    const LightingScene scene { rig };
+
+    rig.park (scene.group);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (150);                                       // three seconds: two of the three have gone
+
+    REQUIRE (rig.received ("/lx/a") == 1u);
+    REQUIRE (rig.received ("/lx/b") == 1u);
+    REQUIRE (rig.received ("/lx/c") == 0u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (2);
+    REQUIRE (rig.press ("go").rejected == 0);
+
+    rig.ticks (190);                                       // just short of four seconds
+    CHECK (rig.received ("/lx/a") == 1u);
+    CHECK (rig.received ("/lx/b") == 1u);
+    CHECK (rig.received ("/lx/c") == 0u);
+
+    rig.ticks (20);
+    CHECK (rig.received ("/lx/c") == 1u);
+
+    for (const auto& id : { scene.members[0], scene.members[1] })
+    {
+        const auto* again = rig.newestRunOf (id);
+        REQUIRE (again != nullptr);
+        CHECK (again->warning == std::string (cue::runWarning::leftToOperator));
+    }
+}
+
+TEST_CASE ("go.doh: an act's footer that went to a desk left to its operator is not sent again when the act ends again")
+{
+    DohRig rig;
+    const auto act = rig.document.createCue (rig.listId, rig.index++, "group", "Act").id;
+    const auto one = rig.document.createCue (act, 0, "memo", "One").id;
+    rig.document.createCue (act, 1, "memo", "Two");
+
+    std::string three;
+
+    SUBCASE ("its last member a line")
+    {
+        three = rig.document.createCue (act, 2, "memo", "Three").id;
+    }
+
+    /*  THE CORRECTED GO'S OWN STOP ON THE ACT (§24, HB): the act brought back
+        to life carries no stop of the early GO's, so the footer the corrected
+        GO sets off is that GO's - and held back for the desk. Kept, the early
+        GO's ask made it nobody's, and it went out again. */
+    SUBCASE ("its last member a stop aimed at the act itself")
+    {
+        three = rig.document.createCue (act, 2, "transport", "End the act").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + three + "/target", act).ok);
+    }
+
+    const auto footer = rig.document.createRole (act, "footer").id;
+    const auto release = rig.document.createCue (footer, 0, "osc", "Houselights").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + release + "/address", "/lx/footer").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + release + "/value", "i:1").ok);
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    rig.park (one);
+
+    for (int press = 0; press < 3; ++press)
+    {
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (8);
+    }
+
+    REQUIRE (rig.received ("/lx/footer") == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.standby() == three);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (10);
+
+    CHECK (rig.received ("/lx/footer") == 1u);
+
+    const auto* again = rig.newestRunOf (release);
+    REQUIRE (again != nullptr);
+    CHECK (again->warning == std::string (cue::runWarning::leftToOperator));
+}
+
+TEST_CASE ("go.doh: a Doh of the corrected GO keeps what the first Doh left")
+{
+    DohRig rig;
+    const LightingScene scene { rig };
+
+    rig.park (scene.group);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (50);                                        // one second: the first light has gone
+    REQUIRE (rig.received ("/lx/a") == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (250);                                       // the corrected GO sends the other two
+
+    REQUIRE (rig.received ("/lx/b") == 1u);
+    REQUIRE (rig.received ("/lx/c") == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (250);
+
+    CHECK (rig.received ("/lx/a") == 1u);
+    CHECK (rig.received ("/lx/b") == 1u);
+    CHECK (rig.received ("/lx/c") == 1u);
+}
+
+TEST_CASE ("go.doh: the Doh's own persistent pass sends nothing to a device left to its operator")
+{
+    DohRig rig;
+
+    const auto section = rig.document.createPersistent (rig.listId);
+    REQUIRE (section.ok);
+    const auto bed = rig.document.createCue (section.id, 0, "osc", "Sub one up").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + bed + "/address", "/lx/sub").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + bed + "/value", "f:1").ok);
+
+    const auto eleven = rig.document.createCue (rig.listId, rig.index++, "memo", "Eleven").id;
+    const auto twelve = rig.document.createCue (rig.listId, rig.index++, "group", "Twelve").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + twelve + "/mode", "timeline").ok);
+
+    const auto stopper = rig.document.createCue (twelve, 0, "transport", "Sub one out").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + stopper + "/target", bed).ok);
+    const auto blackout = rig.document.createCue (twelve, 1, "osc", "Sub one to nought").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + blackout + "/address", "/lx/sub").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + blackout + "/value", "f:0").ok);
+
+    auto takeBack = false;
+
+    SUBCASE ("left to its operator, the default") {}
+
+    SUBCASE ("a device that takes back: the pass re-asserts, and the corrected GO sends the blackout again")
+    {
+        takeBack = true;
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+    }
+
+    const auto values = [&rig]
+    {
+        //  Everything that left has arrived (the rig's `received`).
+        REQUIRE (rig.listener.waitFor (rig.sender.sentFor (lightingDesk) + rig.sender.sentFor ("K3PV7WRB")));
+        std::vector<float> out;
+
+        for (const auto& datagram : rig.listener.all())
+        {
+            const auto decoded = osc::decode (datagram.bytes.data(), datagram.bytes.size());
+
+            if (decoded.ok && decoded.packet.address == "/lx/sub" && ! decoded.packet.args.empty())
+                out.push_back (decoded.packet.args.front().getFloat32());
+        }
+
+        return out;
+    };
+
+    rig.park (eleven);
+    REQUIRE (rig.press ("go").rejected == 0);               // eleven: its step asserts the bed
+    rig.ticks (40);
+    REQUIRE (values() == std::vector<float> { 1.0f });
+
+    REQUIRE (rig.press ("go").rejected == 0);               // twelve: the blackout, and the bed dropped
+    rig.ticks (40);
+    REQUIRE (values() == std::vector<float> { 1.0f, 0.0f });
+
+    const auto assertsBefore = [&rig]
+    {
+        const auto parsed = LogFile::parse (rig.engine.log().contents());
+        return std::count_if (parsed.records.begin(), parsed.records.end(),
+                              [] (const auto& record) { return record.command == "run.assert"; });
+    };
+
+    const auto before = assertsBefore();
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (40);
+
+    if (takeBack)
+    {
+        CHECK (assertsBefore() > before);
+        CHECK (values() == std::vector<float> { 1.0f, 0.0f, 1.0f });
+    }
+    else
+    {
+        CHECK (assertsBefore() == before);
+        CHECK (values() == std::vector<float> { 1.0f, 0.0f });
+    }
+
+    REQUIRE (rig.press ("go").rejected == 0);               // twelve, corrected
+    rig.ticks (40);
+
+    if (takeBack)
+        CHECK (values() == std::vector<float> { 1.0f, 0.0f, 1.0f, 0.0f });
+    else
+        CHECK (values() == std::vector<float> { 1.0f, 0.0f });
+}
+
+TEST_CASE ("go.doh: what was left outlives a GO on an earlier cue, and goes once the show has gone past it")
+{
+    DohRig rig;
+    const auto halfway = rig.document.createCue (rig.listId, rig.index++, "memo", "Eleven and a half").id;
+    const auto twelve = rig.makeOsc ("/lx/go", "i:12", "none");
+    const auto thirteen = rig.document.createCue (rig.listId, rig.index++, "memo", "Thirteen").id;
+
+    rig.park (twelve);                                     // eleven and a half skipped
+    REQUIRE (rig.press ("go").rejected == 0);
+    REQUIRE (rig.listener.waitFor (1));
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.standby() == twelve);
+
+    SUBCASE ("the author's own: eleven and a half, then twelve - twelve sends nothing")
+    {
+        rig.park (halfway);
+        REQUIRE (rig.press ("go").rejected == 0);
+        REQUIRE (rig.standby() == twelve);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (2);
+
+        CHECK (rig.received ("/lx/go") == 1u);
+        CHECK (rig.newestRunOf (twelve)->warning == std::string (cue::runWarning::leftToOperator));
+    }
+
+    SUBCASE ("a GO past twelve forgets it: coming back to twelve sends it")
+    {
+        rig.park (thirteen);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.park (twelve);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (2);
+
+        CHECK (rig.received ("/lx/go") == 2u);
+    }
+
+    SUBCASE ("a start cue on the GO before it fires twelve: that GO's, and it sends nothing")
+    {
+        const auto starter = rig.document.createCue (rig.listId, 0, "start", "Start twelve").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + starter + "/target", twelve).ok);
+
+        rig.park (starter);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (4);
+
+        CHECK (rig.received ("/lx/go") == 1u);
+        CHECK (rig.newestRunOf (twelve)->warning == std::string (cue::runWarning::leftToOperator));
+    }
+}
+
+TEST_CASE ("go.doh: what left is decided at the send")
+{
+    DohRig rig;
+    const auto lx = rig.makeOsc ("/lx/go", "i:12", "none");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    SUBCASE ("a value the described console's node refuses wrote nothing: the corrected GO sends again")
+    {
+        const auto refused = rig.makeOsc ("/desk/fader", "s:loud", "none");
+        rig.park (refused);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (2);
+        REQUIRE (rig.newestRunOf (refused)->state == cue::runState::failed);
+
+        REQUIRE (rig.press ("go.doh").rejected == 0);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (2);
+
+        CHECK (rig.newestRunOf (refused)->warning != std::string (cue::runWarning::leftToOperator));
+    }
+
+    SUBCASE ("the device's prefix edited between the GO and the Doh: still the device it was sent to, and its setting is read there")
+    {
+        /*  ON A DESK THAT TAKES BACK, so the two readings part: the device the
+            send went to takes back, and the cue goes again; read off the
+            address at the Doh, `/lx/go` would have named no device - `leave` -
+            and nothing would have gone. */
+        auto takeBack = false;
+
+        SUBCASE ("left to its operator") {}
+
+        SUBCASE ("taking back")
+        {
+            takeBack = true;
+            REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+        }
+
+        rig.park (lx);
+        REQUIRE (rig.press ("go").rejected == 0);
+        REQUIRE (rig.received ("/lx/go") == 1u);
+        CHECK (rig.newestRunOf (lx)->sentTo == lightingDesk);
+
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/prefix", "/lights").ok);
+
+        REQUIRE (rig.press ("go.doh").rejected == 0);
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/prefix", "/lx").ok);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (2);
+
+        CHECK (rig.received ("/lx/go") == (takeBack ? 2u : 1u));
+        CHECK (rig.newestRunOf (lx)->warning
+                 == std::string (takeBack ? "" : cue::runWarning::leftToOperator));
+    }
+
+    /*  UNTIL H4 A DOUBLE ESC DROPS NOTHING THAT IS QUEUED (namespace draft §24,
+        L31): the message the GO queued in the press's own drain still leaves
+        at the tick's flush - so it counts as sent, and the corrected GO sends
+        the desk left to its operator nothing more. Stamping it "never left"
+        ahead of H4, as the first build did, sent it a second time. */
+    SUBCASE ("a double Esc in the GO's own drain: until H4 drops the queue the message leaves, and is not sent again")
+    {
+        rig.park (lx);
+        rig.engine.submit ("cli", "go", {});
+        rig.engine.submit ("cli", "run.killAll", {});
+        rig.tickOnce();
+
+        const auto* first = rig.newestRunOf (lx);
+        REQUIRE (first != nullptr);
+        CHECK_FALSE (first->sendDropped);
+        CHECK (rig.received ("/lx/go") == 1u);
+
+        rig.ticks (3);
+        REQUIRE (rig.press ("go.doh").rejected == 0);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (2);
+
+        CHECK (rig.received ("/lx/go") == 1u);
+        CHECK (rig.newestRunOf (lx)->warning == std::string (cue::runWarning::leftToOperator));
+    }
+
+    SUBCASE ("a single Esc drops nothing: it left, and is not sent again")
+    {
+        rig.park (lx);
+        rig.engine.submit ("cli", "go", {});
+        rig.engine.submit ("cli", "run.stopAll", {});
+        rig.tickOnce();
+        REQUIRE (rig.listener.waitFor (1));
+
+        rig.ticks (3);
+        REQUIRE (rig.press ("go.doh").rejected == 0);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (2);
+
+        CHECK (rig.received ("/lx/go") == 1u);
+        CHECK (rig.newestRunOf (lx)->warning == std::string (cue::runWarning::leftToOperator));
+    }
+}
+
+TEST_CASE ("go.doh: two Dohs on one list - each cue left with the desk keeps its own entry")
+{
+    /*  WHAT WAS LEFT IS KEPT PER CUE (§24, HP): Doh! on 12, GO 11.5, Doh! on
+        11.5 too - the list's mark holds both, each living by its own cue - and
+        the corrected GOs on 11.5 and then on 12 send the desk neither again. A
+        net for a road the design asked for and no case reached. */
+    DohRig rig;
+    const auto halfway = rig.makeOsc ("/lx/half", "i:1", "none");
+    const auto twelve = rig.makeOsc ("/lx/go", "i:12", "none");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "Thirteen");
+
+    rig.park (twelve);                                     // eleven and a half skipped
+    REQUIRE (rig.press ("go").rejected == 0);
+    REQUIRE (rig.received ("/lx/go") == 1u);
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+
+    rig.park (halfway);
+    REQUIRE (rig.press ("go").rejected == 0);              // eleven and a half - too early as well
+    REQUIRE (rig.received ("/lx/half") == 1u);
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.standby() == halfway);
+
+    REQUIRE (rig.press ("go").rejected == 0);              // eleven and a half, corrected
+    REQUIRE (rig.standby() == twelve);
+    REQUIRE (rig.press ("go").rejected == 0);              // twelve, corrected
+    rig.ticks (2);
+
+    CHECK (rig.received ("/lx/half") == 1u);
+    CHECK (rig.received ("/lx/go") == 1u);
+    CHECK (rig.newestRunOf (halfway)->warning == std::string (cue::runWarning::leftToOperator));
+    CHECK (rig.newestRunOf (twelve)->warning == std::string (cue::runWarning::leftToOperator));
+}
+
+TEST_CASE ("go.doh: a jump forgets what was left with a device's operator - the next GO on the cue sends it")
+{
+    /*  A JUMP PUTS THE SHOW SOMEWHERE ELSE (§24, HP): what is due there goes
+        out, and what a Doh left with a desk's operator on that list is
+        forgotten with the GO it came from. A net for a road no case reached. */
+    DohRig rig;
+    const auto top = rig.document.createCue (rig.listId, rig.index++, "memo", "Top").id;
+    const auto lx = rig.makeOsc ("/lx/go", "i:12", "none");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    rig.park (lx);
+    REQUIRE (rig.press ("go").rejected == 0);
+    REQUIRE (rig.received ("/lx/go") == 1u);
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+
+    //  A jump to the top of the list, where nothing has fired yet.
+    REQUIRE (rig.press ("list.aim", { osc::Value::string (rig.listId), osc::Value::string (top),
+                                      osc::Value::float64 (0.0) }).rejected == 0);
+    REQUIRE (rig.press ("list.loadToTime", { osc::Value::string (rig.listId) }).rejected == 0);
+
+    rig.park (lx);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (2);
+
+    CHECK (rig.received ("/lx/go") == 2u);
+    CHECK (rig.newestRunOf (lx)->warning.empty());
 }

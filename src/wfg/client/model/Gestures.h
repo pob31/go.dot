@@ -60,6 +60,11 @@ namespace wfg::client::gesture
     Event stopAll();
     Event killAll();
 
+    /*  GO DOH! (PRD §3.32, 2026-10-01): the third level, recovery - the last
+        GO taken back, inside the show's window. Its own button, beside PANIC,
+        and its own key; one named command, as §4.11 asks, and never Undo. */
+    Event doh();
+
     /*  Where GO would act next, and where it would act before: the cue
         list's arrows. Not a selection - this list has none yet - but the
         pointer itself, which is what the page's arrows move too. */

@@ -71,6 +71,16 @@ namespace wfg::client::ui
         void resized() override;
         bool keyPressed (const juce::KeyPress& key) override;
 
+        /*  Forwarded to the transport as the presses are, so a key let go
+            reaches the one latch there is: Go Doh!'s on F9 (PRD §3.32). */
+        bool keyStateChanged (bool isKeyDown) override;
+
+        /*  AND LOOKED AT AGAIN WHEN THE FOCUS MOVES: F9 let go while another
+            window had the keys - a menu, a dialog, another application - never
+            reaches here, and the latch would swallow the next press. */
+        void focusGained (FocusChangeType cause) override;
+        void focusLost (FocusChangeType cause) override;
+
         /*  THE MENU'S OWN KEYS, asked last: what neither pane claims is
             offered to the window that owns the menu, so ctrl/⌘-N, -O and
             -shift-S reach the items they are printed beside. */

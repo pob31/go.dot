@@ -3,7 +3,9 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/model/Devices.h>
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/engine/audio/DeviceLayer.h>
@@ -19,6 +21,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #include <windows.h>
 
@@ -551,14 +554,27 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
             collect (*child);
     };
     collect (*page);
-    REQUIRE (boxes.size() == 2u);
+
+    /*  GO DOH!'S WINDOW RIGHT AFTER THE GO DEBOUNCE (the author, 2026-09-30;
+        D1): three numbers, in that order. */
+    REQUIRE (boxes.size() == 3u);
 
     auto* between = boxes[0];
-    auto* fade = boxes[1];
+    auto* doh = boxes[1];
+    auto* fade = boxes[2];
 
-    //  What a show that says nothing has: half a second, and one.
+    //  What a show that says nothing has: half a second, ten, and one.
     CHECK (between->getText().getDoubleValue() == doctest::Approx (0.5));
+    CHECK (doh->getText().getDoubleValue() == doctest::Approx (10.0));
     CHECK (fade->getText().getDoubleValue() == doctest::Approx (1.0));
+
+    doh->setText ("12,5", juce::dontSendNotification);
+    doh->onReturnKey();
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent.back().command == "node.set");
+    CHECK (rig.sent.back().args[0].getString() == "/godot/list/dohWindow");
+    CHECK (rig.sent.back().args[1].getString() == "12.5");
+    rig.sent.clear();
 
     //  A comma is a decimal point, as a French booth types it.
     between->setText ("0,4", juce::dontSendNotification);
@@ -580,10 +596,11 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     fade->onFocusLost();
     CHECK (rig.sent.size() == 2u);
 
-    //  Locked, neither can be typed into.
+    //  Locked, none can be typed into.
     REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
     panel.refresh (*rig.publish());
     CHECK_FALSE (between->isEnabled());
+    CHECK_FALSE (doh->isEnabled());
     CHECK_FALSE (fade->isEnabled());
 }
 
@@ -1089,4 +1106,149 @@ TEST_CASE ("audio settings UI: opening and rescanning cannot stop the ASIO callb
         return;
     }
     MESSAGE ("no usable device; native live-callback portion did not run");
+}
+
+//==============================================================================
+/*  GO DOH!'S SETTING ON THE DEVICE ROWS (PRD §3.32; the author, 2026-10-01, D1):
+    a Doh! cell on every network device and every MIDI port - Leave, the
+    default, or Take back, in words - and on a port the "plays sound" switch.
+    Each a `node.set` that lands at once; locked, nothing is sent. Failed before
+    D1: there were no such cells.
+
+    ONE CLICK, AT THE MIDDLE OF ONE CELL, and exactly one event from it (the
+    review, 2026-10-01): the first version walked a click in from the row's
+    right edge until some cell answered, sending the delete cross and every
+    cell on the way - so a cell sending too much, or two cells' hits trading
+    places, still passed. The words a cell paints are asserted off the rows the
+    page reads, which is where the cell takes them from. */
+namespace
+{
+    juce::ListBox* listOn (juce::Component& root)
+    {
+        if (auto* list = dynamic_cast<juce::ListBox*> (&root))
+            return list;
+
+        for (auto* child : root.getChildren())
+            if (auto* found = listOn (*child))
+                return found;
+
+        return nullptr;
+    }
+
+    /*  A click on the first row at `x`, in the list's own coordinates - which
+        is the component a row is clicked through, and the width its cells are
+        carved from. */
+    void clickAt (juce::ListBox& list, int x)
+    {
+        const auto source = juce::Desktop::getInstance().getMainMouseSource();
+        const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+        const juce::Point<float> at { static_cast<float> (x), 10.0f };
+        const auto now = juce::Time::getCurrentTime();
+
+        list.getListBoxModel()->listBoxItemClicked (0, juce::MouseEvent (source, at, left,
+            juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f,
+            &list, &list, now, at, now, 1, false));
+    }
+
+    /*  THE MIDDLES OF THE CELLS, by the pages' own carve (`cellsFor`), from the
+        right: the row's 8 px of padding, then each cell's width. Written out
+        here so a column that moves fails a case rather than a show.
+
+        The Network tab: the cross 24, the problem 150, the sent count 54, then
+        Doh! 80. The MIDI tab: the cross 24, the state 190, then Doh! 80 and
+        Sound 56. */
+    int networkDohAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 54 - 80 / 2; }
+    int midiDohAt (const juce::ListBox& list)    { return list.getWidth() - 8 - 24 - 190 - 80 / 2; }
+    int midiSoundAt (const juce::ListBox& list)  { return list.getWidth() - 8 - 24 - 190 - 80 - 56 / 2; }
+
+    /*  The one `node.set` a click sent, as address and value. */
+    std::pair<std::string, std::string> theOneSet (const std::vector<Event>& sent)
+    {
+        REQUIRE (sent.size() == 1u);
+        REQUIRE (sent.front().command == "node.set");
+        REQUIRE (sent.front().args.size() == 2u);
+        return { sent.front().args[0].getString(), sent.front().args[1].getString() };
+    }
+}
+
+TEST_CASE ("show settings UI: a network device's Doh! cell switches between leaving it to its operator and taking back")
+{
+    Rig rig;
+    REQUIRE (rig.document.createMount ("/lx", "", "QX7DESK0").ok);
+
+    const auto first = rig.publish();
+    client::ui::ShowSettingsWindow panel (rig.theme, *first,
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setSize (1400, 800);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
+
+    auto* list = listOn (*tabs->getCurrentContentComponent());
+    REQUIRE (list != nullptr);
+    REQUIRE (list->getListBoxModel()->getNumRows() == 1);
+
+    //  Absent is Leave, in words: one click on the cell asks to take back.
+    CHECK (client::model::readDevices (*first).front().dohWord() == "Leave");
+
+    clickAt (*list, networkDohAt (*list));
+    CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/mount/QX7DESK0/doh", "takeBack" });
+
+    //  And back.
+    REQUIRE (rig.document.setAttribute ("/godot/mount/QX7DESK0/doh", "takeBack").ok);
+    const auto taking = rig.publish();
+    panel.refresh (*taking);
+    CHECK (client::model::readDevices (*taking).front().dohWord() == "Take back");
+
+    rig.sent.clear();
+    clickAt (*list, networkDohAt (*list));
+    CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/mount/QX7DESK0/doh", "leave" });
+
+    //  Locked, a click sends nothing.
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+    rig.sent.clear();
+    clickAt (*list, networkDohAt (*list));
+    CHECK (rig.sent.empty());
+}
+
+TEST_CASE ("show settings UI: a MIDI port says whether it plays sound and what Go Doh! does with it")
+{
+    Rig rig;
+    const auto made = rig.document.createPort ("Keys");
+    REQUIRE (made.ok);
+
+    const auto first = rig.publish();
+    client::ui::ShowSettingsWindow panel (rig.theme, *first,
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setSize (1400, 800);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("MIDI"));
+
+    auto* list = listOn (*tabs->getCurrentContentComponent());
+    REQUIRE (list != nullptr);
+    REQUIRE (list->getListBoxModel()->getNumRows() == 1);
+
+    //  Sound reads OFF and Doh! reads Leave until somebody says otherwise.
+    const auto ports = client::model::readPorts (*first);
+    REQUIRE (ports.size() == 1u);
+    CHECK_FALSE (ports.front().audible);
+    CHECK (ports.front().dohWord() == "Leave");
+
+    clickAt (*list, midiDohAt (*list));
+    CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/port/" + made.id + "/doh", "takeBack" });
+
+    rig.sent.clear();
+    clickAt (*list, midiSoundAt (*list));
+    CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/port/" + made.id + "/audible", "true" });
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+    rig.sent.clear();
+    clickAt (*list, midiSoundAt (*list));
+    clickAt (*list, midiDohAt (*list));
+    CHECK (rig.sent.empty());
 }

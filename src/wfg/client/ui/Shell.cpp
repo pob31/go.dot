@@ -257,4 +257,23 @@ namespace wfg::client::ui
         return cues.keyPressed (key) || transport.keyPressed (key)
             || (menuKeys != nullptr && menuKeys (key));
     }
+
+    bool Shell::keyStateChanged (bool isKeyDown)
+    {
+        /*  THE FOCUS RESTS HERE, so a key's release arrives here and not at
+            the transport, which holds the latch a held F9 is filtered by. */
+        return transport.keyStateChanged (isKeyDown);
+    }
+
+    /*  A RELEASE NOBODY HERE SAW: the transport asks the keyboard whether F9
+        is still down, and opens its latch when it is not. */
+    void Shell::focusGained (FocusChangeType)
+    {
+        transport.keyStateChanged (false);
+    }
+
+    void Shell::focusLost (FocusChangeType)
+    {
+        transport.keyStateChanged (false);
+    }
 }

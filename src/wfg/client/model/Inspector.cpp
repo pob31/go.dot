@@ -91,8 +91,11 @@ namespace wfg::client::model
                                "stopWhenDone" } },
                 { "transport", { "target", "verb", "range", "curve" } },
                 { "start",   { "target" } },
-                { "osc",     { "device", "address", "value", "wait", "timeout" } },
-                { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait" } },
+                /*  WHAT GO DOH! DOES WITH WHAT IT SENT last on both (PRD §3.32,
+                    2026-10-01): a question about after the send, so it comes
+                    after everything the send itself is. */
+                { "osc",     { "device", "address", "value", "wait", "timeout", "doh" } },
+                { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait", "doh" } },
 
                 /*  `takeover` BESIDE `mode`, because it is a question only a
                     sampler group is asked and the answer to `mode` is what
@@ -130,6 +133,7 @@ namespace wfg::client::model
                 { "rateMode", "speed mode" },
                 { "levelOn", "moves level" },
                 { "rateOn", "moves speed" },
+                { "doh", "on Doh!" },
             };
 
             return table;
@@ -391,6 +395,61 @@ namespace wfg::client::model
 
                 field.control = Control::portRef;
                 field.choices = portChoices (ports);
+                return;
+            }
+        }
+
+        /*  WHAT GO DOH! DOES WITH WHAT THIS CUE SENT (PRD §3.32; the author,
+            2026-10-01: "a default per device that can be overriden at cue
+            level"), in words. The row stays the enum the node declares -
+            `device`, `takeBack`, `leave`, written as they are - and the menu
+            says what each means, the first naming what the cue's device says
+            NOW: an OSC cue's by its address, through `deviceOf` - the engine's
+            own resolver, longest prefix and the smallest identifier on a tie -
+            and a MIDI cue's by its port. Read as the engine reads it: only the
+            exact word takes back, and no device leaves. The words are the
+            implementer's; the author rewords at first look. */
+        void wordTheDoh (const tree::TreeSnapshot& snapshot, const std::string& kind,
+                         std::vector<Field>& decided)
+        {
+            const auto valueOf = [&decided] (const char* name)
+            {
+                for (const auto& field : decided)
+                    if (field.name == name)
+                        return field.value;
+
+                return std::string {};
+            };
+
+            for (auto& field : decided)
+            {
+                if (field.name != "doh" || ! field.writable)
+                    continue;
+
+                auto deviceTakesBack = false;
+
+                if (kind == "osc")
+                {
+                    const auto devices = readDevices (snapshot);
+                    const auto deviceId = deviceOf (valueOf ("address"), devices);
+
+                    for (const auto& row : devices)
+                        if (row.id == deviceId)
+                            deviceTakesBack = row.doh == "takeBack";
+                }
+                else
+                {
+                    const auto portId = valueOf ("port");
+
+                    for (const auto& row : readPorts (snapshot))
+                        if (row.id == portId)
+                            deviceTakesBack = row.doh == "takeBack";
+                }
+
+                field.choices = { { "device", deviceTakesBack ? "as the device (take back)"
+                                                               : "as the device (leave)" },
+                                  { "takeBack", "take back" },
+                                  { "leave", "leave to its operator" } };
                 return;
             }
         }
@@ -815,6 +874,9 @@ namespace wfg::client::model
             aimAtAPort (snapshot, decided);
             nameTheNumbers (decided);
         }
+
+        if (out.kind == "osc" || out.kind == "midi")
+            wordTheDoh (snapshot, out.kind, decided);
 
         if (out.kind == "fade")
             greyWhatAFadeLeavesAlone (decided);

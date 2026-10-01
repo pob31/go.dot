@@ -104,7 +104,7 @@ namespace wfg::client
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
-            menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate
+            menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh
         };
 
         class Window final : public wfg::Client,
@@ -127,6 +127,11 @@ namespace wfg::client
                     tick thread applies it in arrival order like a datagram. */
                 actions.go              = [this] { send (gesture::go()); leaveLoadToTime(); };
                 actions.panic           = [this] { panic(); };
+
+                /*  GO DOH! (PRD §3.32): the command and nothing else - no
+                    notice, which would stand in front of the engine's refusal
+                    when there is one, and the refusal is the news. */
+                actions.doh             = [this] { send (gesture::doh()); };
                 actions.undo            = [this] { send (gesture::undo()); };
                 actions.redo            = [this] { send (gesture::redo()); };
                 actions.save            = [this] { save(); };
@@ -659,6 +664,11 @@ namespace wfg::client
                     case menuWaveform:  return { 'w', mod, 0 };
                     case menuUndoHistory: return { 'u', mod | shift, 0 };
                     case menuRecord:     return { 'r', mod | shift, 0 };
+
+                    /*  F9 FOR GO DOH! (PRD §3.32), printed here and answered by
+                        the transport, which Shell::keyPressed asks first: it
+                        holds the latch that makes a held F9 one Doh!. */
+                    case menuGoDoh:      return { juce::KeyPress::F9Key, 0, 0 };
                     /*  No accelerator: these are reached through the menu only.
                         The surfaces window takes the number keys for its pads
                         once it is open, and needs no key of its own to open. */
@@ -712,6 +722,11 @@ namespace wfg::client
                     case menuUndoHistory: return unlocked;
                     case menuRecord:     return model::isYes (last.recording) ? unlocked : true;
                     case menuShowSettings: return true;
+
+                    /*  ALWAYS: under the lock - taking back a GO is running the
+                        show, not editing it - and whether there is a GO it can
+                        take back is the engine's to say, in its own sentence. */
+                    case menuGoDoh:      return true;
 
                     /*  OFFERED UNDER THE LOCK TOO: riding a fader and pressing a
                         pad are playing the show, not editing it. */
@@ -799,6 +814,10 @@ namespace wfg::client
                 {
                     addMenuItem (menu, menuLock, model::isYes (last.locked) ? "Unlock the show"
                                                                             : "Lock the show");
+
+                    /*  GO DOH! BESIDE THE LOCK, the two things here an operator
+                        reaches for during a show rather than before it. */
+                    addMenuItem (menu, menuGoDoh, "Go Doh! - take back the last GO");
                     menu.addSeparator();
                     addMenuItem (menu, menuLoadToTime, loadingToTime ? "Stop loading to time"
                                                                      : "Load to time...");
@@ -850,6 +869,7 @@ namespace wfg::client
                     case menuSelectAll: selection.all (show.rows()); inspectNow(); break;
                     case menuDeleteCue: removeChosen(); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
+                    case menuGoDoh:     send (gesture::doh()); break;
                     case menuLoadToTime: toggleLoadToTime(); break;
                     case menuUndoHistory: toggleUndoHistory(); break;
                     case menuWaveform:  toggleWaveform(); break;

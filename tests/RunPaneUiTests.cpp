@@ -11,7 +11,9 @@
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
+#include <wfg/client/ui/Shell.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
+#include <wfg/client/ui/TransportComponent.h>
 #include <wfg/client/ui/NewCueBarComponent.h>
 #include <wfg/client/ui/NewCueMenu.h>
 #include <wfg/client/ui/Look.h>
@@ -3030,4 +3032,88 @@ TEST_CASE ("network monitor: opening listens, shutting stops, and the filters ch
     CHECK_FALSE (heard.back());
     CHECK_FALSE (window.listening());
     CHECK (window.lineCount() == keptBefore);
+}
+
+//==============================================================================
+/*  GO DOH! ON THE TRANSPORT (PRD §3.32; the author, 2026-09-30, D1): its own
+    button, directly to the left of PANIC on GO's row, and its own key, F9 -
+    one press however long it is held. Both failed before D1: there was no such
+    button, and nothing answered F9. */
+TEST_CASE ("transport: Doh! sits directly left of PANIC on GO's row, and a click is a Doh! and nothing else")
+{
+    auto goes = 0, panics = 0, dohs = 0;
+
+    ui::TransportComponent::Actions actions;
+    actions.go = [&goes] { ++goes; };
+    actions.panic = [&panics] { ++panics; };
+    actions.doh = [&dohs] { ++dohs; };
+
+    ui::TransportComponent transport (model::Theme {}, actions);
+    transport.setSize (1200, transport.preferredHeight());
+
+    juce::TextButton* go = nullptr;
+    juce::TextButton* panic = nullptr;
+    juce::TextButton* doh = nullptr;
+
+    for (auto* child : transport.getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*> (child))
+        {
+            if (button->getButtonText() == "GO")                 go = button;
+            if (button->getButtonText() == "PANIC")              panic = button;
+            if (button->getButtonText().startsWith ("Doh!"))     doh = button;
+        }
+
+    REQUIRE (go != nullptr);
+    REQUIRE (panic != nullptr);
+    REQUIRE (doh != nullptr);
+
+    const auto d = doh->getBounds();
+    const auto p = panic->getBounds();
+
+    CHECK (d.getY() == p.getY());
+    CHECK (d.getHeight() == p.getHeight());
+    CHECK (d.getRight() <= p.getX());
+    CHECK (p.getX() - d.getRight() <= 4);
+    CHECK (d.getX() > go->getBounds().getRight());
+
+    //  Nothing in the gap between them.
+    const juce::Rectangle<int> gap { d.getRight(), d.getY(), p.getX() - d.getRight(), d.getHeight() };
+
+    for (auto* child : transport.getChildren())
+        if (child != doh && child != panic && child->isVisible() && ! gap.isEmpty())
+            CHECK_FALSE (child->getBounds().intersects (gap));
+
+    doh->onClick();
+    CHECK (dohs == 1);
+    CHECK (goes == 0);
+    CHECK (panics == 0);
+}
+
+TEST_CASE ("transport: F9 held sends one Doh!, through the Shell as the window delivers keys")
+{
+    auto dohs = 0;
+
+    ui::TransportComponent::Actions actions;
+    actions.doh = [&dohs] { ++dohs; };
+
+    ui::Shell shell (model::Theme {}, actions, {}, {}, {}, {}, {}, {}, {});
+
+    //  Held: the key repeats, and one Doh! goes.
+    CHECK (shell.keyPressed (juce::KeyPress (juce::KeyPress::F9Key)));
+    CHECK (shell.keyPressed (juce::KeyPress (juce::KeyPress::F9Key)));
+    CHECK (dohs == 1);
+
+    //  Let go, and pressed again: a second.
+    shell.keyStateChanged (false);
+    CHECK (shell.keyPressed (juce::KeyPress (juce::KeyPress::F9Key)));
+    CHECK (dohs == 2);
+
+    /*  LET GO SOMEWHERE ELSE: the release went to another window - a menu, a
+        dialog, another application - and never reached the Shell. The latch is
+        looked at again when the focus comes back, F9 up by then, so the next
+        press is not swallowed (the review, 2026-10-01). */
+    shell.focusLost (juce::Component::focusChangedDirectly);
+    shell.focusGained (juce::Component::focusChangedDirectly);
+    CHECK (shell.keyPressed (juce::KeyPress (juce::KeyPress::F9Key)));
+    CHECK (dohs == 3);
 }

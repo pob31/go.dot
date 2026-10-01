@@ -32,6 +32,7 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -39,6 +40,7 @@
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/midi/PortTable.h>
 
@@ -615,6 +617,97 @@ TEST_CASE ("midi cue: a port nothing was bound to fails the run and not the load
     CHECK (runs.all().front().state == cue::runState::failed);
 }
 
+TEST_CASE ("midi cue: a port switched off sends nothing, and its run ends saying not-sent")
+{
+    /*  THE PROMISE THE PORT'S ROW HAS MADE ALL ALONG (2026-10-01, J3, namespace
+        draft §23.7): "Off, the cue still runs and finishes carrying the warning
+        not-sent, exactly as a network device's tx does". A network device kept
+        it; a MIDI port did not, and a cue on a bound port switched off went out
+        on the cable. Go Doh! asks whether a MIDI cue reached a synth, and a port
+        that sends whatever its switch says would answer that wrongly. */
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (41);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    RecordingSink sink;
+    runner.setMidiSink (&sink);
+
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    const auto listId = document.createList ("Show").id;
+    const auto cueId = document.createCue (listId, 0, "midi", "House lights").id;
+    const auto portId = declarePort (document, "Lights");
+
+    REQUIRE_FALSE (cueId.empty());
+    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/port", portId).ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/type", "programChange").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/data1", "12").ok);
+
+    const auto fireAndSettle = [&]
+    {
+        REQUIRE (engine.submit (origin::cli, "cue.fire", { osc::Value::string (cueId) }));
+        engine.processTick (0);
+
+        runner.beforeTick (engine, 1);
+        engine.processTick (1);
+
+        REQUIRE (runs.all().size() == 1u);
+        return runs.all().front();
+    };
+
+    SUBCASE ("off: nothing reaches the cable, and the run ends done carrying not-sent")
+    {
+        REQUIRE (document.setAttribute ("/godot/port/" + portId + "/tx", "false").ok);
+
+        const auto run = fireAndSettle();
+
+        CHECK (sink.sent.empty());
+        CHECK (run.state == cue::runState::done);
+        CHECK (run.warning == cue::runWarning::notSent);
+        CHECK (run.error.empty());
+    }
+
+    SUBCASE ("on, said: one message, and no warning")
+    {
+        REQUIRE (document.setAttribute ("/godot/port/" + portId + "/tx", "true").ok);
+
+        const auto run = fireAndSettle();
+
+        CHECK (sink.sent.size() == 1u);
+        CHECK (run.state == cue::runState::done);
+        CHECK (run.warning.empty());
+    }
+
+    SUBCASE ("on, unsaid - the row's default: one message, and no warning")
+    {
+        const auto run = fireAndSettle();
+
+        CHECK (sink.sent.size() == 1u);
+        CHECK (run.state == cue::runState::done);
+        CHECK (run.warning.empty());
+    }
+
+    SUBCASE ("a message that cannot be built still fails bad-message on a port switched off")
+    {
+        /*  As a network cue's failed write comes before its `tx` test: what
+            is wrong with the cue is said whatever the switch says. */
+        REQUIRE (document.setAttribute ("/godot/port/" + portId + "/tx", "false").ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/type", "sysex").ok);
+
+        const auto run = fireAndSettle();
+
+        CHECK (sink.sent.empty());
+        CHECK (run.state == cue::runState::failed);
+        CHECK (run.error == cue::runError::badMessage);
+    }
+}
+
 TEST_CASE ("midi cue: a show that asks to be verified is refused when it is read")
 {
     /*  There is no read-back on a MIDI cable, so nothing would ever answer and
@@ -848,4 +941,207 @@ TEST_CASE ("midi: a port changed while the show runs is put on its device then, 
         REQUIRE (done.size() == 1u);
         CHECK (done.front().binding.problem.find ("second try") != std::string::npos);
     }
+}
+
+//==============================================================================
+/*  GO DOH! AND MIDI (PRD §3.32, namespace draft §24; the author, 2026-10-01).
+
+    Two things the show says about a port, read from the document: whether it
+    PLAYS SOUND - a synth, not a desk - which makes a scene that sent to it
+    heard, and so paused rather than handed back; and its Go Doh! setting, which
+    leaves what reached it to its operator unless it says take back. Each case
+    failed before D1: `go.doh` was an unknown command, and neither row existed. */
+namespace
+{
+    struct MidiDohRig
+    {
+        MidiDohRig()
+        {
+            engine.log().openInMemory ({});
+            runner.setMidiSink (&sink);
+
+            doc::registerDocumentCommands (engine.commands(), document);
+            cue::registerCueCommands (engine.commands(), document, focus);
+            cue::registerRunCommands (engine.commands(), runs);
+            cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+            listId = document.createList ("Show").id;
+            port = declarePort (document, "Keys");
+            REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
+        }
+
+        std::string midiCue (const std::string& parent, int index)
+        {
+            const auto id = document.createCue (parent, index, "midi", "Note").id;
+            REQUIRE (document.setAttribute ("/godot/cue/" + id + "/port", port).ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + id + "/type", "programChange").ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + id + "/data1", "5").ok);
+            return id;
+        }
+
+        void tickOnce()
+        {
+            runner.beforeTick (engine, tick);
+            engine.processTick (tick++);
+        }
+
+        Engine::TickResult press (const char* command)
+        {
+            engine.submit ("cli", command, {});
+            runner.beforeTick (engine, tick);
+            return engine.processTick (tick++);
+        }
+
+        void park (const std::string& cueId)
+        {
+            REQUIRE (document.setAttribute (cue::standbyAddressOf (listId), cueId).ok);
+            tickOnce();
+        }
+
+        std::size_t revocations()
+        {
+            const auto parsed = LogFile::parse (engine.log().contents());
+            return static_cast<std::size_t> (std::count_if (parsed.records.begin(), parsed.records.end(),
+                                                            [] (const auto& record) { return record.command == "run.revoke"; }));
+        }
+
+        const cue::Run* newestRunOf (const std::string& cueId) const
+        {
+            const cue::Run* out = nullptr;
+
+            for (const auto& run : runs.all())
+                if (run.cue == cueId)
+                    out = &run;
+
+            return out;
+        }
+
+        Engine engine;
+        doc::ShowDocument document;
+        cue::RunTable runs;
+        cue::Focus focus;
+        doc::IdRegistry runIds = doc::IdRegistry::withSeed (43);
+        cue::Runner runner { document, runs, runIds, focus };
+        RecordingSink sink;
+
+        std::string listId, port;
+        std::int64_t tick = 0;
+    };
+}
+
+TEST_CASE ("go.doh: a MIDI cue to a port that plays sound makes its scene heard; to any other port it does not")
+{
+    MidiDohRig rig;
+
+    const auto scene = rig.document.createCue (rig.listId, 0, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    rig.midiCue (scene, 0);
+    const auto wait = rig.document.createCue (scene, 1, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + wait + "/preWait", "10").ok);
+
+    auto heard = false;
+    auto txOff = false;
+
+    SUBCASE ("plays sound: heard, so its job ends it, nothing given back")
+    {
+        heard = true;
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/audible", "true").ok);
+    }
+
+    SUBCASE ("plays sound, and the port's own Go Doh! setting says take back: still heard")
+    {
+        heard = true;
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/audible", "true").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+    }
+
+    SUBCASE ("does not play sound: not heard, so the scene is given back") {}
+
+    SUBCASE ("plays sound but switched off: nothing left the machine, so nothing was heard")
+    {
+        txOff = true;
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/audible", "true").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/tx", "false").ok);
+    }
+
+    rig.park (scene);
+    REQUIRE (rig.press ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.sink.sent.size() == (txOff ? 0u : 1u));
+
+    const auto sceneRun = rig.newestRunOf (scene)->id;
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (sceneRun)->isFinished());
+    CHECK (rig.revocations() == (heard ? 0u : 1u));
+}
+
+TEST_CASE ("go.doh: a MIDI port left to its operator gets the cue once in all")
+{
+    MidiDohRig rig;
+    const auto note = rig.midiCue (rig.listId, 0);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    rig.park (note);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.sink.sent.size() == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (rig.sink.sent.size() == 1u);
+    CHECK (rig.newestRunOf (note)->warning == std::string (cue::runWarning::leftToOperator));
+}
+
+TEST_CASE ("go.doh: a MIDI port that takes back gets the cue again from the corrected GO")
+{
+    MidiDohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+
+    const auto note = rig.midiCue (rig.listId, 0);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    rig.park (note);
+    REQUIRE (rig.press ("go").rejected == 0);
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+
+    CHECK (rig.sink.sent.size() == 2u);
+    CHECK (rig.newestRunOf (note)->warning.empty());
+}
+
+TEST_CASE ("go.doh: a MIDI cue that found no port sent nothing, so the corrected GO sends it")
+{
+    MidiDohRig rig;
+    const auto note = rig.midiCue (rig.listId, 0);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    //  Bound to nothing of this port's at the early GO: `no-port`.
+    rig.sink.bound = "SOMEWHERE";
+
+    rig.park (note);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.newestRunOf (note)->error == cue::runError::noPort);
+    REQUIRE (rig.sink.sent.empty());
+
+    //  The cable plugged back in - the live rebind - before the corrected GO.
+    rig.sink.bound = rig.port;
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+
+    CHECK (rig.sink.sent.size() == 1u);
+    CHECK (rig.newestRunOf (note)->warning.empty());
 }

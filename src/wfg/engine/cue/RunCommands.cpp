@@ -64,7 +64,7 @@ namespace wfg::cue
                         "The sound started. Reported by the audio side on the tick it was observed.",
                         { { "run", 's', false } },
                         false,
-                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             auto* run = runs.find (args[0].getString());
 
@@ -74,7 +74,21 @@ namespace wfg::cue
                             /*  Applied and ignored once it has finished, so a
                                 report in flight when a stop landed cannot undo
                                 the stop. */
-                            if (! run->isFinished())
+                            if (run->isFinished())
+                                return Outcome::ok (args);
+
+                            /*  WHEN IT WAS FIRST HEARD (2026-10-01, PRD §3.32): Go
+                                Doh! asks whether anything a GO started has
+                                reached the room, and this record is the answer -
+                                logged, so a replay answers the same. Kept on every
+                                launch, a seek's included. */
+                            run->startedAtTick = context.tick;
+
+                            /*  AND A RUN GO DOH! TOOK BACK STAYS ON ITS WAY OUT:
+                                a launch placed in the very tick of the Doh is
+                                reported after it, and must not hand the run back
+                                to `playing` under the fade taking it down. */
+                            if (! run->takenBack)
                                 run->state = runState::playing;
 
                             return Outcome::ok (args);
@@ -97,6 +111,15 @@ namespace wfg::cue
                                 "done" would throw away the only account of what
                                 went wrong. */
                             if (run->state == runState::failed)
+                                return Outcome::ok (args);
+
+                            /*  A GROUP GO DOH! BROUGHT BACK TO LIFE IN THIS VERY
+                                TICK (2026-10-01, namespace draft §24): its job
+                                decided its end before the Doh, on the state the
+                                Doh has just undone, and the record drains after
+                                it. Applied and ignored, by the tick the log keeps,
+                                so a replay ignores exactly the same one. */
+                            if (run->isGroup() && run->unadoptedAt >= 0 && run->unadoptedAt == context.tick)
                                 return Outcome::ok (args);
 
                             /*  ENDED IS NOT DONE WHEN THERE IS A POST-WAIT.
@@ -124,7 +147,11 @@ namespace wfg::cue
                                 slots and its scene for a whole post-wait more,
                                 and began one for a cue killed before it had
                                 even fired. */
-                            if (run->postWaitTicks > 0 && ! run->isWaiting() && ! run->skipFooter)
+                            /*  AND NOT FOR A RUN GO DOH! TOOK BACK: a Doh is a
+                                pause, not an end, and a taken-back cue owes no
+                                post-wait to anything waiting on it. */
+                            if (run->postWaitTicks > 0 && ! run->isWaiting() && ! run->skipFooter
+                                  && ! run->takenBack)
                             {
                                 run->state = runState::postWait;
                                 run->dueTick = context.tick + run->postWaitTicks;
@@ -311,6 +338,11 @@ namespace wfg::cue
                                 Idempotent where it costs nothing, like every
                                 other report here. */
                             if (run->isFinished())
+                                return Outcome::ok (args);
+
+                            /*  Or on a group Go Doh! brought back to life in this
+                                very tick (`run.ended`'s reason). */
+                            if (run->isGroup() && run->unadoptedAt >= 0 && run->unadoptedAt == context.tick)
                                 return Outcome::ok (args);
 
                             run->state = runState::done;
@@ -524,7 +556,7 @@ namespace wfg::cue
                                 return Outcome::ok (args);
                             }
 
-                            run->state = runState::stopping;
+                            run->askStop (0);
                             return Outcome::ok (args);
                         } });
 
@@ -563,7 +595,7 @@ namespace wfg::cue
                                 releases what it was holding. */
                             run->skipFooter = true;
                             run->killed = true;
-                            run->state = runState::stopping;
+                            run->askStop (0);
                             return Outcome::ok (args);
                         } });
 
@@ -636,7 +668,8 @@ namespace wfg::cue
 
             AN EMPTY TABLE IS APPLIED AND DOES NOTHING. Esc on a silent show is
             not a mistake, and the hand that pressed it needs no error to read.
-            The third level, Go Doh!, stays deferred in the law itself.
+            The third level, Go Doh!, is `go.doh` (PRD §3.32, 2026-10-01): it
+            takes back the last GO and stops nothing else.
 
             THE RUNNER SPECIALISES BOTH (2026-09-28, `registerGoCommands`): Esc
             fades what is sounding over the show's `audio/panicFade` before the
@@ -693,7 +726,7 @@ namespace wfg::cue
                 if (immediate)
                     run->skipFooter = true;
 
-                run->state = runState::stopping;
+                run->askStop (0);
             }
         }
     }

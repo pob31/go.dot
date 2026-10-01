@@ -1363,6 +1363,13 @@ namespace wfg::tree
                 {
                     const doc::Attribute attribute { "Lists", row };
                     const auto name = std::string (row->name);
+
+                    /*  WHAT GO DOH! WOULD TAKE BACK (2026-10-01) is what the
+                        machine is doing, not the show: the runtime half
+                        publishes it, every tick. */
+                    if (name == "doh")
+                        continue;
+
                     const auto text = name == "order" ? orderOf (container)
                                                       : storedText (attribute, container);
 
@@ -2966,6 +2973,15 @@ namespace wfg::tree
                 runtime.push_back (makeLeaf (base + "/solve", *row, solves[listId]));
             }
         }
+
+        /*  WHAT GO DOH! WOULD TAKE BACK (PRD §3.32, 2026-10-01): the list the
+            last GO moved, the cue it fired and its tick, or nothing - one node
+            for the engine, beside `/godot/list/focus`, because the Doh acts on
+            the list of the last GO whichever list has the focus. */
+        if (const auto* row = rowNamed ("lists", "doh"))
+            runtime.push_back (makeLeaf (std::string (godot) + "/list/doh", *row,
+                                         lists != nullptr ? cue::spellDohOffer (lists->dohOffer())
+                                                          : std::string {}));
 
         /*  HOW FAR AHEAD EACH CUE HAS BEEN GOT READY.
 

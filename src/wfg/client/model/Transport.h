@@ -109,6 +109,23 @@ namespace wfg::client::model
         /** `/godot/document/revision`: 0 before the first publish, never 0 after it. */
         std::uint64_t revision = 0;
 
+        /*  GO DOH! (PRD §3.32, 2026-10-01): `/godot/list/doh` as the engine
+            spells it - "<list> <cue> <tick>" of the GO it would take back, or
+            empty - the number (or the name) of that cue, and the show's
+            `/godot/list/dohWindow` in seconds. */
+        std::string doh;
+        std::string dohCue;
+        std::string dohWindow;
+
+        /*  WHAT THE DOH! BUTTON SAYS: "Doh! 12" while the last GO is still
+            inside the window - read off the engine's own tick - and "Doh!"
+            otherwise, so the operator sees which GO a press would take back. */
+        std::string dohCaption() const;
+
+        /*  The window, in seconds: the snapshot's, the schema's ten when it has
+            not said, never below nought - which is Doh! switched off. */
+        double dohWindowSeconds() const;
+
         //======================================================================
         /*  THE SENTENCES, made here rather than beside the labels that show
             them, because what a reading MEANS is the model's answer and where

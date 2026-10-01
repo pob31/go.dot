@@ -117,6 +117,15 @@ namespace wfg::cue
             `runWarning::notSent`. */
         bool notSent = false;
 
+        /*  NOTHING LEFT THE MACHINE, because what this cue sends had already
+            reached a device left to its operator under a GO that Go Doh! took
+            back (2026-10-01, namespace draft §24): the run is `sendsLeft`.
+            Nothing is written to the tree and nothing is queued - the device
+            holds what the early GO sent, or what its operator has made of it -
+            and the run ends DONE carrying `left-to-operator`, the way a
+            `notSent` job ends. A MIDI cue's job is one of these too. */
+        bool left = false;
+
         /*  READ BEFORE WRITE: the state a PREPARED network cue starts in.
 
             PRD §3.12's anticipation only works if it can be undone, and §13.1

@@ -1281,6 +1281,8 @@ namespace wfg::client::ui
                                                                && a.outputDevice == b.outputDevice
                                                                && a.inputDevice == b.inputDevice
                                                                && a.rx == b.rx && a.tx == b.tx
+                                                               && a.audible == b.audible
+                                                               && a.doh == b.doh
                                                                && a.bound == b.bound
                                                                && a.problem == b.problem;
                                                        });
@@ -1336,9 +1338,9 @@ namespace wfg::client::ui
                 g.setColour (Look::colour (theme, "ink-off"));
 
                 const auto cells = cellsFor (heading.withWidth (rowWidth()));
-                const char* names[] { "Port", "Sends on", "Listens to", "Rx", "Tx", "State" };
+                const char* names[] { "Port", "Sends on", "Listens to", "Rx", "Tx", "Sound", "Doh!", "State" };
 
-                for (auto at = 0; at < 6; ++at)
+                for (auto at = 0; at < 8; ++at)
                     g.drawText (names[at], cells[static_cast<std::size_t> (at)],
                                 juce::Justification::centredLeft);
             }
@@ -1356,34 +1358,50 @@ namespace wfg::client::ui
 
             /*  One carve for the painter and the hit test, so a click cannot
                 land somewhere the eye says is another column. */
-            static std::array<juce::Rectangle<int>, 7> cellsFor (juce::Rectangle<int> row)
+            /*  AND, AFTER TX, WHAT GO DOH! ASKS OF THE PORT (PRD §3.32; the
+                author, 2026-10-01): whether it plays sound - a synth, not a
+                desk, so a MIDI cue sent here makes its scene heard - and what a
+                Doh! does with what was sent here. Taken from the name. */
+            static std::array<juce::Rectangle<int>, 9> cellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
                 const auto cross = area.removeFromRight (24);
                 const auto state = area.removeFromRight (190);
+                const auto doh = area.removeFromRight (80);
+                const auto sound = area.removeFromRight (56);
                 const auto tx = area.removeFromRight (42);
                 const auto rx = area.removeFromRight (42);
                 const auto listens = area.removeFromRight (210);
                 const auto sends = area.removeFromRight (210);
 
-                return { area, sends, listens, rx, tx, state, cross };
+                return { area, sends, listens, rx, tx, sound, doh, state, cross };
             }
 
-            enum class Cell { name, sends, listens, rx, tx, state, cross };
+            enum class Cell { name, sends, listens, rx, tx, sound, doh, state, cross };
 
             static Cell cellAt (int x, int width)
             {
                 const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
                 const Cell order[] { Cell::name, Cell::sends, Cell::listens,
-                                     Cell::rx, Cell::tx, Cell::state, Cell::cross };
+                                     Cell::rx, Cell::tx, Cell::sound, Cell::doh, Cell::state, Cell::cross };
 
-                for (auto at = 0; at < 7; ++at)
+                for (auto at = 0; at < 9; ++at)
                     if (x >= cells[static_cast<std::size_t> (at)].getX()
                           && x < cells[static_cast<std::size_t> (at)].getRight())
                         return order[at];
 
                 return Cell::state;
+            }
+
+            /*  WHAT THE TWO GO DOH! CELLS MEAN, on the row: the list has no
+                tooltip per cell, and these are the two a person cannot guess. */
+            juce::String getTooltipForRow (int) override
+            {
+                return "Sound: a MIDI cue sent here makes its scene heard for Go Doh! - a synth, not a desk. "
+                       "Doh!: what Go Doh! does with what a cue sent here. Leave (the default): it is the "
+                       "device's operator's - nothing put back, nothing sent again. Take back: sent again "
+                       "by the corrected GO.";
             }
 
             int getNumRows() override { return static_cast<int> (rows.size()); }
@@ -1419,25 +1437,30 @@ namespace wfg::client::ui
                                                       : juce::String (entry.inputDevice),
                             cells[2], juce::Justification::centredLeft, true);
 
-                for (auto at = 0; at < 2; ++at)
+                for (auto at = 0; at < 3; ++at)
                 {
-                    const auto on = at == 0 ? entry.rx : entry.tx;
+                    const auto on = at == 0 ? entry.rx : at == 1 ? entry.tx : entry.audible;
 
                     g.setColour (Look::colour (theme, on ? "ink" : "ink-off"));
                     g.drawText (on ? "ON" : "OFF", cells[static_cast<std::size_t> (3 + at)],
                                 juce::Justification::centredLeft);
                 }
 
+                /*  GO DOH!'S SETTING IN WORDS (4.8): Leave, the default, or
+                    Take back. */
+                g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-dim"));
+                g.drawText (juce::String (entry.dohWord()), cells[6], juce::Justification::centredLeft, true);
+
                 /*  THE STATE IN WORDS, and the sentence when there is one -
                     never a colour on its own (4.8). */
                 g.setColour (Look::colour (theme, entry.problem.empty() ? "ink-dim" : "failed"));
                 g.drawText (juce::String (entry.problem.empty() ? entry.stateWord() : entry.problem),
-                            cells[5], juce::Justification::centredLeft, true);
+                            cells[7], juce::Justification::centredLeft, true);
 
                 if (! locked)
                 {
                     g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[6],
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[8],
                                 juce::Justification::centred);
                 }
             }
@@ -1457,6 +1480,8 @@ namespace wfg::client::ui
                     case Cell::cross:   send (gesture::deleteObject (entry.id)); return;
                     case Cell::rx:      send (gesture::setNode (base + "rx", entry.rx ? "false" : "true")); return;
                     case Cell::tx:      send (gesture::setNode (base + "tx", entry.tx ? "false" : "true")); return;
+                    case Cell::sound:   send (gesture::setNode (base + "audible", entry.audible ? "false" : "true")); return;
+                    case Cell::doh:     send (gesture::setNode (base + "doh", entry.doh == "takeBack" ? "leave" : "takeBack")); return;
                     case Cell::name:    renameAt (row, width); return;
                     case Cell::sends:   chooseAt (row, width, true); return;
                     case Cell::listens: chooseAt (row, width, false); return;
@@ -1712,6 +1737,7 @@ namespace wfg::client::ui
                                                                && a.prefix == b.prefix
                                                                && a.host == b.host && a.port == b.port
                                                                && a.rx == b.rx && a.tx == b.tx
+                                                               && a.doh == b.doh
                                                                && a.sent == b.sent
                                                                && a.problem == b.problem;
                                                        });
@@ -1786,9 +1812,9 @@ namespace wfg::client::ui
                 auto cells = cellsFor (heading.withWidth (rowWidth()));
 
                 const char* names[] { "Name", "Prefix", "IPv4 Address", "Tx Port",
-                                      "Rx", "Tx", "Sent" };
+                                      "Rx", "Tx", "Doh!", "Sent" };
 
-                for (auto at = 0; at < 7; ++at)
+                for (auto at = 0; at < 8; ++at)
                     g.drawText (names[at], cells[static_cast<std::size_t> (at)],
                                 juce::Justification::centredLeft);
             }
@@ -1812,16 +1838,18 @@ namespace wfg::client::ui
                 cannot land somewhere the eye says is another column. The cue
                 list learned this the hard way and says so in its own header.
 
-                Order from the right: the cross, then the readouts, then the
-                two switches, then the numbers; the name takes what is left,
-                because it is the one that wants room. */
-            static std::array<juce::Rectangle<int>, 9> cellsFor (juce::Rectangle<int> row)
+                Order from the right: the cross, then the readouts, then Go
+                Doh!'s setting (PRD §3.32), then the two switches, then the
+                numbers; the name takes what is left, because it is the one
+                that wants room. */
+            static std::array<juce::Rectangle<int>, 10> cellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
                 const auto cross = area.removeFromRight (24);
                 const auto problem = area.removeFromRight (150);
                 const auto sent = area.removeFromRight (54);
+                const auto doh = area.removeFromRight (80);
                 const auto tx = area.removeFromRight (42);
                 const auto rx = area.removeFromRight (42);
                 const auto port = area.removeFromRight (70);
@@ -1832,26 +1860,35 @@ namespace wfg::client::ui
                     at all. Taken from the name, which has the rest of the row. */
                 const auto prefix = area.removeFromRight (200);
 
-                return { area, prefix, host, port, rx, tx, sent, problem, cross };
+                return { area, prefix, host, port, rx, tx, doh, sent, problem, cross };
             }
 
             /*  What a click at this x is on, by the same arithmetic. Named
                 rather than an index, because a column moving should break a
                 compile and not a gesture. */
-            enum class Cell { name, prefix, host, port, rx, tx, none, problem, cross };
+            enum class Cell { name, prefix, host, port, rx, tx, doh, none, problem, cross };
 
             static Cell cellAt (int x, int width)
             {
                 const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
                 const Cell order[] { Cell::name, Cell::prefix, Cell::host, Cell::port,
-                                     Cell::rx, Cell::tx, Cell::none, Cell::problem, Cell::cross };
+                                     Cell::rx, Cell::tx, Cell::doh, Cell::none, Cell::problem, Cell::cross };
 
-                for (auto at = 0; at < 9; ++at)
+                for (auto at = 0; at < 10; ++at)
                     if (x >= cells[static_cast<std::size_t> (at)].getX()
                           && x < cells[static_cast<std::size_t> (at)].getRight())
                         return order[at];
 
                 return Cell::none;
+            }
+
+            /*  WHAT THE DOH! CELL MEANS, on the row: the list has no tooltip
+                per cell, and this is the one a person cannot guess. */
+            juce::String getTooltipForRow (int) override
+            {
+                return "Doh!: what Go Doh! does with what a cue sent here. Leave (the default): it is the "
+                       "device's operator's - nothing put back, nothing sent again. Take back: put back "
+                       "where it can be read back, and sent again by the corrected GO.";
             }
 
             int getNumRows() override { return static_cast<int> (rows.size()); }
@@ -1896,8 +1933,13 @@ namespace wfg::client::ui
                                 juce::Justification::centredLeft);
                 }
 
+                /*  GO DOH!'S SETTING IN WORDS (4.8): Leave, the default, or
+                    Take back. */
+                g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-dim"));
+                g.drawText (juce::String (entry.dohWord()), cells[6], juce::Justification::centredLeft, true);
+
                 g.setColour (Look::colour (theme, "ink-dim"));
-                g.drawText (juce::String (entry.sent), cells[6], juce::Justification::centredLeft);
+                g.drawText (juce::String (entry.sent), cells[7], juce::Justification::centredLeft);
 
                 /*  AND WHAT IS WRONG WITH IT, in the engine's own sentence.
                     This is the whole reason the row exists rather than a line
@@ -1907,14 +1949,14 @@ namespace wfg::client::ui
                 if (! entry.problem.empty())
                 {
                     g.setColour (Look::colour (theme, "failed"));
-                    g.drawText (juce::String (entry.problem), cells[7],
+                    g.drawText (juce::String (entry.problem), cells[8],
                                 juce::Justification::centredLeft, true);
                 }
 
                 if (! locked)
                 {
                     g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[8],
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[9],
                                 juce::Justification::centred);
                 }
             }
@@ -1939,6 +1981,7 @@ namespace wfg::client::ui
                     case Cell::cross:  send (gesture::deleteObject (entry.id)); return;
                     case Cell::rx:     send (gesture::setNode (base + "rx", entry.rx ? "false" : "true")); return;
                     case Cell::tx:     send (gesture::setNode (base + "tx", entry.tx ? "false" : "true")); return;
+                    case Cell::doh:    send (gesture::setNode (base + "doh", entry.doh == "takeBack" ? "leave" : "takeBack")); return;
 
                     case Cell::name:
                     case Cell::prefix:
@@ -4591,11 +4634,14 @@ namespace wfg::client::ui
             the show settings, there should be a 'time between' Go's and a
             'Panic' fade duration that fades out all playing cues").
 
-            TWO NUMBERS, EACH A `node.set` that lands at once and that Ctrl-Z
+            THREE NUMBERS, EACH A `node.set` that lands at once and that Ctrl-Z
             takes back, like every row on the Outputs tab: they are the show's,
             saved with it, and nothing on this tab waits for Apply. Each says in
             a sentence what it does and what nought means, because a box that
-            only reads "0.3" is one nobody dares touch in the middle of a tech. */
+            only reads "0.3" is one nobody dares touch in the middle of a tech.
+            GO DOH!'S WINDOW SITS BETWEEN THE OTHER TWO (the author, 2026-09-30;
+            PRD §3.32): how long after a GO it can still be taken back, the
+            third level beside the other two. */
         class PlaybackPage final : public juce::Component
         {
         public:
@@ -4610,6 +4656,14 @@ namespace wfg::client::ui
                                               " The standby stays where it was. 0 turns it off.",
                                               juce::dontSendNotification);
 
+                dohWindow.address = "/godot/list/dohWindow";
+                dohWindow.label.setText ("Go Doh! window (F9)", juce::dontSendNotification);
+                dohWindow.explanation.setText ("How long after a GO Go Doh! can still take it back: the standby goes"
+                                               " back, and what that GO started comes down - over the panic fade if it"
+                                               " was heard, at once if not - with no footers. Only the last GO, and not"
+                                               " once a trigger has fired after it. 0 turns Go Doh! off.",
+                                               juce::dontSendNotification);
+
                 panicFade.address = "/godot/audio/panicFade";
                 panicFade.label.setText ("Panic fade (Esc)", juce::dontSendNotification);
                 panicFade.explanation.setText ("Esc and the PANIC button fade every playing cue out over this long,"
@@ -4618,7 +4672,7 @@ namespace wfg::client::ui
                                                " not. 0 cuts at once.",
                                                juce::dontSendNotification);
 
-                for (auto* field : { &debounce, &panicFade })
+                for (auto* field : { &debounce, &dohWindow, &panicFade })
                 {
                     for (auto* label : { &field->label, &field->unit, &field->explanation })
                         addAndMakeVisible (*label);
@@ -4636,9 +4690,12 @@ namespace wfg::client::ui
                 }
             }
 
-            void show (const std::string& debounceNow, const std::string& panicFadeNow, bool editable)
+            void show (const std::string& debounceNow, const std::string& dohWindowNow,
+                       const std::string& panicFadeNow, bool editable)
             {
-                for (auto [field, now] : { std::pair { &debounce, &debounceNow }, std::pair { &panicFade, &panicFadeNow } })
+                for (auto [field, now] : { std::pair { &debounce, &debounceNow },
+                                           std::pair { &dohWindow, &dohWindowNow },
+                                           std::pair { &panicFade, &panicFadeNow } })
                 {
                     field->shown = *now;
 
@@ -4655,7 +4712,7 @@ namespace wfg::client::ui
             {
                 auto area = getLocalBounds().reduced (22);
 
-                for (auto* field : { &debounce, &panicFade })
+                for (auto* field : { &debounce, &dohWindow, &panicFade })
                 {
                     auto line = area.removeFromTop (30);
                     field->label.setBounds (line.removeFromLeft (230));
@@ -4694,7 +4751,7 @@ namespace wfg::client::ui
             }
 
             std::function<void (Event)> send;
-            Field debounce, panicFade;
+            Field debounce, dohWindow, panicFade;
         };
 
         /*  WHAT TO DO FIRST, AND WHAT EACH TAB IS FOR (author, 2026-09-30:
@@ -4741,8 +4798,9 @@ namespace wfg::client::ui
                     { "Plugins",      "Scanning this machine for plugins, and the set a cue's FX can switch in." },
                     { "Rack",         "Rack channels: chains of plugins that mic cues play through, and the"
                                       " ones that sample." },
-                    { "Playback",     "How GO and Esc behave: the least time between two GOs, and how long"
-                                      " the panic fade takes." },
+                    { "Playback",     "How GO, Go Doh! and Esc behave: the least time between two GOs, how"
+                                      " long after a GO it can be taken back, and how long the panic fade"
+                                      " takes." },
                 };
 
                 for (const auto& [name, what] : tabs)
@@ -5099,6 +5157,7 @@ namespace wfg::client::ui
             /*  GO AND ESC: the document's, re-read every pass like the outputs,
                 since each lands at once as a `node.set`. */
             playback->show (model::text (snapshot, "/godot/list/goDebounce"),
+                            model::text (snapshot, "/godot/list/dohWindow"),
                             model::text (snapshot, "/godot/audio/panicFade"),
                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 

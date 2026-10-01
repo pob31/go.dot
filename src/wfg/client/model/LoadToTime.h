@@ -56,13 +56,13 @@ namespace wfg::client::model
     {
         std::int64_t tick = 0;
         std::string cue;
-        char origin = 'g';   ///< g a GO, f fired by name, t a trigger
+        char origin = 'g';   ///< g a GO, f fired by name, t a trigger, p a strip press, d a Go Doh!
     };
 
     /** `<tick>:<cue>:<origin>` space-separated, newest first, as published. */
     std::vector<HistoryStep> readHistory (const std::string& text);
 
-    /** The letter as the word an operator reads: GO, by name, trigger. */
+    /** The letter as the word an operator reads: GO, by name, trigger, press, Doh!. */
     std::string originWord (char origin);
 
     /** One run the engine's answer names. */
@@ -110,7 +110,11 @@ namespace wfg::client::model
         that cue was last fired, each at its offset into the cue, and marked
         `undone` when it lies past the instant - a load would take it back.
         Oldest first, which is the order they are drawn in. Empty when the
-        aimed cue was never fired: there is no clock to place them on. */
+        aimed cue was never fired: there is no clock to place them on.
+
+        A GO DOH! STEP (`d`, PRD §3.32) IS NOT A FIRING: it neither anchors the
+        clock - the aimed cue's is its latest GO, not the press that took a GO
+        back - nor sits under it, as the engine's solver passes it over. */
     struct StepLine
     {
         std::string cue;

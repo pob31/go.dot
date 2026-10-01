@@ -66,6 +66,10 @@ namespace wfg::client::ui
                 the window's to read (model/Panic.h); this only says a press
                 happened. */
             std::function<void()> panic;
+
+            /*  GO DOH! (PRD §3.32): the last GO taken back. Its own button,
+                directly left of PANIC, and F9 - once per key-down. */
+            std::function<void()> doh;
             std::function<void()> undo;
             std::function<void()> redo;
             std::function<void()> save;
@@ -101,6 +105,11 @@ namespace wfg::client::ui
         void resized() override;
         bool keyPressed (const juce::KeyPress& key) override;
 
+        /*  F9 LET GO OPENS GO DOH!'S LATCH AGAIN (PRD §3.32): JUCE repeats
+            `keyPressed` while a key is held, so a held F9 is one Doh!. The
+            Shell forwards this as it forwards the presses. */
+        bool keyStateChanged (bool isKeyDown) override;
+
     private:
         Actions actions;
         model::Theme theme;
@@ -125,6 +134,16 @@ namespace wfg::client::ui
             redundant buttons"); their keys stay, and ask the reading. */
         juce::TextButton goButton { "GO" }, panicButton { "PANIC" },
                         recoverButton { "recover" }, discardButton { "discard" };
+
+        /*  GO DOH! (PRD §3.32; the author, 2026-09-30): directly to the left
+            of PANIC on GO's row - the third level beside the other two, and as
+            far from GO as PANIC is. It names the GO it would take back while
+            the show's window is open. */
+        juce::TextButton dohButton { "Doh!" };
+
+        /*  F9's latch: shut by the press that sent the Doh!, open again once
+            the key is up. */
+        bool dohKeyDown = false;
 
         int rowHeight() const noexcept;
         juce::Rectangle<int> bannerArea() const;

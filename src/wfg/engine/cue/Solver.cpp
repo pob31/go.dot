@@ -609,8 +609,11 @@ namespace wfg::cue
             no clock to read the rest against, and the order is the answer. */
         std::int64_t firedAt = -1;
 
+        /*  NEVER A DOH! STEP (2026-10-01, PRD §3.32): a `d` records that a GO
+            was taken back, and the GO's own step is gone with it - read as a
+            firing, it would place the cue at the moment it was taken back. */
         for (const auto& step : steps)
-            if (step.cue == aim.cue)
+            if (step.cue == aim.cue && step.origin != 'd')
                 firedAt = step.tick;
 
         if (firedAt < 0)
@@ -706,6 +709,10 @@ namespace wfg::cue
                 decision 9): the history keeps it so the live recorder can, and
                 a jump re-arms the bank and leaves the hands to play it. */
             if (step.origin == 'p')
+                continue;
+
+            /*  NOR A DOH! (2026-10-01): it fired nothing. */
+            if (step.origin == 'd')
                 continue;
 
             const auto* entry = placedOf (step.cue);

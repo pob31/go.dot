@@ -38,6 +38,7 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/MediaInfo.h>
@@ -65,6 +66,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -4681,6 +4683,51 @@ TEST_CASE ("audio recovery: connection state is logged and failed validation can
     CHECK (engine.processTick (5).applied == 1);
     CHECK (state.status == "running");
     CHECK (state.settingsError.empty());
+}
+
+TEST_CASE ("audio recovery: Go Doh! is let through an outage, as Esc is, and a GO still is not")
+{
+    /*  PRD §3.32 (D1, 2026-10-01): Go Doh! is recovery, so it passes the outage
+        the way Esc does (namespace draft §11.1) - the pointer goes back at once,
+        the rest waits for the clock. A GO is still dropped, never queued (PRD
+        §6.2). Failed before D1: `go.doh` was an unknown command. */
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (37);
+    cue::Runner runner { document, runs, runIds, focus };
+    audio::AudioState state;
+
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+    audio::registerAudioCommands (engine.commands(), state);
+    audio::registerAudioSettingsCommands (engine, document, runner, runs, state);
+
+    const auto listId = document.createList ("Show").id;
+    const auto first = document.createCue (listId, 0, "memo", "One").id;
+    const auto second = document.createCue (listId, 1, "memo", "Two").id;
+    REQUIRE (document.setAttribute (cue::standbyAddressOf (listId), first).ok);
+
+    state.status = "running";
+    engine.submit ("cli", "go", {});
+    REQUIRE (engine.processTick (10).applied == 1);
+    REQUIRE (document.getAttribute (cue::standbyAddressOf (listId)) == std::optional<std::string> (second));
+
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (false) });
+    REQUIRE (engine.processTick (11).applied == 1);
+    REQUIRE (state.status == "noClock");
+
+    //  At the frozen tick: applied, and the pointer is back.
+    engine.submit ("cli", "go.doh", {});
+    CHECK (engine.processTick (11).applied == 1);
+    CHECK (document.getAttribute (cue::standbyAddressOf (listId)) == std::optional<std::string> (first));
+
+    engine.submit ("cli", "go", {});
+    CHECK (engine.processTick (11).rejected == 1);
+    CHECK (engine.lastError().find ("audio-reconnecting") != std::string::npos);
 }
 
 TEST_CASE ("audio recovery: a moved clock stops what plays the Esc way, says so, and asks to be followed")

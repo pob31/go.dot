@@ -32,6 +32,7 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/DohSetting.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
@@ -47,12 +48,19 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
+/*  AND THE CLIENT'S OWN READING OF THE DEVICES, for one case: the Go Doh!
+    setting's one resolver is asked of the engine, the mount table and the
+    desktop's model together, and the model's rows are read off a published
+    tree as the inspector reads them. */
+#include <wfg/client/model/Devices.h>
+
 #include <juce_core/juce_core.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -2383,4 +2391,188 @@ TEST_CASE ("edit lock: the locked fixture bundle opens locked, refuses an edit, 
     ShowDocument reopened;
     REQUIRE (Bundle::open (savedFolder, reopened).ok);
     CHECK (reopened.isLocked());
+}
+
+//==============================================================================
+/*  THE GO DOH! SETTING (PRD §3.32, namespace draft §24; the author, 2026-10-01):
+    one per network device and MIDI port - `leave` unless somebody says
+    `takeBack` - and one per OSC or MIDI cue, which follows its device unless it
+    says otherwise; and "plays sound" on a port. Read from the document, fail-
+    safe, through one resolver. Failed before D1: none of the rows existed. */
+TEST_CASE ("the Go Doh! setting: every device and port leaves unless told, a cue follows its device, and the show keeps what was chosen")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Show").id;
+
+    REQUIRE (document.createMount ("/desk", "", "D3SK0001").ok);
+    const auto port = document.createPort ("Keys").id;
+    REQUIRE_FALSE (port.empty());
+
+    const auto oscCue = [&] (const std::string& address)
+    {
+        const auto id = document.createCue (listId, 0, "osc", "Light").id;
+        REQUIRE (document.setAttribute ("/godot/cue/" + id + "/address", address).ok);
+        return id;
+    };
+
+    const auto fader = oscCue ("/desk/fader");
+    const auto stray = oscCue ("/nowhere/x");
+    const auto note = document.createCue (listId, 0, "midi", "Note").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + note + "/port", port).ok);
+
+    SUBCASE ("nobody said anything: everything is left to its operator")
+    {
+        CHECK (cue::dohOf (document, fader) == "leave");
+        CHECK (cue::dohOf (document, note) == "leave");
+        CHECK (cue::dohOf (document, stray) == "leave");
+
+        CHECK (document.getAttribute ("/godot/mount/D3SK0001/doh") == std::optional<std::string> ("leave"));
+        CHECK (document.getAttribute ("/godot/port/" + port + "/doh") == std::optional<std::string> ("leave"));
+        CHECK (document.getAttribute ("/godot/cue/" + fader + "/doh") == std::optional<std::string> ("device"));
+        CHECK (document.getAttribute ("/godot/cue/" + note + "/doh") == std::optional<std::string> ("device"));
+        CHECK (document.getAttribute ("/godot/port/" + port + "/audible") == std::optional<std::string> ("false"));
+    }
+
+    SUBCASE ("a device that takes back, and a cue overriding either way")
+    {
+        REQUIRE (document.setAttribute ("/godot/mount/D3SK0001/doh", "takeBack").ok);
+        CHECK (cue::dohOf (document, fader) == "takeBack");
+
+        REQUIRE (document.setAttribute ("/godot/cue/" + fader + "/doh", "leave").ok);
+        CHECK (cue::dohOf (document, fader) == "leave");
+
+        REQUIRE (document.setAttribute ("/godot/mount/D3SK0001/doh", "leave").ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + fader + "/doh", "takeBack").ok);
+        CHECK (cue::dohOf (document, fader) == "takeBack");
+
+        //  A MIDI cue follows its port the same way.
+        REQUIRE (document.setAttribute ("/godot/port/" + port + "/doh", "takeBack").ok);
+        CHECK (cue::dohOf (document, note) == "takeBack");
+        REQUIRE (document.setAttribute ("/godot/cue/" + note + "/doh", "leave").ok);
+        CHECK (cue::dohOf (document, note) == "leave");
+    }
+
+    SUBCASE ("the longest prefix wins, and a separator is a boundary")
+    {
+        REQUIRE (document.createMount ("/desk/aux", "", "D3SK0002").ok);
+        REQUIRE (document.setAttribute ("/godot/mount/D3SK0002/doh", "takeBack").ok);
+
+        CHECK (cue::dohOf (document, oscCue ("/desk/aux/fader")) == "takeBack");
+        CHECK (cue::dohOf (document, oscCue ("/desktop/x")) == "leave");
+        CHECK (cue::deviceOf (document, "/desktop/x").empty());
+    }
+
+    SUBCASE ("plays sound: the toggle, and its tx")
+    {
+        CHECK_FALSE (cue::playsSound (document, note));
+
+        REQUIRE (document.setAttribute ("/godot/port/" + port + "/audible", "true").ok);
+        CHECK (cue::playsSound (document, note));
+
+        REQUIRE (document.setAttribute ("/godot/port/" + port + "/tx", "false").ok);
+        CHECK_FALSE (cue::playsSound (document, note));
+    }
+
+    SUBCASE ("one resolver: a tie goes to the smallest identifier, as the mount table and the client say")
+    {
+        //  Declared in the other order on purpose: the walk is by id, not by place.
+        REQUIRE (document.createMount ("/eos", "", "B2000000").ok);
+        REQUIRE (document.createMount ("/eos", "", "A1000000").ok);
+        REQUIRE (document.setAttribute ("/godot/mount/B2000000/doh", "takeBack").ok);
+
+        CHECK (cue::deviceOf (document, "/eos/sub/1") == "A1000000");
+        CHECK (cue::dohOf (document, oscCue ("/eos/sub/1")) == "leave");
+
+        tree::MountTable table;
+
+        for (const auto* id : { "B2000000", "A1000000" })
+        {
+            tree::MountDeclaration declared;
+            declared.id = id;
+            declared.prefix = "/eos";
+            declared.host = "127.0.0.1";
+            declared.port = 9000;
+            REQUIRE (table.declare (declared).ok);
+        }
+
+        CHECK (table.mountOf ("/eos/sub/1") == "A1000000");
+
+        /*  THE INSPECTOR'S OWN ROWS, read off a published tree the way it
+            reads them - not handed in already sorted, so the client's walk is
+            what decides the tie. */
+        Engine engine;
+        tree::MountTable published;
+        cue::RunTable runs;
+        tree::ParameterTree parameters { document, engine.commands(), published, runs };
+        tree::EngineState state;
+        const auto snapshot = parameters.publish (0, state);
+        REQUIRE (snapshot != nullptr);
+
+        CHECK (client::model::deviceOf ("/eos/sub/1", client::model::readDevices (*snapshot)) == "A1000000");
+    }
+
+    SUBCASE ("a device of several roots")
+    {
+        REQUIRE (document.createMount ("/channel /console /digico", "", "D1G1C000").ok);
+        REQUIRE (document.setAttribute ("/godot/mount/D1G1C000/doh", "takeBack").ok);
+
+        CHECK (cue::dohOf (document, oscCue ("/digico/snapshots/fire")) == "takeBack");
+    }
+
+    SUBCASE ("read fail-safe: only the exact words move the default")
+    {
+        auto mount = document.findById ("D3SK0001");
+        auto cueNode = document.findById (fader);
+        REQUIRE (mount.isValid());
+        REQUIRE (cueNode.isValid());
+
+        for (const auto* spelt : { "takeback", "Take back", "" })
+        {
+            INFO ("device: [" << spelt << "]");
+            mount.setProperty ("doh", juce::String (spelt), nullptr);
+            CHECK (cue::deviceDoh (document, "mount", "D3SK0001") == "leave");
+            CHECK (cue::dohOf (document, fader) == "leave");
+        }
+
+        for (const auto* spelt : { "leaves", "" })
+        {
+            INFO ("cue: [" << spelt << "]");
+            cueNode.setProperty ("doh", juce::String (spelt), nullptr);
+            CHECK (cue::cueDoh (document, fader) == "device");
+        }
+    }
+}
+
+TEST_CASE ("the Go Doh! setting and plays sound survive a save and a load, and the show still validates")
+{
+    ShowDocument document;
+    const auto listId = document.createList ("Show").id;
+
+    REQUIRE (document.createMount ("/desk", "", "D3SK0001").ok);
+    REQUIRE (document.setAttribute ("/godot/mount/D3SK0001/port", "9000").ok);
+    const auto port = document.createPort ("Keys").id;
+
+    const auto light = document.createCue (listId, 0, "osc", "Light").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + light + "/address", "/desk/fader").ok);
+    const auto note = document.createCue (listId, 1, "midi", "Note").id;
+    REQUIRE (document.setAttribute ("/godot/cue/" + note + "/port", port).ok);
+
+    REQUIRE (document.setAttribute ("/godot/mount/D3SK0001/doh", "takeBack").ok);
+    REQUIRE (document.setAttribute ("/godot/port/" + port + "/doh", "takeBack").ok);
+    REQUIRE (document.setAttribute ("/godot/port/" + port + "/audible", "true").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + light + "/doh", "leave").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/" + note + "/doh", "takeBack").ok);
+
+    const auto written = CanonicalXml::write (document);
+
+    ShowDocument read;
+    REQUIRE (CanonicalXml::read (written, read).ok);
+
+    CHECK (read.getAttribute ("/godot/mount/D3SK0001/doh") == std::optional<std::string> ("takeBack"));
+    CHECK (read.getAttribute ("/godot/port/" + port + "/doh") == std::optional<std::string> ("takeBack"));
+    CHECK (read.getAttribute ("/godot/port/" + port + "/audible") == std::optional<std::string> ("true"));
+    CHECK (read.getAttribute ("/godot/cue/" + light + "/doh") == std::optional<std::string> ("leave"));
+    CHECK (read.getAttribute ("/godot/cue/" + note + "/doh") == std::optional<std::string> ("takeBack"));
+
+    CHECK (read.validate().empty());
 }

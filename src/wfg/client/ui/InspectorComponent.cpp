@@ -562,6 +562,26 @@ namespace wfg::client::ui
                     break;
 
                 case model::Control::choice:
+                    /*  A WORDED CHOICE CAN CHANGE ITS WORDS while the cue stays
+                        picked - Go Doh!'s first item says what the device says
+                        now - so its menu is compared and refilled as the
+                        show's menus below are, and selected by key. */
+                    if (! field.choices.empty())
+                    {
+                        if (line.field.choices != field.choices)
+                        {
+                            line.choice.clear (juce::dontSendNotification);
+
+                            auto item = 1;
+
+                            for (const auto& choice : field.choices)
+                                line.choice.addItem (juce::String (choice.second), item++);
+                        }
+
+                        line.choice.setSelectedId (idForChoice (field), juce::dontSendNotification);
+                        break;
+                    }
+
                     line.choice.setText (shown (field), juce::dontSendNotification);
                     break;
 
@@ -867,6 +887,33 @@ namespace wfg::client::ui
                 };
 
                 content.addAndMakeVisible (line->toggle);
+            }
+            else if (! field.options.empty() && field.writable && ! field.choices.empty())
+            {
+                /*  A CLOSED SET THE MODEL PUTS IN WORDS (Go Doh!'s row, PRD
+                    §3.32, 2026-10-01): the menu reads the words and writes their
+                    keys, which are still exactly the values the tree declares -
+                    the device menus' way of committing, by position. */
+                auto at = 1;
+
+                for (const auto& choice : field.choices)
+                    line->choice.addItem (juce::String (choice.second), at++);
+
+                line->choice.setSelectedId (idForChoice (field), juce::dontSendNotification);
+                line->choice.setWantsKeyboardFocus (false);
+
+                auto* raw = line.get();
+
+                line->choice.onChange = [this, raw]
+                {
+                    const auto at_ = raw->choice.getSelectedId() - 1;
+
+                    if (at_ >= 0 && at_ < static_cast<int> (raw->field.choices.size()))
+                        commitField (raw->field,
+                                     raw->field.choices[static_cast<std::size_t> (at_)].first);
+                };
+
+                content.addAndMakeVisible (line->choice);
             }
             else if (! field.options.empty() && field.writable)
             {

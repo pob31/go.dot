@@ -58,6 +58,11 @@ namespace wfg::client::model
         }
     }
 
+    std::string PortRow::dohWord() const
+    {
+        return doh == "takeBack" ? "Take back" : "Leave";
+    }
+
     std::string PortRow::label() const
     {
         return name.empty() ? id : name;
@@ -113,6 +118,11 @@ namespace wfg::client::model
             else if (name == "tx")            row.tx = text (node) == "true";
             else if (name == "bound")         row.bound = text (node) == "true";
             else if (name == "problem")       row.problem = text (node);
+            else if (name == "audible")       row.audible = text (node) == "true";
+
+            /*  FAIL-SAFE, as the engine reads it (PRD §3.32): only the exact
+                word takes back. */
+            else if (name == "doh")           row.doh = text (node) == "takeBack" ? "takeBack" : "leave";
         }
 
         std::vector<PortRow> rows;

@@ -168,6 +168,22 @@ namespace wfg
             this one would have. */
         inline constexpr const char* tooSoon          = "too-soon";
 
+        /*  GO DOH! PRESSED AFTER ITS WINDOW (`list/dohWindow`, PRD §3.32,
+            2026-10-01): the last GO is older than the show allows a Doh to
+            reach back, or the window is nought and Doh! is off. Nothing moves. */
+        inline constexpr const char* tooLate          = "too-late";
+
+        /*  GO DOH! WITH NO GO TO TAKE BACK: none yet, the last one already
+            taken back, or forgotten by a jump on its list. */
+        inline constexpr const char* nothingToTakeBack = "nothing-to-take-back";
+
+        /*  GO DOH! AFTER A TRIGGER ON THE GO'S LIST (the author, 2026-09-30):
+            a cue fired by name, a trigger, or a hand on a pad of the bank the
+            GO armed, since the GO - so the GO is being played on, and taking
+            it back could undo a correct one. Taking back a trigger is a later
+            version's. */
+        inline constexpr const char* triggerAfterGo   = "trigger-after-go";
+
         /*  A PRESS ON A TAKE WITH NOTHING TO PRESS IT THROUGH (Phase 9c,
             namespace draft §19.6): Rec, Loop or a layer asked of a sampling
             channel no sounding mic cue holds - its cue not fired yet, ended,

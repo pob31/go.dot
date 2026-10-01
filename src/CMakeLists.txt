@@ -100,6 +100,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/Run.cpp
     wfg/engine/cue/ListState.h
     wfg/engine/cue/ListState.cpp
+    wfg/engine/cue/DohSetting.h
+    wfg/engine/cue/DohSetting.cpp
     wfg/engine/cue/ShowWalk.h
     wfg/engine/cue/Solver.h
     wfg/engine/cue/Solver.cpp

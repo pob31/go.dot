@@ -39,6 +39,7 @@ namespace wfg::client::gesture
 
     Event stopAll() { return plain ("run.stopAll"); }
     Event killAll() { return plain ("run.killAll"); }
+    Event doh()     { return plain ("go.doh"); }
 
     Event standbyNext()     { return plain ("standby.next"); }
     Event standbyPrevious() { return plain ("standby.previous"); }

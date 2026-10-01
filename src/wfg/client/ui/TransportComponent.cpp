@@ -64,6 +64,7 @@ namespace wfg::client::ui
         {
             { &goButton,      &actions.go },
             { &panicButton,   &actions.panic },
+            { &dohButton,     &actions.doh },
             { &recoverButton, &actions.recover },
             { &discardButton, &actions.discardRecovery },
         };
@@ -80,6 +81,10 @@ namespace wfg::client::ui
             a half. */
         goButton.getProperties().set (Look::fontScale(), 2.0);
         panicButton.getProperties().set (Look::fontScale(), 1.5);
+
+        /*  Doh! a little larger than the type: pressed in a hurry too, but
+            read before it is pressed - it names the GO it would take back. */
+        dohButton.getProperties().set (Look::fontScale(), 1.2);
 
         setWantsKeyboardFocus (true);
         applyTheme (theme);
@@ -129,6 +134,15 @@ namespace wfg::client::ui
         panicButton.setTooltip ("Esc: every cue stops and the footers run. "
                                 "Esc again within a second: everything is dropped, no footers.");
 
+        /*  GO DOH! IN THE STANDBY'S AMBER, black letters on it: what it gives
+            back first is the standby. The tooltip says what a press does, the
+            key, and where its window is set. */
+        dohButton.setColour (juce::TextButton::buttonColourId, Look::colour (theme, "standby"));
+        dohButton.setColour (juce::TextButton::textColourOffId, Look::colour (theme, "go-ink"));
+        dohButton.setTooltip ("F9: Go Doh! - takes back the last GO: the standby goes back, and "
+                              "what it started comes down, no footers. Only within the show's "
+                              "Doh! window after that GO (Show settings > Playback).");
+
         statusLabel.setFont (Look::font (theme, 13.0f));
         statusLabel.setColour (juce::Label::textColourId, dim);
 
@@ -170,6 +184,12 @@ namespace wfg::client::ui
         notesLabel.setText (text (reading.standbyNotes), juce::dontSendNotification);
 
         statusLabel.setText (text (reading.lockLine()), juce::dontSendNotification);
+
+        /*  THE GO DOH! WOULD TAKE BACK, while the window is open: "Doh! 12".
+            Read off the engine's tick, so it goes plain on the tick a press
+            would start being refused. */
+        if (const auto caption = text (reading.dohCaption()); dohButton.getButtonText() != caption)
+            dohButton.setButtonText (caption);
 
         /*  WHAT THE MASTER DIAL TURNS (2026-09-26), said wherever that number
             is on screen or not: it stays on its cue when the pick moves. */
@@ -397,6 +417,11 @@ namespace wfg::client::ui
             without looking, and apart because one of them must never be hit
             by a hand reaching for the other. */
         panicButton.setBounds (middle.removeFromRight (row * 3).reduced (2));
+
+        /*  AND GO DOH! DIRECTLY TO ITS LEFT (PRD §3.32), the same height:
+            the three levels of §4.4 side by side, at the end of the row away
+            from GO. */
+        dohButton.setBounds (middle.removeFromRight (row * 2).reduced (2));
         middle.removeFromRight (pad);
 
         /*  THE NAME ON THE LEFT HALF, THE NOTES ON THE RIGHT: the eye reads
@@ -471,6 +496,24 @@ namespace wfg::client::ui
             return true;
         }
 
+        /*  F9 IS GO DOH! (PRD §3.32), ONCE PER KEY-DOWN. JUCE repeats a held
+            key's `keyPressed`, and nothing here filtered that - Space, F5 and
+            Esc still do not - so a held F9 would have been a string of Dohs.
+            The latch lets the first through and is opened again by
+            `keyStateChanged` once F9 is up; the engine's own debounce covers a
+            bounce, a second surface and a second person. */
+        if (key == juce::KeyPress (juce::KeyPress::F9Key))
+        {
+            if (! dohKeyDown)
+            {
+                dohKeyDown = true;
+
+                if (actions.doh) actions.doh();
+            }
+
+            return true;
+        }
+
         /*  THE ACCELERATORS FOLLOW THEIR BUTTONS, every one of them: a key
             that fired a gesture the strip is not offering would be a second
             route to something this client has decided not to ask for - which
@@ -497,6 +540,17 @@ namespace wfg::client::ui
             return true;
         }
 
+        return false;
+    }
+
+    bool TransportComponent::keyStateChanged (bool isKeyDown)
+    {
+        juce::ignoreUnused (isKeyDown);
+
+        if (dohKeyDown && ! juce::KeyPress::isKeyCurrentlyDown (juce::KeyPress::F9Key))
+            dohKeyDown = false;
+
+        /*  Nothing is consumed: every other key's change is somebody else's. */
         return false;
     }
 }

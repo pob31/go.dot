@@ -50,6 +50,7 @@
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
+#include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/Icons.h>
 #include <wfg/client/model/Traffic.h>
 #include <wfg/engine/osc/OscCodec.h>
@@ -104,6 +105,7 @@
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/FadePoints.h>
+#include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
@@ -641,7 +643,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneTake ("STRP0001"),
         gesture::laneFree(), gesture::laneRecord (0.0), gesture::laneRecord (12.5), gesture::laneStop(),
 
-        gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
+        gesture::go(), gesture::doh(), gesture::standbyNext(), gesture::standbyPrevious(),
         gesture::stopAll(), gesture::killAll(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::seek ("R4NID001", 12.5),
@@ -7117,4 +7119,227 @@ TEST_CASE ("client: a mic cue's take is read off its channel's rows, said in wor
     CHECK (keep.args[0].getString() == "TK000011");
     CHECK (keep.args[1].getBool());
     CHECK (keep.args[2].getString() == "TK000002");
+}
+
+//==============================================================================
+/*  GO DOH! IN THE DESKTOP CLIENT (PRD §3.32, D1, 2026-10-01): its refusals are
+    sentences on the transport's line, its button names the GO it would take
+    back while the window is open, its step reads as a word in the history, and
+    its setting is read off the rows of the devices and the cues. Each failed
+    before D1: no such words, no gesture, no rows. */
+TEST_CASE ("client: Go Doh!'s refusals are sentences, its step is a word, and its button names the GO it would take back")
+{
+    model::TransportReading reading;
+    reading.dohWindow = "10";
+
+    reading.lastError = "5500 27 window too-late go.doh";
+    CHECK (reading.errorLine() == "Doh! ignored: the last GO is too long ago to take back (Show settings > Playback)");
+
+    reading.dohWindow = "0";
+    CHECK (reading.errorLine() == "Doh! is off (Show settings > Playback)");
+    reading.dohWindow = "10";
+
+    reading.lastError = "5500 27 window nothing-to-take-back go.doh";
+    CHECK (reading.errorLine() == "Doh! ignored: there is no GO it can take back");
+
+    //  The author's own sentence.
+    reading.lastError = "5500 27 window trigger-after-go go.doh";
+    CHECK (reading.errorLine() == "Doh! ignored: a trigger fired after the last GO");
+
+    reading.lastError = "5500 27 window too-soon go.doh";
+    CHECK (reading.errorLine() == "Doh! ignored: pressed again too soon (Show settings > Playback)");
+
+    //  The GO's own bounce keeps its words.
+    reading.lastError = "5500 27 window too-soon go";
+    CHECK (reading.errorLine() == "GO ignored: too soon after the last one (Show settings > Playback)");
+
+    //  One named command, nothing else (§4.11).
+    const auto doh = gesture::doh();
+    CHECK (doh.command == "go.doh");
+    CHECK (doh.args.empty());
+
+    /*  THE BUTTON NAMES THE CUE while the GO is still inside the window, and is
+        plain "Doh!" otherwise - read off the engine's tick, never a clock of
+        this window's own. */
+    reading.tick = "1100";
+    reading.doh = "7K2QM9X4 B3N8R5TW 1000";
+    reading.dohCue = "12";
+    CHECK (reading.dohCaption() == "Doh! 12");
+
+    reading.tick = "1500";
+    CHECK (reading.dohCaption() == "Doh!");
+
+    reading.tick = "1100";
+    reading.doh.clear();
+    CHECK (reading.dohCaption() == "Doh!");
+
+    //  Its step in the history, and a press's.
+    CHECK (model::originWord ('d') == "Doh!");
+    CHECK (model::originWord ('p') == "press");
+
+    /*  AND A DOH! IS NOT A FIRING: the aimed cue's clock is its latest GO, not
+        the step that took a GO back. */
+    const auto steps = model::readHistory ("900:A1:d 600:B2:g 100:A1:g");
+    const auto lines = model::stepsUnder (steps, "A1", 600);
+    REQUIRE (lines.size() == 1u);
+    CHECK (lines[0].cue == "B2");
+    CHECK (lines[0].offset == doctest::Approx (10.0));
+}
+
+TEST_CASE ("client: Go Doh!'s choice on an OSC or a MIDI cue says what its device says, and writes the cue's own row")
+{
+    Rig rig;
+
+    const auto dohField = [&rig] (std::int64_t tick, const std::string& cue, const char* last)
+    {
+        const auto inspection = model::inspect (*rig.publish (tick), cue);
+        model::Field found;
+        auto seenLast = false;
+        auto afterLast = false;
+
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+            {
+                if (field.name == last)
+                    seenLast = true;
+
+                if (field.name == "doh")
+                {
+                    found = field;
+                    afterLast = seenLast;
+                }
+            }
+
+        CHECK (afterLast);
+        return found;
+    };
+
+    const std::string light = "N4T9B2QF";
+    rig.apply (1, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                 osc::Value::string ("osc"), osc::Value::string ("Desk go"),
+                 osc::Value::string (light) });
+    rig.apply (2, "window", "node.set",
+               { osc::Value::string ("/godot/cue/" + light + "/address"),
+                 osc::Value::string ("/wfs/source/1/gain") });
+
+    auto field = dohField (3, light, "timeout");
+    CHECK (field.label == "on Doh!");
+    CHECK (field.address == "/godot/cue/" + light + "/doh");
+    CHECK (field.writable);
+    REQUIRE (field.choices.size() == 3u);
+    CHECK (field.choices[0].first == "device");
+    CHECK (field.choices[0].second == "as the device (leave)");
+    CHECK (field.choices[1].first == "takeBack");
+    CHECK (field.choices[1].second == "take back");
+    CHECK (field.choices[2].first == "leave");
+    CHECK (field.choices[2].second == "leave to its operator");
+
+    rig.apply (4, "window", "node.set",
+               { osc::Value::string ("/godot/mount/G1JS4VWE/doh"), osc::Value::string ("takeBack") });
+    CHECK (dohField (5, light, "timeout").choices[0].second == "as the device (take back)");
+
+    //  A MIDI cue the same, through its port.
+    rig.apply (6, "window", "port.create", { osc::Value::string ("Keys") });
+    const auto ports = model::readPorts (*rig.publish (7));
+    REQUIRE (ports.size() == 1u);
+    CHECK (ports[0].audible == false);
+    CHECK (ports[0].doh == "leave");
+
+    const std::string note = "M1D1C0EE";
+    rig.apply (8, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                 osc::Value::string ("midi"), osc::Value::string ("Note"),
+                 osc::Value::string (note) });
+    rig.apply (9, "window", "node.set",
+               { osc::Value::string ("/godot/cue/" + note + "/port"), osc::Value::string (ports[0].id) });
+
+    CHECK (dohField (10, note, "wait").choices[0].second == "as the device (leave)");
+
+    rig.apply (11, "window", "node.set",
+               { osc::Value::string ("/godot/port/" + ports[0].id + "/doh"), osc::Value::string ("takeBack") });
+    rig.apply (12, "window", "node.set",
+               { osc::Value::string ("/godot/port/" + ports[0].id + "/audible"), osc::Value::string ("true") });
+    CHECK (dohField (13, note, "wait").choices[0].second == "as the device (take back)");
+
+    const auto after = model::readPorts (*rig.publish (14));
+    REQUIRE (after.size() == 1u);
+    CHECK (after[0].audible);
+    CHECK (after[0].doh == "takeBack");
+    CHECK (after[0].dohWord() == "Take back");
+
+    //  And a device's row reads its setting in words.
+    const auto devices = model::readDevices (*rig.publish (15));
+    REQUIRE (devices.size() == 2u);
+    CHECK (devices[0].id == "G1JS4VWE");
+    CHECK (devices[0].dohWord() == "Take back");
+    CHECK (devices[1].dohWord() == "Leave");
+}
+
+TEST_CASE ("client: the Doh! button names the GO the engine would take back, and stops naming it once a Doh, a fire by name or a jump has spent it")
+{
+    /*  END TO END (namespace draft §24.4): the engine publishes what Go Doh!
+        would take back at `/godot/list/doh`, and the transport reads the cue's
+        number off the same snapshot - "Doh! 1" after a GO on cue 1. Every road
+        that spends that GO clears it, so the button never names a GO a press
+        would be refused for. A net for the path the case above feeds by hand. */
+    Engine engine;
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (fixtureBundle(), document).ok);
+    REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (7);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    MountTable mounts;
+    ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.setListState (&runner.listState());
+
+    std::int64_t tick = 0;
+
+    const auto press = [&] (const std::string& command, std::vector<osc::Value> args)
+    {
+        REQUIRE (engine.submit ("cli", command, std::move (args)));
+        runner.beforeTick (engine, tick);
+        engine.processTick (tick++);
+    };
+
+    const auto caption = [&]
+    {
+        parameters.markStale();
+        EngineState state;
+        state.tick = tick;
+        return model::readTransport (*parameters.publish (tick, state)).dohCaption();
+    };
+
+    CHECK (caption() == "Doh!");                             // no GO yet
+
+    press ("go", {});
+    CHECK (caption() == "Doh! 1");                           // "House to half", cue 1
+
+    SUBCASE ("a Doh spends it")
+    {
+        press ("go.doh", {});
+    }
+
+    SUBCASE ("a fire by name on its list makes a press refused, so it is spent")
+    {
+        press ("cue.fire", { osc::Value::string ("E4GP6QSC") });
+    }
+
+    SUBCASE ("a jump on its list forgets it")
+    {
+        press ("list.aim", { osc::Value::string ("7K2QM9X4"), osc::Value::string ("B3N8R5TW"),
+                             osc::Value::float64 (0.0) });
+        press ("list.loadToTime", { osc::Value::string ("7K2QM9X4") });
+    }
+
+    CHECK (caption() == "Doh!");
 }
