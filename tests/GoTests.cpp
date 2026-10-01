@@ -116,6 +116,22 @@ namespace
             return true;
         }
 
+        /*  A KILL, kept beside the stop it is here (namespace draft §23.6): on
+            a real voice it also empties the chain, and what a case can see of
+            that is the Runner asking for it. */
+        bool kill (int track) override
+        {
+            kills.push_back (track);
+            return stop (track);
+        }
+
+        /*  A DOUBLE ESC'S SWEEP, with the voices it was told the press leaves
+            ready (namespace draft §23.6, FY), one entry a press. */
+        void resetEffects (const std::vector<int>& readyTracks) override
+        {
+            sweeps.push_back (readyTracks);
+        }
+
         bool stopAtSample (int track, int slot, std::int64_t sample) override
         {
             stopsAt.push_back ({ track, sample });
@@ -243,6 +259,8 @@ namespace
         std::set<int> playing;
         std::set<int> ready;
         std::vector<int> stopped;
+        std::vector<int> kills;
+        std::vector<std::vector<int>> sweeps;
         std::vector<std::pair<int, std::int64_t>> stopsAt;
         std::vector<std::pair<int, double>> levels;
     };
@@ -4188,6 +4206,231 @@ TEST_CASE ("stop levels: a member a killed stop cue hands back is killed again, 
     CHECK (rig.audio.playing.count (track) == 0u);
 }
 
+TEST_CASE ("stop levels: a member the double Esc has cut is given no level by its lane, from the press to its end")
+{
+    /*  H3 (namespace draft §23.6). A double Esc takes every voice to silence
+        in the press's own tick - the sweep - and a member of a scene is killed
+        later, by its group's job. A lane moves the member's level every tick
+        until its run ends, and the level written over that silence brought
+        the voice back for the ticks before its kill. This player's sweep only
+        counts the press, and its stop ends the sound at once: what is checked
+        is that the Runner writes nothing to the voice from the press to the
+        run's end.
+        The write after a kill, while a real voice still reads as playing, is
+        the AudioTests case's to hear. */
+    GroupRig rig;
+
+    const auto rain = rig.document.createCue (rig.groupId, 0, "media", "Rain").id;
+    rig.setCue (rain, "file", "rain.wav");
+    rig.setCue (rain, "levelLane", "0 0 8 -24");         // all the way down: a level that moves every tick
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rain).empty(); }));
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto rainRun = rig.runOf (rain);
+    const auto track = rig.runs.find (rainRun)->track;
+    REQUIRE (track >= 0);
+    rig.audio.playing.insert (track);
+
+    const auto writesTo = [&rig, track]
+    {
+        return std::count_if (rig.audio.levels.begin(), rig.audio.levels.end(),
+                              [track] (const std::pair<int, double>& write) { return write.first == track; });
+    };
+
+    //  Time moves, as the sound does.
+    const auto onTick = [&rig]
+    {
+        rig.audio.samples += 960;
+        rig.tickOnce();
+    };
+
+    const auto killed = [&rig, track]
+    {
+        return std::find (rig.audio.stopped.begin(), rig.audio.stopped.end(), track) != rig.audio.stopped.end();
+    };
+
+    //  While it plays, its voice follows the lane.
+    for (int n = 0; n < 5; ++n)
+        onTick();
+
+    const auto playingWrites = writesTo();
+
+    for (int n = 0; n < 5; ++n)
+        onTick();
+
+    REQUIRE (writesTo() > playingWrites);
+
+    //  The press: the scene marked, and from here on nothing reaches the voice.
+    REQUIRE (rig.engine.submit ("cli", "run.killAll", {}));
+    onTick();
+
+    const auto atThePress = writesTo();
+    REQUIRE_FALSE (killed());
+
+    //  Its group's job kills it a tick or two on (this player's kill is its stop).
+    for (int n = 0; n < 5 && ! killed(); ++n)
+        onTick();
+
+    REQUIRE (killed());
+
+    for (int n = 0; n < 5; ++n)
+        onTick();
+
+    CHECK (rig.runs.find (rainRun)->isFinished());
+    CHECK (writesTo() == atThePress);
+}
+
+TEST_CASE ("stop levels: killing a stop cue and the cue it is fading in the same drain still kills the cue")
+{
+    /*  FOUND BY H3'S FINAL CHECK (2026-10-01, namespace draft §23.6). A stop
+        cue whose own run is ended hands the cue it was fading back to
+        `playing` (`advanceFades`: the fade killed on its own gives its target
+        back its level), and the hand-back asked only whether the target's stop
+        had been issued - not whether the target itself had been killed. So the
+        running pane's kill of both, landing in one drain, lost the second: the
+        stop cue's end handed the killed cue back to `playing`, `enforceStops`
+        found nothing stopping, and the cue played on. A killed target is
+        never handed back. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+    const auto track = rig.runs.find (mediaRun)->track;
+    REQUIRE (track >= 0);
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "10");
+    rig.fire (rig.stopId);
+    REQUIRE (rig.runs.find (mediaRun)->state == cue::runState::stopping);
+
+    const auto stopRun = rig.runOf (rig.stopId);
+    REQUIRE_FALSE (stopRun.empty());
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.audio.playing.count (track) == 1u);
+    REQUIRE (rig.audio.kills.empty());
+
+    //  Both in one drain, the stop cue first, as a pane listing them would.
+    REQUIRE (rig.engine.submit ("cli", "run.kill", { osc::Value::string (stopRun) }));
+    REQUIRE (rig.engine.submit ("cli", "run.kill", { osc::Value::string (mediaRun) }));
+    rig.tickOnce();
+
+    CHECK (rig.tickUntil ([&rig, track] { return ! rig.audio.kills.empty(); }, 5));
+    CHECK (rig.audio.kills == std::vector<int> { track });
+    CHECK (rig.audio.playing.count (track) == 0u);
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (mediaRun)->isFinished(); }, 5));
+}
+
+TEST_CASE ("stop levels: the pane's kill of a cue a fade-and-stop is holding cuts it at once, not at the fade's end")
+{
+    /*  H3 (namespace draft §23.6, GC). A stop cue's fade holds its target back
+        from `enforceStops` until the stop it carries is due - which is the
+        whole of the fade verb - and the hold made no exception for a kill. So
+        the running pane's kill of a cue half a second into a ten-second
+        fade-out reached the voice only when the fade would have ended; and a
+        run that is cut is given no level (FZ), so the cue hung at the level the
+        kill found it at for the rest of the fade, and was then stopped there,
+        its tail ringing. A kill asks nothing of the cue (§4.4's immediate
+        level): it lands at once, and the fade, nothing left to stop, runs out
+        its own run. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+    const auto track = rig.runs.find (mediaRun)->track;
+    REQUIRE (track >= 0);
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "10");
+    rig.fire (rig.stopId);
+    REQUIRE (rig.runs.find (mediaRun)->state == cue::runState::stopping);
+
+    //  Half a second into ten: on its way down, and still sounding.
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.audio.playing.count (track) == 1u);
+    REQUIRE (rig.audio.kills.empty());
+    REQUIRE (rig.audio.stopped.empty());
+
+    const auto writesTo = [&rig, track]
+    {
+        return std::count_if (rig.audio.levels.begin(), rig.audio.levels.end(),
+                              [track] (const std::pair<int, double>& write) { return write.first == track; });
+    };
+
+    REQUIRE (rig.submitAndTick ("run.kill", { osc::Value::string (mediaRun) }).rejected == 0);
+    const auto atThePress = writesTo();
+    rig.tickOnce();
+
+    //  The kill reaches the voice in the tick after the press...
+    CHECK (rig.audio.kills == std::vector<int> { track });
+    CHECK (rig.audio.playing.count (track) == 0u);
+
+    //  ...the run ends with the sound, given no level on the way...
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (mediaRun)->isFinished(); }, 5));
+    CHECK (writesTo() == atThePress);
+
+    //  ...and the fade, nothing left to stop, stops nothing when it is due.
+    for (int n = 0; n < 500; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.audio.kills == std::vector<int> { track });
+    CHECK (rig.audio.stopped == std::vector<int> { track });
+}
+
+TEST_CASE ("stop levels: a kill that finds a member holding its post-wait kills its voice, as well as ending it")
+{
+    /*  H3 (namespace draft §23.6, GD). A killed group ends a member that holds
+        its post-wait with `run.done`, on the spot (ES): its sound is over, and
+        the wait - its voice with it - is all it holds. But it is the clip that
+        is over, not the chain: the voice's EQ and inserts still ring what the
+        file's last moments put into them, at the cue's level, and `run.done`
+        reaches no Player. So the pane's kill of a scene left a member's reverb
+        ringing until it died away, or until the next arm on that voice cleared
+        it. A double Esc's sweep reached it; the pane's kill had nothing that
+        did. */
+    GroupRig rig;
+
+    const auto bed = rig.document.createCue (rig.groupId, 0, "media", "Bed").id;
+    rig.setCue (bed, "file", "bed.wav");
+    rig.setCue (bed, "postWait", "30");
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (bed).empty(); }));
+
+    rig.audio.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.audio.launches.empty(); }));
+
+    const auto bedRun = rig.runOf (bed);
+    const auto voice = rig.runs.find (bedRun)->track;
+    REQUIRE (voice >= 0);
+
+    rig.audio.playing.insert (voice);                 // it sounds...
+    rig.tickOnce();
+    rig.tickOnce();
+    rig.audio.playing.erase (voice);                  // ...and its file reaches its end
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (bedRun)->state == cue::runState::postWait; }));
+    REQUIRE (rig.audio.kills.empty());
+
+    //  The running pane's kill of the scene.
+    const auto groupRun = rig.runOf (rig.groupId);
+    REQUIRE (rig.submitAndTick ("run.kill", { osc::Value::string (groupRun) }).rejected == 0);
+    CHECK (rig.runToCompletion (groupRun, 10) < 10);
+
+    CHECK (rig.runs.find (bedRun)->isFinished());
+    CHECK (rig.audio.kills == std::vector<int> { voice });
+    CHECK_FALSE (rig.runs.isTrackBusy (voice));
+}
+
 TEST_CASE ("stop levels: with no audio side, a stop cue aimed at a group still runs its footer")
 {
     /*  A FADE THAT ENDS IN A STOP SAYS THE END ITSELF when there is no audio
@@ -5253,6 +5496,63 @@ TEST_CASE ("prepare: Esc and a double Esc leave a prepared scene standing, and G
         CHECK (live->id == preparedId);
         CHECK (rig.tickUntil ([&] { return rig.runs.find (armedId)->launchRequested; }));
     }
+}
+
+TEST_CASE ("prepare: a double Esc's sweep is told the voice a prepared scene armed, not a sounding cue's, and GO launches it unarmed again")
+{
+    /*  H3 (namespace draft §23.6, FY). The press spares what was only made
+        ready (§23.3), and the GO after it launches that with no arm in between
+        - so the sweep must leave those voices at the level their arm set, and
+        it is told which they are: every voice of a run only made ready. That
+        is the standby's own arm, and as here the member a prepared scene's
+        horizon armed, which the press spares through its block. A list of the
+        roots alone - the rule the press itself stops by - would hand the sweep
+        none of a scene's members, and the scene would launch at silence. */
+    PrepareRig rig;
+
+    //  The scene made ready, its member's voice held ahead.
+    rig.setStandby (rig.sound);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    const auto armedId = rig.runOf (rig.sound);
+    const auto voice = rig.runs.find (armedId)->track;
+    REQUIRE (voice >= 0);
+    REQUIRE (rig.runs.find (armedId)->onlyPrepared());
+
+    //  And the list's own cue, fired by name and left sounding.
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) }).rejected == 0);
+    rig.audio.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.audio.launches.empty(); }));
+
+    const auto* fired = rig.runs.liveRunOf (rig.mediaId);
+    REQUIRE (fired != nullptr);
+
+    const auto firedId = fired->id;
+    const auto sounding = fired->track;
+    REQUIRE (sounding >= 0);
+    REQUIRE (sounding != voice);
+    rig.audio.playing.insert (sounding);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+
+    REQUIRE (rig.audio.sweeps.size() == 1u);
+    const auto spared = rig.audio.sweeps.back();
+    CHECK (std::find (spared.begin(), spared.end(), voice) != spared.end());
+    CHECK (std::find (spared.begin(), spared.end(), sounding) == spared.end());
+
+    //  The sounding cue is killed; the member stays as its arm left it.
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (firedId)->isFinished(); }, 10));
+    REQUIRE (rig.runs.find (armedId)->state == cue::runState::armed);
+
+    //  AND THE GO LAUNCHES IT WHERE THE HORIZON ARMED IT, asking for no arm.
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (armedId)->launchRequested; }));
+    CHECK (std::none_of (rig.audio.arms.begin(), rig.audio.arms.end(),
+                         [&armedId] (const cue::ArmRequest& arm) { return arm.runId == armedId; }));
+    CHECK (rig.audio.sweeps.size() == 1u);
 }
 
 TEST_CASE ("Esc: the standby's armed cue stays armed, and GO launches that very run")

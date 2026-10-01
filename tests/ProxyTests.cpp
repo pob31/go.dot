@@ -29,9 +29,13 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/clock/AudioClockSource.h>
+#include <wfg/engine/audio/CueEq.h>
 #include <wfg/engine/audio/CueMatrix.h>
+#include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/command/CommandRegistry.h>
@@ -55,12 +59,14 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <new>
 #include <optional>
 #include <string>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -2443,6 +2449,244 @@ TEST_CASE ("rack: a gate opens over its fade-in, a stop rings until the output i
     CHECK_FALSE (host.isRackSounding (rack));
 
     host.setBlockSink (nullptr);
+    host.stop();
+}
+
+TEST_CASE ("kill: a voice's kill empties its EQ and inserts and no other track's, a stop empties none, and double Esc's sweep silences every voice and empties every EQ not sounding, but resets no voice's insert")
+{
+    /*  H3 (namespace draft §23.6), at the host and with no child. Every lane
+        is bound to a region in a vector, so a reset reads as that lane's own
+        count; and every track's EQ is driven by hand - a Q-10 peak at a
+        hundred hertz rung up with its own frequency, then one block of silence
+        through it, which gives back the ring when nothing cleared it and
+        nothing at all when something did. The graph is run twice to bring its
+        plugins up, and never again.
+
+        A VOICE'S INSERTS ARE RESET BY A KILL THAT FINDS THE VOICE STILL
+        HEARD, AND BY NOTHING ELSE HERE (GE). One child serves a plugin's lane
+        on every voice and runs their resets one after another - a VST3's is a
+        whole deactivation - so a burst of them in one pass leaves every lane
+        it serves waiting past its deadline, block after block, until the
+        plugin is failed for it. A voice the sweep or an earlier fade has
+        already taken to silence has nothing of its inserts to be heard; its
+        next arm resets them before anything plays through them again. */
+    VectorRegion region (2, 64, 5);                     // before the host: it outlives every binding
+
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    //  Two voices with two inserts each, and a rack channel with one: tracks 0, 1 and 2.
+    auto spec = specWithPlugins (2, 2);
+
+    audio::RackChannelSpec channel;
+    channel.id = "CH000001";
+    channel.name = "Verb";
+
+    audio::PluginSpec entry;
+    entry.id = "PG7N0021";
+    entry.identifier = plugin::Catalogue::testGainIdentifier();
+    entry.name = "Test gain";
+    channel.plugins.push_back (entry);
+    spec.rack.push_back (channel);
+
+    REQUIRE (host.buildEdit (spec));
+
+    const auto rack = host.rackTrackOf ("CH000001");
+    REQUIRE (rack == 2);
+
+    host.processBlock();
+    host.processBlock();
+
+    const std::array<std::pair<int, int>, 5> slots { { { 0, 0 }, { 0, 1 }, { 1, 0 }, { 1, 1 }, { rack, 0 } } };
+
+    for (std::size_t i = 0; i < slots.size(); ++i)
+    {
+        auto* lane = host.proxyLane (slots[i].first, slots[i].second);
+        REQUIRE (lane != nullptr);
+        region.bind (*lane, static_cast<int> (i));
+    }
+
+    const auto resets = [&region]
+    {
+        std::array<std::uint32_t, 5> out {};
+
+        for (std::size_t i = 0; i < out.size(); ++i)
+            out[i] = region.lane (static_cast<int> (i))->resetSeq.load();
+
+        return out;
+    };
+
+    //  Every track at a level of its own, so silence can be told from it.
+    for (int track = 0; track <= rack; ++track)
+    {
+        REQUIRE (host.trackMatrix (track) != nullptr);
+        host.trackMatrix (track)->setLevelDb (-6.0f);
+    }
+
+    audio::EqSettings boost;
+    boost.band[0].freq = 100.0f;
+    boost.band[0].gain = 12.0f;
+    boost.band[0].q = 10.0f;
+
+    for (int track = 0; track <= rack; ++track)
+        host.setTrackEq (track, boost);
+
+    //  A tenth of a second of the band's own frequency through a track's EQ.
+    const auto ringUp = [&host] (int track)
+    {
+        auto* eq = host.trackEq (track);
+        REQUIRE (eq != nullptr);
+
+        std::array<float, 64> left {}, right {};
+        float* channels[] { left.data(), right.data() };
+        auto loudest = 0.0f;
+
+        for (int block = 0; block < 75; ++block)
+        {
+            for (std::size_t n = 0; n < left.size(); ++n)
+            {
+                const auto at = static_cast<double> (block) * 64.0 + static_cast<double> (n);
+                left[n] = right[n] = 0.25f * static_cast<float> (std::sin (juce::MathConstants<double>::twoPi * 100.0 * at / 48000.0));
+            }
+
+            eq->process (channels, 2, 64);
+
+            for (const auto sample : left)
+                loudest = std::max (loudest, std::abs (sample));
+        }
+
+        REQUIRE (loudest > 0.5f);                       // twelve decibels up: the EQ is in
+    };
+
+    //  One block of silence through it: the ring, or nothing.
+    const auto ringOf = [&host] (int track)
+    {
+        std::array<float, 64> left {}, right {};
+        float* channels[] { left.data(), right.data() };
+        host.trackEq (track)->process (channels, 2, 64);
+
+        auto loudest = 0.0f;
+
+        for (const auto sample : left)
+            loudest = std::max (loudest, std::abs (sample));
+
+        return loudest;
+    };
+
+    Engine engine;
+    audio::HostPlayer player { host, engine };
+
+    const auto from = resets();
+
+    //  A STOP empties nothing: the inserts, the EQ and the level as they were.
+    ringUp (0);
+    player.stop (0);
+    CHECK (resets() == from);
+    CHECK (ringOf (0) > 0.1f);
+    CHECK (host.trackMatrix (0)->levelDb() == doctest::Approx (-6.0f));
+
+    //  A VOICE'S KILL empties that voice, and nothing else.
+    ringUp (0);
+    ringUp (1);
+    player.kill (0);
+    CHECK (resets() == std::array<std::uint32_t, 5> { from[0] + 1, from[1] + 1, from[2], from[3], from[4] });
+
+    const auto killedRing = ringOf (0);
+    INFO ("the killed voice's EQ gives back " << killedRing);
+    CHECK (juce::exactlyEqual (killedRing, 0.0f));
+    CHECK (ringOf (1) > 0.1f);
+    CHECK (host.trackMatrix (0)->levelDb() == doctest::Approx (audio::CueMatrix::silenceDb));
+    CHECK (host.trackMatrix (1)->levelDb() == doctest::Approx (-6.0f));
+
+    //  killTrack is a voice's: a rack channel's track, and no track, answer false and touch nothing.
+    CHECK_FALSE (host.killTrack (rack));
+    CHECK_FALSE (host.killTrack (9));
+    CHECK_FALSE (host.killTrack (-1));
+    CHECK (resets()[4] == from[4]);
+    CHECK (host.trackMatrix (rack)->levelDb() == doctest::Approx (-6.0f));
+
+    //  A RACK CHANNEL'S KILL resets its plugins, as it did, and now empties its EQ as well.
+    ringUp (rack);
+    player.kill (rack);
+    CHECK (resets()[4] == from[4] + 1);
+
+    const auto rackRing = ringOf (rack);
+    INFO ("the killed rack channel's EQ gives back " << rackRing);
+    CHECK (juce::exactlyEqual (rackRing, 0.0f));
+    CHECK (host.trackMatrix (rack)->levelDb() == doctest::Approx (audio::CueMatrix::silenceDb));
+
+    /*  DOUBLE ESC'S SWEEP: every voice silenced and every EQ emptied, held by a
+        run or not, and every rack channel's inserts reset - but no voice's
+        inserts, which the voice's own silence covers until its next arm resets
+        them (GE); nothing on the voice the press leaves armed for the next GO,
+        which keeps what its arm gave it; and no rack channel's level moved. */
+    host.trackMatrix (0)->setLevelDb (-6.0f);
+    host.trackMatrix (rack)->setLevelDb (-6.0f);
+    const auto swept = resets();
+
+    for (int track = 0; track <= rack; ++track)
+        ringUp (track);
+
+    player.resetEffects ({ 1 });
+    CHECK (resets() == std::array<std::uint32_t, 5> { swept[0], swept[1], swept[2], swept[3], swept[4] + 1 });
+
+    for (const int track : { 0, rack })
+    {
+        const auto ring = ringOf (track);
+        INFO ("track " << track << " gives back " << ring);
+        CHECK (juce::exactlyEqual (ring, 0.0f));
+    }
+
+    CHECK (ringOf (1) > 0.1f);                                                  // left ready
+    CHECK (host.trackMatrix (0)->levelDb() == doctest::Approx (audio::CueMatrix::silenceDb));
+    CHECK (host.trackMatrix (1)->levelDb() == doctest::Approx (-6.0f));
+    CHECK (host.trackMatrix (rack)->levelDb() == doctest::Approx (-6.0f));    // a rack channel's level is left
+
+    /*  AND THE KILL THAT FOLLOWS, on a voice the sweep has already silenced:
+        the stop, the EQ emptied - and no insert reset, there being nothing of
+        them left to hear (GE). */
+    const auto killedAfter = resets();
+    ringUp (0);
+    player.kill (0);
+    CHECK (resets() == killedAfter);
+    CHECK (juce::exactlyEqual (ringOf (0), 0.0f));
+    CHECK (host.trackMatrix (0)->levelDb() == doctest::Approx (audio::CueMatrix::silenceDb));
+
+    //  Nothing left ready: that voice goes with the rest, its inserts left to its next arm.
+    const auto again = resets();
+    ringUp (1);
+    player.resetEffects ({});
+    CHECK (resets() == std::array<std::uint32_t, 5> { again[0], again[1], again[2], again[3], again[4] + 1 });
+    CHECK (juce::exactlyEqual (ringOf (1), 0.0f));
+    CHECK (host.trackMatrix (1)->levelDb() == doctest::Approx (audio::CueMatrix::silenceDb));
+    CHECK (host.trackMatrix (rack)->levelDb() == doctest::Approx (-6.0f));
+
+    /*  WHAT STILL SOUNDS IS LEFT TO ITS OWN KILL: a rack channel whose gate is
+        open keeps its EQ and its plugins through the sweep - emptied under
+        the sound they would click - and its kill, a tick later, empties them. */
+    host.openRackGate (rack, -1);
+    REQUIRE (host.isRackPassing (rack));
+    ringUp (rack);
+
+    const auto open = resets();
+    player.resetEffects ({});
+    CHECK (resets()[4] == open[4]);
+    CHECK (ringOf (rack) > 0.1f);
+
+    player.kill (rack);
+    CHECK (resets()[4] == open[4] + 1);
+    CHECK (juce::exactlyEqual (ringOf (rack), 0.0f));
+
+    for (const auto& [track, slot] : slots)
+        host.proxyLane (track, slot)->unbind();
+
     host.stop();
 }
 

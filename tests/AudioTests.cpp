@@ -39,6 +39,7 @@
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/MediaInfo.h>
 
 #include <tuple>
@@ -4960,6 +4961,379 @@ TEST_CASE ("eq: a peak on the voice doubles a sine at its centre, written live t
     rig.host.setBlockSink (nullptr);
 
     CHECK (20.0 * std::log10 (rmsOf (again, 0) / flatRms) == doctest::Approx (0.0).scale (1.0).epsilon (0.05));
+}
+
+//==============================================================================
+/*  H3 (namespace draft §23.6), HEARD: what a voice's own processing holds
+    after each way of stopping it. A peak twelve decibels up at a hundred hertz
+    with a Q of ten rings for hundreds of milliseconds after its input has gone
+    - the tail a delay or a reverb on an insert would leave, from the EQ every
+    voice has, so no plugin is needed. Esc stops the cue and lets that ring on
+    at the cue's level, as §4.4 lets it (the panic fade at nought, so what is
+    heard is the stop itself). A double Esc takes the sounding voice to silence
+    over the press's own tick with its EQ left whole under the fade, so its
+    kill a tick later lands on nothing; a double Esc once Esc's cue has ended
+    cuts the tail within the press's tick, by the sweep alone; the pane's kill
+    is silent within a block of the kill; and each is exactly silent the ticks
+    after, a cue whose lane goes on moving its level included. Then the next GO
+    plays the standby both keys leave armed, on the other voice, at the level
+    it had before - the sweep leaves the voice the next GO needs as its arm
+    made it - and the killed cue, fired again onto the voice the kill or the
+    sweep took to silence and emptied, plays at its own level too: its arm puts
+    the level back, and its EQ rings up again because it was emptied, not
+    switched out. */
+TEST_CASE ("double Esc: a voice's own EQ is silent within a block of the kill, where Esc lets it ring - and the next GO plays as before")
+{
+    constexpr int rate = 48000;
+    constexpr int blockSize = 64;
+    constexpr int samplesPerTick = rate / 50;
+    constexpr int blocksPerTick = samplesPerTick / blockSize;
+    static_assert (blocksPerTick * blockSize == samplesPerTick, "a tick must be whole blocks");
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+
+    //  Two voices: the cue that rings on one, the standby armed ahead on the other.
+    audio::EditSpec spec;
+    spec.tracks = 2;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSineTone (rig.storage.folder, rate, 100.0, 0.25f, 8);
+    REQUIRE (tone.existsAsFile());
+
+    //  --- a show: two media cues through the same EQ, one bus ------------------
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (29);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    engine.log().openInMemory ({});
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    auto audioNode = document.root().getChildWithName ("Audio");
+    audioNode.setProperty (juce::Identifier ("tracks"), 2, nullptr);
+
+    juce::ValueTree bus { "Bus" };
+    bus.setProperty (juce::Identifier ("id"), "KZB00001", nullptr);
+    bus.setProperty (juce::Identifier ("name"), "Main", nullptr);
+    bus.setProperty (juce::Identifier ("firstChannel"), 0, nullptr);
+    bus.setProperty (juce::Identifier ("width"), 1, nullptr);
+    audioNode.appendChild (bus, nullptr);
+
+    const auto listId = document.createList ("Sound").id;
+
+    //  Esc a cut, and a GO as soon as a script presses it.
+    REQUIRE (document.setAttribute ("/godot/audio/panicFade", "0").ok);
+    REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    std::vector<std::string> cueIds;
+
+    for (const auto* name : { "Ring", "After" })
+    {
+        const auto id = document.createCue (listId, static_cast<int> (cueIds.size()), "media", name).id;
+        REQUIRE_FALSE (id.empty());
+        document.setAttribute ("/godot/cue/" + id + "/file", tone.getFileName().toStdString());
+
+        //  Strings, as a show file holds them: the suite runs under fr_FR as well.
+        REQUIRE (document.setAttribute ("/godot/cue/" + id + "/eqB1Freq", "100").ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + id + "/eqB1Gain", "12").ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + id + "/eqB1Q", "10").ok);
+
+        auto media = document.findById (id);
+        juce::ValueTree route { "Route" };
+        route.setProperty (juce::Identifier ("id"), cueIds.empty() ? "KZR00001" : "KZR00002", nullptr);
+        route.setProperty (juce::Identifier ("bus"), "KZB00001", nullptr);
+        route.setProperty (juce::Identifier ("gains"), "1", nullptr);
+        media.appendChild (route, nullptr);
+
+        cueIds.push_back (id);
+    }
+
+    const auto ringCue = cueIds[0];
+    const auto afterCue = cueIds[1];
+    REQUIRE (document.setAttribute (cue::standbyAddressOf (listId), ringCue).ok);
+
+    //  --- the audio side ----------------------------------------------------------
+    audio::HostPlayer player { rig.host, engine };
+    runner.setPlayer (&player);
+    runner.setSamplesPerTick (samplesPerTick);
+    runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
+
+    std::int64_t tick = 0;
+
+    const auto oneTick = [&]
+    {
+        runner.beforeTick (engine, tick);
+        engine.processTick (tick++);
+        player.serviceArms();
+
+        for (int i = 0; i < blocksPerTick; ++i)
+            rig.host.processBlock();
+    };
+
+    const auto record = [&] (RecordingSink& sink, int ticks)
+    {
+        sink.prepare (2, ticks * samplesPerTick);
+        rig.host.setBlockSink (&sink);
+
+        for (int i = 0; i < ticks; ++i)
+            oneTick();
+
+        rig.host.setBlockSink (nullptr);
+    };
+
+    //  The loudest sample from `from` on.
+    const auto loudest = [] (const RecordingSink& sink, int from)
+    {
+        return sink.written > from ? sink.buffer.getMagnitude (0, from, sink.written - from) : 0.0f;
+    };
+
+    //  The cue's latest run, found again after every tick: the table's storage moves.
+    const auto runOf = [&runs] (const std::string& cueId)
+    {
+        const cue::Run* found = nullptr;
+
+        for (const auto& each : runs.all())
+            if (each.cue == cueId)
+                found = runs.find (each.id);
+
+        return found;
+    };
+
+    const auto sounding = [&rig, &runOf] (const std::string& cueId)
+    {
+        const auto* run = runOf (cueId);
+        return run != nullptr && run->track >= 0 && rig.host.trackPlayState (run->track).playing;
+    };
+
+    for (int i = 0; i < 4; ++i)
+        oneTick();
+
+    REQUIRE (engine.submit ("udp:127.0.0.1:9000", "go", {}));
+
+    for (int i = 0; i < 600 && ! sounding (ringCue); ++i)
+        oneTick();
+
+    REQUIRE (sounding (ringCue));
+
+    //  Settled: a quarter at twelve decibels up is a sine of about one.
+    for (int i = 0; i < 25; ++i)
+        oneTick();
+
+    RecordingSink steady;
+    record (steady, 10);
+
+    const auto steadyRms = rmsOf (steady, 0);
+    INFO ("steady " << steadyRms);
+    REQUIRE (steadyRms > 0.5);
+
+    //  The standby armed ahead on the other voice, which both keys leave ready (§23.3).
+    REQUIRE (runOf (afterCue) != nullptr);
+    REQUIRE (runOf (afterCue)->state == cue::runState::armed);
+    REQUIRE (runOf (afterCue)->track >= 0);
+    REQUIRE (runOf (afterCue)->track != runOf (ringCue)->track);
+
+    const auto ringRun = runOf (ringCue)->id;
+    const auto ringVoice = runOf (ringCue)->track;
+
+    SUBCASE ("Esc: a stop, and the EQ rings on at the cue's level")
+    {
+        REQUIRE (engine.submit ("cli", "run.stopAll", {}));
+        oneTick();                                      // the handler: the root asked to stop
+        oneTick();                                      // enforceStops: the stop, the clip gone
+
+        RecordingSink tail;
+        record (tail, 2);
+
+        INFO ("after Esc " << loudest (tail, 0));
+        CHECK (loudest (tail, 0) > 0.2f);
+    }
+
+    SUBCASE ("double Esc: the sounding voice faded out over the press's tick with its EQ whole, and its kill lands on silence")
+    {
+        rt::resetCounts();
+        REQUIRE (engine.submit ("cli", "run.killAll", {}));
+
+        RecordingSink pressing, killing, quiet;
+        record (pressing, 1);                           // the handler: the stops let go, the sweep
+        record (killing, 1);                            // enforceStops: the kill
+        record (quiet, 2);
+
+        /*  THE BOOST IS STILL IN at the head of the press's tick: the sweep
+            leaves a sounding voice's EQ to its kill (FW). Cleared under the
+            sound, the ring would fall to the bare quarter in one sample and
+            take a good part of a period to build again, while the level, on
+            its one-tick way down, is still three quarters up at sample 256. And
+            that way down is over by the tick's end - the sweep silenced the
+            voice itself, a tick before its kill: nothing at all is heard in
+            the kill's tick. */
+        const auto opening = pressing.buffer.getMagnitude (0, 0, 4 * blockSize);
+
+        INFO ("the press's first four blocks " << opening << ", the kill's tick " << loudest (killing, 0)
+                << ", after it " << loudest (quiet, 0));
+        CHECK (opening > 0.5f);
+        CHECK (juce::exactlyEqual (loudest (killing, 0), 0.0f));
+        CHECK (juce::exactlyEqual (loudest (quiet, 0), 0.0f));
+
+        if (rt::isCounting())
+            CHECK (rt::violations() == 0);
+    }
+
+    SUBCASE ("Esc, then double Esc once the cue has ended: the sweep cuts the tail Esc left ringing, within a block of the press")
+    {
+        REQUIRE (engine.submit ("cli", "run.stopAll", {}));
+        oneTick();
+        oneTick();
+
+        RecordingSink tail;
+        record (tail, 2);
+
+        INFO ("after Esc " << loudest (tail, 0));
+        REQUIRE (loudest (tail, 0) > 0.2f);
+
+        /*  NO RUN LEFT TO KILL: what cuts this tail is the sweep, in the
+            press's own tick - the EQ of a voice nothing sounds on cleared at
+            once. The level's twenty-millisecond way down alone would still let
+            seven eighths of the ring through at the third block. */
+        REQUIRE (runOf (ringCue)->isFinished());
+
+        rt::resetCounts();
+        REQUIRE (engine.submit ("cli", "run.killAll", {}));
+
+        RecordingSink pressing, quiet;
+        record (pressing, 1);
+        record (quiet, 2);
+
+        INFO ("in the press's tick " << loudest (pressing, 2 * blockSize) << ", after it " << loudest (quiet, 0));
+        CHECK (loudest (pressing, 2 * blockSize) < 0.05f);
+        CHECK (juce::exactlyEqual (loudest (quiet, 0), 0.0f));
+
+        if (rt::isCounting())
+            CHECK (rt::violations() == 0);
+    }
+
+    SUBCASE ("the pane's kill: the voice's own kill empties it")
+    {
+        rt::resetCounts();
+        REQUIRE (engine.submit ("cli", "run.kill", { osc::Value::string (ringRun) }));
+        oneTick();                                      // the handler: the run marked
+
+        RecordingSink killing, quiet;
+        record (killing, 1);                            // enforceStops: HostPlayer::kill on the voice
+        record (quiet, 2);
+
+        INFO ("in the kill's tick " << loudest (killing, 2 * blockSize) << ", after it " << loudest (quiet, 0));
+        CHECK (loudest (killing, 2 * blockSize) < 0.05f);
+        CHECK (juce::exactlyEqual (loudest (quiet, 0), 0.0f));
+
+        if (rt::isCounting())
+            CHECK (rt::violations() == 0);
+    }
+
+    SUBCASE ("the pane's kill of a cue its lane is moving: the lane does not bring the voice back")
+    {
+        /*  The lane moves the run's level every tick until `run.ended`, which
+            comes a tick after the kill. Written over the kill's silence, that
+            level brought back what the voice still gives - here the stop's own
+            ten samples through the emptied EQ - and left it there once the run
+            had gone. */
+        REQUIRE (document.setAttribute ("/godot/cue/" + ringCue + "/levelLane", "0 0 8 -24").ok);
+
+        for (int i = 0; i < 3; ++i)
+            oneTick();
+
+        rt::resetCounts();
+        REQUIRE (engine.submit ("cli", "run.kill", { osc::Value::string (ringRun) }));
+        oneTick();
+
+        RecordingSink killing, quiet;
+        record (killing, 1);
+        record (quiet, 2);
+
+        INFO ("in the kill's tick " << loudest (killing, 2 * blockSize) << ", after it " << loudest (quiet, 0));
+        CHECK (loudest (killing, 2 * blockSize) < 0.05f);
+        CHECK (juce::exactlyEqual (loudest (quiet, 0), 0.0f));
+
+        /*  AND THE VOICE IS STILL AT SILENCE, whatever its chain holds: the
+            lane wrote nothing over the kill's level, from the press to the
+            run's end. Heard, that is only the few samples the stop seeds into
+            the emptied EQ; read at the output stage, it is the whole of it. */
+        const auto* stage = rig.host.trackMatrix (ringVoice);
+        REQUIRE (stage != nullptr);
+        INFO ("the voice's level " << stage->levelDb());
+        CHECK (stage->levelDb() == doctest::Approx (audio::CueMatrix::silenceDb));
+
+        if (rt::isCounting())
+            CHECK (rt::violations() == 0);
+
+        //  The lane goes, so the cue fired again below plays at its own level.
+        REQUIRE (document.setAttribute ("/godot/cue/" + ringCue + "/levelLane", "").ok);
+    }
+
+    //  THE NEXT GO: the standby the press left armed, at the level it had.
+    for (int i = 0; i < 20 && ! runOf (ringCue)->isFinished(); ++i)
+        oneTick();
+
+    REQUIRE (runOf (ringCue)->isFinished());
+    REQUIRE (runOf (afterCue)->state == cue::runState::armed);
+
+    REQUIRE (engine.submit ("udp:127.0.0.1:9000", "go", {}));
+
+    for (int i = 0; i < 600 && ! sounding (afterCue); ++i)
+        oneTick();
+
+    REQUIRE (sounding (afterCue));
+
+    for (int i = 0; i < 50; ++i)
+        oneTick();
+
+    RecordingSink again;
+    record (again, 10);
+
+    const auto againRms = rmsOf (again, 0);
+    INFO ("steady " << steadyRms << ", the next GO " << againRms);
+    CHECK (20.0 * std::log10 (againRms / steadyRms) == doctest::Approx (0.0).epsilon (0.01));
+
+    /*  AND THE KILLED CUE AGAIN, ON THE VOICE THE PRESS EMPTIED. The standby
+        played on the voice the sweep left alone; this is the other one, left
+        at silence by the kill or the sweep, its EQ cleared. Its arm puts the
+        level back, and its EQ rings up as it did the first time: emptied, not
+        switched out. Fired by name, which is never debounced, once the cue
+        just played has gone: the lowest voice free is the first one. */
+    REQUIRE (engine.submit ("cli", "run.kill", { osc::Value::string (runOf (afterCue)->id) }));
+
+    for (int i = 0; i < 20 && ! runOf (afterCue)->isFinished(); ++i)
+        oneTick();
+
+    REQUIRE (runOf (afterCue)->isFinished());
+    REQUIRE (engine.submit ("cli", "cue.fire", { osc::Value::string (ringCue) }));
+
+    for (int i = 0; i < 600 && ! sounding (ringCue); ++i)
+        oneTick();
+
+    REQUIRE (sounding (ringCue));
+    REQUIRE (runOf (ringCue)->track == ringVoice);
+
+    for (int i = 0; i < 50; ++i)
+        oneTick();
+
+    RecordingSink refired;
+    record (refired, 10);
+
+    const auto refiredRms = rmsOf (refired, 0);
+    INFO ("steady " << steadyRms << ", the killed cue again on its own voice " << refiredRms);
+    CHECK (20.0 * std::log10 (refiredRms / steadyRms) == doctest::Approx (0.0).epsilon (0.01));
 }
 
 //==============================================================================

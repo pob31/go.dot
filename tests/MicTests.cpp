@@ -409,6 +409,13 @@ namespace
             return true;
         }
 
+        /*  A double Esc's sweep of Go.dot's own effects (namespace draft
+            §23.6), counted. */
+        void resetEffects (const std::vector<int>&) override
+        {
+            ++effectResets;
+        }
+
         void completeArms (Engine& engine)
         {
             for (const auto& arm : arms)
@@ -433,6 +440,8 @@ namespace
         std::vector<int> stops, kills;
         std::map<int, double> levels;
         std::set<int> playing, ready;
+
+        int effectResets = 0;
     };
 
     struct RunRig
@@ -643,6 +652,10 @@ TEST_CASE ("mic: what would stop a mic cue fails its run in words")
 
 TEST_CASE ("mic: Esc lets the tail ring out, and a kill does not")
 {
+    /*  AND ONLY THE DOUBLE ESC SWEEPS (namespace draft §23.6): Go.dot's own
+        effects, every track's, emptied once a press - asked in the press's own
+        tick, the kill coming a tick later - and never by Esc or by the pane's
+        kill of one cue, which reach that cue alone. */
     SUBCASE ("Esc: a stop, the channel's plugins left to ring")
     {
         RunRig rig;
@@ -655,6 +668,20 @@ TEST_CASE ("mic: Esc lets the tail ring out, and a kill does not")
         CHECK (rig.audio.stops == std::vector<int> { 2 });
         CHECK (rig.audio.kills.empty());
         CHECK (rig.tickUntil ([&rig] { return rig.runOf ("MC000002")->isFinished(); }, 20));
+        CHECK (rig.audio.effectResets == 0);
+    }
+
+    SUBCASE ("Esc on every root: no sweep")
+    {
+        RunRig rig;
+        REQUIRE (rig.fireAndLaunch ("MC000002") != nullptr);
+
+        rig.submitAndTick ("run.stopAll");
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.audio.effectResets == 0);
     }
 
     SUBCASE ("a kill from the running pane: silence, nothing left ringing")
@@ -668,17 +695,25 @@ TEST_CASE ("mic: Esc lets the tail ring out, and a kill does not")
 
         CHECK (rig.audio.kills == std::vector<int> { 2 });
         CHECK (rig.audio.stops.empty());
+        CHECK (rig.audio.effectResets == 0);
     }
 
-    SUBCASE ("double Esc: the same kill")
+    SUBCASE ("double Esc: the same kill, and Go.dot's own effects swept once")
     {
         RunRig rig;
         REQUIRE (rig.fireAndLaunch ("MC000002") != nullptr);
 
         rig.submitAndTick ("run.killAll");
-        rig.tickOnce();
+        CHECK (rig.audio.effectResets == 1);             // the handler's, in the press's tick
+        CHECK (rig.audio.kills.empty());
 
+        rig.tickOnce();
         CHECK (rig.audio.kills == std::vector<int> { 2 });
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.audio.effectResets == 1);
     }
 }
 

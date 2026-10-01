@@ -246,7 +246,17 @@ namespace wfg::audio
             return true;
         }
 
-        return audioHost.stopTrack (track);
+        /*  A VOICE'S KILL EMPTIES THE VOICE (2026-10-01, namespace draft
+            §23.6): the stop, the output silenced, and the EQ and the inserts
+            after it emptied - the inserts on a voice still heard - where a stop
+            lets them ring. It was the stop alone, so a double Esc left a cue's
+            reverb ringing at its level. */
+        return audioHost.killTrack (track);
+    }
+
+    void HostPlayer::resetEffects (const std::vector<int>& ready)
+    {
+        audioHost.resetEffects (ready);
     }
 
     //==============================================================================

@@ -1667,7 +1667,7 @@ Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's ar
 | `run.prune`, `run.unprune` | `/godot/cmd/run/prune`, `…/unprune` | `s` run, `s` cue, `s` scope | scope `round` (this round only) or `group` (every round of this run). Run-local; clicking again reinstates if not already passed (§3.6) |
 | `run.kill` | unchanged | `s` run | **now kills a run with no track** — a fade, an osc wait, a group and every descendant — immediately, and runs no footer |
 | `run.stopAll` | `/godot/cmd/run/stopAll` | — | *(2026-09-18)* §4.4's **Esc**: `run.stop hard` applied to every root run, so members come down in order and every footer runs. An empty table is applied and does nothing. *(2026-09-30, H2: every root except one that was only made ready - the standby's arm, the block its horizon prepared - which is left ready, §23.3; a block with a run somebody asked for under it, such as a member fired by name, is stopped like any root)* |
-| `run.killAll` | `/godot/cmd/run/killAll` | — | *(2026-09-18)* §4.4's **double Esc**: `run.kill` applied to every root run; no footer runs. Which of the two a press means is the client's reading of a hand, and each reading is one of these two records. *(2026-09-30, H2: the standby's preparation is left ready here too, on the same terms, §23.3)* |
+| `run.killAll` | `/godot/cmd/run/killAll` | — | *(2026-09-18)* §4.4's **double Esc**: `run.kill` applied to every root run; no footer runs. Which of the two a press means is the client's reading of a hand, and each reading is one of these two records. *(2026-09-30, H2: the standby's preparation is left ready here too, on the same terms, §23.3)* *(2026-10-01, H3: and Go.dot's own effects are swept once - every voice silenced, every EQ and every rack channel's inserts emptied, the standby's left as its arm made it - §23.6)* |
 | `run.solo` | `/godot/cmd/run/solo` | `s` run, `[T on]` | *(2026-09-25, at the author's direction)* a sampler clip soloed on its strip: while it holds, a press on any other strip of its bank - a touch, a pad, a fire by name - is applied and starts nothing. Without `on` it toggles, and the value it came to is what is logged. It lets go by itself when the clip stops (its end, a stop, a kill, a release); a clip that has stopped takes none; a run that is no sampler clip: `bad-value`. The SOLO button of a Mackie strip sends it |
 | `run.seek` | `/godot/cmd/run/seek` | `s` run, `d` seconds, `[s made…]` | *(2026-09-18)* a scrub settling: a **media** run is moved to that second of its file - the voice stopped and asked for again on the same track, at the level a fade had brought it to, the run keeping its identifier - and a **group** run is re-seated at that second of its own timeline under the same group run, its members built again from the solver's answer for the scene at that second (over, sounding at their offset, or waiting for their due tick), which is what brings a member already over back. Nothing beside the group is touched. The identifiers a group seek draws ride on the applied arguments as a jump's do. A ranged media run lands at the start of the range holding the second. A fade, a wait, a message: `bad-value`; a run that is over: applied and nothing |
 | `record.start` | `/godot/cmd/record/start` | — | *(2026-09-19)* the live recorder on: from now every applied `go`, `cue.fire` and `trigger.fire` on any list is kept with its tick, unbounded, beside the sixty-four-step history |
@@ -9394,7 +9394,8 @@ change the way Phase 5's views did.
    author's to rule on:** a stop cue aimed at a sampler group kills its sounding clips at once
    rather than fading each (the existing group stop kills children; Esc does the same - *2026-09-30,
    H1: a group's stop now stops its children and only a kill kills them, §23.2; on a voice the two
-   are one stop, so the clips still stop at once rather than fade*), and GO on a
+   are one stop, so the clips still stop at once rather than fade* - *2026-10-01, H3: one no more:
+   a kill on a voice also empties its EQ and inserts, §23.6; the clips still stop at once*), and GO on a
    running *non*-sampler group at the top of a list still starts a second scene — decision N says a
    live group is ignored, the comment beside `armInternal` says so too, and the code does not. Only
    the sampler refresh was added; the general fix waits for the author.
@@ -11116,7 +11117,9 @@ the queue. **A fade that stops a mic cue** closes the input over the fade (`Play
 its job keeps the level where it was, on the session and on a replay alike. **A kill** - any run
 whose `skipFooter` is set, which is double Esc and the running pane's kill - is `Player::kill`,
 which on a voice is the stop it always was and on a rack channel is `killRack`: the input shut in a
-millisecond, the level to silence, every lane reset, nothing left ringing. The routing, EQ and FX
+millisecond, the level to silence, every lane reset, nothing left ringing. *(2026-10-01, H3: on a
+voice it is `killTrack` now - the stop, the EQ cleared, the level to silence, and every insert reset
+unless the voice was silent already - and `killRack` clears the channel's EQ as well, §23.6.)* The routing, EQ and FX
 pushes reach a sounding mic run as a media run's. **Not in 9b.5:** a mic cue armed at standby or
 prepared by a header, asserted in the persistent section, or named by the refusal of Load now (all
 9b.6); and the path's delay and `overBudget` rows, which §18.7 makes readings the tree derives and
@@ -11354,7 +11357,8 @@ said on the insert: the cue has it switched out, or the cue is wider than the pl
   `ProxyLane::fadeSamples` (48, a millisecond at 48 kHz), then zeros; the miss is counted as before.
 - **Answered after silence** - the first piece rises over the same 48 samples.
 - **A new cue on the voice** (`requestReset`, at every arm and a rack kill) starts the fades over, so
-  nothing of the last cue's is faded from.
+  nothing of the last cue's is faded from. *(2026-10-01, H3: and at a voice's kill that finds it
+  still heard, and at a double Esc's sweep of a rack channel, §23.6.)*
 - **The Tracktion plugin around the lane** (`ProxyPlugin::applyToBuffer`) returned before calling the
   lane when it was unbound or its switch was off - so in the graph, and only there, a failed plugin's
   block went out dry whatever the lane said. It now returns only for an insert the cue has switched
@@ -12366,6 +12370,10 @@ brought down with everything else; a stop due sooner than the panic's lands wher
 **Double Esc** (`Runner::dropStopFades`): every job holding a stop still to come lets go - the
 panic's, a stop cue's fade, a sampler release - so the roots `run.killAll` marks are cut by
 `enforceStops` on the next tick instead of being faded to the end. §4.4: *"drops all actions"*.
+*(2026-10-01, H3: and it sweeps Go.dot's own effects once, `Runner::resetEffects` - every voice
+silenced, every EQ and every rack channel's inserts emptied, the standby's left as its arm made it -
+and the kill that follows empties what it reaches; and a single kill, the pane's, no longer waits
+behind such a job either, §23.6.)*
 
 **A GO during the fade.** A group can now be `stopping` for as long as the fade. Both walks that
 descend into a live group (`fireStandby`, `prepareStandby`) pass over one that is stopping and make
@@ -13118,6 +13126,7 @@ asked. `run.kill` marks a run to skip its footer (`skipFooter`) and as the opera
   shut, the reverb ringing out, as Esc promises. `enforceStops` passed over any run whose stop was
   issued, for good, so the kill that followed never reached the audio side. It now goes through
   once (`Run::killIssued`): on a rack channel it cuts the tail; on a voice it is the stop again.
+  *(2026-10-01, H3: on a voice it cuts the tail too - `killTrack`, §23.6.)*
 - **A kill ends a post-wait and begins none** (ES; found in the review). A kill wrote `stopping`
   over a run's post-wait, and the `run.ended` that followed began it again from nought - so a double
   Esc held a member's voice, its slots and its scene for a whole post-wait more (EJ had only stopped
@@ -13756,3 +13765,255 @@ driver should be green there too - no `~RF`, and the stale offer closed on every
 rename by handle's fallback to `MoveFileExW` has not met a FAT stick or a network share here. And
 the gap by design above closes with one call to `Bundle::resolveAllSuperseded` in the serve verb's
 open (`Console.cpp`, not this stage's file). Nothing to the bench.
+
+### 23.6 A double Esc empties Go.dot's own effects (H3)
+
+**What it means.** After a double Esc nothing Go.dot processes is left sounding. The EQ every voice
+has, and the plugins inserted on a voice or a rack channel, used to go on ringing out what they held
+when a cue was killed - a delay's repeats, a reverb's tail - at the cue's level. Now a kill empties
+them, and a double Esc also silences every voice and empties every EQ and every rack channel's
+plugins that no cue holds any more, so a tail whose cue has already ended goes too. A voice's own
+plugins are silenced with the voice, and emptied by its next cue before anything plays through them
+(GE). Esc is unchanged: it stops cues and lets their tails ring, as §4.4 lets it.
+
+**The gap.**
+
+- **A media cue's kill was its stop.** `HostPlayer::kill` on a voice was `AudioHost::stopTrack`: the
+  clip stopped, and everything after it in the voice's chain - the EQ's filter memory, an insert's
+  delay line or reverb - rang on at the cue's level. A mic cue's kill already reset its channel's
+  plugins and silenced it (CN), but left its EQ ringing behind that silence until the next cue's arm
+  cleared it.
+- **Nothing reached a tail whose cue had ended.** A double Esc reaches runs. A media cue whose file
+  ran out while its reverb still rang, a mic cue past its ten-second ring-out (CG), a cue Esc stopped
+  a moment before the second press: none had a run left to kill.
+- **The plan's "shared reverb" does not exist as audio.** There are no aux sends and no return tracks
+  (§18.11). A `Rack/Channel` with `access="shared"` is built as an ordinary rack channel whose gate
+  nothing can open - a mic cue on it fails `bad-channel`, and `Media/Insert` is only a claim - and
+  `RackChannelSpec` does not even carry `access`. So there is no `resetSharedReturns`: the sweep
+  below covers every track the host builds, which takes in a shared return the day one is built as a
+  track.
+
+**The fix.**
+
+- **A voice's kill empties the voice** (FT). `AudioHost::killTrack`: every slot stopped at the next
+  block, the output stage to silence behind its one-tick ramp, the EQ cleared, every insert reset
+  before its next block - the inserts only on a voice still heard (GE). `HostPlayer::kill` calls it
+  for a voice. The level is what makes the kill exact: the clip's own stop is a ten-sample fade,
+  which reaches the EQ and the inserts after their reset and seeds a little tail again (0.000115
+  from the kill's third block, in the test below), and an AU or an LV2 plugin is not reset at all
+  (GA). It is not a bypass: every insert stays switched as the cue left it - a switched-out insert
+  is not called, passes the block dry and keeps its tail frozen - and the next arm puts the level
+  back and resets again.
+- **A rack channel's kill clears its EQ as well** (FU), in `killRack`, beside its plugins.
+- **A double Esc sweeps once** (FV), from the `run.killAll` wrapper in `registerGoCommands`, in the
+  press's own tick: `Runner::resetEffects`, then `Player::resetEffects` (nothing by default, so every
+  test's player is complete), then `HostPlayer` and `AudioHost::resetEffects`. Every voice's output
+  goes to silence over one tick, held by a run or not, so a voice no run owns is silenced as well -
+  its inserts with it; on every track that is not sounding - a voice whose clip is not playing, a
+  rack channel whose gate is shut - the EQ is cleared; and on every rack channel that is not
+  sounding, every insert is reset. A voice's inserts are not: its silence covers them and its next
+  arm resets them (GE). A rack channel's level is left as it is: a sounding mic cue is
+  `killRack`'s, and a channel no cue holds is armed by none. It is a Player call and nothing else -
+  no record, no change to a run - so a replay, which has no Player, is the same with it or without.
+  The command's help says so.
+- **What still sounds is emptied by its own kill** (FW), not by the sweep: a voice still playing, a
+  rack channel still open. Its kill reaches it a tick later through `enforceStops` - a member of a
+  killed scene a tick after that, through its group's job - and empties it under the silence the
+  sweep has already brought: a rack channel's EQ and plugins, a voice's EQ, the voice's inserts
+  silent with it and left to its next arm (GE). Emptied in the press's tick, under the sound, the EQ
+  would lose the boost it carries in one sample and a VST3 miss a block: a click at the head of the
+  cut.
+- **What the press leaves ready is left alone** (FY). H2 keeps the standby's arm and its prepared
+  block armed through a double Esc (EO), and the next GO launches them with no arm in between, so the
+  level their arm set is the only one they will have. The Runner passes the tracks of every
+  unfinished run only made ready (`Run::onlyPrepared`) and the sweep touches nothing on them. The
+  stage drew the sweep as every voice to silence; built that way, the standby the next GO launched
+  played at silence - RMS 0 in the `AudioTests` case below, in both of its double-Esc forms.
+- **A voice that is cut keeps its silence** (FZ). A lane, a DCA ridden or a fade goes on moving a
+  run's level every tick until `run.ended`, and `applyLevels` - which runs before `enforceStops` -
+  writes it to the voice. So every killed cue was given its level once more after its stop, and kept
+  it once its run was gone, with the stop's re-seeded tail, or an AU's, still in its chain - a mic
+  cue's `killRack` included; and with the sweep, a member of a killed scene would have come back for
+  the tick between the press's silence and its own kill.
+  `applyLevels` now writes no level for a run whose kill has gone out (`Run::killIssued`), a killed
+  run still stopping, or a run under a kill (`underAKill`); a seek that brings a run back clears
+  `killIssued`, and the run is given its level again. The brief listed this guard as optional;
+  without it GA would not hold for a cue with a lane. A run is never left so for longer than its
+  kill takes to land, a tick or two - which needed the next fix.
+- **A kill is not held back by a fade-and-stop** (GC; found in review). `enforceStops` defers every
+  run a stop cue's fade is holding - the fade verb is that hold, the stop landing at the fade's end -
+  and it made no exception for a kill. Only a double Esc let such jobs go (`dropStopFades`). So the
+  running pane's kill of a cue five seconds into a twenty-second fade-out reached the voice fifteen
+  seconds later; and since FZ gives a cut run no level, the cue hung at the level the kill found it
+  at all that while - the pane showing it still falling - then took the fade's plain stop there, its
+  tail ringing a tick before the escalated kill emptied it. The kill made the cue louder for longer
+  than not killing it. The same for a kill during Esc's own panic fade (a stop-fade job too), a D700
+  MUTE on a sampler clip in its release, and the members a killed group ends while such a fade holds
+  one. Now a run that is cut - its own kill, or one above it - goes through the hold and is killed on
+  the next tick; the fade runs on to its own end with nothing left to stop, its stop passing over a
+  run that has finished.
+- **A kill that finds a member holding its post-wait kills its voice too** (GD; found in review). A
+  killed group ends such a member with `run.done` (ES): its sound is over and the wait, its voice
+  with it, is all it holds. But it is the clip that is over, not the chain - the voice's EQ and
+  inserts still ring what the file's last moments put into them, at the cue's level - and `run.done`
+  reaches no Player. A double Esc's sweep reached that tail; the pane's kill of a scene had nothing
+  that did. `Runner::endMember` now asks the Player to kill the member's voice beside the `run.done`,
+  from the hook that decides it, as `enforceStops` asks - no record, so a replay is the same.
+- **No burst of insert resets** (GE; found in review). One child process serves a plugin's lane on
+  every voice - the set's entry, a lane a voice (`proxySpecFor`) - and its one worker runs the lanes
+  in turn, a lane's reset inline before its block; a VST3's reset is a whole `setProcessing` and
+  `setActive` cycle. The parent runs one graph thread, and while the worker is busy every lane of that
+  plugin switched in on a voice waits out its deadline (the lesser of 250 µs and a quarter of the
+  block), misses, and is counted. N resets of r each in one pass give each of K called lanes about
+  N·r/(K·d) misses in a row - about r/d when most of them are reset - so a VST3 whose reset takes
+  2 ms or more reaches the eight in a row that fail the plugin (*"every voice using it is silent until
+  it is back"*; a second failure inside a minute leaves it down until `plugin.restart`). The sweep
+  as first built was that burst, every idle voice's inserts at once, once a press - and the D700
+  sends a `run.killAll` for every STOP inside its double window - and a killed scene's members'
+  kills were the same burst a tick later. Neither bought anything heard: the sweep takes every voice
+  it does not leave ready to exact silence over a tick, and every arm resets the inserts again before
+  its launch. So the sweep resets no voice's inserts, and `killTrack` resets them only on a voice
+  still heard - one whose level was not already at silence, which a double Esc's kills, landing under
+  the sweep's silence, never are; nor is a voice a fade has taken to nothing. The pane's kill of a
+  sounding cue still resets its inserts within a block, and a rack channel's are still reset, by its
+  kill and by the sweep, since its level is left. What is left of the burst is under *Honest limits*.
+
+**What does not change.**
+
+- **Esc.** Its stop leaves the EQ and the inserts ringing at the cue's level - with the panic fade at
+  nought, after `run.stop`, or at a natural end; a panic fade takes a media cue's level, which comes
+  after the inserts, to silence first. A mic cue's tail rings at its input (CG). Esc does not sweep.
+- **The pane's kill** of one cue empties that cue's voice and nothing else. Only the double Esc
+  sweeps.
+- **`enforceStops` still keys on the run's own mark** - `skipFooter`, or a kill above it (ER). Since
+  H1 a graceful group stop sends its members `run.stop`, so nothing graceful reaches `Player::kill`.
+  A stop cue's fade still holds every run that is not cut, as the fade verb says (GC is about kills).
+
+**Everything that kills a voice now empties it** - or, on a voice already silent, leaves its
+inserts to its next arm (GE). A double Esc, the pane's kill - at once, even of a cue a stop cue's
+fade is holding (GC) - the D700 strip's MUTE (`run.kill`), the kill a double Esc sends after Esc's
+stop has landed (ER), and four hooks of the Runner's own:
+
+- a killed group's job killing its members;
+- a killed group's job ending a member that holds its post-wait (GD);
+- a sampler group ending an idle member - armed, never launched - when it closes or loses its strip:
+  nothing sounds there, so nothing is heard;
+- **the lane recorder ending a pass by hand** (GB). Rec pressed again, or the waveform's stop:
+  `recordLane` writes the ride, then ends the cue with `run.kill`. Its own comment and §20.9 say the
+  cue is *stopped* there; §20.9's DM is about a double Esc's kill dropping the ride, and this kill
+  comes after the ride is written, so it drops nothing. Left a kill, as the stage ruled for a
+  deliberate one: a pass ended by hand now cuts its cue's EQ and insert tail, which rang on until H3.
+  `run.stop` there would let it ring, and would stop marking the run `killed`, which suspends a
+  persistent cue (S). The author's to rule on.
+
+**Honest limits.**
+
+- **AU and LV2 inserts are not emptied** (GA). JUCE's `reset()` is real for VST3 and VST2 in this pin
+  and does nothing for an Audio Unit or an LV2 plugin; the in-tree test plugins ignore it too. For
+  those formats the voice's silence is what silences them: a killed voice, and after a double Esc
+  every voice the press does not leave ready. A rack channel hosting one still rings after a double
+  Esc, since a channel's level is left; so does a voice the press leaves ready, if the run before it
+  on that voice left such a tail, which its arm's reset could not clear either. The child process is
+  unchanged.
+- **A voice's inserts are silenced, not emptied, by a double Esc** (GE). Whatever the format, a
+  voice the sweep reaches or a kill finds already silent keeps its inserts' tail inside them, at
+  exact silence, until its next arm resets them before anything plays through. Heard, nothing; but
+  the plugin is still computing that tail. A voice the press leaves ready is neither silenced nor
+  emptied - its arm already reset it, unless an AU or an LV2 one held a tail from the cue before.
+- **A VST3's reset can miss a block, and a burst of them can fail the plugin.** It runs
+  `setActive (false/true)` on the child's audio thread, which can take longer than the lane's
+  deadline; that block is silent, never dry (CU), and counted as a miss, as at every arm. Misses
+  add up per pass of the child, not per lane (GE): N resets of r in one pass give each of the K
+  lanes it serves about N·r/(K·d) misses in a row, and eight fail it. *(The first build of this
+  stage said "one reset a lane, so no run of misses marks a plugin failed", which was wrong.)* What
+  is left of that: the pane's kill of a scene whose sounding members share one VST3 resets all of
+  their lanes in the same tick, nothing having silenced them first; and a double Esc's sweep resets
+  every idle rack channel's inserts, so a rack whose idle channels share one VST3 can feel a smaller
+  burst. Owed to the bench.
+- **The order of a double Esc.** The press's tick takes every voice to silence over one tick,
+  clears the EQ of every track that is not sounding and resets the inserts of every rack channel
+  that is not; the next tick's kills stop the roots' voices and clear their EQs - their inserts
+  already silent - and empty their rack channels; a scene's members are killed a tick after that.
+  A clip still playing in the press's tick is heard fading over it, twenty milliseconds.
+
+**Tests**, each written first. The new calls could not compile against the tree before this stage,
+so it was built with them declared and doing nothing - every behaviour as before - and each case
+failed there:
+
+- `AudioTests`, the whole chain - the document, the Runner, `HostPlayer`, `AudioHost` and the
+  EqPlugin before the output stage - with a peak twelve decibels up at 100 Hz and a Q of ten on two
+  media cues, one sounding and the other the standby, armed on a second voice. Esc leaves the ring
+  (0.52 two ticks after the stop). The pane's kill, and the pane's kill of a cue whose lane is
+  moving, are below 0.05 from the kill's third block (0.000115 and 0.000087) and exactly silent the
+  two ticks after. A double Esc is silent from the kill's own tick: the sweep took the voice there
+  over the press's tick, its EQ left whole under that fade - the press's first four blocks still
+  peak at 0.87. A double Esc once Esc's cue has ended - required finished, so nothing but the sweep
+  acts - is at nothing from the press's third block. And in every case the next GO plays the
+  standby left armed within 0.01 dB of the first cue (+0.0005 dB measured), and the killed cue,
+  fired again by name onto the voice the kill or the sweep silenced, plays within 0.01 dB of itself
+  (+0.0005 dB): its arm puts the level back and its EQ rings up again. Before this stage: 0.71 in
+  the kill's tick and 0.52 after, for a double Esc and for the pane's kill; 0.20 and 0.15 for the
+  double Esc after Esc. With the sweep as the stage drew it, every kill passed and the next GO after
+  a double Esc played nothing (RMS 0) - FY's evidence. With FZ's guard off, the lane brought the
+  killed voice back: 0.000066 after the kill instead of nothing, and the voice's level read -2.52 dB
+  at the output stage where it reads -120. The checks the review added pass on this stage's code by
+  construction; each was shown to catch what it is for on a build with that one thing broken - the
+  sweep clearing a sounding voice's EQ (the press's opening 0.24), the voice's level drop moved past
+  the sounding test (the kill's tick not silent), no EQ clearing on an idle voice (0.24 in the
+  press's tick after Esc), and an arm that sets no level (the cue fired again at RMS 0, in the four
+  subcases whose voice was silenced).
+- `ProxyTests`, at the host with no child: every lane bound to a region in a vector, every EQ driven
+  by hand, rung up and then listened to through a block of silence. A stop resets nothing; a voice's
+  kill resets its two inserts and its EQ, silences it, and leaves the other voice alone; `killTrack`
+  answers false for a rack channel and for no track; a rack channel's kill now clears its EQ (FU);
+  the sweep clears every EQ, silences every voice and resets the rack channel's insert, but resets
+  no voice's insert (GE), touches nothing on the voice left ready and moves no rack channel's level;
+  a kill on a voice the sweep has silenced clears its EQ and resets none of its inserts (GE); a rack
+  channel whose gate is open is left to its kill, which then empties it. 14 assertions failed before
+  this stage, the rack channel's EQ among them; five failed on the sweep as first built (FW, FY);
+  and three on the first build of this stage, which reset every voice's inserts in the sweep and in
+  a kill that found the voice silent (GE).
+- `MicTests`: a double Esc asks for the sweep once, in the press's own tick, and the kill comes a
+  tick later; Esc, on one cue or on every root, and the pane's kill never ask. It failed on the count,
+  0 where 1 was due.
+- `GoTests`: a media member of a scene whose lane is moving is given no level from the double Esc to
+  its run's end. With FZ's guard off it was given two. And, from the review:
+  - the pane's kill of a cue half a second into a ten-second fade-and-stop reaches its voice in the
+    next tick, the run ends, no level is written on the way, and the fade stops nothing when it is
+    due (GC). On the first build of this stage: no kill a tick after the press, the cue still
+    playing, the run not over five ticks later, and in the end the fade's own stop at ten seconds
+    with the escalated kill after it;
+  - the pane's kill of a scene whose member holds its post-wait kills that member's voice as well as
+    ending it (GD). No kill at all on the first build;
+  - a double Esc's sweep is told the voice a prepared scene's horizon armed, and not a sounding cue's,
+    and the GO after it launches the member with no new arm (FY). It passed on the first build; with
+    the list cut to the roots - the rule the press stops by - it failed, the member's voice not told.
+
+Guards, which passed on the old code by construction: Esc's ring, a stop resetting nothing,
+`killTrack`'s false answers, and the counts of nought for Esc and the pane's kill.
+
+**The decisions.** Letters follow H6b's; FX is skipped, as EQ was, because it reads as the effects
+everywhere else in this document. FT to GB are the implementer's and GC to GE the fixer's, after
+review; all are the author's to overrule.
+
+| | Decision | Whose |
+|---|---|---|
+| FT | **A voice's kill empties the voice**: `killTrack` stops every slot, takes the output to silence behind its one-tick ramp, clears the EQ and resets every insert - the inserts only on a voice still heard (GE); nothing is switched out | implementer's call, as the stage ruled; narrowed by GE |
+| FU | **A rack channel's kill clears its EQ too** | implementer's call, as the stage ruled |
+| FV | **A double Esc sweeps Go.dot's own processing once**, from its own handler: every voice silenced, every EQ on a track not sounding emptied, every insert on a rack channel not sounding reset - a voice's left to its silence and its next arm (GE) - and a rack channel's level left; a Player call, no record | implementer's call, as the stage ruled: there is no shared return to reset (§18.11), and a sweep over every track reaches the tails of runs already ended; narrowed by GE |
+| FW | **What still sounds is emptied by its own kill**, a tick later and under the silence the sweep began, not by the sweep | implementer's call, departing from the stage's "every track's EQ and inserts": emptied under the sound, the EQ clicks and a VST3 misses a block |
+| FY | **The sweep touches nothing the press leaves ready**: the tracks of every run only made ready | implementer's call, departing from the stage's "every voice to silence": the standby H2 keeps armed is launched by the next GO with no arm, and played at silence |
+| FZ | **A voice that is cut keeps its silence**: no level written for a run whose kill has gone out, a killed run still stopping, or a run under a kill | implementer's call; the stage listed it as an optional guard, and a lane or a DCA undid the kill's silence without it |
+| GA | **AU and LV2 inserts are silenced by the voice's level, not emptied**; the child is unchanged | implementer's call, as the stage ruled |
+| GB | **The lane recorder's end of a pass by hand stays a kill**, and now cuts its cue's tail | implementer's call, as the stage ruled for a deliberate kill; its own words say "stopped", so it is the author's to rule on |
+| GC | **A kill is not held back by a stop cue's fade**: a run that is cut - its own kill or one above it - goes through the hold in `enforceStops` and is killed on the next tick; the fade runs on to its end with nothing to stop | the fixer's call, after review: held, a killed cue hung at the level the kill found it at (FZ) until the fade's end, then took a plain stop there; a kill asks nothing of the cue (CN: "silence at once") |
+| GD | **A kill that ends a member's post-wait kills its voice as well**, from the group's job, beside `run.done` | the fixer's call, after review: the clip was over and the chain was not, and nothing reached it but a double Esc's sweep |
+| GE | **No burst of insert resets**: the sweep resets no voice's inserts, and a kill resets them only on a voice still heard - not one a double Esc's sweep or a fade has already taken to silence; rack channels' are still reset | the fixer's call, after review: one child resets a plugin's lanes on every voice one after another, and a burst of VST3 resets fails the plugin for the whole show after two presses inside a minute; under silence they bought nothing heard |
+| GF | **A killed target is never handed back**: a stop cue whose own run ends gives the cue it was fading back to `playing` only when that cue was not killed itself | the orchestrator's call, found by the stage's final check: the running pane's kill of a stop cue and of its target in one drain handed the killed target back, and the kill was lost - the cue played on. Test: GoTests "stop levels: killing a stop cue and the cue it is fading in the same drain still kills the cue", failing first |
+
+**Owed to the bench**, beside §23.3's: a double Esc on a media cue with a VST3 delay insert, the
+repeats cut; the same with an AU or an LV2 insert, silenced by the level; a double Esc with the
+standby armed, the next GO at its level; a VST3 reverb switched in on eight or more voices at a
+64-sample buffer, double Esc pressed twice inside a minute, the plugin's row watched for "stopped
+answering" (GE); the pane's kill of a scene whose sounding members share that reverb, watched the
+same way; and the pane's kill of a cue a long stop cue's fade is bringing down, the cut at once (GC).

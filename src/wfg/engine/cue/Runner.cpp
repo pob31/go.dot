@@ -4662,6 +4662,31 @@ namespace wfg::cue
                        running.end());
     }
 
+    void Runner::resetEffects()
+    {
+        if (audio == nullptr)
+            return;
+
+        /*  WHAT THE PRESS LEAVES ARMED KEEPS ITS LEVEL (namespace draft §23.3
+            and §23.6). The standby's arm and every member its horizon armed -
+            a run only made ready, which every road to a launch unmarks - are
+            spared by `run.killAll`, and the GO after it launches them with no
+            arm in between: the level their arm set is the only one they will
+            have, and a sweep that silenced it made that GO play nothing. One
+            in a block somebody reached into is in this list all the same, and
+            the press stops the block: what was asked for in it is ended, then
+            the rest is given back by the block's revocation - an armed run
+            never launched, which holds nothing for a sweep to empty, and whose
+            voice the next arm on it sets afresh. */
+        std::vector<int> ready;
+
+        for (const auto& run : runs.all())
+            if (! run.isFinished() && run.track >= 0 && run.onlyPrepared())
+                ready.push_back (run.track);
+
+        audio->resetEffects (ready);
+    }
+
     bool Runner::goTooSoon (std::int64_t tick) const
     {
         if (lastGoTick < 0)
@@ -5496,11 +5521,17 @@ namespace wfg::cue
                     still on its way out, the scene played its next member once
                     that one had gone - after Esc, which stops the stop cue's run
                     with every other root. The hand-back is about a voice, which
-                    `enforceStops` would otherwise cut at once. */
+                    `enforceStops` would otherwise cut at once.
+
+                    NOR A TARGET THAT WAS KILLED ITSELF (2026-10-01, namespace
+                    draft §23.6). The hand-back asked only whether the target's
+                    stop had been issued: the running pane killing the stop cue
+                    and its target in one drain handed the killed target back to
+                    `playing`, and the kill was lost - the cue played on. */
                 if (job.stopWhenDone)
                     if (auto* held = runs.find (job.heldRun()))
                         if (held->state == runState::stopping && ! held->stopIssued
-                              && ! held->isGroup())
+                              && ! held->isGroup() && ! held->skipFooter)
                             held->state = runState::playing;
 
                 job.retired = true;
@@ -7099,12 +7130,25 @@ namespace wfg::cue
             kill asks nothing of the cue: `run.done`, the post-wait's own ending,
             lets all of it go on the spot. `run.kill` would only have written
             `stopping` over the wait. Under Esc a post-wait still runs out, as
-            the member's own way of completing. */
+            the member's own way of completing.
+
+            AND ITS VOICE IS KILLED AS WELL (2026-10-01, namespace draft §23.6,
+            GD). It is the clip that is over, not the chain: the voice's EQ and
+            inserts still ring what the file's last moments put into them, at
+            the cue's level, and `run.done` reaches no Player - so the pane's
+            kill of a scene left a member's reverb ringing until it died away,
+            or until the next arm on that voice cleared it. Asked here, by the
+            hook that decided, as `enforceStops` asks: while the run still holds
+            the voice, and with no record, so a replay - which has no Player -
+            is the same with it or without. */
         if (member.isFinished())
             return;
 
         if (! graceful && member.state == runState::postWait)
         {
+            if (audio != nullptr && member.track >= 0)
+                audio->kill (member.track);
+
             engine.submit (origin::engine, "run.done", one (member.id));
             return;
         }
@@ -8333,6 +8377,30 @@ namespace wfg::cue
             return total;
         };
 
+        /*  A VOICE THAT IS CUT KEEPS ITS SILENCE (2026-10-01, namespace draft
+            §23.6). A kill takes the voice's output to silence at the audio
+            side, and a double Esc's sweep takes every voice it does not leave
+            ready there in the press's own tick, a tick or two before each
+            run's kill reaches it; but a lane, a DCA ridden or a fade goes on
+            moving the run's level every tick until `run.ended`, and writing it
+            brought the voice back - a member of a killed scene for the ticks
+            before its kill, and any killed cue for good, its level written once
+            more after the stop and never taken away. What the voice still
+            gives then is what a kill cannot empty: the stop's own few samples
+            through an emptied chain, an AU's or an LV2's tail. So a run under
+            a kill, killed, or whose kill has gone out is given no level; a seek
+            that brings one back gives it its own again. And it is never left so
+            for longer than its kill takes to land, a tick or two: a stop cue's
+            fade holding the run does not hold its kill back (GC, in
+            `enforceStops`), or the cue would hang at the level the kill found
+            it at until the fade's end. */
+        const auto cut = [this] (const Run& candidate)
+        {
+            return candidate.killIssued
+                     || (candidate.skipFooter && candidate.state == runState::stopping)
+                     || underAKill (candidate);
+        };
+
         for (const auto& snapshot : runs.all())
         {
             auto* run = runs.find (snapshot.id);
@@ -8353,7 +8421,7 @@ namespace wfg::cue
             /*  A GROUP RUN HAS NO VOICE, which is what makes its level a trim
                 rather than a level: the number reaches the outputs through its
                 members, each of which has just had it added to its own. */
-            if (audio != nullptr && run->track >= 0)
+            if (audio != nullptr && run->track >= 0 && ! cut (*run))
                 audio->setLevelDb (run->track, effective);
         }
     }
@@ -8690,7 +8758,8 @@ namespace wfg::cue
             and it has a job counting down to a stop of its own; stopping it
             here would land it at the moment the operator asked instead of at
             the end of the fade, which is the whole difference between the two
-            verbs. So a run that some fade job is holding is left alone. */
+            verbs. So a run that some fade job is holding is left alone - unless
+            it is killed (see below). */
         if (audio == nullptr)
             return;
 
@@ -8709,8 +8778,10 @@ namespace wfg::cue
                 promises (CG). This loop used to pass over a run whose stop was
                 issued, for good, so the kill that followed never reached the
                 audio side and the tail rang through the press that promises
-                everything is cut (CN). Now it goes through, once: on a rack
-                channel it cuts the tail; on a voice it is the stop again. */
+                everything is cut (CN). Now it goes through, once, and cuts the
+                tail: a rack channel's input stage and plugins, a voice's EQ and
+                its inserts, unless a double Esc's sweep has already silenced
+                them (since 2026-10-01, §23.6 - it was the stop again). */
             if (snapshot.stopIssued)
             {
                 if (cut && ! snapshot.killIssued)
@@ -8731,7 +8802,20 @@ namespace wfg::cue
                                                         && job.heldRun() == snapshot.id;
                                            });
 
-            if (held)
+            /*  BUT A KILL IS NOT HELD (2026-10-01, namespace draft §23.6, GC).
+                The hold is what a fade-and-stop is; a kill asks nothing of the
+                cue, its fade included, and lands now. Held, the pane's kill of
+                a cue ten seconds into a twenty-second fade-out reached the
+                voice when the fade would have ended - and as a run that is cut
+                is given no level (`applyLevels`), the cue hung at the level the
+                kill found it at all that while, then was stopped there, its tail
+                ringing. The same for a kill during Esc's own panic fade, a
+                MUTE on a sampler clip in its release, and the members a killed
+                group is ending. A double Esc never met it: it lets every such
+                job go first (`dropStopFades`). The fade runs on to its own end
+                with nothing left to stop, since its stop passes over a run
+                that has finished. */
+            if (held && ! cut)
                 continue;
 
             if (auto* run = runs.find (snapshot.id))
@@ -8740,10 +8824,13 @@ namespace wfg::cue
                 run->killIssued = cut;
             }
 
-            /*  A KILL IS NOT A STOP ON A RACK CHANNEL (Phase 9b, decision CN):
-                a double Esc, or the pane's own kill, silences a mic cue at once
-                with nothing left ringing, where Esc lets its tail ring out. On a
-                voice the two are the same stop, as they always were.
+            /*  A KILL IS NOT A STOP (Phase 9b, decision CN): a double Esc, or
+                the pane's own kill, silences a mic cue at once with nothing
+                left ringing, where Esc lets its tail ring out - and, since
+                2026-10-01 (namespace draft §23.6), a media cue too: its output
+                silenced and its voice's EQ and inserts emptied - the inserts
+                only if the voice is still heard (GE) - where a stop leaves them
+                ringing. The two were the same stop on a voice.
 
                 AND A RUN UNDER A KILLED GROUP IS CUT, however it was asked to
                 stop (2026-09-30, namespace draft §23.2). Every double Esc is two
@@ -8870,6 +8957,18 @@ namespace wfg::cue
             `audio/panicFade` and then stops every root, `run.killAll` lets go of
             every stop still to come and then drops every root.
 
+            AND A DOUBLE ESC SWEEPS GO.DOT'S OWN EFFECTS, ONCE (2026-10-01,
+            namespace draft §23.6): every voice silenced and every EQ in the
+            graph emptied, and the inserts of every rack channel reset - but
+            nothing this press leaves armed for the next GO - from here, because
+            this is the one place that runs once a press. A voice's inserts are
+            covered by its silence and reset by its next arm, not here: a burst
+            of resets would fail a plugin every voice shares (GE). A kill
+            reaches a run's voice a tick later, through `enforceStops`; the
+            sweep is what reaches a tail whose run has already ended. A Player
+            call, no record: a replay, with no Player, does the same without
+            it.
+
             WRAPPED, NOT REWRITTEN, so what the earlier registration carries -
             the output test it stops, since 2026-09-21 - comes with it; and a
             rig that registered the run commands alone keeps the plain ones.
@@ -8895,14 +8994,24 @@ namespace wfg::cue
                 specialised.description = "Stops every run now, gracefully: Esc. What is sounding fades to"
                                           " silence over audio/panicFade first; members come down in order"
                                           " and every footer runs; the standby's preparation is left ready.";
+            else
+                specialised.description = "Drops every run now: double Esc. No footer runs, and the world is left"
+                                          " as it was; every voice in Go.dot's own graph is silenced and every EQ"
+                                          " and rack channel's insert emptied, but the standby's, whose preparation"
+                                          " is left ready.";
 
             specialised.handler = [&runner, graceful, before = plain->handler]
                                   (CommandContext& context, const std::vector<osc::Value>& args)
             {
                 if (graceful)
+                {
                     runner.beginPanicFade (context.tick);
+                }
                 else
+                {
                     runner.dropStopFades();
+                    runner.resetEffects();
+                }
 
                 return before (context, args);
             };

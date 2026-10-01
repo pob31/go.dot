@@ -2459,11 +2459,117 @@ namespace wfg::audio
         impl->rackShutAt[static_cast<std::size_t> (trackIndex - impl->voices)] = -2;
 
         if (auto* matrix = trackMatrix (trackIndex))
-            matrix->setLevelDb (-120.0f);
+            matrix->setLevelDb (CueMatrix::silenceDb);
+
+        /*  THE EQ AS WELL (2026-10-01, namespace draft §23.6): its filter
+            memory is a tail like a plugin's, heard under the next cue's
+            fade-in until that cue's arm cleared it. */
+        if (auto* eq = trackEq (trackIndex))
+            eq->reset();
 
         for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
             if (lane != nullptr)
                 lane->requestReset();
+    }
+
+    bool AudioHost::killTrack (int trackIndex) noexcept
+    {
+        /*  BOUNDED BY THE LANES AS WELL AS THE VOICES: a graph that failed to
+            build lets go of every lane and keeps its voice count. */
+        if (trackIndex < 0 || trackIndex >= impl->voices
+              || trackIndex >= static_cast<int> (impl->trackLanes.size()))
+            return false;
+
+        /*  THE STOP FIRST, then the rest, all landing at the next block. Its
+            ten-sample fade still reaches the chain after the reset, which is
+            what the level is for: silence at the output stage a tick on,
+            whatever the chain was seeded with or could not let go of. */
+        const auto stopped = impl->stopEverySlot (trackIndex);
+
+        auto* matrix = trackMatrix (trackIndex);
+        const auto alreadySilent = matrix != nullptr && matrix->levelDb() <= CueMatrix::silenceDb;
+
+        if (matrix != nullptr)
+            matrix->setLevelDb (CueMatrix::silenceDb);
+
+        if (auto* eq = trackEq (trackIndex))
+            eq->reset();
+
+        /*  THE INSERTS ONLY ON A VOICE STILL HEARD (2026-10-01, namespace draft
+            §23.6, GE). One child serves a plugin's lane on every voice and runs
+            their resets one after another in a pass - a VST3's is a whole
+            deactivation - while every lane it serves waits out its deadline;
+            enough of them at once and each lane misses block after block until
+            the plugin is failed. A double Esc's kills are exactly that many at
+            once - a scene's members in one tick - and they land on voices the
+            press's sweep has already taken to silence, as an earlier fade to
+            nothing would have: nothing of their inserts can be heard, and the
+            next arm resets them before anything plays through them again. */
+        if (! alreadySilent)
+            for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
+                if (lane != nullptr)
+                    lane->requestReset();
+
+        return stopped;
+    }
+
+    void AudioHost::resetEffects (const std::vector<int>& ready) noexcept
+    {
+        /*  EVERY TRACK THE GRAPH WAS BUILT WITH, held or not - a tail outlives
+            the run that made it - and nothing switched: a reset is not a
+            bypass, and an insert switched out would pass the block dry and
+            keep its tail frozen in it.
+
+            SAFE BESIDE buildEdit BECAUSE NO HANDLER RUNS WHILE A GRAPH IS
+            BUILT: every rebuild - an Apply, Load now, a clock followed - joins
+            the tick thread, the only one that runs handlers, and takes the
+            Player away before it touches the graph. An outage is the one time
+            `run.killAll` is let through on purpose (AudioSettings.cpp), and the
+            graph is then the one the show had, paused and not torn down: what
+            is asked here waits for its next block. */
+        const auto tracks = static_cast<int> (impl->trackLanes.size());
+
+        for (int track = 0; track < tracks; ++track)
+        {
+            if (std::find (ready.begin(), ready.end(), track) != ready.end())
+                continue;
+
+            const auto voice = track < impl->voices;
+
+            if (voice)
+                if (auto* matrix = trackMatrix (track))
+                    matrix->setLevelDb (CueMatrix::silenceDb);
+
+            /*  WHAT STILL SOUNDS IS EMPTIED BY ITS OWN KILL, a tick from now
+                and under the silence begun above. Cleared here, its EQ would
+                drop the boost it carries in one sample and a plugin miss a
+                block in the middle of the sound: a click before the cut. */
+            if (voice ? impl->isTrackPlaying (track) : isRackPassing (track))
+                continue;
+
+            if (auto* eq = trackEq (track))
+                eq->reset();
+
+            /*  A VOICE'S INSERTS ARE LEFT TO ITS SILENCE AND ITS NEXT ARM
+                (2026-10-01, namespace draft §23.6, GE). One child serves a
+                plugin's lane on every voice and resets them one after another
+                in a pass - a VST3's reset is a whole deactivation - while every
+                lane it serves waits out its deadline, and a lane late eight
+                blocks running fails the plugin for every voice. A sweep that
+                reset every idle voice's inserts at once was exactly that burst,
+                once a press, for nothing heard: the level above takes the voice
+                to exact silence in a tick, and every arm resets the inserts
+                again before its launch. A rack channel's level is left, so
+                nothing else would empty its inserts, and they are reset here -
+                which a rack whose idle channels share one plugin can still feel
+                as a smaller burst (§23.6's limits). */
+            if (voice)
+                continue;
+
+            for (auto* lane : impl->trackLanes[static_cast<std::size_t> (track)])
+                if (lane != nullptr)
+                    lane->requestReset();
+        }
     }
 
     bool AudioHost::isRackTrack (int trackIndex) const noexcept

@@ -366,13 +366,26 @@ namespace wfg::cue
             channel was built as, or -1 for one the graph does not have; a mic
             cue's launch, its channel's gate opened at a sample over its
             fade-in; a stop's fade taken by the input, the tail left to ring;
-            and a kill, which for a voice is its stop and for a rack channel is
-            silence at once with nothing left ringing. Defaults a test's player
-            is complete with. */
+            and a kill, which is silence at once with nothing left ringing - on
+            a rack channel its input shut, and on a voice (2026-10-01, §23.6)
+            its stop with its output silenced and its EQ emptied, and its
+            inserts too unless it was silent already, where it used to be the
+            stop alone. Defaults a test's player is complete with: the default
+            kill is the stop. */
         virtual int rackTrackOf (const std::string&) const { return -1; }
         virtual bool openLive (int track, std::int64_t sample, double) { return launchAtSample (track, 0, sample); }
         virtual void shutLive (int, double) {}
         virtual bool kill (int track) { return stop (track); }
+
+        /*  A DOUBLE ESC'S SWEEP OF GO.DOT'S OWN PROCESSING (PRD §4.4, namespace
+            draft §23.6), asked once a press, on the tick thread: every voice
+            silenced, every EQ in the graph emptied and every rack channel's
+            inserts reset - those of runs that have already ended among them;
+            one still sounding by its own kill, a tick later; a voice's inserts
+            by its silence and its next arm - but nothing on the tracks in
+            `ready`, which the press leaves armed for the next GO. Nothing by
+            default, so a replay's player and a test's are complete. */
+        virtual void resetEffects (const std::vector<int>&) {}
 
         virtual int inputCount() const { return 0; }
         virtual float takeInputPeak (int) { return 0.0f; }
@@ -890,6 +903,14 @@ namespace wfg::cue
             `playing` by the killed fade and never stopped at all. */
         void dropStopFades();
 
+        /*  AND THE SWEEP THAT GOES WITH IT (2026-10-01, namespace draft §23.6):
+            the audio side asked, once a press, to silence every voice and
+            empty every effect Go.dot's graph holds - but nothing on the voices
+            this press leaves armed for the next GO, which it is told. A Player
+            call and nothing else - no record, no change to a run - so a replay,
+            which has no Player, is the same with it or without. */
+        void resetEffects();
+
         /*  THE LEAST TIME BETWEEN TWO GOs (PRD §3.7's GO debounce, a show
             setting since 2026-09-28): whether a GO at `tick` falls inside the
             show's `list/goDebounce` of the last GO that fired something. The
@@ -1345,7 +1366,8 @@ namespace wfg::cue
         /*  ONE MEMBER OF A STOPPING GROUP, ended the way the group is ending:
             `run.stop` when it was stopped, `run.kill` when it was killed, once
             a member rather than once a tick, and `run.done` for a post-wait a
-            kill finds (namespace draft §23.2). Hook-side, as it submits. */
+            kill finds (namespace draft §23.2) - its voice killed beside it, the
+            chain's tail with it (§23.6). Hook-side, as it submits. */
         void endMember (Engine& engine, const Run& member, bool graceful);
 
         /*  WHAT SOMEBODY ASKED FOR INSIDE A BLOCK THAT NEVER STARTED, ended the

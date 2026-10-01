@@ -302,10 +302,62 @@ namespace wfg::audio
 
         /*  A KILL (namespace draft §18.5, decision CN): the input shut in a
             millisecond, the output stage's level to silence behind its own
-            ramp, the channel's plugins reset so that the next cue does not open
-            onto a tail left inside them - and no ring-out: the channel is free
-            at once. Tick thread. */
+            ramp, the channel's EQ cleared and its plugins reset so that the
+            next cue does not open onto a tail left inside them - and no
+            ring-out: the channel is free at once. Tick thread. */
         void killRack (int trackIndex) noexcept;
+
+        /*  A VOICE'S KILL (2026-10-01, namespace draft §23.6): every slot
+            stopped at the next block, the output stage taken to silence behind
+            its one-tick ramp, the EQ's delay lines cleared and - on a voice
+            still heard - every insert reset before its next block, so what a
+            delay or a reverb on the voice was still holding is not heard after
+            a double Esc or the pane's kill, where a stop lets it ring.
+
+            THE LEVEL GOES TOO, and it is not belt and braces. The clip's own
+            stop is a ten-sample fade, and it reaches the EQ and the inserts
+            after their reset, which seeds a little tail again; and an AU or an
+            LV2 plugin is not reset at all, since JUCE's reset does nothing for
+            either. Silence at the output stage is what makes the voice silent
+            one tick later whatever its chain holds.
+
+            NO INSERT RESET ON A VOICE ALREADY SILENT (GE): one a double Esc's
+            sweep took to silence a tick before, or a fade to nothing. Nothing
+            of its inserts can be heard, and a scene's worth of resets at once
+            is the burst that fails a plugin every voice shares; its next arm
+            resets them.
+
+            NOT A BYPASS. Every insert stays switched as the cue left it, and
+            the next arm puts the level back and resets again. Tick thread;
+            atomics. False for a rack channel's track, which is killRack's,
+            and for an index no voice answers to. */
+        bool killTrack (int trackIndex) noexcept;
+
+        /*  A DOUBLE ESC'S SWEEP (PRD §4.4: it "kills all internal processing
+            including live effects"; namespace draft §23.6), once a press, over
+            every track the graph was built with, a run's or nobody's:
+
+            - EVERY VOICE TAKEN TO SILENCE behind its one-tick ramp: the tail
+              of a cue that has already ended goes with the rest, inserts and
+              all, and so does a voice no run owns, which nothing else would
+              reach.
+            - EVERY EQ CLEARED on a track that is not sounding, and EVERY INSERT
+              RESET on a rack channel that is not - a voice's inserts are left
+              to its silence and its next arm (GE), since one child resets a
+              plugin's lanes on every voice in a row and a burst of them fails
+              it. A track that is sounding - a clip playing, a gate open - is
+              left to its own kill a tick later, which empties it under the
+              silence this has begun: emptied now, under the sound, it would
+              click.
+            - NOTHING AT ALL on the tracks in `ready`, which the press leaves
+              armed for the next GO (§23.3). Nothing arms them again before it
+              launches them, so the level their arm set is the only one they
+              will have.
+
+            A rack channel's level is left as it is: a sounding mic cue is
+            killRack's, and a channel no cue holds is armed by none. Tick
+            thread; atomics. */
+        void resetEffects (const std::vector<int>& ready) noexcept;
 
         /** Whether this track is a rack channel's rather than a voice. Any thread. */
         bool isRackTrack (int trackIndex) const noexcept;
@@ -598,7 +650,8 @@ namespace wfg::audio
 
         /*  Stops EVERY slot of the track, at the next block. What a stop cue
             means: the cue stops, and which of its ranges happened to be
-            sounding is not something the caller should have to know. */
+            sounding is not something the caller should have to know. Its EQ
+            and its inserts are left to ring out; a kill is killTrack. */
         bool stopTrack (int trackIndex) noexcept;
 
         /*  What a track's launch handle says right now, as a plain value.

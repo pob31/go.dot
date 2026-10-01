@@ -95,8 +95,11 @@ namespace wfg::audio
         /*  THE LIVE RACK (Phase 9b): a rack channel's track is played through
             its gate - opened at the launch's sample over the cue's fade-in,
             shut over a stop's fade or five milliseconds, and its tail left to
-            ring out - and a kill is silence at once. On a voice, `kill` is the
-            stop it always was. */
+            ring out - and a kill is silence at once. On a voice, a kill was
+            the stop alone until 2026-10-01 (namespace draft §23.6), and left
+            the voice's EQ and inserts ringing at the cue's level: it is the
+            stop now with the output silenced and those emptied - the inserts
+            unless the voice was silent already - killTrack. */
         int rackTrackOf (const std::string& channelId) const override;
         bool openLive (int track, std::int64_t sample, double fadeInSeconds) override;
         void shutLive (int track, double seconds) override;
@@ -106,6 +109,11 @@ namespace wfg::audio
         float takeOutputPeak (int track) override;
         int inputCount() const override;
         float takeInputPeak (int channel) override;
+
+        /*  A double Esc's sweep, once a press: AudioHost::resetEffects. It
+            posts nothing to a take - a double Esc unmakes nothing that was
+            recorded (§19.3). */
+        void resetEffects (const std::vector<int>& ready) override;
 
         /*  A SAMPLING CHANNEL'S TAKE (Phase 9c): a press handed to the channel's
             recorder at its sample, the points turned into samples at the rate;
