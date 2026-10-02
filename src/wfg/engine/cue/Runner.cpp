@@ -488,21 +488,53 @@ namespace wfg::cue
         {
             if (resumeNext.has_value() && kind == "media")
             {
-                const auto slices = static_cast<int> (rangesOf (cue).size());
+                const auto ranges = rangesOf (cue);
+                const auto slices = static_cast<int> (ranges.size());
 
                 if (resumeNext->range >= 0 && slices > 0)
                 {
                     run->startRange = std::min (resumeNext->range, slices - 1);
                     run->startOffset = 0.0;
+
+                    /*  AND INSIDE IT, AT THE SAME POINT AND IN THE SAME PASS
+                        (the author, 2026-10-02, K8's review): the seconds the
+                        slice had played, passes and all. Only into the slice
+                        it was in - one the cue has lost since is entered at the
+                        in-point of its last - and only into a pass the slice
+                        still has: a loop count lowered since keeps the point
+                        and gives it its last pass. */
+                    if (resumeNext->range < slices && resumeNext->from > 0.0)
+                    {
+                        const auto& slice = ranges[static_cast<std::size_t> (run->startRange)];
+                        const auto length = slice.out - slice.in;
+                        auto from = resumeNext->from;
+
+                        if (length > 0.0 && slice.loops > 0
+                              && from >= static_cast<double> (slice.loops) * length)
+                            from = static_cast<double> (slice.loops - 1) * length + std::fmod (from, length);
+
+                        run->sliceFrom = length > 0.0 ? from : 0.0;
+                    }
                 }
                 else if (resumeNext->range < 0 && slices == 0 && resumeNext->from > 0.0)
                 {
                     run->startOffset = resumeNext->from;
                 }
+
+                /*  CARRIED ON, SO IT ARRIVES OVER A DE-CLICK (K8's review;
+                    §24, GQ): armed at silence, up to its level over a tenth
+                    of a second once it is heard. A bed the hook started from
+                    its top had no resume point, and arrives as it always has. */
+                run->deClick = true;
             }
 
             paused.erase (cueId);
         }
+
+        /*  WHERE ITS ARM BEGINS, kept on the run (K8's review): what a pause
+            counts from when it has no playhead to read, rather than the cue's
+            offset as an edit since may have left it. */
+        run->armedOrigin = run->startOffset > 0.0 ? run->startOffset : numberOf (cue, "startOffset");
 
         if (! fireAtOnce)
         {
@@ -1260,7 +1292,13 @@ namespace wfg::cue
     {
         const auto found = paused.find (cueId);
 
-        if (found == paused.end() || ! found->second.resumes)
+        if (found == paused.end())
+            return std::nullopt;
+
+        if (const auto heard = playheads.find (found->second.run); heard != playheads.end())
+            return heard->second;
+
+        if (! found->second.resumes)
             return std::nullopt;
 
         return found->second.at;
@@ -1271,15 +1309,21 @@ namespace wfg::cue
         /*  ESC ON A PERSISTENT MEDIA CUE IS A PAUSE (the author, 2026-10-02;
             PRD §3.29, §4.4). Everything else about the press is unchanged: the
             bed comes down over the panic fade with the rest, as an abort, and
-            the roots' stop ends it. What is added is the second it had reached,
-            for the next step's assertion to carry it on from.
+            the roots' stop ends it. What is added is which run it was, for the
+            next step's assertion to carry it on.
 
-            Read from HANDLER STATE ONLY - `startedAtTick`, the run's own start
-            offset and slice, the document - and never from the voice: the
-            sound card's playhead is a readout a replay does not have, and the
-            same press must remember the same second in both. The speed is the
-            cue's own as the document says it; a speed fade or an edit while it
-            played is not counted (a named limit, as load-to-time's). */
+            WHERE IT HAD GOT TO IS ITS PLAYHEAD (the author's answer to K8's
+            review, 2026-10-02), and that is a readout of the sample clock: a
+            hook reads it (`notePausedPlayheads`) and the `run.assert` record
+            carries it, and no handler may. What this handler writes beside the
+            run is the answer for a session with NO playhead to read - no audio
+            side, or a run whose launch was never placed - from HANDLER STATE
+            ONLY, so a replay writes the same: where the run's arm began, copied
+            onto it when it was made (`armedOrigin`, never the cue's offset as
+            an edit since may have left it), and the file's seconds since
+            `run.started` at the cue's speed as the document says it. A cue
+            with slices: the slice it is in, and the point it was armed at in
+            the one it was armed into. */
         for (const auto& run : runs.all())
         {
             if (run.isFinished() || run.state == runState::preparing || run.takenBack || run.stopAsked
@@ -1289,6 +1333,7 @@ namespace wfg::cue
 
             PausedBed bed;
             bed.run = run.id;
+            bed.media = run.media;
 
             if (run.kind == "media")
             {
@@ -1298,22 +1343,19 @@ namespace wfg::cue
                 if (! rangesOf (cue).empty())
                 {
                     /*  THE SLICE IT IS IN, from `run.range` - a logged record -
-                        or the one it was armed into when none has come yet. */
+                        or the one it was armed into when none has come yet;
+                        and, in that one, the point it was armed at. */
                     bed.at.range = std::max (run.range >= 0 ? run.range : run.startRange, 0);
-                    bed.resumes = heard || run.startRange > 0;
+                    bed.at.from = bed.at.range == run.startRange ? run.sliceFrom : 0.0;
+                    bed.resumes = heard || run.startRange > 0 || run.sliceFrom > 0.0;
                 }
                 else
                 {
-                    /*  WHERE ITS ARM BEGAN, as `requestArmOn` armed it - the
-                        run's own offset when it has one (a jump, or an earlier
-                        resume), the cue's otherwise - and the file's seconds
-                        since it was heard. */
-                    const auto armedFrom = run.startOffset > 0.0 ? run.startOffset : numberOf (cue, "startOffset");
                     const auto elapsed = heard ? static_cast<double> (tick - run.startedAtTick)
                                                    / static_cast<double> (TickClock::rateHz)
                                                : 0.0;
 
-                    bed.at.from = armedFrom + std::max (elapsed, 0.0) * documentSpeedOf (cue);
+                    bed.at.from = run.armedOrigin + std::max (elapsed, 0.0) * documentSpeedOf (cue);
                     bed.resumes = heard || run.startOffset > 0.0;
                 }
             }
@@ -1335,32 +1377,116 @@ namespace wfg::cue
         escapedAtTick = tick;
     }
 
+    void Runner::notePausedPlayheads()
+    {
+        /*  A PLAYHEAD BELONGS TO ITS PAUSE, and goes when the pause has: a
+            double Esc, a load-to-time, the fire that made the cue's next run. */
+        for (auto entry = playheads.begin(); entry != playheads.end();)
+        {
+            const auto belongs = std::any_of (paused.begin(), paused.end(),
+                                              [&entry] (const auto& bed) { return bed.second.run == entry->first; });
+
+            entry = belongs ? std::next (entry) : playheads.erase (entry);
+        }
+
+        if (audio == nullptr)
+            return;
+
+        /*  READ ON THE FIRST TICK AFTER THE PRESS, AND BEFORE `updatePositions`
+            moves it on (`beforeTick` calls this ahead of it): what the readout
+            holds now is what the press's own tick made of the sample clock -
+            the press drains after the hooks - so it is the second the bed had
+            reached when Esc was pressed, not the one the panic fade has taken
+            it to since. A run whose launch was never placed has no playhead,
+            and keeps the handler's answer. */
+        for (const auto& [cueId, bed] : paused)
+        {
+            juce::ignoreUnused (cueId);
+
+            if (playheads.count (bed.run) > 0)
+                continue;
+
+            const auto* run = runs.find (bed.run);
+
+            if (run == nullptr || run->kind != "media" || run->launchedAtSample <= 0)
+                continue;
+
+            ResumePoint at;
+
+            /*  A SLICE'S PLAYHEAD IS HOW FAR THE SLICE HAS GOT, passes and all
+                (the author's answer to K8's review): a looping bed carries on
+                inside its loop, in the pass it was in. */
+            if (run->rangeStartedAtSample > 0)
+            {
+                at.range = std::max (run->range >= 0 ? run->range : run->startRange, 0);
+                at.from = run->slicePlayed;
+            }
+            else
+            {
+                at.from = run->position;
+            }
+
+            playheads[bed.run] = at;
+        }
+    }
+
     void Runner::submitAssert (Engine& engine, const std::string& cueId)
     {
-        const auto found = paused.find (cueId);
-
-        if (found == paused.end() || ! found->second.resumes)
+        const auto plain = [&engine, &cueId]
         {
             engine.submit (origin::engine, "run.assert", { osc::Value::string (cueId) });
+        };
+
+        const auto found = paused.find (cueId);
+
+        if (found == paused.end())
+        {
+            plain();
             return;
         }
 
-        const auto at = found->second.at;
+        /*  THE PLAYHEAD WHEN ONE WAS READ, the handler's count when none was. */
+        auto at = found->second.at;
+        auto resumes = found->second.resumes;
 
-        /*  ALL BUT OVER THERE, by the length the log knows: a bed paused in its
-            last half second carries on from its top rather than ending the
-            moment it is back (the guard Doh!'s resume uses, §24). A length not
-            known resumes as it is; a slice is always somewhere to carry on. */
+        if (const auto heard = playheads.find (found->second.run); heard != playheads.end())
+        {
+            at = heard->second;
+            resumes = true;
+        }
+
+        if (! resumes)
+        {
+            plain();
+            return;
+        }
+
+        const auto cue = document.findById (cueId);
+
+        /*  NOT ANOTHER RECORDING (K8's review): a second of one file is no
+            place in another. A cue given a new file while it was paused starts
+            that file from its top. */
+        if (textOf (cue, "file") != found->second.media)
+        {
+            plain();
+            return;
+        }
+
+        /*  ALL BUT OVER THERE, OR PAST IT, by the length the log knows: a bed
+            paused in its last half second carries on from its top rather than
+            ending the moment it is back (the guard Doh!'s resume uses, §24),
+            and one past its end - a file swapped for a shorter one of the same
+            name - has nothing there to play. A length not known resumes as it
+            is; a slice always has somewhere to carry on, its loop or the next. */
         if (at.range < 0 && durations != nullptr)
         {
-            const auto cue = document.findById (cueId);
             const auto length = durations->find (textOf (cue, "file"));
             const auto speed = documentSpeedOf (cue);
 
             if (length != durations->end() && length->second > 0.0
                   && at.from >= length->second - 0.5 * speed)
             {
-                engine.submit (origin::engine, "run.assert", { osc::Value::string (cueId) });
+                plain();
                 return;
             }
         }
@@ -1371,6 +1497,48 @@ namespace wfg::cue
                        { osc::Value::string (cueId), osc::Value::string (std::string {}),
                          osc::Value::float64 (at.from),
                          osc::Value::int32 (static_cast<std::int32_t> (at.range)) });
+    }
+
+    void Runner::deClickLaunched()
+    {
+        /*  FROM THE TICK IT IS HEARD, NOT FROM THE ARM: a bed can spend ticks
+            loading, and a ramp begun at the arm would be over before anything
+            sounded. Its launch placed is the moment - a launch is placed a
+            horizon ahead, which the five ticks cover. A run already on its way
+            out has nothing to come up for, and a fade somebody set going on it
+            already owns its level (it starts from the silence the arm left). */
+        for (const auto& snapshot : runs.all())
+        {
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr || ! run->deClickOwed || run->launchedAtSample <= 0 || run->launchRequested)
+                continue;
+
+            run->deClickOwed = false;
+
+            if (run->isFinished() || run->stopAsked || run->stopIssued || run->takenBack)
+                continue;
+
+            const auto faded = std::any_of (running.begin(), running.end(),
+                                            [run] (const FadeJob& job)
+                                            {
+                                                return ! job.retired && ! job.movesRate && job.target == run->id;
+                                            });
+
+            if (faded)
+                continue;
+
+            FadeJob job;
+            job.target = run->id;
+            job.reportsSelf = false;
+            job.fromDb = run->ownLevel;
+            job.toDb = run->deClickTo;
+            job.ticksTotal = deClickTicks;
+            job.curve = FadeCurve::linear;
+            job.stopWhenDone = false;
+
+            running.push_back (job);
+        }
     }
 
     void Runner::assertPersistent (Engine& engine, std::int64_t tick)
@@ -1977,6 +2145,7 @@ namespace wfg::cue
                 offset, which M17 measured landing on the sample. */
             run->startOffset = wants.offset;
             run->startRange = std::max (wants.range, 0);
+            run->armedOrigin = run->startOffset > 0.0 ? run->startOffset : numberOf (cue, "startOffset");
             run->launchRequested = true;
             run->launchRequestedAtTick = tick;
 
@@ -2111,6 +2280,8 @@ namespace wfg::cue
 
         run->startOffset = range >= 0 ? 0.0 : std::max (seconds, 0.001);
         run->startRange = std::max (range, 0);
+        run->sliceFrom = 0.0;
+        run->armedOrigin = run->startOffset;
         run->positionOrigin = origin;
         run->position = origin;
         run->range = range;
@@ -2402,13 +2573,26 @@ namespace wfg::cue
             voice will START - the offset, or the in-point of the slice it
             enters - and a boundary pending from an earlier arm is forgotten,
             since a re-arm is a jump and the slice it was leaving is gone. */
+        /*  THE SLICE IT ENTERS, AND HOW FAR INTO ITS LOOP (K8's review): a bed
+            Esc paused inside a looping slice is armed at the same point of the
+            loop - the passes it had played are the launch's to count, not the
+            clip's. Every other arm enters its slice at the in-point. */
+        if (! request.ranges.empty())
+        {
+            request.startSlot = std::clamp (run.startRange, 0, static_cast<int> (request.ranges.size()) - 1);
+
+            const auto& slice = request.ranges[static_cast<std::size_t> (request.startSlot)];
+            const auto length = slice.out - slice.in;
+
+            if (run.sliceFrom > 0.0 && length > 0.0)
+                request.sliceOffset = std::fmod (run.sliceFrom, length);
+        }
+
         run.lane = live ? std::vector<doc::LanePoint> {}
                         : doc::readLevelLane (textOf (cue, "levelLane")).points;
         run.laneStart = request.ranges.empty()
                           ? request.startOffset
-                          : request.ranges[static_cast<std::size_t> (
-                                std::clamp (run.startRange, 0,
-                                            static_cast<int> (request.ranges.size()) - 1))].in;
+                          : request.ranges[static_cast<std::size_t> (request.startSlot)].in + request.sliceOffset;
         run.laneOutgoingAt = 0;
         run.laneDb = doc::laneLevelDb (run.lane, run.laneStart);
 
@@ -3412,7 +3596,22 @@ namespace wfg::cue
         run->ratePlaced = run->ownRate;
         run->rateNow = run->ownRate;
 
-        requestArmOn (engine, cue, *run, numberOf (cue, "level"));
+        /*  A RUN THAT ARRIVES OVER A DE-CLICK IS ARMED AT SILENCE (K8's review;
+            namespace draft §24, GQ): the level it comes up to is kept, and the
+            scheduler starts the ramp once its launch is placed
+            (`deClickLaunched`). Its own level is the silence until then, so
+            nothing - `applyLevels`, a seek's re-arm - puts it at the cue's
+            level ahead of the ramp. */
+        auto level = numberOf (cue, "level");
+
+        if (run->deClick)
+        {
+            run->deClickTo = level;
+            run->deClickOwed = true;
+            level = silenceDb;
+        }
+
+        requestArmOn (engine, cue, *run, level);
     }
 
     void Runner::armMic (Engine& engine, const juce::ValueTree& cue, const std::string& runId)
@@ -9953,6 +10152,11 @@ namespace wfg::cue
         applyFx();
         advanceSends (engine);
         observeAfterStep (engine, tick);
+
+        /*  THE PLAYHEADS AN ESC PAUSED, read before the pass that may carry
+            them on and before `updatePositions` below moves the readout on
+            (K8's review): what it holds now is the press's own tick's. */
+        notePausedPlayheads();
         assertPersistent (engine, tick);
 
         /*  Above the gate too: with no player there are no inputs, and the
@@ -9965,6 +10169,10 @@ namespace wfg::cue
         armWaitingMics (engine);
         serviceTakes (engine);
         launchIfDue (engine, tick);
+
+        /*  A RUN CARRIED ON MID-FILE COMES UP FROM SILENCE, from the tick its
+            launch was placed (K8's review; §24, GQ). */
+        deClickLaunched();
 
         /*  AFTER THE LAUNCH AND BEFORE THE RANGES: a launch starts its run's
             clock, and a range's boundary is read off it (§22.4). */
@@ -10173,6 +10381,32 @@ namespace wfg::cue
                     run->boundaryPlacedAt = -1;
                     run->rangesFinished = false;
 
+                    /*  A BED CARRIED ON INSIDE ITS SLICE (K8's review): the clip
+                        was armed that far into its loop, and the slice's start
+                        is dated back by all it had played, passes and all - so
+                        the pass count, the playhead, the lane and the boundary
+                        read on from the pass it was in, by the arithmetic every
+                        slice uses. In samples of the file, which are the
+                        clock's at the launch. A session younger than that -
+                        the device rebuilt since - keeps the point and starts
+                        the passes again; younger still, the in-point's count. */
+                    if (run->sliceFrom > 0.0 && run->passSamples > 0
+                          && static_cast<int> (at) == run->startRange)
+                    {
+                        const auto rate = static_cast<double> (audio->sampleRate());
+                        auto back = static_cast<std::int64_t> (std::llround (run->sliceFrom * rate));
+
+                        if (target - back < 1)
+                            back = static_cast<std::int64_t> (std::llround (
+                                       std::fmod (run->sliceFrom, static_cast<double> (run->passSamples) / rate) * rate));
+
+                        if (target - back >= 1)
+                        {
+                            run->rangeStartedAtSample = target - back;
+                            run->rangeSource = run->launchSource - static_cast<double> (back);
+                        }
+                    }
+
                     engine.submit (origin::engine, "run.range",
                                    { osc::Value::string (run->id),
                                      osc::Value::int32 (static_cast<std::int32_t> (at)) });
@@ -10262,9 +10496,12 @@ namespace wfg::cue
             /*  AT A SPEED (namespace draft §22.4) a pass is the slice's length
                 of the FILE, and how far the file has got is the run's clock's
                 business; at exactly one from the launch on, the count below. */
+            /*  NOT BEFORE THE LAUNCH, for the reason `updatePositions` gives: a
+                slice carried on inside its loop is dated back before it. */
+            const auto heardTo = std::max (now, run->launchedAtSample);
             const auto atSpeed = ! run->rateClock.isIdentityFrom (static_cast<double> (run->launchedAtSample));
             const auto pass = static_cast<double> (run->passSamples);
-            const auto played = atSpeed ? std::max (0.0, run->rateClock.sourceAt (static_cast<double> (now)) - run->rangeSource)
+            const auto played = atSpeed ? std::max (0.0, run->rateClock.sourceAt (static_cast<double> (heardTo)) - run->rangeSource)
                                         : 0.0;
 
             if (atSpeed)
@@ -10273,7 +10510,7 @@ namespace wfg::cue
             }
             else
             {
-                const auto elapsed = std::max<std::int64_t> (0, now - run->rangeStartedAtSample);
+                const auto elapsed = std::max<std::int64_t> (0, heardTo - run->rangeStartedAtSample);
                 run->rangeIteration = static_cast<int> (elapsed / run->passSamples) + 1;
             }
 
@@ -10353,7 +10590,7 @@ namespace wfg::cue
                 }
                 else
                 {
-                    const auto passesGone = (now - run->rangeStartedAtSample) / run->passSamples;
+                    const auto passesGone = (heardTo - run->rangeStartedAtSample) / run->passSamples;
 
                     endsAt = run->rangeStartedAtSample + (passesGone + 1) * run->passSamples;
                 }
@@ -10585,11 +10822,22 @@ namespace wfg::cue
                 the slice began, wrapped by the slice's pass as below. A run at
                 exactly one from its launch on takes the count below instead,
                 the same integers as before there was a speed. */
+            /*  NOT BEFORE THE LAUNCH: between its placement and its instant the
+                file is where the launch will start it. Said by clamping the
+                sample rather than the count, because a slice carried on inside
+                its loop (K8's review) has a start dated back before the launch,
+                and the count from it is already part-way through a pass. */
+            const auto heardTo = std::max (now, run->launchedAtSample);
+
             if (! run->rateClock.isIdentityFrom (static_cast<double> (run->launchedAtSample)))
             {
                 const auto inRange = run->range >= 0 && run->rangeStartedAtSample > 0;
                 const auto origin = inRange ? run->rangeSource : run->launchSource;
-                auto played = std::max (0.0, run->rateClock.sourceAt (static_cast<double> (now)) - origin);
+                auto played = std::max (0.0, run->rateClock.sourceAt (static_cast<double> (heardTo)) - origin);
+
+                /*  HOW FAR THE SLICE HAS GOT, passes and all (K8's review): what
+                    an Esc pausing a looping bed carries on from. */
+                run->slicePlayed = inRange ? played / rate : 0.0;
 
                 if (inRange && run->passSamples > 0)
                     played = std::fmod (played, static_cast<double> (run->passSamples));
@@ -10604,6 +10852,7 @@ namespace wfg::cue
                 what that window means is a playhead sitting at the start offset
                 waiting for the sound, which is what nought gives. */
             auto elapsed = std::max<std::int64_t> (0, now - run->launchedAtSample);
+            run->slicePlayed = 0.0;
 
             if (run->range >= 0 && run->rangeStartedAtSample > 0)
             {
@@ -10613,7 +10862,8 @@ namespace wfg::cue
                     energy - so a looping range's playhead is back at its
                     in-point on every pass, and what the file position wants is
                     the remainder rather than the total. */
-                elapsed = std::max<std::int64_t> (0, now - run->rangeStartedAtSample);
+                elapsed = std::max<std::int64_t> (0, heardTo - run->rangeStartedAtSample);
+                run->slicePlayed = static_cast<double> (elapsed) / rate;
 
                 if (run->passSamples > 0)
                     elapsed %= run->passSamples;
@@ -12146,8 +12396,9 @@ namespace wfg::cue
             machine put back from one they started. */
         registry.add ({ "run.assert",
                         "The persistent section found a cue not as it declares, and put it back:"
-                        " a bed Esc paused carries on from the second of its file it had reached,"
-                        " or from the start of the slice it was in.",
+                        " a bed Esc paused carries on from the second of its file its playhead had"
+                        " reached, or from as far into the slice it was in - passes and all - as it"
+                        " had got.",
                         { { "cue", 's', false }, { "run", 's', true },
                           { "from", 'd', true }, { "range", 'i', true } },
                         true,
@@ -12177,10 +12428,12 @@ namespace wfg::cue
                                                             : std::string {};
 
                             /*  WHERE A PAUSED BED CARRIES ON FROM (K8): decided by
-                                the hook, which knows the file's length, and
-                                carried here so a replay arms the same second. A
-                                record without it - every one before K8 - starts
-                                the cue from its top, as it did. */
+                                the hook, which knows the file's length and read
+                                the playhead (K8's review), and carried here so a
+                                replay arms the same second. A record without it -
+                                every one before K8 - starts the cue from its top,
+                                as it did; one from K8 itself names a slice with
+                                nought, its in-point, as it did. */
                             std::optional<Runner::ResumePoint> resume;
 
                             if (args.size() > 2)

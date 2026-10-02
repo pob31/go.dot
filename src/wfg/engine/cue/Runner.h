@@ -207,6 +207,15 @@ namespace wfg::cue
             thread at each boundary, and re-arms through a fresh request. */
         std::vector<RangeSpec> ranges;
 
+        /*  THE SLICE THE RUN ENTERS FIRST, and how far into its loop that
+            slice's clip starts, in seconds (2026-10-02, K8's review, namespace
+            draft §23.17): a bed Esc paused inside a looping slice carries on at
+            the same point of its loop. Nought for every other arm - a slice
+            launches at its in-point, as it always has. Only the first slice
+            takes it; every slice after is entered at its in-point. */
+        int startSlot = 0;
+        double sliceOffset = 0.0;
+
         /*  The cue's EQ, read through the schema at the arm (Phase 9a) and
             applied while the voice is silent, as the routing is. A value for
             the reason everything else here is one. */
@@ -854,10 +863,12 @@ namespace wfg::cue
         std::uint64_t observationsAsked() const noexcept { return asked; }
 
         /*  WHERE A PAUSED BED CARRIES ON FROM (2026-10-02, K8, namespace draft
-            §23.17): a second of its file for a cue with no slices, or the slice
-            it was in - the audio side launches a slice only at its in-point.
-            What `run.assert` carries when the assertion puts back a bed Esc
-            paused. */
+            §23.17): a second of its file for a cue with no slices; for a cue
+            with slices, the slice it was in and - since K8's review - how far
+            into it, in seconds of the file since the slice's first pass began,
+            the passes not wrapped, so a looping slice carries on inside its
+            loop and in the same pass. What `run.assert` carries when the
+            assertion puts back a bed Esc paused. */
         struct ResumePoint
         {
             double from = 0.0;
@@ -876,12 +887,17 @@ namespace wfg::cue
             is brought down.
 
             - Every persistent media run it finds sounding - not finished, not
-              already asked to stop, not taken back by Doh! - is PAUSED: the
-              second of its file it has reached is remembered, counted from the
-              tick `run.started` was applied on and the cue's own speed, never
-              read from the sound card, so a replay counts the same. A cue with
-              slices remembers the slice it is in. A mic run is remembered with
-              nothing to carry on from: its resume is a relaunch.
+              already asked to stop, not taken back by Doh! - is PAUSED: which
+              run it was, and the file it played. WHERE it had got to is its
+              playhead at the press (the author, 2026-10-02, K8's review), read
+              by a hook on the next tick (`notePausedPlayheads`) and carried on
+              the `run.assert` record, so a replay - which has no playhead -
+              arms the same second from the log. What this handler writes
+              beside it is the second for a session with no playhead to read
+              (no audio side): counted from the tick `run.started` was applied
+              on at the cue's own speed, from where the run's arm began. A mic
+              run is remembered with nothing to carry on from: its resume is a
+              relaunch.
             - The persistent pass a step before the press opened is taken back,
               as the double Esc's is (§23.10): the next step is what puts the
               section back, and its pass carries the paused beds on.
@@ -895,7 +911,9 @@ namespace wfg::cue
             this, as it asks `killedInDrain`, and does nothing. */
         bool escapedInDrain (std::int64_t tick) const noexcept { return escapedAtTick >= 0 && escapedAtTick == tick; }
 
-        /** Whether Esc left a persistent cue paused at a second to carry on from. Tests. */
+        /*  Whether Esc left a persistent cue paused at a second to carry on
+            from, and where: the playhead when one was read, the handler's count
+            otherwise. Tests. */
         std::optional<ResumePoint> pausedAt (const std::string& cueId) const;
 
         /** Whether a persistent cue is suspended for this session. Tests and the console. */
@@ -1939,9 +1957,37 @@ namespace wfg::cue
             std::string run;
             bool resumes = false;
             ResumePoint at;
+
+            /*  The file it played (K8's review): a cue given another file while
+                it was paused starts the new one from its top. */
+            std::string media;
         };
 
         std::map<std::string, PausedBed> paused;
+
+        /*  WHERE EACH PAUSED BED'S PLAYHEAD WAS AT THE PRESS (the author,
+            2026-10-02, K8's review), by the run Esc took down: the readout the
+            press's own tick made off the sample clock - before the drain that
+            applied the press, and so before the panic fade had moved it on -
+            read by `notePausedPlayheads` on the next tick, before the readout
+            moves again. Exact through a speed fade, an edit of the speed, a
+            speed held at nought, a stretched cue and the launch latency, none
+            of which the document knows. HOOK STATE: no handler reads it; the
+            second rides the logged `run.assert`, so a replay arms what the
+            session armed. Pruned when the pause it belongs to has gone. */
+        std::map<std::string, ResumePoint> playheads;
+
+        /*  The hook that reads them. */
+        void notePausedPlayheads();
+
+        /*  THE DE-CLICK (K8's review; namespace draft §24, GQ): every run made
+            to arrive over one, whose launch has now been placed, is given a
+            straight fade from silence to its level over `deClickTicks` - a
+            level job that reports nothing, stops nothing and submits nothing,
+            so a replay, which runs no hook, is unchanged. Built once, for the
+            paused bed here and for Doh!'s resume. */
+        static constexpr int deClickTicks = 5;
+        void deClickLaunched();
 
         /*  BEDS A PASS FOUND STILL FADING UNDER THE ESC THAT PAUSED THEM (K8):
             a fire of a cue whose run is on its way out is ignored (decision N),

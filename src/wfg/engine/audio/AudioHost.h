@@ -494,10 +494,18 @@ namespace wfg::audio
             `stretch` is the cue's mode, as for setTrackSource, and every slot
             of the cue takes it.
 
+            `sliceOffset` is how far into its loop the clip of slot `startSlot`
+            starts, in seconds (2026-10-02, K8's review): a bed Esc paused
+            inside a looping slice carries on at the same point of the loop. The
+            clip's own offset, which inside a loop is read from the loop's start
+            and wraps with it. Nought - every arm but a resume's - leaves every
+            slot launching at its in-point, as before.
+
             Message thread. One rebuild for the lot, rather than one per range. */
         bool setTrackRanges (int trackIndex, const std::string& mediaFile,
                              const std::vector<RangeSpec>& ranges,
-                             double startOffset = 0.0, bool stretch = false);
+                             double startOffset = 0.0, bool stretch = false,
+                             int startSlot = 0, double sliceOffset = 0.0);
 
         /*  A CUE'S SPEED, PLACED AHEAD (namespace draft §22.4): from the last
             breakpoint the voice holds, its speed moves in a straight line to

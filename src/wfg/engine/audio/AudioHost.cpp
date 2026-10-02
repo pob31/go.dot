@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -1630,7 +1631,8 @@ namespace wfg::audio
             At 60 bpm one beat is one second, which is what makes the loop range
             in beats the same number as the range in seconds. */
         bool armRangeInto (int trackIndex, int slotIndex, const juce::File& file,
-                           const AudioHost::RangeSpec& range, bool stretch = false)
+                           const AudioHost::RangeSpec& range, bool stretch = false,
+                           double intoLoop = 0.0)
         {
             if (! pointSlotAtFile (trackIndex, slotIndex, file, 0.0, stretch))
                 return false;
@@ -1666,6 +1668,18 @@ namespace wfg::audio
             clip->setLoopRangeBeats ({ tracktion::BeatPosition::fromBeats (range.in),
                                        tracktion::BeatPosition::fromBeats (range.out) });
 
+            /*  PART-WAY INTO ITS LOOP (2026-10-02, K8's review): a bed Esc paused
+                inside a looping slice carries on at the same point of it. The
+                clip's own offset does it, and the reader wraps it with the loop -
+                it reads the loop's start plus the offset, modulo the loop's
+                length - so the first pass starts there and every pass after it
+                at the in-point. Set after the loop range, which leaves an offset
+                alone, and only when there is one: every other slice's arm is
+                what it was. */
+            if (intoLoop > 0.0)
+                clip->setOffset (tracktion::TimeDuration::fromSeconds (
+                                     std::fmod (intoLoop, range.out - range.in)));
+
             return clip->isLooping();
         }
 
@@ -1683,7 +1697,7 @@ namespace wfg::audio
 
         bool setTrackRanges (int trackIndex, const std::string& mediaFile,
                              const std::vector<AudioHost::RangeSpec>& ranges,
-                             double startOffset, bool stretch)
+                             double startOffset, bool stretch, int startSlot, double sliceOffset)
         {
             const juce::File file { juce::String (mediaFile) };
 
@@ -1737,7 +1751,8 @@ namespace wfg::audio
                 if (slot < static_cast<int> (ranges.size()))
                 {
                     armed = armRangeInto (trackIndex, slot, file,
-                                          ranges[static_cast<std::size_t> (slot)], stretch) && armed;
+                                          ranges[static_cast<std::size_t> (slot)], stretch,
+                                          slot == startSlot ? sliceOffset : 0.0) && armed;
                     continue;
                 }
 
@@ -2757,9 +2772,10 @@ namespace wfg::audio
 
     bool AudioHost::setTrackRanges (int trackIndex, const std::string& mediaFile,
                                     const std::vector<RangeSpec>& ranges, double startOffset,
-                                    bool stretch)
+                                    bool stretch, int startSlot, double sliceOffset)
     {
-        return impl->setTrackRanges (trackIndex, mediaFile, ranges, startOffset, stretch);
+        return impl->setTrackRanges (trackIndex, mediaFile, ranges, startOffset, stretch,
+                                     startSlot, sliceOffset);
     }
 
     int AudioHost::slotCount() const noexcept  { return impl->editSlots; }

@@ -3605,6 +3605,81 @@ TEST_CASE ("ranges: a range plays the part of the file it names, and goes on pla
     CHECK (player.isPlaying (0));
 }
 
+TEST_CASE ("ranges: a slice armed part-way into its loop starts there, and wraps to its in-point")
+{
+    /*  K8'S REVIEW (the author, 2026-10-02): a bed Esc paused inside a
+        looping slice carries on at the same point of its loop, so the arm
+        starts that slice's clip part-way in - its own offset, which inside a
+        loop is read from the loop's start and wraps with it. A two-second loop
+        over the first two segments, armed a second and a half in: the second
+        segment for half a second, then the first from the in-point, then the
+        second again. Before, every slice launched at its in-point. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 2;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, rate);
+    REQUIRE (tone.existsAsFile());
+
+    REQUIRE (rig.host.setTrackRanges (0, tone.getFullPathName().toStdString(),
+                                      { { 2.0, 3.0, 1 }, { 0.0, 2.0, 0 } }, 0.0, false, 1, 1.5));
+
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+    auto* matrix = rig.host.trackMatrix (0);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    RecordingSink sink;
+    sink.prepare (settings.outputChannels, rate * 3);
+    rig.host.setBlockSink (&sink);
+
+    const auto target = rig.host.clock().samplesElapsed() + 4 * (rate / 50);
+    REQUIRE (rig.host.launchTrackAt (0, 1, rig.host.beatsAtSample (target)));
+
+    for (int block = 0; block < 5 * rate / (2 * blockSize) + 200; ++block)
+        rig.host.processBlock();
+
+    rig.host.setBlockSink (nullptr);
+
+    const auto first = sink.firstSoundAt (0);
+    REQUIRE (first >= 0);
+    REQUIRE (sink.written > first + rate * 9 / 4);
+
+    /*  A second and a half in: the second segment, for half a second. */
+    CHECK (segmentOf (sink.buffer.getSample (0, first + rate / 4)) == 1);
+
+    /*  Then the in-point, and the first segment for a second. */
+    CHECK (segmentOf (sink.buffer.getSample (0, first + rate * 3 / 4)) == 0);
+    CHECK (segmentOf (sink.buffer.getSample (0, first + rate * 5 / 4)) == 0);
+
+    /*  And the second segment again: the loop, from its in-point on. */
+    CHECK (segmentOf (sink.buffer.getSample (0, first + rate * 7 / 4)) == 1);
+
+    /*  The other slot is armed at its in-point, as every slice but a resumed
+        one is: nothing of its offset leaked into it. */
+    CHECK_FALSE (rig.host.trackPlayState (0, 0).playing);
+}
+
 TEST_CASE ("ranges: arming a cue with none of them puts the whole file back in the first slot")
 {
     /*  A voice is reused. A slot still holding the last cue's third range would

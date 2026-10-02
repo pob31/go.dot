@@ -2536,10 +2536,13 @@ at the author's direction, 2026-09-10 — decision S,
   that remembers its position, resumed at that offset by the next assertion —
   load-to-time's operation at load-to-time's cost (§3.25: offset in prepare, a
   relaunch when already playing). It still comes down over the panic fade like
-  everything Esc takes. No footer runs on a pause. The position is counted from
-  the ticks and the cue's own speed, never read from the sound card, so a replay
-  resumes at the same second; a cue with ranges carries on from the start of the
-  range it was in. For a mic, a still, an effect chain or a data process — OSC
+  everything Esc takes. No footer runs on a pause. The position is the cue's own
+  playhead at the press, carried on the logged assertion, so a replay resumes at
+  the same second; a cue with ranges carries on inside the range it was in, at
+  the same point and in the same pass; and the cue comes back over §3.32's
+  0.1 s de-click *(2026-10-02, K8's review: the playhead and the loop are the
+  author's answers, replacing a count of ticks at the cue's speed and a range
+  resumed at its start)*. For a mic, a still, an effect chain or a data process — OSC
   and MIDI included — there is nothing to remember and the resume is a relaunch.
   A load-to-time forgets the position (it re-solves the world), and so does a
   double Esc, which on a persistent cue stays what it was: stopped at once, back

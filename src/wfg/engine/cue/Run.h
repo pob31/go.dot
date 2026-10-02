@@ -371,6 +371,16 @@ namespace wfg::cue
             values are not. */
         double position = 0.0;
 
+        /*  AND HOW FAR THE SLICE PLAYING NOW HAS GOT (2026-10-02, K8's review,
+            namespace draft §23.17): seconds of the file since the slice's first
+            pass began, the passes NOT wrapped - so the third pass of a two-
+            second loop, half a second in, reads 4.5 where `position` reads the
+            in-point and a half. What an Esc pausing a looping bed remembers, so
+            it carries on inside its loop and in the same pass. A readout like
+            `position`, beside which it is computed; nought for a run playing no
+            slice. */
+        double slicePlayed = 0.0;
+
         /*  WHERE IN THE FILE THE THING PLAYING NOW BEGAN, in seconds, which is
             the origin `position` is measured FROM and the half of it that
             cannot be counted from the sample clock.
@@ -780,6 +790,37 @@ namespace wfg::cue
             than slot nought - which is what every launch did before there was
             anywhere else to jump to. */
         int startRange = 0;
+
+        /*  AND HOW FAR INTO IT (2026-10-02, K8's review, namespace draft
+            §23.17): seconds of the slice's file since its first pass began, the
+            passes not wrapped - `slicePlayed` as an Esc found it. A bed Esc
+            paused inside a looping slice carries on there: the arm starts the
+            slice's clip that far into its loop, and the launch dates the
+            slice's start back by it, so the pass count, the playhead, the lane
+            and the boundary all go on from the pass it was in. Nought for every
+            run an assertion did not carry on. */
+        double sliceFrom = 0.0;
+
+        /*  WHERE ITS ARM BEGAN, in seconds of the file (K8's review): the run's
+            own offset when a jump, a seek or a resume gave it one, and the
+            cue's `startOffset` as it was when the run was made otherwise.
+            Written by the handlers that make and move a run, never read off the
+            document later - an edit of the cue's offset while the run sounds is
+            the next run's (§4.10). What a pause counts from when it has no
+            playhead to read. */
+        double armedOrigin = 0.0;
+
+        /*  ARRIVES OVER A DE-CLICK (K8's review; namespace draft §24, GQ): a
+            run made to carry a sound on mid-file - the resume of a bed Esc
+            paused - is armed at silence and brought up to its level over a
+            tenth of a second from the tick its launch is placed, so the cut
+            into the middle of a waveform is not heard as a click. Set by the
+            handler that makes the run. `deClickTo` - the level it comes up to -
+            and `deClickOwed` are the arm's and the scheduler's bookkeeping,
+            never logged: levels are not, and the ramp submits nothing. */
+        bool deClick = false;
+        double deClickTo = 0.0;
+        bool deClickOwed = false;
 
         //======================================================================
         /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.

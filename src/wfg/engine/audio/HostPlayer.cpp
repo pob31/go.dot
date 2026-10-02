@@ -116,7 +116,8 @@ namespace wfg::audio
         if (request.live)
             audioHost.setRackSource (request.track, request.firstInput, request.inputWidth);
         else if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges,
-                                             request.startOffset, request.stretch))
+                                             request.startOffset, request.stretch,
+                                             request.startSlot, request.sliceOffset))
         {
             /*  MEDIA-MISSING COVERS ALL THREE, for now: a file that is not
                 there, one that is there and is not audio, and a range that

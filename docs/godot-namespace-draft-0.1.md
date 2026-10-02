@@ -2616,7 +2616,7 @@ origin `engine`:
 |---|---|---|
 | `run.prepare` | `s` cue, `[s run]` | the horizon reached a cue or a group and made it ready: a group run is created in `preparing` and its header's preparable cues run under it. The generated ID is the record's last argument, as every generated ID is |
 | `run.revoke` | `s` run | the horizon left before a GO: the pre-sent values are put back, the claims released, the run and its children ended. *(2026-09-30, H2: also a group stopped or killed while it was only prepared, submitted by its own job, §23.3)* |
-| `run.assert` | `s` cue, `[s run]`, `[d from]`, `[i range]` | a persistent cue was found not running, or found disagreeing with the world, and was re-asserted (§13.11); `from` and `range` since K8 (2026-10-02, §23.17): where a bed Esc paused carries on - a second of its file, or the slice it was in |
+| `run.assert` | `s` cue, `[s run]`, `[d from]`, `[i range]` | a persistent cue was found not running, or found disagreeing with the world, and was re-asserted (§13.11); `from` and `range` since K8 (2026-10-02, §23.17): where a bed Esc paused carries on - a second of its file, or the slice it was in; since K8's review, with `from` how far into that slice it had got, passes and all (LR) |
 
 Two operator commands:
 
@@ -15978,7 +15978,10 @@ while the interface is away - the desk's fader left where the scene put it when 
    own speed, never read from the sound card, so a replay gets the same answer (Doh! D2's design
    uses the same rule, §24). A load-to-time drops the remembered position - it re-solves the world -
    and so does a double Esc, which on a persistent cue keeps what it did: stopped at once, the next
-   GO re-asserting it from the top.
+   GO re-asserting it from the top. *(Revised by the author, 2026-10-02, answering K8's review: the
+   position is the bed's own playhead at the press, read by a hook and carried on the logged
+   record - so a replay still gets the same answer, from the log - and a looping bed carries on
+   inside its loop. LQ, LR below.)*
 2. **PRD §3.29's Esc bullet becomes decided text, and §4.4 gains one sentence** - in its Esc
    bullet: *"A persistent media cue is paused rather than stopped, and the next GO resumes it where
    it was (§3.29)."* `CLAUDE.md`'s §4 is copied from the PRD byte for byte, and
@@ -16006,7 +16009,11 @@ press - put the section straight back after the Esc. Only the double Esc took it
   is remembered with nothing to carry on from - it starts from its top - unless it was armed at a
   second of its own. A mic run is remembered with nothing to carry on from: what is kept is that
   this run was Esc's. Handler state, read from logged records and the document only, so a replay
-  pauses the same runs at the same seconds.
+  pauses the same runs at the same seconds. *(K8's review, 2026-10-02: this count is now only the
+  answer for a session with no playhead to read. Where a bed had got to is its playhead at the
+  press, read by a hook (LQ); a slice's point inside it is kept too (LR); and the origin is the
+  run's own `armedOrigin`, copied when it was made, not the cue's `startOffset` as an edit while it
+  played may have left it (LS).)*
 - **The pass carries it on** (`submitAssert`). Where a pause says so, `run.assert` carries two new
   optional arguments, `from` (seconds) and `range` (a slice, -1 for none), and the handler hands
   them to the run it makes: its `startOffset`, or its `startRange` with the offset left at nought -
@@ -16014,7 +16021,10 @@ press - put the section straight back after the Esc. Only the double Esc took it
   the hook, which also knows the file's length when the log does: a bed paused within half a second
   (of the clock, at its speed) of its file's end starts from the top instead, the guard Doh!'s
   resume uses. A record without the arguments - every one written before K8 - starts the cue from
-  its top, as it did.
+  its top, as it did. *(K8's review: for a slice, `from` is now how far into the slice it had got,
+  passes and all, and the run takes it as `sliceFrom` (LR); the same comparison starts a bed paused
+  past its file's end from the top, and a cue given another file while it was paused starts that
+  file from its top (LU).)*
 - **A step inside the fade owes the bed** (`owed`, hook state). Firing a cue whose run is on its
   way out is ignored (decision N), so the pass marks a bed it finds still fading under the Esc that
   paused it, and `assertPersistent` puts it back - from where it was - on the tick its old run has
@@ -16036,14 +16046,19 @@ fade took down plays again, as Doh!'s resume has it (§24, L3). The arm places i
 is not counted is the launch latency between `run.started` and the first sample heard (40-80 ms at
 ordinary block sizes, §24 L3) - so a bed resumes up to that much later in its file than it was
 heard, never earlier. The tests hold it to the tick: the resumed run's `startOffset` is the press's
-tick less `run.started`'s, over fifty, times the speed, plus the origin.
+tick less `run.started`'s, over fifty, times the speed, plus the origin. *(K8's review, 2026-10-02:
+no longer so. The second is the playhead the press's own tick read off the sample clock, so the
+launch latency is counted, and so is everything the document's speed does not say - a speed fade,
+an edit of the speed, the freeze at nought (DR), a stretched cue held to its limit. The tests hold
+it to the sample: `origin + (press's sample - launch's sample) / rate x speed`, or the old run's
+own `position` after the press.)*
 
 **Before and after.**
 
 | What happens | Before K8 | Since K8 |
 |---|---|---|
 | Esc on a sounding persistent media cue, then the next GO | back from the top | back at the second it had reached at the press |
-| ...a cue with slices | back from the top | back at the start of the slice it was in |
+| ...a cue with slices | back from the top | back inside the slice it was in, at the same point and in the same pass (K8's review; at the slice's start in K8 itself) |
 | ...a mic, OSC or MIDI cue | relaunched or re-sent | the same |
 | A GO inside Esc's fade | nothing put back until the step after | the bed put back when its fade has ended, from where it was |
 | A double Esc after the Esc, or a load-to-time, then a GO | back from the top | the same: the pause forgotten |
@@ -16058,6 +16073,13 @@ replay as they played: their `run.assert` records carry no resume point. The new
 only on an engine `run.assert` in the tick of an Esc; no fixture has an Esc and a persistent
 section together (`persistent.wfglog` has no Esc; `mic.wfglog` and `take.wfglog` have Esc and no
 section). The first new case replays its own session and finds the resumed run at the same second.
+
+*Said plainly (K8's review, 2026-10-02):* **an old log replays differently in one case.** A log
+written before K8 in which an engine `run.assert` - a pass decided by the hook before an Esc -
+drained in the Esc's own tick, after the press, put the bed back when it was written; replayed
+since K8, that record is applied and does nothing (`escapedInDrain`), so the replay has no bed
+where the session had one, and every record about that run after it does not match. It is the
+same difference H4's `killedInDrain` made for a double Esc (§23.10). No fixture holds such a tick.
 
 **Tests.** Written first, each run on the code before the change:
 
@@ -16095,33 +16117,160 @@ changed in `Runner.cpp`, `GoTests.cpp` and `MicTests.cpp`.
 
 | | Decision | Whose |
 |---|---|---|
-| LF | **Esc pauses a persistent media cue; a mic, OSC or MIDI cue is relaunched or re-sent as before**: the second is counted from the tick `run.started` was applied on and the cue's document speed, from where its arm began, never read from the voice; a run never heard is not paused unless it was armed at a second of its own | the author's, 2026-10-02 (the pause, the counting rule, the kinds); the never-heard rule the implementer's |
+| LF | **Esc pauses a persistent media cue; a mic, OSC or MIDI cue is relaunched or re-sent as before**: the second is counted from the tick `run.started` was applied on and the cue's document speed, from where its arm began, never read from the voice; a run never heard is not paused unless it was armed at a second of its own. *The counting rule retired by LQ (the author, 2026-10-02): it is only the answer with no playhead to read* | the author's, 2026-10-02 (the pause, the counting rule, the kinds); the never-heard rule the implementer's |
 | LG | **The second remembered is the press's**: the second the panic fade takes down plays again at the resume, as Doh!'s does (§24, L3) | implementer's call; the author's to move to the fade's end |
-| LH | **A cue with slices carries on from the start of the slice it was in**: the audio side launches a slice only at its in-point, as a jump's does | implementer's call, the audio side's limit |
-| LI | **The resume point rides `run.assert`** (`from`, `range`, both optional), decided by the hook, which starts a bed paused within half a second of its file's end, by the length the log knows, from the top | implementer's call |
-| LJ | **A step inside Esc's fade owes the bed**: put back, from where it was, on the tick its old run ends | implementer's call |
+| LH | **A cue with slices carries on from the start of the slice it was in**: the audio side launches a slice only at its in-point, as a jump's does. *Revised by LR (the author, 2026-10-02): inside the slice, at the same point and in the same pass* | implementer's call, the audio side's limit |
+| LI | **The resume point rides `run.assert`** (`from`, `range`, both optional), decided by the hook, which starts a bed paused within half a second of its file's end, by the length the log knows, from the top - past the end included, the one comparison (LU) | implementer's call |
+| LJ | **A step inside Esc's fade owes the bed**: put back, from where it was, on the tick its old run ends. *(K8's review:) the tick that pays what was owed can also hold a new step's pass, so one tick can submit two `run.assert` records for the bed; the second is answered by decision N - the run the first made is the run, live and replayed alike* | implementer's call |
 | LK | **The pause is forgotten by a double Esc and a load-to-time, and spent by any fire that makes the cue's next run** - a fire by name or a trigger starts it from the top | the author's, 2026-10-02, for the double Esc and the load-to-time; the fire the implementer's |
 | LL | **Esc takes back the persistent pass a step before it opened**, as the double Esc does (IY): the step counted as asserted, the wait cleared, what a pass owed forgotten, and an engine `run.assert` draining behind the press applied and doing nothing | the author's, 2026-10-02 ("close the asymmetry"); the road IY's |
 
 **Named limits.**
 
-- **A speed fade, or an edit of the speed while the bed played, is not counted**: the second is
-  reckoned at the speed the document says at the press, as load-to-time reckons it (§22.5). Nor is
-  a stretched cue's speed held down to the stretcher's limit, which the audio side sets.
-- **A slice resumes at its in-point** (LH), so a bed looping one slice for ever comes back at the
-  top of its loop.
-- **A resumed bed starts at its level at once**, mid-file and with no fade-in, as a jump's relaunch
-  does.
+- *Retired by K8's review (2026-10-02):* ~~a speed fade, or an edit of the speed while the bed
+  played, is not counted, nor a stretched cue held to the stretcher's limit~~ - the playhead counts
+  them all (LQ); ~~a slice resumes at its in-point~~ - inside its loop, in the pass it was in (LR);
+  ~~a resumed bed starts at its level at once~~ - it comes up from silence over a tenth of a second
+  (LT).
+- **A press within a launch horizon of a slice's end carries on at the next slice's in-point**
+  *(K8's review)*: the boundary is placed a horizon ahead of the crossing, and from the placement
+  the playhead is the incoming slice's - the last 40-80 ms of the outgoing pass are not played again.
+- **A session younger than what a slice had played** *(K8's review)* - the device rebuilt since the
+  bed began, its counter started again - keeps the point inside the loop and counts the passes from
+  there; younger than the point itself, the pass count starts at the in-point's while the sound
+  carries on at the point. Read from the code.
+- **With no playhead there is only the count** *(K8's review)*: a session with no audio side - `wfg
+  serve` without `--hosted` - pauses at the handler's count (LS). It launches no media, so nothing
+  there was ever heard: a bed is paused only when its arm began at a second of its own, and comes
+  back at that second.
+- **A resumed bed's first tenth of a second is ramped** *(K8's review, LT)*: the resumed second is
+  heard from silence, as the de-click means it to be.
 - **The pause is not published**: nothing on the tree says a bed is paused or where; the running
   pane shows the bed gone until the next step puts it back.
 - **A pause outlives a stop before the pointer.** A bed Esc paused whose stop cue the operator then
   steps past is suspended by the solver and keeps its pause; stepping back before the stop brings it
   back from where Esc paused it. Read from the code.
 
+**K8's review (2026-10-02): what changed.** No blocker. The author answered two of its questions
+himself the same day - where a bed had got to is its own playhead, and a looping bed carries on
+inside its loop - and those answers decide the rest. Each behaviour change has a case written
+first and run on K8 as committed (f8e36cb, with K5's review on top); the persistent cases run with
+the fake player's sample clock moving 960 samples a tick (`Rig::clockRuns`), as a sound card's
+does.
+
+- **The playhead, not the ticks** (LQ, the author's answer). Esc's handler still writes the pause -
+  which run, which file - and the count it wrote before, but that count is now only the answer
+  when there is no playhead to read. A hook, `Runner::notePausedPlayheads`, runs on the first tick
+  after the press, ahead of `updatePositions`: the readout it finds is the one the press's own tick
+  made off the sample clock - hooks run before the drain that applied the press - so it is where
+  the bed was when Esc was pressed, not where the panic fade has taken it since. It keeps that
+  second by run, in hook state (`playheads`), and `submitAssert` puts it on the `run.assert` record;
+  no handler reads it, and a replay arms the second from the record as before. Exact through
+  everything the document's speed does not say: a speed fade, an edit of the speed, the freeze at
+  nought (DR), a stretched cue held to the stretcher's limit, and the launch latency K8's count
+  missed (two ticks of file at ordinary block sizes). A run whose launch was never placed - still
+  loading at the press - has no playhead and keeps the handler's answer, which is where its arm
+  began. *What a replay does:* it runs no hook and needs no playhead - `from` is on the record.
+  *What a session with no audio side does* (`wfg serve` without `--hosted`): it launches no media,
+  so nothing is ever heard; a bed is paused only when its arm began at a second of its own, and
+  comes back there. *What the rigs do:* `GoTests`' fake player now runs its clock in the persistent
+  cases, so they read a real playhead; one case takes the player away and holds the count.
+  Case (first): a speed fade to 2 under the bed, Esc, GO - back at the old run's playhead, more
+  than a second and a half past what the ticks at one say. Before: the ticks at one. And K8's own
+  case now holds every subcase to the sample - before, two ticks of file short.
+- **The arm's own origin** (LS, the review's item 1). The count's origin was read off the document
+  at the press: the cue's `startOffset` whenever the run had none of its own, so an edit of it while
+  the bed played moved where it came back. A run now keeps `armedOrigin`, written by the handlers
+  that make and move it (`armInternal`, the jump's `seatPlan`, `seekMedia`), and the count reads
+  that. Only the count: with a playhead it is never read. Case (first, with no player and
+  `run.started` by hand): `startOffset` 1.5, edited to 7 while the bed played - back at 1.5 plus
+  the ticks. Before: 7 plus the ticks.
+- **A looping slice carries on inside its loop, in its pass** (LR, the author's answer, revising
+  LH). For a slice, the playhead read is `Run::slicePlayed` - a new readout beside `position`: how
+  far the slice has got since its first pass began, the passes not wrapped - and `from` carries it.
+  The run made takes it as `sliceFrom`; the arm hands the audio side the slice to enter and how far
+  into its loop (`ArmRequest::startSlot`, `sliceOffset` = `sliceFrom` modulo the slice's length),
+  and `AudioHost::setTrackRanges` sets that slot's clip offset after its loop range - inside a
+  loop, Tracktion reads the clip's offset from the loop's start and wraps it with the loop, so the
+  first pass starts there and every pass after it at the in-point. The launch dates the slice's
+  start back by all of `sliceFrom` (`rangeStartedAtSample`, `rangeSource`), so the pass count, the
+  playhead, the lane and the slice's end go on by the arithmetic every slice uses; the playhead and
+  the pass count are clamped to the launch so the dated-back start reads the point, not less,
+  until the sound starts. A loop count lowered since keeps the point in the slice's last pass; a
+  slice the cue has lost since is entered at the in-point of its last. Cases (first): two slices,
+  Esc two seconds into the second - back in the second at that point, replayed the same (before:
+  at its in-point); one slice looping three times, Esc in its second pass - the arm asks for the
+  point in the loop, the run reads pass 2 at that point, and the slice's end lands three passes
+  from the first, not three more (before: pass 1 at the in-point, and no end in reach);
+  `AudioTests` "ranges: a slice armed part-way into its loop starts there, and wraps to its
+  in-point" renders it: a two-second loop over two segments armed 1.5 s in plays the second
+  segment for half a second, then the first from the in-point, then the second (before: the first
+  segment first).
+- **The de-click** (LT, the orchestrator's call; the mechanism Doh! D2's resume needs, §24 GQ,
+  built once). A run made with a resume point is marked (`Run::deClick`, in `armInternal`, a
+  handler), armed at silence (`armMedia` keeps the level it comes up to), and on the tick its launch
+  is placed - not at the arm: a bed can spend ticks loading - `deClickLaunched` gives it a straight
+  five-tick fade from silence to that level: a level job that reports nothing, stops nothing and
+  submits nothing. Levels are not logged, so a replay is unchanged. A fade somebody set going on the
+  run first keeps its level; a run already on its way out gets none. A plain launch is as it was.
+  Case (first): a fresh bed armed at 0 dB and at it at once; the resumed one armed below -100 dB,
+  at -96 dB a tick after its launch is placed, climbing, at 0 dB on the fifth tick. Before: armed
+  and sounding at 0 dB.
+- **Stale guards** (LU, the review's item 3). `submitAssert` starts the cue from its top when its
+  file is not the one the paused run played (`PausedBed::media`); LI's comparison - `from` at or
+  after the length less half a second at the speed - already took a bed paused past its end to the
+  top as well as one in its last half second, and the case now holds both. Cases: the file changed
+  while paused (first: K8 put `storm.wav` back at rain's second); a length the log knows 0.3 s
+  past the playhead, 1 s short of it, 0.7 s past it (the first two a net - K8 had the guard - the
+  third first, by the latency).
+- **The tests the review found missing**, each a net on the property it guards unless said: a
+  second Esc inside the fade keeps the first press's second; an Esc on a resumed bed still loading
+  keeps the same second; a Doh! after the Esc puts nothing back and the GO after it carries the bed
+  on; a pane kill while a GO inside the fade owes the bed suspends it (decision S in the owed loop);
+  a fire by name spends the pause and starts from the top; the session of "Esc right after a GO"
+  (both subcases - the second is `escapedInDrain`) and of the owed path replayed record for record,
+  reaching the same runs; Esc while the pass waits for an askable desk's answers takes the pass
+  back, and without the press the bed comes once the wait has run out (an askable mount added to
+  the case, not to `PersistentRig`). The first three failed on K8 only by the launch latency they
+  are now held to; the rest passed on K8.
+
+**What it means for a replay (K8's review).** No handler reads a playhead: the second is a hook's,
+on the logged record, and the handler's count, `armedOrigin` and `sliceFrom` are written from
+logged records and the document. `slicePlayed`, the dated-back slice start and the de-click are a
+hook's bookkeeping and levels, none logged. `run.assert`'s `from` for a slice now means seconds
+into it rather than nought; a K8 log's slice records carry nought, which is the in-point, as it
+was. Every `wfg.replay.*` fixture (58, both locales) replays record for record - none has an
+Esc and a persistent section together - and the cases that replay their own session reach the same
+runs at the same seconds.
+
+**Counts.** The persistent cases (28, eleven of them new) and the `AudioTests` slice case under C
+and `fr-FR`: 29 cases, 725 assertions each, green. Run first on K8 as committed, 11 persistent cases
+failed (33 assertions) and the `AudioTests` case failed (2). The four nets that passed on K8 - the
+desk's wait, the pane kill in the owed loop, the fire by name, LI's last half second and past the
+end - were each shown to bite, by building with the line they guard taken out (`assertDue = -1` in
+`pausePersistent`, decision S in the owed loop, `paused.erase` in `armInternal`, the length guard
+in `submitAssert`): all four failed, and the lines were put back. `GoTests`, `MicTests` and
+`AudioTests` whole under C: 444 cases, 33985 assertions, green, the audio-timing cases included.
+`ctest -R "wfg\.replay|blackbox\.(phase4|phase9b-inputs)\.|wfg\.commands"`: 64 of 64.
+`scripts/check-comments.py` and `scripts/check-claude-md.py` pass; clang-tidy with the GCC warnings
+finds nothing on the lines changed in `Runner.cpp`, `AudioHost.cpp`, `HostPlayer.cpp`, `GoTests.cpp`
+and `AudioTests.cpp`.
+
+| | Decision | Whose |
+|---|---|---|
+| LQ | **A paused bed carries on from its own playhead at the press**: the readout the press's tick made off the sample clock, read by a hook on the next tick, kept by run in hook state and carried on `run.assert`; the handler's count from ticks and the document's speed is only the answer with no playhead (no audio side, or a launch never placed) | the author's, 2026-10-02 (the playhead); reading the press's tick's readout, and the fallback, the implementer's |
+| LR | **A looping slice carries on inside its loop, at the same point and in the same pass**: `from` is how far the slice had got, passes and all; the arm starts the slice's clip that far into its loop (`sliceOffset`), and the launch dates the slice's start back by all of it | the author's, 2026-10-02 (inside the loop, the pass semantics); the clip offset and the dating back the implementer's |
+| LS | **The count's origin is the run's own** (`armedOrigin`, written by the handlers that make and move it), never the cue's offset read at the press | the review's |
+| LT | **A run carried on mid-file arrives over a de-click**: armed at silence, and a straight five-tick fade to its level from the tick its launch is placed; built once, for D2's resume too | the orchestrator's call (K8's review); from the launch's placement, and a fade already on the run keeping its level, the implementer's |
+| LU | **A paused bed whose cue now names another file starts it from its top**, as one past its end or in its last half second does (LI) | the review's |
+
 **Owed to the bench:** on the MADIface, a persistent bed sounding a minute in: Esc - it fades out
 with the rest; GO a few seconds later - it comes back where it was, within a launch latency, the
 faded second heard again; GO inside the fade - it comes back once the fade has ended; double Esc
-after an Esc, then GO - from the top.
+after an Esc, then GO - from the top. *(K8's review:)* a bed slowed by a speed fade, Esc, GO - it
+comes back where it was heard, not where the ticks at its document speed would put it; a slice
+looping for ever paused mid-loop - it comes back at the same point of the loop; every resume heard
+coming up over a tenth of a second, with no click.
 
 ## 24. Doh! — taking back the last GO
 
@@ -16441,7 +16590,9 @@ a cue, that takes back. (b) A short effect heard in part **carries on**; a **sec
 the next GO starts it from the top, leaving nothing armed at the old point. (c) What nobody heard is
 **taken back exactly**: a cue in its pre-wait, or a scene of network cues only, starts over with its
 full timing (GL). (d) A paused cue arrives over a **0.1 s de-click**; cues the GO stopped fade in
-over the panic fade (GQ). (e) After a trigger or a fire by name on the same list following the GO,
+over the panic fade (GQ). *(2026-10-02, K8's review: the de-click is built, for the bed Esc pauses -
+`Run::deClick`, armed at silence and a five-tick straight fade from the tick its launch is placed,
+§23.17 LT - and D2's resume takes the same.)* (e) After a trigger or a fire by name on the same list following the GO,
 Doh! is **refused with a sentence** - *"a trigger fired after the last GO"* - and taking back
 triggers is a later version's (GI).
 
