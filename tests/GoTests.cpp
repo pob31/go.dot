@@ -4075,7 +4075,8 @@ TEST_CASE ("stop levels: a nested group whose member holds its post-wait still c
         the next tick stopped it again, for ever: the scene never came down.
         Graceful teardown of nested groups makes that an ordinary show, so a
         member is now asked once, and one already on its way out is left to
-        finish. */
+        finish. (2026-10-02, K2, namespace draft §23.13: one holding its
+        post-wait is no longer left to run it out - the stop ends it.) */
     NestedRig rig;
     rig.setCue (rig.deep, "preWait", "0");
     rig.setCue (rig.deep, "postWait", "0.2");            // ten ticks
@@ -4620,6 +4621,347 @@ TEST_CASE ("stop levels: a double Esc never waits out a post-wait")
         REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
         CHECK (rig.runToCompletion (groupRun, 10) < 10);
         CHECK (rig.runs.find (rig.runOf (closing))->isFinished());
+    }
+}
+
+TEST_CASE ("stop levels: Esc ends a post-wait too, begins none, and the footer still runs")
+{
+    /*  THE AUTHOR'S RULING (2026-10-02, K2, namespace draft §23.13: "Esc ends
+        them too"). Under Esc a member's post-wait ran out before its scene's
+        footer: a member that had just begun a thirty-second post-wait kept its
+        voice, its slots and its scene for that half-minute, and a member Esc
+        stopped in its PRE-wait - never fired - began its whole post-wait when
+        it ended. Now a stop asked of a run ends a post-wait under way and
+        begins none, as a kill already did (ES); the footers still run, which
+        is what Esc keeps of normal completion. A scene that ends on its own
+        still waits out its members' post-waits - the guard at the end. */
+    SUBCASE ("a member holding its post-wait is ended, its voice given back, and the footer runs within the fade")
+    {
+        GroupRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+        const auto bed = rig.document.createCue (rig.groupId, 0, "media", "Bed").id;
+        rig.setCue (bed, "file", "bed.wav");
+        rig.setCue (bed, "postWait", "30");
+
+        const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (bed).empty(); }));
+
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.audio.launches.empty(); }));
+
+        const auto bedRun = rig.runOf (bed);
+        const auto voice = rig.runs.find (bedRun)->track;
+        REQUIRE (voice >= 0);
+
+        rig.audio.playing.insert (voice);                 // it sounds...
+        rig.tickOnce();
+        rig.tickOnce();
+        rig.audio.playing.erase (voice);                  // ...and reaches its end
+
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (bedRun)->state == cue::runState::postWait; }));
+        REQUIRE (rig.runs.isTrackBusy (voice));           // a post-wait holds its voice
+
+        const auto groupRun = rig.runOf (rig.groupId);
+
+        //  Esc: the footer within the panic fade and a few ticks, not thirty seconds on.
+        REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+        CHECK (rig.tickUntil ([&] { return ! rig.runOf (closing).empty(); }, 60));
+        CHECK (rig.runs.find (bedRun)->state == cue::runState::done);
+        CHECK_FALSE (rig.runs.isTrackBusy (voice));
+        CHECK (rig.audio.kills.empty());                  // Esc cuts nothing
+        CHECK (rig.runToCompletion (groupRun, 70) < 70);
+    }
+
+    SUBCASE ("a member Esc stops in its pre-wait begins no post-wait")
+    {
+        GroupRig rig;
+        rig.setCue (rig.first, "preWait", "10");
+        rig.setCue (rig.first, "postWait", "30");
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto id = rig.runOf (rig.first);
+            return ! id.empty() && rig.runs.find (id)->state == cue::runState::waiting;
+        }));
+
+        const auto groupRun = rig.runOf (rig.groupId);
+        const auto memberRun = rig.runOf (rig.first);
+
+        REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (memberRun)->isFinished(); }, 10));
+        CHECK (rig.runToCompletion (groupRun, 70) < 70);
+    }
+
+    SUBCASE ("a scene's own post-wait is not begun after the footer Esc ran")
+    {
+        GroupRig rig;
+        rig.setCue (rig.first, "preWait", "10");          // hold the group in its members
+        rig.setCue (rig.groupId, "postWait", "30");
+
+        const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+        const auto groupRun = rig.runOf (rig.groupId);
+
+        REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+        CHECK (rig.runToCompletion (groupRun, 70) < 70);
+        CHECK_FALSE (rig.runOf (closing).empty());
+    }
+
+    SUBCASE ("a cue on its own, stopped in its pre-wait, begins no post-wait")
+    {
+        Rig rig;
+        rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/preWait", "10");
+        rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/postWait", "30");
+
+        rig.setStandby (rig.memoId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto memoRun = rig.runOf (rig.memoId);
+        REQUIRE_FALSE (memoRun.empty());
+        REQUIRE (rig.runs.find (memoRun)->state == cue::runState::waiting);
+
+        REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (memoRun)->isFinished(); }, 10));
+    }
+
+    SUBCASE ("a stop cue aimed at the scene ends its member's post-wait, and the footer runs")
+    {
+        GroupRig rig;
+        rig.setCue (rig.first, "postWait", "30");
+
+        const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+        const auto stopId = rig.document.createCue (rig.listId, 3, "transport", "Abort").id;
+        rig.setCue (stopId, "target", rig.groupId);
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto id = rig.runOf (rig.first);
+            return ! id.empty() && rig.runs.find (id)->state == cue::runState::postWait;
+        }));
+
+        const auto groupRun = rig.runOf (rig.groupId);
+
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (stopId) }).rejected == 0);
+        CHECK (rig.runToCompletion (groupRun, 70) < 70);
+        CHECK_FALSE (rig.runOf (closing).empty());
+        CHECK (rig.runOf (rig.second).empty());           // and nothing after it was fired
+    }
+
+    SUBCASE ("guard: a scene ending on its own still waits out its member's post-wait before its footer")
+    {
+        GroupRig rig;
+        rig.setCue (rig.third, "postWait", "0.4");        // twenty ticks
+
+        const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto id = rig.runOf (rig.third);
+            return ! id.empty() && rig.runs.find (id)->state == cue::runState::postWait;
+        }));
+
+        int ticks = 0;
+
+        while (rig.runOf (closing).empty() && ticks < 100)
+        {
+            rig.tickOnce();
+            ++ticks;
+        }
+
+        CHECK (ticks >= 20);
+        CHECK (ticks < 100);
+    }
+}
+
+TEST_CASE ("stop levels: a cue on its own holding its post-wait is ended at once by Esc or the pane's stop")
+{
+    /*  A ROOT IN ITS POST-WAIT, reached by Esc's own stop, and by the pane's
+        stop aimed at it (2026-10-02, K2, namespace draft §23.13): the stop
+        wrote `stopping` over the wait, and the `run.ended` that followed began
+        it again from nought - every stop of a cue holding its post-wait cost it
+        the whole post-wait once more. */
+    for (const auto* how : { "run.stopAll", "run.stop" })
+    {
+        INFO (std::string (how));
+        Rig rig;
+        rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/postWait", "30");
+
+        rig.setStandby (rig.memoId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto memoRun = rig.runOf (rig.memoId);
+        REQUIRE_FALSE (memoRun.empty());
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (memoRun)->state == cue::runState::postWait; }, 10));
+
+        if (std::string (how) == "run.stop")
+            REQUIRE (rig.submitAndTick (how, { osc::Value::string (memoRun) }).rejected == 0);
+        else
+            REQUIRE (rig.submitAndTick (how).rejected == 0);
+
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (memoRun)->isFinished(); }, 10));
+    }
+}
+
+TEST_CASE ("stop levels: a cue's authored ending keeps its target's post-wait, and an abort ends it")
+{
+    /*  THE LINE BETWEEN THE TWO (2026-10-02, K2's review, namespace draft
+        §23.13, JX): an ABORT - Esc, a double Esc, the pane's stop, and the
+        stop a stopping scene's job sends each member - ends a post-wait and
+        begins none; a cue's AUTHORED ENDING - a stop cue aimed at a cue, a
+        fade that ends in a stop - is how that cue ends in the show, and its
+        post-wait is still the gap the designer wrote after it (PRD §3.6:
+        "pre-wait and post-wait win"). And whatever the stop, a post-wait that
+        had begun is never begun again from nought. */
+    SUBCASE ("a stop cue fading a sequence member: the next member follows its post-wait after the fade's end")
+    {
+        GroupRig rig;
+
+        const auto bed = rig.document.createCue (rig.groupId, 0, "media", "Bed").id;
+        rig.setCue (bed, "file", "bed.wav");
+        rig.setCue (bed, "postWait", "3");                // 150 ticks
+
+        const auto fadeOut = rig.document.createCue (rig.listId, 3, "transport", "Fade the bed").id;
+        rig.setCue (fadeOut, "target", bed);
+        rig.setCue (fadeOut, "verb", "fade");
+        rig.setCue (fadeOut, "duration", "0.2");          // ten ticks
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (bed).empty(); }));
+
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.audio.launches.empty(); }));
+
+        const auto bedRun = rig.runOf (bed);
+        rig.audio.playing.insert (rig.runs.find (bedRun)->track);
+        rig.tickOnce();
+        rig.tickOnce();
+
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (fadeOut) }).rejected == 0);
+
+        //  The fade lands its stop, and the bed holds its post-wait.
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (bedRun)->state == cue::runState::postWait; }, 40));
+
+        int ticks = 0;
+
+        while (rig.runOf (rig.first).empty() && ticks < 300)
+        {
+            rig.tickOnce();
+            ++ticks;
+        }
+
+        CHECK (ticks >= 145);
+        CHECK (ticks < 170);
+    }
+
+    SUBCASE ("a stop cue aimed at a scene in an act: its members' waits end, its footer runs, its own post-wait spaces the next")
+    {
+        GroupRig rig;
+
+        const auto act = rig.document.createCue (rig.listId, 3, "group", "Act").id;
+        rig.setCue (act, "advance", "auto");
+
+        const auto scene = rig.document.createCue (act, 0, "group", "Scene one").id;
+        rig.setCue (scene, "advance", "auto");
+        rig.setCue (scene, "postWait", "1");              // fifty ticks before the next scene
+
+        const auto hold = rig.document.createCue (scene, 0, "memo", "Hold").id;
+        rig.setCue (hold, "preWait", "10");
+        rig.setCue (hold, "postWait", "30");
+
+        const auto release = rig.document.createCue (rig.roleOf (scene, "footer"), 0, "memo", "Release").id;
+        const auto next = rig.document.createCue (act, 1, "memo", "Scene two").id;
+
+        const auto abort = rig.document.createCue (rig.listId, 4, "transport", "Leave scene one").id;
+        rig.setCue (abort, "target", scene);
+
+        rig.setStandby (act);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (hold).empty(); }));
+
+        const auto holdRun = rig.runOf (hold);
+
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (abort) }).rejected == 0);
+
+        //  The member's wait goes and the footer runs at once...
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (holdRun)->isFinished(); }, 20));
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (release).empty(); }, 20));
+
+        //  ...and the scene's own post-wait still spaces the next scene.
+        int ticks = 0;
+
+        while (rig.runOf (next).empty() && ticks < 200)
+        {
+            rig.tickOnce();
+            ++ticks;
+        }
+
+        CHECK (ticks >= 45);
+        CHECK (ticks < 70);
+    }
+
+    SUBCASE ("a stop cue aimed at a cue holding its post-wait leaves the wait where it was")
+    {
+        Rig rig;
+        rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/postWait", "1");   // fifty ticks
+
+        const auto stopId = rig.document.createCue (rig.listId, 2, "transport", "Stop it").id;
+        rig.document.setAttribute ("/godot/cue/" + stopId + "/target", rig.memoId);
+
+        rig.setStandby (rig.memoId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto memoRun = rig.runOf (rig.memoId);
+        REQUIRE_FALSE (memoRun.empty());
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (memoRun)->state == cue::runState::postWait; }, 10));
+
+        for (int n = 0; n < 20; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (stopId) }).rejected == 0);
+
+        //  Thirty ticks of the fifty were left: not ended now, not fifty more.
+        CHECK_FALSE (rig.tickUntil ([&] { return rig.runs.find (memoRun)->isFinished(); }, 20));
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (memoRun)->isFinished(); }, 20));
+    }
+
+    SUBCASE ("guard: in an automatic sequence a member's post-wait spaces the next member")
+    {
+        GroupRig rig;
+        rig.setCue (rig.first, "postWait", "0.4");        // twenty ticks
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto id = rig.runOf (rig.first);
+            return ! id.empty() && rig.runs.find (id)->state == cue::runState::postWait;
+        }));
+
+        int ticks = 0;
+
+        while (rig.runOf (rig.second).empty() && ticks < 100)
+        {
+            rig.tickOnce();
+            ++ticks;
+        }
+
+        CHECK (ticks >= 18);
+        CHECK (ticks < 30);
     }
 }
 

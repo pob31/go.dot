@@ -76,6 +76,11 @@ namespace wfg::cue
         `audio.clockMoved`, when the interface's clock moved under the show
         (PRD §6.2). For a handler only: the table's writer.
 
+        A ROOT is an unfinished run whose parent is none, missing, or finished
+        (the last since 2026-10-02, K2, namespace draft §23.13: a pre-send left
+        asking under a scene that had ended was nobody's root). Every stop it
+        asks is an abort (`Run::stopEndsWait`), so the run owes no post-wait.
+
         `spareHorizon` LEAVES WHAT WAS ONLY MADE READY (2026-09-30, namespace
         draft §23): a root that `Run::onlyPrepared` - the standby's arm, the
         block its horizon prepared - is not running, and the two keys stop what

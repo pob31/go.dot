@@ -1026,6 +1026,25 @@ namespace wfg::cue
         std::uint64_t stopAskedBy = 0;
         bool askedAgain = false;
 
+        /*  WHETHER THE STOP ASKED OF IT WAS AN ABORT, which owes no post-wait
+            (2026-10-02, K2, namespace draft §23.13, JX). Esc, a double Esc, the
+            pane's stop or kill, and the stop a stopping scene's job sends each
+            member set it - `stopEveryRoot`, `beginPanicFade`, the `run.stop`
+            and `run.kill` handlers. A cue's AUTHORED ending does not: a stop
+            cue aimed at a cue, a fade that ends in a stop, a speed fade's stop,
+            a sampler clip's release, `advance` or a boundary verb on something
+            with no boundary - the cue ends the way the show was written, and
+            its post-wait is still the gap written after it (PRD §3.6, "pre-wait
+            and post-wait win"). `run.ended` reads it. Handler-only, like the
+            ask, and cleared with it. */
+        bool stopEndsWait = false;
+
+        /*  THE TICK ITS POST-WAIT BEGAN, or -1. A stop writes `stopping` over
+            the wait, and the `run.ended` after it began the post-wait again
+            from nought; with this it carries on to the deadline it had, or ends
+            under an abort. Written by `run.ended`. */
+        std::int64_t postWaitBegan = -1;
+
         /*  THE TICK THE DOH HANDED THIS RUN BACK ON - a group it brought back
             to life - or -1. Records its own hooks submitted in that tick, on
             the state the Doh has just undone, are applied and ignored. */

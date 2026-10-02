@@ -1131,7 +1131,8 @@ TEST_CASE ("double Esc: a pre-send of the GO's scene still asking when the press
 
     /*  A member that holds the scene in its members phase: a scene with
         nothing but its header ends at the GO, its pre-send left asking under
-        a scene that is over (§23.10 names that road). */
+        a scene that is over (§23.10 names that road; K2 closed it on
+        2026-10-02, §23.13, and the case after this one is its test). */
     const auto hold = rig.document.createCue (scene.group, 0, "memo", "Hold").id;
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "10").ok);
 
@@ -1170,6 +1171,80 @@ TEST_CASE ("double Esc: a pre-send of the GO's scene still asking when the press
     CHECK (rig.runs.find (presendRun)->isFinished());
     CHECK (rig.mounts.valueOf ("/desk/fader") == nullptr);   // nothing written to the desk
     CHECK (rig.sender.sentFor ("K3PV7WRB") == 0u);
+}
+
+TEST_CASE ("Esc and double Esc: a pre-send left asking under a scene that has ended is reached, and writes nothing")
+{
+    /*  THE ROAD §23.10 FOUND AND LEFT FOR A RULING (2026-10-02, K2, namespace
+        draft §23.13; the author: "fix it"). A scene with nothing but its header
+        ends at the GO that adopts it, and a pre-send of that header still
+        asking what the desk held is left running under a scene that is over.
+        `stopEveryRoot` counted a run as a root only when its parent was missing
+        from the run table, and a finished run is never removed from it: so
+        neither Esc nor a double Esc reached that pre-send, and its answer wrote
+        the value after the press. A finished parent now counts as gone.
+
+        BOTH PRESSES, and the answer either in the press's own drain or after
+        it: nothing reaches the desk or the wire, and the run ends. */
+    for (const auto* level : { "run.stopAll", "run.killAll" })
+        for (const auto together : { true, false })
+        {
+            INFO (std::string (level) << (together ? ", answered in the press's drain" : ", answered after"));
+            VerifiedRig rig;
+            rig.anticipate();
+            rig.runner.setMounts (&rig.mounts, &rig.sender, nullptr);   // the test answers the read itself
+
+            const PreparedScene scene { rig, "f:0.8", "none" };
+
+            rig.setStandby (scene.group);
+
+            for (int n = 0; n < 5; ++n)
+                rig.tickOnce();
+
+            const auto* presend = rig.runOf (scene.cue);
+            REQUIRE (presend != nullptr);
+            REQUIRE (presend->restoreAtom.empty());                 // still asking
+            const auto presendRun = presend->id;
+
+            REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
+            const auto blockId = rig.runs.preparedRunOf (scene.group)->id;
+
+            /*  The GO adopts the scene, which has nothing else to do and ends -
+                the pre-send still out, under a parent that is over. */
+            rig.engine.submit ("cli", "go", {});
+
+            for (int n = 0; n < 5; ++n)
+                rig.tickOnce();
+
+            REQUIRE (rig.runs.find (blockId)->isFinished());
+            REQUIRE_FALSE (rig.runs.find (presendRun)->isFinished());
+            REQUIRE (rig.runs.find (presendRun)->parent == blockId);
+
+            const auto answer = [&rig]
+            {
+                rig.engine.submit ("mount:K3PV7WRB", "mount.readback",
+                                   { osc::Value::string ("K3PV7WRB"), osc::Value::string ("/desk/fader"),
+                                     osc::Value::float32 (0.2f) });
+            };
+
+            rig.engine.submit ("cli", level, {});
+
+            if (together)
+                answer();
+
+            rig.tickOnce();
+
+            if (! together)
+                answer();
+
+            for (int n = 0; n < 5; ++n)
+                rig.tickOnce();
+
+            CHECK (rig.runs.find (presendRun)->isFinished());
+            CHECK (rig.runs.find (presendRun)->stopAsked);
+            CHECK (rig.mounts.valueOf ("/desk/fader") == nullptr);   // nothing written to the desk
+            CHECK (rig.sender.sentFor ("K3PV7WRB") == 0u);
+        }
 }
 
 TEST_CASE ("double Esc: the standby's pre-send already on its way still leaves")
@@ -1213,6 +1288,101 @@ TEST_CASE ("double Esc: the standby's pre-send already on its way still leaves")
     REQUIRE (rig.runs.find (blockId) != nullptr);
     CHECK_FALSE (rig.runs.find (blockId)->isFinished());
     CHECK (rig.runs.preparedRunOf (scene.group) != nullptr);
+}
+
+TEST_CASE ("Esc and double Esc: a scene made ready under an act that has finished stays ready, its pre-send on its way still leaving")
+{
+    /*  JV'S SPARED SIDE (2026-10-02, K2's review, namespace draft §23.13). An
+        act left at a boundary (`afterMember`) ends without asking the scene the
+        horizon made ready under it, which is the standby's and stays made
+        ready - hanging from a run that has finished. Since K2 that block is a
+        root, and the filter every root passes through spares it: Esc and a
+        double Esc leave it ready. And the double Esc's drop now draws the same
+        line: its walk to the root used to climb past the block to the finished
+        act, find nothing spared there, and drop the block's pre-send still in
+        the sender's queue - the desk never got the value the scene believes it
+        holds. */
+    for (const auto* level : { "run.stopAll", "run.killAll" })
+    {
+        INFO (std::string (level));
+        VerifiedRig rig;
+        rig.anticipate();
+        rig.runner.setMounts (&rig.mounts, &rig.sender, nullptr);   // the test answers the read itself
+        REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+        //  An act (manual) opening with a memo that holds a second, then a scene whose header pre-sends.
+        const auto act = rig.document.createCue (rig.listId, rig.index++, "group", "Act").id;
+        const auto opening = rig.document.createCue (act, 0, "memo", "Opening").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + opening + "/preWait", "1").ok);
+        const auto scene = rig.document.createCue (act, 1, "group", "Scene").id;
+        const auto inside = rig.document.createCue (scene, 0, "memo", "Inside").id;
+
+        const auto header = rig.document.createRole (scene, "header");
+        REQUIRE (header.ok);
+
+        const auto presend = rig.document.createCue (header.id, 0, "osc", "Position the source").id;
+        rig.document.setAttribute ("/godot/cue/" + presend + "/address", "/desk/fader");
+        rig.document.setAttribute ("/godot/cue/" + presend + "/value", "f:0.8");
+        rig.document.setAttribute ("/godot/cue/" + presend + "/wait", "none");
+        rig.document.setAttribute ("/godot/cue/" + presend + "/timeout", "5");
+
+        //  GO on the opening: the act runs, the pointer walks into the scene, and the horizon prepares it.
+        rig.setStandby (opening);
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+
+        REQUIRE (rig.document.findById (rig.listId)[juce::Identifier ("standby")].toString().toStdString()
+                   == inside);
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        const auto* ready = rig.runs.preparedRunOf (scene);
+        REQUIRE (ready != nullptr);
+        const auto blockId = ready->id;
+
+        const auto* actRun = rig.runs.liveRunOf (act);
+        REQUIRE (actRun != nullptr);
+        const auto actId = actRun->id;
+        REQUIRE (rig.runs.find (blockId)->parent == actId);
+
+        //  The act is left at the end of its member, and ends; the block stays, made ready, under it.
+        rig.engine.submit ("cli", "run.stop", { osc::Value::string (actId), osc::Value::string ("afterMember") });
+
+        for (int n = 0; n < 100 && ! rig.runs.find (actId)->isFinished(); ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.runs.find (actId)->isFinished());
+        REQUIRE_FALSE (rig.runs.find (blockId)->isFinished());
+        REQUIRE (rig.runs.find (blockId)->onlyPrepared());
+
+        const auto* asking = rig.runOf (presend);
+        REQUIRE (asking != nullptr);
+        REQUIRE (asking->restoreAtom.empty());                // still asking
+        REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 0u);
+
+        /*  The desk answers; the pre-send writes in the next tick's hook - the
+            press's - and its value is queued when the press drains. */
+        rig.engine.submit ("mount:K3PV7WRB", "mount.readback",
+                           { osc::Value::string ("K3PV7WRB"), osc::Value::string ("/desk/fader"),
+                             osc::Value::float32 (0.2f) });
+        rig.tickOnce();
+        REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 0u);
+
+        rig.engine.submit ("cli", level, {});
+        rig.tickOnce();
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+        //  And the scene is still the standby's, made ready.
+        CHECK_FALSE (rig.runs.find (blockId)->isFinished());
+        CHECK (rig.runs.preparedRunOf (scene) != nullptr);
+    }
 }
 
 TEST_CASE ("prepare: a block whose pre-sent value came back equal says verified")

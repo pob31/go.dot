@@ -150,11 +150,36 @@ namespace wfg::cue
                             /*  AND NOT FOR A RUN GO DOH! TOOK BACK: a Doh is a
                                 pause, not an end, and a taken-back cue owes no
                                 post-wait to anything waiting on it. */
+                            /*  NOR FOR AN ABORT (2026-10-02, K2, namespace
+                                draft §23.13; the author: "Esc ends them too").
+                                Esc wrote `stopping` over a member's pre-wait
+                                and this began its whole post-wait, for a cue
+                                that never fired; a scene's footer waited behind
+                                it. Esc, a double Esc, the pane's stop and a
+                                stopping scene's job abort the cue: no wait is
+                                owed. A cue's authored ending - a stop cue aimed
+                                at it, a fade that ends in a stop - keeps its
+                                post-wait, the gap the designer wrote after it.
+                                `stopEndsWait` is the handlers' own account, so a
+                                replay decides the same. The footers still run;
+                                only the waits go.
+
+                                AND A POST-WAIT ALREADY BEGUN IS NEVER BEGUN
+                                AGAIN. A stop writes `stopping` over the wait;
+                                this used to start it over from nought, so every
+                                stop of a cue holding its post-wait cost the
+                                whole wait once more. Now it carries on to the
+                                deadline it had, or ends under an abort. */
                             if (run->postWaitTicks > 0 && ! run->isWaiting() && ! run->skipFooter
-                                  && ! run->takenBack)
+                                  && ! run->takenBack && ! run->stopEndsWait)
                             {
+                                if (run->postWaitBegan < 0)
+                                {
+                                    run->postWaitBegan = context.tick;
+                                    run->dueTick = context.tick + run->postWaitTicks;
+                                }
+
                                 run->state = runState::postWait;
-                                run->dueTick = context.tick + run->postWaitTicks;
                                 return Outcome::ok (args);
                             }
 
@@ -523,7 +548,8 @@ namespace wfg::cue
         registry.add ({ "run.stop",
                         "Stops one run: now, at the end of the member playing, or at the end of"
                         " this round. The footer runs either way; a scene that was only made"
-                        " ready is given back instead, with no footer.",
+                        " ready is given back instead, with no footer. A cue stopped this way"
+                        " owes no post-wait.",
                         { { "run", 's', false }, { "verb", 's', true } },
                         true,
                         [&runs] (CommandContext&, const std::vector<osc::Value>& args)
@@ -556,7 +582,10 @@ namespace wfg::cue
                                 return Outcome::ok (args);
                             }
 
+                            /*  THE PANE'S STOP, AND A STOPPING SCENE'S JOB'S:
+                                an abort, which owes no post-wait (§23.13). */
                             run->askStop (0);
+                            run->stopEndsWait = true;
                             return Outcome::ok (args);
                         } });
 
@@ -596,6 +625,7 @@ namespace wfg::cue
                             run->skipFooter = true;
                             run->killed = true;
                             run->askStop (0);
+                            run->stopEndsWait = true;
                             return Outcome::ok (args);
                         } });
 
@@ -649,6 +679,17 @@ namespace wfg::cue
             counts as a root, so nothing is left standing because its parent
             finished first.
 
+            AND A PARENT THAT HAS FINISHED IS GONE (2026-10-02, K2, namespace
+            draft §23.13). A finished run is never removed from the table - it
+            keeps its address for five seconds, and its row for the session -
+            so "missing from the table" never caught the case it was written
+            for: a scene adopted by a GO while its header's pre-send was still
+            asking ends at once when it has nothing else to do, and the pre-send
+            went on asking under a scene that was over, out of both presses'
+            reach, and wrote its value when the answer came. The same filter as
+            any root decides what is spared, so the standby's own preparation
+            under a finished run is still left ready.
+
             EXCEPT WHAT WAS ONLY MADE READY (2026-09-30, namespace draft §23).
             The standby's arm and the block its horizon prepared are not
             running, and the pointer has not moved: their readiness is still
@@ -678,7 +719,8 @@ namespace wfg::cue
             that needs only the run table, and a rig with no Runner has it. */
         registry.add ({ "run.stopAll",
                         "Stops every run now, gracefully: Esc. Members come down in order and"
-                        " every footer runs; the standby's preparation is left ready.",
+                        " every footer runs, but no post-wait; the standby's preparation is left"
+                        " ready.",
                         {},
                         true,
                         [&runs, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
@@ -714,10 +756,16 @@ namespace wfg::cue
         std::vector<std::string> roots;
 
         for (const auto& run : runs.all())
-            if (! run.isFinished()
-                  && (run.parent.empty() || runs.find (run.parent) == nullptr)
+        {
+            if (run.isFinished())
+                continue;
+
+            const auto* parent = run.parent.empty() ? nullptr : runs.find (run.parent);
+
+            if ((parent == nullptr || parent->isFinished())
                   && ! (spareHorizon && run.onlyPrepared() && ! runs.askedForUnder (run.id)))
                 roots.push_back (run.id);
+        }
 
         for (const auto& id : roots)
         {
@@ -727,6 +775,7 @@ namespace wfg::cue
                     run->skipFooter = true;
 
                 run->askStop (0);
+                run->stopEndsWait = true;
             }
         }
     }

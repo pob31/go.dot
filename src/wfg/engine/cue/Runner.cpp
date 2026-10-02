@@ -1908,6 +1908,8 @@ namespace wfg::cue
         run->stopAsked = false;
         run->stopAskedBy = 0;
         run->askedAgain = false;
+        run->stopEndsWait = false;
+        run->postWaitBegan = -1;
 
         if (run->state == runState::stopping)
             run->state = runState::playing;
@@ -4946,8 +4948,13 @@ namespace wfg::cue
         {
             panicShapedFade (id, tick, ticks, seconds);
 
+            /*  AN ABORT, and so no post-wait after it (2026-10-02, K2, namespace
+                draft §23.13) - a footer's sound Esc finds playing included. */
             if (auto* target = runs.find (id))
+            {
                 target->askStop (0);
+                target->stopEndsWait = true;
+            }
         }
     }
 
@@ -6229,6 +6236,8 @@ namespace wfg::cue
                 group->stopAsked = false;
                 group->stopAskedBy = 0;
                 group->askedAgain = false;
+                group->stopEndsWait = false;
+                group->postWaitBegan = -1;
 
                 for (auto& job : scheduled)
                     if (job.run == id)
@@ -9041,8 +9050,9 @@ namespace wfg::cue
             member before its own footer, so the innermost comes down first.
 
             ONCE A MEMBER, NOT ONCE A TICK. A member already on its way out is
-            left to finish - `stopping`, or holding its post-wait, which answers
-            a second stop by starting the post-wait again, for ever. A kill
+            left to finish - `stopping`. One holding its post-wait answered a
+            second stop by starting the post-wait again, for ever; it is ended
+            now, below, under a stop as under a kill. A kill
             passes over only a member that is stopping AND already killed, so a
             double Esc during Esc's teardown still reaches the members Esc had
             only stopped.
@@ -9059,8 +9069,18 @@ namespace wfg::cue
             what it holds is the wait - its voice and its slots with it - and a
             kill asks nothing of the cue: `run.done`, the post-wait's own ending,
             lets all of it go on the spot. `run.kill` would only have written
-            `stopping` over the wait. Under Esc a post-wait still runs out, as
-            the member's own way of completing.
+            `stopping` over the wait.
+
+            AND SO IS ONE A STOP FINDS (2026-10-02, K2, namespace draft §23.13;
+            the author: "Esc ends them too"). Under Esc - or a stop cue, or the
+            pane's stop aimed at the scene - a member that had just begun a
+            thirty-second post-wait kept its voice, its slots and its scene for
+            that half-minute, the footer waiting behind it. A stopping scene
+            aborts its members - its `run.stop` owes no post-wait - so the one
+            under way ends here the same way, with `run.done`. Its voice is not
+            cut: a stop lets a tail ring, as Esc lets a mic cue's. The scene's
+            OWN post-wait is another matter: brought down by a stop cue, it
+            still spaces whatever follows it (JX).
 
             AND ITS VOICE IS KILLED AS WELL (2026-10-01, namespace draft §23.6,
             GD). It is the clip that is over, not the chain: the voice's EQ and
@@ -9074,19 +9094,16 @@ namespace wfg::cue
         if (member.isFinished())
             return;
 
-        if (! graceful && member.state == runState::postWait)
+        if (member.state == runState::postWait)
         {
-            if (audio != nullptr && member.track >= 0)
+            if (! graceful && audio != nullptr && member.track >= 0)
                 audio->kill (member.track);
 
             engine.submit (origin::engine, "run.done", one (member.id));
             return;
         }
 
-        const auto onItsWay = member.state == runState::stopping
-                                || member.state == runState::postWait;
-
-        if (onItsWay && (graceful || member.skipFooter))
+        if (member.state == runState::stopping && (graceful || member.skipFooter))
             return;
 
         engine.submit (origin::engine, graceful ? "run.stop" : "run.kill", one (member.id));
@@ -9152,15 +9169,16 @@ namespace wfg::cue
     bool Runner::sparedByThePress (const std::string& runId) const
     {
         /*  UP TO THE ROOT, as `stopEveryRoot` finds one - no parent, or a parent
-            gone - bounded by the table as `underAKill` is. An empty name - a
-            client's `node.set`, a restore - is nobody's, and is not spared. */
+            gone or finished (since 2026-10-02, K2, namespace draft §23.13) -
+            bounded by the table as `underAKill` is. An empty name - a client's
+            `node.set`, a restore - is nobody's, and is not spared. */
         const auto* at = runs.find (runId);
 
         for (std::size_t guard = 0; at != nullptr && guard <= runs.all().size(); ++guard)
         {
             const auto* above = at->parent.empty() ? nullptr : runs.find (at->parent);
 
-            if (above == nullptr)
+            if (above == nullptr || above->isFinished())
                 return ! at->isFinished() && at->onlyPrepared() && ! runs.askedForUnder (at->id);
 
             at = above;
@@ -10973,7 +10991,8 @@ namespace wfg::cue
             if (graceful)
                 specialised.description = "Stops every run now, gracefully: Esc. What is sounding fades to"
                                           " silence over audio/panicFade first; members come down in order"
-                                          " and every footer runs; the standby's preparation is left ready.";
+                                          " and every footer runs, but no post-wait; the standby's preparation"
+                                          " is left ready.";
             else
                 specialised.description = "Drops every run now: double Esc. No footer runs, and the world is left"
                                           " as it was; every voice in Go.dot's own graph is silenced and every EQ"

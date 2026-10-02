@@ -1670,7 +1670,7 @@ Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's ar
 | `run.spawn` | `s` parentRun, `s` cue, `[s run]` | the scheduler created a child run — armed if media, idle otherwise. The generated ID is the record's last argument, as every generated ID is |
 | `run.launch` | `s` run | the scheduler started a run: its pre-wait begins; the due tick is the record's tick plus the wait |
 | `run.fire` | `s` run | a pre-wait elapsed: the kind's fire path runs — media requests its launch, a fade, osc or memo fires at once. Its own record, because a replay runs no hook and skips no handler |
-| `run.done` | `s` run | a post-wait elapsed; the run reports done to its parent. Written only when there *was* a post-wait — `run.ended` sets `done` directly when the run copied none. *(2026-09-30, H1: or when the run was killed, which asks nothing of its post-wait; and a killed group ends a member's post-wait under way with this record, §23.2)* |
+| `run.done` | `s` run | a post-wait elapsed; the run reports done to its parent. Written only when there *was* a post-wait — `run.ended` sets `done` directly when the run copied none. *(2026-09-30, H1: or when the run was killed, which asks nothing of its post-wait; and a killed group ends a member's post-wait under way with this record, §23.2)* *(2026-10-02, K2: or when an abort stopped the run - Esc, the pane's stop, a stopping scene's job - which owes no post-wait either; and a stopping group ends a member's post-wait under way with it too, §23.13)* |
 | `run.round` | `s` run, `h` seed, `s` ids… | a shuffle group materialised a round. The round is the data; a replay never consults the RNG |
 | `run.range` | `s` run, `i` index | a ranged media run entered a range — at launch, at a placed boundary, or on an advance — reported when the boundary is *placed*, the `run.started` rule |
 | `run.late` | `s` run, `i` blocks | §11.4 declared it and nothing ever produced it. From Phase 3 the intended launch tick is kept on the run and the hook reports the shortfall — a GO before its arm, a range boundary its re-arm missed |
@@ -13148,7 +13148,9 @@ asked. `run.kill` marks a run to skip its footer (`skipFooter`) and as the opera
   only stopped. A member that comes back is asked again: a stop cue ended with the rest of its scene
   hands the member it was fading back to `playing` (the rule for a fade killed on its own), and asked
   only once that member would play on to the end of its file with the scene waiting for it. It also
-  takes fifty records a second out of the log during a panic fade.
+  takes fifty records a second out of the log during a panic fade. *(2026-10-02, K2: a member holding
+  its post-wait is no longer left to finish under a stop - the stop ends it with `run.done`, as a
+  kill does, §23.13.)*
 - **A group is never handed back to `playing`** (EK). A fade whose own run is stopped gives its
   target back its level - the rule for a stop cue killed on its own, where the operator asked
   nothing of the cue - and Esc stops a stop cue's run with every other root. For a voice that is
@@ -13188,7 +13190,9 @@ asked. `run.kill` marks a run to skip its footer (`skipFooter`) and as the opera
   it happening for ever), and a cue killed in its pre-wait began a post-wait it had never reached.
   `run.ended` now finishes a killed run at once, a handler change (§23.3 says what it means for a
   replay); and a group's kill ends a member's post-wait already under way with `run.done`, the
-  post-wait's own ending, which lets its voice and slots go on the spot.
+  post-wait's own ending, which lets its voice and slots go on the spot. *(2026-10-02, K2: a stop
+  now does the same - a scene stopped by Esc, a stop cue or the pane's stop ends its members'
+  post-waits, leaving the voice to ring, §23.13.)*
 
 **Not changed, and worth knowing:**
 
@@ -13198,7 +13202,8 @@ asked. `run.kill` marks a run to skip its footer (`skipFooter`) and as the opera
   level trims every run under it, its footer's included, so a footer's own sound plays under that
   fade (and under silence at once, for a `hard` stop cue - which is why a mic member of a group a
   hard stop cue is aimed at is stopped rather than killed, and rings behind a level already at
-  silence). Recorded as a known gap; out of this stage, and the author's to rule on.
+  silence). Recorded as a known gap; out of this stage, and the author's to rule on. *(2026-10-02,
+  K2: and the members it stops at once owe no post-wait, §23.13, JX.)*
 - **Under Esc a member's post-wait still runs out** before its group's footer: Esc is the path of
   normal completion entered early, and a post-wait is part of how a member completes. A member that
   has just begun a thirty-second post-wait keeps its voice and its slots, and its scene waits for
@@ -13206,7 +13211,11 @@ asked. `run.kill` marks a run to skip its footer (`skipFooter`) and as the opera
   the author's to rule on. The same holds for a member Esc stops while it is still in its PRE-wait:
   it never fired, yet the `run.ended` that ends it begins its full post-wait, and its scene waits
   for that too (a media member armed during the pre-wait keeps its voice meanwhile). ES spares only
-  a killed run; the author's to rule on with the rest.
+  a killed run; the author's to rule on with the rest. *(2026-10-02, K2: ruled and changed - "Esc
+  ends them too". A post-wait under way when Esc's stop reaches the member ends at once, its voice
+  and slots with it, and the footer follows; a member stopped in its pre-wait begins none; and so
+  for every abort - the pane's stop, a stopping scene's job - while a cue's authored ending, a stop
+  cue aimed at it, keeps its post-wait, §23.13, JW and JX.)*
 - **Under a double Esc a group's members still get `run.kill`**, which marks them `killed` as well as
   skipping their footers. §18.8 took `killed` off `run.killAll`'s roots so that a double Esc suspends
   no persistent cue; a persistent media or mic cue sounding as a member of a group would still be
@@ -13362,7 +13371,7 @@ author's to overrule. EQ is skipped: it is the equaliser everywhere else in this
 | | Decision | Whose |
 |---|---|---|
 | EI | **A group's members are ended the way the group was**: stopped when it was stopped, and they run their footers; killed only when it was killed | implementer's call; §4.4 and §12.4 drew it, and the code had not followed |
-| EJ | **One stop a member, not one a tick**: a member already stopping or holding its post-wait is left to finish under a stop, and a kill passes over only one already stopping under a kill (a post-wait it ends, ES); a member handed back to `playing` is asked again | implementer's call |
+| EJ | **One stop a member, not one a tick**: a member already stopping or holding its post-wait is left to finish under a stop, and a kill passes over only one already stopping under a kill (a post-wait it ends, ES); a member handed back to `playing` is asked again *(2026-10-02, K2: a stop ends a post-wait too, §23.13)* | implementer's call |
 | EK | **A group is never handed back to `playing`** when the stop cue fading it has its own run stopped | implementer's call |
 | EL | **A double Esc cuts a footer already running**: its runs killed, the group ended | implementer's call (§4.4, *"skips footers"*) |
 | EM | **With no audio side, a stop cue aimed at a group leaves the ending to the group's job**, footer and all | implementer's call |
@@ -13370,7 +13379,7 @@ author's to overrule. EQ is skipped: it is the equaliser everywhere else in this
 | EO | **Esc and a double Esc leave what was only made ready**: the standby's arm and prepared block, or any cue armed ahead and not asked for, with nothing asked for under it (ET) | implementer's call, the double Esc included: a preparation is anticipation, which nobody hears |
 | EP | **GO on a mic cue armed ahead acts on its take's `onGo`**, as GO on one fired cold does | implementer's call (decision CF's reach) |
 | ER | **A kill is read from above, and it follows a stop that has landed**: a run under a killed group is cut however it was asked to stop, a group under one begins no footer, and a kill arriving after a run's stop was issued still reaches the audio side, once | implementer's call (§4.4; every double Esc is two presses, and lands on Esc's teardown) |
-| ES | **A kill ends a post-wait and begins none**: `run.ended` finishes a killed run at once, and a killed group ends a member's post-wait under way with `run.done`. Under Esc a post-wait still runs out | implementer's call; whether Esc should end one too is the author's |
+| ES | **A kill ends a post-wait and begins none**: `run.ended` finishes a killed run at once, and a killed group ends a member's post-wait under way with `run.done`. Under Esc a post-wait still runs out *(2026-10-02, K2: no longer - JW, JX, §23.13)* | implementer's call; whether Esc should end one too is the author's *(ruled 2026-10-02: it does)* |
 | ET | **A block somebody reached into is not only made ready**: with a run asked for under it - a member fired by name, a group fired by name, a seek - Esc and a double Esc stop it like any root; a stop reaching it ends what was asked for first, the way it is ending, and revokes it after; the pointer moving away leaves that playing and gives the block back once it has gone | implementer's call |
 | EU | **A mic cue a header prepares is armed, never opened**: its channel claimed, its plugins set, the gate shut, until the GO that enters its scene | implementer's call (`isPreparable` and §18.5 already said so) |
 
@@ -14417,6 +14426,8 @@ above, and so does every walk of the pointer past a scene inside a running act.
   is still entered cold, as a scene nobody prepared always is.
 - **An adopted scene's header still runs at entry what the horizon could not take ahead** (§13.6), and
   a pre-send whose answer is still out at the GO goes on asking and writes when it lands.
+  *(2026-10-02, K2: unless Esc or a double Esc comes first - when the scene has ended under it, the
+  press now reaches it too, and it writes nothing, §23.13.)*
 
 **Tests**, each written first and run on the code before the fix:
 
@@ -14644,7 +14655,9 @@ completion entered early, and what it finds queued goes.
   pre-send, and its answer still writes after the press, until its own timeout. The fix belongs to
   `stopEveryRoot` (a parent that has finished counts as gone, which its own comment says it means)
   and changes Esc as well, so it is left for a ruling. `VerifiedCueTests`' case below holds its
-  scene in its members phase to test the road this stage closes.
+  scene in its members phase to test the road this stage closes. *(2026-10-02, K2: ruled - "fix
+  it" - and closed: a parent that has finished counts as gone, so both presses reach the pre-send
+  and its answer writes nothing, §23.13, JV.)*
 
 **Tests**, each written first. The new calls could not compile against the tree before this stage,
 so it was first built with them declared and doing nothing - every behaviour as before - and each
@@ -14973,6 +14986,218 @@ H5, but with the mount's policy rather than the bad word) and says so.
 |---|---|---|
 | JT | **A PANIC a state node could never hold is a warning, not a refusal**: ignored, the node keeps the mount's policy, the device loads, and a warning names the address and `PANIC`; overrules JC's state-node half. The generator stays strict | the author's, 2026-10-02 ("stay flexible") |
 | JU | **The warning goes to `/godot/document/warnings` and to the terminal, not to the device's `problem` row**: that row means the device cannot be used, and is painted as a failure | implementer's call (the brief: reuse the closest existing channel, no new UI) |
+
+### 23.13 Esc reaches a pre-send its scene left behind, and ends a post-wait (K2)
+
+**What it means.** Two gaps H1 and H4 named and left for a ruling, ruled by the author on
+2026-10-02 and closed here.
+
+- **A pre-send left asking under a scene that has ended is reached by Esc and by a double Esc**
+  ("fix it"). A scene adopted by a GO while its header's pre-send was still asking what the desk
+  held ends at once when it has nothing else to do; the pre-send went on asking under it, out of
+  both presses' reach, and wrote its value when the answer came - after the press. Now either press
+  stops it: its answer writes nothing, and its run ends.
+- **Esc ends a post-wait and begins none** ("Esc ends them too"). A member holding its post-wait
+  when Esc's stop reaches it is ended at once - its voice and its slots given back - and its scene's
+  footer runs without waiting for it: a thirty-second post-wait no longer holds the footer for
+  thirty seconds. A member Esc stops while still in its PRE-wait, never fired, begins no post-wait;
+  nor does a scene whose footer Esc ran. The footers still run - §4.4's Esc runs footers. A
+  footer's cue that starts after the press is asked nothing, and runs out its post-wait as part of
+  the footer; one already sounding when an Esc lands - a second Esc during the footer, or Esc on a
+  scene a stop cue had brought down - is faded and stopped with everything else, and owes none.
+- **A cue's authored ending keeps its post-wait** (the orchestrator's ruling on the review,
+  2026-10-02, pending the author's word; PRD §3.6: "pre-wait and post-wait win"). Only an ABORT
+  ends a post-wait. A stop cue aimed at a cue, or a fade that ends in a stop, is how that cue ends in
+  the show, and the post-wait written after it is still the gap before what follows.
+
+**The gap.**
+
+- **`stopEveryRoot` counted a run as a root only when its parent was missing from the run table**,
+  and a finished run is never removed from it (it keeps its address for five seconds and its row
+  for the session). So "a run whose parent is gone counts as a root" - the function's own comment -
+  never held: an unfinished run under a finished parent was nobody's root and nobody's member.
+- **`run.ended` began a post-wait for every run that was not killed.** A stop writes `stopping`
+  over whatever the run was doing, so a cue stopped in its pre-wait began its whole post-wait when
+  it ended, and a cue stopped while holding its post-wait began it again from nought - under every
+  kind of stop. Esc, the pane's stop or a stop cue on a cue holding a thirty-second post-wait cost
+  it thirty seconds more.
+- **A stopped group's job left a member holding its post-wait to run it out** (EJ): only a kill
+  ended one (ES).
+
+**The fix.**
+
+- **A parent that has finished counts as gone** (JV), in `cue::stopEveryRoot`. The filter that
+  spares what was only made ready (EO, ET) applies to such a root exactly as to any other, so the
+  standby's own preparation is still left ready wherever it hangs; an orphan that is not the
+  standby's preparation - the pre-send above, which was launched and is asking - is stopped by Esc
+  and killed by a double Esc. Its network job then ends it before it reads its answer
+  (`advanceSends`: a run `stopping`, or being killed, is ended there). `Runner::sparedByThePress`,
+  the double Esc's drop's own walk to the root (IU), stops at the same root.
+- **An abort owes no post-wait** (JW, JX). `Run::stopEndsWait`, a handler-only mark, is set beside
+  the ask by `stopEveryRoot`, by `beginPanicFade` (Esc's fade of what sounds), and by the `run.stop`
+  and `run.kill` handlers - the pane's stop and kill, and the stop a stopping scene's job sends each
+  member. `run.ended` begins no post-wait for a run that carries it. Nothing else sets it, and the
+  handlers that give a run back - a seek, a Doh's hand-back - clear it with the ask.
+- **A post-wait already begun is never begun again** (JZ), whatever the stop.
+  `Run::postWaitBegan`, written by `run.ended` when it begins one, keeps the deadline: a later
+  `run.ended` puts the run back in `postWait` with the deadline it had, or, under an abort, ends it.
+- **A stopping group ends a member's post-wait under way with `run.done`**, as a killed one already
+  did (`Runner::endMember`), so the member's voice and slots go on the spot and the footer follows
+  on the next tick. Its voice is not cut (JY).
+- **The descriptions say so**: `run.stop` ("A cue stopped this way owes no post-wait") and
+  `run.stopAll`, the plain one and the Runner's ("every footer runs, but no post-wait").
+
+**The rule, exactly.**
+
+| Stop | Sets `stopEndsWait` | The stopped run's post-wait |
+|---|---|---|
+| Esc (`run.stopAll`): every root, and every run its panic fade takes - a footer's sound included | yes | none begun; one under way ends |
+| Double Esc (`run.killAll`), the pane's kill (`run.kill`) | yes (and `skipFooter`, which already ended it, ES) | none begun; one under way ends |
+| The pane's stop (`run.stop`, any verb that stops the run now) | yes | none begun; one under way ends |
+| A member a stopping scene's job reaches (`run.stop` or `run.kill`, its record) - whoever stopped the scene, a stop cue included | yes | none begun; one under way ends with `run.done` |
+| `audio.clockMoved` (stops every root the Esc way) | yes | none begun; one under way ends |
+| A stop cue aimed at a CUE, `hard` or `fade` (`fireStop` through `beginFade`) | no | kept: begun when the cue ends; one under way keeps its deadline |
+| A stop cue aimed at a SCENE, `hard` or `fade` | no, on the scene | the scene's own post-wait kept - it still spaces what follows; its members are aborted by its job (row 4) |
+| A fade cue that ends in a stop (`beginFade`) | no | kept |
+| A speed fade that ends in a stop (`beginRateFade`) | no | kept |
+| A sampler clip's release, the second press on its strip (`beginReleaseFade`) | no | kept |
+| A stop cue's `advance` on a cue with no range, `afterMember` or `afterIteration` on something that is not a group (`fireStop`: a hard stop) | no | kept |
+| `afterMember` / `afterIteration` on a group | nothing is stopped: the group ends at a boundary | the member's and the group's kept |
+| A cue or a scene completing on its own | - | kept |
+| Go Doh! | no (`takenBack` already owes none) | none |
+
+**What callers of `stopEveryRoot` see.**
+
+- **`run.stopAll` (Esc)**: a run under a finished parent is stopped, gracefully, unless it is only
+  made ready; every run it stops is aborted and owes no post-wait.
+- **`run.killAll` (double Esc)**: such a run is killed - `skipFooter` and the stop - and so read as
+  killed by the hooks that ask (`Runner::beingKilled`), and its queued network message is dropped,
+  as it already was. What changes beside it is a block only made ready that hangs from a finished
+  run - a scene the horizon made ready under an act that then ended at a boundary: the press used to
+  leave it alone because it was nobody's root, while the drop's walk climbed past it to the finished
+  act, found nothing spared, and dropped the block's pre-send still in the queue - the desk never
+  got the value the scene believes it holds. Both now see the block as a root the press spares, and
+  its pre-send leaves (IU's rule).
+- **`audio.clockMoved`**, the third caller, passes no spare: it revokes every preparation first,
+  then stops every root the Esc way. A run under a finished parent is now among them - a pre-send
+  left asking ends rather than writing after the interface came back - and every run it stops is
+  aborted, so a member that was holding its post-wait when the clock moved ends with the rest
+  instead of holding its scene's footer for the length of the wait.
+
+The pre-send is the road found and tested. Any other run that outlives its parent unfinished is
+reached the same way; none other is known.
+
+**What changes that a show could see**, beyond the rulings:
+
+- the pane's stop on a cue holding its post-wait ends it at once;
+- a stop cue on a cue holding its post-wait leaves the wait to run to its deadline, where it began
+  it again from nought;
+- a scene a stop cue or the pane's stop brings down runs its footer without waiting out a member's
+  post-wait. Brought down by a stop cue, its own post-wait still spaces the next scene; by the
+  pane's stop, it begins none.
+
+**What does not change**: a stop cue fading out a member of a running sequence - the next member
+follows the faded member's post-wait after the fade's end, as before K2; a mic cue or an
+ever-looping cue ended by a stop cue keeps its post-wait.
+
+**The limit found in K2's first version, and what is left of it.** A fade-and-stop whose own run is
+stopped or killed on its own hands its target back to `playing` (the rule in `advanceFades`, a
+hook's), and the ask on the target's account stays, since only a handler writes it. With the ask
+itself deciding, the target then owed no post-wait when it later ended on its own. Now the mark
+decides, and a fade-and-stop never sets it: the target ends with its post-wait, and the limit is
+gone. What is left is narrower (JZ's row): an abort aimed at a cue a fade-and-stop is still holding
+- the pane's stop on it, which the hold defers to the fade - marks it, and if the stop cue's own run
+is then taken away the cue is handed back with the mark, and later ends on its own owing no
+post-wait. In that hand-back the pane's stop is itself lost - the cue plays on - which is older
+than K2, read from the code rather than tested, and noted here, not mended.
+
+**What it changes for a replay.** Two handler changes, and a hook's.
+
+- **`stopEveryRoot`**: in an older log with a press after a scene left its pre-send behind, the
+  pre-send's answer, its write and its `run.ended` follow the press; a replay marks the run
+  `stopping` at the press, and the logged `run.ended` ends it on the same tick as before. Every
+  record applies with the same arguments; the run table between the two differs.
+- **`run.ended`**: in an older log where an abort reached a run with a post-wait, `run.ended` began
+  the wait and a `run.done` followed it a post-wait later. A replay finishes the run at `run.ended`
+  and applies the later `run.done` as a no-op on a finished run, as ES's did for a kill. In one
+  where a stop cue or a fade reached a run holding its post-wait, the wait used to begin again and
+  its `run.done` came a whole post-wait later; a replay holds the run in `postWait` to its first
+  deadline, then applies that late `run.done` - the record is the same, the run is `postWait` a
+  little longer in between. What a hook decided in between - a footer begun, the next member - is
+  in the log at its tick and re-injected there, so the replay writes the same records.
+- **`endMember`'s `run.done`** under a stop is a hook's decision, logged and re-injected like the
+  kill's.
+
+No fixture holds any of these shapes: no fixture log has a stop reaching a run with a post-wait but
+a kill (`waits.wfglog`, which ES already covers), and none has a press after a pre-send its scene
+left behind. Every `wfg.replay.*` fixture (58, C and fr_FR) replays record for record, and the
+black-box drivers `phase3`, `phase4`, `triggers`, `lane-level`, `rate-speed`, `phase6-surfaces`,
+`phase6-sampler`, `phase9a-fx`, `phase9b-mic` and `phase9c-take` (20, both locales) pass; none was
+re-recorded.
+
+**Tests**, each written first and run on the code before its change. K2's first version was the
+code before the review's cases, with JV's drop walk put back as it was for the spared case:
+
+- `VerifiedCueTests` "Esc and double Esc: a pre-send left asking under a scene that has ended is
+  reached, and writes nothing" - §23.10's shape: a scene of nothing but a header adopted by a GO
+  while its pre-send asks; the scene ends; then Esc or a double Esc, the desk's answer in the
+  press's own drain or after it. Four runs, each: the pre-send ended, its stop asked, nothing in the
+  mount table, no datagram. Before K2 all four failed on the stop, the desk value (0.8 written) and
+  the datagram (one sent).
+- `VerifiedCueTests` "Esc and double Esc: a scene made ready under an act that has finished stays
+  ready, its pre-send on its way still leaving" (the review's) - an act left at the end of its
+  member (`afterMember`, the cheap boundary; `afterIteration` on a looping act reaches the same
+  `finishPhase`), the next scene's block made ready under it and still asking; the act ends, the
+  block stays. Then the desk answers and the press lands: under both, one datagram, the desk at
+  0.8, the block still made ready. With the drop's walk as it was before K2, Esc passed and the
+  double Esc failed on the datagram (none sent).
+- `GoTests` "stop levels: Esc ends a post-wait too, begins none, and the footer still runs":
+  - a media member that has just begun a thirty-second post-wait: the footer within sixty ticks (the
+    second's panic fade and a few), the member `done`, its voice free, no kill. Before K2: no footer
+    in sixty ticks, the member still in `postWait`, the voice busy, the scene not over in seventy;
+  - a member Esc stops in its pre-wait: ended within ten ticks, the scene over within seventy.
+    Before: neither;
+  - a scene whose footer Esc ran begins no post-wait of its own. Before: still running at seventy;
+  - a cue on its own, stopped by Esc in its pre-wait, ended within ten ticks. Before: not;
+  - a stop cue aimed at the scene ends its member's post-wait, the footer runs, and nothing after
+    the member fires. Before: still running at seventy, no footer;
+  - **a guard**: a scene ending on its own still waits out its last member's twenty-tick post-wait
+    before its footer. Passed before K2 and after.
+- `GoTests` "stop levels: a cue on its own holding its post-wait is ended at once by Esc or the
+  pane's stop" - both ended within ten ticks. Before K2: neither (the post-wait begun again).
+- `GoTests` "stop levels: a cue's authored ending keeps its target's post-wait, and an abort ends
+  it" (the review's):
+  - the reviewer's (A): an automatic sequence [Bed, post-wait 3 s; a memo]; a stop cue fades Bed
+    out over 0.2 s; the memo follows 145 to 170 ticks after Bed enters its post-wait. On K2's first
+    version Bed went straight to `done` and never held one (the case's `REQUIRE` failed);
+  - the reviewer's (C): an automatic act [Scene one, post-wait 1 s, its member in a pre-wait with a
+    thirty-second post-wait, a footer; Scene two]; a stop cue aimed at Scene one: the member ended
+    within twenty ticks, the footer within twenty, and Scene two 45 to 70 ticks after. On K2's first
+    version Scene two came four ticks after the footer;
+  - a stop cue aimed at a memo twenty ticks into its fifty-tick post-wait: not ended in the next
+    twenty ticks, ended in the twenty after. On K2's first version it ended at once (before K2 it
+    began fifty ticks again);
+  - **a guard**: in an automatic sequence a member's twenty-tick post-wait spaces the next member.
+    Passes now; not run on its own against the earlier code, which never touched that road.
+- Each new case under C and `fr-FR`; the whole of `GoTests`, `VerifiedCueTests`, `NetworkCueTests`
+  and `MicTests` under C (400 cases, 7430 assertions), green. The comments of "stop levels: a
+  nested group whose member holds its post-wait still comes down" and of H4's "double Esc: a
+  pre-send of the GO's scene still asking..." carry dated notes; no pinned gap changed.
+
+**The decisions.**
+
+| | Decision | Whose |
+|---|---|---|
+| JV | **A run whose parent has finished is a root**, for Esc, a double Esc and a clock move: the spare-the-standby filter (EO, ET) applies to it as to any root, and the double Esc's drop (`sparedByThePress`) climbs to the same root | the author's, 2026-10-02 ("fix it"); the drop following it the implementer's |
+| JW | **Esc ends a post-wait and begins none**: a member holding one is ended with `run.done`, its voice and slots freed and the footer not held; a member stopped in its pre-wait begins none; a scene whose footer Esc ran begins none of its own. Footers still run; a footer's cue that starts after the press runs out its post-wait, one sounding when Esc lands owes none | the author's, 2026-10-02 ("Esc ends them too") |
+| JX | **Only an abort ends a post-wait; a cue's authored ending keeps it**: Esc, a double Esc, the pane's stop and kill, a stopping scene's job's stop of each member, and a clock move set `stopEndsWait`; a stop cue aimed at a cue or a scene (the scene keeps its own post-wait, its members are aborted by its job), a fade, speed fade or sampler release that ends in a stop, and `advance` or a boundary verb on something with no boundary do not - the table above | the orchestrator's ruling on K2's review, 2026-10-02, after the author's "Esc ends them too" and PRD §3.6 ("pre-wait and post-wait win"); the author's to overrule. It replaces K2's first version, which ended the post-wait on every stop asked |
+| JY | **A post-wait an abort ends lets the voice ring**: `run.done` and nothing sent to the Player; the cut of that voice (GD) stays the kill's | implementer's call (Esc lets a tail ring, CG) |
+| JZ | **A post-wait already begun is never begun again, whatever the stop**: `postWaitBegan` keeps its deadline through a stop that does not end it. Left, narrower than K2's first version: a cue the pane stops while a fade-and-stop holds it, then handed back when the stop cue's run is taken away, keeps the abort's mark and owes no post-wait when it later ends - and the pane's stop is lost in that hand-back, older than K2 | implementer's call; the residue owed a ruling with the hand-back itself |
+
+**Owed to the bench:** on the MADIface, Esc on a scene whose media member has just ended into a long
+post-wait - the footer at the end of the panic fade, not after the wait - and the member's reverb
+left to ring out rather than cut; and a stop cue fading an ambience bed inside an automatic
+sequence - the next cue after the bed's post-wait, counted from the fade's end.
 
 ## 24. Go Doh! — taking back the last GO
 
