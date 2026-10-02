@@ -538,7 +538,7 @@ namespace wfg::cue
         }
 
         /*  MADE READY AT THE POINT A DOH PAUSED IT (2026-10-02, D2, namespace
-            draft §24, §4.2): a sound the next GO carries on is armed by the
+            draft §24.12): a sound the next GO carries on is armed by the
             standby where it was, with no pre-wait, silent, and arriving over
             the de-click at the level it had - whoever asks for the arm, so a
             surface's `audio.arm` of the cue is the same arm. Only a sound at
@@ -1077,7 +1077,7 @@ namespace wfg::cue
     void Runner::adoptPrepared (const std::string& runId, const std::string& entersAt,
                                 bool enters, std::int64_t tick)
     {
-        /*  AS IT WAS, FIRST (2026-10-02, D2, §3.2): the block, everything under
+        /*  AS IT WAS, FIRST (2026-10-02, D2, namespace draft §24.12): the block, everything under
             it and its jobs, so a Doh of a GO nobody heard hands the block back
             exactly - prepared again, its pre-sends still on the desk. The act
             whose job will take it, when it sits under one already running. */
@@ -2242,7 +2242,7 @@ namespace wfg::cue
             run->startOffset = wants.offset;
             run->startRange = std::max (wants.range, 0);
 
-            /*  CARRIED ON BY DOH! (D2, §4.1): arriving over the de-click at the
+            /*  CARRIED ON BY DOH! (D2, namespace draft §24.12): arriving over the de-click at the
                 level it had at the press, and on into the rest of a fade its
                 scene had moving then; inside the slice it was in, at the point
                 its playhead had reached (K8's `sliceFrom`); and never at
@@ -2357,7 +2357,7 @@ namespace wfg::cue
                     continue;
 
                 /*  ITS MEMBERS, AND ONLY THEM (2026-10-02, Doh! D2, namespace
-                    draft §24, §4.1): a scene Doh! carries on seats what its
+                    draft §24.12): a scene Doh! carries on seats what its
                     header had fired too - sent again from their start - and a
                     header's run counted among the members the round waits on
                     would be waited for as one, or launched as one. Taken, as
@@ -2436,7 +2436,7 @@ namespace wfg::cue
 
                 /*  AND WITH NOTHING UNFINISHED AT ALL - seated in the tick
                     between one member's end and the next one's spawn - IT WAITS
-                    ON THE NEWEST MEMBER OVER (D2, §4.1): that run has finished,
+                    ON THE NEWEST MEMBER OVER (D2, namespace draft §24.12): that run has finished,
                     so on its first tick the sequence advances and spawns the
                     member after it. Awaiting nothing, it went looking for an
                     armed member to launch, found none, and held for ever. */
@@ -3509,7 +3509,7 @@ namespace wfg::cue
             {
                 const auto reachedId = ahead->id;
 
-                /*  As it was, first (D2, §3.2): the arm, and the act whose job
+                /*  As it was, first (D2, namespace draft §24.12): the arm, and the act whose job
                     takes it. */
                 snapshotAdoption (reachedId, parentRun);
                 askedFor (reachedId);
@@ -4062,7 +4062,7 @@ namespace wfg::cue
             the run table, so a replay takes the same one (§13.4). */
         claimSlotsFor (cue, runId);
 
-        /*  A MIC CUE DOH! CARRIES ON opens over the de-click (D2, §4.2): its
+        /*  A MIC CUE DOH! CARRIES ON opens over the de-click (D2, namespace draft §24.12): its
             gate is its arrival, and a tenth of a second is the author's. */
         run->fadeIn = run->resumes ? static_cast<double> (deClickTicks) / static_cast<double> (TickClock::rateHz)
                                    : std::max (0.0, numberOf (cue, "fadeIn"));
@@ -6518,7 +6518,7 @@ namespace wfg::cue
                 goRecord.touched.push_back (parent->id);
         }
 
-        /*  THE RESUME GOES WITH ANY GO ON ITS LIST (2026-10-02, D2, §4.3):
+        /*  THE RESUME GOES WITH ANY GO ON ITS LIST (2026-10-02, D2, GN, namespace draft §24.12):
             spent on the run that carried it on, or dropped with its arm at the
             point revoked - the operator went another way, and a later GO on the
             cue starts it from its top. What was left with devices' operators
@@ -6607,13 +6607,18 @@ namespace wfg::cue
     {
         const auto listId = listOfCue (cueId);
 
-        /*  A FIRE OF THE CUE A DOH WOULD CARRY ON (2026-10-02, D2, §4.3) - by
+        /*  A FIRE OF THE CUE A DOH WOULD CARRY ON (2026-10-02, D2, GN, namespace draft §24.12) - by
             name, by a trigger, by a start cue - starts it from its top: the
             resume is dropped first, its arm at the point revoked, so the fire
             finds no arm waiting silent at the point and makes the cue afresh. */
+        /*  AND A FIRE OF A CUE INSIDE A PAUSED SCENE (D2's review, NA): the
+            hand has played part of the scene, and a re-seat at the next GO
+            would sound that cue a second time beside it. The scene starts from
+            its top instead, as after any fire of it by name. */
         if (const auto held = marks.find (listId);
             held != marks.end() && held->second.root.has_value()
-              && (held->second.cue == cueId || held->second.root->cue == cueId))
+              && (held->second.cue == cueId || held->second.root->cue == cueId
+                    || (held->second.root->kind == DohRoot::Kind::tree && isInside (cueId, held->second.root->cue))))
             dropRoot (engine, tick, listId);
 
         const auto found = marks.find (listId);
@@ -6698,7 +6703,7 @@ namespace wfg::cue
 
     bool Runner::isResumeArm (const Run& run, const DohRoot& root) const
     {
-        /*  WHAT A RESUME ARM IS, wherever a rule names one (§4.2): made at the
+        /*  WHAT A RESUME ARM IS, wherever a rule names one (namespace draft §24.12): made at the
             point, and nobody has asked for it yet - launch evidence, never the
             `prepare` mark, which a group's job clears from a hook. */
         return ! run.isFinished() && run.resumes && ! hasLaunchEvidence (run)
@@ -6759,7 +6764,7 @@ namespace wfg::cue
             after it (L1, K8's LR). A FILE, by the length the log knows - half
             a second of the clock from its end is the file's half second times
             its speed - and as it is when the length is not known (L19). File
-            seconds against file seconds (§1.5, GM). */
+            seconds against file seconds (GM). */
         if (range >= 0)
             return true;
 
@@ -6860,13 +6865,13 @@ namespace wfg::cue
         const auto markedCue = found->second.cue;
         found->second.root.reset();
 
-        /*  A MARK LIVES WHILE IT HAS A ROOT OR AN ENTRY (§4.3). */
+        /*  A MARK LIVES WHILE IT HAS A ROOT OR AN ENTRY (GN, namespace draft §24.12). */
         if (found->second.left.empty())
             marks.erase (found);
 
         lists.setResume (listId, {});
 
-        /*  NO ARM AT THE POINT OUTLIVES ITS ROOT (§4.3, red team B2): silent,
+        /*  NO ARM AT THE POINT OUTLIVES ITS ROOT (GN, red team B2): silent,
             with no pre-wait, a GO later would launch it as if the resume stood.
             Revoked - voice and slots back; it pre-sent nothing - but for the
             run that spent the resume. */
@@ -6925,7 +6930,7 @@ namespace wfg::cue
                 break;
             }
 
-        /*  SPENT ON THE RUN THE HAND PUT SOMEWHERE, NOT REVOKED (§4.3): it plays
+        /*  SPENT ON THE RUN THE HAND PUT SOMEWHERE, NOT REVOKED (GN, namespace draft §24.12): it plays
             where it was sought, arriving through its own de-click, and a later
             GO on the cue is decision N's "already sounding" - never a second
             copy at the point. */
@@ -7019,7 +7024,7 @@ namespace wfg::cue
             launch fields and its round; nobody's GO again, with no stop on its
             account; and stamped with this tick, so a record the hooks decided
             in it on the adopted state - a pre-wait's end, a launch placed, a
-            member spawned or launched - is applied and ignored (§1.6). A voice
+            member spawned or launched - is applied and ignored (GZ). A voice
             whose launch was placed is stopped and asked for again on its track
             - live only, as a seek does; a replay has no voice. */
         for (const auto& was : adoption.runs)
@@ -7250,6 +7255,24 @@ namespace wfg::cue
                     return;
                 }
 
+                /*  AN ARM MADE AT THE COUNTED POINT BEFORE THIS ARRIVED is armed
+                    at the wrong second (D2's review, NC): revoked, and the
+                    standby arms the cue again at the playhead's - or, for a
+                    member under its act, the corrected GO seats it there. */
+                std::vector<std::string> early;
+
+                for (const auto& run : runs.all())
+                    if (isResumeArm (run, root))
+                        early.push_back (run.id);
+
+                for (const auto& id : early)
+                    revokePrepared (engine, tick, id);
+
+                if (! early.empty())
+                    if (const auto list = document.findById (listId);
+                        list.isValid() && list[juce::Identifier ("standby")].toString().toStdString() == entry.second.cue)
+                        resetAudioPreparation();
+
                 publishResume (listId);
                 return;
             }
@@ -7294,7 +7317,7 @@ namespace wfg::cue
                                                     std::int64_t tick, const std::vector<std::string>& leftCues,
                                                     int fadeTicks) const
     {
-        /*  §3.1, FROM HANDLER STATE AT THE PRESS. Carried on only what was
+        /*  NAMESPACE DRAFT §24.12, FROM HANDLER STATE AT THE PRESS. Carried on only what was
             heard, is unfinished, holds no post-wait and that nothing has asked
             to stop - a scene's own stop cue aimed at itself included. */
         const auto* root = runs.find (rootId);
@@ -7364,7 +7387,7 @@ namespace wfg::cue
 
         out.kind = DohRoot::Kind::tree;
 
-        /*  THE SCENE'S OWN: the root and its descendants of this GO (§1.4) -
+        /*  THE SCENE'S OWN: the root and its descendants of this GO (GL) -
             never the horizon's next block under it, never what an older act
             ran because of the GO - in the order they were made. */
         std::set<std::string> mine { rootId };
@@ -7476,7 +7499,7 @@ namespace wfg::cue
             const auto remaining = seconds (std::max<std::int64_t> (0, run->dueTick - tick));
 
             /*  SPAWNED AND NEVER LAUNCHED - a sequence's next member - is due at
-                its own pre-wait (§3.1, "anything else"), in a scene the machine
+                its own pre-wait (the design's "anything else" row; ME), in a scene the machine
                 times all at once. IN A SEQUENCE IT IS LEFT TO THE SEQUENCE
                 (implementer's call): seated due, its pre-wait would run out
                 beside the member still playing and it would sound early;
@@ -7838,8 +7861,18 @@ namespace wfg::cue
 
         const auto cue = document.findById (root.cue);
 
+        /*  NOTHING TO SEAT (D2's review, NB) - the cue gone from the show since
+            the Doh, a scene with no row - and the GO is the one it always was,
+            rather than a GO that does nothing. Decided before anything is
+            drawn, so the record's identifiers are the plain GO's. */
+        if (! cue.isValid() || (root.kind == DohRoot::Kind::tree && root.plan.empty()))
+        {
+            out.made = fireStandby (engine, tick, list, standby, supplied);
+            return out;
+        }
+
         //----------------------------------------------------------------------
-        /*  A SCENE, RE-SEATED (§4): where it was at the press, its members at
+        /*  A SCENE, RE-SEATED (namespace draft §24.12): where it was at the press, its members at
             their seconds, what it had fired fired again, what it had sent to a
             device left to its operator not; its own fades on its own sounds
             carried on rather than fired again; under the act it sat in. Its
@@ -8073,8 +8106,11 @@ namespace wfg::cue
         //     from its top, and the arm waiting silent at the point is revoked
         //     first, so nothing is left for that GO to launch there. What was
         //     left with devices' operators stays (L37).
-        if (goRecord.serial == 0)
-        {
+        //     AND WHEN THE LIVE RECORD IS TOO LATE TO TAKE BACK (D2's review, MY):
+        //     a GO on another list since the Doh, its window run out, leaves no
+        //     GO a press could take back - and the button offers the forget
+        //     then, from `lists/dohForget`, which says the same thing.
+        if (goRecord.serial == 0 || dohTooLate (tick))
             if (const auto found = marks.find (lastDohList);
                 found != marks.end() && found->second.root.has_value())
             {
@@ -8083,8 +8119,8 @@ namespace wfg::cue
                 return {};
             }
 
+        if (goRecord.serial == 0)
             return reason::nothingToTakeBack;
-        }
 
         //  2. A TRIGGER, A FIRE BY NAME OR A PAD OF ITS BANK SINCE THE GO.
         if (goRecord.firedAfter)
@@ -8224,7 +8260,7 @@ namespace wfg::cue
                     otherHands.insert (id);
         }
 
-        /*  NOBODY HEARD IT, AND THE GO ADOPTED IT (D2, §3.2): a preparation -
+        /*  NOBODY HEARD IT, AND THE GO ADOPTED IT (D2, namespace draft §24.12): a preparation -
             an arm, a prepared block, a member the horizon armed under a running
             act - is handed back exactly, as it was before the GO, so the
             corrected GO is the rehearsed one: its full pre-wait, its header's
@@ -8420,7 +8456,7 @@ namespace wfg::cue
                                                                 .value_or ("1")).value_or (1.0));
         const auto ticks = static_cast<int> (std::lround (seconds * TickClock::rateHz));
 
-        /*  HEARD, AND CARRIED ON BY THE NEXT GO (D2, §3.1): the root of the
+        /*  HEARD, AND CARRIED ON BY THE NEXT GO (D2, namespace draft §24.12): the root of the
             standby's own chain - the cue the GO fired, or the scene it entered
             to fire it - built before anything moves. At most one; a start
             cue's target is a root of its own and starts from its top (L9). */
@@ -9742,7 +9778,7 @@ namespace wfg::cue
                 continue;
             }
 
-            /*  HELD UNTIL ITS SOUND IS HEARD (D2, §4.4): a job pushed for a run
+            /*  HELD UNTIL ITS SOUND IS HEARD (D2, MC): a job pushed for a run
                 still on its disk keeps the run at where it starts from, so the
                 ramp is not spent before anything sounds. With no audio side
                 there is no launch to wait for. */
@@ -10198,7 +10234,7 @@ namespace wfg::cue
                 }
 
         /*  A SOUND INSIDE A RUNNING ACT THAT A DOH PAUSED, made ready again by
-            the horizon under that act (D2, §4.2, HF): at its point, with no
+            the horizon under that act (D2, HF): at its point, with no
             pre-wait, arriving over the de-click - the arm the corrected GO asks
             for, as it asks for any member the horizon armed. */
         if (makingForHorizon)
@@ -10220,6 +10256,25 @@ namespace wfg::cue
             `fireNow` says why (H4): its pre-wait is not begun either. */
         if (run == nullptr || run->isFinished() || run->takenBack || beingKilled (*run))
             return;
+
+        /*  THE HORIZON'S ARM, LAUNCHED AS A MEMBER OF THE GO'S OWN SCENE, IS
+            THAT GO'S (D2's review, MZ, which retires L42). A second GO pressed
+            before the horizon's `run.prepare` of the pointer's scene had drained
+            - two GOs inside a tick, a footswitch that bounces with the debounce
+            at nought, PRD §4.5's double GO - entered the scene cold, and the
+            preparation then armed the scene's first sound under it, nobody's
+            GO; the scene's job took it from a hook, which cannot stamp. Heard,
+            the scene read unheard to a Doh, and was taken down rather than
+            paused. Stamped here, by the launch's own handler, from fields only
+            handlers write: made by the horizon after the open record's GO,
+            under a run of that GO. */
+        if (run->goSerial == 0 && goRecord.serial != 0
+              && run->preparedAfterGo >= static_cast<std::int64_t> (goRecord.serial))
+            if (const auto* parent = runs.find (run->parent); parent != nullptr && parent->goSerial == goRecord.serial)
+            {
+                stampSubtree (runId, goRecord.serial);
+                run = runs.find (runId);
+            }
 
         /*  The same fork the top-level path takes, and it has to be the same
             one: a member with a pre-wait waits exactly as a cue fired from
@@ -11452,7 +11507,7 @@ namespace wfg::cue
             waitingForVoice.clear();
 
         /*  A SCENE A DOH PAUSED, AT THE STANDBY, IS RE-SEATED BY THE NEXT GO
-            (2026-10-02, D2, §4.2): nothing is made ready for it - a block
+            (2026-10-02, D2, namespace draft §24.12): nothing is made ready for it - a block
             prepared now would be a second copy of a scene the GO carries on.
             A paused sound is made ready, at its point, by the roads below. */
         const auto listId = list.isValid() ? list[idProperty].toString().toStdString() : std::string {};
@@ -12203,6 +12258,21 @@ namespace wfg::cue
             ones a Doh paused, for the next GO to carry on (D2). */
         notePausedPlayheads();
         noteDohPlayheads (engine);
+
+        /*  WHAT A PRESS OF DOH! WOULD FORGET NOW (D2's review, MY): a
+            readout, written here because it turns on the clock - the live
+            record's window running out - and read by the button. The press's
+            own handler decides from its own state. */
+        {
+            ListState::DohForget forget;
+
+            if (const auto found = marks.find (lastDohList);
+                found != marks.end() && found->second.root.has_value()
+                  && (goRecord.serial == 0 || dohTooLate (tick)))
+                forget = { lastDohList, found->second.cue };
+
+            lists.setDohForget (forget);
+        }
         assertPersistent (engine, tick);
 
         /*  Above the gate too: with no player there are no inputs, and the
@@ -14243,7 +14313,7 @@ namespace wfg::cue
                             if (run->kind == "media")
                             {
                                 /*  A SEEK OF THE ARM A DOH LEFT AT THE POINT
-                                    spends the resume on it (D2, §4.3). */
+                                    spends the resume on it (D2, GN). */
                                 runner.seekingRun (engine, context.tick, runId);
                                 runner.seekMedia (engine, context.tick, runId, seconds);
                                 return Outcome::ok (applied);
@@ -15032,7 +15102,7 @@ namespace wfg::cue
                                 return Outcome::rejected (reason::unknownId);
 
                             /*  DECIDED BEFORE A DOH, ON A STATE IT HANDED BACK in
-                                this very tick (2026-10-02, D2, §1.6): applied, and
+                                this very tick (2026-10-02, D2, GZ): applied, and
                                 nothing - the run is a preparation again. */
                             if (runner.handedBackIn (runId, context.tick))
                                 return Outcome::ok (args);
@@ -15072,7 +15142,7 @@ namespace wfg::cue
                                 return Outcome::rejected (reason::unknownId);
 
                             /*  A PRE-WAIT'S END THE HOOK DECIDED BEFORE A DOH
-                                HANDED THE RUN BACK in this very tick (D2, §1.6):
+                                HANDED THE RUN BACK in this very tick (D2, GZ):
                                 applied, and nothing - its pre-wait is whole
                                 again. */
                             if (runner.handedBackIn (runId, context.tick))

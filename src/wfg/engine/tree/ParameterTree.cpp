@@ -1393,7 +1393,7 @@ namespace wfg::tree
                     /*  WHAT DOH! WOULD TAKE BACK (2026-10-01) is what the
                         machine is doing, not the show: the runtime half
                         publishes it, every tick. */
-                    if (name == "doh")
+                    if (name == "doh" || name == "dohForget")
                         continue;
 
                     const auto text = name == "order" ? orderOf (container)
@@ -3030,6 +3030,15 @@ namespace wfg::tree
             runtime.push_back (makeLeaf (std::string (godot) + "/list/doh", *row,
                                          lists != nullptr ? cue::spellDohOffer (lists->dohOffer())
                                                           : std::string {}));
+
+        /*  AND WHAT A PRESS WOULD FORGET INSTEAD (2026-10-03, D2's review, MY):
+            the list and the cue of the resume the last Doh left, when no GO a
+            press could take back stands before it. */
+        if (const auto* row = rowNamed ("lists", "dohForget"))
+            runtime.push_back (makeLeaf (std::string (godot) + "/list/dohForget", *row,
+                                         lists != nullptr && ! lists->dohForget().list.empty()
+                                           ? lists->dohForget().list + " " + lists->dohForget().cue
+                                           : std::string {}));
 
         /*  HOW FAR AHEAD EACH CUE HAS BEEN GOT READY.
 

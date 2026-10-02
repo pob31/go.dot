@@ -222,7 +222,7 @@ namespace wfg::cue
             instead of retiring. Empty for every other job. */
         std::optional<FadeSegment> then;
 
-        /*  HELD UNTIL ITS TARGET IS HEARD (Doh! D2, §4.4): the level does not
+        /*  HELD UNTIL ITS TARGET IS HEARD (Doh! D2, MC, namespace draft §24.12): the level does not
             move until the target's launch has been placed - a cold arm can
             spend a few tenths of a second on its disk, and a ramp begun before
             the sound would be over before anything is heard. Only on a job the

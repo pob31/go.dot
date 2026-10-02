@@ -142,6 +142,19 @@ namespace wfg::client::model
             "<cue>" alone for a mic, which has no position - or empty. */
         std::string resume;
 
+        /*  WHAT A PRESS OF DOH! WOULD FORGET NOW (D2's review, MY):
+            `/godot/list/dohForget` - "<list> <cue>" of the resume the last Doh
+            left, when no GO a press could take back stands before it, or empty
+            - and that cue in the words the list shows it by. The engine's
+            answer, whichever list has the focus: a press acts on the list of the
+            last Doh. */
+        std::string dohForget;
+        std::string dohForgetCue;
+
+        /*  Whether a click of the button would do something: take back the GO
+            the caption names, or forget the resume `dohForget` names. */
+        bool dohClickable() const;
+
         /*  "  resumes at 0:08" when the next GO carries the standby on rather
             than starting it, "  resumes" for a mic; empty otherwise. In words,
             beside the standby's name, never a colour alone (§4.8). */

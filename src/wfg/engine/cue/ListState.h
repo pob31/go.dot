@@ -251,6 +251,19 @@ namespace wfg::cue
             carry on from - or empty when the next GO starts whatever it fires
             from its top. Published as `/godot/list/<id>/resume`; written by the
             handlers that set and drop a Doh's resume, never by a hook. */
+        /*  WHAT A PRESS OF DOH! WOULD FORGET NOW (D2's review): the list and
+            the cue of the resume the last Doh left, when no GO a press could
+            take back stands before it - published as `/godot/list/dohForget`,
+            "<list> <cue>", for the button to offer the second press only where
+            the engine would act on it. A readout: written by a hook. */
+        struct DohForget
+        {
+            std::string list, cue;
+        };
+
+        void setDohForget (const DohForget& forget) { dohForgetNow = forget; }
+        const DohForget& dohForget() const noexcept { return dohForgetNow; }
+
         void setResume (const std::string& list, const std::string& text)
         {
             if (text.empty())
@@ -305,6 +318,7 @@ namespace wfg::cue
             recordingSince = -1;
             doh = {};
             resumes.clear();
+            dohForgetNow = {};
         }
 
         static constexpr std::size_t kept = 64;
@@ -324,5 +338,6 @@ namespace wfg::cue
         std::vector<Step> recorded;
         DohOffer doh;
         std::map<std::string, std::string> resumes;
+        DohForget dohForgetNow;
     };
 }

@@ -1211,14 +1211,14 @@ namespace wfg::cue
         void notePlayheadOf (Engine& engine, std::int64_t tick, const std::string& runId,
                              double from, int range);
 
-        /*  A SEEK OF THE RESUME ARM (§4.3): the hand put the cue somewhere and
+        /*  A SEEK OF THE RESUME ARM (GN, namespace draft §24.12): the hand put the cue somewhere and
             it plays there, so the resume is spent - not revoked - and what was
             left with devices' operators stays. Asked before the seek launches
             it. */
         void seekingRun (Engine& engine, std::int64_t tick, const std::string& runId);
 
         /*  WHETHER A RECORD DECIDED BEFORE A DOH, ON THE STATE IT UNDID, IS ONE
-            TO IGNORE (§1.6, GZ): a run the Doh handed back in this very tick. */
+            TO IGNORE (GZ): a run the Doh handed back in this very tick. */
         bool handedBackIn (const std::string& runId, std::int64_t tick) const;
 
         /*  THE LENGTHS THE LOG'S HEADER RECORDED (§24, GM), which a Doh's
@@ -2199,7 +2199,7 @@ namespace wfg::cue
             written by the `go`, `go.doh`, `cue.fire`, `trigger.fire`,
             `list.loadToTime` and Esc handlers - except where it says hook. */
 
-        /*  A PREPARATION A GO ADOPTED, AS IT WAS BEFORE (2026-10-02, D2, §3.2):
+        /*  A PREPARATION A GO ADOPTED, AS IT WAS BEFORE (2026-10-02, D2, namespace draft §24.12):
             taken in the GO's own handler at each door that adopts - a prepared
             block, an armed arm, a member the horizon armed under a running
             act - so a Doh of a GO nobody heard can hand it back exactly: the
@@ -2335,7 +2335,7 @@ namespace wfg::cue
             waits for before it arms the cue again. */
         std::string waitingForVoice;
 
-        /*  THE MARKS, CHANGED THROUGH THESE AND NOTHING ELSE (§4.3): the resume
+        /*  THE MARKS, CHANGED THROUGH THESE AND NOTHING ELSE (GN, namespace draft §24.12): the resume
             dropped - its arm at the point revoked, but for the run that spent
             it - and the standby asked to make the cue ready again; a whole mark
             dropped, what was left with devices' operators with it; a mark set,
@@ -2361,7 +2361,7 @@ namespace wfg::cue
         void armAtRoot (Run& run, const DohRoot& root, const juce::ValueTree& cue) const;
 
         /*  WHETHER A PAUSED SOUND STILL HAS SOMETHING TO PLAY AT `at` seconds
-            of its file (§1.5): a slice always does; else, by the length the
+            of its file (GM): a slice always does; else, by the length the
             log knows, until half a second of the clock from its end. */
         bool notOver (const juce::ValueTree& cue, int range, double at) const;
 
@@ -2371,17 +2371,17 @@ namespace wfg::cue
         ResumePoint countedPoint (const Run& run, std::int64_t tick) const;
 
         /*  The root a heard GO leaves for the next GO on its cue, built from
-            handler state at the press (§3.1); nothing when it cannot be
+            handler state at the press (namespace draft §24.12); nothing when it cannot be
             carried on - the next GO starts it from its top. */
         std::optional<DohRoot> rootFor (const std::string& rootId, std::uint64_t serial, std::int64_t tick,
                                         const std::vector<std::string>& leftCues, int fadeTicks) const;
 
-        /*  THE UN-ADOPT (§3.2): a preparation the GO adopted and nobody heard,
+        /*  THE UN-ADOPT (namespace draft §24.12): a preparation the GO adopted and nobody heard,
             handed back as it was. */
         void unadopt (Engine& engine, std::int64_t tick, const Adoption& adoption, std::uint64_t serial);
 
         /*  A run seated or brought back under a running act joins the act's
-            job as a member it has launched (§4). */
+            job as a member it has launched (namespace draft §24.12). */
         void adoptIntoParentJob (const std::string& groupRun, const std::string& runId);
 
         const std::map<std::string, double>* handlerDurations() const noexcept

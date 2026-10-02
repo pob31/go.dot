@@ -16727,6 +16727,7 @@ the carry-on, the exact hand-back, §24.12.)*
 | `port,audible` | `/godot/port/<id>/audible` | `T`, false | "plays sound": a MIDI cue fired to this port, its `tx` on, makes its scene heard | D1 |
 | `osc,doh`, `midi,doh` | `/godot/cue/<id>/doh` | `s`, `device` - `device \| takeBack \| leave` | the cue's own answer, or its device's | D1 |
 | `list,resume` | `/godot/list/<id>/resume` | `s`, ro | the cue the next GO carries on, and from which second | D2 |
+| `lists,dohForget` | `/godot/list/dohForget` | `s`, ro | what a press of Doh! would forget now: `<list> <cue>` of the resume the last Doh left, when no GO a press could take back stands before it; empty otherwise. What the button reads to offer the second press *(added 2026-10-03, D2's review, MY)* | D2 |
 | `lists,dohReport` | `/godot/list/dohReport` | `s`, ro | the last Doh's report, whichever list it was on | D3 |
 
 **Edits** (D1): `list,history` names the `p` and `d` letters; `document,locked` adds Doh! to what
@@ -17383,10 +17384,14 @@ top. A second press of Doh! forgets the resume (the author, (b)).
 
 | | Limitation | Leaves intact |
 |---|---|---|
-| L42 | A GO pressed within a tick of the pointer landing on a scene enters it cold, and the horizon's arm made in that same drain, after the GO, is taken by the scene's job without the GO's serial (a hook's adoption, which cannot stamp): a Doh then reads the scene unheard and takes it down rather than pausing it. Older than D2 (D1's tags); an operator never presses within twenty milliseconds of the pointer moving | "carries on" |
-| L43 | A resumed scene's mic member's take hears the corrected GO, and a top-level mic's in place; a mic member inside a running act resumed in place re-opens without a take's `onGo` test of its own, and no case drives a take through a Doh | "paused" |
+| L42 | ~~A GO pressed within a tick of the pointer landing on a scene enters it cold, and the horizon's arm made in that same drain, after the GO, is taken by the scene's job without the GO's serial (a hook's adoption, which cannot stamp): a Doh then reads the scene unheard and takes it down rather than pausing it.~~ *Retired 2026-10-03 by D2's review (MZ): it is PRD §4.5's double GO whenever the debounce is nought - a rig, a show that turns it off, a bouncing footswitch - and the arm is now stamped the GO's by the launch's own handler* | - |
+| L43 | *Reworded 2026-10-03 (D2's review): not a limitation of the build but a gap in its tests.* No case drives a sampling channel's take through a Doh - a mic's `onGo` acting at the resume - nor a mic member inside a running act brought back in place; the code takes both roads (`applyTakeOnGo` at every resume of a mic, `adoptIntoParentJob` for a member) | - |
 
-**Retired or narrowed:** L1 (MD), L2 and L3 (MB) - see the dated notes in §24.7.
+**Retired or narrowed:** L1 (MD), L2 and L3 (MB) - see the dated notes in §24.7. *(2026-10-03:
+and L42, by MZ; L43 reworded as the test gap it is.)*
+
+**MI is not used** *(2026-10-03, D2's review)*: skipped when the letters were assigned - the run and
+cue identifiers' alphabet has no I - and no decision carries it.
 
 **The decisions.**
 
@@ -17400,7 +17405,7 @@ top. A second press of Doh! forgets the resume (the author, (b)).
 | MG | **A scene that plays some of its members starts from the top**, beside loops, shuffle and sampler | implementer's call |
 | MH | **Carried on: a root at the top of its list or in an older manual act**; under a scene the machine runs, from the top | implementer's call |
 | MJ | **The un-adopt leaves a fade or a stop the GO fired running**, and the restored jobs take what the GO made under them | implementer's call |
-| MK | **The Doh! button stays a button while a paused cue waits**, idle in its look, its tooltip naming the second press | implementer's call, the author's to overrule |
+| MK | **The Doh! button stays a button while a paused cue waits**, idle in its look, its tooltip naming the second press *(2026-10-03, D2's review: where the engine says a press would act - MY)* | implementer's call, the author's to overrule |
 | ML | **`list/resume` is "<cue> <seconds>"** - the file's second for a media cue, the scene's own for a scene - or "<cue>" for a mic | implementer's call |
 
 **What it changes for a replay.** Every decision is a handler's from handler state and logged
@@ -17489,6 +17494,64 @@ re-seated: the sounds at their seconds, the late one on its time, the fade again
 an act, Doh'd, the reverb ringing, then GO: the tail cut, the gate open over a tenth of a second. A
 lighting scene caught before anything sounded: the desk keeps what it had, and the corrected GO runs
 the rest on its clock.
+
+**D2's review (2026-10-03): what changed.** No blocker. Each behaviour change has a case written first
+and run on the D2 tree (4294453, with K9's review, d9f418e, on top) before it; the nets say so.
+
+- **A seek of a paused scene does nothing** - a net. Re-seated sounding under the Doh fade, the scene
+  was cut in and then seated again by the corrected GO; K9's review (MV) had already taken a scene
+  Doh! took back out of `seekableNow`, which the seek's handler asks. Case: a seek during the fade
+  leaves the scene `stopping` and draws nothing; the GO after seats one copy.
+- **The second press acts where the button says** (MY). The button offered the forget from the
+  focused list's resume, while a press forgets the root of the list of the last Doh, and only while no
+  GO stands before it: with Doh! pressed on two lists and the focus on the first, the button promised
+  the first list's cue and the press forgot the second's; with a GO on another list since, the button
+  promised a forget the press then refused `too-late`. Now the press also forgets once the live record
+  is past its window, and the engine publishes `/godot/list/dohForget` - the list and cue a press
+  would forget, written by the tick from the same test the handler makes - which the button reads to
+  be clickable and to name the cue. Cases, both shapes. Before: no readout, and `too-late`.
+- **A double GO is the GO's** (MZ, retiring L42): `launchRun`, `run.launch`'s handler, stamps a run
+  the horizon made after the open record's GO, under one of that GO's runs, with the GO's serial.
+  Case: a scene entered by a second GO a tick after the first, its first sound heard, is paused and
+  carried on. Before: the sound nobody's, the scene read unheard.
+- **An arm at the counted point is revoked when the playhead arrives** (NC): an `audio.arm` in the
+  Doh's own drain armed the cue at the handler's count; `go.dohPlayhead`'s handler now revokes any arm
+  at the point it replaces, and the standby arms the cue again at the playhead. Before: the arm kept
+  the count's second.
+- **A fire of a paused scene's cue drops the resume** (NA): re-seated, the scene sounded that cue a
+  second time beside the one fired by name. Before: the scene re-seated.
+- **Nothing to seat is an ordinary GO** (NB): a resume whose cue is gone, or a scene with no row,
+  falls back to `fireStandby` before anything is drawn. No case: deleting the cue moves the pointer off
+  it first, so no command reaches this road.
+- **`§` references re-pointed**: D2's comments named the design file's sections (§1.4-§1.6,
+  §3.1-§3.2, §4, §4.1-§4.4); in this repository a bare `§` is the PRD's. They name the decision
+  letters or this section now. D1's bare references were checked and are the PRD's.
+- **Cases mended**: "a child spawned into a group the Doh took back or handed back is done" (renamed)
+  has a cold SUBCASE again, so `spawnChild`'s taken-back branch is under test; "a seek withdraws a stop
+  ... and the session replays" waits out the Doh fade before its GO, so the replay is compared on a run
+  that is still taken back rather than false with false. Both nets.
+- **The history's back-dated step** (`steppedAt`) is placed by its tick among the steps taken since -
+  the list's history and the live recorder's take stay in tick order, so a step taken while the cue
+  was paused may come after it in the list though it was taken later. Cosmetic: nothing reads the
+  history's order but by tick.
+
+| | Decision | Whose |
+|---|---|---|
+| MY | **The second press forgets the resume the engine names**: the root of the last Doh's list, when no GO a press could take back stands before it - none since, or the last one past its window - published as `lists/dohForget`, which alone makes the button clickable and names the cue | the review's; the readout, the implementer's |
+| MZ | **The horizon's arm launched under the open record's GO is that GO's**, stamped by `run.launch`'s handler (retires L42) | the review's |
+| NA | **A fire of a cue inside a paused scene drops the scene's resume** | the review's (of its two fixes, the one `markFire` already makes for the cue itself) |
+| NB | **A resume with nothing to seat falls back to an ordinary GO** | the review's |
+| NC | **An arm at the counted point is revoked when the playhead's record replaces the point** | the review's |
+
+**Counts (the review).** The eight changed or new cases under C and `fr-FR`: 172 assertions each,
+green; run first on the D2 tree, four failed (MY, MZ, NA, NC) and four passed (the seek and the two
+mended cases, nets; `ClientTests`' case built against the review's client, its fail-first the
+missing field). Every `go.doh` case under `fr-FR`: 101 cases, 3633 assertions. `GoTests`,
+`VerifiedCueTests`, `NetworkCueTests`, `MicTests`, `MidiTests`, `SamplerTests`, `ClientTests`,
+`OscQueryTests` and `DocumentTests` whole under C: 727 cases, 23153 assertions. `ctest -R
+"wfg\.replay|blackbox\.(phase3|phase4|triggers|phase6-sampler|phase9b-mic|phase9c-take)|wfg\.commands|schema|^ui\.|client"`:
+83 of 83. `check-comments.py` and `generate-schema.py --check` pass; clang-tidy finds nothing on the
+lines the review changed.
 
 ## 25. A Show and its Performances
 

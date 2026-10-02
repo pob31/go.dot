@@ -57,6 +57,11 @@ namespace wfg::client::model
         return standbyName + "  " + standbyKind + resumeWords();
     }
 
+    bool TransportReading::dohClickable() const
+    {
+        return dohLook().phase != DohPhase::over || words (dohForget).size() == 2;
+    }
+
     std::string TransportReading::resumeWords() const
     {
         /*  ONLY WHEN IT IS THE STANDBY THE NEXT GO CARRIES ON (Doh! D2): the
@@ -275,10 +280,12 @@ namespace wfg::client::model
         const auto look = dohLook();
 
         /*  AND WHEN THE LAST DOH PAUSED A CUE THE NEXT GO CARRIES ON (D2): a
-            second press forgets that, and the next GO starts it from its top. */
-        if (look.phase == DohPhase::over && ! words (resume).empty())
-            return what + " The next GO carries the paused cue on from where it was; press again "
-                          "to start it from the top instead.";
+            second press forgets that, and the next GO starts it from its top -
+            said only where the engine says a press would act on it (MY), and
+            naming the cue it would act on, whichever list has the focus. */
+        if (look.phase == DohPhase::over && words (dohForget).size() == 2)
+            return what + " The next GO carries " + (dohForgetCue.empty() ? std::string ("the paused cue") : dohForgetCue)
+                        + " on from where it was; press again to start it from the top instead.";
 
         if (look.phase == DohPhase::over)
             return what + " Nothing to take back now: no GO inside the show's Doh! window "
@@ -318,7 +325,7 @@ namespace wfg::client::model
                              r.canUndo, r.canRedo, r.undoName, r.redoName,
                              r.status, r.lastError, r.rateMoved, r.rateMovedTick, r.dial, r.writeError,
                              r.warningCount, r.warningFirst, r.revision,
-                             r.doh, r.dohCue, r.dohWindow, r.resume);
+                             r.doh, r.dohCue, r.dohWindow, r.resume, r.dohForget, r.dohForgetCue);
         };
 
         return tie (*this) == tie (other);
@@ -398,6 +405,16 @@ namespace wfg::client::model
 
             if (reading.dohCue.empty())
                 reading.dohCue = text (snapshot, "/godot/cue/" + parts[1] + "/name");
+        }
+
+        reading.dohForget = text (snapshot, "/godot/list/dohForget");
+
+        if (const auto parts = words (reading.dohForget); parts.size() == 2)
+        {
+            reading.dohForgetCue = text (snapshot, "/godot/cue/" + parts[1] + "/number");
+
+            if (reading.dohForgetCue.empty())
+                reading.dohForgetCue = text (snapshot, "/godot/cue/" + parts[1] + "/name");
         }
 
         return reading;

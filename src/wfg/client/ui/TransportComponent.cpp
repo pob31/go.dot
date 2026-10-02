@@ -299,9 +299,11 @@ namespace wfg::client::ui
             AND IT STAYS A BUTTON WHILE A PAUSED CUE WAITS FOR THE NEXT GO
             (2026-10-02, Doh! D2): idle in its look, but a second press is the
             author's way to start that cue from the top instead, and the tooltip
-            says so. */
+            says so - where the engine says a press would forget it
+            (`dohForget`, D2's review, MY), not wherever the focused list holds a
+            resume. */
         const auto look = last.dohLook();
-        const auto open = look.phase != model::DohPhase::over || ! last.resume.empty();
+        const auto open = last.dohClickable();
         const auto mix = static_cast<float> (1.0 - look.strength);
 
         const auto ground = Look::colour (theme, "doh").interpolatedWith (Look::colour (theme, "go-idle"), mix);

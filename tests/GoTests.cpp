@@ -15314,12 +15314,25 @@ TEST_CASE ("go.doh: decision N passes over a taken-back run - a fire inside the 
     CHECK (rig.runs.find (old)->state == cue::runState::stopping);
 }
 
-TEST_CASE ("go.doh: a child spawned into a taken-back group is done")
+TEST_CASE ("go.doh: a child spawned into a group the Doh took back or handed back is done")
 {
     GroupRig rig;
     rig.setCue (rig.first, "preWait", "10");                 // hold the group in its members
 
-    rig.setStandby (rig.groupId);
+    auto cold = false;
+
+    SUBCASE ("entered cold, so taken back") { cold = true; }
+    SUBCASE ("adopted from the standby's preparation, so handed back") {}
+
+    /*  (2026-10-03, D2's review: entered cold - the GO in the tick the pointer
+        lands, before the horizon prepared the group - the Doh takes the group
+        back, and `spawnChild`'s taken-back branch makes the child; adopted, it
+        is handed back, and the `unadoptedAt` branch does.) */
+    if (cold)
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), rig.groupId).ok);
+    else
+        rig.setStandby (rig.groupId);
+
     REQUIRE (rig.submitAndTick ("go").rejected == 0);
 
     const auto groupRun = rig.runOf (rig.groupId);
@@ -15341,8 +15354,16 @@ TEST_CASE ("go.doh: a child spawned into a taken-back group is done")
     /*  (2026-10-02, D2: nobody heard the group and the GO had adopted the block
         the standby made ready, so it is handed back exactly - prepared again,
         stamped with the Doh's tick - rather than taken back.) */
-    CHECK (rig.runs.find (groupRun)->unadoptedAt == spawnTick);
-    CHECK (rig.runs.find (groupRun)->state == cue::runState::preparing);
+    if (cold)
+    {
+        CHECK (rig.runs.find (groupRun)->takenBack);
+        CHECK (rig.runs.find (groupRun)->unadoptedAt < 0);
+    }
+    else
+    {
+        CHECK (rig.runs.find (groupRun)->unadoptedAt == spawnTick);
+        CHECK (rig.runs.find (groupRun)->state == cue::runState::preparing);
+    }
 }
 
 TEST_CASE ("go.doh: an Esc after the GO - the Doh moves the pointer back and leaves the runs to Esc")
@@ -15986,6 +16007,18 @@ TEST_CASE ("go.doh: a seek withdraws a stop whatever the hook did, and the sessi
     REQUIRE (doh (session).rejected == 0);
     CHECK (session.runs.find (id)->takenBack);
 
+    /*  (2026-10-03, D2's review: the GO waits out the Doh fade, so it carries
+        the cue on from an arm at the point rather than bringing this run back
+        up - and the run stays taken back, in the session and its replay.) */
+    REQUIRE (session.tickUntil ([&] { return session.runs.find (id)->isFinished(); }, 80));
+    REQUIRE (session.tickUntil ([&]
+    {
+        const auto* live = session.runs.liveRunOf (session.mediaId);
+        return live != nullptr && live->id != id;
+    }, 20));
+    session.audio.completeArms (session.engine);
+    session.tickOnce();
+
     REQUIRE (session.submitAndTick ("go").rejected == 0);
 
     for (int n = 0; n < 5; ++n)
@@ -16009,10 +16042,8 @@ TEST_CASE ("go.doh: a seek withdraws a stop whatever the hook did, and the sessi
     CHECK (result.ok);
     REQUIRE (fresh.runs.find (id) != nullptr);
 
-    /*  (2026-10-02, D2: the GO right after the Doh carries the cue on in place,
-        so the run is no longer taken back - in the session and in its replay.) */
-    CHECK_FALSE (session.runs.find (id)->takenBack);
-    CHECK (fresh.runs.find (id)->takenBack == session.runs.find (id)->takenBack);
+    CHECK (session.runs.find (id)->takenBack);
+    CHECK (fresh.runs.find (id)->takenBack);
 }
 
 TEST_CASE ("go.doh: a scene taken back is prepared again whole once its member's voice is free")
@@ -17207,6 +17238,26 @@ namespace
         return anotherLiveRunOf (rig, cueId, old);
     }
 
+    /*  What the engine publishes at `/godot/list/dohForget` (D2's review). */
+    std::string dohForgetSaid (Rig& rig)
+    {
+        tree::MountTable mounts;
+        tree::ParameterTree parameters { rig.document, rig.engine.commands(), mounts, rig.runs };
+        parameters.setListState (&rig.runner.listState());
+        parameters.markStale();
+
+        tree::EngineState state;
+        const auto snapshot = parameters.publish (rig.tick, state);
+        REQUIRE (snapshot != nullptr);
+
+        const auto* node = snapshot->find ("/godot/list/dohForget");
+
+        if (node == nullptr || ! node->soleValue().has_value() || ! node->soleValue()->isString())
+            return "absent";
+
+        return node->soleValue()->getString();
+    }
+
     bool resumeNames (Rig& rig, const std::string& cueId)
     {
         const auto said = resumeSaid (rig);
@@ -17772,7 +17823,7 @@ TEST_CASE ("go.doh: a sound inside a running act resumes like a top-level one")
 
 TEST_CASE ("go.doh: the resume is kept across the pointer walking away and back, and dropped by a GO on another cue, a jump, a fire by name, a second Doh")
 {
-    /*  The design's test 10 (§4.3). After each drop, the next GO on the cue
+    /*  The design's test 10 (GN, namespace draft §24.12). After each drop, the next GO on the cue
         starts it from its own top, at its own level. */
     HistoryRig rig;
     rig.clockRuns = true;
@@ -18191,7 +18242,7 @@ TEST_CASE ("go.doh: a resume arm launched by any road arrives through its de-cli
 
 TEST_CASE ("go.doh drained before a stale run.fire, run.started or run.spawn of what it hands back: each applied and ignored")
 {
-    /*  The design's test 17 (§1.6, GZ): a record a hook decided on the adopted
+    /*  The design's test 17 (GZ): a record a hook decided on the adopted
         state, in the Doh's own tick, drains after the Doh - and is applied and
         ignored, so the cue does not play by itself and the corrected GO is not
         ignored. Each session replays record for record. */
@@ -18623,4 +18674,214 @@ TEST_CASE ("go.doh: a GO inside the Doh fade after something else stopped the ru
     CHECK (rig.runs.find (seated)->startOffset == doctest::Approx (playhead));
     CHECK (rig.runs.find (seated)->deClick);
     CHECK_FALSE (rig.runs.find (old)->state == cue::runState::playing);
+}
+
+//==============================================================================
+/*  DOH! D2'S REVIEW (2026-10-03, namespace draft §24.12). Each case was run on
+    the D2 tree (4294453, with K9's review on top) before its change. */
+TEST_CASE ("go.doh: a seek of a scene the Doh paused changes nothing, and the next GO seats one copy")
+{
+    /*  A NET: K9's review (MV) already keeps the seek's handler off a scene a
+        Doh took back - re-seated sounding under the Doh fade, it was cut in
+        and then seated a second time by the corrected GO. */
+    JumpRig rig;
+    rig.clockRuns = true;
+    rig.durations["thunder.wav"] = 30.0;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto scene = newestRunOf (rig, rig.scene);
+
+    std::map<std::string, std::int64_t> since;
+    runOn (rig, rig.tick + 150, 30.0, since);
+
+    REQUIRE (doh (rig).rejected == 0);
+    const auto runsBefore = rig.runs.all().size();
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (scene), osc::Value::float64 (1.0) }).rejected == 0);
+
+    CHECK (rig.runs.find (scene)->takenBack);
+    CHECK (rig.runs.find (scene)->state == cue::runState::stopping);
+    CHECK (rig.runs.all().size() == runsBefore);
+
+    runOn (rig, rig.tick + 60, 30.0, since);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    auto live = 0;
+
+    for (const auto& run : rig.runs.all())
+        if (run.cue == rig.scene && ! run.isFinished())
+            ++live;
+
+    CHECK (live == 1);
+}
+
+TEST_CASE ("go.doh: the second press forgets the resume the engine names, whichever list has the focus")
+{
+    /*  MY. A press forgets the resume the LAST Doh left - its list, not the
+        focused one's - and once a GO elsewhere has run out of its window it
+        forgets that resume rather than refusing too-late. `lists/dohForget`
+        says which, so the button offers the press only where it acts. */
+    Rig rig;
+    rig.clockRuns = true;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto other = rig.document.createList ("Foyer").id;
+    const auto rain = rig.document.createCue (other, 0, "media", "Rain").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav").ok);
+    const auto doors = rig.document.createCue (other, 1, "memo", "Doors").id;
+
+    //  A Doh on the show's own list: its resume.
+    goAndPlay (rig, rig.mediaId, 30);
+    REQUIRE (doh (rig).rejected == 0);
+    rig.tickOnce();
+    REQUIRE (resumeNames (rig, rig.mediaId));
+    CHECK (dohForgetSaid (rig) == rig.listId + " " + rig.mediaId);
+
+    REQUIRE (rig.document.setAttribute ("/godot/list/focus", other).ok);
+
+    SUBCASE ("a Doh on another list since: the press forgets that one's, not the focused list's")
+    {
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (other), rain).ok);
+        rig.tickOnce();
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        hear (rig, rain);
+
+        for (int n = 0; n < 30; ++n)
+            rig.tickOnce();
+
+        REQUIRE (doh (rig).rejected == 0);
+        REQUIRE (rig.document.setAttribute ("/godot/list/focus", rig.listId).ok);
+        rig.tickOnce();
+
+        CHECK (dohForgetSaid (rig) == other + " " + rain);
+
+        REQUIRE (doh (rig).rejected == 0);
+        rig.tickOnce();
+
+        //  The foyer's resume is gone, the show's own still stands.
+        CHECK ((rig.runner.markOf (other) == nullptr || ! rig.runner.markOf (other)->root.has_value()));
+        CHECK (resumeNames (rig, rig.mediaId));
+        CHECK (dohForgetSaid (rig).empty());
+    }
+
+    SUBCASE ("a GO on another list since, past its window: the press forgets the resume")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/list/dohWindow", "1").ok);
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (other), doors).ok);
+        rig.tickOnce();
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        //  Inside the GO's window a press would take that GO back: nothing to forget.
+        rig.tickOnce();
+        CHECK (dohForgetSaid (rig).empty());
+
+        for (int n = 0; n < 55; ++n)
+            rig.tickOnce();
+
+        CHECK (dohForgetSaid (rig) == rig.listId + " " + rig.mediaId);
+
+        CHECK (doh (rig).rejected == 0);
+        rig.tickOnce();
+        CHECK ((rig.runner.markOf (rig.listId) == nullptr || ! rig.runner.markOf (rig.listId)->root.has_value()));
+        CHECK (dohForgetSaid (rig).empty());
+    }
+}
+
+TEST_CASE ("go.doh: a scene entered by a second GO a tick after the first is carried on, its first sound the GO's")
+{
+    /*  MZ, retiring L42: PRD §4.5's double GO with the debounce at nought. The
+        first GO moves the pointer onto the scene; the second enters it cold
+        before the horizon's preparation of it drains, which then arms the
+        scene's first sound under the GO's run, nobody's GO. Launched by the
+        scene's job, it is stamped the GO's - so a Doh hears it and pauses the
+        scene. */
+    JumpRig rig;
+    rig.clockRuns = true;
+    rig.durations["thunder.wav"] = 30.0;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    rig.setStandby (rig.memoId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.standby() == rig.scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto scene = newestRunOf (rig, rig.scene);
+    std::map<std::string, std::int64_t> since;
+    runOn (rig, rig.tick + 60, 30.0, since);
+
+    const auto early = newestRunOf (rig, rig.early);
+    REQUIRE (rig.runs.find (early)->startedAtTick >= 0);
+    CHECK (rig.runs.find (early)->goSerial == rig.runs.find (scene)->goSerial);
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (resumeNames (rig, rig.scene));
+}
+
+TEST_CASE ("go.doh: an arm at the counted point made before the playhead arrives is revoked, and the cue armed again at the playhead")
+{
+    /*  NC: the Doh's own drain can hold an `audio.arm` of the cue - a surface
+        asking - which arms it at the handler's count; the playhead's record
+        on the next tick revokes that arm, and the standby arms the cue again
+        at the playhead once the old voice has gone. */
+    Rig rig;
+    rig.clockRuns = true;
+
+    std::map<std::string, double> lengths { { "thunder.wav", 30.0 } };
+    rig.runner.setMediaDurations (&lengths);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto old = goAndPlay (rig, rig.mediaId, 50);
+
+    REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+    REQUIRE (rig.engine.submit ("surface:d700", "audio.arm", { osc::Value::string (rig.mediaId) }));
+    rig.tickOnce();
+
+    const auto playhead = rig.runs.find (old)->position;
+    const auto early = anotherLiveRunOf (rig, rig.mediaId, old);
+    REQUIRE_FALSE (early.empty());
+    REQUIRE (rig.runs.find (early)->deClick);
+
+    rig.tickOnce();
+    CHECK (rig.runs.find (early)->isFinished());
+    CHECK (rig.runs.find (early)->warning == cue::runWarning::revoked);
+
+    const auto again = waitForResumeArm (rig, rig.mediaId, old);
+    CHECK (again != early);
+    CHECK (rig.runs.find (again)->startOffset == doctest::Approx (playhead));
+}
+
+TEST_CASE ("go.doh: a cue of a paused scene fired by name drops the resume, and the next GO starts the scene from its top")
+{
+    /*  NA: the hand has played part of the scene; re-seated at the next GO, the
+        scene would have sounded that cue a second time beside the one fired. */
+    JumpRig rig;
+    rig.clockRuns = true;
+    rig.durations["thunder.wav"] = 30.0;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    std::map<std::string, std::int64_t> since;
+    runOn (rig, rig.tick + 150, 30.0, since);
+
+    REQUIRE (doh (rig).rejected == 0);
+    REQUIRE (resumeNames (rig, rig.scene));
+
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.late) }).rejected == 0);
+    CHECK (resumeSaid (rig).empty());
+
+    runOn (rig, rig.tick + 40, 30.0, since);
+    const auto roundsBefore = recordsOf (rig, "run.round");
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    runOn (rig, rig.tick + 3, 30.0, since);
+
+    //  From its top: a round drawn, the first member at its own start.
+    CHECK (recordsOf (rig, "run.round") > roundsBefore);
+    CHECK (rig.runs.find (newestRunOf (rig, rig.early))->startOffset == doctest::Approx (0.0));
 }

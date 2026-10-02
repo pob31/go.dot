@@ -7480,11 +7480,23 @@ TEST_CASE ("client: the standby says where the next GO carries a paused cue on, 
     reading.resume = "Q7WD2M4K 3";
     CHECK (reading.standbyLine() == "Thunder  media");
 
-    //  The button, over - nothing to take back - and a paused cue standing.
+    /*  The button, over - nothing to take back. A paused cue standing on the
+        focused list is not enough (D2's review, MY): the press acts on the
+        resume the engine names, on the list of the last Doh, whichever list
+        has the focus. */
     reading.resume = "B3N8R5TW 8.42";
     CHECK (reading.dohLook().phase == model::DohPhase::over);
+    CHECK_FALSE (reading.dohClickable());
+    CHECK (reading.dohTip().find ("Nothing to take back") != std::string::npos);
+
+    //  The engine names another list's cue: that is the one the tooltip names.
+    reading.dohForget = "LQ4X8MZT Q7WD2M4K";
+    reading.dohForgetCue = "7";
+    CHECK (reading.dohClickable());
+    CHECK (reading.dohTip().find ("carries 7 on") != std::string::npos);
     CHECK (reading.dohTip().find ("start it from the top") != std::string::npos);
 
-    reading.resume.clear();
-    CHECK (reading.dohTip().find ("Nothing to take back") != std::string::npos);
+    reading.dohForget.clear();
+    reading.dohForgetCue.clear();
+    CHECK_FALSE (reading.dohClickable());
 }
