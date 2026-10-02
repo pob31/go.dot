@@ -52,9 +52,32 @@ namespace wfg::client::model
             return "no standby";
 
         if (standbyKind.empty())
-            return standbyName;
+            return standbyName + resumeWords();
 
-        return standbyName + "  " + standbyKind;
+        return standbyName + "  " + standbyKind + resumeWords();
+    }
+
+    std::string TransportReading::resumeWords() const
+    {
+        /*  ONLY WHEN IT IS THE STANDBY THE NEXT GO CARRIES ON (Doh! D2): the
+            second it carries on from, as minutes and seconds, whole. */
+        const auto parts = words (resume);
+
+        if (parts.empty() || standbyId.empty() || parts[0] != standbyId)
+            return {};
+
+        if (parts.size() < 2)
+            return "  resumes";
+
+        const auto seconds = osc::parseDouble (std::string (parts[1])).value_or (-1.0);
+
+        if (! (seconds >= 0.0))
+            return "  resumes";
+
+        const auto whole = static_cast<long long> (std::floor (seconds));
+        const auto ss = whole % 60;
+
+        return "  resumes at " + std::to_string (whole / 60) + ":" + (ss < 10 ? "0" : "") + std::to_string (ss);
     }
 
     namespace
@@ -251,6 +274,12 @@ namespace wfg::client::model
 
         const auto look = dohLook();
 
+        /*  AND WHEN THE LAST DOH PAUSED A CUE THE NEXT GO CARRIES ON (D2): a
+            second press forgets that, and the next GO starts it from its top. */
+        if (look.phase == DohPhase::over && ! words (resume).empty())
+            return what + " The next GO carries the paused cue on from where it was; press again "
+                          "to start it from the top instead.";
+
         if (look.phase == DohPhase::over)
             return what + " Nothing to take back now: no GO inside the show's Doh! window "
                           "(Show settings > Playback).";
@@ -289,7 +318,7 @@ namespace wfg::client::model
                              r.canUndo, r.canRedo, r.undoName, r.redoName,
                              r.status, r.lastError, r.rateMoved, r.rateMovedTick, r.dial, r.writeError,
                              r.warningCount, r.warningFirst, r.revision,
-                             r.doh, r.dohCue, r.dohWindow);
+                             r.doh, r.dohCue, r.dohWindow, r.resume);
         };
 
         return tie (*this) == tie (other);
@@ -325,6 +354,7 @@ namespace wfg::client::model
         {
             reading.listName = text (snapshot, "/godot/list/" + reading.listId + "/name");
             reading.standbyId = text (snapshot, "/godot/list/" + reading.listId + "/standby");
+            reading.resume = text (snapshot, "/godot/list/" + reading.listId + "/resume");
         }
 
         if (! reading.standbyId.empty())

@@ -853,12 +853,26 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   it, brings back to life an act the GO ended, and never has a device left to
   its operator sent the same cue twice. Until D2 the corrected GO starts the
   cue from the top; D2 to D5 pause and carry on, put back, report, and drive it
-  end to end. *(2026-10-02, K7, at the author's direction: named **Doh!** -
+  end to end *(2026-10-02: D2 built, below)*. *(2026-10-02, K7, at the author's direction: named **Doh!** -
   the command stays `go.doh`, and PRD §4.4 and `CLAUDE.md` say it so; a row's
   width of air between the button and PANIC; the button in its own colour while
   a GO can be taken back, fading as the window runs out, disabled once it is
   over; the setting's words "Meh" and "Undo(h)"; three of the author's open
   questions answered - namespace draft §24.8, §24.11.)*
+- **Doh! D2, 2026-10-02 — what was heard carries on, what nobody heard is handed
+  back exactly** (namespace draft §24.12). A GO a Doh takes back that had been
+  heard is paused: the next GO on that cue carries it on from where it was at
+  the press - its own playhead, as K8's paused bed (MB) - arriving over a tenth
+  of a second: in place inside the Doh fade, through the arm the standby makes
+  at the point once the old voice has gone, seated there otherwise; a member of
+  a running act in that act; a scene re-seated where it was, firing again what
+  it had fired except what reached a device left to its operator, its own fades
+  carried on. What nobody heard and the GO had adopted - an arm, a prepared
+  block, a scene made ready inside a running act - is handed back as it was, its
+  pre-sends still on the desk, and the corrected GO is the rehearsed one. A
+  second press forgets the resume; the standby says "resumes at 0:08", and
+  `/godot/list/<id>/resume` publishes it. New: `go.dohPlayhead`, `list,resume`.
+  A log with a Doh made on D1 is not promised to replay on D2 (HD).
 - **H4, 2026-10-02 — a double Esc drops what is still waiting to leave**
   (§23.10). A value a rate cap held back went out on its turn after the press,
   the MIDI queue sent everything it held, and no note-off existed anywhere. The

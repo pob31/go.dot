@@ -16485,7 +16485,7 @@ built: the rule every handler keeps (§24.1), what a GO leaves in flight and wha
 (§24.2), the rows (§24.3), the commands, refusals and words (§24.4), the Doh! setting (§24.5), the
 decisions with their reasons (§24.6), the limitations, each against the decision it leaves intact
 (§24.7), what the author answered and what is still his (§24.8), and, stage by stage, what was built
-and how it was tested (§24.9, §24.10, and K7's §24.11).
+and how it was tested (§24.9, §24.10, K7's §24.11, and D2's §24.12).
 
 **The design came first, whole.** It was settled over five versions and four rounds of the author's
 answers (2026-09-30 and 2026-10-01), each version read by critics who tried to break it, and it is
@@ -16494,7 +16494,9 @@ and carries the Doh! setting, so the author's default is kept from the first com
 what was heard and carries it on at the corrected GO, and hands back exactly what was not; **D3** puts
 back what the GO changed elsewhere - the desk, levels, stops, takes - and composes the report; **D4**
 names, once, what could not be put back; **D5** drives it end to end. Until D2 the corrected GO -
-the one the operator meant - starts the cue from the top. The design's own labels for its decisions
+the one the operator meant - starts the cue from the top. *(2026-10-02: D2 is built - what was heard
+is carried on by the next GO from where it was, what nobody heard is handed back exactly, §24.12.)*
+The design's own labels for its decisions
 (FO to GY) are kept in a column of §24.6's table; the letters here continue §23's.
 
 **One staging rule (HD).** Each stage changes what `go` and `go.doh` do, so a session logged on one
@@ -16544,7 +16546,8 @@ Every decision a Doh makes must come out the same there, so every handler from h
 ### 24.2 What a GO leaves in flight, and what Doh! does with each
 
 The inventory §4.4 deferred Doh! until. **Stage** says which stage builds the row; where D1 does
-less than the row, the column says what D1 does.
+less than the row, the column says what D1 does. *(2026-10-02: D2's rows are built - the pause and
+the carry-on, the exact hand-back, §24.12.)*
 
 | What a GO starts or changes | What Doh! does with it | Stage |
 |---|---|---|
@@ -16606,6 +16609,7 @@ the lock does not stop; `lists,goDebounce` says it also spaces two Doh! presses;
 |---|---|---|---|---|
 | `go.doh` | `/godot/cmd/go/doh` | `[s run…]` | takes back the last GO (§24.2). Nothing a client sends; from D3 the identifiers its put-back draws ride on the applied record, as a jump's do - in D1 it draws none. Accepted under the lock (it writes the pointer, `finished` and the history, where the operator is standing) and through an audio outage, as Esc is. `/godot/cmd/go` stays GO, and now has contents | D1 |
 | `cue.fire` | unchanged | `s` cue `[s run]` `[h cause]` | the third argument, read only from the engine's own fires, is the GO whose start cue fired this one: the next tick's hook writes it into the record, so a replay reads it. A cause a Doh took back: applied and nothing - no run, no step, no press | D1 |
+| `go.dohPlayhead` | `/godot/cmd/go/dohPlayhead` | `s` run `d` from `[i range]` | where a sound Doh! paused had got to at the press, read off its playhead by the engine on the next tick and written into the resume the next GO carries on (MB); `range` the slice it was in, `from` how far into it - or -1, `from` a second of its file. Submitted by a hook; applied and nothing when no resume names the run *(added 2026-10-02, D2)* | D2 |
 | `go.dohRelaunch` | `/godot/cmd/go/dohRelaunch` | `s` run `[s made…]` | a scene the GO stopped, relaunched once it has ended | D3 |
 | `list.dohReport` | `/godot/cmd/list/dohReport` | `s` list `s` text | the report, submitted by a hook | D3 |
 
@@ -16691,7 +16695,7 @@ level"*, and when nobody chose, *"Always leave to its operator"*.
 
 The design's labels in the second column; the letters continue §23's (GG was J3's), GO skipped as
 the command it reads as. A decision marked with a stage later than D1 is specified and not yet
-built.
+built. *(2026-10-02: D2's are built, and D2 adds MB-ML, §24.12.)*
 
 | | Design | Decision | Whose |
 |---|---|---|---|
@@ -16741,9 +16745,9 @@ until that stage lands.
 
 | | Limitation | Leaves intact |
 |---|---|---|
-| L1 | A ranged cue resumes and relaunches at the in-point of the range it was in | "carries on from where it stopped", as near as the audio side can land |
-| L2 | Positions use the cue's document speed; a speed fade in the window is not followed | "carries on" |
-| L3 | A resume lands up to one launch latency (40-80 ms) later in the file than the press was heard; the faded part plays again | "carries on" |
+| L1 | A ranged cue resumes and relaunches at the in-point of the range it was in *(2026-10-02, D2: retired for the resume - a slice carries on inside its loop, at the same point and in the same pass, K8's road, MD; a relaunch is D3's)* | "carries on from where it stopped", as near as the audio side can land |
+| L2 | Positions use the cue's document speed; a speed fade in the window is not followed *(2026-10-02, D2: retired - where a paused sound carries on from is its own playhead at the press, MB; the document's speed is only the count with no playhead)* | "carries on" |
+| L3 | A resume lands up to one launch latency (40-80 ms) later in the file than the press was heard; the faded part plays again *(2026-10-02, D2: narrowed - the playhead counts the latency, so only the faded part plays again, MB)* | "carries on" |
 | L4 | Scenes that loop, shuffle, are sampler banks, were heard before reaching their members, or were in their footer start from the top at the next GO; a prepared one's pre-sends that take back are put back at the Doh and pre-sent again a few ticks later | "paused", "the next GO plays them" |
 | L5 | A resumed scene's sounding members arm at the corrected GO, about 0.4 s late against its due ones; sounds - top-level, and members of a running act - are warm | "carries on" |
 | L6 | A GO inside the Doh fade on a paused scene seats it anew beside the fading one; a sound resumes in place unless something other than the Doh asked it to stop since | "carries on" |
@@ -16967,7 +16971,7 @@ case written first that failed on the first build (the nets below say so where t
   revoked by the Doh, and the caption read end to end off a published tree.
 
 **What waits.** D2: the pause and the resume, the exact hand-back of what nobody heard, the second
-Doh! forgetting the resume, `list/resume`. D3: the desk, levels, stops, takes, flags, sampler banks,
+Doh! forgetting the resume, `list/resume` *(2026-10-02: built, §24.12)*. D3: the desk, levels, stops, takes, flags, sampler banks,
 the report, `go.dohRelaunch` and `list.dohReport`. D4: the report's words for every device and cue
 left to an operator, and the client's notice. D5: the end-to-end drive. H4: the double Esc's own drain dropped from the sender's queue, and
 `sendDropped` stamped with it *(2026-10-02: built, §23.10)*. **Owed to the bench and to
@@ -16981,7 +16985,8 @@ worded-choice commit path; and a replay that pins `beginPreparation`'s leave-out
 lighting desk is not anticipatable, so nothing is prepared there - a VerifiedCueTests case with a
 replay at its end is the place). **A readout that changed**: a GO entering a prepared block now
 stamps its launch tick (`adoptPrepared`), so `/godot/run/<id>/started` reads the GO's tick instead of
-0 and an adopted scene's position readout runs.
+0 and an adopted scene's position readout runs. *(2026-10-02, D2: a Doh of a GO nobody heard hands
+such a block back with the launch tick it had, nought.)*
 
 ### 24.10 Tests (D1)
 
@@ -17139,6 +17144,220 @@ window, `TransportComponent::dressDoh`, run on every reading.
   "Undo(h)". Before: 3 failures.
 - The whole client suite (110 cases) and the window binary (48) under both locales; the `schema.`,
   `wfg.schema`, `claude` and `console` checks; `check-comments.py` and `check-claude-md.py`.
+
+### 24.12 What was built: D2 - what was heard carries on, what was not is handed back (2026-10-02)
+
+**What it does.** A GO a Doh takes back is sorted by §24.1's one question - was anything of it
+heard? - and since D2 the answer decides what the next GO on that cue does, not only how it came
+down. What was HEARD is paused: it comes down over the panic fade as in D1, and the list keeps a
+**resume** of it (the mark's root): the next GO on the cue carries it on from where it was at the
+press, arriving over a tenth of a second (the author, 2026-09-30, (d)). What nobody heard and the GO
+had ADOPTED - an arm, a prepared block, a member the horizon armed under a running act - is **handed
+back exactly** as it was before the GO, so the corrected GO is the rehearsed one (the author, (c)).
+What nobody heard and the GO fired cold is taken down as in D1, and the next GO starts it from its
+top. A second press of Doh! forgets the resume (the author, (b)).
+
+| What the GO started | At the Doh (D2) | At the next GO on the cue |
+|---|---|---|
+| A media cue at the top of a list, heard | Down over the panic fade (D1); its resume kept: the run, its level at the press, and where its file had got to - its own playhead at the press (MB) | Inside the Doh fade, the same run back up from where the fade has it to the level it had, over five ticks - unless something other than the Doh asked it to stop since (Esc, a kill, a double Esc: HH), when it is seated anew at the point. After the fade, the arm the standby made at the point once the old voice had gone: launched, arriving over the de-click (warm). With no such arm, seated there cold |
+| The same, a member of an older running act (HF) | The same; the act keeps running, the member out of its job (D1's surgery) | In place inside the fade, back among the act's members; after it, the arm the horizon made under the act at the point (`run.prepare`), launched by the act's job; else seated under the act |
+| A mic cue, heard | Its input shut, its tail ringing (D1) | Inside the fade the same run, its gate opened again over the de-click and its take told the GO; after it, the old tail cut first if it still holds the channel (a cut, never a kill), then a run whose gate opens over the de-click (L10) |
+| A scene, heard, that had reached its members - by launch evidence, never a member's run merely existing (FS) | Its members down, no footer (D1); its plan kept: one row per cue of the GO's under it (§3.1) | Re-seated where it was (`seatPlan`): what was over, over; what was sounding at its own playhead over the de-click, at the level it had; what was waiting, for what was left of its wait; what it had fired - stops, starts, fades on cues outside it, the sends of cues that take back - fired again from its start, one tick apart per destination; what it had sent to a device left to its operator not (planned over, HJ); its own fades on its own sounds carried on rather than fired again (HG) |
+| A scene that loops, shuffles, plays some of its members, is a sampler bank, was heard before it reached its members, or was in its footer (L4, MG) | Down, as D1 | From its top |
+| A media cue heard, all but over by the length the log knows - half a second of the clock from its end - or already over | Down, as D1 | From its top (ruling 16) |
+| An arm the GO launched, a block it adopted, a member it asked for under a running act - nothing of it heard | **Handed back**: the same runs, in the states, under the parents, with the jobs they had; nobody's GO; what the GO made under it since ended (a fade or a stop it fired left to run, MJ); the pre-sends still on the desk, nothing put back, nothing revoked | The rehearsed GO: the same preparation adopted again - its whole pre-wait, its header's remainder run again, its pre-sends sent once in all |
+| Anything nobody heard that the GO fired cold | Taken down, as D1 | From its top |
+
+**The pieces.**
+
+- **The mark's root** (`Runner::DohRoot`, inside `DohMark`, which now holds `cue`, `goTick`,
+  `dohTick`, `stepTick`, the root and D1's `left`): a sound root - the run, its act (`underRun`),
+  where its file had got to (`offset`, or the slice it was in and how far into it), its level and
+  when the Doh's stop lands (`landsAt`) - or a tree root, its plan and how each sounding cue arrives
+  (`SeatResume`: levels, the rest of a moving fade, the point in a slice, a mic's carried fade). Built
+  in `go.doh`'s handler from handler state at the press (`rootFor`), for the root of the standby's own
+  chain only - a start cue's target starts from its top (L9).
+- **Where it had got to is its own playhead (MB)**, the author's rule for K8's paused bed: the hook
+  `noteDohPlayheads`, on the tick after the press and ahead of `updatePositions`, reads each paused
+  media run's `position` - or `slicePlayed` in a slice - and submits `go.dohPlayhead`; its handler
+  writes the second into the root, and starts the cue from its top instead when the log's length says
+  it was all but over there. Until the record arrives, and with no audio side, the root holds K8's
+  count (`countedPoint`: the arm's origin plus the seconds since `run.started` at the cue's speed).
+- **The resume arm** (§4.2): `armInternal`'s arm of a top-level sound root's cue and `spawnChild`'s
+  arm, made by the horizon under a member root's act, are made AT THE POINT - `armAtRoot`: no pre-wait,
+  `resumes`, K8's `deClick` with `arrivalDb` the level it had, the second or the slice point -
+  whoever asks for the arm, a surface's `audio.arm` included. `armMedia` arms such a run silent and
+  `deClickLaunched` brings it up over five ticks once its launch is placed (K8's LT), carrying on into
+  `arrivalThen` - the rest of a fade its scene had moving - in the same job (`FadeJob::then`). A mic
+  run with `resumes` opens over the de-click (`armMic`). The standby makes nothing ready for a paused
+  SCENE (`armStandby`): the corrected GO re-seats it.
+- **The corrected GO** (`resumeStandby`, the `go` handler's road when `markFor` finds the root): in
+  place, warm, cold or re-seated, as the table says; a member back in its act's job
+  (`adoptIntoParentJob`); its `g` step back-dated - the step the Doh erased, moved forward by the time
+  the cue spent paused (`ListState::steppedAt`) - only when it really carried the cue on.
+- **What drops the resume** (§4.3, `dropRoot`/`dropMark`/`setMark`): any GO on the list (`endGo`;
+  spent on the run that carried it on, else its arm at the point revoked), a fire of the cue by name or
+  by a trigger or a start cue (`markFire`), a jump (`forgetGoOnJump`), a seek of the arm at the point
+  (spent on it, `seekingRun`), and a second Doh! (`go.doh`'s first refusal turned into the forget,
+  applied). A pointer move, Esc and a double Esc keep it. What was left with devices' operators keeps
+  its own lifetime (D1, HP).
+- **The un-adopt** (§3.2): every door that adopts takes a snapshot first (`snapshotAdoption`:
+  `adoptPrepared`, `armInternal`'s armed branch, `fireStandby`'s ask of a member the horizon armed),
+  and `unadopt` writes it back - states, marks, parents, launch fields, rounds, jobs - stamping each
+  run `unadoptedAt`. `run.fire`, `run.launch`, `run.started`, `run.range`, `run.late` and `run.round`
+  on such a run in the Doh's own tick are applied and ignored (§1.6, GZ), and a `run.spawn` under it
+  makes its child done and taken by the restored job. A voice whose launch had been placed is stopped
+  and armed again on its track (live only). The left set leaves the handed-back pre-sends out (HO).
+- **The seat** (§4.1): the job a seat makes takes only the members of its round among the runs it
+  waits on - a scene carried on seats what its header had fired too - and a sequence seated with
+  nothing unfinished awaits its newest member over, so it spawns the next on its first tick.
+- **The readout** `/godot/list/<id>/resume` (`list,resume`): "<cue> <seconds>", "<cue>" for a mic,
+  or empty. The desktop's standby line says "resumes at 0:08" beside the cue's name, and the Doh!
+  button stays a button while a paused cue waits, its tooltip saying a second press starts it from
+  the top instead (MK).
+- **The log's lengths** (GM): `serve` reads its own header's `media` lines back with the replay's
+  parser and hands them to the Runner (`setLoggedDurations`), which a Doh's decisions read
+  (`handlerDurations`), so a session and its replay hold a paused sound against the same length.
+
+**Where D2 departs from the design, and why.**
+
+- **The playhead, not ticks times the speed** (MB): the brief's instruction, after the author's
+  ruling on K8 (LQ). The design had no record for it; `go.dohPlayhead` carries it. Exact through a
+  speed fade, a freeze, a stretch and the launch latency, so L2 and L3 no longer hold.
+- **K8's de-click, not a second arrival** (MC): `deClick`, armed at silence and ramped over five ticks
+  from the tick the launch is placed, where the design pushed an arrival job at the arm and held it
+  with `waitsForLaunch` until the launch sample. `FadeJob::waitsForLaunch` exists, for the one job
+  nothing else could carry - a plain fade still moving on a re-seated scene's mic. The design's
+  `arrivalTicks` is the constant five.
+- **A slice carries on inside its loop** (MD), at the same point and pass - K8's LR - where L1 said its
+  in-point.
+- **A sequence's member spawned and never launched is left to the sequence** (ME): the design planned
+  it due at its own pre-wait, which would have fired it beside the member still playing. Left out of
+  the plan, the seated sequence spawns it after the member it awaits, as it would have.
+- **Sends one tick apart are due at k + 1 ticks for k of one or more** (MF): the scheduler first looks
+  at a seated wait on the tick after the seat, when a wait due on the seat's tick and one due a tick
+  later fire together - the design's k ticks sent the first two as one.
+- **A scene that plays some of its members starts from the top** (MG), with ruling 17's loops,
+  shuffle and sampler: the seat plays the members as written.
+- **Only a sound or scene at the top of its list, or in an older manual act, is carried on** (MH): one
+  a running timeline or sequence spawned is that scene's member, and the scene would not wait for it.
+- **The un-adopt leaves a fade or a stop the GO fired running** (MJ), taken back, as D1's take-down
+  leaves one; and the restored jobs take what the GO made under them, or the corrected GO's entry would
+  walk past those cues as already run.
+- **The Doh! button is clickable while a paused cue waits** (MK), where K7 disabled it once the
+  window was over: a second press is how the author starts the cue from the top instead.
+- **`Solver::documentSpeedOf` was not exposed**: the Runner's own (K8's) answers the guard.
+
+**Named limitations (new).**
+
+| | Limitation | Leaves intact |
+|---|---|---|
+| L42 | A GO pressed within a tick of the pointer landing on a scene enters it cold, and the horizon's arm made in that same drain, after the GO, is taken by the scene's job without the GO's serial (a hook's adoption, which cannot stamp): a Doh then reads the scene unheard and takes it down rather than pausing it. Older than D2 (D1's tags); an operator never presses within twenty milliseconds of the pointer moving | "carries on" |
+| L43 | A resumed scene's mic member's take hears the corrected GO, and a top-level mic's in place; a mic member inside a running act resumed in place re-opens without a take's `onGo` test of its own, and no case drives a take through a Doh | "paused" |
+
+**Retired or narrowed:** L1 (MD), L2 and L3 (MB) - see the dated notes in §24.7.
+
+**The decisions.**
+
+| | Decision | Whose |
+|---|---|---|
+| MB | **Where a paused sound carries on from is its own playhead at the press**, read by a hook on the next tick and carried on `go.dohPlayhead`; K8's count when there is none | the author's (K8's LQ, 2026-10-02), applied to Doh! by the brief; the record, the implementer's |
+| MC | **The resume's arrival is K8's de-click** - armed silent, five ticks from the launch's placement - at the level the sound had at the press, carrying on into the rest of a moving fade in the same job | the author's tenth of a second (2026-09-30); K8's mechanism, reused at the brief's direction |
+| MD | **A paused slice carries on inside its loop, at the same point and in the same pass** | the author's (K8's LR) |
+| ME | **A sequence's member spawned and never launched is left to the seated sequence**, not planned due | implementer's call |
+| MF | **One tick apart per destination: the first at once, the k-th at k + 1 ticks** | implementer's call |
+| MG | **A scene that plays some of its members starts from the top**, beside loops, shuffle and sampler | implementer's call |
+| MH | **Carried on: a root at the top of its list or in an older manual act**; under a scene the machine runs, from the top | implementer's call |
+| MJ | **The un-adopt leaves a fade or a stop the GO fired running**, and the restored jobs take what the GO made under them | implementer's call |
+| MK | **The Doh! button stays a button while a paused cue waits**, idle in its look, its tooltip naming the second press | implementer's call, the author's to overrule |
+| ML | **`list/resume` is "<cue> <seconds>"** - the file's second for a media cue, the scene's own for a scene - or "<cue>" for a mic | implementer's call |
+
+**What it changes for a replay.** Every decision is a handler's from handler state and logged
+records: the resume from `run.started`, launch evidence, the run fields and the document; the point
+from `go.dohPlayhead`, a record; the un-adopt from snapshots its own GO's handler took. The jobs a
+seat makes, the levels and the de-click are a hook's. `go.dohPlayhead` is new, and a log with a Doh
+made on D1 is not promised to replay on D2 (HD): a GO after a heard GO's Doh now carries the cue on, a
+second press is applied, and an unheard adopted block is handed back rather than given back. The
+seat's job change (members only; the newest member over awaited) is hook-consumed: every
+`wfg.replay.*` fixture replays record for record (58, both locales), and a jump or a seek that seats a
+sequence with every member it seated over no longer holds it.
+
+**Tests**, each written first and run on the code before D2 - the engine sources put back to `main`
+(767b545) and built with the new cases - then after it, under C and `fr-FR`:
+
+- **`GoTests`** (22 new): a heard sound carried on at its playhead over the de-click, at its speed
+  and from its offset (before: armed at nought); a GO inside the Doh fade the same run back up, with a
+  voice to spare and with none (before: a second run); a cue in its pre-wait handed back whole (before:
+  done); a scene inside an act carried on, ending once, its footer once, the pointer walking on (before:
+  no resume); a sequence carried on from its pre-wait and from between two members (before: no
+  resume); a sound inside an act in place and warm (before: no resume); the resume kept by a walk of
+  the pointer and dropped by a GO elsewhere, a jump and a second Doh (before: at nought); the bounce
+  inside the debounce keeps it (before: no readout); the guard in file seconds and a slice carried on
+  inside it (before: no resume); loops, shuffle and play-N from the top (a net but for the readout,
+  absent before); a Doh of the corrected GO giving the resume back (before: the arm ended); the
+  session with a pause, an in-place, a warm and a seated resume replayed record for record (before:
+  taken back); an arm at the point launched by a seek and revoked by a fire by name (before: no
+  de-click); stale `run.fire`, `run.started` and `run.spawn` records each applied and ignored, each
+  replayed (before: ended); the back-dated step (before: the GO's tick); a timeline carried on whole -
+  members at their seconds, the last due, the fade outside fired again, the record carrying every run
+  (before: from the top); a scene's own fades carried on and a dipped scene seated dipped (before: no
+  resume); a GO after Esc, a double Esc or a kill seating the cue at the point (before: from the top).
+  Two are nets that passed before: a jump into a sequence's pre-wait (K9's LZ), and a surface's arm
+  left alone while the resume arm waits (D1's memory). Two failed before only for want of the
+  readout, their behaviour D1's already: loops, shuffle and play-N from the top, and a scene heard in
+  its header started from it.
+- **`MicTests`** (1): a mic in place, warm and with its tail cut, each opening over a tenth of a
+  second (before: a second run, half a second).
+- **`MidiTests`** (1): a scene heard through a synth carried on - the note again only where its port
+  takes back - and one not heard handed back, its note left (before: no resume; given back).
+- **`NetworkCueTests`** (3): sends again one tick apart per address (before: three where four);
+  what takes back sent again, what was left not, what never left at its time (before: from the top);
+  a second press forgets the resume and keeps what was left, replayed (before: refused).
+- **`VerifiedCueTests`** (2): a prepared scene, at the top and as a row inside a running act, handed
+  back with its pre-send on the desk and adopted again (before: given back, revoked); and a scene heard
+  in its header started over without its left pre-send (a net against D1).
+- **`ClientTests`** (1): the standby's "resumes at 0:08" and the button's second-press tooltip. It
+  could not be built before D2: the reading had no `resume`.
+
+**D1's cases that D2 changed** (fourteen), each with a dated note in the case. In `GoTests`: a GO
+inside the Doh fade now carries the cue on, so the decision-N case fires the cue by name instead; a
+press after the debounce is the forget, and a third is refused; a seek-then-GO session's run is no
+longer taken back, live or replayed; a heard scene is not prepared again until a second press forgets
+it; an unheard block the GO adopted is handed back rather than taken back - a child spawned into it,
+an act whose next member the horizon armed, and a scene inside an act whose fade Esc let go of - and
+three cases of D1's review now enter their scene cold, the GO in the very tick the pointer lands, to
+keep D1's give-back road under test. In `MidiTests`, a scene not heard is handed back, nothing revoked.
+In `VerifiedCueTests`, a committed pre-send's block, an act the GO entered, and an unheard scene with a
+fade outside it are handed back with their pre-sends on the desk.
+
+**What the design's list has that is not here:** test 9's mic SUBCASE (a member mic inside an act) and
+test 14's take - `onGo` acting at the resume - are not driven (L43); test 27 has its first SUBCASE
+only; test 15's orders are test 17's three stale-record cases, each replayed.
+
+**Counts.** The new cases under C and `fr-FR`: 30 cases, 1456 assertions each, green. Every
+`go.doh` case, D1's included, under `fr-FR`: 96 cases, 3508 assertions, green. `GoTests`,
+`VerifiedCueTests`, `NetworkCueTests`, `MicTests`, `MidiTests`, `SamplerTests` and `ClientTests` whole
+under C: 637 cases, 16656 assertions, green; `OscQueryTests`, `DocumentTests`, `UndoTests`,
+`RunTests`, `SolverTests`, `SequenceTests`, `TakeTests`, `TreeTests` and `LaneRecordTests`: 198 cases,
+green. `ctest -R "wfg\.replay|blackbox\.(phase3|phase4|triggers|phase6-sampler|phase9b-mic|phase9c-take)"`:
+70 of 70; `ctest -R "wfg\.commands|schema|^ui\.|client"`: 13 of 13. `scripts/check-comments.py` and
+`generate-schema.py --check` pass; clang-tidy with the GCC warnings finds nothing on the lines D2
+changed.
+
+**What D3 inherits.** The mark's root and its plan, `rootFor`'s rows, `resumeStandby`, the snapshots
+and `unadopt`, `SeatResume` and the seat's `resume` (a relaunch's arrival is the panic fade, §3.6:
+`arrivalDb` and `deClick` take another length there), `FadeJob::then` and `waitsForLaunch`,
+`handlerDurations`, and K5's `preSentAtom` for the desk. Left for D3: the fade and stop runs the GO
+fired (left running, taken back - D1's pass A and the un-adopt alike), levels, stops, takes and the
+desk put back, the report and `go.dohRelaunch`.
+
+**Owed to the bench:** on the MADIface, a bed GO'd early and Doh'd five seconds in: GO inside the
+fade - it comes back up where it was; after it - it comes back at the point within a launch latency,
+the faded second heard again, no click. A scene of three sounds and a fade outside it, Doh'd and
+re-seated: the sounds at their seconds, the late one on its time, the fade again. A presenter's mic in
+an act, Doh'd, the reverb ringing, then GO: the tail cut, the gate open over a tenth of a second. A
+lighting scene caught before anything sounded: the desk keeps what it had, and the corrected GO runs
+the rest on its clock.
 
 ## 25. A Show and its Performances
 

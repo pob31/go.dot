@@ -136,6 +136,17 @@ namespace wfg::client::model
         std::string dohCue;
         std::string dohWindow;
 
+        /*  WHAT THE NEXT GO CARRIES ON (2026-10-02, Doh! D2): the focused
+            list's `/godot/list/<id>/resume` as the engine spells it - "<cue>
+            <seconds>", the cue a Doh paused and the second it carries on from,
+            "<cue>" alone for a mic, which has no position - or empty. */
+        std::string resume;
+
+        /*  "  resumes at 0:08" when the next GO carries the standby on rather
+            than starting it, "  resumes" for a mic; empty otherwise. In words,
+            beside the standby's name, never a colour alone (§4.8). */
+        std::string resumeWords() const;
+
         /*  WHAT THE DOH! BUTTON SAYS: "Doh! 12" while the last GO is still
             inside the window - read off the engine's own tick - and "Doh!"
             otherwise, so the operator sees which GO a press would take back. */

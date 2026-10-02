@@ -44,6 +44,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <string>
@@ -143,6 +144,35 @@ namespace wfg::cue
                 steps.erase (steps.begin());
         }
 
+        /*  A STEP PUT WHERE ITS TICK SAYS, not at the end (2026-10-02, Doh!
+            D2, namespace draft §24): the corrected GO that carries a paused
+            cue on writes its `g` back-dated - the step the Doh erased, moved
+            forward by the time the cue spent paused - so a later jump places
+            the cue where it is playing. After the last step whose tick is at
+            or before it, in the history and in the recorder's take alike. */
+        void steppedAt (const std::string& list, const Step& step)
+        {
+            const auto placeIn = [&step] (std::vector<Step>& steps)
+            {
+                auto at = steps.end();
+
+                while (at != steps.begin() && std::prev (at)->tick > step.tick)
+                    --at;
+
+                steps.insert (at, step);
+            };
+
+            auto& steps = histories[list];
+            placeIn (steps);
+            ++taken;
+
+            if (recordingSince >= 0)
+                placeIn (recorded);
+
+            while (steps.size() > kept)
+                steps.erase (steps.begin());
+        }
+
         /*  A JUMP RETIMES THE HISTORY (2026-09-19). The steps are on the wall
             clock, and a load to time puts the show where it was at `landedAt`:
             from now on a cue fired at tick t before that instant has been
@@ -216,6 +246,25 @@ namespace wfg::cue
         void setDohOffer (const DohOffer& offer) { doh = offer; }
         const DohOffer& dohOffer() const noexcept { return doh; }
 
+        /*  WHAT THE NEXT GO ON A LIST CARRIES ON (2026-10-02, Doh! D2, PRD
+            §3.32): `"<cue> <seconds>"` - the cue a Doh paused and where it will
+            carry on from - or empty when the next GO starts whatever it fires
+            from its top. Published as `/godot/list/<id>/resume`; written by the
+            handlers that set and drop a Doh's resume, never by a hook. */
+        void setResume (const std::string& list, const std::string& text)
+        {
+            if (text.empty())
+                resumes.erase (list);
+            else
+                resumes[list] = text;
+        }
+
+        std::string resumeOf (const std::string& list) const
+        {
+            const auto found = resumes.find (list);
+            return found == resumes.end() ? std::string {} : found->second;
+        }
+
         /** Newest last. */
         const std::vector<Step>& historyOf (const std::string& list) const
         {
@@ -255,6 +304,7 @@ namespace wfg::cue
             recorded.clear();
             recordingSince = -1;
             doh = {};
+            resumes.clear();
         }
 
         static constexpr std::size_t kept = 64;
@@ -273,5 +323,6 @@ namespace wfg::cue
         std::int64_t recordingSince = -1;
         std::vector<Step> recorded;
         DohOffer doh;
+        std::map<std::string, std::string> resumes;
     };
 }

@@ -1091,10 +1091,141 @@ namespace wfg::cue
             nothing of. */
         void beginGo (std::int64_t tick, const std::string& listId, const std::string& standby,
                       bool finishedBefore);
-        void endGo (const std::vector<std::string>& made);
+
+        /*  `carriedOn` is the run a resume launched or brought back (D2): the
+            list's resume is spent on it rather than revoked. */
+        void endGo (Engine& engine, std::int64_t tick, const std::vector<std::string>& made,
+                    const std::string& carriedOn = {});
         std::uint64_t goInHand() const noexcept { return currentGo; }
 
         std::string goDoh (Engine& engine, doc::ShowDocument& editable, std::int64_t tick);
+
+        //======================================================================
+        /*  CARRYING ON WHAT A DOH PAUSED (2026-10-02, D2, PRD §3.32, namespace
+            draft §24): what a GO started that had been HEARD - a media or mic
+            cue, a scene - is paused by the Doh, and the next GO on that cue
+            carries it on from where it was at the press, arriving over a 0.1 s
+            de-click (the author, 2026-09-30). What the list's mark holds of it
+            is its ROOT: the run paused, where its file had got to - the
+            playhead the press's own tick read, reported by a hook on the next
+            tick (`go.dohPlayhead`), the handler's count until then and with no
+            audio side - its level, and for a scene the plan it is seated
+            from. All handler state, so a replay carries the same on.
+
+            `markFor` is the mark on a list whose root the standby names, or
+            nothing; `resumeStandby` is the `go` handler's road when there is
+            one: in place inside the Doh fade, warm through the arm the standby
+            made at the point, cold or as a re-seated scene otherwise. */
+        struct SeatResume
+        {
+            /*  How what a seat carries on arrives: each sounding media cue at
+                the level it had at the press over the de-click, carrying on
+                into the rest of a fade of its own scene still moving then
+                (HG), inside the slice it was in at the point its playhead had
+                reached (K8's `sliceFrom`); each sounding mic and group seated
+                at the level it had. */
+            std::map<std::string, double> levels;
+            std::map<std::string, FadeSegment> carryOn;
+            std::map<std::string, double> sliceFrom;
+
+            /*  A carried plain fade on a sounding mic, pushed as a job of its
+                own once the mic is seated: the mic's arrival is its gate, not a
+                job, so there is nothing for it to ride. */
+            std::map<std::string, FadeSegment> micFades;
+        };
+
+        struct DohRoot
+        {
+            enum class Kind { media, mic, tree };
+
+            Kind kind = Kind::media;
+            std::string cue, run;
+
+            /*  The older live manual group it sat in - the act a member was
+                fired into - or empty at the top of the list. */
+            std::string underRun;
+
+            /*  A media root: where in its file it carries on from, or the slice
+                it was in and how far into it (K8's `sliceFrom`). */
+            double offset = 0.0;
+            int range = -1;
+            double sliceFrom = 0.0;
+
+            double levelDb = 0.0;
+            std::int64_t landsAt = 0;
+
+            /*  A scene: one row per cue of it, how each sounding cue arrives,
+                and the run of each media cue sounding, whose playhead the hook
+                reports. */
+            std::vector<PlannedRun> plan;
+            SeatResume arrival;
+            std::map<std::string, std::string> heardRuns;
+        };
+
+        struct DohMark
+        {
+            /*  The cue whose GO a Doh took back, when the mark carries a root:
+                the cue the next GO carries on; and when. `stepTick` is the
+                erased `g`'s tick, as a seek may have moved it. */
+            std::string cue;
+            std::int64_t goTick = -1, dohTick = -1, stepTick = -1;
+            std::optional<DohRoot> root;
+
+            /*  WHAT A DOH LEFT WITH DEVICES' OPERATORS, ON ONE LIST (D1): per
+                marked cue - the cue whose GO the Doh took back - the cues of
+                that GO whose sends were left. Each entry lives by its marked
+                cue (§24, HP): a GO that reaches the cue consumes it, a GO past
+                it, a jump or a deliberate fire forgets it, a GO before it keeps
+                it. */
+            std::map<std::string, std::vector<std::string>> left;
+        };
+
+        const DohMark* markFor (const std::string& listId, const std::string& standby) const;
+
+        /** The list's mark, or nothing. Tests. */
+        const DohMark* markOf (const std::string& listId) const
+        {
+            const auto found = marks.find (listId);
+            return found == marks.end() ? nullptr : &found->second;
+        }
+
+        struct Resumed
+        {
+            std::vector<std::string> made;
+            bool resumed = false;
+            std::string carriedOn;
+        };
+
+        Resumed resumeStandby (Engine& engine, std::int64_t tick, const juce::ValueTree& list,
+                               const DohMark& mark, const std::vector<std::string>& supplied);
+
+        /*  WHERE A RUN THE DOH PAUSED HAD GOT TO, read off its playhead by the
+            hook on the tick after the press: `go.dohPlayhead`'s handler, which
+            writes it into the root - and starts the cue from its top instead
+            when the length the log knows says it was all but over there. */
+        void notePlayheadOf (Engine& engine, std::int64_t tick, const std::string& runId,
+                             double from, int range);
+
+        /*  A SEEK OF THE RESUME ARM (§4.3): the hand put the cue somewhere and
+            it plays there, so the resume is spent - not revoked - and what was
+            left with devices' operators stays. Asked before the seek launches
+            it. */
+        void seekingRun (Engine& engine, std::int64_t tick, const std::string& runId);
+
+        /*  WHETHER A RECORD DECIDED BEFORE A DOH, ON THE STATE IT UNDID, IS ONE
+            TO IGNORE (§1.6, GZ): a run the Doh handed back in this very tick. */
+        bool handedBackIn (const std::string& runId, std::int64_t tick) const;
+
+        /*  THE LENGTHS THE LOG'S HEADER RECORDED (§24, GM), which a Doh's
+            decisions read so that a session and its replay agree to the bit:
+            `serve` hands them in after writing the header; with none - a test,
+            or a replay, which hands its own in as the media durations - the
+            media durations are read. */
+        void setLoggedDurations (std::map<std::string, double> lengths)
+        {
+            loggedDurations = std::move (lengths);
+            haveLoggedDurations = true;
+        }
 
         /*  WHAT ELSE THE RECORD HEARS. A fire by name or a trigger on its list
             - a pad's included, and a hand on a pad of the bank the GO armed -
@@ -1114,11 +1245,16 @@ namespace wfg::cue
         /*  A FIRE OF A CUE A DOH LEFT WITH A DEVICE'S OPERATOR (§24, HP): by
             name or by a trigger it is a deliberate send, and the cue is no
             longer held back; by a GO's start cue it is that GO reaching it. */
-        void markFire (const std::string& cueId, const std::string& from, std::uint64_t cause);
+        /*  AND IT SPENDS A RESUME OF THE CUE (D2): fired by name, by a trigger
+            or by a start cue, it starts from its top, the arm at the point
+            revoked first. */
+        void markFire (Engine& engine, std::int64_t tick, const std::string& cueId,
+                       const std::string& from, std::uint64_t cause);
 
         /*  A JUMP ON THE LIST RETIMES THE HISTORY THE GO LIVED IN: the record
-            is forgotten, and so is everything a Doh left on that list. */
-        void forgetGoOnJump (const std::string& listId);
+            is forgotten, and so is everything a Doh left on that list - its
+            resume revoked. */
+        void forgetGoOnJump (Engine& engine, std::int64_t tick, const std::string& listId);
 
         /*  Which GO a run belongs to: the GO whose effect made it (a footer an
             older act ran because of it) before the GO that made or adopted it. */
@@ -1479,7 +1615,8 @@ namespace wfg::cue
         void seatPlan (Engine& engine, std::int64_t tick,
                        const std::vector<PlannedRun>& wanted,
                        std::map<std::string, std::string>& runFor,
-                       const std::function<std::string()>& nextId);
+                       const std::function<std::string()>& nextId,
+                       const SeatResume* resume = nullptr);
 
         /*  The slots a cue's `Feed` and `Insert` children name, claimed for its
             run (PRD §3.9b, §3.9e).
@@ -2057,16 +2194,34 @@ namespace wfg::cue
             written by the `go`, `go.doh`, `cue.fire`, `trigger.fire`,
             `list.loadToTime` and Esc handlers - except where it says hook. */
 
-        /*  WHAT A DOH LEFT WITH DEVICES' OPERATORS, ON ONE LIST: per marked cue
-            - the cue whose GO the Doh took back - the cues of that GO whose
-            sends were left. Each entry lives by its marked cue (§24, HP): a GO
-            that reaches the cue consumes it, a GO past it, a jump or a
-            deliberate fire forgets it, a GO before it keeps it. A resume root
-            joins it in D2. */
-        struct DohMark
+        /*  A PREPARATION A GO ADOPTED, AS IT WAS BEFORE (2026-10-02, D2, §3.2):
+            taken in the GO's own handler at each door that adopts - a prepared
+            block, an armed arm, a member the horizon armed under a running
+            act - so a Doh of a GO nobody heard can hand it back exactly: the
+            same runs, in the same states, under the same parents, their jobs
+            as they were. `parentGroup` is the running act whose job takes it,
+            or empty. */
+        struct RunBefore
         {
-            std::map<std::string, std::vector<std::string>> left;
+            std::string id, state, prepare, parent, enterAt;
+            bool launchRequested = false;
+            std::int64_t launchRequestedAtTick = 0, dueTick = 0;
+            std::vector<std::string> round;
+            int iteration = 0;
+            std::int32_t seed = 0;
+            std::int64_t roundStartedAtTick = 0, firstRoundAtTick = 0;
         };
+
+        struct Adoption
+        {
+            std::string root, parentGroup;
+            std::vector<RunBefore> runs;
+            std::vector<GroupJob> jobs;
+        };
+
+        /*  The snapshot, taken before the adoption changes anything - and only
+            for the GO the record is open for, once per block. */
+        void snapshotAdoption (const std::string& runId, const std::string& parentGroup);
 
         /*  THE LAST GO, as the Doh would take it back. */
         struct GoRecord
@@ -2085,6 +2240,9 @@ namespace wfg::cue
             /*  The entries of the mark this GO filed - marked cue, cues - so
                 `endGo` can undo a filing no run of the marked cue took. */
             std::map<std::string, std::vector<std::string>> filed;
+
+            /*  What it adopted, as it was (D2). */
+            std::vector<Adoption> adoptions;
         };
 
         /*  The cues a corrected GO sends nothing of, by its serial. */
@@ -2171,6 +2329,68 @@ namespace wfg::cue
         /*  HOOK MEMORY: a taken-back run whose voice the standby's preparation
             waits for before it arms the cue again. */
         std::string waitingForVoice;
+
+        /*  THE MARKS, CHANGED THROUGH THESE AND NOTHING ELSE (§4.3): the resume
+            dropped - its arm at the point revoked, but for the run that spent
+            it - and the standby asked to make the cue ready again; a whole mark
+            dropped, what was left with devices' operators with it; a mark set,
+            the one it replaces dropped first. */
+        void dropRoot (Engine& engine, std::int64_t tick, const std::string& listId,
+                       const std::string& carriedOn = {});
+        void dropMark (Engine& engine, std::int64_t tick, const std::string& listId);
+        void setMark (Engine& engine, std::int64_t tick, const std::string& listId, DohMark mark);
+
+        /*  The `list/resume` readout, from the list's mark. */
+        void publishResume (const std::string& listId);
+
+        /*  A resume arm of a root: unfinished, `resumes`, no launch evidence,
+            under the root's act, or at the top for a root at the top. */
+        bool isResumeArm (const Run& run, const DohRoot& root) const;
+
+        /*  The root of a mark on any list that names this cue as a sound to
+            carry on, for the arm that makes it ready at its point. */
+        const DohRoot* soundRootOf (const std::string& cueId) const;
+
+        /*  The resume fields a run made ready at a root's point is given
+            before its arm: no pre-wait, the de-click, the level, the point. */
+        void armAtRoot (Run& run, const DohRoot& root, const juce::ValueTree& cue) const;
+
+        /*  WHETHER A PAUSED SOUND STILL HAS SOMETHING TO PLAY AT `at` seconds
+            of its file (§1.5): a slice always does; else, by the length the
+            log knows, until half a second of the clock from its end. */
+        bool notOver (const juce::ValueTree& cue, int range, double at) const;
+
+        /*  Where the paused run's file had got to, as the handler can count
+            it: from its arm's origin at the cue's own speed since it was heard
+            (K8's fallback, `armedOrigin`), or the slice it was in. */
+        ResumePoint countedPoint (const Run& run, std::int64_t tick) const;
+
+        /*  The root a heard GO leaves for the next GO on its cue, built from
+            handler state at the press (§3.1); nothing when it cannot be
+            carried on - the next GO starts it from its top. */
+        std::optional<DohRoot> rootFor (const std::string& rootId, std::uint64_t serial, std::int64_t tick,
+                                        const std::vector<std::string>& leftCues, int fadeTicks) const;
+
+        /*  THE UN-ADOPT (§3.2): a preparation the GO adopted and nobody heard,
+            handed back as it was. */
+        void unadopt (Engine& engine, std::int64_t tick, const Adoption& adoption, std::uint64_t serial);
+
+        /*  A run seated or brought back under a running act joins the act's
+            job as a member it has launched (§4). */
+        void adoptIntoParentJob (const std::string& groupRun, const std::string& runId);
+
+        const std::map<std::string, double>* handlerDurations() const noexcept
+        {
+            return haveLoggedDurations ? &loggedDurations : durations;
+        }
+
+        std::map<std::string, double> loggedDurations;
+        bool haveLoggedDurations = false;
+
+        /*  HANDLER-WRITTEN, HOOK-READ: the runs a Doh paused whose playhead the
+            hook reports on the next tick (`go.dohPlayhead`); and that hook. */
+        std::vector<std::string> playheadsOwed;
+        void noteDohPlayheads (Engine& engine);
 
         /*  Set for the length of `prepareStandby`: what is made then is the
             horizon's, nobody's GO. */

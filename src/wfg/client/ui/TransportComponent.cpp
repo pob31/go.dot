@@ -294,9 +294,14 @@ namespace wfg::client::ui
             while it can be taken back, the tooltip says the seconds left, and
             over is a disabled button. F9 and the Show menu still send a press
             whatever the button says - the engine is the judge, and its refusal
-            is a sentence on the transport line. */
+            is a sentence on the transport line.
+
+            AND IT STAYS A BUTTON WHILE A PAUSED CUE WAITS FOR THE NEXT GO
+            (2026-10-02, Doh! D2): idle in its look, but a second press is the
+            author's way to start that cue from the top instead, and the tooltip
+            says so. */
         const auto look = last.dohLook();
-        const auto open = look.phase != model::DohPhase::over;
+        const auto open = look.phase != model::DohPhase::over || ! last.resume.empty();
         const auto mix = static_cast<float> (1.0 - look.strength);
 
         const auto ground = Look::colour (theme, "doh").interpolatedWith (Look::colour (theme, "go-idle"), mix);

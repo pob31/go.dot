@@ -104,12 +104,44 @@
 #include <thread>
 #include <csignal>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace
 {
+    //==============================================================================
+    /*  THE LENGTHS A LOG'S HEADER RECORDS, read back: `media <name> <bytes>
+        <seconds>`, written by `serve` for every file the show references.
+        Parsed from the end so a name with spaces in it survives. One parser,
+        for the replay and - since Doh! D2 (2026-10-02, namespace draft §24, GM)
+        - for the session that wrote them, whose Doh! decisions read the same
+        numbers its replay will. */
+    std::map<std::string, double> lengthsFromHeader (const std::vector<std::string>& lines)
+    {
+        std::map<std::string, double> lengths;
+
+        for (const auto& line : lines)
+        {
+            if (line.rfind ("media ", 0) != 0)
+                continue;
+
+            const auto bytesAt = line.rfind (' ', line.rfind (' ') - 1);
+
+            if (bytesAt == std::string::npos || bytesAt <= 6)
+                continue;
+
+            const auto name = line.substr (6, bytesAt - 6);
+            const auto seconds = wfg::osc::parseDouble (line.substr (line.rfind (' ') + 1));
+
+            if (! name.empty() && seconds.has_value())
+                lengths[name] = *seconds;
+        }
+
+        return lengths;
+    }
+
     //==============================================================================
     /*  --wfg-locale=<name> is stripped before JUCE's argument parser sees it,
         so every verb accepts it and no verb has to declare it.
@@ -817,22 +849,8 @@ namespace
             entitled to the night's own numbers. A log with no `media` lines -
             every one written before PR 4.1 - leaves the table empty, which is
             the behaviour every such log already replayed with. */
-        for (const auto& line : logFile->headerLines)
-        {
-            if (line.rfind ("media ", 0) != 0)
-                continue;
-
-            const auto bytesAt = line.rfind (' ', line.rfind (' ') - 1);
-
-            if (bytesAt == std::string::npos || bytesAt <= 6)
-                continue;
-
-            const auto name = line.substr (6, bytesAt - 6);
-            const auto seconds = wfg::osc::parseDouble (line.substr (line.rfind (' ') + 1));
-
-            if (! name.empty() && seconds.has_value())
-                durations[name] = *seconds;
-        }
+        for (const auto& [name, seconds] : lengthsFromHeader (logFile->headerLines))
+            durations[name] = seconds;
 
         /*  UP TO A RECOVERY AND NO FURTHER: the records before it ran against
             the bundle the header names, and are held to reproducing exactly
@@ -3341,6 +3359,13 @@ namespace
         {
             engine.log().openInMemory (headerLines);
         }
+
+        /*  AND THE SAME NUMBERS FOR DOH!'S DECISIONS (2026-10-02, D2, namespace
+            draft §24, GM): read back from the lines just written with the
+            replay's own parser, so the session and its replay hold a paused
+            sound against the same length to the bit. A file imported after this
+            is unknown to both. */
+        runner.setLoggedDurations (lengthsFromHeader (headerLines));
 
         //  --- the transports ------------------------------------------------
         const auto requestedOsc = args.containsOption ("--osc-port")

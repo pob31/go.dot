@@ -44,6 +44,7 @@
 #include <wfg/engine/document/FadePoints.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -95,6 +96,24 @@ namespace wfg::cue
     */
     double fadeLevelDb (double fromDb, const std::vector<doc::FadePoint>& points,
                         double progress) noexcept;
+
+    //==============================================================================
+    /*  THE REST OF A FADE, carried on after an arrival (2026-10-02, Doh! D2,
+        namespace draft §24, HG): a scene Doh! paused while one of its own fades
+        was still moving on one of its own sounds is carried on at the next GO
+        - the sound arrives at the level it had at the press, over the
+        de-click, and then goes on from there to where that fade was going, over
+        the time it had left, and stops at its end if the fade was a
+        fade-and-stop. One job on the level throughout, so nothing re-fired
+        takes over from the arrival and starts the sound again from silence. */
+    struct FadeSegment
+    {
+        double toDb = 0.0;
+        int ticks = 0;
+        FadeCurve curve = FadeCurve::linear;
+        std::vector<doc::FadePoint> points;
+        bool stopWhenDone = false;
+    };
 
     //==============================================================================
     /*  One fade in flight. A value the Runner holds and advances; it owns
@@ -196,6 +215,20 @@ namespace wfg::cue
             nothing is not that, and the difference is what the `refers` column
             made checkable. */
         std::string failure;
+
+        /*  WHAT IT BECOMES WHEN IT ARRIVES (Doh! D2, HG): the rest of a fade
+            its target's scene had moving at a Doh, which this job - the
+            target's arrival - carries on into from wherever it has got to,
+            instead of retiring. Empty for every other job. */
+        std::optional<FadeSegment> then;
+
+        /*  HELD UNTIL ITS TARGET IS HEARD (Doh! D2, §4.4): the level does not
+            move until the target's launch has been placed - a cold arm can
+            spend a few tenths of a second on its disk, and a ramp begun before
+            the sound would be over before anything is heard. Only on a job the
+            Runner pushes for a sound it is seating; with no audio side there
+            is no launch to wait for and the job runs as any other. */
+        bool waitsForLaunch = false;
 
         /** Whether the level has reached its destination. */
         bool isFinished() const noexcept { return ticksDone >= ticksTotal; }

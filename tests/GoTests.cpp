@@ -14914,8 +14914,12 @@ TEST_CASE ("go.doh: run.started stamps when it started; a run taken back stays s
     CHECK (runs.find ("RN000002")->startedAtTick == 9);
 }
 
-TEST_CASE ("go.doh: decision N passes over a taken-back run - a GO inside the Doh fade starts the cue again")
+TEST_CASE ("go.doh: decision N passes over a taken-back run - a fire inside the Doh fade starts the cue again")
 {
+    /*  (2026-10-02, D2: a GO on the cue inside the Doh fade now brings the same
+        run back up, in place - the corrected GO carries it on. A fire of it by
+        name is what still starts it again, from its top, decision N passing
+        over the run on its way out.) */
     FadeRig rig;
     REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
 
@@ -14928,7 +14932,7 @@ TEST_CASE ("go.doh: decision N passes over a taken-back run - a GO inside the Do
     REQUIRE (rig.runs.find (old)->takenBack);
 
     rig.tickOnce();
-    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) }).rejected == 0);
 
     CHECK (runsFor (rig, rig.mediaId) == 2u);
 
@@ -14962,7 +14966,12 @@ TEST_CASE ("go.doh: a child spawned into a taken-back group is done")
     CHECK (rig.runs.find (spawned)->state == cue::runState::done);
     CHECK (rig.runs.find (spawned)->endedAtTick == spawnTick);
     CHECK (rig.runs.find (spawned)->track < 0);
-    CHECK (rig.runs.find (groupRun)->takenBack);
+
+    /*  (2026-10-02, D2: nobody heard the group and the GO had adopted the block
+        the standby made ready, so it is handed back exactly - prepared again,
+        stamped with the Doh's tick - rather than taken back.) */
+    CHECK (rig.runs.find (groupRun)->unadoptedAt == spawnTick);
+    CHECK (rig.runs.find (groupRun)->state == cue::runState::preparing);
 }
 
 TEST_CASE ("go.doh: an Esc after the GO - the Doh moves the pointer back and leaves the runs to Esc")
@@ -15235,6 +15244,14 @@ TEST_CASE ("go.doh: a second press inside the GO debounce is refused too-soon an
         CHECK (rig.runs.find (old)->takenBack);
 
         while (rig.tick < dohTick + 30)
+            rig.tickOnce();
+
+        /*  (2026-10-02, D2: past the debounce, the second press is the
+            deliberate one - it forgets the resume of the cue that was heard -
+            and a third has nothing left.) */
+        CHECK (doh (rig).rejected == 0);
+
+        while (rig.tick < dohTick + 60)
             rig.tickOnce();
 
         CHECK (doh (rig).rejected == 1);
@@ -15620,7 +15637,11 @@ TEST_CASE ("go.doh: a seek withdraws a stop whatever the hook did, and the sessi
 
     CHECK (result.ok);
     REQUIRE (fresh.runs.find (id) != nullptr);
-    CHECK (fresh.runs.find (id)->takenBack);
+
+    /*  (2026-10-02, D2: the GO right after the Doh carries the cue on in place,
+        so the run is no longer taken back - in the session and in its replay.) */
+    CHECK_FALSE (session.runs.find (id)->takenBack);
+    CHECK (fresh.runs.find (id)->takenBack == session.runs.find (id)->takenBack);
 }
 
 TEST_CASE ("go.doh: a scene taken back is prepared again whole once its member's voice is free")
@@ -15649,6 +15670,11 @@ TEST_CASE ("go.doh: a scene taken back is prepared again whole once its member's
     REQUIRE (doh (rig).rejected == 0);
     CHECK (rig.runs.find (block)->takenBack);
     CHECK (rig.runs.find (old)->takenBack);
+
+    /*  (2026-10-02, D2: the scene was heard, so the next GO would carry it on
+        and nothing is made ready for it. A second press forgets that, and the
+        scene is prepared again whole - the road this case is about.) */
+    REQUIRE (doh (rig).rejected == 0);
 
     //  A fresh block at D+1; the member waits for the old voice before it is armed.
     REQUIRE (rig.tickUntil ([&] { return rig.prepared (rig.groupId) != nullptr
@@ -15725,7 +15751,11 @@ TEST_CASE ("go.doh: an unheard scene whose next member was spawned and not yet l
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/duration", "1").ok);
     rig.document.createCue (scene, 2, "memo", "Last");
 
-    rig.setStandby (scene);
+    /*  ENTERED COLD - the GO in the very tick the pointer lands, before the
+        horizon has made the scene ready - so the Doh takes it back and its job
+        gives it back (2026-10-02, D2: a block the GO adopted and nobody heard is
+        handed back exactly instead, §24.12). */
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), scene).ok);
     REQUIRE (rig.submitAndTick ("go").rejected == 0);
     const auto sceneRun = rig.runOf (scene);
 
@@ -15765,7 +15795,8 @@ TEST_CASE ("go.doh: an unheard scene whose fade-and-stop on a cue outside it the
     const auto hold = rig.document.createCue (scene, 1, "memo", "Hold").id;
     rig.setCue (hold, "preWait", "5");
 
-    rig.setStandby (scene);
+    //  Entered cold (D2: see the case above).
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), scene).ok);
     REQUIRE (rig.submitAndTick ("go").rejected == 0);
     const auto sceneRun = rig.runOf (scene);
 
@@ -15840,7 +15871,12 @@ TEST_CASE ("go.doh: an unheard scene inside an older act, its fade-and-stop let 
         rig.tickOnce();
 
     REQUIRE (doh (rig).rejected == 0);
-    REQUIRE (rig.runs.find (sceneRun)->takenBack);
+
+    /*  (2026-10-02, D2: nobody heard the block the GO adopted, so it is handed
+        back exactly - prepared again under the act - and its fade, which the GO
+        fired on the bed outside it, is left to run as before.) */
+    REQUIRE_FALSE (rig.runs.find (sceneRun)->takenBack);
+    REQUIRE (rig.runs.find (sceneRun)->state == cue::runState::preparing);
     REQUIRE_FALSE (rig.runs.find (actRun)->isFinished());
 
     //  Esc with the fade's stop due before the panic fade's: Esc lets go of the fade's job.
@@ -15874,7 +15910,8 @@ TEST_CASE ("go.doh: an unheard scene taken back in its footer, a scene in that f
     const auto later = rig.document.createCue (release, 1, "memo", "Later").id;
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + later + "/preWait", "5").ok);
 
-    rig.setStandby (scene);
+    //  Entered cold (D2: see the cases above).
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), scene).ok);
     REQUIRE (rig.submitAndTick ("go").rejected == 0);
     const auto sceneRun = rig.runOf (scene);
 
@@ -16187,7 +16224,11 @@ TEST_CASE ("go.doh: the horizon's arm of the act's next member, made after the G
     CHECK (revoked->state == cue::runState::done);
     CHECK (revoked->warning == cue::runWarning::revoked);
     CHECK_FALSE (revoked->takenBack);
-    CHECK (rig.runs.find (act)->takenBack);
+
+    /*  (2026-10-02, D2: the act, a block the GO adopted and nobody heard, is
+        handed back exactly rather than taken back.) */
+    CHECK_FALSE (rig.runs.find (act)->takenBack);
+    CHECK (rig.runs.find (act)->state == cue::runState::preparing);
 }
 
 TEST_CASE ("go.doh: a jump read from the history never plans the cue a Doh took back")
@@ -16692,4 +16733,1523 @@ TEST_CASE ("double Esc: nothing Go.dot started keeps writing, for fifty ticks af
 
     INFO ("changed after the press, with nothing meant to write:\n" << unexplained);
     CHECK (unexplained.empty());
+}
+
+//==============================================================================
+/*  DOH! D2 - WHAT WAS HEARD IS CARRIED ON, WHAT WAS NOT IS HANDED BACK EXACTLY
+    (2026-10-02, PRD §3.32, namespace draft §24.12).
+
+    A GO a Doh takes back that had been HEARD - a media or mic cue, a scene - is
+    paused: the next GO on that cue carries it on from where it was at the press,
+    arriving over a tenth of a second (the author, 2026-09-30). In place inside
+    the Doh fade; through the arm the standby makes at the point once the old
+    voice has gone; seated there cold when neither is possible; a scene
+    re-seated where it was. Where it was is its own PLAYHEAD at the press (K8's
+    rule, LQ), read by a hook on the next tick and carried on a record. What
+    nobody heard and the GO had ADOPTED - an arm, a prepared block, a member the
+    horizon armed under an act - is handed back exactly as it was before the GO.
+
+    Every case here was written first, and run on the code before D2 (the
+    engine sources put back to `main`, 767b545): what it says there is in
+    namespace draft §24.12. */
+namespace
+{
+    /*  What the engine publishes at `/godot/list/<id>/resume`: the cue the next
+        GO carries on and the second, empty for none, "absent" with no node. */
+    std::string resumeSaid (Rig& rig)
+    {
+        tree::MountTable mounts;
+        tree::ParameterTree parameters { rig.document, rig.engine.commands(), mounts, rig.runs };
+        parameters.setListState (&rig.runner.listState());
+        parameters.markStale();
+
+        tree::EngineState state;
+        const auto snapshot = parameters.publish (rig.tick, state);
+        REQUIRE (snapshot != nullptr);
+
+        const auto* node = snapshot->find ("/godot/list/" + rig.listId + "/resume");
+
+        if (node == nullptr || ! node->soleValue().has_value() || ! node->soleValue()->isString())
+            return "absent";
+
+        return node->soleValue()->getString();
+    }
+
+    /*  The level job on a run - not a speed's - or nothing. */
+    std::optional<cue::FadeJob> levelJob (const Rig& rig, const std::string& runId)
+    {
+        for (const auto& job : rig.runner.fades())
+            if (job.target == runId && ! job.movesRate)
+                return job;
+
+        return std::nullopt;
+    }
+
+    /*  How many records of one command the log holds, applied or not. */
+    std::size_t recordsOf (Rig& rig, const char* command)
+    {
+        const auto parsed = LogFile::parse (rig.engine.log().contents());
+
+        return static_cast<std::size_t> (std::count_if (parsed.records.begin(), parsed.records.end(),
+                                                         [command] (const auto& record)
+                                                         {
+                                                             return record.command == command;
+                                                         }));
+    }
+
+    /*  The newest unfinished run of a cue that is not `old`, or empty. */
+    std::string anotherLiveRunOf (const Rig& rig, const std::string& cueId, const std::string& old)
+    {
+        std::string out;
+
+        for (const auto& run : rig.runs.all())
+            if (run.cue == cueId && run.id != old && ! run.isFinished())
+                out = run.id;
+
+        return out;
+    }
+
+    /*  A heard media cue at the top of the list: armed at the standby, GO,
+        heard, and `seconds` of it played on a running clock. */
+    std::string goAndPlay (Rig& rig, const std::string& cueId, int ticks)
+    {
+        rig.setStandby (cueId);
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        const auto id = hear (rig, cueId);
+
+        for (int n = 0; n < ticks; ++n)
+            rig.tickOnce();
+
+        return id;
+    }
+
+    /*  The Doh fade waited out and the old voice gone - the fake voice stops
+        when the fade's stop reaches it - and the arm the standby makes at the
+        point then made. */
+    std::string waitForResumeArm (Rig& rig, const std::string& cueId, const std::string& old)
+    {
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (old)->isFinished(); }, 90));
+        REQUIRE (rig.tickUntil ([&] { return ! anotherLiveRunOf (rig, cueId, old).empty(); }, 20));
+        return anotherLiveRunOf (rig, cueId, old);
+    }
+
+    bool resumeNames (Rig& rig, const std::string& cueId)
+    {
+        const auto said = resumeSaid (rig);
+        return said == cueId || said.rfind (cueId + " ", 0) == 0;
+    }
+}
+
+TEST_CASE ("go.doh: a heard sound carries on at the next GO from where it was, in file time, arriving over the de-click")
+{
+    /*  The design's test 3. Where it was is the run's own playhead at the press
+        (K8's LQ): the readout the press's tick made off the sample clock, read
+        by the hook on the next tick and carried on `go.dohPlayhead`. */
+    Rig rig;
+    rig.clockRuns = true;
+
+    std::map<std::string, double> lengths { { "thunder.wav", 30.0 } };
+    rig.runner.setMediaDurations (&lengths);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    auto startsAt = 0.0;
+
+    SUBCASE ("at its own speed, from the top of its file") {}
+
+    SUBCASE ("at half its speed")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/rate", "0.5").ok);
+    }
+
+    SUBCASE ("a second into its file")
+    {
+        startsAt = 1.0;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/startOffset", "1").ok);
+    }
+
+    const auto old = goAndPlay (rig, rig.mediaId, 100);
+    const auto levelBefore = rig.runs.find (old)->ownLevel;
+
+    REQUIRE (doh (rig).rejected == 0);
+    const auto playhead = rig.runs.find (old)->position;
+    INFO ("the playhead at the press: " << playhead);
+    REQUIRE (playhead > startsAt + 0.5);
+
+    /*  Nothing more is armed while the old voice fades; then, once it has gone,
+        the standby arms the cue AT THE POINT - silent, no pre-wait, arriving
+        over the de-click at the level it had. */
+    const auto armId = waitForResumeArm (rig, rig.mediaId, old);
+    const auto* arm = rig.runs.find (armId);
+
+    CHECK (arm->startOffset == doctest::Approx (playhead));
+    CHECK (arm->deClick);
+    CHECK (arm->deClickTo == doctest::Approx (levelBefore));
+    CHECK (arm->preWaitTicks == 0);
+    CHECK_FALSE (arm->prepare.empty());
+    CHECK (arm->launchRequestedAtTick <= 0);
+
+    REQUIRE_FALSE (rig.audio.arms.empty());
+    CHECK (rig.audio.arms.back().runId == armId);
+    CHECK (rig.audio.arms.back().levelDb < -100.0);
+    CHECK (rig.audio.arms.back().startOffset == doctest::Approx (playhead));
+
+    CHECK (resumeNames (rig, rig.mediaId));
+
+    //  The corrected GO: no arm asked for, that run launched, the de-click on it.
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armId)->launchedAtSample > 0; }, 20));
+    CHECK (rig.audio.arms.empty());
+
+    const auto ramp = levelJob (rig, armId);
+    REQUIRE (ramp.has_value());
+    CHECK (ramp->ticksTotal == 5);
+    CHECK (ramp->fromDb < -100.0);
+    CHECK (ramp->toDb == doctest::Approx (levelBefore));
+
+    CHECK (resumeSaid (rig).empty());
+}
+
+TEST_CASE ("go.doh: a GO inside the Doh fade brings the same run back up")
+{
+    /*  The design's test 4: no second voice, no stop issued - the run the Doh
+        was fading is handed back to `playing` and brought back up to where it
+        was over the de-click. */
+    Rig rig;
+    rig.clockRuns = true;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    auto tracks = 4;
+
+    SUBCASE ("with voices to spare") {}
+
+    SUBCASE ("with no voice to spare: a second run could never have sounded")
+    {
+        tracks = 1;
+    }
+
+    rig.audio.tracks = tracks;
+
+    const auto old = goAndPlay (rig, rig.mediaId, 50);
+    const auto levelBefore = rig.runs.find (old)->ownLevel;
+    const auto track = rig.runs.find (old)->track;
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto* run = rig.runs.find (old);
+    CHECK (run->state == cue::runState::playing);
+    CHECK_FALSE (run->takenBack);
+    CHECK_FALSE (run->stopAsked);
+    CHECK (runsFor (rig, rig.mediaId) == 1u);
+
+    const auto up = levelJob (rig, old);
+    REQUIRE (up.has_value());
+    CHECK (up->ticksTotal == 5);
+    CHECK_FALSE (up->stopWhenDone);
+    CHECK (up->toDb == doctest::Approx (levelBefore));
+
+    //  Past where the Doh's stop would have landed: it never does.
+    for (int n = 0; n < 60; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (old)->state == cue::runState::playing);
+    CHECK (std::find (rig.audio.stopped.begin(), rig.audio.stopped.end(), track) == rig.audio.stopped.end());
+    CHECK (rig.runs.find (old)->ownLevel == doctest::Approx (levelBefore));
+}
+
+TEST_CASE ("go.doh: a cue caught before anyone heard it is exactly as it was")
+{
+    /*  The design's test 5 (the author, 2026-09-30, (c)): a cue in its pre-wait
+        is handed back - the same armed run, its mark on, its pre-wait not begun,
+        nobody's GO - and the corrected GO waits the whole of it again. Nothing
+        is armed a second time. */
+    Rig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/preWait", "2").ok);
+
+    rig.setStandby (rig.mediaId);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    const auto armed = rig.runs.liveRunOf (rig.mediaId)->id;
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.runs.find (armed)->state == cue::runState::waiting);
+
+    for (int n = 0; n < 50; ++n)
+        rig.tickOnce();
+
+    const auto armsLogged = recordsOf (rig, "audio.arm");
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    const auto* back = rig.runs.find (armed);
+    CHECK (back->state == cue::runState::armed);
+    CHECK (back->prepare == cue::preparedness::armed);
+    CHECK (back->dueTick == 0);
+    CHECK (back->goSerial == 0u);
+    CHECK_FALSE (back->takenBack);
+    CHECK_FALSE (back->launchRequested);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    CHECK (recordsOf (rig, "audio.arm") == armsLogged);
+    CHECK (runsFor (rig, rig.mediaId) == 1u);
+    CHECK (resumeSaid (rig).empty());
+
+    const auto goTick = rig.tick;
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    CHECK (rig.runs.find (armed)->state == cue::runState::waiting);
+    CHECK (rig.runs.find (armed)->dueTick == goTick + 100);
+}
+
+TEST_CASE ("go.doh: a scene carried on ends after its members, runs its footer once, and a GO on its last member walks on")
+{
+    /*  The design's test 1, the net that a resumed scene ends once: a manual act
+        whose last member is a timeline scene with a footer. The corrected GO
+        re-seats the scene where it was - its member at the point, no round drawn
+        again - and the pointer leaves the act behind it. */
+    ManualRig rig;
+    rig.clockRuns = true;
+
+    std::map<std::string, double> lengths { { "thunder.wav", 30.0 } };
+    rig.runner.setMediaDurations (&lengths);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto scene = rig.document.createCue (rig.groupId, 3, "group", "Storm").id;
+    rig.setCue (scene, "mode", "timeline");
+    const auto rain = rig.document.createCue (scene, 0, "media", "Rain").id;
+    rig.setCue (rain, "file", "thunder.wav");
+    const auto closing = rig.document.createCue (rig.roleOf (scene, "footer"), 0, "memo", "Release").id;
+
+    rig.setStandby (rig.first);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.standby() == scene);
+
+    /*  A tick for the horizon to make the scene ready under the act, as the
+        operator's reading the next line always gives it. */
+    rig.tickOnce();
+    REQUIRE (rig.runs.preparedRunOf (scene) != nullptr);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto act = rig.runOf (rig.groupId);
+    const auto oldScene = newestRunOf (rig, scene);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rain).empty(); }, 10));
+    const auto oldRain = hear (rig, rain);
+
+    for (int n = 0; n < 60; ++n)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+    const auto playhead = rig.runs.find (oldRain)->position;
+    REQUIRE (rig.standby() == scene);
+    CHECK (resumeNames (rig, scene));
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (oldRain)->isFinished(); }, 60));
+    const auto roundsBefore = recordsOf (rig, "run.round");
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    CHECK (rig.standby() == rig.after);
+
+    const auto seatedScene = newestRunOf (rig, scene);
+    REQUIRE (seatedScene != oldScene);
+    CHECK (rig.runs.find (seatedScene)->parent == act);
+    CHECK (rig.runs.find (seatedScene)->iteration == 1);
+
+    const auto seatedRain = newestRunOf (rig, rain);
+    REQUIRE (seatedRain != oldRain);
+    CHECK (rig.runs.find (seatedRain)->startOffset == doctest::Approx (playhead));
+    CHECK (rig.runs.find (seatedRain)->deClick);
+
+    //  The member plays out and ends: the scene's footer once, then the act.
+    rig.audio.completeArms (rig.engine);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (seatedRain)->launchedAtSample > 0; }, 20));
+    rig.audio.playing.insert (rig.runs.find (seatedRain)->track);
+    rig.tickOnce();
+    rig.audio.playing.erase (rig.runs.find (seatedRain)->track);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (seatedScene)->isFinished(); }, 60));
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (act)->isFinished(); }, 60));
+
+    CHECK (recordsOf (rig, "run.round") == roundsBefore);
+    CHECK (runsFor (rig, closing) == 1u);
+    CHECK (rig.standby() == rig.after);
+}
+
+TEST_CASE ("go.doh: a timeline scene carries on - over, sounding at its second, the late one due, what it fired fired again")
+{
+    /*  The design's test 7. A timeline - members at nought, two and ten
+        seconds, and a fade at one second on a bed OUTSIDE it - three seconds in
+        at the press: re-seated by the corrected GO with the first member at its
+        playhead, the second at its own, the last still due for what was left of
+        its wait, and the fade fired again from its start, as the first GO fired
+        it, its target not the scene's. Every run the seat made is on the GO's
+        record. (Its MIDI half is `MidiTests`' "a scene heard through a synth".) */
+    JumpRig rig;
+    rig.clockRuns = true;
+    rig.durations["thunder.wav"] = 30.0;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto under = rig.document.createCue (rig.scene, 3, "fade", "Under").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + under + "/target", rig.mediaId).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + under + "/level", "-10").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + under + "/duration", "0.5").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + under + "/preWait", "1").ok);
+
+    //  The bed, sounding before the GO.
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) }).rejected == 0);
+    hear (rig, rig.mediaId);
+
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto oldScene = newestRunOf (rig, rig.scene);
+
+    std::map<std::string, std::int64_t> since;
+    runOn (rig, rig.tick + 150, 30.0, since);
+
+    const auto oldEarly = newestRunOf (rig, rig.early);
+    const auto oldMiddle = newestRunOf (rig, rig.middle);
+    const auto oldLate = newestRunOf (rig, rig.late);
+    REQUIRE (rig.runs.find (oldLate)->state == cue::runState::waiting);
+
+    const auto dohTick = rig.tick;
+    REQUIRE (doh (rig).rejected == 0);
+
+    const auto earlyAt = rig.runs.find (oldEarly)->position;
+    const auto middleAt = rig.runs.find (oldMiddle)->position;
+    const auto lateLeft = rig.runs.find (oldLate)->dueTick - dohTick;
+    INFO ("at the press: the first member at " << earlyAt << ", the second at " << middleAt
+           << ", the last due in " << lateLeft << " ticks");
+
+    REQUIRE (earlyAt == doctest::Approx (3.0).epsilon (0.05));
+    REQUIRE (middleAt == doctest::Approx (1.0).epsilon (0.15));
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (oldEarly)->isFinished(); }, 60));
+    const auto fadesBefore = runsFor (rig, under);
+
+    const auto goTick = rig.tick;
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto scene = newestRunOf (rig, rig.scene);
+    REQUIRE (scene != oldScene);
+    CHECK (rig.runs.find (scene)->state == cue::runState::playing);
+    CHECK (liveJobOf (rig, scene) != nullptr);
+
+    const auto early = newestRunOf (rig, rig.early);
+    const auto middle = newestRunOf (rig, rig.middle);
+    const auto late = newestRunOf (rig, rig.late);
+
+    CHECK (rig.runs.find (early)->startOffset == doctest::Approx (earlyAt));
+    CHECK (rig.runs.find (middle)->startOffset == doctest::Approx (middleAt));
+    CHECK (rig.runs.find (late)->state == cue::runState::waiting);
+    CHECK (rig.runs.find (late)->dueTick == goTick + lateLeft);
+
+    //  The fade on the bed, fired again from its start on the next tick.
+    REQUIRE (runsFor (rig, under) == fadesBefore + 1);
+    rig.tickOnce();
+    CHECK (rig.runs.find (newestRunOf (rig, under))->launchRequestedAtTick == goTick + 1);
+
+    //  The GO's record carries every run the seat made.
+    std::vector<std::string> recorded;
+
+    for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+        if (record.command == "go")
+        {
+            recorded.clear();
+
+            for (const auto& arg : record.args)
+                recorded.push_back (arg.getString());
+        }
+
+    CHECK (recorded == std::vector<std::string> { scene, early, middle, late, newestRunOf (rig, under) });
+}
+
+TEST_CASE ("jump: an automatic sequence jumped into during a member's pre-wait plays on to its footer")
+{
+    /*  The design's test 2. A NET: K9's seat (§23.18, LZ) already waits on the
+        member due first, so this passed before D2; D2's own change to the seat
+        - members only, and the newest member over when nothing is unfinished -
+        must not undo it. */
+    GroupRig rig;
+    std::map<std::string, double> lengths;
+    rig.runner.setMediaDurations (&lengths);
+
+    rig.setCue (rig.second, "preWait", "2");
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+
+    REQUIRE (rig.engine.submit ("cli", "list.aim", { osc::Value::string (rig.listId), osc::Value::string (rig.second),
+                                                     osc::Value::float64 (0.5) }));
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("list.loadToTime", { osc::Value::string (rig.listId) }).rejected == 0);
+
+    const auto groupRun = rig.runOf (rig.groupId);
+    REQUIRE_FALSE (groupRun.empty());
+
+    CHECK (rig.runToCompletion (groupRun) < 400);
+    CHECK (runsFor (rig, rig.third) == 1u);
+    CHECK (runsFor (rig, closing) == 1u);
+}
+
+TEST_CASE ("go.doh: a sequence Doh'd in a member's pre-wait carries on to its footer")
+{
+    /*  The design's test 8: heard through its first member, the sequence is
+        re-seated where it was - the member in its pre-wait still waiting for
+        the rest of it - and carries on to its footer, playing nothing twice. */
+    GroupRig rig;
+    rig.clockRuns = true;
+
+    std::map<std::string, double> lengths { { "thunder.wav", 30.0 } };
+    rig.runner.setMediaDurations (&lengths);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto bell = rig.document.createCue (rig.groupId, 0, "media", "Bell").id;
+    rig.setCue (bell, "file", "thunder.wav");
+    rig.setCue (rig.first, "preWait", "2");
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto groupRun = rig.runOf (rig.groupId);
+
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (bell).empty(); }, 10));
+    const auto oldBell = hear (rig, bell);
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    //  The bell ends: the sequence moves on to the first memo, which waits.
+    rig.audio.playing.erase (rig.runs.find (oldBell)->track);
+    rig.tickOnce();
+    REQUIRE (rig.runs.find (oldBell)->isFinished());
+
+    SUBCASE ("in the first memo's pre-wait")
+    {
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto id = rig.runOf (rig.first);
+            return ! id.empty() && rig.runs.find (id)->state == cue::runState::waiting;
+        }, 10));
+
+        for (int n = 0; n < 20; ++n)
+            rig.tickOnce();
+
+        REQUIRE (doh (rig).rejected == 0);
+    }
+
+    SUBCASE ("in the tick between the bell's end and the next member's spawn")
+    {
+        REQUIRE (rig.runOf (rig.first).empty());
+        REQUIRE (doh (rig).rejected == 0);
+    }
+
+    CHECK (resumeNames (rig, rig.groupId));
+
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    const auto goTick = rig.tick;
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto seated = newestRunOf (rig, rig.groupId);
+    REQUIRE (seated != groupRun);
+
+    //  Nothing of the bell plays again: its seat is over.
+    for (const auto& run : rig.runs.all())
+        if (run.cue == bell && run.id != oldBell)
+        {
+            CHECK (run.isFinished());
+            CHECK (run.launchRequestedAtTick < goTick);
+        }
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (seated)->isFinished(); }, 300));
+
+    //  The memos once each that played, in the seated sequence, and the footer once.
+    const auto playedUnder = [&rig, &seated] (const std::string& cueId)
+    {
+        return std::count_if (rig.runs.all().begin(), rig.runs.all().end(), [&] (const cue::Run& run)
+        {
+            return run.cue == cueId && run.parent == seated && run.launchRequestedAtTick > 0;
+        });
+    };
+
+    CHECK (playedUnder (rig.first) == 1);
+    CHECK (playedUnder (rig.second) == 1);
+    CHECK (playedUnder (rig.third) == 1);
+    CHECK (runsFor (rig, closing) == 1u);
+}
+
+TEST_CASE ("go.doh: a sound inside a running act resumes like a top-level one")
+{
+    /*  The design's test 9 (HF): in place inside the Doh fade, back among the
+        act's members; after it, armed at the point under the act by the
+        horizon, and launched by the act's job at the corrected GO. */
+    ManualRig rig;
+    rig.clockRuns = true;
+
+    std::map<std::string, double> lengths { { "bell.wav", 30.0 } };
+    rig.runner.setMediaDurations (&lengths);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    const auto bell = rig.document.createCue (rig.groupId, 3, "media", "Bell").id;
+    rig.setCue (bell, "file", "bell.wav");
+    const auto closing = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+
+    auto tracks = 4;
+    auto insideTheFade = true;
+
+    SUBCASE ("a GO inside the Doh fade") {}
+    SUBCASE ("a GO inside the Doh fade with no voice to spare") { tracks = 1; }
+    SUBCASE ("a GO after the Doh fade") { insideTheFade = false; }
+
+    rig.audio.tracks = tracks;
+
+    rig.setStandby (rig.first);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.standby() == bell);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto act = rig.runOf (rig.groupId);
+    const auto old = hear (rig, bell);
+    REQUIRE (rig.runs.find (old)->parent == act);
+
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    const auto levelBefore = rig.runs.find (old)->ownLevel;
+    REQUIRE (doh (rig).rejected == 0);
+    const auto playhead = rig.runs.find (old)->position;
+    CHECK (resumeNames (rig, bell));
+
+    if (insideTheFade)
+    {
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        rig.audio.arms.clear();
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto* run = rig.runs.find (old);
+        CHECK (run->state == cue::runState::playing);
+        CHECK_FALSE (run->takenBack);
+        CHECK (run->parent == act);
+        CHECK (runsFor (rig, bell) == 1u);
+        CHECK (rig.audio.arms.empty());
+
+        const auto* job = liveJobOf (rig, act);
+        REQUIRE (job != nullptr);
+        CHECK (std::find (job->phaseRuns.begin(), job->phaseRuns.end(), old) != job->phaseRuns.end());
+
+        const auto up = levelJob (rig, old);
+        REQUIRE (up.has_value());
+        CHECK (up->ticksTotal == 5);
+        CHECK (up->toDb == doctest::Approx (levelBefore));
+
+        //  It ends; then the act's footer, once.
+        rig.tickOnce();
+        rig.audio.playing.erase (rig.runs.find (old)->track);
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (act)->isFinished(); }, 60));
+        CHECK (runsFor (rig, closing) == 1u);
+        return;
+    }
+
+    const auto preparesBefore = recordsOf (rig, "run.prepare");
+    const auto armId = waitForResumeArm (rig, bell, old);
+    const auto* arm = rig.runs.find (armId);
+
+    CHECK (arm->parent == act);
+    CHECK (arm->deClick);
+    CHECK (arm->preWaitTicks == 0);
+    CHECK (arm->startOffset == doctest::Approx (playhead));
+    CHECK (recordsOf (rig, "run.prepare") > preparesBefore);
+    REQUIRE_FALSE (rig.audio.arms.empty());
+    CHECK (rig.audio.arms.back().levelDb < -100.0);
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armId)->launchedAtSample > 0; }, 20));
+    CHECK (rig.audio.arms.empty());
+
+    const auto ramp = levelJob (rig, armId);
+    REQUIRE (ramp.has_value());
+    CHECK (ramp->ticksTotal == 5);
+    CHECK (ramp->toDb == doctest::Approx (levelBefore));
+
+    rig.audio.playing.insert (rig.runs.find (armId)->track);
+    rig.tickOnce();
+    rig.audio.playing.erase (rig.runs.find (armId)->track);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (act)->isFinished(); }, 60));
+    CHECK (runsFor (rig, closing) == 1u);
+}
+
+TEST_CASE ("go.doh: the resume is kept across the pointer walking away and back, and dropped by a GO on another cue, a jump, a fire by name, a second Doh")
+{
+    /*  The design's test 10 (§4.3). After each drop, the next GO on the cue
+        starts it from its own top, at its own level. */
+    HistoryRig rig;
+    rig.clockRuns = true;
+
+    std::map<std::string, double> lengths { { "thunder.wav", 30.0 } };
+    rig.runner.setMediaDurations (&lengths);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto old = goAndPlay (rig, rig.mediaId, 50);
+
+    REQUIRE (doh (rig).rejected == 0);
+    const auto playhead = rig.runs.find (old)->position;
+    const auto armId = waitForResumeArm (rig, rig.mediaId, old);
+    REQUIRE (rig.runs.find (armId)->startOffset == doctest::Approx (playhead));
+
+    auto resumes = false;
+
+    SUBCASE ("the pointer walks away and comes back: kept")
+    {
+        resumes = true;
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.second) }).rejected == 0);
+        rig.tickOnce();
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.mediaId) }).rejected == 0);
+        rig.tickOnce();
+    }
+
+    SUBCASE ("a GO on another cue: dropped")
+    {
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.second) }).rejected == 0);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.mediaId) }).rejected == 0);
+    }
+
+    SUBCASE ("a jump: dropped")
+    {
+        REQUIRE (rig.engine.submit ("cli", "list.aim", { osc::Value::string (rig.listId), osc::Value::string (rig.second),
+                                                         osc::Value::float64 (0.0) }));
+        rig.tickOnce();
+        REQUIRE (rig.submitAndTick ("list.loadToTime", { osc::Value::string (rig.listId) }).rejected == 0);
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.mediaId) }).rejected == 0);
+    }
+
+    SUBCASE ("a second Doh!, once the arm at the point exists: forgotten, and the arm revoked")
+    {
+        REQUIRE (doh (rig).rejected == 0);
+        CHECK (rig.runs.find (armId)->isFinished());
+        CHECK (rig.runs.find (armId)->warning == cue::runWarning::revoked);
+        CHECK (resumeSaid (rig).empty());
+    }
+
+    if (! resumes)
+    {
+        CHECK (resumeSaid (rig).empty());
+
+        //  The standby arms the cue afresh: its own offset, its own level.
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto* live = rig.runs.liveRunOf (rig.mediaId);
+            return live != nullptr && live->id != armId && live->id != old && ! live->deClick;
+        }, 20));
+    }
+    else
+    {
+        CHECK (resumeNames (rig, rig.mediaId));
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.liveRunOf (rig.mediaId) != nullptr; }, 20));
+    }
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto played = rig.runs.liveRunOf (rig.mediaId)->id;
+
+    if (resumes)
+    {
+        CHECK (rig.runs.find (played)->deClick);
+        CHECK (rig.runs.find (played)->startOffset == doctest::Approx (playhead));
+    }
+    else
+    {
+        CHECK_FALSE (rig.runs.find (played)->deClick);
+        CHECK (rig.runs.find (played)->startOffset == doctest::Approx (0.0));
+    }
+}
+
+TEST_CASE ("go.doh: a second press inside the GO debounce is refused and the resume stands")
+{
+    /*  The design's test 10, its last SUBCASE (GG): a bounce is not the
+        deliberate second press that forgets the resume. */
+    Rig rig;
+    rig.clockRuns = true;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    const auto old = goAndPlay (rig, rig.mediaId, 50);
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0.5").ok);
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (doh (rig).rejected == 1);
+    CHECK (refusedFor (rig, "too-soon"));
+    CHECK (resumeNames (rig, rig.mediaId));
+    CHECK (rig.runs.find (old)->takenBack);
+}
+
+TEST_CASE ("go.doh: a sound that ended inside the window starts from the top; the guard is in file seconds")
+{
+    /*  The design's test 11 (ruling 16; FT): a ten-second file, each Doh'd a
+        few seconds after its start. Where it carries on is a second of the
+        FILE, held against the file's own length less half a second of the
+        clock. */
+    Rig rig;
+    rig.clockRuns = true;
+
+    std::map<std::string, double> lengths { { "thunder.wav", 10.0 } };
+    rig.runner.setMediaDurations (&lengths);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    auto ticks = 150;
+    auto carriesOn = true;
+    auto ended = false;
+    auto sliced = false;
+
+    SUBCASE ("starting five seconds in: carried on at about eight")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/startOffset", "5").ok);
+    }
+
+    SUBCASE ("at twice its speed: carried on at about six")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/rate", "2").ok);
+    }
+
+    SUBCASE ("at twice its speed, a second and a half from its end: from the top")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/rate", "2").ok);
+        ticks = 235;
+        carriesOn = false;
+    }
+
+    SUBCASE ("in the second of two slices: carried on inside it")
+    {
+        sliced = true;
+        rig.audio.slots = 2;
+        REQUIRE (rig.document.createRange (rig.mediaId, 0.0, 2.0).ok);
+        REQUIRE (rig.document.createRange (rig.mediaId, 5.0, 9.0).ok);
+    }
+
+    SUBCASE ("over before the Doh: from the top")
+    {
+        ended = true;
+        carriesOn = false;
+    }
+
+    const auto old = goAndPlay (rig, rig.mediaId, ticks);
+
+    if (ended)
+    {
+        rig.audio.playing.erase (rig.runs.find (old)->track);
+        rig.tickOnce();
+        REQUIRE (rig.runs.find (old)->isFinished());
+    }
+
+    if (sliced)
+        REQUIRE (rig.runs.find (old)->range == 1);
+
+    REQUIRE (doh (rig).rejected == 0);
+    const auto playhead = rig.runs.find (old)->position;
+    const auto into = rig.runs.find (old)->slicePlayed;
+    INFO ("the playhead at the press: " << playhead << ", in the slice " << into);
+
+    if (! carriesOn)
+    {
+        rig.tickOnce();
+        CHECK (resumeSaid (rig).empty());
+
+        if (! ended)
+            REQUIRE (rig.tickUntil ([&] { return rig.runs.find (old)->isFinished(); }, 60));
+
+        REQUIRE (rig.tickUntil ([&] { return ! anotherLiveRunOf (rig, rig.mediaId, old).empty(); }, 20));
+        const auto* fresh = rig.runs.find (anotherLiveRunOf (rig, rig.mediaId, old));
+        CHECK_FALSE (fresh->deClick);
+        CHECK (fresh->startOffset == doctest::Approx (0.0));
+        return;
+    }
+
+    CHECK (resumeNames (rig, rig.mediaId));
+
+    const auto armId = waitForResumeArm (rig, rig.mediaId, old);
+    const auto* arm = rig.runs.find (armId);
+    CHECK (arm->deClick);
+
+    if (sliced)
+    {
+        CHECK (arm->startRange == 1);
+        CHECK (arm->sliceFrom == doctest::Approx (into));
+    }
+    else
+    {
+        CHECK (arm->startOffset == doctest::Approx (playhead));
+    }
+}
+
+TEST_CASE ("go.doh: a scene that loops, shuffles or plays some of its members starts from the top")
+{
+    /*  The design's test 12 (ruling 17, L4): a round the scene drew is not a
+        place the plan can seat, so it is not carried on: the next GO draws its
+        rounds afresh. A sampler bank is not here: heard only through a pad,
+        and a pad of the bank the GO armed makes the Doh refuse (GI). */
+    RoundRig rig;
+    rig.clockRuns = true;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto bell = rig.document.createCue (rig.groupId, 0, "media", "Bell").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + bell + "/file", "thunder.wav").ok);
+
+    SUBCASE ("loops") { rig.setGroup ("loops", "2"); }
+    SUBCASE ("shuffles") { rig.setGroup ("selection", "shuffle"); rig.setGroup ("seed", "7"); }
+    SUBCASE ("plays two of its four members") { rig.setGroup ("play", "2"); }
+
+    rig.setStandby (rig.groupId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto group = rig.groupRun();
+
+    REQUIRE (rig.tickUntil ([&] { return ! anotherLiveRunOf (rig, bell, {}).empty(); }, 10));
+    hear (rig, bell);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (resumeSaid (rig).empty());
+
+    for (int n = 0; n < 40; ++n)
+        rig.tickOnce();
+
+    const auto roundsBefore = recordsOf (rig, "run.round");
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (newestRunOf (rig, rig.groupId) != group);
+    CHECK (recordsOf (rig, "run.round") > roundsBefore);
+}
+
+TEST_CASE ("go.doh: a Doh of the corrected GO before anyone heard it gives the resume back")
+{
+    /*  The design's test 13: the corrected GO launched the arm at the point and
+        nothing had sounded yet; a Doh of it hands the arm back exactly - an arm
+        at the point again - and the mark that GO found, its resume, with it. */
+    Rig rig;
+    rig.clockRuns = true;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto old = goAndPlay (rig, rig.mediaId, 50);
+    REQUIRE (doh (rig).rejected == 0);
+    const auto playhead = rig.runs.find (old)->position;
+
+    const auto armId = waitForResumeArm (rig, rig.mediaId, old);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    //  The corrected GO and, in its own drain, a Doh of it: nothing heard.
+    REQUIRE (rig.engine.submit ("cli", "go", {}));
+    REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+    rig.tickOnce();
+
+    const auto* arm = rig.runs.find (armId);
+    CHECK_FALSE (arm->isFinished());
+    CHECK (arm->launchRequestedAtTick <= 0);
+    CHECK_FALSE (arm->launchRequested);
+    CHECK (arm->goSerial == 0u);
+    CHECK (arm->deClick);
+    CHECK (resumeNames (rig, rig.mediaId));
+    CHECK (rig.standby() == rig.mediaId);
+
+    //  And the GO after it carries the cue on, from the same arm.
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armId)->launchedAtSample > 0; }, 20));
+    CHECK (rig.runs.find (armId)->startOffset == doctest::Approx (playhead));
+    CHECK (runsFor (rig, rig.mediaId) == 2u);
+}
+
+TEST_CASE ("go.doh: a session with a pause, a resume in place, a warm resume and a seated scene replays record for record")
+{
+    /*  The design's test 15: every decision of the carry-on from handler state
+        and logged records - the playhead reaching the resume on its record - so
+        a replay with no audio side reaches the same runs, the same states, the
+        same GOs. */
+    JumpRig rig;
+    rig.clockRuns = true;
+    rig.durations["thunder.wav"] = 30.0;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto wind = rig.document.createCue (rig.listId, 4, "media", "Wind").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + wind + "/file", "thunder.wav").ok);
+
+    const auto park = [&rig] (const std::string& cueId)
+    {
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (cueId) }).rejected == 0);
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+        rig.tickOnce();
+    };
+
+    //  A sound, paused and brought back up inside the Doh fade.
+    park (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto thunder = hear (rig, rig.mediaId);
+
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    CHECK_FALSE (rig.runs.find (thunder)->takenBack);
+
+    //  Another, paused and carried on warm once its old voice has gone.
+    park (wind);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto oldWind = hear (rig, wind);
+
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+    const auto windArm = waitForResumeArm (rig, wind, oldWind);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (windArm)->launchedAtSample > 0; }, 20));
+
+    //  A scene, paused and re-seated.
+    park (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    std::map<std::string, std::int64_t> since;
+    runOn (rig, rig.tick + 150, 30.0, since);
+
+    REQUIRE (doh (rig).rejected == 0);
+    const auto oldEarly = newestRunOf (rig, rig.early);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (oldEarly)->isFinished(); }, 60));
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    CHECK (newestRunOf (rig, rig.early) != oldEarly);
+
+    runOn (rig, rig.tick + 20, 30.0, since);
+
+    replaysTheSame (rig);
+}
+
+TEST_CASE ("go.doh: a resume arm launched by any road arrives through its de-click")
+{
+    /*  The design's test 16 (GI): the arrival is the run's own. A seek of the
+        arm plays it where the hand put it, over the de-click, and spends the
+        resume - a later GO on the cue is decision N's "already sounding", never
+        a second copy at the point. A fire of the cue by name starts it from its
+        top: the arm at the point is revoked first. */
+    Rig rig;
+    rig.clockRuns = true;
+
+    std::map<std::string, double> lengths { { "thunder.wav", 30.0 } };
+    rig.runner.setMediaDurations (&lengths);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto old = goAndPlay (rig, rig.mediaId, 50);
+    const auto levelBefore = rig.runs.find (old)->ownLevel;
+
+    REQUIRE (doh (rig).rejected == 0);
+    const auto armId = waitForResumeArm (rig, rig.mediaId, old);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    SUBCASE ("a seek of it")
+    {
+        REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (armId), osc::Value::float64 (1.0) }).rejected == 0);
+
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armId)->launchedAtSample > 0; }, 20));
+
+        const auto ramp = levelJob (rig, armId);
+        REQUIRE (ramp.has_value());
+        CHECK (ramp->ticksTotal == 5);
+        CHECK (ramp->fromDb < -100.0);
+        CHECK (ramp->toDb == doctest::Approx (levelBefore));
+        CHECK (resumeSaid (rig).empty());
+
+        //  A GO on the cue now: already sounding.
+        REQUIRE (rig.standby() == rig.mediaId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (runsFor (rig, rig.mediaId) == 2u);
+    }
+
+    SUBCASE ("a fire of the cue by name")
+    {
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) }).rejected == 0);
+
+        CHECK (rig.runs.find (armId)->isFinished());
+        CHECK (rig.runs.find (armId)->warning == cue::runWarning::revoked);
+
+        const auto fresh = anotherLiveRunOf (rig, rig.mediaId, armId);
+        REQUIRE_FALSE (fresh.empty());
+        CHECK_FALSE (rig.runs.find (fresh)->deClick);
+        CHECK (rig.runs.find (fresh)->startOffset == doctest::Approx (0.0));
+        CHECK (resumeSaid (rig).empty());
+    }
+}
+
+TEST_CASE ("go.doh drained before a stale run.fire, run.started or run.spawn of what it hands back: each applied and ignored")
+{
+    /*  The design's test 17 (§1.6, GZ): a record a hook decided on the adopted
+        state, in the Doh's own tick, drains after the Doh - and is applied and
+        ignored, so the cue does not play by itself and the corrected GO is not
+        ignored. Each session replays record for record. */
+    SUBCASE ("a pre-wait's end")
+    {
+        Rig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/preWait", "2").ok);
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.mediaId) }).rejected == 0);
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+
+        const auto armed = rig.runs.liveRunOf (rig.mediaId)->id;
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        const auto due = rig.runs.find (armed)->dueTick;
+
+        while (rig.tick < due)
+            rig.tickOnce();
+
+        //  Drained in the tick whose hook submits the run's `run.fire`.
+        REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+        rig.tickOnce();
+
+        const auto* back = rig.runs.find (armed);
+        CHECK (back->state == cue::runState::armed);
+        CHECK_FALSE (back->prepare.empty());
+        CHECK_FALSE (back->launchRequested);
+
+        for (int n = 0; n < 60; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runs.find (armed)->launchedAtSample == 0);
+        CHECK (rig.runs.find (armed)->state == cue::runState::armed);
+
+        const auto goTick = rig.tick;
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (rig.runs.find (armed)->state == cue::runState::waiting);
+        CHECK (rig.runs.find (armed)->dueTick == goTick + 100);
+
+        replaysTheSame (rig);
+    }
+
+    SUBCASE ("a launch placed")
+    {
+        Rig rig;
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.mediaId) }).rejected == 0);
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+
+        const auto armed = rig.runs.liveRunOf (rig.mediaId)->id;
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.runs.find (armed)->launchRequested);
+
+        //  Drained in the tick whose hook places the launch and reports it.
+        REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+        rig.tickOnce();
+
+        const auto* back = rig.runs.find (armed);
+        CHECK (back->state == cue::runState::armed);
+        CHECK (back->startedAtTick < 0);
+        CHECK_FALSE (back->launchRequested);
+
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+        rig.tickOnce();
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armed)->startedAtTick >= 0; }, 20));
+        CHECK (runsFor (rig, rig.mediaId) == 1u);
+
+        replaysTheSame (rig);
+    }
+
+    SUBCASE ("a header cue spawned by the block's job")
+    {
+        PrepareRig rig;
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.sound) }).rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return rig.prepared (rig.groupId) != nullptr && ! rig.runOf (rig.sound).empty(); }, 10));
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+
+        const auto block = rig.prepared (rig.groupId)->id;
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.runs.find (block)->state == cue::runState::playing);
+
+        //  Drained in the tick whose hook spawns the header's memo.
+        REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+        rig.tickOnce();
+
+        CHECK (rig.runs.find (block)->state == cue::runState::preparing);
+
+        const auto opening = rig.runOf (rig.opening);
+        REQUIRE_FALSE (opening.empty());
+        CHECK (rig.runs.find (opening)->isFinished());
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&]
+        {
+            return std::any_of (rig.runs.all().begin(), rig.runs.all().end(), [&rig, &opening] (const cue::Run& run)
+            {
+                return run.cue == rig.opening && run.id != opening && run.launchRequestedAtTick > 0;
+            });
+        }, 20));
+
+        replaysTheSame (rig);
+    }
+}
+
+TEST_CASE ("go.doh: the corrected GO back-dates its step only when it carried the cue on")
+{
+    /*  The design's test 18 (red team m4): the `g` the Doh erased, moved
+        forward by the time the cue spent paused, when the GO carried it on; the
+        GO's own tick when it started the cue from its top. */
+    HistoryRig rig;
+    rig.clockRuns = true;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto goTickOf = [&rig]
+    {
+        std::int64_t out = -1;
+
+        for (const auto& step : rig.runner.listState().historyOf (rig.listId))
+            if (step.origin == 'g' && step.cue == rig.mediaId)
+                out = step.tick;
+
+        return out;
+    };
+
+    SUBCASE ("carried on: back-dated")
+    {
+        const auto old = goAndPlay (rig, rig.mediaId, 50);
+        const auto firstGo = goTickOf();
+
+        const auto dohTick = rig.tick;
+        REQUIRE (doh (rig).rejected == 0);
+        waitForResumeArm (rig, rig.mediaId, old);
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+
+        const auto correctedAt = rig.tick;
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        CHECK (goTickOf() == firstGo + (correctedAt - dohTick));
+    }
+
+    SUBCASE ("its act stopped since: from the top, and stepped now")
+    {
+        ManualRig act;
+        act.clockRuns = true;
+        REQUIRE (act.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+        const auto bell = act.document.createCue (act.groupId, 3, "media", "Bell").id;
+        act.setCue (bell, "file", "bell.wav");
+
+        act.setStandby (act.first);
+        REQUIRE (act.submitAndTick ("go").rejected == 0);
+        REQUIRE (act.submitAndTick ("go").rejected == 0);
+        REQUIRE (act.submitAndTick ("go").rejected == 0);
+        REQUIRE (act.submitAndTick ("go").rejected == 0);
+
+        const auto actRun = act.runOf (act.groupId);
+        hear (act, bell);
+
+        for (int n = 0; n < 20; ++n)
+            act.tickOnce();
+
+        REQUIRE (doh (act).rejected == 0);
+        REQUIRE (act.submitAndTick ("run.stop", { osc::Value::string (actRun) }).rejected == 0);
+
+        const auto correctedAt = act.tick;
+        REQUIRE (act.submitAndTick ("go").rejected == 0);
+
+        std::int64_t stepped = -1;
+
+        for (const auto& step : act.runner.listState().historyOf (act.listId))
+            if (step.origin == 'g' && step.cue == bell)
+                stepped = step.tick;
+
+        CHECK (stepped == correctedAt);
+    }
+}
+
+TEST_CASE ("go.doh: while the resume arm waits for the old voice, a surface's arm of another cue is left alone")
+{
+    /*  The design's test 19 (red team m10). A NET: D1 already waited through a
+        memory rather than by re-running the standby's revocation pass, so this
+        passed before D2; the arm at the point must not bring that pass back. */
+    Rig rig;
+    rig.clockRuns = true;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    const auto rain = rig.document.createCue (rig.listId, 2, "media", "Rain").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav").ok);
+
+    const auto old = goAndPlay (rig, rig.mediaId, 30);
+    REQUIRE (doh (rig).rejected == 0);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    const auto revokesBefore = recordsOf (rig, "run.revoke");
+    REQUIRE (rig.engine.submit ("surface:d700", "audio.arm", { osc::Value::string (rain) }));
+    rig.tickOnce();
+
+    const auto surfaceArm = rig.runOf (rain);
+    REQUIRE_FALSE (surfaceArm.empty());
+
+    waitForResumeArm (rig, rig.mediaId, old);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (surfaceArm)->state == cue::runState::armed);
+    CHECK (rig.runs.find (surfaceArm)->warning.empty());
+    CHECK (recordsOf (rig, "run.revoke") == revokesBefore);
+}
+
+TEST_CASE ("go.doh: a scene heard before it reached its members starts from the top, whole")
+{
+    /*  The design's test 20 (red team A major): heard in its header, a scene
+        has not reached its members - by launch evidence, never by a member's run
+        existing, which the horizon's arms adopted with the block always do - so
+        nothing of it is carried on, and the next GO enters it from its header.
+        A NET against D1, which started every scene from the top. */
+    PrepareRig rig;
+    rig.clockRuns = true;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto intro = rig.document.createCue (rig.roleOf (rig.groupId, "header"), 0, "media", "Intro").id;
+    rig.setCue (intro, "file", "intro.wav");
+    rig.setCue (rig.opening, "preWait", "2");
+
+    rig.setStandby (rig.sound);
+    REQUIRE (rig.tickUntil ([&] { return rig.prepared (rig.groupId) != nullptr; }, 10));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (intro).empty(); }, 10));
+    const auto oldIntro = hear (rig, intro);
+
+    //  The intro ends; the header's memo waits its two seconds.
+    rig.audio.playing.erase (rig.runs.find (oldIntro)->track);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.opening).empty(); }, 10));
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (resumeSaid (rig).empty());
+
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    //  The header again, from its top: the intro launched afresh.
+    REQUIRE (rig.tickUntil ([&]
+    {
+        return std::any_of (rig.runs.all().begin(), rig.runs.all().end(), [&] (const cue::Run& run)
+        {
+            return run.cue == intro && run.id != oldIntro && run.launchRequestedAtTick > 0;
+        });
+    }, 30));
+}
+
+TEST_CASE ("go.doh: a resumed scene's own fades carry on, never from silence")
+{
+    /*  The design's test 21 (HG): a timeline whose fade member takes its first
+        member down. The member's new run arrives at the level the fade had
+        brought it to; a fade still moving at the press carries on, in the same
+        job, to where it was going over the time it had left. */
+    JumpRig rig;
+    rig.clockRuns = true;
+    rig.durations["thunder.wav"] = 30.0;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    const auto down = rig.document.createCue (rig.scene, 3, "fade", "Down").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + down + "/target", rig.early).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + down + "/level", "-20").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + down + "/preWait", "1").ok);
+
+    auto moving = false;
+    auto stops = false;
+
+    SUBCASE ("a one-second fade, over by the press: the member arrives at -20")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + down + "/duration", "1").ok);
+    }
+
+    SUBCASE ("a six-second fade, two seconds into it at the press: carried on")
+    {
+        moving = true;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + down + "/duration", "6").ok);
+    }
+
+    SUBCASE ("a six-second fade-and-stop, still moving: carried on to its stop")
+    {
+        moving = true;
+        stops = true;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + down + "/duration", "6").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + down + "/stopWhenDone", "true").ok);
+    }
+
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    std::map<std::string, std::int64_t> since;
+    runOn (rig, rig.tick + 150, 30.0, since);
+
+    const auto oldEarly = newestRunOf (rig, rig.early);
+    const auto fadesBefore = runsFor (rig, down);
+
+    /*  The level at the press: the press's own tick has moved the fade on
+        once more before the Doh drains. */
+    REQUIRE (doh (rig).rejected == 0);
+    const auto pressLevel = rig.runs.find (oldEarly)->ownLevel;
+    INFO ("the member's level at the press: " << pressLevel);
+
+    if (moving)
+        REQUIRE (pressLevel > -19.0);
+    else
+        REQUIRE (pressLevel == doctest::Approx (-20.0));
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (oldEarly)->isFinished(); }, 60));
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto seated = newestRunOf (rig, rig.early);
+    REQUIRE (seated != oldEarly);
+    CHECK (rig.runs.find (seated)->deClickTo == doctest::Approx (pressLevel));
+
+    //  Not fired again: no run of the fade is moving any more.
+    rig.tickOnce();
+    CHECK (runsFor (rig, down) <= fadesBefore + 1);
+
+    for (const auto& run : rig.runs.all())
+        if (run.cue == down)
+            CHECK (run.isFinished());
+
+    //  Launched, and arrived over the de-click at the level it had.
+    for (int n = 0; n < 20 && rig.runs.find (seated)->launchedAtSample <= 0; ++n)
+        runOn (rig, rig.tick + 1, 30.0, since);
+
+    REQUIRE (rig.runs.find (seated)->launchedAtSample > 0);
+    runOn (rig, rig.tick + 6, 30.0, since);
+    CHECK (std::abs (rig.runs.find (seated)->ownLevel - pressLevel) < 1.0);
+
+    if (! moving)
+        return;
+
+    //  And on, to -20, over what the fade had left: about four seconds.
+    runOn (rig, rig.tick + 230, 30.0, since);
+
+    if (stops)
+    {
+        CHECK (rig.runs.find (seated)->isFinished());
+        return;
+    }
+
+    CHECK (rig.runs.find (seated)->ownLevel == doctest::Approx (-20.0));
+}
+
+TEST_CASE ("go.doh: a scene a fade from outside had dipped is seated at its dipped level")
+{
+    /*  The design's test 21, its last SUBCASE in the shape a top-level scene
+        has (HG): a scene's own level is carried, so one a fade had brought down
+        does not come back up at the resume. */
+    JumpRig rig;
+    rig.clockRuns = true;
+    rig.durations["thunder.wav"] = 30.0;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.4").ok);
+
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    std::map<std::string, std::int64_t> since;
+    runOn (rig, rig.tick + 50, 30.0, since);
+
+    /*  A fade on the scene from outside it - on another list, since a fire on
+        the GO's own list after the GO would make the Doh refuse. */
+    const auto sceneRun = newestRunOf (rig, rig.scene);
+    const auto other = rig.document.createList ("Side").id;
+    const auto dip = rig.document.createCue (other, 0, "fade", "Dip").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/target", rig.scene).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/level", "-12").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + dip + "/duration", "0.2").ok);
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (dip) }).rejected == 0);
+
+    runOn (rig, rig.tick + 30, 30.0, since);
+    REQUIRE (rig.runs.find (sceneRun)->ownLevel == doctest::Approx (-12.0));
+
+    REQUIRE (doh (rig).rejected == 0);
+    runOn (rig, rig.tick + 40, 30.0, since);
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto seated = newestRunOf (rig, rig.scene);
+    REQUIRE (seated != sceneRun);
+    CHECK (rig.runs.find (seated)->ownLevel == doctest::Approx (-12.0));
+}
+
+TEST_CASE ("go.doh: a GO inside the Doh fade after something else stopped the run seats it anew at the point")
+{
+    /*  The design's test 22 (HH, red team B minor 2): handed back to `playing`
+        on a voice a kill had cut, the run would have been silent and the mark
+        spent. Something other than the Doh asked it to stop, so the GO seats
+        the cue at the point instead. */
+    Rig rig;
+    rig.clockRuns = true;
+
+    std::map<std::string, double> lengths { { "thunder.wav", 30.0 } };
+    rig.runner.setMediaDurations (&lengths);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    const auto old = goAndPlay (rig, rig.mediaId, 50);
+    REQUIRE (doh (rig).rejected == 0);
+    const auto playhead = rig.runs.find (old)->position;
+
+    SUBCASE ("a double Esc") { REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0); }
+    SUBCASE ("an Esc") { REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0); }
+    SUBCASE ("a kill of it from the running pane") { REQUIRE (rig.submitAndTick ("run.kill", { osc::Value::string (old) }).rejected == 0); }
+
+    for (int n = 0; n < 4; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto seated = anotherLiveRunOf (rig, rig.mediaId, old);
+    REQUIRE_FALSE (seated.empty());
+    CHECK (rig.runs.find (seated)->startOffset == doctest::Approx (playhead));
+    CHECK (rig.runs.find (seated)->deClick);
+    CHECK_FALSE (rig.runs.find (old)->state == cue::runState::playing);
 }

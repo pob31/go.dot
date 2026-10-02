@@ -1078,8 +1078,15 @@ TEST_CASE ("go.doh: a MIDI cue to a port that plays sound makes its scene heard;
     for (int n = 0; n < 5; ++n)
         rig.tickOnce();
 
-    CHECK (rig.runs.find (sceneRun)->isFinished());
-    CHECK (rig.revocations() == (heard ? 0u : 1u));
+    /*  (2026-10-02, D2: a scene nobody heard, the block the standby made ready
+        and the GO adopted, is handed back exactly - prepared again, nothing
+        revoked - where D1 gave it back the way a preparation is given back.) */
+    if (heard)
+        CHECK (rig.runs.find (sceneRun)->isFinished());
+    else
+        CHECK (rig.runs.find (sceneRun)->state == cue::runState::preparing);
+
+    CHECK (rig.revocations() == 0u);
 }
 
 TEST_CASE ("go.doh: a MIDI port left to its operator gets the cue once in all")
@@ -1144,6 +1151,96 @@ TEST_CASE ("go.doh: a MIDI cue that found no port sent nothing, so the corrected
 
     CHECK (rig.sink.sent.size() == 1u);
     CHECK (rig.newestRunOf (note)->warning.empty());
+}
+
+TEST_CASE ("go.doh: a scene heard through a synth is carried on - what it sent goes again only where its port takes back")
+{
+    /*  Doh! D2 (2026-10-02, namespace draft §24.12; the design's test 26, and
+        the MIDI half of its test 7). A scene whose only sound so far was a MIDI
+        cue to a port that plays sound was heard: paused, and the next GO carries
+        it on - the line it was waiting on waits only what was left of its wait.
+        What the note sent went to a port left to its operator, so it is not sent
+        again; to one that takes back, the corrected GO sends it again, as a
+        first GO would. On a port that does not play sound nothing was heard, and
+        the scene is handed back exactly - the block the horizon made ready, as
+        it was - and the corrected GO runs the note again, sending nothing. */
+    MidiDohRig rig;
+
+    const auto scene = rig.document.createCue (rig.listId, 0, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    const auto note = rig.midiCue (scene, 0);
+    const auto hold = rig.document.createCue (scene, 1, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "10").ok);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    auto heard = true;
+    auto takeBack = false;
+
+    SUBCASE ("plays sound, left to its operator: carried on, the note not sent again")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/audible", "true").ok);
+    }
+
+    SUBCASE ("plays sound, and takes back: carried on, the note sent again")
+    {
+        takeBack = true;
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/audible", "true").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+    }
+
+    SUBCASE ("does not play sound: handed back as it was, the note left")
+    {
+        heard = false;
+    }
+
+    rig.park (scene);
+    REQUIRE (rig.press ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.sink.sent.size() == 1u);
+
+    const auto sceneRun = rig.newestRunOf (scene)->id;
+    const auto* waiting = rig.newestRunOf (hold);
+    REQUIRE (waiting != nullptr);
+    REQUIRE (waiting->state == cue::runState::waiting);
+    const auto dueBefore = waiting->dueTick;
+
+    const auto dohTick = rig.tick;
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    if (! heard)
+    {
+        CHECK (rig.runs.find (sceneRun)->state == cue::runState::preparing);
+        CHECK (rig.revocations() == 0u);
+    }
+
+    const auto goTick = rig.tick;
+    REQUIRE (rig.press ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.sink.sent.size() == (takeBack ? 2u : 1u));
+
+    if (heard)
+    {
+        CHECK (rig.newestRunOf (scene)->id != sceneRun);
+
+        const auto* again = rig.newestRunOf (hold);
+        REQUIRE (again != nullptr);
+        CHECK (again->state == cue::runState::waiting);
+        CHECK (again->dueTick == goTick + (dueBefore - dohTick));
+        return;
+    }
+
+    //  The same block, adopted again; the note run again, sending nothing.
+    CHECK (rig.newestRunOf (scene)->id == sceneRun);
+    CHECK (rig.newestRunOf (note)->warning == std::string (cue::runWarning::leftToOperator));
 }
 
 //==============================================================================

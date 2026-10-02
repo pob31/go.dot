@@ -1994,3 +1994,165 @@ TEST_CASE ("go.doh: a jump forgets what was left with a device's operator - the 
     CHECK (rig.received ("/lx/go") == 2u);
     CHECK (rig.newestRunOf (lx)->warning.empty());
 }
+
+//==============================================================================
+/*  DOH! D2 (2026-10-02, namespace draft §24.12): a scene that was heard is
+    carried on by the corrected GO - re-seated where it was - and what it had
+    sent goes again only where it takes back, one tick apart per address; what
+    reached a device left to its operator is not sent again. These rigs have no
+    audio side, so the scene's sound is heard by `run.started` sent by hand, as
+    the audio side would. Each case was run on the code before D2 first. */
+namespace
+{
+    /*  A timeline scene with a bed at nought - what makes it heard - and the
+        network cues a case names, each at its second. */
+    struct HeardScene
+    {
+        HeardScene (DohRig& rig, std::vector<std::tuple<std::string, std::string, std::string>> sends)
+        {
+            group = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + group + "/mode", "timeline").ok);
+
+            bed = rig.document.createCue (group, 0, "media", "Bed").id;
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + bed + "/file", "bed.wav").ok);
+
+            auto at = 1;
+
+            for (const auto& [address, atom, second] : sends)
+            {
+                const auto id = rig.document.createCue (group, at++, "osc", "Send").id;
+                REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/address", address).ok);
+                REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/value", atom).ok);
+                REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/preWait", second).ok);
+                members.push_back (id);
+            }
+
+            after = rig.document.createCue (rig.listId, rig.index++, "memo", "After").id;
+        }
+
+        /*  GO, the bed heard, and `ticks` of the scene. */
+        std::string goAndHear (DohRig& rig, int ticks)
+        {
+            //  Parked through the command, so a replay is given the pointer.
+            REQUIRE (rig.press ("standby.set", { osc::Value::string (group) }).rejected == 0);
+            rig.tickOnce();
+            REQUIRE (rig.press ("go").rejected == 0);
+            rig.tickOnce();
+
+            const auto* sounding = rig.newestRunOf (bed);
+            REQUIRE (sounding != nullptr);
+            const auto id = sounding->id;
+            REQUIRE (rig.engine.submit (origin::engine, "run.started", { osc::Value::string (id) }));
+            rig.tickOnce();
+            REQUIRE (rig.runs.find (id)->startedAtTick >= 0);
+
+            rig.ticks (ticks);
+            return id;
+        }
+
+        std::string group, bed, after;
+        std::vector<std::string> members;
+    };
+}
+
+TEST_CASE ("go.doh: a resumed scene sends again what it had sent, one tick apart per address")
+{
+    /*  The design's test 23 (red team B minor 1): the sender keeps one message
+        per address a flush, the last winning, so two GOs the scene had sent to
+        one address, both fired again at the corrected GO, would leave as one. */
+    DohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+
+    HeardScene scene { rig, { { "/lx/go", "i:1", "0" }, { "/lx/go", "i:2", "2" } } };
+    scene.goAndHear (rig, 150);
+    REQUIRE (rig.received ("/lx/go") == 2u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (2);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (5);
+
+    CHECK (rig.received ("/lx/go") == 4u);
+}
+
+TEST_CASE ("go.doh: a resumed scene sends again what takes back, and nothing of what was left")
+{
+    /*  The design's test 24 (the author, 2026-10-01): A went to the lighting
+        desk, left to its operator by default; B to the console, which takes
+        back; D, at six seconds, was never sent. The corrected GO carries the
+        bed on at about three seconds, sends B again at once, A not at all, and
+        D at its own time, three seconds on, whatever its device says. */
+    DohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+
+    HeardScene scene { rig, { { "/lx/a", "i:1", "0.5" }, { "/desk/fader", "f:0.5", "1" }, { "/lx/d", "i:1", "6" } } };
+    const auto a = scene.members[0];
+    const auto b = scene.members[1];
+
+    auto aAgain = 1u;
+    auto bAgain = 2u;
+
+    SUBCASE ("as the devices say") {}
+
+    SUBCASE ("A says take back") { aAgain = 2u; REQUIRE (rig.document.setAttribute ("/godot/cue/" + a + "/doh", "takeBack").ok); }
+
+    SUBCASE ("B says leave") { bAgain = 1u; REQUIRE (rig.document.setAttribute ("/godot/cue/" + b + "/doh", "leave").ok); }
+
+    const auto bed = scene.goAndHear (rig, 148);
+    REQUIRE (rig.received ("/lx/a") == 1u);
+    REQUIRE (rig.received ("/desk/fader") == 1u);
+    REQUIRE (rig.received ("/lx/d") == 0u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (2);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (5);
+
+    CHECK (rig.received ("/lx/a") == aAgain);
+    CHECK (rig.received ("/desk/fader") == bAgain);
+    CHECK (rig.received ("/lx/d") == 0u);
+
+    const auto* carried = rig.newestRunOf (scene.bed);
+    REQUIRE (carried != nullptr);
+    CHECK (carried->id != bed);
+    CHECK (carried->startOffset == doctest::Approx (3.0).epsilon (0.03));
+
+    rig.ticks (155);
+    CHECK (rig.received ("/lx/d") == 1u);
+}
+
+TEST_CASE ("go.doh: a second Doh! forgets the resume and keeps what was left")
+{
+    /*  The design's test 25 (the author, 2026-09-30, (b); L37): the second press
+        means the next GO starts the scene from its top - the bed at its own
+        offset - and still sends nothing a device's operator was left with; what
+        takes back is sent again. */
+    DohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+
+    HeardScene scene { rig, { { "/lx/a", "i:1", "0.5" }, { "/desk/fader", "f:0.5", "1" } } };
+    const auto a = scene.members[0];
+    const auto bed = scene.goAndHear (rig, 148);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (70);
+    REQUIRE (rig.runs.find (bed)->isFinished());
+
+    //  The second press: applied, and the resume is gone.
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.standby() == scene.group);
+
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (80);
+
+    const auto* fresh = rig.newestRunOf (scene.bed);
+    REQUIRE (fresh != nullptr);
+    CHECK (fresh->id != bed);
+    CHECK (fresh->startOffset == doctest::Approx (0.0));
+
+    CHECK (rig.received ("/lx/a") == 1u);
+    CHECK (rig.received ("/desk/fader") == 2u);
+    CHECK (rig.newestRunOf (a)->warning == std::string (cue::runWarning::leftToOperator));
+
+    replaysTheSame (rig);
+}

@@ -49,6 +49,7 @@
 
 #include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/clock/RateClock.h>
+#include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/document/LevelLane.h>
 
 #include <bit>
@@ -56,6 +57,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -821,6 +823,21 @@ namespace wfg::cue
         bool deClick = false;
         double deClickTo = 0.0;
         bool deClickOwed = false;
+
+        /*  A RUN DOH! CARRIES ON (2026-10-02, D2, namespace draft §24): made at
+            the point a Doh paused its cue - the standby's arm of it, or the
+            seat the corrected GO makes - with no pre-wait, and arriving over
+            the de-click above at `arrivalDb`, the level it had at the press
+            rather than its cue's, then carrying on into `arrivalThen`, the rest
+            of a fade its scene had moving then (HG). Written by the handler
+            that makes the run, before its arm, so the arrival is the run's own
+            whatever launches it - the corrected GO, a seek, a fire by name. A
+            run with `resumes` and no launch evidence is a RESUME ARM, and only
+            that: what a later drop of the resume revokes. A mic run takes the
+            de-click as its gate's fade-in, its input being its arrival. */
+        bool resumes = false;
+        std::optional<double> arrivalDb;
+        std::optional<FadeSegment> arrivalThen;
 
         //======================================================================
         /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.

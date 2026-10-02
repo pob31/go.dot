@@ -77,6 +77,15 @@ namespace wfg::cue
                             if (run->isFinished())
                                 return Outcome::ok (args);
 
+                            /*  A LAUNCH PLACED ON A STATE DOH! HANDED BACK IN
+                                THIS VERY TICK (2026-10-02, D2, namespace draft
+                                §24, GZ): decided by the hook before the Doh
+                                drained, and its voice stopped by the Doh. Applied
+                                and ignored, by the tick the log keeps: nothing was
+                                heard, and the run is a preparation again. */
+                            if (run->unadoptedAt >= 0 && run->unadoptedAt == context.tick)
+                                return Outcome::ok (args);
+
                             /*  WHEN IT WAS FIRST HEARD (2026-10-01, PRD §3.32):
                                 Doh! asks whether anything a GO started has
                                 reached the room, and this record is the answer -
@@ -227,6 +236,12 @@ namespace wfg::cue
                             if (run == nullptr)
                                 return Outcome::rejected (reason::unknownId);
 
+                            /*  A ROUND DRAWN ON A STATE DOH! HANDED BACK IN THIS
+                                VERY TICK (D2, GZ): the block is prepared again,
+                                and draws its round when a GO enters it. */
+                            if (run->unadoptedAt >= 0 && run->unadoptedAt == context.tick)
+                                return Outcome::ok (args);
+
                             run->seed = args[1].getInt32();
                             run->round.clear();
 
@@ -293,7 +308,7 @@ namespace wfg::cue
                         "A ranged media cue entered one of its ranges: the index, from nought.",
                         { { "run", 's', false }, { "index", 'i', false } },
                         false,
-                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             auto* run = runs.find (args[0].getString());
 
@@ -305,6 +320,11 @@ namespace wfg::cue
                                 in flight. Idempotent where it costs nothing,
                                 like every other report here. */
                             if (run->isFinished())
+                                return Outcome::ok (args);
+
+                            /*  Or on one Doh! handed back in this very tick (D2,
+                                GZ): its launch was undone with it. */
+                            if (run->unadoptedAt >= 0 && run->unadoptedAt == context.tick)
                                 return Outcome::ok (args);
 
                             run->range = args[1].getInt32();
@@ -438,7 +458,7 @@ namespace wfg::cue
                         " number is what makes GO is instant a measurement rather than a claim.",
                         { { "run", 's', false }, { "blocks", 'i', false } },
                         false,
-                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             auto* run = runs.find (args[0].getString());
 
@@ -449,6 +469,11 @@ namespace wfg::cue
 
                             if (blocks < 0)
                                 return Outcome::rejected (reason::typeMismatch);
+
+                            /*  Nor on one Doh! handed back in this very tick (D2,
+                                GZ): the launch it measures was undone. */
+                            if (run->unadoptedAt >= 0 && run->unadoptedAt == context.tick)
+                                return Outcome::ok (args);
 
                             /*  The WORST it was, not the last report. A run that
                                 was 3 blocks late and then reported 0 was still

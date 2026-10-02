@@ -1219,3 +1219,96 @@ TEST_CASE ("go.doh: a scene taken back runs no footer, and its mic member's tail
     CHECK (rig.runs.find (voice)->takenBack);
     CHECK_FALSE (rig.runs.find (voice)->killed);
 }
+
+TEST_CASE ("go.doh: a mic cue opens again at the next GO over a tenth of a second - in place inside the Doh fade, after it with its old tail cut first")
+{
+    /*  Doh! D2 (2026-10-02, namespace draft §24.12; the design's tests 4, 9 and
+        14, their mic halves): a mic has no position, so carrying it on is
+        opening it again - inside the Doh fade the same run, its gate reopened
+        where the Doh shut it; after it, a run whose gate opens over the
+        de-click, the old run's tail cut first if it still holds the channel, so
+        the gate does not wait out the reverb. Never the cue's own fade-in. */
+    RunRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("MC000001"), "MC000002").ok);
+    rig.tickOnce();
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.opens.empty(); }));
+    rig.tickOnce();
+
+    const auto old = rig.runOf ("MC000002")->id;
+    REQUIRE (rig.runs.find (old)->startedAtTick >= 0);
+    REQUIRE (std::get<2> (rig.audio.opens.front()) == doctest::Approx (0.5));
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    SUBCASE ("a GO inside the Doh fade: the same run, its gate opened again")
+    {
+        REQUIRE (rig.submitAndTick ("go.doh").rejected == 0);
+        REQUIRE (rig.audio.shuts.size() == 1u);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        const auto opened = rig.audio.opens.size();
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        CHECK (rig.runOf ("MC000002")->id == old);
+        CHECK (rig.runs.find (old)->state == cue::runState::playing);
+        CHECK_FALSE (rig.runs.find (old)->takenBack);
+        REQUIRE (rig.audio.opens.size() == opened + 1);
+        CHECK (std::get<0> (rig.audio.opens.back()) == 2);
+        CHECK (std::get<2> (rig.audio.opens.back()) == doctest::Approx (0.1));
+
+        //  Past where the Doh's stop would have landed: it never does.
+        for (int n = 0; n < 60; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runs.find (old)->state == cue::runState::playing);
+        CHECK (rig.audio.stops.empty());
+    }
+
+    SUBCASE ("a GO after the Doh fade, the tail rung out: armed again, opened over the de-click")
+    {
+        REQUIRE (rig.submitAndTick ("go.doh").rejected == 0);
+        REQUIRE (rig.tickUntil ([&rig, &old] { return rig.runs.find (old)->isFinished(); }, 80));
+        REQUIRE (rig.tickUntil ([&rig, &old] { return rig.runOf ("MC000002")->id != old; }, 20));
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+
+        const auto opened = rig.audio.opens.size();
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&rig, opened] { return rig.audio.opens.size() > opened; }, 20));
+
+        CHECK (std::get<2> (rig.audio.opens.back()) == doctest::Approx (0.1));
+        CHECK (rig.runOf ("MC000002")->id != old);
+    }
+
+    SUBCASE ("a GO after the Doh fade, the tail still ringing: cut first, then opened over the de-click")
+    {
+        rig.audio.ringsOnStop = true;
+        REQUIRE (rig.submitAndTick ("go.doh").rejected == 0);
+
+        for (int n = 0; n < 70; ++n)
+            rig.tickOnce();
+
+        REQUIRE_FALSE (rig.runs.find (old)->isFinished());
+
+        const auto opened = rig.audio.opens.size();
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&rig, opened]
+        {
+            rig.audio.completeArms (rig.engine);
+            return rig.audio.opens.size() > opened;
+        }, 40));
+
+        CHECK (rig.runs.find (old)->isFinished());
+        CHECK (std::find (rig.audio.kills.begin(), rig.audio.kills.end(), 2) != rig.audio.kills.end());
+        CHECK (std::get<2> (rig.audio.opens.back()) == doctest::Approx (0.1));
+        CHECK (rig.runOf ("MC000002")->id != old);
+    }
+}

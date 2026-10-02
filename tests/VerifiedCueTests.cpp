@@ -1746,9 +1746,11 @@ TEST_CASE ("go.doh: what the GO committed to a device left to its operator is ne
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "2").ok);
 
     auto takeBack = false;
+    auto adopted = false;
 
     SUBCASE ("pre-sent by the horizon, committed by the GO")
     {
+        adopted = true;
         rig.setStandby (scene.group);
         tickUntilDeskHolds (rig, 0.8f);
         REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
@@ -1800,10 +1802,14 @@ TEST_CASE ("go.doh: what the GO committed to a device left to its operator is ne
     //  Nothing put back on the console: the GO's own write stays.
     CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
 
-    //  The horizon prepared the scene again; the cue left to the console's operator is not in it.
+    /*  The horizon prepared the scene again; the cue left to the console's
+        operator is not in it. (2026-10-02, D2: a block the GO adopted and
+        nobody heard is handed back exactly instead - the same block, its
+        pre-send the horizon's again, still on the desk - and the corrected GO
+        adopts it as it is.) */
     const auto* again = rig.runs.preparedRunOf (scene.group);
     REQUIRE (again != nullptr);
-    CHECK (rig.runs.hasChildFor (again->id, scene.cue) == takeBack);
+    CHECK (rig.runs.hasChildFor (again->id, scene.cue) == (takeBack || adopted));
 
     rig.engine.submit ("cli", "go", {});
     ticksOf (rig, 10);
@@ -1927,14 +1933,18 @@ TEST_CASE ("go.doh: an act the GO entered, nobody heard, the next scene's block 
     rig.engine.submit ("cli", "go.doh", {});
     rig.tickOnce();
 
-    CHECK (rig.runs.find (actId)->takenBack);
+    /*  (2026-10-02, D2: the act was a block the standby made ready and the GO
+        adopted, and nobody heard it, so it is handed back exactly - prepared
+        again - rather than taken back and revoked. The next scene's block under
+        it is the horizon's, given back with its pre-send put back, as before.) */
+    CHECK_FALSE (rig.runs.find (actId)->takenBack);
+    CHECK (rig.runs.find (actId)->state == cue::runState::preparing);
     CHECK_FALSE (rig.runs.find (blockId)->takenBack);
 
     ticksOf (rig, 10);
 
     CHECK (recordsOf (rig, "node.set", "/desk/fader") == 1u);
     CHECK (rig.runs.find (blockId)->warning == cue::runWarning::revoked);
-    CHECK (rig.runs.find (actId)->warning == cue::runWarning::revoked);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
     CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
 }
@@ -1980,37 +1990,26 @@ TEST_CASE ("go.doh: an unheard scene's pre-send that takes back is put back befo
 
     rig.engine.submit ("cli", "go.doh", {});
     rig.tickOnce();
-    REQUIRE (rig.runs.find (block)->takenBack);
 
-    //  The scene prepared again for the restored pointer, its header pre-sent afresh.
-    const auto freshPreSent = [&rig, &scene, &block]
-    {
-        const auto* again = rig.runs.preparedRunOf (scene.group);
+    /*  (2026-10-02, D2: a block the GO adopted and nobody heard is handed back
+        exactly - prepared again, its pre-send still on the desk and the
+        horizon's again - so nothing is put back and nothing is pre-sent afresh;
+        the dip the GO fired on the bed outside it is left to run. The road this
+        case was written for, a give-back racing a fresh preparation, is now a
+        cold-entered scene's only, and such a scene pre-sent nothing.) */
+    REQUIRE_FALSE (rig.runs.find (block)->takenBack);
+    REQUIRE (rig.runs.find (block)->state == cue::runState::preparing);
+    ticksOf (rig, 10);
+    CHECK (rig.runs.preparedRunOf (scene.group) == rig.runs.find (block));
+    CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
 
-        if (again == nullptr || again->id == block)
-            return false;
-
-        for (const auto* child : rig.runs.childrenOf (again->id))
-            if (child->cue == scene.cue && child->isFinished())
-                return true;
-
-        return false;
-    };
-
-    for (int n = 0; n < 600 && ! freshPreSent(); ++n)
-    {
-        rig.tickOnce();
-        std::this_thread::sleep_for (std::chrono::milliseconds (2));
-    }
-
-    REQUIRE (freshPreSent());
-
-    //  The corrected GO while the old dip is still moving; the old scene goes after it.
+    //  The corrected GO while the old dip is still moving: the same block, adopted again.
     rig.engine.submit ("cli", "go", {});
     rig.tickOnce();
     ticksOf (rig, 200);
 
-    REQUIRE (rig.runs.find (block)->isFinished());
+    CHECK (rig.runs.find (block)->state != cue::runState::preparing);
+    CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
     CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
 }
@@ -3040,4 +3039,221 @@ TEST_CASE ("clock move: a follow that ends in an error still puts the desk back 
         REQUIRE (held.has_value());
         CHECK (*held == osc::Value::float32 (0.2f));
     }
+}
+
+//==============================================================================
+/*  DOH! D2 (2026-10-02, namespace draft §24.12): WHAT NOBODY HEARD IS HANDED
+    BACK EXACTLY. A prepared scene the GO adopted and nothing of it sounded is
+    given back as it was before the GO - the same block, its job holding again,
+    its pre-sends still on the desk, nothing put back and nothing revoked - and
+    the corrected GO adopts it again, as the rehearsed GO would have. Run first
+    on the code before D2, where the Doh gave the block back the way a pointer
+    moving away does. */
+namespace
+{
+    const cue::GroupJob* jobOf (VerifiedRig& rig, const std::string& runId)
+    {
+        for (const auto& job : rig.runner.groups())
+            if (job.run == runId && ! job.retired)
+                return &job;
+
+        return nullptr;
+    }
+}
+
+TEST_CASE ("go.doh: a prepared scene fired early and caught before its first sound is prepared again as it was - its pre-sends never leave the desk")
+{
+    /*  The design's test 6. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+
+    SUBCASE ("at the top of the list")
+    {
+        const PreparedScene scene { rig, "f:0.8", "none" };
+        const auto hold = rig.document.createCue (scene.group, 0, "memo", "Hold").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "2").ok);
+
+        rig.setStandby (scene.group);
+        tickUntilDeskHolds (rig, 0.8f);
+        ticksOf (rig, 5);
+        REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+        const auto* ready = rig.runs.preparedRunOf (scene.group);
+        REQUIRE (ready != nullptr);
+        const auto block = ready->id;
+        const auto word = ready->prepare;
+
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+        ticksOf (rig, 25);
+
+        const auto setsBefore = recordsOf (rig, "node.set", "/desk/fader");
+
+        rig.engine.submit ("cli", "go.doh", {});
+        rig.tickOnce();
+        ticksOf (rig, 10);
+
+        //  The same block, made ready again, as it was.
+        const auto* back = rig.runs.find (block);
+        CHECK (back->state == cue::runState::preparing);
+        CHECK (back->prepare == word);
+        CHECK (back->goSerial == 0u);
+        CHECK (rig.runs.preparedRunOf (scene.group) == back);
+
+        const auto* job = jobOf (rig, block);
+        REQUIRE (job != nullptr);
+        CHECK (job->phase == std::string (cue::groupPhase::prepared));
+
+        //  Its pre-send never left the desk: nothing put back, nothing revoked, nothing sent.
+        CHECK (recordsOf (rig, "node.set", "/desk/fader") == setsBefore);
+        CHECK (recordsOf (rig, "run.revoke", block) == 0u);
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+        //  The corrected GO adopts it again, and the line waits its two seconds.
+        const auto goTick = rig.tick;
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+        ticksOf (rig, 5);
+
+        CHECK (rig.runs.find (block)->state == cue::runState::playing);
+
+        const cue::Run* line = nullptr;
+
+        for (const auto& run : rig.runs.all())
+            if (run.cue == hold && run.parent == block && ! run.isFinished())
+                line = &run;
+
+        REQUIRE (line != nullptr);
+        CHECK (line->state == cue::runState::waiting);
+        CHECK (line->dueTick >= goTick + 100);
+        CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+    }
+
+    SUBCASE ("a scene's row inside a running act (J2): back under the act, out of its job")
+    {
+        const SceneInAnAct shape { rig };
+        shape.enter (rig);
+        tickUntilDeskHolds (rig, 0.8f);
+        ticksOf (rig, 5);
+
+        const auto* ready = rig.runs.preparedRunOf (shape.scene);
+        REQUIRE (ready != nullptr);
+        const auto block = ready->id;
+        const auto actRun = rig.runs.liveRunOf (shape.act)->id;
+
+        const auto* actJob = jobOf (rig, actRun);
+        REQUIRE (actJob != nullptr);
+        const auto takenBefore = actJob->taken;
+        const auto phaseBefore = actJob->phaseRuns;
+        const auto launchedBefore = actJob->launched;
+
+        rig.engine.submit ("cli", "go", {});                // scene two's row: adopted under the act
+        rig.tickOnce();
+        ticksOf (rig, 25);
+        REQUIRE (rig.runs.find (block)->state == cue::runState::playing);
+
+        rig.engine.submit ("cli", "go.doh", {});
+        rig.tickOnce();
+        ticksOf (rig, 5);
+
+        const auto* back = rig.runs.find (block);
+        CHECK (back->state == cue::runState::preparing);
+        CHECK (back->parent == actRun);
+        CHECK (rig.runs.liveRunOf (shape.act) != nullptr);
+
+        actJob = jobOf (rig, actRun);
+        REQUIRE (actJob != nullptr);
+        CHECK (actJob->taken == takenBefore);
+        CHECK (actJob->phaseRuns == phaseBefore);
+        CHECK (actJob->launched == launchedBefore);
+
+        CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+        CHECK (recordsOf (rig, "run.revoke", block) == 0u);
+
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+        ticksOf (rig, 5);
+
+        CHECK (rig.runs.find (block)->state == cue::runState::playing);
+        CHECK (rig.runs.find (block)->parent == actRun);
+        CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+    }
+}
+
+TEST_CASE ("go.doh: a scene started over from the top is prepared again without what its devices' operators were left with")
+{
+    /*  The design's test 27 (red team C major 2, road b), its first SUBCASE - a
+        NET against D1, which already left the cue out: a scene heard in its
+        header, before any member had launched, is not carried on (L4) - it
+        starts from its top - and the pre-send the GO committed, left with the
+        desk's operator, is not pre-sent again by the fresh block the horizon
+        makes, nor sent by the corrected GO's entry. Once in all. This rig has
+        no audio side, so the header's sound is heard by `run.started` sent by
+        hand, as the audio side would. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+    const auto intro = rig.document.createCue (rig.document.createRole (scene.group, "header").id, 1,
+                                               "media", "Intro").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + intro + "/file", "intro.wav").ok);
+    const auto hold = rig.document.createCue (scene.group, 0, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "2").ok);
+
+    rig.setStandby (scene.group);
+    tickUntilDeskHolds (rig, 0.8f);
+    ticksOf (rig, 5);
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+
+    //  The header's intro launched, and heard; no member launched yet.
+    for (int n = 0; n < 50 && rig.runOf (intro) == nullptr; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.runOf (intro) != nullptr);
+    rig.engine.submit (origin::engine, "run.started", { osc::Value::string (rig.runOf (intro)->id) });
+    rig.tickOnce();
+    REQUIRE (rig.runOf (intro)->startedAtTick >= 0);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+
+    //  The fresh block, made without the left cue: nothing pre-sent again.
+    for (int n = 0; n < 200; ++n)
+    {
+        if (const auto* again = rig.runs.preparedRunOf (scene.group); again != nullptr)
+            break;
+
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    const auto* again = rig.runs.preparedRunOf (scene.group);
+    REQUIRE (again != nullptr);
+    CHECK_FALSE (rig.runs.hasChildFor (again->id, scene.cue));
+    ticksOf (rig, 20);
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+    rig.engine.submit ("cli", "go", {});
+    ticksOf (rig, 10);
+
+    const cue::Run* sent = nullptr;
+
+    for (const auto& run : rig.runs.all())
+        if (run.cue == scene.cue)
+            sent = &run;
+
+    REQUIRE (sent != nullptr);
+    CHECK (sent->warning == std::string (cue::runWarning::leftToOperator));
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
 }

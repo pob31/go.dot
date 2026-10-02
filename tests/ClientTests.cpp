@@ -7450,3 +7450,41 @@ TEST_CASE ("client: the Doh! button names the GO the engine would take back, and
 
     CHECK (caption() == "Doh!");
 }
+
+/*  WHAT THE NEXT GO CARRIES ON (2026-10-02, Doh! D2, namespace draft §24.12):
+    a cue Doh! paused is carried on by the next GO from where it was, and the
+    standby says so beside its name - in words, at the second it carries on
+    from, or plainly for a mic, which has no position - and the Doh! button's
+    tooltip says that a second press starts it from the top instead. It could
+    not be built before D2: the reading had no `resume`. */
+TEST_CASE ("client: the standby says where the next GO carries a paused cue on, and Doh! says a second press forgets it")
+{
+    model::TransportReading reading;
+    reading.standbyId = "B3N8R5TW";
+    reading.standbyName = "Thunder";
+    reading.standbyKind = "media";
+    reading.tick = "2000";
+
+    CHECK (reading.standbyLine() == "Thunder  media");
+
+    reading.resume = "B3N8R5TW 8.42";
+    CHECK (reading.standbyLine() == "Thunder  media  resumes at 0:08");
+
+    reading.resume = "B3N8R5TW 125";
+    CHECK (reading.standbyLine() == "Thunder  media  resumes at 2:05");
+
+    reading.resume = "B3N8R5TW";
+    CHECK (reading.standbyLine() == "Thunder  media  resumes");
+
+    //  Another cue paused on the list is not this standby's.
+    reading.resume = "Q7WD2M4K 3";
+    CHECK (reading.standbyLine() == "Thunder  media");
+
+    //  The button, over - nothing to take back - and a paused cue standing.
+    reading.resume = "B3N8R5TW 8.42";
+    CHECK (reading.dohLook().phase == model::DohPhase::over);
+    CHECK (reading.dohTip().find ("start it from the top") != std::string::npos);
+
+    reading.resume.clear();
+    CHECK (reading.dohTip().find ("Nothing to take back") != std::string::npos);
+}

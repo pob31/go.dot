@@ -1427,7 +1427,7 @@ namespace wfg::tree
                             behind. Same rule as a cue's `prepare` and a slot's
                             `holder`. */
                         if (name == "aim" || name == "solve" || name == "statePosition"
-                             || name == "history")
+                             || name == "history" || name == "resume")
                             continue;
 
                         const auto section = list.getChildWithName ("Persistent");
@@ -2985,6 +2985,12 @@ namespace wfg::tree
 
                 runtime.push_back (makeLeaf (base + "/history", *row, text));
             }
+
+            /*  WHAT THE NEXT GO CARRIES ON (2026-10-02, Doh! D2): the cue a Doh
+                paused and the second it carries on from, or nothing. */
+            if (const auto* row = rowNamed ("list", "resume"))
+                runtime.push_back (makeLeaf (base + "/resume", *row,
+                                             lists != nullptr ? lists->resumeOf (listId) : std::string {}));
 
             if (const auto* row = rowNamed ("list", "solve"))
             {
