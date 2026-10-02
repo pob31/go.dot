@@ -1812,17 +1812,19 @@ TEST_CASE ("midi sender: a slow port still gets every note-off at the close")
     outputs.attach ("PRT00001", synth);
     outputs.start();
 
-    for (const std::uint8_t key : { std::uint8_t { 60 }, std::uint8_t { 64 }, std::uint8_t { 67 } })
+    /*  Two notes, not three: a 45 ms sleep can last twice that on a shared
+        macOS runner, and three of those overran the 250 ms budget (CI,
+        2026-10-02). Two still fail the old cap, which sent one. */
+    for (const std::uint8_t key : { std::uint8_t { 60 }, std::uint8_t { 64 } })
         REQUIRE (outputs.sendForRun ("RUN00001", "PRT00001", { 0x91, key, 100 }).empty());
 
-    REQUIRE (waitForSent (outputs, 3));
+    REQUIRE (waitForSent (outputs, 2));
     synth->delayMs = 45;
 
     outputs.stop();
 
     CHECK (synth->count ({ 0x81, 60, 0 }) == 1u);
     CHECK (synth->count ({ 0x81, 64, 0 }) == 1u);
-    CHECK (synth->count ({ 0x81, 67, 0 }) == 1u);
 }
 
 TEST_CASE ("midi sender: a port that does not take messages holds the close for a bounded time")

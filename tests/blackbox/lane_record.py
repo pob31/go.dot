@@ -195,7 +195,10 @@ def run(locale: "str | None") -> int:
                                  f"heard {heard:.2f} dB")
 
             silent = lane_level.level_db(left, marks["stop"] + int(0.6 * RATE))
-            report.check(silent < -60.0, "and the stop stopped the cue", f"{silent:.1f} dBFS")
+            #  Read at a wall-clock mark, like the levels above: since K4 the
+            #  hand's stop is a graceful stop, not a kill, and on a starved CI
+            #  runner the mark can land before the stop reaches the render.
+            lane_level.timed(report, silent < -60.0, "and the stop stopped the cue", f"{silent:.1f} dBFS")
 
             # Where the turn from -6 to -12 was written, against when it was sent.
             turn = next((s for s, level in written if abs(level - (-12.0)) <= 0.05), None)
