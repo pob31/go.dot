@@ -2580,6 +2580,35 @@ TEST_CASE ("stop: the fade verb reaches silence before it stops anything")
     CHECK (rig.audio.levels.back().second == doctest::Approx (-120.0));
 }
 
+TEST_CASE ("stop: a hard stop over a fade-and-stop lands at once, not at the fade's end")
+{
+    /*  THE SOONER OF TWO STOPS (2026-10-02, K3's review, namespace draft
+        §23.14, KS). A takeover keeps a stop already coming at its tick, so
+        that riding the level back up does not call it off (author,
+        2026-09-06) - and it kept that tick under a second STOP due first: a
+        `hard` stop fired into a ten-second fade-out took the level to silence
+        and left the voice running, silent, to the tenth second. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "10");
+    rig.fire (rig.stopId);
+
+    for (int i = 0; i < 20; ++i)
+        rig.tickOnce();
+
+    REQUIRE (rig.audio.stopped.empty());
+
+    const auto cutId = rig.document.createCue (rig.listId, 4, "transport", "Cut").id;
+    rig.setCue (cutId, "target", rig.mediaId);
+    rig.fire (cutId);
+
+    CHECK (rig.tickUntil ([&] { return ! rig.audio.stopped.empty(); }, 3));
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (mediaRun)->isFinished(); }, 5));
+}
+
 TEST_CASE ("stop: a target that is not running is a no-op too")
 {
     FadeRig rig;
@@ -5198,11 +5227,14 @@ TEST_CASE ("stop levels: a fade-and-stop on a scene is a fade, and the scene sto
         CHECK (scene.runsOf (scene.release) == 1);
     }
 
-    SUBCASE ("pinned: the stop cue's own run killed during the fade lands the scene's stop at once")
+    SUBCASE ("pins an open question (KM): the stop cue's own run killed during the fade lands the scene's stop at once")
     {
-        /*  A fade-and-stop whose own run is killed hands a CUE back to
-            `playing` (the rule in `advanceFades`); a scene it never hands
-            back (EK), so the stop it was asked lands now, gracefully. */
+        /*  NOT A RULING, A PIN. A fade-and-stop whose own run is killed hands
+            a CUE back to `playing` (the rule in `advanceFades`); a scene it
+            never hands back (EK), so the stop it was asked lands now,
+            gracefully. Whether a scene should be handed back as a cue is, is
+            the author's to rule on (namespace draft §23.14, KM); this says
+            what the build does until then. */
         Scene scene ("fade", "4");
         scene.start();
         scene.fire (scene.stopId);
@@ -5214,6 +5246,218 @@ TEST_CASE ("stop levels: a fade-and-stop on a scene is a fade, and the scene sto
         CHECK (scene.rig.tickUntil ([&] { return scene.bedFinished(); }, 5));
         CHECK (scene.rig.runToCompletion (scene.groupRun, 10) < 10);
         CHECK (scene.runsOf (scene.release) == 1);
+    }
+
+    SUBCASE ("a hard stop over the fade lands at once, footer and all")
+    {
+        /*  THE SOONER STOP WINS (K3's review, KS). The takeover kept the stop
+            already coming at its own tick, even under a second stop due
+            first: a `hard` stop over a ten-second fade-out silenced the scene
+            at once and left it playing, silent, to the tenth second. */
+        Scene scene ("fade", "10");
+        scene.start();
+        scene.fire (scene.stopId);
+        scene.ticks (100);
+
+        REQUIRE (scene.rig.runs.find (scene.bedRun)->state == cue::runState::playing);
+
+        const auto hardId = scene.rig.document.createCue (scene.rig.listId, 4, "transport", "Cut it").id;
+        scene.rig.setCue (hardId, "target", scene.rig.groupId);
+        scene.fire (hardId);
+
+        CHECK (scene.rig.tickUntil ([&] { return scene.bedFinished(); }, 5));
+        CHECK (scene.rig.runToCompletion (scene.groupRun, 10) < 10);
+        CHECK (scene.runsOf (scene.release) == 1);
+        CHECK (scene.rig.runOf (scene.rig.first).empty());
+    }
+
+    SUBCASE ("a member the sequence reaches during the fade is aborted at its end")
+    {
+        /*  One, reached when the bed ends a fifth of the way through, is in
+            its ten-second pre-wait when the fade ends: the scene's stop
+            aborts it - no post-wait (K2) - and the footer follows. */
+        Scene scene ("fade", "2");
+        scene.rig.setCue (scene.rig.first, "preWait", "10");
+        scene.rig.setCue (scene.rig.first, "postWait", "30");
+        scene.start();
+        scene.fire (scene.stopId);
+        scene.ticks (20);
+
+        scene.rig.audio.playing.erase (scene.voice);      // the bed reaches its end
+        REQUIRE (scene.rig.tickUntil ([&]
+        {
+            const auto id = scene.rig.runOf (scene.rig.first);
+            return ! id.empty() && scene.rig.runs.find (id)->state == cue::runState::waiting;
+        }, 10));
+
+        const auto oneRun = scene.rig.runOf (scene.rig.first);
+
+        int ticks = 0;
+
+        while (! scene.rig.runs.find (oneRun)->isFinished() && ticks < 200)
+        {
+            scene.rig.tickOnce();
+            ++ticks;
+        }
+
+        //  Ended at the fade's end, seventy-odd ticks on - not at its pre-wait, nor after a post-wait.
+        CHECK (ticks >= 65);
+        CHECK (ticks < 90);
+        CHECK (scene.rig.runs.find (oneRun)->stopEndsWait);
+        CHECK (scene.rig.runToCompletion (scene.groupRun, 10) < 10);
+        CHECK (scene.runsOf (scene.release) == 1);
+        CHECK (scene.rig.runOf (scene.rig.second).empty());
+    }
+
+    SUBCASE ("a scene whose own timeline member fades it out plays on to that fade's end")
+    {
+        /*  The stop cue a member of the scene it stops. Before K3 the scene
+            was stopped on the fade's first tick and its job stopped every
+            member - the stop cue's own run among them, which ended the fade
+            with it: the scene came down at once. */
+        GroupRig rig;
+        rig.setCue (rig.groupId, "mode", "timeline");
+
+        const auto bed = rig.document.createCue (rig.groupId, 0, "media", "Bed").id;
+        rig.setCue (bed, "file", "bed.wav");
+
+        const auto out = rig.document.createCue (rig.groupId, 1, "transport", "Scene out").id;
+        rig.setCue (out, "target", rig.groupId);
+        rig.setCue (out, "verb", "fade");
+        rig.setCue (out, "duration", "2");
+        rig.setCue (out, "preWait", "1");                 // once the bed is sounding
+
+        const auto release = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Release").id;
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (bed).empty(); }));
+
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.audio.launches.empty(); }));
+
+        const auto bedRun = rig.runOf (bed);
+        const auto voice = rig.runs.find (bedRun)->track;
+        REQUIRE (voice >= 0);
+        rig.audio.playing.insert (voice);
+
+        const auto groupRun = rig.runOf (rig.groupId);
+
+        REQUIRE (rig.tickUntil ([&]
+        {
+            const auto id = rig.runOf (out);
+            return ! id.empty() && rig.runs.find (id)->state == cue::runState::playing;
+        }, 80));
+
+        for (int n = 0; n < 50; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runs.find (bedRun)->state == cue::runState::playing);
+        CHECK (rig.runs.find (groupRun)->ownLevel < -50.0);
+        CHECK (rig.runOf (release).empty());
+
+        int ticks = 0;
+
+        while (! rig.runs.find (bedRun)->isFinished() && ticks < 120)
+        {
+            rig.tickOnce();
+            ++ticks;
+        }
+
+        CHECK (ticks >= 45);
+        CHECK (ticks < 60);
+        CHECK (rig.runToCompletion (groupRun, 20) < 20);
+        CHECK_FALSE (rig.runOf (release).empty());
+    }
+
+    SUBCASE ("a hard stop on the act above brings the scene it is fading inside down at once")
+    {
+        /*  An AUTHORED stop above, landed (K3's review, KV): the act's job
+            passed over the faded scene as a member already on its way out,
+            and the hard stop of the act waited for the inner fade. */
+        GroupRig rig;
+
+        const auto inner = rig.document.createCue (rig.groupId, 0, "group", "Inner").id;
+        rig.setCue (inner, "advance", "auto");
+
+        const auto bed = rig.document.createCue (inner, 0, "media", "Bed").id;
+        rig.setCue (bed, "file", "bed.wav");
+        const auto after = rig.document.createCue (inner, 1, "memo", "After").id;
+
+        const auto innerRelease = rig.document.createCue (rig.roleOf (inner, "footer"), 0, "memo", "Inner release").id;
+        const auto outerRelease = rig.document.createCue (rig.roleOf (rig.groupId, "footer"), 0, "memo", "Outer release").id;
+
+        const auto fadeInner = rig.document.createCue (rig.listId, 3, "transport", "Inner out").id;
+        rig.setCue (fadeInner, "target", inner);
+        rig.setCue (fadeInner, "verb", "fade");
+        rig.setCue (fadeInner, "duration", "4");
+
+        const auto cutAct = rig.document.createCue (rig.listId, 4, "transport", "Act out").id;
+        rig.setCue (cutAct, "target", rig.groupId);
+
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (bed).empty(); }));
+
+        rig.audio.completeArms (rig.engine);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.audio.launches.empty(); }));
+
+        const auto bedRun = rig.runOf (bed);
+        rig.audio.playing.insert (rig.runs.find (bedRun)->track);
+        rig.tickOnce();
+        rig.tickOnce();
+
+        const auto outerRun = rig.runOf (rig.groupId);
+
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (fadeInner) }).rejected == 0);
+
+        for (int n = 0; n < 50; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.runs.find (bedRun)->state == cue::runState::playing);
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (cutAct) }).rejected == 0);
+
+        CHECK (rig.tickUntil ([&] { return rig.runs.find (bedRun)->isFinished(); }, 5));
+        CHECK (rig.runToCompletion (outerRun, 15) < 15);
+        CHECK (rig.runOf (after).empty());
+        CHECK_FALSE (rig.runOf (innerRelease).empty());
+        CHECK_FALSE (rig.runOf (outerRelease).empty());
+    }
+
+    SUBCASE ("the two-second fade replays record for record")
+    {
+        /*  The hold is a hook's: what it decides - the members' stops at
+            the fade's end, the footer - is in the log, and a replay with no
+            audio side, running no hooks, reaches the same runs (KN). */
+        Scene scene ("fade", "2");
+        scene.start();
+        scene.fire (scene.stopId);
+        REQUIRE (scene.rig.runToCompletion (scene.groupRun, 200) < 200);
+        REQUIRE (scene.runsOf (scene.release) == 1);
+
+        const auto show = doc::CanonicalXml::write (scene.rig.document);
+        const auto original = LogFile::parse (scene.rig.engine.log().contents());
+        REQUIRE (original.errors.empty());
+
+        GroupRig fresh;
+        fresh.runner.setPlayer (nullptr);
+        REQUIRE (doc::CanonicalXml::read (show, fresh.document).ok);
+
+        const auto result = replay (fresh.engine, original);
+
+        for (const auto& mismatch : result.mismatches)
+            MESSAGE (mismatch);
+
+        CHECK (result.ok);
+
+        for (const auto& run : scene.rig.runs.all())
+        {
+            INFO ("run " << run.id << " of " << run.cue);
+            const auto* again = fresh.runs.find (run.id);
+            REQUIRE (again != nullptr);
+            CHECK (again->state == run.state);
+            CHECK (again->stopEndsWait == run.stopEndsWait);
+        }
     }
 
     SUBCASE ("an abort on an outer scene reaches a scene a stop cue is fading inside it")
@@ -8287,6 +8531,49 @@ TEST_CASE ("seek: a scene that plays once, scrubbed, plays the rest of its round
         INFO ("member " << member);
         CHECK (runsOfCue (rig, member) == runsEach);
     }
+}
+
+TEST_CASE ("seek: a scene a fade-and-stop is fading, sought, still stops at the fade's end")
+{
+    /*  K3's review (2026-10-02, namespace draft §23.14, KT). The seek's seat
+        wrote `playing` over the standing scene, the stop asked of it still on
+        its account: the scene's new job never entered its stopping branch, a
+        fade lands nothing on a group itself, and the scene played on - silent
+        under the fade's level - to its natural end, eleven seconds on. The
+        seat now keeps a scene whose stop is asked `stopping`, and the fade
+        ends it at its tick. */
+    JumpRig rig;
+    std::map<std::string, std::int64_t> since;
+
+    const auto outId = rig.document.createCue (rig.listId, 4, "transport", "Scene out").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + outId + "/target", rig.scene).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + outId + "/verb", "fade").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + outId + "/duration", "2").ok);
+
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    const auto* scene = rig.liveRunOf (rig.scene);
+    REQUIRE (scene != nullptr);
+    const auto sceneRun = scene->id;
+
+    playOn (rig, [] { return false; }, since, 50);
+
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (outId) }).rejected == 0);
+    playOn (rig, [] { return false; }, since, 25);
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (3.0) }).rejected == 0);
+
+    CHECK (rig.runs.find (sceneRun)->state == cue::runState::stopping);
+
+    //  Down at the fade's end, seventy-odd ticks on - not at the scene's own end, eleven seconds on.
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since, 90));
+
+    //  And the member due at ten seconds never played.
+    for (const auto& run : rig.runs.all())
+        if (run.cue == rig.late)
+            CHECK (run.startedAtTick < 0);
 }
 
 TEST_CASE ("seek: a manual group sought keeps its round, and the GO on its last member walks on")

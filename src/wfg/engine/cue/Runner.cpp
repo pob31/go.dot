@@ -1629,7 +1629,21 @@ namespace wfg::cue
                 continue;
             }
 
-            run->state = runState::playing;
+            /*  A STANDING SCENE ON ITS WAY OUT STAYS ON ITS WAY OUT (2026-10-02,
+                K3's review, namespace draft §23.14, KT). A seek re-seats where
+                the scene is, not whether it is ending: written `playing` over a
+                scene a fade-and-stop was bringing down, it kept the fade's
+                level and lost the stop - its new job never entered the
+                stopping branch, and a fade lands nothing on a group itself -
+                so the scene played on, silent, to its natural end, its network
+                and MIDI members still firing. A stop asked of it stands until
+                a handler that gives a run back withdraws it (`stopAsked`, a
+                handler's account, so a replay seats the same state); the fade
+                still ends it at its tick, and a stop already landed brings the
+                re-seated members down at once. A seek of a media run withdraws
+                the ask (HB), but its fade's job still lands its stop on the
+                voice - the same end, by the road a cue has. */
+            run->state = ! madeHere && run->stopAsked ? runState::stopping : runState::playing;
 
             /*  WHEN IT STARTED, AS IF IT HAD. `started` publishes this tick
                 and `position` counts from it, so a scene seated `offset`
@@ -2265,14 +2279,22 @@ namespace wfg::cue
                 is going, and preparing a member into it would hand the member
                 to a group about to kill it. The horizon builds a fresh one,
                 as it would once the old one has ended. */
+            /*  NOR ONE INSIDE A SCENE ON ITS WAY OUT, nor a block made ready
+                under one (2026-10-02, K3's review, §23.14, KU): since K3 a
+                fade-and-stop keeps a scene `stopping` for as long as its fade,
+                and a block reused under it was given back when its stop landed
+                - its pre-send put back over whatever the GO in between had
+                sent. The block under it is given back at once instead
+                (`armStandby`), and a fresh one is made here. */
             if (const auto* live = runs.liveRunOf (groupId);
-                live != nullptr && live->state != runState::stopping)
+                live != nullptr && ! goingOut (*live))
             {
                 parentRun = live->id;
                 continue;
             }
 
-            if (const auto* ready = runs.preparedRunOf (groupId))
+            if (const auto* ready = runs.preparedRunOf (groupId);
+                ready != nullptr && ! goingOut (*ready))
             {
                 parentRun = ready->id;
                 continue;
@@ -2470,8 +2492,11 @@ namespace wfg::cue
                 would be killed by it on the next tick, a GO that made no sound.
                 The GO starts the scene again instead, which is what it did
                 when the group was gone a tick after Esc. */
+            /*  NOR ONE INSIDE A SCENE ON ITS WAY OUT (2026-10-02, K3's review,
+                §23.14, KU): the level above was built afresh, and the old run
+                of this level is going with its parent. */
             if (const auto* live = runs.liveRunOf (groupId);
-                live != nullptr && live->state != runState::stopping)
+                live != nullptr && ! goingOut (*live))
             {
                 parentRun = live->id;
                 continue;
@@ -2491,7 +2516,8 @@ namespace wfg::cue
                 `beginPhase` reads that copy. Writing only the run would start
                 the scene at member one, wherever the operator's pointer
                 actually was. */
-            if (const auto* ready = runs.preparedRunOf (groupId))
+            if (const auto* ready = runs.preparedRunOf (groupId);
+                ready != nullptr && ! goingOut (*ready))
             {
                 const auto adopted = ready->id;
 
@@ -4274,10 +4300,19 @@ namespace wfg::cue
             each other - and neither exists yet (`fade/@level` is a destination
             in dB, never an offset). When relative fades arrive this is the line
             that changes, and the stop's schedule is not what changes with it. */
+        /*  AND A STOP OVER A STOP LANDS AT THE SOONER OF THE TWO (2026-10-02,
+            K3's review, namespace draft §23.14, KS). The takeover keeps a stop
+            already coming from being called off by a FADE; it was never meant
+            to put off a second stop that is due first. A `hard` stop over a
+            ten-second fade-out took the level to silence at once and left the
+            cue - since K3, a whole scene - playing silently to the tenth
+            second. */
         if (takeover.keepStopping)
         {
             job.stopWhenDone = true;
-            job.stopsAtTick = takeover.stopsAtTick;
+            job.stopsAtTick = stopWhenDone
+                                ? std::min (takeover.stopsAtTick, currentTick + job.ticksTotal + stopLagTicks)
+                                : takeover.stopsAtTick;
         }
         else if (stopWhenDone)
         {
@@ -4382,11 +4417,14 @@ namespace wfg::cue
             horizon ahead of the tick that wrote it and reached over one more,
             and a stop is heard at the next block: stopped with the fade's last
             tick, the voice would never play the end of the ramp. A stop this
-            job inherited keeps its own tick, as a level's does. */
+            job inherited keeps its own tick, as a level's does - unless this
+            job stops too, and sooner (KS). */
         if (takeover.keepStopping)
         {
             job.stopWhenDone = true;
-            job.stopsAtTick = takeover.stopsAtTick;
+            job.stopsAtTick = stopWhenDone
+                                ? std::min (takeover.stopsAtTick, currentTick + job.ticksTotal + latencyTicks() + 1)
+                                : takeover.stopsAtTick;
         }
         else if (stopWhenDone)
         {
@@ -8807,6 +8845,75 @@ namespace wfg::cue
             blocksToGiveBack = std::move (stillPlaying);
         }
 
+        /*  A SCENE MADE READY UNDER A SCENE A FADE IS TAKING DOWN, given back at
+            once (2026-10-02, K3's review, namespace draft §23.14, KU) - asked
+            every tick, above the gate below, since what it waits for is a fade
+            beginning and not a move of the pointer. Since K3 a fade-and-stop
+            keeps its scene `stopping` for the length of the fade, and nothing
+            will ever enter a block under it: a GO on that row builds the scene
+            afresh beside it (`fireStandby`). Left to the scene's job, the block
+            was given back when the fade ended - its pre-send put back over the
+            value the GO in between had sent, the desk left as it was before
+            the show got there. Given back now, before any such GO, and made
+            again for the pointer when it is the pointer's own scene: the
+            horizon builds it under a fresh run of the act (`prepareStandby`,
+            `goingOut`), which the GO adopts. Only a block nobody asked for
+            anything in, as at every give-back; a block under a scene whose stop
+            has landed is its job's, in the same tick, as it always was. */
+        {
+            const auto horizon = horizonGroupsFor (list, standby);
+            auto prepareAgain = false;
+
+            const auto isBlock = [] (const Run& candidate)
+            {
+                return candidate.onlyPrepared() && candidate.state == runState::preparing
+                         && ! candidate.prepare.empty();
+            };
+
+            /*  The first `stopping` run above it decides: a fade still holding
+                it, or a stop that has landed and is its job's. */
+            const auto underAFade = [this] (const Run& candidate)
+            {
+                const auto* above = runs.find (candidate.parent);
+
+                for (std::size_t guard = 0; above != nullptr && ! above->isFinished()
+                                              && guard <= runs.all().size(); ++guard)
+                {
+                    if (above->state == runState::stopping)
+                        return fadingToItsStop (*above);
+
+                    above = above->parent.empty() ? nullptr : runs.find (above->parent);
+                }
+
+                return false;
+            };
+
+            for (const auto& snapshot : runs.all())
+            {
+                if (! isBlock (snapshot) || snapshot.parent.empty()
+                      || std::find (givenBack.begin(), givenBack.end(), snapshot.id) != givenBack.end())
+                    continue;
+
+                /*  THE OUTERMOST BLOCK ONLY: a revocation takes the blocks
+                    inside it with it, restores and all. */
+                if (const auto* parentBlock = runs.find (snapshot.parent);
+                    parentBlock != nullptr && isBlock (*parentBlock))
+                    continue;
+
+                if (! underAFade (snapshot) || runs.askedForUnder (snapshot.id))
+                    continue;
+
+                submitRevocation (engine, snapshot.id);
+                givenBack.push_back (snapshot.id);
+
+                if (std::find (horizon.begin(), horizon.end(), snapshot.cue) != horizon.end())
+                    prepareAgain = true;
+            }
+
+            if (prepareAgain && ! standby.empty())
+                engine.submit (origin::engine, "run.prepare", one (standby));
+        }
+
         /*  A VOICE DOH! IS FADING OUT, WAITED FOR (2026-10-01, namespace
             draft §24): the standby's arm of the cue was put off while the old
             run still held it, and once that run has gone it is asked for again
@@ -9214,16 +9321,29 @@ namespace wfg::cue
             sends each member all mark what they stop (`stopEndsWait`, K2), a
             kill marks it `skipFooter`, a Doh `takenBack` - all handler-written.
             Above, because a stopping scene leaves a member already on its way
-            out to finish (`endMember`): without the walk, Esc on an act left a
-            scene a stop cue was fading inside it playing on to the fade's end,
-            its sequence launching members after the press. Bounded by the
+            out to finish (`endMember`): without the walk, the pane's stop on an
+            act left a scene a stop cue was fading inside it playing on to the
+            fade's end, the act's footer waiting behind it. (Esc reaches the
+            stop cue's own run too, which lets go by itself.) Bounded by the
             table, as `underAKill` is; a finished parent ends the walk, as it
-            ends `stopEveryRoot`'s (JV). */
+            ends `stopEveryRoot`'s (JV).
+
+            AND NOR DOES A STOP ABOVE IT THAT HAS LANDED (2026-10-02, K3's
+            review, KV): an authored stop - a `hard` stop cue on the act, or
+            the act's own fade-and-stop reaching its end - makes the act
+            `stopping` with no abort's mark, and its job passed over the scene
+            inside it as one already on its way out, so a hard stop of the act
+            waited for the inner scene's fade. An ancestor `stopping` and not
+            itself held by a fade is one whose stop is being carried out: the
+            scene inside it comes down now, with it. */
         const auto* at = &group;
 
         for (std::size_t guard = 0; at != nullptr && guard <= runs.all().size(); ++guard)
         {
             if (at->stopEndsWait || at->skipFooter || at->takenBack)
+                return false;
+
+            if (at != &group && at->state == runState::stopping && ! fadingToItsStop (*at))
                 return false;
 
             if (at->parent.empty())
@@ -9238,6 +9358,25 @@ namespace wfg::cue
         }
 
         return true;
+    }
+
+    bool Runner::goingOut (const Run& run) const
+    {
+        /*  Bounded by the table, as `underAKill` is. */
+        const auto* at = &run;
+
+        for (std::size_t guard = 0; at != nullptr && guard <= runs.all().size(); ++guard)
+        {
+            if (at->isFinished())
+                return false;
+
+            if (at->state == runState::stopping)
+                return true;
+
+            at = at->parent.empty() ? nullptr : runs.find (at->parent);
+        }
+
+        return false;
     }
 
     bool Runner::beingKilled (const Run& run) const

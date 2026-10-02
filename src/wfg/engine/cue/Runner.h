@@ -1540,6 +1540,13 @@ namespace wfg::cue
             of stopping its members. Hook state, read by a hook. */
         bool fadingToItsStop (const Run& group) const;
 
+        /*  WHETHER A RUN, OR ANY UNFINISHED RUN ABOVE IT, IS `stopping`
+            (2026-10-02, K3's review, namespace draft §23.14, KU): a scene on
+            its way out, or one inside such a scene. The standby's two walks
+            neither descend into one nor adopt a block made under one - a fresh
+            run is built instead, as for a scene Esc is fading down. */
+        bool goingOut (const Run& run) const;
+
         /*  WHETHER A KILL HAS REACHED A RUN AND STILL STANDS: its own
             (`skipFooter`, which only `run.kill` and a double Esc write, with
             the stop it asked - a seek withdraws that) or one above it. Since

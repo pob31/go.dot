@@ -2217,6 +2217,62 @@ TEST_CASE ("prepare: the pointer leaving a scene made ready inside a running act
     }
 }
 
+TEST_CASE ("prepare: a GO on a scene's row while its act fades out keeps the desk the GO sent, after the fade")
+{
+    /*  K3's review (2026-10-02, namespace draft §23.14, KU). Since K3 a
+        fade-and-stop keeps the act `stopping` for the length of its fade, and
+        the scene the horizon made ready under it stayed there: a GO on the
+        scene's row built the act afresh beside the fading one, its scene
+        sending the desk its value - and at the fade's end the act's job gave
+        the old block back, putting the desk back to what it held before the
+        show got there. Now the block under a fading act is given back at once,
+        before any GO, and made again under a fresh run of the act, which the GO
+        adopts. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    const SceneInAnAct shape { rig };
+
+    const auto actOut = rig.document.createCue (rig.listId, rig.index++, "transport", "Act out").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + actOut + "/target", shape.act).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + actOut + "/verb", "fade").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + actOut + "/duration", "2").ok);
+
+    shape.enter (rig);
+
+    tickUntilDeskHolds (rig, 0.8f);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+    const auto actRun = rig.runs.liveRunOf (shape.act)->id;
+    REQUIRE (rig.runs.preparedRunOf (shape.scene) != nullptr);
+    REQUIRE (rig.runs.preparedRunOf (shape.scene)->parent == actRun);
+
+    //  The act is faded out by name, the pointer still on scene two's row.
+    rig.engine.submit ("cli", "cue.fire", { osc::Value::string (actOut) });
+    rig.tickOnce();
+    ticksOf (rig, 10);
+    tickUntilDeskHolds (rig, 0.8f);
+
+    //  GO on scene two during the fade.
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+    ticksOf (rig, 10);
+
+    const auto* playing = rig.runs.liveRunOf (shape.scene);
+    REQUIRE (playing != nullptr);
+    CHECK (playing->parent != actRun);
+
+    //  Past the fade's end: the old act down, the desk still holding what the GO sent.
+    ticksOf (rig, 150);
+
+    CHECK (rig.runs.find (actRun)->isFinished());
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+}
+
 TEST_CASE ("prepare: a scene adopted under a running act whose header settles in the tick after the GO stays adopted")
 {
     /*  THE MARK IS WHAT THE GIVE-BACK READS, so an adopted block must never get
