@@ -104,7 +104,7 @@ namespace wfg::client
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
-            menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh
+            menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance
         };
 
         class Window final : public wfg::Client,
@@ -676,7 +676,8 @@ namespace wfg::client
                     case menuShowSettings:
                     case menuSurfaces:
                     case menuNetworkMonitor:
-                    case menuAssociate: break;
+                    case menuAssociate:
+                    case menuNewPerformance: break;
                     
                 }
 
@@ -707,6 +708,9 @@ namespace wfg::client
                 {
                     case menuNew:
                     case menuOpen:      return host.openWindow != nullptr;
+
+                    //  From the show, or from a performance used as a template.
+                    case menuNewPerformance: return host.openWindow != nullptr && documentFolder().isDirectory();
                     case menuSave:      return last.mayOfferSave() && last.hasSomethingToSave();
                     case menuSaveAs:    return last.mayOfferSave();
                     case menuRevert:    return last.mayOfferSave();
@@ -769,6 +773,7 @@ namespace wfg::client
                 if (index == 0)
                 {
                     addMenuItem (menu, menuNew, "New show...");
+                    addMenuItem (menu, menuNewPerformance, "New performance...");
                     addMenuItem (menu, menuOpen, "Open show...");
                     menu.addSeparator();
                     addMenuItem (menu, menuSave, "Save");
@@ -855,6 +860,7 @@ namespace wfg::client
                 switch (itemId)
                 {
                     case menuNew:       chooseShowFolder (true); break;
+                    case menuNewPerformance: askForANewPerformance(); break;
                     case menuOpen:      chooseShowFolder (false); break;
                     case menuSave:      save(); break;
                     case menuSaveAs:    if (host.emptyShowAtStart) chooseWhereTheEmptyShowLives();
@@ -1120,12 +1126,17 @@ namespace wfg::client
             }
 
         private:
-            static juce::String titleFor (const std::string& show)
+            /*  "Go.dot - Hamlet", and for a performance its show's name before
+                its own: "Go.dot - Hamlet - Paris" (§25, JJ). */
+            static juce::String titleFor (const std::string& show, const juce::String& aroundShow = {})
             {
                 /*  The dash as UTF-8 bytes, not a narrow literal: the title bar
                     showed "â□□" for it once the frame was the window's own. */
+                const juce::String dash { juce::CharPointer_UTF8 (" \xe2\x80\x94 ") };
+
                 return show.empty() ? juce::String ("Go.dot")
-                                    : juce::String (juce::CharPointer_UTF8 ("Go.dot \xe2\x80\x94 "))
+                                    : juce::String ("Go.dot") + dash
+                                        + (aroundShow.isEmpty() ? juce::String() : aroundShow + dash)
                                         + juce::String (show);
             }
 
@@ -1226,7 +1237,7 @@ namespace wfg::client
                 if (surfaces) surfaces->refresh (*snapshot);
 
                 if (reading.show != last.show)
-                    window->setName (titleFor (reading.show));
+                    window->setName (titleFor (reading.show, showAroundThisDocument()));
 
                 shell->transport.show (reading);
 
@@ -1546,6 +1557,7 @@ namespace wfg::client
             {
                 pass();
                 followTheEmptyShowsSave();
+                followTheNewPerformance();
             }
 
             /*  THE ONE WAY OUT OF THIS CLIENT INTO THE SHOW (§14.16, rule 1).
@@ -2091,6 +2103,126 @@ namespace wfg::client
                                                 && ! last.hasSomethingToSave() && last.canUndo == model::Flag::no)
                                               host.quit();
                                       });
+            }
+
+            //======================================================================
+            /*  A SHOW AND ITS PERFORMANCES (namespace draft §25). A Show is the
+                piece and a Performance each event of it - a whole bundle folded
+                inside the show's folder (JJ). Which this window's document is
+                is a fact about the disk: a document whose folder sits in a
+                folder holding a .wfg is a performance of that show. */
+            juce::File documentFolder() const
+            {
+                if (latest == nullptr)
+                    return {};
+
+                const auto path = model::text (*latest, "/godot/document/path");
+                return path.empty() ? juce::File() : juce::File (juce::String (path));
+            }
+
+            static bool holdsAShow (const juce::File& folder)
+            {
+                return folder.isDirectory()
+                         && folder.getNumberOfChildFiles (juce::File::findFiles, "*.wfg") > 0;
+            }
+
+            //  The show around this document, when it is a performance; empty when it is a show.
+            juce::String showAroundThisDocument() const
+            {
+                const auto around = documentFolder().getParentDirectory();
+                return holdsAShow (around) ? around.getFileName() : juce::String();
+            }
+
+            /*  NEW PERFORMANCE (§25, JI): a copy of this window's document - the
+                show, or a performance used as a template - into a folder of its
+                own inside the show's, opened in its own window. Named first,
+                today's date suggested, since a performance is most often a date
+                and a place. The copy is one `document.saveAs`, the copy the
+                engine already makes, followed from the timer as the empty
+                show's save is (followTheNewPerformance). */
+            void askForANewPerformance()
+            {
+                const auto document = documentFolder();
+
+                if (! document.isDirectory() || ! host.openWindow)
+                    return;
+
+                const auto showFolder = showAroundThisDocument().isNotEmpty() ? document.getParentDirectory() : document;
+
+                auto* box = new juce::AlertWindow ("New performance",
+                                                   "A name for it - a date and a place, say. It goes in "
+                                                     + showFolder.getFileName() + "'s folder.",
+                                                   juce::MessageBoxIconType::NoIcon);
+                box->addTextEditor ("name", juce::Time::getCurrentTime().formatted ("%Y-%m-%d"));
+                box->addButton ("Make it", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                box->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                box->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, box, document, showFolder, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                    {
+                        if (answer != 1 || safe == nullptr)
+                            return;
+
+                        const auto name = juce::File::createLegalFileName (box->getTextEditorContents ("name").trim());
+                        const auto target = showFolder.getChildFile (name);
+
+                        if (name.isEmpty())
+                        {
+                            shell->transport.setNotice ("a performance needs a name");
+                            return;
+                        }
+
+                        if (target.exists())
+                        {
+                            shell->transport.setNotice (name + " is already in " + showFolder.getFileName());
+                            return;
+                        }
+
+                        //  From a template, its own sounds come too; the show's are found from around.
+                        const auto templateMedia = document != showFolder ? document.getChildFile ("media") : juce::File();
+
+                        send (gesture::saveAs (target.getFullPathName().toStdString()));
+                        makingAPerformance = NewPerformance { target, juce::Time::getCurrentTime(),
+                                                              last.writeError, templateMedia };
+                        shell->transport.setNotice ("making the performance " + name);
+                    }), true);
+            }
+
+            /*  On every pass while a performance is being made. */
+            void followTheNewPerformance()
+            {
+                if (! makingAPerformance.has_value())
+                    return;
+
+                auto& making = *makingAPerformance;
+
+                if (! last.writeError.empty() && last.writeError != making.errorBefore)
+                {
+                    shell->transport.setNotice ("the performance was not made: " + juce::String (last.writeError));
+                    makingAPerformance.reset();
+                    return;
+                }
+
+                if (copyLanded (making.folder, making.since))
+                {
+                    const auto made = making;
+                    makingAPerformance.reset();
+
+                    if (made.templateMedia.isDirectory()
+                          && ! made.templateMedia.copyDirectoryTo (made.folder.getChildFile ("media")))
+                        shell->transport.setNotice ("the performance is made, but its template's own sounds were not all copied");
+
+                    const auto refused = host.openWindow (made.folder.getFullPathName().toStdString(), false);
+                    shell->transport.setNotice (refused.empty() ? "opening the performance " + made.folder.getFileName()
+                                                                : juce::String (refused));
+                    return;
+                }
+
+                if ((juce::Time::getCurrentTime() - making.since).inSeconds() > 20.0)
+                {
+                    shell->transport.setNotice ("the performance did not arrive in " + making.folder.getFileName());
+                    makingAPerformance.reset();
+                }
             }
 
             /*  WHERE A SHOW DIALOG STARTS (author, 2026-10-01: "Can they
@@ -2870,6 +3002,19 @@ namespace wfg::client
             };
 
             std::optional<EmptyShowSave> savingTheEmptyShow;
+
+            /*  A performance on its way (askForANewPerformance): its folder,
+                since when, what the writer had said before, and the template's
+                own media/ to bring along - empty when made from the show. */
+            struct NewPerformance
+            {
+                juce::File folder;
+                juce::Time since;
+                std::string errorBefore;
+                juce::File templateMedia;
+            };
+
+            std::optional<NewPerformance> makingAPerformance;
         };
     }
 

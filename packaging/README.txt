@@ -27,6 +27,18 @@ a show remembers the one it was saved with. A new show opens on its settings.
 Open show... takes a show's folder or its .wfg, and a show that is already
 open in a window is brought forward instead of being opened twice.
 
+A show and its performances: a Show is the piece, a Performance each night
+of it - another venue or the same one. File > "New performance..." makes one
+inside the show's folder, as a copy of the show or of an earlier performance:
+
+    Hamlet/                 the show, with media/ for the piece's sounds
+      2026-10-03 Paris/     a performance, with media/ for its own
+      2026-11-12 Lyon/
+
+A performance finds a sound in its own media/ first, then in the show's.
+Sounds you add to the show are the piece's; sounds you add to a performance
+(an announcement) and its recordings stay with that performance.
+
   Windows   Two downloads, the same Go.dot. The setup (-setup.exe) installs
             it for you alone, or for everybody if you choose, adds it to the
             Start menu, and makes a double-click on a show's .wfg open it; it
