@@ -5383,6 +5383,15 @@ namespace wfg::cue
         assertDue = -1;
         paused.clear();
         owed.clear();
+
+        /*  AND THE PUT-BACKS A CLOCK MOVE OR A SETTINGS OPERATION STILL OWES
+            (2026-10-02, K5's review, namespace draft §23.16, LP): PRD §4.4's
+            "drops all actions", as the queued output above is dropped - the
+            desk keeps what the pre-sends left, the price of an emergency. The
+            standby is still made ready again once a write is let in (LC):
+            `waitingForWrites` stays, and the settle is let go. Hook state. */
+        owedPutBacks.clear();
+        prepareAfterPutBack = -1;
     }
 
     bool Runner::goTooSoon (std::int64_t tick) const
@@ -7208,6 +7217,14 @@ namespace wfg::cue
                     job.reading = false;
                     job.ticksWaited = 0;
                     writeOscNow (job);
+
+                    /*  AND WHAT IT WROTE, as the tree took it (2026-10-02, K5's
+                        review, LO): a put-back after a clock move is made only
+                        while the desk still holds this. */
+                    if (job.failure.empty() && ! job.left)
+                        if (auto* writer = runs.find (job.self))
+                            if (const auto* written = mounts->valueOf (job.address))
+                                writer->preSentAtom = written->toAtom();
 
                     if (! job.failure.empty())
                         continue;
@@ -9066,18 +9083,24 @@ namespace wfg::cue
             same since 2026-10-02 for a settings operation (`audio.apply`,
             `audio.setup`, `plugin.load`), which revokes in its handler and
             hands over the same way. */
-        if (! owedPutBacks.empty() && engine.admits ("node.set"))
+        /*  AND NOTHING IS MADE READY WHILE A PUT-BACK WAITS FOR THE CLOCK
+            (2026-10-02, K5's review, LM). The first tick the show runs again
+            can still have `audio.settingsReady` queued and not drained, so a
+            write is not admitted yet; a pointer Doh! moved during the outage
+            then had the latch below ask for its scene in that same drain -
+            made ready and pre-sent ahead of the put-back, reading the scene's
+            value as the desk's. Every preparation waits for the put-back now,
+            as it would have been refused anyway while the clock was away. */
+        if (waitingForWrites)
         {
-            auto anything = false;
+            if (! engine.admits ("node.set"))
+                return;
 
-            for (const auto& id : owedPutBacks)
-                anything = submitRestores (engine, id) || anything;
-
-            owedPutBacks.clear();
-            armedStandby.clear();
-
-            if (anything)
+            if (advancePutBacks (engine))
                 prepareAfterPutBack = currentTick + putBackSettleTicks;
+
+            armedStandby.clear();
+            waitingForWrites = ! owedPutBacks.empty();
         }
 
         /*  A BLOCK THE POINTER LEFT WITH SOMETHING PLAYING IN IT, given back
@@ -9382,6 +9405,108 @@ namespace wfg::cue
         for (const auto& id : revokedRuns)
             if (std::find (owedPutBacks.begin(), owedPutBacks.end(), id) == owedPutBacks.end())
                 owedPutBacks.push_back (id);
+
+        if (! revokedRuns.empty())
+            waitingForWrites = true;
+    }
+
+    bool Runner::advancePutBacks (Engine& engine)
+    {
+        /*  ONE PASS OVER WHAT A CLOCK MOVE OR A SETTINGS OPERATION GAVE BACK
+            (2026-10-02, K5's review, namespace draft §23.16), each pre-send
+            decided by what the mounted tree holds at its address now:
+
+            - THE VALUE TO PUT BACK: it went back - the `node.set` this hook
+              submitted on an earlier pass was applied. Settled.
+            - WHAT THE PRE-SEND WROTE: nobody has written since, so the value
+              goes back, as an ordinary `node.set` - submitted, and the run kept
+              owed until a later pass sees it landed. Admission is only a
+              forecast here: a record queued ahead of the restore in its drain -
+              `audio.connection` false from an interface that drops again, a
+              settings operation - can still have it refused, and a restore
+              forgotten as it was submitted was lost for good (LN).
+            - ANYTHING ELSE: somebody wrote since - a client's `node.set`, a
+              load-to-time's writes, in the drain that ended the outage - and
+              that write is newer than anything the show remembers. Not put
+              back over (LO). Settled.
+
+            A pre-send with no record of what it wrote, or a show with no mount
+            table, is put back once and forgotten, as every other give-back
+            does. Hook state throughout: the restore fields are the hooks', the
+            `node.set` is a logged record a replay re-injects. */
+        auto submitted = false;
+        std::set<std::string> seen;
+        std::vector<std::string> stillOwed;
+
+        for (const auto& blockId : owedPutBacks)
+        {
+            std::vector<std::string> under;
+
+            for (const auto* below : runs.descendantsOf (blockId))
+                under.push_back (below->id);
+
+            auto owes = false;
+
+            for (const auto& runId : under)
+            {
+                if (! seen.insert (runId).second)
+                    continue;
+
+                auto* run = runs.find (runId);
+
+                if (run == nullptr || run->restoreAddress.empty())
+                    continue;
+
+                const auto restore = osc::Value::fromAtom (run->restoreAtom);
+                const auto preSent = osc::Value::fromAtom (run->preSentAtom);
+                const auto* now = mounts != nullptr ? mounts->valueOf (run->restoreAddress) : nullptr;
+
+                const auto forget = [run]
+                {
+                    run->restoreAddress.clear();
+                    run->restoreAtom.clear();
+                    run->preSentAtom.clear();
+                };
+
+                if (! restore.has_value())
+                {
+                    forget();
+                    continue;
+                }
+
+                if (! preSent.has_value() || mounts == nullptr)
+                {
+                    engine.submit (origin::engine, "node.set",
+                                   { osc::Value::string (run->restoreAddress), *restore });
+                    submitted = true;
+                    forget();
+                    continue;
+                }
+
+                if (now != nullptr && *now == *restore)
+                {
+                    forget();
+                    continue;
+                }
+
+                if (now != nullptr && *now == *preSent)
+                {
+                    engine.submit (origin::engine, "node.set",
+                                   { osc::Value::string (run->restoreAddress), *restore });
+                    submitted = true;
+                    owes = true;
+                    continue;
+                }
+
+                forget();
+            }
+
+            if (owes)
+                stillOwed.push_back (blockId);
+        }
+
+        owedPutBacks = std::move (stillOwed);
+        return submitted;
     }
 
     void Runner::submitRevocation (Engine& engine, const std::string& runId)
@@ -9390,9 +9515,8 @@ namespace wfg::cue
         engine.submit (origin::engine, "run.revoke", one (runId));
     }
 
-    bool Runner::submitRestores (Engine& engine, const std::string& runId)
+    void Runner::submitRestores (Engine& engine, const std::string& runId)
     {
-        auto putBack = false;
 
         /*  WHAT WAS PRE-SENT GOES BACK FIRST, and it goes back as an ORDINARY
             WRITE.
@@ -9421,11 +9545,8 @@ namespace wfg::cue
                 continue;
 
             if (const auto value = osc::Value::fromAtom (run->restoreAtom))
-            {
                 engine.submit (origin::engine, "node.set",
                                { osc::Value::string (run->restoreAddress), *value });
-                putBack = true;
-            }
 
             /*  ONCE (2026-10-01, namespace draft §24): a block given back inside
                 one being given back - the next scene's, under an act Doh! is
@@ -9452,8 +9573,6 @@ namespace wfg::cue
         for (auto& job : sending)
             if (inAncestryOf (runId, job.self))
                 job.finished = true;
-
-        return putBack;
     }
 
     bool Runner::drivenByAJob (const Run& run) const

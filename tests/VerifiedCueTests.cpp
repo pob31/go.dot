@@ -2459,15 +2459,17 @@ namespace
         }
     }
 
-    /*  The `node.set` records on the desk's fader carrying `value`, in log
-        order: where each stands. */
+    /*  The applied `node.set` records on the desk's fader carrying `value`,
+        in log order: where each stands. A write the engine refused reached
+        nobody, and is not counted (K5's review). */
     std::vector<std::size_t> deskWrites (VerifiedRig& rig, const osc::Value& value)
     {
         const auto records = LogFile::parse (rig.engine.log().contents()).records;
         std::vector<std::size_t> out;
 
         for (std::size_t n = 0; n < records.size(); ++n)
-            if (records[n].command == "node.set" && records[n].args.size() == 2u
+            if (records[n].command == "node.set" && records[n].kind == LogRecord::Kind::applied
+                  && records[n].args.size() == 2u
                   && records[n].args[0].isString() && records[n].args[0].getString() == "/desk/fader"
                   && records[n].args[1] == value)
                 out.push_back (n);
@@ -2685,5 +2687,357 @@ TEST_CASE ("prepare: a clock move or a settings operation puts back what the sta
             CHECK (replayed->state == run.state);
             CHECK (replayed->warning == run.warning);
         }
+
+        /*  AND THE DESK AS THE LOG LEAVES IT (K5's review): the put-back is the
+            last record that writes it, so the replay's desk holds 0.2. The
+            session's holds 0.8 after it - the fresh pre-send's write, which a
+            hook makes when the desk's answer lands and which no record carries
+            (`advanceSends`, since Phase 4): a replay's mounted tree never has a
+            pre-send's value. Compared where it can be, then: here against the
+            last write the log has, and in the cases below with no pre-send
+            after the put-back, against the session's desk itself. */
+        REQUIRE (again.mounts.valueOf ("/desk/fader") != nullptr);
+        CHECK (*again.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+    }
+}
+
+//==============================================================================
+/*  K5'S REVIEW (2026-10-02, namespace draft §23.16): the put-back's own edges.
+    A pointer moved while the clock was away, an interface that drops again in
+    the very drain that carries the put-back, a client that writes the fader
+    as the show comes back, Esc and a double Esc during the outage, a GO inside
+    the settle, and a follow that ended in an error. */
+namespace
+{
+    /*  The rig of the case above, set up to the moment before the clock goes:
+        the standby on a scene whose header pre-sent 0.8 over the desk's 0.2,
+        with a footer that must never run. */
+    struct ClockScene
+    {
+        ClockScene()
+        {
+            rig.anticipate();
+            rig.device.target.says ({ osc::Value::float32 (0.2f) });
+            REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+            wireTheClock (rig, state);
+
+            const auto footer = rig.document.createRole (scene.group, "footer");
+            REQUIRE (footer.ok);
+            release = rig.document.createCue (footer.id, 0, "memo", "Release").id;
+        }
+
+        /*  The pointer on the scene and its header pre-sent; the show as a
+            replay starts from, taken before anything is in the log. */
+        void prepare()
+        {
+            rig.setStandby (scene.group);
+            show = doc::CanonicalXml::write (rig.document);
+            tickUntilDeskHolds (rig, 0.8f);
+            REQUIRE (deskHolds (0.8f));
+
+            REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
+            block = rig.runs.preparedRunOf (scene.group)->id;
+        }
+
+        void loseTheClock()
+        {
+            rig.engine.submit ("engine", "audio.connection", { osc::Value::boolean (false) });
+            deskTicks (rig, 1);
+            REQUIRE (state.status == "noClock");
+
+            rig.engine.submit ("engine", "audio.clockMoved", { osc::Value::int32 (96000), osc::Value::int32 (256) });
+            deskTicks (rig, 1);
+            REQUIRE (rig.runs.find (block)->warning == cue::runWarning::revoked);
+        }
+
+        /*  What the Console submits when its follow is over; queued, not ticked. */
+        void clockBack (const std::string& error = {}, int outputs = 2)
+        {
+            rig.engine.submit ("engine", "audio.settingsReady",
+                               { osc::Value::string (error), osc::Value::int32 (96000), osc::Value::int32 (256),
+                                 osc::Value::int32 (0), osc::Value::int32 (outputs),
+                                 osc::Value::string (std::string {}) });
+        }
+
+        bool deskHolds (float value) const
+        {
+            const auto* now = rig.mounts.valueOf ("/desk/fader");
+            return now != nullptr && *now == osc::Value::float32 (value);
+        }
+
+        /*  The finished header pre-send of a block of `group` made after the
+            clock moved, or none yet. */
+        const cue::Run* freshPreSend (const std::string& group, const std::string& cueId) const
+        {
+            const auto* ready = rig.runs.preparedRunOf (group);
+
+            if (ready == nullptr || ready->id == block)
+                return nullptr;
+
+            for (const auto* child : rig.runs.childrenOf (ready->id))
+                if (child->cue == cueId && child->isFinished() && ! child->restoreAtom.empty())
+                    return child;
+
+            return nullptr;
+        }
+
+        /*  Ticks, the desk holding what it is sent, until `group` is made ready
+            again and its pre-send written - then five more. */
+        const cue::Run* waitForFresh (const std::string& group, const std::string& cueId)
+        {
+            for (int n = 0; n < 600 && freshPreSend (group, cueId) == nullptr; ++n)
+                deskTicks (rig, 1);
+
+            deskTicks (rig, 5);
+            return freshPreSend (group, cueId);
+        }
+
+        static std::optional<osc::Value> restoreOf (const cue::Run* run)
+        {
+            if (run == nullptr)
+                return std::nullopt;
+
+            return osc::Value::fromAtom (run->restoreAtom);
+        }
+
+        /*  The tick of a record, by its place in the log. */
+        std::int64_t tickAt (std::size_t index)
+        {
+            const auto records = LogFile::parse (rig.engine.log().contents()).records;
+            REQUIRE (index < records.size());
+            return records[index].tick;
+        }
+
+        VerifiedRig rig;
+        audio::AudioState state;
+        PreparedScene scene { rig, "f:0.8", "none" };
+        std::string release, block, show;
+    };
+}
+
+TEST_CASE ("clock move: a pointer moved while the clock was away is made ready after the put-back, not before")
+{
+    /*  Doh! is let through an outage and moves the pointer; so does anything
+        that moves it while the tick thread is suspended. On the first tick the
+        show runs again, `audio.settingsReady` is queued and not yet drained:
+        K5 as committed skipped its put-back there (no write admitted yet), and
+        the latch, seeing a new pointer, asked for the new scene - drained after
+        the clock's record, so made ready and pre-sent BEFORE the desk was put
+        back, its restore value the old scene's. Held now until the put-back
+        has gone (LM). */
+    ClockScene clock;
+    const PreparedScene other { clock.rig, "f:0.6", "none" };
+    clock.prepare();
+    clock.loseTheClock();
+
+    //  The pointer moves to the other scene, and the clock comes back, in one drain.
+    REQUIRE (clock.rig.document.setAttribute (cue::standbyAddressOf (clock.rig.listId), other.group).ok);
+    clock.clockBack();
+
+    const auto* fresh = clock.waitForFresh (other.group, other.cue);
+    REQUIRE (fresh != nullptr);
+
+    const auto putBack = deskWrites (clock.rig, osc::Value::float32 (0.2f));
+    REQUIRE (putBack.size() == 1u);
+
+    const auto prepared = lastPrepareOf (clock.rig, other.group);
+    CHECK (putBack.front() < prepared);
+    CHECK (clock.tickAt (prepared) >= clock.tickAt (putBack.front()) + 5);
+
+    //  Made ready once, and every pre-send of it read the desk as it was put back.
+    CHECK (recordsOf (clock.rig, "run.prepare", other.group) == 1u);
+
+    for (const auto& run : clock.rig.runs.all())
+    {
+        if (run.cue != other.cue || run.restoreAtom.empty())
+            continue;
+
+        INFO ("pre-send " << run.id);
+        const auto value = osc::Value::fromAtom (run.restoreAtom);
+        REQUIRE (value.has_value());
+        CHECK (*value == osc::Value::float32 (0.2f));
+    }
+
+    const auto held = ClockScene::restoreOf (clock.freshPreSend (other.group, other.cue));
+    REQUIRE (held.has_value());
+    CHECK (*held == osc::Value::float32 (0.2f));
+    CHECK (clock.deskHolds (0.6f));
+}
+
+TEST_CASE ("clock move: a put-back refused by an outage in its own drain goes out after the next recovery")
+{
+    /*  A flapping interface: lost again, `audio.connection` false queued
+        ahead of the put-back in the very drain that carries it. K5 as
+        committed had cleared what to restore and forgotten the run when it
+        submitted, so the refused write was lost for good (LN): the desk kept
+        the scene's value, and the scene made again kept that as the desk's. */
+    ClockScene clock;
+    clock.prepare();
+    clock.loseTheClock();
+    clock.clockBack();
+    deskTicks (clock.rig, 1);
+    REQUIRE (clock.state.status == "running");
+
+    clock.rig.engine.submit ("engine", "audio.connection", { osc::Value::boolean (false) });
+    deskTicks (clock.rig, 1);
+    REQUIRE (clock.state.status == "noClock");
+    CHECK (deskWrites (clock.rig, osc::Value::float32 (0.2f)).empty());
+
+    deskTicks (clock.rig, 10);
+    CHECK (deskWrites (clock.rig, osc::Value::float32 (0.2f)).empty());
+    CHECK (clock.rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+    //  Back on the clock it had.
+    clock.state.resumePlayback = [] { return true; };
+    clock.rig.engine.submit ("engine", "audio.connection", { osc::Value::boolean (true) });
+
+    const auto* fresh = clock.waitForFresh (clock.scene.group, clock.scene.cue);
+    REQUIRE (fresh != nullptr);
+
+    const auto putBack = deskWrites (clock.rig, osc::Value::float32 (0.2f));
+    CHECK (putBack.size() == 1u);
+
+    if (! putBack.empty())
+        CHECK (clock.tickAt (lastPrepareOf (clock.rig, clock.scene.group)) >= clock.tickAt (putBack.front()) + 5);
+
+    const auto held = ClockScene::restoreOf (fresh);
+    REQUIRE (held.has_value());
+    CHECK (*held == osc::Value::float32 (0.2f));
+    CHECK (clock.rig.runOf (clock.release) == nullptr);
+}
+
+TEST_CASE ("clock move: a client's write in the drain that ends the outage is not put back over")
+{
+    /*  The put-back goes out on the tick after the clock's record; a client
+        that set the fader in that drain - or a load-to-time's own writes - is
+        newer than anything the show remembers. K5 as committed wrote the old
+        value over it (LO). A put-back is made only while the desk still holds
+        what the pre-send wrote. */
+    ClockScene clock;
+    clock.prepare();
+    clock.loseTheClock();
+    clock.clockBack();
+    clock.rig.engine.submit ("udp:127.0.0.1:9000", "node.set",
+                             { osc::Value::string ("/desk/fader"), osc::Value::float32 (0.5f) });
+
+    const auto* fresh = clock.waitForFresh (clock.scene.group, clock.scene.cue);
+    REQUIRE (fresh != nullptr);
+
+    CHECK (deskWrites (clock.rig, osc::Value::float32 (0.2f)).empty());
+
+    //  The scene made again keeps the client's value as the desk's.
+    const auto held = ClockScene::restoreOf (fresh);
+    REQUIRE (held.has_value());
+    CHECK (*held == osc::Value::float32 (0.5f));
+}
+
+TEST_CASE ("clock move: Esc during the outage keeps the put-back, a double Esc drops it, and the standby is made ready again either way")
+{
+    /*  PRD §4.4: a double Esc drops all actions - as it drops the output still
+        queued (H4) it drops the put-back owed (LP), and the desk keeps what the
+        pre-send left there, the price of an emergency. Esc is graceful and
+        drops nothing. Either way the standby's scene is made ready again when
+        the clock returns (LC), and no footer runs. */
+    for (const auto* level : { "run.stopAll", "run.killAll" })
+    {
+        INFO (std::string (level));
+        const auto dropped = std::string (level) == "run.killAll";
+
+        ClockScene clock;
+        clock.prepare();
+        clock.loseTheClock();
+
+        clock.rig.engine.submit ("cli", level, {});
+        deskTicks (clock.rig, 1);
+
+        clock.clockBack();
+
+        const auto* fresh = clock.waitForFresh (clock.scene.group, clock.scene.cue);
+        REQUIRE (fresh != nullptr);
+
+        const auto putBack = deskWrites (clock.rig, osc::Value::float32 (0.2f));
+        CHECK (putBack.size() == (dropped ? 0u : 1u));
+
+        const auto held = ClockScene::restoreOf (fresh);
+        REQUIRE (held.has_value());
+        CHECK (*held == osc::Value::float32 (dropped ? 0.8f : 0.2f));
+        CHECK (clock.deskHolds (0.8f));
+        CHECK (clock.rig.runOf (clock.release) == nullptr);
+    }
+}
+
+TEST_CASE ("clock move: a GO inside the settle enters the scene cold, and the desk ends where the scene puts it")
+{
+    /*  Five ticks between the put-back and the scene made again (LE): a GO in
+        them has no block to adopt and enters the scene as a GO always could
+        with none - its header written cold, at once. A net: K5 as committed
+        did the same. Replayed, the desk comes out as the session left it: the
+        put-back and the cold write are both records. */
+    ClockScene clock;
+    clock.prepare();
+    clock.loseTheClock();
+    clock.clockBack();
+    deskTicks (clock.rig, 2);
+    REQUIRE (deskWrites (clock.rig, osc::Value::float32 (0.2f)).size() == 1u);
+    REQUIRE (clock.rig.runs.preparedRunOf (clock.scene.group) == nullptr);
+
+    clock.rig.engine.submit ("cli", "go", {});
+    deskTicks (clock.rig, 1);
+
+    const auto* live = clock.rig.runs.liveRunOf (clock.scene.group);
+    REQUIRE (live != nullptr);
+    CHECK (live->id != clock.block);
+
+    deskTicks (clock.rig, 20);
+    CHECK (clock.deskHolds (0.8f));
+    CHECK (clock.rig.runs.preparedRunOf (clock.scene.group) == nullptr);
+
+    const auto original = LogFile::parse (clock.rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    VerifiedRig again;
+    again.anticipate();
+    audio::AudioState againState;
+    wireTheClock (again, againState);
+    REQUIRE (doc::CanonicalXml::read (clock.show, again.document).ok);
+    REQUIRE (again.document.setAttribute (cue::standbyAddressOf (clock.rig.listId), clock.scene.group).ok);
+
+    const auto result = replay (again.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+
+    //  The desk compared with the session's itself: no pre-send wrote it last.
+    REQUIRE (again.mounts.valueOf ("/desk/fader") != nullptr);
+    REQUIRE (clock.rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*again.mounts.valueOf ("/desk/fader") == *clock.rig.mounts.valueOf ("/desk/fader"));
+}
+
+TEST_CASE ("clock move: a follow that ends in an error still puts the desk back and makes the standby ready again")
+{
+    /*  The Console's follow can fail: the interface opened again from the
+        start, or not at all, the show on the dummy clock. Either way
+        `audio.settingsReady` carries the error and ends the outage, and the
+        desk - a network device, not the sound card - can be written. A net. */
+    for (const auto outputs : { 2, 0 })
+    {
+        INFO ("outputs " << outputs);
+        ClockScene clock;
+        clock.prepare();
+        clock.loseTheClock();
+        clock.clockBack ("The interface's clock moved and the show could not follow it", outputs);
+
+        const auto* fresh = clock.waitForFresh (clock.scene.group, clock.scene.cue);
+        REQUIRE (fresh != nullptr);
+        CHECK (clock.state.settingsStatus == "error");
+
+        CHECK (deskWrites (clock.rig, osc::Value::float32 (0.2f)).size() == 1u);
+
+        const auto held = ClockScene::restoreOf (fresh);
+        REQUIRE (held.has_value());
+        CHECK (*held == osc::Value::float32 (0.2f));
     }
 }

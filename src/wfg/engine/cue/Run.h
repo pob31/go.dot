@@ -754,6 +754,13 @@ namespace wfg::cue
         std::string restoreAddress;
         std::string restoreAtom;
 
+        /*  AND WHAT IT WROTE THERE, as the mounted tree took it (2026-10-02,
+            K5's review, namespace draft §23.16): a put-back after a clock move
+            or a settings operation is made only while the tree still holds
+            this - a value somebody wrote since is newer, and is left. A hook's
+            field, as the two above; empty in a replay. */
+        std::string preSentAtom;
+
         /*  WHERE IN THE FILE THIS RUN BEGINS, BECAUSE SOMEBODY JUMPED THERE.
 
             §3.13's load-to-time: an operator asks for the show as it was two

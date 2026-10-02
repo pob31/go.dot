@@ -15772,7 +15772,7 @@ scene's value, and the block made again after `audio.settingsReady` kept it as t
 - **A hook puts the values back once the desk may be written** (LA). `armStandby`, at its head,
   submits the restores of every run handed over - `submitRestores`, H2's helper, the same `node.set`
   with the value read before the pre-send, once each - as soon as the engine would let a `node.set`
-  in (`Engine::admits`, new: the admission check asked without a command). Not before: an outage
+  in (`Engine::admits`, new: the admission check asked about `node.set` at hook time). Not before: an outage
   refuses every write with `audio-reconnecting` until the show runs on the interface's clock again,
   and a settings operation refuses them with `audio-restarting` until its rebuild ends; a restore
   refused is a restore lost. So the desk goes back on the tick after `audio.settingsReady` - or after
@@ -15883,12 +15883,89 @@ both locales, `blackbox.devices` (both), `blackbox.device.C`, `blackbox.rate-spe
 - **The settle is a time, not an answer.** A device that takes longer than a tenth of a second to
   apply a datagram could still answer the fresh pre-send's question with the scene's value. Read
   from the code; the scripted device here answers at once.
+- **"Landed" is the mounted tree's word** *(K5's review)*: a put-back counts as gone once the tree
+  holds the value put back, which a `node.set` writes as it queues the datagram. A datagram lost on
+  the wire is not seen, as for every write to a device that cannot be read back.
+- **A replay's desk lacks every pre-send's value** *(found in K5's review; older than K5)*: a
+  pre-send writes the tree from `advanceSends`, a hook, when the desk's answer lands, and no record
+  carries that write - so a replay's mounted tree never holds what a pre-send wrote, though every
+  record and every run come out the same. K5's case compares the replay's desk with the last write
+  the log has (the put-back); the review's GO-inside-the-settle case, where no pre-send writes last,
+  compares it with the session's desk itself. Left for a ruling: logging the pre-send's write would
+  change every log with a pre-send in it.
+
+**K5's review (2026-10-02): what changed.** No blocker; four holes in the put-back's road and the
+tests asked for. Each behaviour change has a case written first and run on K5 as committed
+(b75878c, with K8 on top); the new cases are `VerifiedCueTests` "clock move: ...".
+
+- **Nothing is made ready while a put-back waits for the clock** (LM). Doh! is let through an outage
+  and moves the pointer. On the first tick the show runs again `audio.settingsReady` can be queued
+  and not yet drained, so `admits ("node.set")` said no at hook time and the put-back was skipped -
+  while the arm's latch, seeing a new pointer, asked for the new scene in that same drain, applied
+  after the clock's record: made ready and pre-sent ahead of the put-back. `armStandby` now returns
+  at its head while a hand-over waits and a write is not let in (`waitingForWrites`), holding every
+  preparation - all of which the outage would refuse anyway. Case: the pointer moved to another
+  scene in the drain that ends the outage - the put-back, then that scene made ready once, five
+  ticks later or more, its pre-send's restore value the desk's own. Before: made ready twice (the
+  early block and the latch's second ask after the put-back).
+- **A put-back refused in its drain is not lost** (LN). Admission is asked when the hook submits,
+  and a record queued ahead of the restore - `audio.connection` false from an interface that drops
+  again, a settings operation - can flip it before the restore is applied. K5 had cleared the
+  restore and forgotten the block as it submitted. The hand-over now keeps each pre-send owed, and
+  its restore fields, until a later pass sees the tree hold the value put back
+  (`Runner::advancePutBacks`); a refused one is submitted again the next time a write is let in.
+  Case: the interface lost again in the drain that carries the put-back - nothing written during
+  the second outage, the put-back once after it, the scene made ready again with the desk's own
+  value. Before: the put-back never went out, and the standby was never made ready again (its
+  preparation had been asked for, and refused, during the second outage).
+- **A newer write is not put back over** (LO). The put-back goes out on the tick after the record
+  that ends the outage; a client's `node.set` on the same address in that drain, or a
+  load-to-time's writes, came first and are newer. A pre-send now keeps what it wrote, as the tree
+  took it (`Run::preSentAtom`, set in `advanceSends`), and a put-back is made only while the tree
+  still holds that; anything else at the address lets the put-back go. Case: a client's 0.5 in the
+  drain that ends the outage - no put-back, the scene made again keeping 0.5 as the desk's. Before:
+  0.2 written over the client's 0.5.
+- **A double Esc during the outage drops the put-back** (LP, the orchestrator's ruling: PRD §4.4,
+  "drops all actions", as H4 dropped queued output). `dropOutputs` empties what is owed and lets the
+  settle go; the hold stays, so the standby is still made ready again once a write is let in (LC).
+  Esc keeps it. Case, both keys: Esc - the put-back once, the restore value 0.2; a double Esc - no
+  put-back, the desk left at the scene's 0.8 and the scene made again keeping that; the standby made
+  ready again and no footer either way. Before: the double Esc's put-back went out.
+- **The tests the review asked for.** K5's case now compares the replay's desk (above, the named
+  limit); a GO inside the five-tick settle enters the scene cold - no block to adopt, the header
+  written at once, the desk at 0.8, the replay's desk the session's (a net, passed before); a follow
+  that ends in an error - `audio.settingsReady` carrying one, with two outputs and with none - still
+  puts the desk back and makes the standby ready again (a net, passed before). `deskWrites` counts
+  applied writes only.
+- **The docs**: `Engine::admits` is said to be asked about `node.set`; `Runner.h`'s comments on
+  `submitRevocation` and the owed list name the settings operations.
+
+**What it means for a replay.** Nothing in a handler: the double Esc's clearing is hook state, as
+the start cues it already dropped; `preSentAtom` is a hook's field; the hold and the second put-back
+are a hook's timing of logged records. Every `wfg.replay.*` fixture (58, both locales) replays
+record for record, and each new case that replays its session reaches the same runs.
+
+**Counts.** The K5 case and the six review cases under C and `fr-FR`: 7 cases, 467 assertions each;
+the four were run first on K5 as committed - the pointer moved (made ready twice), the refused
+put-back (fatal: never made ready again), the client's write (two checks), the double Esc (two
+checks) - and failed. `DeviceTests`, `VerifiedCueTests`, `NetworkCueTests` and `GoTests` under C:
+405 cases, 8193 assertions; the audio recovery, Doh! and persistent cases under C (91). `ctest -R
+"wfg\.replay|blackbox\.(device|rate|phase9a-fx)"`: 65 of 65.
+
+| | Decision | Whose |
+|---|---|---|
+| LM | **Every preparation waits while a put-back waits for the clock**: `armStandby` returns at its head while a hand-over is pending and a write is not let in | the review's, 2026-10-02 |
+| LN | **A put-back stays owed until it is seen to land**: the restore fields kept, and the `node.set` submitted again whenever a write is let in, until the mounted tree holds the value put back | the review's; "landed" read off the tree the implementer's |
+| LO | **A put-back is made only while the desk holds what the pre-send wrote**: a newer write at the address - a client's, a load-to-time's - lets it go | the review's; the pre-sent value kept as the tree took it the implementer's |
+| LP | **A double Esc drops the put-backs owed**, and still lets the standby be made ready again when the clock returns; Esc keeps them | the orchestrator's ruling, 2026-10-02 (PRD §4.4) |
+
 
 **Owed to the bench:** on the MADIface (or any interface whose rate can be moved from its own
 panel) with an OSCQuery desk, the pointer on a scene whose header pre-sends a fader: move the
 interface's rate while the show is set up - the desk's fader goes back to where it was when the show
 follows, then to the scene's value again; move the pointer away - it goes back to where it was, not
-to the scene's value. The same with Load now and with Apply in the show settings window.
+to the scene's value. The same with Load now and with Apply in the show settings window. *(K5's review:)* and a double Esc pressed
+while the interface is away - the desk's fader left where the scene put it when the show comes back.
 
 ### 23.17 Esc pauses a persistent bed, and takes back the pass a step just opened (K8)
 

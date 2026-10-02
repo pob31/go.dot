@@ -1548,10 +1548,11 @@ namespace wfg::cue
 
             HOOKS ONLY. It submits, and a handler that submitted would put the
             records in a replay twice - once from the log and once from itself.
-            The handlers that revoke (`audio.apply`, `audio.clockMoved`) call
+            The handlers that revoke - `audio.clockMoved` and the settings
+            operations `audio.apply`, `audio.setup` and `plugin.load` - call
             `revokePrepared` and put nothing back themselves; since K5
-            (2026-10-02) `audio.clockMoved` hands what it revoked to
-            `putBackWhenWritable`, whose hook puts it back.
+            (2026-10-02) they hand what they revoked to `putBackWhenWritable`,
+            whose hook puts it back (`advancePutBacks`).
 
             AND THE BLOCK'S NETWORK JOBS ARE SETTLED HERE, so that a pre-send
             whose answer is read later in this same tick writes nothing. */
@@ -1560,9 +1561,15 @@ namespace wfg::cue
         /*  ITS FIRST HALF ON ITS OWN: the values put back and the network jobs
             settled, and no `run.revoke` yet - for a scene Doh! gives back
             while something it set going still moves under it (namespace draft
-            §24). Each restore is submitted once, so asking again is safe.
-            True when it put anything back (2026-10-02, K5). */
-        bool submitRestores (Engine& engine, const std::string& runId);
+            §24). Each restore is submitted once, so asking again is safe. */
+        void submitRestores (Engine& engine, const std::string& runId);
+
+        /*  ONE PASS OVER THE PUT-BACKS OWED (2026-10-02, K5's review, namespace
+            draft §23.16): each pre-sent value put back while the desk still
+            holds what the pre-send wrote, kept owed until a later pass sees it
+            landed, and let go once it has, or once somebody else wrote the
+            address. True when it submitted a `node.set`. Hook-side. */
+        bool advancePutBacks (Engine& engine);
 
         /*  WHETHER A JOB OF THE RUNNER'S STILL DRIVES A RUN: a fade's, a
             network cue's, a group's own, or the end a memo is owed. What no job
@@ -1754,10 +1761,18 @@ namespace wfg::cue
             it leads to is a record in the log. */
         std::vector<std::string> blocksToGiveBack;
 
-        /*  RUNS A CLOCK MOVE REVOKED, whose pre-sent values are still to be
-            put back (`putBackWhenWritable`, namespace draft §23.16). Hook
-            state, as the one above. */
+        /*  RUNS A CLOCK MOVE OR A SETTINGS OPERATION (`audio.apply`,
+            `audio.setup`, `plugin.load`) REVOKED, whose pre-sent values are
+            still to be put back - or were submitted and not yet seen to land
+            (`putBackWhenWritable`, `advancePutBacks`, namespace draft §23.16).
+            Hook state, as the one above; a double Esc drops it (LP). */
         std::vector<std::string> owedPutBacks;
+
+        /*  WHETHER `armStandby` HOLDS EVERY PREPARATION until the engine takes
+            a write (K5's review, LM): set by a hand-over, kept through a double
+            Esc so the standby is still made ready again (LC), and let go on the
+            pass that finds nothing more owed. Hook state. */
+        bool waitingForWrites = false;
 
         /*  THE TICK THE STANDBY MAY BE MADE READY AGAIN after those values went
             back (2026-10-02, K5's extension, §23.16, LE): five ticks, a tenth
