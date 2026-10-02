@@ -2531,13 +2531,21 @@ at the author's direction, 2026-09-10 — decision S,
   operator fights the machine (decision S, 2026-09-07);
 - a **double Esc** does not: the next GO restoring the declared world is the
   point of declaring it, and it is §4.4's price of an emergency, paid once;
-- **Esc** on a persistent *media* cue is a **pause** *(proposed; the author's
-  lean)*: a stop that remembers its position, resumed at that offset by the
-  next assertion — load-to-time's operation at load-to-time's cost (§3.25:
-  offset in prepare, a relaunch when already playing). No footer runs on a pause.
-  For a still, an effect chain or a data process there is nothing to remember
-  and the resume is a relaunch. If adopted, §4.4 gains one sentence and
-  `CLAUDE.md` is re-copied.
+- **Esc** on a persistent *media* cue is a **pause** *(decided by the author,
+  2026-10-02; built as K8, `docs/godot-namespace-draft-0.1.md` §23.17)*: a stop
+  that remembers its position, resumed at that offset by the next assertion —
+  load-to-time's operation at load-to-time's cost (§3.25: offset in prepare, a
+  relaunch when already playing). It still comes down over the panic fade like
+  everything Esc takes. No footer runs on a pause. The position is counted from
+  the ticks and the cue's own speed, never read from the sound card, so a replay
+  resumes at the same second; a cue with ranges carries on from the start of the
+  range it was in. For a mic, a still, an effect chain or a data process — OSC
+  and MIDI included — there is nothing to remember and the resume is a relaunch.
+  A load-to-time forgets the position (it re-solves the world), and so does a
+  double Esc, which on a persistent cue stays what it was: stopped at once, back
+  from the top at the next GO. Esc also takes back an assertion a step just
+  before it had opened, as the double Esc does: the next step is what puts the
+  section back. §4.4 says so in one sentence.
 
 A relaunch is a **machine action**: logged with its origin, shown on the run,
 and it never moves standby (§3.5). A stateful data process — a counter, a latch
@@ -2977,6 +2985,8 @@ draft lists the rest.
    - **Esc — graceful abort.** Stops running cues and **runs footers**. Same code
      path as normal completion, entered early: a group aborted at 04:12 releases
      its channels and kills its LFOs exactly as it would have at 06:00.
+     A persistent media cue is paused rather than stopped, and the next GO
+     resumes it where it was (§3.29).
    - **Double Esc — immediate.** Drops all actions, **skips footers**, kills all
      internal processing including live effects. Scope is **everything Go.dot
      originates** — it does not mute the PA or shut down the projector. The world
@@ -3294,7 +3304,8 @@ Added 2026-09-07, with the sections that carry them: a member pinning its strip
 clip and the second-surface rule (§3.27); the voices claim shape (§3.25,
 measured by M16 and now the author's to pick); the bypassed stack in a rack
 channel (§3.18); a group carrying a persistent section and Esc as a pause on
-persistent media (§3.29).
+persistent media (§3.29). *Answered 2026-10-02 for the second: Esc is a pause
+(§3.29, §4.4; `docs/godot-namespace-draft-0.1.md` §23.17).*
 
 Added 2026-09-09: authored colour at idle and timbre while sounding, as a
 layout option (§3.30).

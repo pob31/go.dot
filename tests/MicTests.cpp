@@ -1079,6 +1079,78 @@ TEST_CASE ("mic: in the persistent section a mic cue is asserted, silenced by a 
     CHECK (again->state == cue::runState::playing);
 }
 
+TEST_CASE ("mic: in the persistent section Esc brings a mic cue down, and the next GO relaunches it, even inside the fade")
+{
+    /*  K8 (2026-10-02): Esc on a persistent MEDIA cue is a pause; a mic cue has
+        no second to remember, so its resume is a relaunch, as before. A GO
+        inside Esc's fade found the old run still on its way out and asserted
+        nothing until the step after; the pass now owes the cue and relaunches
+        it once the fade has ended. */
+    RunRig rig;
+
+    const auto section = rig.document.createPersistent ("MC000001", "MC000070");
+    REQUIRE (section.ok);
+    REQUIRE (rig.document.createCue ("MC000070", 0, "mic", "Ambient mic", "MC000071").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000071/input", "MC000021").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000071/channel", "MC000011").ok);
+
+    const auto go = [&rig]
+    {
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("MC000001"), "MC000006").ok);
+        rig.tickOnce();
+        rig.submitAndTick ("go");
+    };
+
+    const auto sounding = [&rig]
+    {
+        for (int n = 0; n < 5; ++n)
+        {
+            rig.tickOnce();
+            rig.audio.completeArms (rig.engine);
+        }
+
+        rig.tickUntil ([&rig] { const auto* run = rig.runs.liveRunOf ("MC000071");
+                                return run != nullptr && run->state == cue::runState::playing; }, 80);
+    };
+
+    go();
+    sounding();
+
+    const auto* bed = rig.runs.liveRunOf ("MC000071");
+    REQUIRE (bed != nullptr);
+    REQUIRE (bed->state == cue::runState::playing);
+    const auto first = bed->id;
+
+    rig.submitAndTick ("run.stopAll");
+
+    auto insideFade = false;
+
+    SUBCASE ("the next GO once the fade has ended")
+    {
+        rig.tickUntil ([&rig, &first] { return rig.runs.find (first)->isFinished(); }, 80);
+        REQUIRE (rig.runs.find (first)->isFinished());
+    }
+
+    SUBCASE ("the next GO inside the fade") { insideFade = true; }
+
+    go();
+
+    if (insideFade)
+    {
+        REQUIRE_FALSE (rig.runs.find (first)->isFinished());
+        rig.tickUntil ([&rig, &first] { return rig.runs.find (first)->isFinished(); }, 80);
+    }
+
+    sounding();
+
+    const auto* again = rig.runs.liveRunOf ("MC000071");
+    REQUIRE (again != nullptr);
+    CHECK (again->id != first);
+    CHECK (again->asserted);
+    CHECK (again->state == cue::runState::playing);
+    CHECK (rig.audio.kills.empty());
+}
+
 TEST_CASE ("mic: the DCA a mic cue is marked with trims it")
 {
     RunRig rig;

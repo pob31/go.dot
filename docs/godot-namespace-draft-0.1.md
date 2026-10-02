@@ -842,7 +842,9 @@ back on if nobody feels strongly by then.
   assertion" is taken as **yes** — run-local, for the session — because without it the operator
   fights the machine, and every other run-local gesture here already evaporates the same way. A
   group carrying its own persistent section, and Esc as a pause on persistent media, stay
-  *(proposed)*.
+  *(proposed)*. *(2026-10-02, K8: Esc as a pause is the author's, decided and built - the next step
+  carries a paused bed on from where it was; a mic, OSC or MIDI cue is relaunched; a double Esc and
+  a load-to-time forget the pause, §23.17. The group-level section stays proposed.)*
 
 - **T — Phase 5 has two halves, and the engine half comes first** (settled 2026-09-09): undo, a
   save that cannot be half-written, an autosave, the edit lock and the spectral cache are built
@@ -2614,7 +2616,7 @@ origin `engine`:
 |---|---|---|
 | `run.prepare` | `s` cue, `[s run]` | the horizon reached a cue or a group and made it ready: a group run is created in `preparing` and its header's preparable cues run under it. The generated ID is the record's last argument, as every generated ID is |
 | `run.revoke` | `s` run | the horizon left before a GO: the pre-sent values are put back, the claims released, the run and its children ended. *(2026-09-30, H2: also a group stopped or killed while it was only prepared, submitted by its own job, §23.3)* |
-| `run.assert` | `s` cue, `[s run]` | a persistent cue was found not running, or found disagreeing with the world, and was re-asserted (§13.11) |
+| `run.assert` | `s` cue, `[s run]`, `[d from]`, `[i range]` | a persistent cue was found not running, or found disagreeing with the world, and was re-asserted (§13.11); `from` and `range` since K8 (2026-10-02, §23.17): where a bed Esc paused carries on - a second of its file, or the slice it was in |
 
 Two operator commands:
 
@@ -3480,7 +3482,8 @@ footer, `standby.set` refuses its cues with `not-a-stop` (`not-manual-path` unti
 **The assertion is a mode of the solver, not a second mechanism** — §3.29 says so in those words.
 After any applied `go`, `cue.fire` or `trigger.fire`, the next tick's hook solves for the persistent
 set alone and submits `run.assert` for each cue that is not as declared: a media cue with no live
-run is relaunched, an osc cue is re-sent where the read-back differs (and always where the mount
+run is relaunched *(2026-10-02, K8: one Esc paused carries on from the second it had reached,
+§23.17)*, an osc cue is re-sent where the read-back differs (and always where the mount
 cannot be asked), a midi cue is re-sent. Checking at triggers rather than every tick is deliberate
 and the PRD gives the reason: *"a tick-rate check makes a stop impossible, a trigger-rate check is
 human-paced"*.
@@ -3495,6 +3498,10 @@ human-paced"*.
   fights the machine, and every other run-local gesture in this engine already evaporates the same
   way;
 - a **double Esc** does not, by §3.29. Phase 10's.
+- **Esc** does not either *(2026-10-02, K8, the author's ruling, §23.17)*: it **pauses** a persistent
+  media cue - brought down over the panic fade, its second remembered - and the next step carries it
+  on from there; a mic, osc or midi cue is relaunched as before. A double Esc after it, and a
+  load-to-time, forget the second: the next step starts the bed from its top.
 
 A relaunch is a machine action: logged with its origin, shown on the run, and it never moves standby
 (§3.5). A stateful data process loses its state on relaunch and restarts at its resting state
@@ -3785,7 +3792,8 @@ worse than not sending them. It wants a spatcore change first, and that is recor
 rather than attempted here.
 
 **Authored waypoints**, per decision R. **A group-level persistent section** and **Esc as a pause on
-persistent media**, both *(proposed)* in §3.29 and both left there. **The other three read-back
+persistent media**, both *(proposed)* in §3.29 and both left there *(2026-10-02, K8: the pause is
+decided and built, §23.17)*. **The other three read-back
 mechanisms** (§11.7): a polled get-convention, a subscription, a bespoke sync command —
 `mount/@readback` names the mechanism precisely so each becomes another word, and Phase 4 adds none.
 
@@ -4029,7 +4037,8 @@ requests. Each is one sentence that building the thing made exact:
 - **§3.29, the persistent section's suspensions.** Two *(proposed)* items were taken as yes
   (decision S): a kill on a persistent run suspends it until a load-to-time re-solves, and a
   stop cue before standby aimed at it suspends it because the document says so. A group-level
-  section and Esc-as-pause stay *(proposed)*.
+  section and Esc-as-pause stay *(proposed)*. *(2026-10-02, K8: Esc-as-pause decided by the author
+  and written into §3.29 and §4.4, §23.17.)*
 
 **And one amendment §13.15 promised is not among the five.** §13.15 named §3.13's *"walk back"*
 against the forward pass (§13.8: *"One forward pass, and §3.13 says backward"*), and the
@@ -11145,7 +11154,10 @@ behind the matrix's own ramp, the channel's plugins reset so that the next cue o
 not open onto a tail left inside them, and the channel free at once (CN).
 
 **Persistent.** A mic cue in the persistent section is asserted as a media cue is; its resume is a
-relaunch, having no position to remember. §18.8 is what that needed.
+relaunch, having no position to remember. §18.8 is what that needed. *(2026-10-02, K8: Esc now
+pauses a persistent media cue, which the next step carries on from where it was; a mic cue's resume
+stays a relaunch - and a step inside Esc's fade relaunches it once the fade has ended, where it
+asserted nothing until the step after, §23.17.)*
 
 **Load now and a change of interface** are refused while a mic cue sounds, as while anything plays,
 and the refusal names the cue — a persistent mic would otherwise refuse them all show with no clue
@@ -11253,7 +11265,9 @@ there did not do what §3.29 says.
   operator's kill from the running pane, which suspends its cue until a load-to-time lifts it
   (`Runner.cpp:1111-1127`). PRD §3.29 says a double Esc does not suspend, *"the next GO restoring
   the declared world is the point of declaring it"*. Now `run.killAll` marks runs as skipping their
-  footers and not as killed; the running pane's kill still suspends.
+  footers and not as killed; the running pane's kill still suspends. *(2026-10-02, K8: and a double
+  Esc forgets the second an Esc before it paused a bed at, so the next GO still brings it back from
+  the top, §23.17.)*
 - **A jump cut the section's runs.** Load-to-time's sweep ends every run of the list the plan does
   not name (`Runner.cpp:1241-1263`), and the solver never plans the persistent section, so a jump
   ended a sounding bed — and a jump is not a step, so nothing asserted it again until the next GO.
@@ -13074,10 +13088,12 @@ Written from 2026-09-30, one subsection per stage of the hardening plan as it la
 Phase 10 is "timecode, panic, hardening", and most of it waits on something: timecode on the tick
 derivation, Doh! and the revert of a GO on the list of everything a GO leaves in flight *(that list
 is §24.2 since 2026-10-01, and Doh! has §24)*, Esc as a
-pause on its own ruling. What waits on nothing is the two stop levels Go.dot already ships. Read
-against PRD §4.4 they fell short in several places, and this section records each gap, its fix and
-the decisions taken on the way. Nothing here changes the law - PRD §4 and `CLAUDE.md` are untouched -
-it makes the code keep it.
+pause on its own ruling *(ruled 2026-10-02: a pause, §23.17)*. What waits on nothing is the two
+stop levels Go.dot already ships. Read against PRD §4.4 they fell short in several places, and this
+section records each gap, its fix and the decisions taken on the way. Nothing here changes the law -
+PRD §4 and `CLAUDE.md` are untouched - it makes the code keep it. *(2026-10-02, K8: one exception,
+at the author's ruling - §4.4's Esc bullet gained the sentence PRD §3.29 had promised it, and
+`CLAUDE.md` was copied from the PRD again, §23.17.)*
 
 ### 23.1 The real-time safety gate (H0)
 
@@ -14553,7 +14569,8 @@ played (the author's, 2026-09-30). Nothing a killed run still had in hand starts
 either: a scene's next member, a pre-wait running out, a disk answering in the press's own tick, a
 start cue's fire of its target; and the persistent pass a GO just before the press had opened is
 taken back, so the next GO restores the section (PRD §3.29). Esc is unchanged: it is normal
-completion entered early, and what it finds queued goes.
+completion entered early, and what it finds queued goes. *(2026-10-02, K8: Esc takes back the
+persistent pass too, the author's ruling - and pauses the section's media beds, §23.17.)*
 
 **The gap.**
 
@@ -15872,6 +15889,162 @@ panel) with an OSCQuery desk, the pointer on a scene whose header pre-sends a fa
 interface's rate while the show is set up - the desk's fader goes back to where it was when the show
 follows, then to the scene's value again; move the pointer away - it goes back to where it was, not
 to the scene's value. The same with Load now and with Apply in the show settings window.
+
+### 23.17 Esc pauses a persistent bed, and takes back the pass a step just opened (K8)
+
+**The rulings.** The author, 2026-10-02, on what PRD §3.29 had left as his lean:
+
+1. **Esc on a persistent media cue is a pause**: a stop that remembers its position, resumed at
+   that offset by the next assertion - the next step. No footer runs on a pause, and it still comes
+   down over the panic fade like everything Esc takes. A mic, OSC or MIDI cue has nothing to
+   remember: its resume is a relaunch, as before. The position is computed from ticks and the cue's
+   own speed, never read from the sound card, so a replay gets the same answer (Doh! D2's design
+   uses the same rule, §24). A load-to-time drops the remembered position - it re-solves the world -
+   and so does a double Esc, which on a persistent cue keeps what it did: stopped at once, the next
+   GO re-asserting it from the top.
+2. **PRD §3.29's Esc bullet becomes decided text, and §4.4 gains one sentence** - in its Esc
+   bullet: *"A persistent media cue is paused rather than stopped, and the next GO resumes it where
+   it was (§3.29)."* `CLAUDE.md`'s §4 is copied from the PRD byte for byte, and
+   `scripts/check-claude-md.py` passes.
+3. **Close the asymmetry**: Esc also takes back a persistent pass already open, as the double Esc
+   has since the review of H4 (§23.10, IY).
+
+**Before K8.** Esc brought a bed down over the panic fade and the roots' stop ended it; the next
+step's pass found no live run and fired the cue, from the top. A step inside the fade found the old
+run still live - on its way out - and asserted nothing, so the bed came back only at the step after.
+And a pass a step just before the press had opened - not yet run, or waiting up to half a second
+for the desks' answers, or run in the press's own tick with its `run.assert` draining behind the
+press - put the section straight back after the Esc. Only the double Esc took it back.
+
+**The fix.**
+
+- **Esc's handler pauses the section's beds** (`Runner::pausePersistent`, from `run.stopAll`'s
+  wrapper, before the panic fade begins). Every persistent media run it finds - unfinished, not
+  already asked to stop, not taken back by Doh!, at the top of its list's section - is remembered,
+  by cue: the run, and where it carries on from. For a cue with no slices, a second of its file:
+  `origin + (tick - startedAtTick) / 50 x speed`, the origin being where its arm began (the run's
+  own offset when a jump or an earlier resume gave it one, the cue's `startOffset` otherwise) and
+  the speed the cue's `rate` as the document says it. For a cue with slices, the slice it is in
+  (`run.range`, a logged record; the slice it was armed into before one comes). A run never heard
+  is remembered with nothing to carry on from - it starts from its top - unless it was armed at a
+  second of its own. A mic run is remembered with nothing to carry on from: what is kept is that
+  this run was Esc's. Handler state, read from logged records and the document only, so a replay
+  pauses the same runs at the same seconds.
+- **The pass carries it on** (`submitAssert`). Where a pause says so, `run.assert` carries two new
+  optional arguments, `from` (seconds) and `range` (a slice, -1 for none), and the handler hands
+  them to the run it makes: its `startOffset`, or its `startRange` with the offset left at nought -
+  the same fields a jump's `seatPlan` writes, which M17 measured landing on the sample. Decided by
+  the hook, which also knows the file's length when the log does: a bed paused within half a second
+  (of the clock, at its speed) of its file's end starts from the top instead, the guard Doh!'s
+  resume uses. A record without the arguments - every one written before K8 - starts the cue from
+  its top, as it did.
+- **A step inside the fade owes the bed** (`owed`, hook state). Firing a cue whose run is on its
+  way out is ignored (decision N), so the pass marks a bed it finds still fading under the Esc that
+  paused it, and `assertPersistent` puts it back - from where it was - on the tick its old run has
+  ended. Killed on its way out from the running pane, it is suspended instead (decision S), as the
+  pass would have found it.
+- **The pause is spent or forgotten.** Any fire that makes the cue's next run spends it - the resume
+  itself, a fire by name, a trigger (`armInternal`). A double Esc forgets it (`dropOutputs`), so the
+  next GO starts the bed from the top as it did before K8; a load-to-time forgets it beside lifting
+  the suspensions (`loadToTime`), the section's solved place being the top of each cue. What a pass
+  owed goes with both.
+- **Esc takes back the pass** (`pausePersistent`, the double Esc's road). The step a GO before the
+  press took is counted as asserted and the pass's wait cleared, so only a step after the press opens
+  one; a `run.assert` the pass submitted in the press's own tick, draining behind the press, is
+  applied and does nothing (`escapedInDrain`, beside `killedInDrain`). The next step puts the
+  section back.
+
+**Where it lands.** The second remembered is the press's, not the end of the fade: the second the
+fade took down plays again, as Doh!'s resume has it (§24, L3). The arm places it exactly (M17); what
+is not counted is the launch latency between `run.started` and the first sample heard (40-80 ms at
+ordinary block sizes, §24 L3) - so a bed resumes up to that much later in its file than it was
+heard, never earlier. The tests hold it to the tick: the resumed run's `startOffset` is the press's
+tick less `run.started`'s, over fifty, times the speed, plus the origin.
+
+**Before and after.**
+
+| What happens | Before K8 | Since K8 |
+|---|---|---|
+| Esc on a sounding persistent media cue, then the next GO | back from the top | back at the second it had reached at the press |
+| ...a cue with slices | back from the top | back at the start of the slice it was in |
+| ...a mic, OSC or MIDI cue | relaunched or re-sent | the same |
+| A GO inside Esc's fade | nothing put back until the step after | the bed put back when its fade has ended, from where it was |
+| A double Esc after the Esc, or a load-to-time, then a GO | back from the top | the same: the pause forgotten |
+| A pass a step just before the Esc opened | asserted after the press | taken back; the next step asserts |
+| A pane kill during Esc's fade | suspended (decision S) | the same |
+| Footer, post-wait | none (a section holds no group; an abort ends a post-wait, K2) | the same |
+
+**What it means for a replay.** The pause is handler state written by `run.stopAll`'s handler from
+logged records and the document; the resume point is decided by the hook and carried in the
+`run.assert` record, so a replay - which runs no hook - arms the same second from the log. Old logs
+replay as they played: their `run.assert` records carry no resume point. The new drain guard acts
+only on an engine `run.assert` in the tick of an Esc; no fixture has an Esc and a persistent
+section together (`persistent.wfglog` has no Esc; `mic.wfglog` and `take.wfglog` have Esc and no
+section). The first new case replays its own session and finds the resumed run at the same second.
+
+**Tests.** Written first, each run on the code before the change:
+
+- `GoTests` "persistent: Esc pauses a bed, and the next GO carries it on from where it was": three
+  SUBCASEs - at its own speed from the top of its file; at speed 2 from 1.5 s into its file; in the
+  second of two slices. A bed sounding about three and a half seconds, Esc, its fade and end, sixty
+  ticks of silence, the next step: the new run is asserted and armed at `origin + elapsed x speed`
+  (or `startRange` 1), the old run not killed, not `skipFooter`, ended as an abort, nothing
+  suspended; and the session replayed record for record lands the resumed run at the same second.
+  Before: 0 where 3.58 and 8.66 were due, slice 0 where 1 was due.
+- `GoTests` "persistent: a GO inside Esc's fade brings the bed back once the fade has ended, from
+  where it was". Before: no bed after the fade (`REQUIRE (again != nullptr)`).
+- `GoTests` "persistent: Esc right after a GO takes back the pass that GO opened", in the GO's own
+  drain and on the tick after it, the pass decided ahead of the press; and the next step brings the
+  bed back from its top. Before: the bed asserted after the press, in both.
+- `GoTests` "persistent: after Esc, a double Esc or a jump forgets where the bed was, and the next GO
+  starts it from the top": a double Esc after the fade, a double Esc inside it, a load-to-time. It
+  cannot fail on the code before K8, which always started from the top; it was shown failing on K8
+  with the two forgettings taken out (3.58 where 0 was due, in all three).
+- `MicTests` "mic: in the persistent section Esc brings a mic cue down, and the next GO relaunches
+  it, even inside the fade": the next GO after the fade (a net: it passed before), and inside the
+  fade. Before: no mic run after the fade, inside it.
+
+The five new cases under C and `fr-FR`: 244 assertions each, green. The whole of `GoTests`,
+`MicTests` and `AudioTests` under C: 431 cases, 33649 assertions, green, the audio-timing cases
+included; the `persistent:`, `mic:`, `stop levels:` and `go.doh:` cases under `fr-FR`: 120 cases,
+3524 assertions. `ctest -R "wfg\.replay|blackbox\.(phase4|phase9b-inputs)\."`: 62 of 62 - the 58
+`wfg.replay.*` fixtures under both locales, none changed, and the two drivers that hold a
+persistent section (`blackbox.phase4`, `blackbox.phase9b-inputs`) under both; `wfg.commands` (2),
+which lists `run.assert`'s new arguments. `scripts/check-claude-md.py` and
+`scripts/check-comments.py` pass; clang-tidy with the GCC warnings finds nothing on the lines K8
+changed in `Runner.cpp`, `GoTests.cpp` and `MicTests.cpp`.
+
+**The decisions.**
+
+| | Decision | Whose |
+|---|---|---|
+| LF | **Esc pauses a persistent media cue; a mic, OSC or MIDI cue is relaunched or re-sent as before**: the second is counted from the tick `run.started` was applied on and the cue's document speed, from where its arm began, never read from the voice; a run never heard is not paused unless it was armed at a second of its own | the author's, 2026-10-02 (the pause, the counting rule, the kinds); the never-heard rule the implementer's |
+| LG | **The second remembered is the press's**: the second the panic fade takes down plays again at the resume, as Doh!'s does (§24, L3) | implementer's call; the author's to move to the fade's end |
+| LH | **A cue with slices carries on from the start of the slice it was in**: the audio side launches a slice only at its in-point, as a jump's does | implementer's call, the audio side's limit |
+| LI | **The resume point rides `run.assert`** (`from`, `range`, both optional), decided by the hook, which starts a bed paused within half a second of its file's end, by the length the log knows, from the top | implementer's call |
+| LJ | **A step inside Esc's fade owes the bed**: put back, from where it was, on the tick its old run ends | implementer's call |
+| LK | **The pause is forgotten by a double Esc and a load-to-time, and spent by any fire that makes the cue's next run** - a fire by name or a trigger starts it from the top | the author's, 2026-10-02, for the double Esc and the load-to-time; the fire the implementer's |
+| LL | **Esc takes back the persistent pass a step before it opened**, as the double Esc does (IY): the step counted as asserted, the wait cleared, what a pass owed forgotten, and an engine `run.assert` draining behind the press applied and doing nothing | the author's, 2026-10-02 ("close the asymmetry"); the road IY's |
+
+**Named limits.**
+
+- **A speed fade, or an edit of the speed while the bed played, is not counted**: the second is
+  reckoned at the speed the document says at the press, as load-to-time reckons it (§22.5). Nor is
+  a stretched cue's speed held down to the stretcher's limit, which the audio side sets.
+- **A slice resumes at its in-point** (LH), so a bed looping one slice for ever comes back at the
+  top of its loop.
+- **A resumed bed starts at its level at once**, mid-file and with no fade-in, as a jump's relaunch
+  does.
+- **The pause is not published**: nothing on the tree says a bed is paused or where; the running
+  pane shows the bed gone until the next step puts it back.
+- **A pause outlives a stop before the pointer.** A bed Esc paused whose stop cue the operator then
+  steps past is suspended by the solver and keeps its pause; stepping back before the stop brings it
+  back from where Esc paused it. Read from the code.
+
+**Owed to the bench:** on the MADIface, a persistent bed sounding a minute in: Esc - it fades out
+with the rest; GO a few seconds later - it comes back where it was, within a launch latency, the
+faded second heard again; GO inside the fade - it comes back once the fade has ended; double Esc
+after an Esc, then GO - from the top.
 
 ## 24. Doh! — taking back the last GO
 

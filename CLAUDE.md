@@ -20,6 +20,8 @@ is exact. Every `§` reference points into the PRD, which is where §3.3 and the
    - **Esc — graceful abort.** Stops running cues and **runs footers**. Same code
      path as normal completion, entered early: a group aborted at 04:12 releases
      its channels and kills its LFOs exactly as it would have at 06:00.
+     A persistent media cue is paused rather than stopped, and the next GO
+     resumes it where it was (§3.29).
    - **Double Esc — immediate.** Drops all actions, **skips footers**, kills all
      internal processing including live effects. Scope is **everything Go.dot
      originates** — it does not mute the PA or shut down the projector. The world

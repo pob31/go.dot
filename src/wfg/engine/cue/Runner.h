@@ -853,10 +853,50 @@ namespace wfg::cue
         /** How many observation questions have been asked. Diagnostics, and M21. */
         std::uint64_t observationsAsked() const noexcept { return asked; }
 
+        /*  WHERE A PAUSED BED CARRIES ON FROM (2026-10-02, K8, namespace draft
+            §23.17): a second of its file for a cue with no slices, or the slice
+            it was in - the audio side launches a slice only at its in-point.
+            What `run.assert` carries when the assertion puts back a bed Esc
+            paused. */
+        struct ResumePoint
+        {
+            double from = 0.0;
+            int range = -1;
+        };
+
         /*  Fires a persistent cue the assertion found missing, and marks the run
-            as the machine's rather than anybody's. `run.assert`'s handler. */
+            as the machine's rather than anybody's. `run.assert`'s handler. With
+            a resume point, a media run is armed there rather than at the top. */
         std::string assertCue (Engine& engine, std::int64_t tick, const std::string& cueId,
-                               const std::string& runId);
+                               const std::string& runId,
+                               std::optional<ResumePoint> resume = std::nullopt);
+
+        /*  ESC ON THE PERSISTENT SECTION (2026-10-02, K8, the author's ruling;
+            PRD §3.29, §4.4): called by `run.stopAll`'s handler before anything
+            is brought down.
+
+            - Every persistent media run it finds sounding - not finished, not
+              already asked to stop, not taken back by Doh! - is PAUSED: the
+              second of its file it has reached is remembered, counted from the
+              tick `run.started` was applied on and the cue's own speed, never
+              read from the sound card, so a replay counts the same. A cue with
+              slices remembers the slice it is in. A mic run is remembered with
+              nothing to carry on from: its resume is a relaunch.
+            - The persistent pass a step before the press opened is taken back,
+              as the double Esc's is (§23.10): the next step is what puts the
+              section back, and its pass carries the paused beds on.
+
+            Handler state, so a replay pauses the same runs; the pass is hook
+            state, which a replay never reads. Nothing is submitted. */
+        void pausePersistent (std::int64_t tick);
+
+        /*  WHETHER AN ESC WAS APPLIED EARLIER IN THIS DRAIN (K8): a pass a hook
+            decided before the press can drain behind it, and `run.assert` asks
+            this, as it asks `killedInDrain`, and does nothing. */
+        bool escapedInDrain (std::int64_t tick) const noexcept { return escapedAtTick >= 0 && escapedAtTick == tick; }
+
+        /** Whether Esc left a persistent cue paused at a second to carry on from. Tests. */
+        std::optional<ResumePoint> pausedAt (const std::string& cueId) const;
 
         /** Whether a persistent cue is suspended for this session. Tests and the console. */
         bool isSuspended (const std::string& cueId) const
@@ -1867,6 +1907,51 @@ namespace wfg::cue
 
         /*  The tick of the last double Esc applied, or -1: `killedInDrain`. */
         std::int64_t killedAtTick = -1;
+
+        /*  And of the last Esc, or -1: `escapedInDrain` (K8). */
+        std::int64_t escapedAtTick = -1;
+
+        /*  THE BEDS ESC PAUSED (K8, namespace draft §23.17), by cue: the run it
+            took down and where it carries on from - `resumes` false for a mic
+            run, and for a media run never heard, which starts from its top.
+            Written by Esc's handler (`pausePersistent`); dropped by the fire
+            that makes the cue's next run - the resume itself, or anybody's -
+            by a double Esc (`dropOutputs`) and by a load-to-time, which
+            re-solves the world. Handler state: a replay keeps the same, and
+            never reads it, because `run.assert` carries the resume point. */
+        struct PausedBed
+        {
+            std::string run;
+            bool resumes = false;
+            ResumePoint at;
+        };
+
+        std::map<std::string, PausedBed> paused;
+
+        /*  BEDS A PASS FOUND STILL FADING UNDER THE ESC THAT PAUSED THEM (K8):
+            a fire of a cue whose run is on its way out is ignored (decision N),
+            so the pass owes them, and `assertPersistent` puts each back on the
+            tick its old run has ended. Hook state, emptied by Esc, a double
+            Esc and a load-to-time. */
+        std::set<std::string> owed;
+
+        /*  The resume point `assertCue` hands the run it is about to make. */
+        std::optional<ResumePoint> resumeNext;
+
+        /*  The hook's half of putting a persistent cue back: `run.assert`,
+            carrying where a paused bed carries on from - unless the log knows
+            its file is all but over there, when it starts from the top. */
+        void submitAssert (Engine& engine, const std::string& cueId);
+
+        /*  Whether a run of the cue was killed since the last load-to-time:
+            decision S's suspension, read off the run table. */
+        bool killedSinceLift (const std::string& cueId) const;
+
+        /** Whether the cue sits in a list's persistent section. */
+        bool inPersistentSection (const std::string& cueId) const;
+
+        /** A media cue's speed as its document says, nought to twenty. */
+        double documentSpeedOf (const juce::ValueTree& cue) const;
 
         /*  Cues the operator killed, which stay killed for the session (decision
             S). Cleared by a load-to-time, which is a new answer to the same

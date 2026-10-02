@@ -10761,6 +10761,30 @@ namespace
 
         const cue::Run* liveBed() const { return runs.liveRunOf (bed); }
 
+        /*  A step, and the bed it puts back made to sound: its arm answered and
+            its launch placed. The run, or nothing. */
+        const cue::Run* stepAndSound (const std::string& from = {})
+        {
+            step (from);
+            settle();
+            audio.completeArms (engine);
+            settle();
+            return liveBed();
+        }
+
+        /*  Ticks through Esc's fade until the run is over. The fake voice never
+            says it is sounding, so nothing hears it stop: once the fade has had
+            its second and more, the end is reported as the audio side would. */
+        void waitOut (const std::string& runId)
+        {
+            if (tickUntil ([this, &runId] { return runs.find (runId)->isFinished(); }, 70))
+                return;
+
+            REQUIRE (engine.submit (origin::engine, "run.ended", { osc::Value::string (runId) }));
+            tickOnce();
+            REQUIRE (runs.find (runId)->isFinished());
+        }
+
         std::string section, bed;
     };
 }
@@ -11084,6 +11108,245 @@ TEST_CASE ("persistent: a double Esc right after a GO takes back the pass that G
 
     REQUIRE (rig.liveBed() != nullptr);
     CHECK (rig.liveBed()->asserted);
+}
+
+TEST_CASE ("persistent: Esc pauses a bed, and the next GO carries it on from where it was")
+{
+    /*  K8, the author's ruling of 2026-10-02 (PRD §3.29, §4.4): Esc on a
+        persistent media cue is a PAUSE - it comes down over the panic fade like
+        everything Esc takes, runs nothing after it, and the next step's
+        assertion puts it back at the second of its file it had reached at the
+        press, counted from the ticks and the cue's own speed. Until K8 the
+        next step started it from the top. A slice is the audio side's own
+        unit: a bed in its second slice carries on from that slice's start. */
+    PersistentRig rig;
+
+    auto startsAt = 0.0;
+    auto speed = 1.0;
+    auto sliced = false;
+
+    SUBCASE ("at its own speed, from the top of its file") {}
+
+    SUBCASE ("at twice its speed, from a second and a half into its file")
+    {
+        speed = 2.0;
+        startsAt = 1.5;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.bed + "/rate", "2").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.bed + "/startOffset", "1.5").ok);
+    }
+
+    SUBCASE ("in the second of its slices")
+    {
+        sliced = true;
+        rig.audio.slots = 2;
+        REQUIRE (rig.document.createRange (rig.bed, 0.0, 1.0).ok);
+        REQUIRE (rig.document.createRange (rig.bed, 5.0, 9.0).ok);
+    }
+
+    const auto* live = rig.stepAndSound();
+    REQUIRE (live != nullptr);
+    const auto first = live->id;
+    const auto started = live->startedAtTick;
+    REQUIRE (started >= 0);
+    CHECK (live->startOffset == doctest::Approx (0.0));
+
+    /*  The slice it moved into, as the audio side reports it. */
+    if (sliced)
+    {
+        REQUIRE (rig.engine.submit (origin::engine, "run.range",
+                                    { osc::Value::string (first), osc::Value::int32 (1) }));
+        rig.tickOnce();
+        REQUIRE (rig.runs.find (first)->range == 1);
+    }
+
+    /*  Three seconds of it, and Esc. */
+    rig.settle (150);
+    const auto pressedAt = rig.tick;
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+
+    rig.waitOut (first);
+
+    /*  An Esc and not a kill: nothing is suspended. A section holds no group,
+        so there is no footer a pause could run; what Esc ends it ends as an
+        abort, with no post-wait (K2). */
+    CHECK_FALSE (rig.runs.find (first)->killed);
+    CHECK_FALSE (rig.runs.find (first)->skipFooter);
+    CHECK (rig.runs.find (first)->stopEndsWait);
+    CHECK_FALSE (rig.runner.isSuspended (rig.bed));
+
+    /*  Silent until somebody presses. */
+    rig.settle (60);
+    CHECK (rig.liveBed() == nullptr);
+
+    const auto* again = rig.stepAndSound();
+    REQUIRE (again != nullptr);
+    CHECK (again->id != first);
+    CHECK (again->asserted);
+
+    const auto expected = startsAt + static_cast<double> (pressedAt - started) / 50.0 * speed;
+
+    if (sliced)
+    {
+        CHECK (again->startRange == 1);
+        CHECK (again->startOffset == doctest::Approx (0.0));
+    }
+    else
+    {
+        INFO ("pressed at tick " << pressedAt << ", started at tick " << started);
+        CHECK (again->startOffset == doctest::Approx (expected));
+        CHECK (again->positionOrigin == doctest::Approx (expected));
+    }
+
+    /*  AND A REPLAY PUTS IT BACK AT THE SAME SECOND: the record carries it. */
+    const auto resumed = again->id;
+    const auto resumedAt = again->startOffset;
+    const auto resumedRange = again->startRange;
+
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    PersistentRig fresh;
+    fresh.runner.setPlayer (nullptr);
+
+    doc::ReadResult read = doc::CanonicalXml::read (show, fresh.document);
+    REQUIRE (read.ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        INFO (mismatch);
+
+    CHECK (result.ok);
+
+    const auto* replayed = fresh.runs.find (resumed);
+    REQUIRE (replayed != nullptr);
+    CHECK (replayed->startOffset == doctest::Approx (resumedAt));
+    CHECK (replayed->startRange == resumedRange);
+}
+
+TEST_CASE ("persistent: a GO inside Esc's fade brings the bed back once the fade has ended, from where it was")
+{
+    /*  K8: the step after Esc can come while the bed is still fading, and a
+        cue fired while its run is on its way out is ignored (decision N) - so
+        until K8 that step asserted nothing, and the bed came back only at the
+        step after. The pass now owes it, and pays when the fade has ended. */
+    PersistentRig rig;
+
+    const auto* live = rig.stepAndSound();
+    REQUIRE (live != nullptr);
+    const auto first = live->id;
+    const auto started = live->startedAtTick;
+
+    rig.settle (100);
+    const auto pressedAt = rig.tick;
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+
+    rig.settle (10);
+    REQUIRE (rig.liveBed() != nullptr);
+    REQUIRE (rig.liveBed()->id == first);           // still fading
+
+    rig.step();
+    rig.settle (3);
+    CHECK (rig.liveBed()->id == first);             // nothing beside the fading voice
+
+    rig.waitOut (first);
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* again = rig.liveBed();
+    REQUIRE (again != nullptr);
+    CHECK (again->id != first);
+    CHECK (again->asserted);
+    CHECK (again->startOffset == doctest::Approx (static_cast<double> (pressedAt - started) / 50.0));
+}
+
+TEST_CASE ("persistent: after Esc, a double Esc or a jump forgets where the bed was, and the next GO starts it from the top")
+{
+    /*  K8, the author's ruling: a double Esc on a persistent cue keeps what it
+        did before - stopped at once, back from the top at the next GO - and so
+        drops a pause an Esc before it left; a load-to-time re-solves the world,
+        and the section's solved place is the top of its file. */
+    PersistentRig rig;
+
+    const auto* live = rig.stepAndSound();
+    REQUIRE (live != nullptr);
+    const auto first = live->id;
+
+    rig.settle (150);
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+
+    SUBCASE ("a double Esc once the fade has ended")
+    {
+        rig.waitOut (first);
+        REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+    }
+
+    SUBCASE ("a double Esc inside the fade")
+    {
+        rig.settle (10);
+        REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+        rig.waitOut (first);
+    }
+
+    SUBCASE ("a load-to-time")
+    {
+        rig.waitOut (first);
+        REQUIRE (rig.engine.submit ("cli", "list.aim",
+                                    { osc::Value::string (rig.listId),
+                                      osc::Value::string (rig.memoId),
+                                      osc::Value::float64 (-1.0) }));
+        rig.tickOnce();
+        REQUIRE (rig.submitAndTick ("list.loadToTime",
+                                    { osc::Value::string (rig.listId) }).applied >= 1);
+    }
+
+    rig.settle (10);
+    CHECK (rig.liveBed() == nullptr);
+
+    const auto* again = rig.stepAndSound();
+    REQUIRE (again != nullptr);
+    CHECK (again->id != first);
+    CHECK (again->asserted);
+    CHECK (again->startOffset == doctest::Approx (0.0));
+}
+
+TEST_CASE ("persistent: Esc right after a GO takes back the pass that GO opened")
+{
+    /*  K8, the author's third ruling: what the double Esc has done since the
+        review of H4 (§23.10), Esc does too. A pass a step just before the press
+        opened - not yet run, or run in the press's tick with its record
+        draining behind the press - put the section back after an Esc that had
+        just taken everything down. The next step is what brings it back. */
+    PersistentRig rig;
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.memoId) }).applied == 1);
+
+    auto sameDrain = true;
+
+    SUBCASE ("in the GO's own drain") {}
+    SUBCASE ("on the tick after the GO, its pass decided ahead of the press") { sameDrain = false; }
+
+    REQUIRE (rig.engine.submit ("cli", "go", {}));
+
+    if (! sameDrain)
+        rig.tickOnce();
+
+    REQUIRE (rig.engine.submit ("cli", "run.stopAll", {}));
+    rig.tickOnce();
+
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    CHECK (rig.runOf (rig.bed).empty());
+    CHECK (rig.liveBed() == nullptr);
+
+    /*  And the next GO brings it back, from the top: it was never heard. */
+    const auto* again = rig.stepAndSound();
+    REQUIRE (again != nullptr);
+    CHECK (again->asserted);
+    CHECK (again->startOffset == doctest::Approx (0.0));
 }
 
 TEST_CASE ("persistent: a jump leaves the section sounding")

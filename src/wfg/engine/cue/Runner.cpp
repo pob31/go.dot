@@ -479,6 +479,31 @@ namespace wfg::cue
         run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
         run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
 
+        /*  A BED ESC PAUSED, CARRIED ON (K8): the assertion's resume point is
+            this run's own start, as a jump's would be - a second of the file,
+            or the slice it was in when the cue still has it. And whatever made
+            this run, the pause is spent: a fire by name or a trigger starts the
+            cue as it always did, and the next pass has nothing to carry on. */
+        if (fireAtOnce)
+        {
+            if (resumeNext.has_value() && kind == "media")
+            {
+                const auto slices = static_cast<int> (rangesOf (cue).size());
+
+                if (resumeNext->range >= 0 && slices > 0)
+                {
+                    run->startRange = std::min (resumeNext->range, slices - 1);
+                    run->startOffset = 0.0;
+                }
+                else if (resumeNext->range < 0 && slices == 0 && resumeNext->from > 0.0)
+                {
+                    run->startOffset = resumeNext->from;
+                }
+            }
+
+            paused.erase (cueId);
+        }
+
         if (! fireAtOnce)
         {
             /*  THE SMALLEST HORIZON THERE IS, and it has been here since PR 2.3
@@ -1187,14 +1212,165 @@ namespace wfg::cue
     }
 
     std::string Runner::assertCue (Engine& engine, std::int64_t tick,
-                                   const std::string& cueId, const std::string& runId)
+                                   const std::string& cueId, const std::string& runId,
+                                   std::optional<ResumePoint> resume)
     {
+        /*  THE RESUME POINT RIDES TO THE RUN `fire` MAKES (K8), and to nothing
+            else: handed over around the one call, and taken back after it
+            whether or not a run was made - a cue fired while its run is still
+            live is ignored (decision N), and the next fire must not find it. */
+        resumeNext = resume;
         const auto made = fire (engine, tick, cueId, runId);
+        resumeNext.reset();
 
         if (auto* run = runs.find (made))
             run->asserted = true;
 
         return made;
+    }
+
+    bool Runner::inPersistentSection (const std::string& cueId) const
+    {
+        for (auto node = document.findById (cueId); node.isValid(); node = node.getParent())
+            if (node.getType().toString() == "Persistent")
+                return true;
+
+        return false;
+    }
+
+    double Runner::documentSpeedOf (const juce::ValueTree& cue) const
+    {
+        /*  The solver's reading (§22.5): one when the document cannot say, and
+            never nought by accident - an unreadable number read as nought would
+            be a stopped tape. */
+        const auto speed = osc::parseDouble (textOf (cue, "rate")).value_or (1.0);
+        return std::isfinite (speed) ? std::clamp (speed, 0.0, 20.0) : 1.0;
+    }
+
+    bool Runner::killedSinceLift (const std::string& cueId) const
+    {
+        for (const auto& run : runs.all())
+            if (run.cue == cueId && run.killed && run.endedAtTick >= liftedAt)
+                return true;
+
+        return false;
+    }
+
+    std::optional<Runner::ResumePoint> Runner::pausedAt (const std::string& cueId) const
+    {
+        const auto found = paused.find (cueId);
+
+        if (found == paused.end() || ! found->second.resumes)
+            return std::nullopt;
+
+        return found->second.at;
+    }
+
+    void Runner::pausePersistent (std::int64_t tick)
+    {
+        /*  ESC ON A PERSISTENT MEDIA CUE IS A PAUSE (the author, 2026-10-02;
+            PRD §3.29, §4.4). Everything else about the press is unchanged: the
+            bed comes down over the panic fade with the rest, as an abort, and
+            the roots' stop ends it. What is added is the second it had reached,
+            for the next step's assertion to carry it on from.
+
+            Read from HANDLER STATE ONLY - `startedAtTick`, the run's own start
+            offset and slice, the document - and never from the voice: the
+            sound card's playhead is a readout a replay does not have, and the
+            same press must remember the same second in both. The speed is the
+            cue's own as the document says it; a speed fade or an edit while it
+            played is not counted (a named limit, as load-to-time's). */
+        for (const auto& run : runs.all())
+        {
+            if (run.isFinished() || run.state == runState::preparing || run.takenBack || run.stopAsked
+                  || ! run.parent.empty() || (run.kind != "media" && run.kind != "mic")
+                  || ! inPersistentSection (run.cue))
+                continue;
+
+            PausedBed bed;
+            bed.run = run.id;
+
+            if (run.kind == "media")
+            {
+                const auto cue = document.findById (run.cue);
+                const auto heard = run.startedAtTick >= 0;
+
+                if (! rangesOf (cue).empty())
+                {
+                    /*  THE SLICE IT IS IN, from `run.range` - a logged record -
+                        or the one it was armed into when none has come yet. */
+                    bed.at.range = std::max (run.range >= 0 ? run.range : run.startRange, 0);
+                    bed.resumes = heard || run.startRange > 0;
+                }
+                else
+                {
+                    /*  WHERE ITS ARM BEGAN, as `requestArmOn` armed it - the
+                        run's own offset when it has one (a jump, or an earlier
+                        resume), the cue's otherwise - and the file's seconds
+                        since it was heard. */
+                    const auto armedFrom = run.startOffset > 0.0 ? run.startOffset : numberOf (cue, "startOffset");
+                    const auto elapsed = heard ? static_cast<double> (tick - run.startedAtTick)
+                                                   / static_cast<double> (TickClock::rateHz)
+                                               : 0.0;
+
+                    bed.at.from = armedFrom + std::max (elapsed, 0.0) * documentSpeedOf (cue);
+                    bed.resumes = heard || run.startOffset > 0.0;
+                }
+            }
+
+            paused[run.cue] = bed;
+        }
+
+        /*  THE PASS A STEP BEFORE THE PRESS OPENED IS TAKEN BACK (the author's
+            third ruling): Esc takes the section down with everything else, and
+            a pass still owed to that step - not run yet, or waiting for the
+            desks' answers - would put it straight back after the press. The
+            step is counted as asserted, so only a step after the press opens a
+            pass; one decided before it and draining behind it is answered by
+            `run.assert` itself (`escapedInDrain`). What an earlier pass owed is
+            forgotten with it: the next step owes it again. */
+        assertedFor = lists.stepsTaken();
+        assertDue = -1;
+        owed.clear();
+        escapedAtTick = tick;
+    }
+
+    void Runner::submitAssert (Engine& engine, const std::string& cueId)
+    {
+        const auto found = paused.find (cueId);
+
+        if (found == paused.end() || ! found->second.resumes)
+        {
+            engine.submit (origin::engine, "run.assert", { osc::Value::string (cueId) });
+            return;
+        }
+
+        const auto at = found->second.at;
+
+        /*  ALL BUT OVER THERE, by the length the log knows: a bed paused in its
+            last half second carries on from its top rather than ending the
+            moment it is back (the guard Doh!'s resume uses, §24). A length not
+            known resumes as it is; a slice is always somewhere to carry on. */
+        if (at.range < 0 && durations != nullptr)
+        {
+            const auto cue = document.findById (cueId);
+            const auto length = durations->find (textOf (cue, "file"));
+            const auto speed = documentSpeedOf (cue);
+
+            if (length != durations->end() && length->second > 0.0
+                  && at.from >= length->second - 0.5 * speed)
+            {
+                engine.submit (origin::engine, "run.assert", { osc::Value::string (cueId) });
+                return;
+            }
+        }
+
+        /*  THE RUN'S IDENTIFIER IS LEFT FOR THE HANDLER TO DRAW, as every
+            assertion leaves it; the record it logs carries the one drawn. */
+        engine.submit (origin::engine, "run.assert",
+                       { osc::Value::string (cueId), osc::Value::string (std::string {}),
+                         osc::Value::float64 (at.from),
+                         osc::Value::int32 (static_cast<std::int32_t> (at.range)) });
     }
 
     void Runner::assertPersistent (Engine& engine, std::int64_t tick)
@@ -1207,6 +1383,40 @@ namespace wfg::cue
         {
             assertedFor = lists.stepsTaken();
             assertDue = tick;
+        }
+
+        /*  WHAT A PASS OWES, paid on the tick the old run has ended (K8): a bed
+            the step found still fading under the Esc that paused it. Dropped
+            when its pause has gone - a double Esc, a load-to-time, a fire that
+            made the cue's next run - and suspended rather than put back when
+            somebody killed it on its way out (decision S). */
+        for (auto due = owed.begin(); due != owed.end();)
+        {
+            const auto found = paused.find (*due);
+
+            if (found == paused.end() || suspended.count (*due) > 0)
+            {
+                due = owed.erase (due);
+                continue;
+            }
+
+            const auto* live = runs.liveRunOf (*due);
+
+            if (live != nullptr && live->id == found->second.run)
+            {
+                ++due;
+                continue;
+            }
+
+            if (live == nullptr)
+            {
+                if (killedSinceLift (*due))
+                    suspended.insert (*due);
+                else
+                    submitAssert (engine, *due);
+            }
+
+            due = owed.erase (due);
         }
 
         if (assertDue < 0)
@@ -1292,31 +1502,36 @@ namespace wfg::cue
 
                 if (kind == "media" || kind == "mic")
                 {
-                    if (runs.liveRunOf (planned.cue) != nullptr)
+                    /*  STILL SOUNDING, and left alone - unless it is the run
+                        Esc paused, still on its way out over the panic fade:
+                        that one is owed, and put back when it has gone (K8). */
+                    if (const auto* live = runs.liveRunOf (planned.cue))
+                    {
+                        if (const auto found = paused.find (planned.cue);
+                            found != paused.end() && found->second.run == live->id)
+                            owed.insert (planned.cue);
+
                         continue;
+                    }
 
                     /*  A RUN THE OPERATOR KILLED SUSPENDS THE CUE for the
                         session (decision S). Read off the run rather than
                         remembered at the moment of killing, because a kill is a
                         record and this is a hook: what the handler wrote is
                         what a replay would have written too. */
-                    auto killed = false;
-
-                    for (const auto& run : runs.all())
-                        if (run.cue == planned.cue && run.killed
-                             && run.endedAtTick >= liftedAt)
-                            killed = true;
-
-                    if (killed)
+                    if (killedSinceLift (planned.cue))
                     {
                         suspended.insert (planned.cue);
                         continue;
                     }
-                }
-                else if (kind != "midi")
-                {
+
+                    /*  AND A BED ESC PAUSED CARRIES ON FROM WHERE IT WAS (K8). */
+                    submitAssert (engine, planned.cue);
                     continue;
                 }
+
+                if (kind != "midi")
+                    continue;
 
                 engine.submit (origin::engine, "run.assert",
                                { osc::Value::string (planned.cue) });
@@ -1557,9 +1772,15 @@ namespace wfg::cue
         /*  AND A KILLED PERSISTENT CUE COMES BACK (decision S). A suspension is
             run-local and for the session, and a load-to-time is the operator
             asking the same question again with a new answer - so it is the one
-            gesture that lifts one. */
+            gesture that lifts one.
+
+            AND A BED ESC PAUSED IS FORGOTTEN (K8, the author's ruling): a jump
+            re-solves the world, and the section's solved place is the top of
+            each cue - so the next step starts a paused bed from there. */
         suspended.clear();
         liftedAt = tick;
+        paused.clear();
+        owed.clear();
 
         return used;
     }
@@ -5151,9 +5372,17 @@ namespace wfg::cue
             after the press. The step is counted as asserted, so only a step
             taken after the press opens a pass. Hook state, as the start cues'
             list: a replay takes `run.assert` from the log, and the log now has
-            none. */
+            none.
+
+            AND A BED AN ESC BEFORE IT PAUSED IS FORGOTTEN (K8, the author's
+            ruling): a double Esc on a persistent cue is what it was - stopped at
+            once, back from the top at the next GO - and the second press drops
+            the first's pause with everything else. Handler state, like the
+            pause itself; what a pass owed goes with it. */
         assertedFor = lists.stepsTaken();
         assertDue = -1;
+        paused.clear();
+        owed.clear();
     }
 
     bool Runner::goTooSoon (std::int64_t tick) const
@@ -11293,7 +11522,8 @@ namespace wfg::cue
                 specialised.description = "Stops every run now, gracefully: Esc. What is sounding fades to"
                                           " silence over audio/panicFade first; members come down in order"
                                           " and every footer runs, but no post-wait; the standby's preparation"
-                                          " is left ready.";
+                                          " is left ready. A persistent media cue is paused: the next step"
+                                          " carries it on from where it was.";
             else
                 specialised.description = "Drops every run now: double Esc. No footer runs, and the world is left"
                                           " as it was; every voice in Go.dot's own graph is silenced and every EQ"
@@ -11332,8 +11562,13 @@ namespace wfg::cue
             {
                 runner.noteEscape();
 
+                /*  AND ESC PAUSES THE PERSISTENT SECTION'S BEDS (2026-10-02, K8,
+                    namespace draft §23.17, the author's ruling): their second is
+                    remembered before anything is brought down, and the pass a
+                    step before the press opened is taken back. */
                 if (graceful)
                 {
+                    runner.pausePersistent (context.tick);
                     runner.beginPanicFade (context.tick);
                     return before (context, args);
                 }
@@ -11791,8 +12026,11 @@ namespace wfg::cue
             runs. The run says `asserted`, so an operator can tell a sound the
             machine put back from one they started. */
         registry.add ({ "run.assert",
-                        "The persistent section found a cue not as it declares, and put it back.",
-                        { { "cue", 's', false }, { "run", 's', true } },
+                        "The persistent section found a cue not as it declares, and put it back:"
+                        " a bed Esc paused carries on from the second of its file it had reached,"
+                        " or from the start of the slice it was in.",
+                        { { "cue", 's', false }, { "run", 's', true },
+                          { "from", 'd', true }, { "range", 'i', true } },
                         true,
                         [&engine, &runner, &document, withRun]
                         (CommandContext& context, const std::vector<osc::Value>& args)
@@ -11806,17 +12044,37 @@ namespace wfg::cue
                                 review of H4, 2026-10-02, namespace draft §23.10):
                                 decided by the hook in the press's tick, it drains
                                 after the press, and the next GO is what restores
-                                the section (PRD §3.29). Applied and nothing. */
+                                the section (PRD §3.29). Applied and nothing.
+
+                                NOR BEHIND AN ESC (K8, namespace draft §23.17): Esc
+                                takes the section down with everything else, and
+                                the next step puts it back. */
                             if (context.origin != nullptr && *context.origin == origin::engine
-                                  && runner.killedInDrain (context.tick))
+                                  && (runner.killedInDrain (context.tick)
+                                        || runner.escapedInDrain (context.tick)))
                                 return Outcome::ok (args);
 
                             const auto id = args.size() > 1 ? args[1].getString()
                                                             : std::string {};
 
+                            /*  WHERE A PAUSED BED CARRIES ON FROM (K8): decided by
+                                the hook, which knows the file's length, and
+                                carried here so a replay arms the same second. A
+                                record without it - every one before K8 - starts
+                                the cue from its top, as it did. */
+                            std::optional<Runner::ResumePoint> resume;
+
+                            if (args.size() > 2)
+                            {
+                                Runner::ResumePoint point;
+                                point.from = args[2].asDouble();
+                                point.range = args.size() > 3 ? args[3].getInt32() : -1;
+                                resume = point;
+                            }
+
                             return Outcome::ok (withRun (args, 1,
                                                          runner.assertCue (engine, context.tick,
-                                                                           cueId, id)));
+                                                                           cueId, id, resume)));
                         } });
 
         //----------------------------------------------------------------------

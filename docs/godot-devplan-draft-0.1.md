@@ -761,10 +761,11 @@ level - since filtered, the author's way (namespace draft §22.11).
   early trigger within the anticipation window. Revert-of-GO (§4.5).
 - Panic values on every node honoured.
 - Debounce as a user preference.
-- **Esc on a persistent media cue as a pause** (PRD §3.29, *(proposed)*): if
-  adopted, §4.4 gains a sentence and `CLAUDE.md` is re-copied, never edited. A
-  kill from the running pane suspends a persistent assertion; a double Esc does
-  not, and the next GO restores the declared world.
+- **Esc on a persistent media cue as a pause** (PRD §3.29): *decided by the
+  author 2026-10-02 and built as K8 (namespace draft §23.17)*; §4.4 gained its
+  sentence and `CLAUDE.md` was re-copied, never edited. A kill from the running
+  pane suspends a persistent assertion; a double Esc does not, and the next GO
+  restores the declared world - from the top, a double Esc forgetting a pause.
 
 **Done when:** a show chases timecode from an external source without drift or
 discontinuity, and each stop level does exactly its guarantee and nothing more.
@@ -772,7 +773,7 @@ discontinuity, and each stop level does exactly its guarantee and nothing more.
 **Needs from the author:** the Doh! inventory of in-flight objects (PRD
 §4.4, deferred) - *met: the author's answers of 2026-09-30 and 2026-10-01 are in
 PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
-(§3.29).
+(§3.29) - *met 2026-10-02: a pause, built as K8*.
 
 **Built** (the hardening plan, stage by stage in namespace draft §23):
 
