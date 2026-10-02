@@ -51,6 +51,7 @@
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/LoadToTime.h>
+#include <wfg/client/model/TemplateReview.h>
 #include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
@@ -67,6 +68,7 @@
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/NetworkMonitorWindow.h>
+#include <wfg/client/ui/TemplateReviewWindow.h>
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
 #include <wfg/client/ui/MainWindow.h>
@@ -104,7 +106,7 @@ namespace wfg::client
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
-            menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance
+            menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance, menuUpdateTemplate
         };
 
         class Window final : public wfg::Client,
@@ -677,7 +679,8 @@ namespace wfg::client
                     case menuSurfaces:
                     case menuNetworkMonitor:
                     case menuAssociate:
-                    case menuNewPerformance: break;
+                    case menuNewPerformance:
+                    case menuUpdateTemplate: break;
                     
                 }
 
@@ -711,6 +714,11 @@ namespace wfg::client
 
                     //  From the show, or from a performance used as a template.
                     case menuNewPerformance: return host.openWindow != nullptr && documentFolder().isDirectory();
+
+                    //  A performance of a show - with its template, or to be its first.
+                    case menuUpdateTemplate: return host.compareWithTemplate != nullptr
+                                                      && showAroundThisDocument().isNotEmpty()
+                                                      && ! model::isYes (last.locked);
                     case menuSave:      return last.mayOfferSave() && last.hasSomethingToSave();
                     case menuSaveAs:    return last.mayOfferSave();
                     case menuRevert:    return last.mayOfferSave();
@@ -774,6 +782,8 @@ namespace wfg::client
                 {
                     addMenuItem (menu, menuNew, "New show...");
                     addMenuItem (menu, menuNewPerformance, "New performance...");
+                    addMenuItem (menu, menuUpdateTemplate, templateAroundThisDocument() ? "Update the show's template..."
+                                                                                       : "Make this the show's template");
                     addMenuItem (menu, menuOpen, "Open show...");
                     menu.addSeparator();
                     addMenuItem (menu, menuSave, "Save");
@@ -861,6 +871,12 @@ namespace wfg::client
                 {
                     case menuNew:       chooseShowFolder (true); break;
                     case menuNewPerformance: askForANewPerformance(); break;
+                    case menuUpdateTemplate:
+                        if (templateAroundThisDocument())
+                            reviewTemplate ({});
+                        else if (host.makeTemplate)
+                            shell->transport.setNotice (juce::String (host.makeTemplate().said));
+                        break;
                     case menuOpen:      chooseShowFolder (false); break;
                     case menuSave:      save(); break;
                     case menuSaveAs:    if (host.emptyShowAtStart) chooseWhereTheEmptyShowLives();
@@ -1558,6 +1574,7 @@ namespace wfg::client
                 pass();
                 followTheEmptyShowsSave();
                 followTheNewPerformance();
+                followTheSaveBeforeReview();
             }
 
             /*  THE ONE WAY OUT OF THIS CLIENT INTO THE SHOW (§14.16, rule 1).
@@ -2120,17 +2137,183 @@ namespace wfg::client
                 return path.empty() ? juce::File() : juce::File (juce::String (path));
             }
 
-            static bool holdsAShow (const juce::File& folder)
+            //  A template cue list: a .wfg of the show folder's own.
+            static bool holdsATemplate (const juce::File& folder)
             {
                 return folder.isDirectory()
                          && folder.getNumberOfChildFiles (juce::File::findFiles, "*.wfg") > 0;
             }
 
+            /*  A show folder: a template, or the media its performances share -
+                the template is optional (§25), and "around" is where a sound
+                is found (audio/MediaInfo.h). */
+            static bool holdsAShow (const juce::File& folder)
+            {
+                return holdsATemplate (folder) || folder.getChildFile ("media").isDirectory();
+            }
+
             //  The show around this document, when it is a performance; empty when it is a show.
             juce::String showAroundThisDocument() const
             {
-                const auto around = documentFolder().getParentDirectory();
-                return holdsAShow (around) ? around.getFileName() : juce::String();
+                const auto document = documentFolder();
+                const auto around = document.getParentDirectory();
+                return document.isDirectory() && around != document && holdsAShow (around) ? around.getFileName()
+                                                                                          : juce::String();
+            }
+
+            bool templateAroundThisDocument() const
+            {
+                return showAroundThisDocument().isNotEmpty() && holdsATemplate (documentFolder().getParentDirectory());
+            }
+
+            /*  WHAT GOES BACK INTO THE SHOW'S TEMPLATE (§25, author 2026-10-02):
+                on close and on demand, never on save. The comparison reads the
+                files, so a performance with unsaved changes is offered "Save,
+                then review" first. `afterwards` runs once the review is done -
+                an update made, or nothing to bring - and is how closing goes on
+                to its own question; a Cancel anywhere runs nothing. */
+            void reviewTemplate (std::function<void()> afterwards)
+            {
+                if (last.dirty != model::Flag::yes)
+                {
+                    openTemplateReview (std::move (afterwards));
+                    return;
+                }
+
+                juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                                .withTitle ("Save this performance first?")
+                                                .withMessage ("What goes back into the show's template is read from what is "
+                                                              "saved, and this performance has changes that are not.")
+                                                .withButton ("Save, then review")
+                                                .withButton ("Review what is saved")
+                                                .withButton ("Cancel")
+                                                .withAssociatedComponent (window.get()),
+                                              [this, afterwards, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                                              {
+                                                  if (safe == nullptr)
+                                                      return;
+
+                                                  if (answer == 1)
+                                                  {
+                                                      send (gesture::save());
+                                                      reviewAfterSave = ReviewAfterSave { afterwards, juce::Time::getCurrentTime(),
+                                                                                          last.writeError };
+                                                  }
+                                                  else if (answer == 2)
+                                                  {
+                                                      openTemplateReview (afterwards);
+                                                  }
+                                              });
+            }
+
+            void followTheSaveBeforeReview()
+            {
+                if (! reviewAfterSave.has_value())
+                    return;
+
+                if (! last.writeError.empty() && last.writeError != reviewAfterSave->errorBefore)
+                {
+                    shell->transport.setNotice ("the performance was not saved: " + juce::String (last.writeError));
+                    reviewAfterSave.reset();
+                    return;
+                }
+
+                if (last.dirty == model::Flag::no)
+                {
+                    auto afterwards = reviewAfterSave->afterwards;
+                    reviewAfterSave.reset();
+                    openTemplateReview (std::move (afterwards));
+                }
+                else if ((juce::Time::getCurrentTime() - reviewAfterSave->since).inSeconds() > 20.0)
+                {
+                    shell->transport.setNotice ("the performance was not saved in time to review it");
+                    reviewAfterSave.reset();
+                }
+            }
+
+            void openTemplateReview (std::function<void()> afterwards)
+            {
+                if (! host.compareWithTemplate)
+                    return;
+
+                const auto comparison = host.compareWithTemplate();
+
+                if (! comparison.ok)
+                {
+                    shell->transport.setNotice (juce::String (comparison.problem));
+                    if (afterwards) afterwards();
+                    return;
+                }
+
+                if (comparison.changes.empty())
+                {
+                    shell->transport.setNotice ("this performance and the show's template agree");
+                    if (afterwards) afterwards();
+                    return;
+                }
+
+                ui::TemplateReviewWindow::Actions actions;
+
+                actions.update = [this, afterwards] (const model::TemplateReview& review)
+                {
+                    const auto picks = review.picks();
+                    const auto sounds = review.localSounds();
+
+                    if (sounds.empty())
+                    {
+                        finishTemplateUpdate (picks, false, afterwards);
+                        return;
+                    }
+
+                    juce::String named;
+                    for (const auto& sound : sounds)
+                        named << (named.isEmpty() ? "" : ", ") << juce::String (sound);
+
+                    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                    .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                                    .withTitle ("Copy the sounds into the show?")
+                                                    .withMessage ("Only this performance has " + named
+                                                                  + ". Copy them into the show's media, so every performance "
+                                                                    "made from the template has them - or bring the cues without them.")
+                                                    .withButton ("Copy them")
+                                                    .withButton ("Without them")
+                                                    .withButton ("Cancel")
+                                                    .withAssociatedComponent (templateReview.get()),
+                                                  [this, picks, afterwards] (int answer)
+                                                  {
+                                                      if (answer == 1 || answer == 2)
+                                                          finishTemplateUpdate (picks, answer == 1, afterwards);
+                                                  });
+                };
+
+                actions.cancel = [this] { closeTemplateReview(); };
+
+                templateReview = std::make_unique<ui::TemplateReviewWindow> (theme, model::TemplateReview (comparison.changes),
+                                                                             showAroundThisDocument(), std::move (actions));
+                templateReview->setVisible (true);
+                templateReview->toFront (true);
+            }
+
+            void finishTemplateUpdate (const std::vector<TemplatePick>& picks, bool copySounds, std::function<void()> afterwards)
+            {
+                const auto updated = host.updateTemplate ? host.updateTemplate (picks, copySounds)
+                                                         : TemplateUpdate { false, "this build cannot update a template" };
+                shell->transport.setNotice (juce::String (updated.said));
+                closeTemplateReview();
+
+                if (updated.ok && afterwards)
+                    afterwards();
+            }
+
+            //  From inside one of its own buttons, so later rather than now.
+            void closeTemplateReview()
+            {
+                juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<ui::MainWindow> (window.get()), this]
+                                                 {
+                                                     if (safe != nullptr)
+                                                         templateReview.reset();
+                                                 });
             }
 
             /*  NEW PERFORMANCE (§25, JI): a copy of this window's document - the
@@ -2702,7 +2885,53 @@ namespace wfg::client
                 callbacks hold a SafePointer, never `this` - the box outlives
                 nothing, but JUCE_MODAL_LOOPS_PERMITTED=0 means every box here
                 is asynchronous and the rule is cheaper than the exception. */
+            /*  CLOSING A PERFORMANCE THAT DIFFERS FROM ITS SHOW'S TEMPLATE asks
+                first whether to bring its changes back (§25, the author: "this
+                should be a question when saving or closing" - closing, not
+                every save, since a tech saves all day). Then the window's own
+                question, as for any document. */
             void closeRequested()
+            {
+                if (model::isYes (last.locked) || ! host.compareWithTemplate || ! templateAroundThisDocument())
+                {
+                    askToClose();
+                    return;
+                }
+
+                const auto dirty = last.dirty == model::Flag::yes;
+                const auto comparison = host.compareWithTemplate();
+
+                if (! dirty && (! comparison.ok || comparison.changes.empty()))
+                {
+                    askToClose();
+                    return;
+                }
+
+                juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                                .withTitle ("Bring this performance's changes into the show's template?")
+                                                .withMessage (dirty ? "This performance has unsaved changes, and may differ from "
+                                                                      + showAroundThisDocument() + "'s template."
+                                                                    : "This performance differs from " + showAroundThisDocument()
+                                                                      + "'s template in " + juce::String (static_cast<int> (comparison.changes.size()))
+                                                                      + (comparison.changes.size() == 1 ? " place." : " places."))
+                                                .withButton (dirty ? "Save, then review..." : "Review the changes...")
+                                                .withButton ("Close without")
+                                                .withButton ("Cancel")
+                                                .withAssociatedComponent (window.get()),
+                                              [this, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                                              {
+                                                  if (safe == nullptr)
+                                                      return;
+
+                                                  if (answer == 1)
+                                                      reviewTemplate ([this] { askToClose(); });
+                                                  else if (answer == 2)
+                                                      askToClose();
+                                              });
+            }
+
+            void askToClose()
             {
                 using Options = juce::MessageBoxOptions;
 
@@ -3015,6 +3244,17 @@ namespace wfg::client
             };
 
             std::optional<NewPerformance> makingAPerformance;
+
+            //  A save asked for so the template review reads it, and what runs after the review.
+            struct ReviewAfterSave
+            {
+                std::function<void()> afterwards;
+                juce::Time since;
+                std::string errorBefore;
+            };
+
+            std::optional<ReviewAfterSave> reviewAfterSave;
+            std::unique_ptr<ui::TemplateReviewWindow> templateReview;
         };
     }
 

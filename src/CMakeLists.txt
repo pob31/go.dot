@@ -247,6 +247,9 @@ add_library(wfg_engine STATIC
     wfg/engine/clock/TickClock.h
     wfg/engine/clock/TickThread.cpp
     wfg/engine/clock/TickThread.h
+    wfg/engine/TemplateChanges.h
+    wfg/engine/document/Template.cpp
+    wfg/engine/document/Template.h
     wfg/engine/document/Bundle.cpp
     wfg/engine/document/Bundle.h
     wfg/engine/document/CanonicalXml.cpp
@@ -455,6 +458,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/FxEditor.h
     wfg/client/model/FxEditor.cpp
     wfg/client/model/Traffic.h
+    wfg/client/model/TemplateReview.cpp
+    wfg/client/model/TemplateReview.h
     wfg/client/model/Traffic.cpp
     wfg/client/model/Timeline.h
     wfg/client/model/Timeline.cpp
@@ -515,6 +520,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/InspectorComponent.cpp
     wfg/client/ui/NetworkMonitorWindow.h
     wfg/client/ui/NetworkMonitorWindow.cpp
+    wfg/client/ui/TemplateReviewWindow.cpp
+    wfg/client/ui/TemplateReviewWindow.h
     wfg/client/ui/HistoryPanelComponent.h
     wfg/client/ui/HistoryPanelComponent.cpp
     wfg/client/ui/UndoPanelComponent.h

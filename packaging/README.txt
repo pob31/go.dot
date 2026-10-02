@@ -39,6 +39,12 @@ A performance finds a sound in its own media/ first, then in the show's.
 Sounds you add to the show are the piece's; sounds you add to a performance
 (an announcement) and its recordings stay with that performance.
 
+The show's template (Hamlet.wfg in Hamlet/) is optional: "Make this the
+show's template" in a performance's File menu makes one. When you close a
+performance that differs from it - or choose "Update the show's
+template..." - Go.dot lists what differs, cue by cue, and brings what you
+tick back into the template, for the performances still to come.
+
   Windows   Two downloads, the same Go.dot. The setup (-setup.exe) installs
             it for you alone, or for everybody if you choose, adds it to the
             Start menu, and makes a double-click on a show's .wfg open it; it

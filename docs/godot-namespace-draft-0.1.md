@@ -15502,6 +15502,37 @@ piece and one event of it. PRD §3.20 carries the decided text; this section is 
   this, `../` reached anywhere on the disk a show was copied to. A `:` alone is a name - a Mac or
   Linux file may have one.
 
+*2026-10-02, the author correcting the model before stage 3:* "For me 'performances' are .wfg
+cuelists and specific recorded media. The show is a container with global media storage,
+subcontainers, with eventually a template cuelist. [...] how to update the template cuelist, then
+this should be a question when saving or closing." So:
+
+- **JN - The show is a container; its template is optional.** A show folder holds the media its
+  performances share, the performances, and - if someone made one - a template cue list, which is the
+  show folder's own `.wfg`. A document is a performance when the folder around it holds a `.wfg` or a
+  `media/` (JK's "around"); the show has a template when it holds a `.wfg`. With no template nothing
+  is asked; "Make this the show's template" gives it one.
+- **JO - A performance's changes go back to the template on close and on demand.** Closing a
+  performance that differs asks "Review the changes... / Close without / Cancel" before the window's
+  own question; File > "Update the show's template..." asks any time. Saving does not ask: a tech
+  saves all day. The comparison reads both documents from the disk, so a performance with unsaved
+  changes is offered "Save, then review" first.
+- **JP - Listed: added, changed field by field, removed, show settings.** Matched by id. A changed
+  cue's fields are each attribute that differs (as the file would spell it, so a default spelled out
+  is no difference), each kind of part taken whole (routing, feeds, ranges...), and its place in the
+  list - judged against neighbours both documents have, so a cue added beside it does not move it.
+  The settings are one item per container beside Lists (audio, devices, MIDI ports, network,
+  surfaces, DCAs) and the lists' own attributes. *Mine:* added and changed are ticked to start,
+  removed and settings are not - removal reaches every performance to come, and settings are
+  usually the venue's.
+- **JQ - A new cue goes after its neighbour.** The cue before it in the performance, found in the
+  template by id; at the end of its parent when that cue is not there.
+- **JR - A sound only the performance has is asked about each time**: copy it into the show's
+  `media/`, or bring the cue without it.
+- **JS - The template is written only when it stays a show** - validated before it is saved - and
+  never while it is open in another window (`app/OpenShows.h`), which would lose one of the two
+  writers. *Mine.*
+
 ### 25.2 Stages
 
 1. **The resolver** (JK, JM) - *built 2026-10-02*. `resolveMediaPath` looks in the folder around;
@@ -15518,7 +15549,10 @@ piece and one event of it. PRD §3.20 carries the decided text; this section is 
    a window of its own. A document whose folder sits in a folder holding a `.wfg` is a performance:
    its window is titled "Go.dot - Hamlet - Paris". Tried here: the title. The dialog and the copy are
    the author's to try.
-3. **Back to the show** - *(proposed, not designed)*. Sending a performance's change to the show,
-   cue by cue by ID. Open: the show may be open in another window (its own engine); a cue's local
-   sounds would move to the show's `media/`; a cue new to the show needs a place in its list. Each
-   needs the author's answer before it is built.
+3. **The template** (JN-JS) - *built 2026-10-02*. `document/Template.h` compares and updates, on the
+   caller's thread, from the disk; `wfg template diff|update|make` is its named form (§4.11); the
+   window's `ui/TemplateReviewWindow` draws the ticks of `model::TemplateReview` and hands them to
+   the same code through `ClientHost`. Tested by `TemplateTests` (agreement after a copy; each kind
+   of change; field picks; the neighbour and the end; sounds copied only when asked; removals and
+   settings only when picked; no template, then one made; a folder that is no show) and by hand with
+   `wfg template` on the phase4 fixture. The window's dialogs are the author's to try.

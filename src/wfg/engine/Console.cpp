@@ -23,6 +23,7 @@
 #include <wfg/engine/app/StartupReport.h>
 #include <wfg/engine/app/WindowApplication.h>
 #include <wfg/engine/document/Bundle.h>
+#include <wfg/engine/document/Template.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
@@ -1327,6 +1328,96 @@ namespace
         test build's folder with go.dot.sh beside it. Elsewhere it says who
         does it instead, and fails: a verb that exits 0 having done nothing
         is the one the ConsoleApplication comment at the bottom warns about. */
+    /*  `wfg template diff|update|make <performance>`: A PERFORMANCE AND ITS
+        SHOW'S TEMPLATE (namespace draft §25, document/Template.h) - the named
+        form of what the window's "Update the show's template..." does (§4.11).
+
+            diff                           one line per change, its id in brackets
+            update --pick=<id>[:<field>,...]... [--all] [--copy-sounds]
+            make                           a show with none gets this performance as its template
+
+        Nothing is picked unless named: `update` with no --pick and no --all
+        changes nothing, and says so. */
+    int runTemplate (const juce::ArgumentList& args)
+    {
+        const auto verb = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
+        const auto path = args.arguments.size() > 2 ? args.arguments[2].text : juce::String();
+
+        if (verb.isEmpty() || path.isEmpty() || path.startsWith ("-"))
+        {
+            std::cerr << "wfg template: diff|update|make <performance>" << std::endl;
+            return 2;
+        }
+
+        const auto performance = wfg::doc::Bundle::folderFor (juce::File::getCurrentWorkingDirectory().getChildFile (path));
+
+        if (performance == juce::File())
+        {
+            std::cerr << "wfg template: not a show folder or a .wfg: " << path << std::endl;
+            return 2;
+        }
+
+        if (verb == "make")
+        {
+            const auto made = wfg::doc::Template::makeTemplate (performance);
+            (made.ok ? std::cout : std::cerr) << "wfg template: " << made.said << std::endl;
+            return made.ok ? 0 : 2;
+        }
+
+        const auto comparison = wfg::doc::Template::compare (performance);
+
+        if (! comparison.ok)
+        {
+            std::cerr << "wfg template: " << comparison.problem << std::endl;
+            return 2;
+        }
+
+        if (verb == "diff")
+        {
+            for (const auto& line : wfg::doc::Template::describe (comparison))
+                std::cout << line << std::endl;
+
+            if (comparison.changes.empty())
+                std::cout << "the performance and the template agree" << std::endl;
+
+            return 0;
+        }
+
+        if (verb != "update")
+        {
+            std::cerr << "wfg template: diff|update|make, not " << verb << std::endl;
+            return 2;
+        }
+
+        std::vector<wfg::TemplatePick> picks;
+
+        if (args.containsOption ("--all"))
+            for (const auto& change : comparison.changes)
+                picks.push_back ({ change.id, {} });
+
+        for (const auto& argument : args.arguments)
+        {
+            if (! argument.text.startsWith ("--pick="))
+                continue;
+
+            const auto value = argument.text.fromFirstOccurrenceOf ("=", false, false);
+            wfg::TemplatePick pick { value.upToFirstOccurrenceOf (":", false, false).toStdString(), {} };
+
+            juce::StringArray fields;
+            fields.addTokens (value.fromFirstOccurrenceOf (":", false, false), ",", {});
+            fields.removeEmptyStrings();
+
+            for (const auto& field : fields)
+                pick.fields.push_back (field.toStdString());
+
+            picks.push_back (std::move (pick));
+        }
+
+        const auto updated = wfg::doc::Template::update (performance, picks, args.containsOption ("--copy-sounds"));
+        (updated.ok ? std::cout : std::cerr) << "wfg template: " << updated.said << std::endl;
+        return updated.ok ? 0 : 2;
+    }
+
     int runAssociate (const juce::ArgumentList& args)
     {
        #if JUCE_LINUX
@@ -5008,6 +5099,14 @@ namespace
                                                 && openedAtLaunchCount == 0;
                 clientHost.traffic = &traffic;
 
+                //  The show's template (§25), for this window's document.
+                clientHost.compareWithTemplate = [&target] { return wfg::doc::Template::compare (target); };
+                clientHost.updateTemplate = [&target] (const std::vector<wfg::TemplatePick>& picks, bool copySounds)
+                {
+                    return wfg::doc::Template::update (target, picks, copySounds);
+                };
+                clientHost.makeTemplate = [&target] { return wfg::doc::Template::makeTemplate (target); };
+
                #if JUCE_LINUX
                 /*  Not once the .deb is installed: it has told the desktop
                     for everybody (scripts/package-linux-deb.sh), and a copy
@@ -5246,6 +5345,16 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       [] (const juce::ArgumentList& args)
                       {
                           if (const auto code = runCanon (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
+    app.addCommand ({ "template",
+                      "template diff|update|make <performance> [--pick=<id>[:<field>,...]]... [--all] [--copy-sounds]",
+                      "A performance and its show's template cue list: what differs, bring picks into it, or make one",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runTemplate (args); code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 

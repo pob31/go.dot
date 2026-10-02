@@ -38,9 +38,12 @@
     the loop; nothing it is not.
 */
 
+#include <wfg/engine/TemplateChanges.h>
+
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace wfg
 {
@@ -158,6 +161,16 @@ namespace wfg
             from the window. Answers a sentence for the foot. Empty elsewhere:
             Windows has its installer and the Mac its app. */
         std::function<std::string()> associate {};
+
+        /*  A PERFORMANCE AND ITS SHOW'S TEMPLATE (namespace draft §25): what
+            this window's performance has that the template has not, bringing
+            picks of it back, and giving a show with no template this
+            performance as one. All three read the documents from the disk
+            (document/Template.h) - what is not saved is not compared - and are
+            the window's form of `wfg template` (§4.11). */
+        std::function<TemplateComparison()> compareWithTemplate {};
+        std::function<TemplateUpdate (const std::vector<TemplatePick>&, bool copySounds)> updateTemplate {};
+        std::function<TemplateUpdate()> makeTemplate {};
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

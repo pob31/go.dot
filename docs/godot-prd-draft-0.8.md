@@ -1678,15 +1678,17 @@ Canonicalisation rules:
   independently
 
 **A Show and its Performances** *(added in 0.8, at the author's direction,
-2026-10-01 - `docs/godot-namespace-draft-0.1.md` §25)*. A **Show** is the piece;
-a **Performance** is each event of it, in another venue or the same one, on tour
-or in a long run. The show is the master: you change the piece by editing it. A
-performance is a complete bundle of its own, folded inside the show's folder, made
-as a copy of the show or of any earlier performance used as a template, and free to
-differ in cues, levels, the room and its own sounds and recordings. A performance
-finds a sound in its own `media/` first, then in the show's; nothing names a file
-outside `media/`. A change made in a performance can be sent back to the show, cue
-by cue, matched by cue ID *(proposed - its design is §25's last open question)*.
+2026-10-01 and 2026-10-02 - `docs/godot-namespace-draft-0.1.md` §25)*. A **Show**
+is the piece, and on disk a container: the media its performances share, the
+performances, and optionally a **template** cue list. A **Performance** is each
+event of it, in another venue or the same one, on tour or in a long run: a cue list
+with the media recorded at it, a complete bundle folded inside the show's folder,
+made as a copy of the template or of any earlier performance, and free to differ in
+cues, levels, the room and its own sounds. A performance finds a sound in its own
+`media/` first, then in the show's; nothing names a file outside `media/`. Closing a
+performance that differs from the template - or asking - lists what differs, cue by
+cue and field by field, matched by cue ID, and brings what is ticked back into the
+template.
 
 **RELAX NG schema** shipped → validation as a pre-commit hook. **XPath** gives
 the projections nearly for free.
