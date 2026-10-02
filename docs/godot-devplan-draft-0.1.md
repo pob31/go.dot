@@ -882,9 +882,12 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   and event rows - and holds every `default` to the same rule, with its own
   cases run by every `--check`; the table passes untouched. A device's `PANIC`
   array is read as a state node's safe value and published back as one; one
-  the node could never hold refuses its namespace, and on a container or an
-  event anything but a policy is ignored. PRD §3.3's "snap-to" against the
-  schema's `snap` is left for the author. Nothing applies a panic value yet.
+  the node could never hold is ignored with a warning and the device loads
+  *(2026-10-02, K1: H5 refused its namespace; the author overruled it, "stay
+  flexible" - namespace draft §23.12)*, and on a container or an event
+  anything but a policy is ignored. PRD §3.3's "snap-to" against the schema's
+  `snap` was left for the author *(2026-10-02, K1: ruled - the PRD says `snap`
+  now)*. Nothing applies a panic value yet.
 
 ---
 

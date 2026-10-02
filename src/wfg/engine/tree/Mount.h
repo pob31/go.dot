@@ -77,10 +77,13 @@
         declared safe VALUE (namespace draft §3): read as the node's own types,
         it becomes the word "value" plus `Node::panicValues`. On a state node,
         one the node could never hold - an unknown word, out of its range, not
-        one of its VALS, the wrong type or count - refuses the namespace, as a
-        FULL_PATH that lies does. On a container or an event anything but a
-        policy is ignored: neither has a value, and an event is often only
-        inferred. Nothing applies a panic value yet (devplan Phase 10).
+        one of its VALS, the wrong type or count - is ignored and SAID: the
+        node keeps the mount's policy, the device still loads, and a warning
+        names the address (2026-10-02, K1, the author's "stay flexible"; H5
+        refused the namespace). On a container or an event anything but a
+        policy is ignored in silence: neither has a value, and an event is
+        often only inferred. Nothing applies a panic value yet (devplan
+        Phase 10).
 
         AND, A TRAP FOR WHOEVER APPLIES IT: these are copied onto the nodes
         when the namespace loads, and `updateDeclaration` keeps the nodes - so
@@ -255,6 +258,13 @@ namespace wfg::tree
         /** One message per problem, in the order they were found. */
         std::vector<std::string> problems;
 
+        /*  WHAT IS WRONG WITH THE FILE BUT DID NOT STOP IT LOADING, one
+            sentence each, naming the address. Today one thing lands here: a
+            node's GODOT.PANIC it could never hold (2026-10-02, K1), which is
+            ignored rather than refused. A namespace refused for something else
+            may carry some too; its problems are what decide. */
+        std::vector<std::string> warnings;
+
         /** The mounted nodes, sorted by address. Empty when it did not load. */
         std::vector<Node> nodes;
 
@@ -315,6 +325,16 @@ namespace wfg::tree
             machine found, not what anybody decided (PRD 4.10). */
         void setProblem (const std::string& mountId, std::string problem);
         std::string problemOf (const std::string& mountId) const;
+
+        /*  WHAT IS WRONG WITH A LOADED DEVICE'S FILE THAT DID NOT STOP IT
+            LOADING (2026-10-02, K1): every mount's `MountResult::warnings`, in
+            the order of the mount ids, kept for as long as the namespace that
+            produced them. NOT a problem: the problem row says why a device
+            cannot be used and is painted as a failure, and this device can.
+            They are published with the show's own warnings, under
+            `/godot/document/warnings`, which is where every client already
+            looks for what is wrong but did not stop the show opening. */
+        std::vector<std::string> warnings() const;
 
         /** Forgets a mount and everything under it. */
         bool unload (const std::string& mountId);
@@ -435,6 +455,7 @@ namespace wfg::tree
         {
             MountDeclaration declaration;
             std::vector<Node> nodes;      // sorted by address
+            std::vector<std::string> warnings;
         };
 
         Node* findNode (const std::string& address);

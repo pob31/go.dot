@@ -89,9 +89,10 @@ namespace wfg::tree
                                      const juce::File& bundleFolder, const std::string& mountId);
 
     /*  All of them, in document order. Returns every problem, each already
-        saying which mount it came from. A mount that fails does not stop the
-        others: one unreadable description should cost that one target, not the
-        show. */
+        saying which mount it came from, and then - starting "warning: " - what
+        was wrong with a file that loaded all the same (2026-10-02, K1). A
+        mount that fails does not stop the others: one unreadable description
+        should cost that one target, not the show. */
     std::vector<std::string> loadAllMountsFromBundle (const doc::ShowDocument& document,
                                                       MountTable& mounts,
                                                       const juce::File& bundleFolder);

@@ -397,8 +397,10 @@ one are indistinguishable to the engine (§3.22). Without a key, `KIND` is infer
 whatever it was, so `"PANIC": [-60]` read as an empty word and went back out as `"PANIC": ""`.
 An array is read as the node's own types - one element per type tag, the first inside the node's
 range or among its `VALS` - and published back as the array it was, spelled as `VALUE` is. A
-`PANIC` a state node could never hold refuses the namespace; on a container or an event, which have
-no value and are never published with one, anything but `"park"` or `"snap"` is ignored (§23.11).
+`PANIC` a state node could never hold is ignored - the node keeps the mount's policy - and said as a
+warning naming the address, and the device still loads *(2026-10-02, K1: until then it refused the
+namespace; §23.12)*; on a container or an event, which have no value and are never published with
+one, anything but `"park"` or `"snap"` is ignored in silence (§23.11).
 A mount's own `panic` stays `park` or `snap`: a device has nodes of many types. And the
 parameter table's `panic` column takes a literal of the row's own type too, checked by the
 generator (`docs/parameters/README.md`). Nothing applies any of them yet: devplan Phase 10.)*
@@ -14834,7 +14836,10 @@ under the French locale too. A row of the parameter table that rests at a litera
 same way, though none does yet.
 
 On a state node, anything else - an unknown word, an object, a bare number, the wrong count, a
-value out of range or of the wrong type - refuses the namespace, as a `FULL_PATH` that lies does. A
+value out of range or of the wrong type - is ignored, the node keeping the mount's policy, and is
+said as a warning naming the address and `PANIC`; the device loads. *(2026-10-02, K1: this stage
+built it as a refusal of the whole namespace, as a `FULL_PATH` that lies is - decision JC - and
+the author overruled it the same day, "stay flexible": §23.12, JT.)* A
 `GODOT` key is written by whoever wrote the description: a template by hand, or a device that
 describes itself as Go.dot does, whose own OSCQuery reply carries one on every node. On a container
 or an event, anything but a policy word is ignored and the mount's policy stays: neither has a value
@@ -14846,7 +14851,9 @@ stays `park` or `snap` (`show.rng`): a device has nodes of many types.
 
 **Left for the author: the policy's spelling.** PRD §3.3 calls the second policy *snap-to*; the
 schema, `show.rng`, this document and the reader say `snap`. A description written from the PRD,
-`"PANIC": "snap-to"` on a state node, is now refused. The PRD is not edited here.
+`"PANIC": "snap-to"` on a state node, is now refused. The PRD is not edited here. *(2026-10-02, K1:
+ruled. PRD §3.3 now says `snap`, at the author's direction, and a `"snap-to"` is an unknown word
+like any other - a warning, and the device loads. §23.12.)*
 
 **Not changed, and worth knowing.**
 
@@ -14861,8 +14868,9 @@ schema, `show.rng`, this document and the reader say `snap`. A description writt
 **What it changes for a replay.** Nothing: no handler, hook or record changed. What changes is
 what loads - a namespace file with a `PANIC` a state node could never hold, which used to load with
 that `PANIC` read as `""` or kept as an unknown word, now refuses, and the show opens with that
-device's problem said. No fixture has one: the only `PANIC` in a namespace fixture is
-`console.json`'s `"snap"`.
+device's problem said. *(2026-10-02, K1: no longer - it loads, the node rests as the device does,
+and the show opens with a warning said, §23.12.)* No fixture has one: the only `PANIC` in a
+namespace fixture is `console.json`'s `"snap"`.
 
 **Tests**, each written first and run against the code before its change:
 
@@ -14873,6 +14881,8 @@ device's problem said. No fixture has one: the only `PANIC` in a namespace fixtu
 - `MountTests` "a PANIC the node could never hold is refused when the namespace loads" - fourteen
   ways on a state node, `"snap-to"` among them, each refused with a problem naming the address and
   `PANIC`, and the same node with a value it can hold loading. Every one loaded before.
+  *(2026-10-02, K1: renamed "a PANIC the node could never hold is a warning, and the device still
+  loads", and turned round to match - §23.12.)*
 - `MountTests` "a PANIC on an event or a container is ignored, and the namespace still loads" (the
   review's) - an inferred event with an array, one with an unknown word, and a container with an
   array: the namespace loads, each keeps the mount's `park`, and the event publishes no `PANIC`. On
@@ -14899,11 +14909,70 @@ questions and on the stage's review, 2026-10-02; all are the author's to overrul
 | IZ | **A row rests at a policy or at one value of its own type**: `park` or `snap`, or one literal spelled as the document reader takes it, inside the row's range or enum and its type's width on the wire (32 bits for `i`, a 32-bit float for `f`); the two words always mean the policy; a blob, list or event row takes a policy only; never empty | the orchestrator's ruling (lists and events); the spelling the brief's, after the engine's own readers; the float width the review's |
 | JA | **A default meets the same rule**, a list's element by element: none of the 399 fails, the header unchanged | the orchestrator's ruling |
 | JB | **A device's PANIC array is the node's safe value**: one element per type tag, coerced as a write would be and held to more - a whole number for `i`/`h` checked before the coercion that would truncate it, the first inside the node's RANGE and VALS, no number for `T`; held as the word `value` beside `panicValues`, and published back as the array | the orchestrator's ruling (the representation); the rest the brief's |
-| JC | **On a state node, a PANIC it could never hold refuses the namespace**, as a FULL_PATH that lies does; **on a container or an event, anything but a policy is ignored** and the mount's policy stays | the orchestrator's ruling, and the review's: an event is often only inferred, and a description that loaded before must still load; ignoring an unknown word there too, not only an array, the implementer's, for the same reason |
+| JC | **On a state node, a PANIC it could never hold refuses the namespace**, as a FULL_PATH that lies does; **on a container or an event, anything but a policy is ignored** and the mount's policy stays | the orchestrator's ruling, and the review's: an event is often only inferred, and a description that loaded before must still load; ignoring an unknown word there too, not only an array, the implementer's, for the same reason. *The state-node half overruled by the author, 2026-10-02: a warning, and the device loads (JT, §23.12)* |
 | JD | **The checker is tested on every `--check`**: its own table of good and bad literals, so `schema.generated` goes red the day the rule loosens, with no new ctest entry | implementer's call (the brief's optional `--self-test`, kept out of `tests/CMakeLists.txt` in a shared checkout) |
 | JE | **After a double Esc a fader taken for lane recording stays taken**, and shows the lane's start once, two ticks after the press - the one move the invariant accepts | the orchestrator's ruling (DN and DG kept), against the plan's "let go"; the author's to rule on |
 | JF | **The invariant allows the clock and nothing else**: the engine's tick may change; a node may leave the tree, and none may appear or change | implementer's call |
 | JG | **The teardown is bounded**: every run over within four ticks of the press (three measured), and at most one level a voice after it | the review's |
+
+### 23.12 A device's PANIC that cannot be held is a warning (K1)
+
+**What it means.** H5 refused a whole device whose description gave one of its nodes a resting
+state that node could never hold (JC, §23.11). The author overruled it on 2026-10-02: *"stay
+flexible"*. One wrong word in somebody else's file must not unmount the device and fail every cue
+aimed at it. So the device loads, the bad `PANIC` is ignored - the node rests as the mount says,
+exactly as a container or an event already did - and the mistake is said, as a warning naming the
+address and `PANIC`, never in silence.
+
+Everything else H5 built stays: a `PANIC` array a state node can hold is still read as its value,
+held to the same checks, and published back as the array; a container or an event still ignores
+anything but a policy without a word; and `scripts/generate-schema.py` stays strict, because it
+checks Go.dot's own parameter table, not a third party's file.
+
+**Where the warning goes.** The mount reader had no channel for what is wrong but not fatal: every
+sentence in `MountResult::problems` refused the namespace. Two places a show already says things
+were the candidates. A device's `/godot/mount/<id>/problem` is one sentence on that device's row,
+but it says why a device *cannot be used*, and the settings window paints it as a failure - this
+device can be. `/godot/document/warnings` is defined as what is wrong with the show but did not stop
+it opening, and every client already counts it and shows the first line (`Transport.h`). The warning
+goes there, and to the lines a show prints on the terminal as it opens. So `MountResult` gained
+`warnings`, the mount table keeps a loaded device's warnings with its nodes (a reload or an unload
+forgets them, as it forgets the nodes), `MountTable::warnings()` lists them, the tree appends them
+to `document/warnings` after the show's own, and `loadAllMountsFromBundle` returns them after the
+problems, each starting `warning: `. The device's `problem` row stays empty. No new UI.
+
+The sentence: `/ext/console/masterLevel: PANIC says "snap-to"; it must be "park", "snap" or an
+array holding the value the node rests at - ignored; the node rests as the device does (park)`.
+
+**The spelling.** PRD §3.3 now says `snap` (it said *snap-to*), at the author's direction, edited by
+the orchestrator: the schema, `show.rng`, this document and the reader already did. A description
+that says `"snap-to"` is just an unknown word - a warning, and it loads.
+
+**What it changes for a replay.** Nothing: no handler, hook or record changed. What changes is
+what loads - a namespace with a `PANIC` a state node could never hold loads again (as it did before
+H5, but with the mount's policy rather than the bad word) and says so.
+
+**Tests**, run against the code before its change:
+
+- `MountTests` "a PANIC the node could never hold is a warning, and the device still loads" - H5's
+  refusal case turned round, over its fourteen rows: each loads, has no problem, keeps the mount's
+  `park` with no values, and carries one warning naming `/desk/fader` and `PANIC`. A held value
+  warns of nothing, and a device whose policy is `snap` lends it to the node it ignored a
+  `"snap-to"` on. Before the change: 43 failures, every row refused (`ok`, `problems`, `warnings`
+  each failing fourteen times) and the `snap` case's `REQUIRE (ok)`.
+- `MountTests` "a device's PANIC warning reaches the show's warnings, and the device is not a failed
+  one" - the fixture bundle's console with its master's `"snap"` spelled `"snap-to"`: the device
+  loads, its `problem` is empty in the table and in the tree, the node rests at `park`, the lines
+  `loadAllMountsFromBundle` returns name the node and `PANIC`, and `/godot/document/warnings` holds
+  the sentence. Before the change: three failures - not loaded, a problem, and no node to find.
+- Both under C and `fr-FR`; the whole of `MountTests`, `TreeTests`, `OscQueryTests` and
+  `DocumentTests` (149 cases) under both; and the `schema.`, `wfg.schema`, `wfg.validate`, `wfg.tree`
+  and `blackbox.devices` ctests (16), green.
+
+| | Decision | Whose |
+|---|---|---|
+| JT | **A PANIC a state node could never hold is a warning, not a refusal**: ignored, the node keeps the mount's policy, the device loads, and a warning names the address and `PANIC`; overrules JC's state-node half. The generator stays strict | the author's, 2026-10-02 ("stay flexible") |
+| JU | **The warning goes to `/godot/document/warnings` and to the terminal, not to the device's `problem` row**: that row means the device cannot be used, and is painted as a failure | implementer's call (the brief: reuse the closest existing channel, no new UI) |
 
 ## 24. Go Doh! — taking back the last GO
 

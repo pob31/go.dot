@@ -124,7 +124,8 @@ Each node declares:
 - **rate cap** for outbound dispatch
 - **anticipatable**: may be pre-sent before GO (imperceptible *and* revocable in
   the current state); third-party defaults to false
-- **panic value**: park | snap-to | declared safe value
+- **panic value**: park | snap | declared safe value *("snap-to" until 2026-10-02,
+  spelled `snap` at the author's direction to match the schema and `show.rng`)*
 
 *Added in 0.8, at the author's direction (2026-09-22).* Each mount is a
 **device** in the show settings, and declares four more things about itself, all

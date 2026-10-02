@@ -785,22 +785,25 @@ TEST_CASE ("mount: a PANIC array is the node's safe value, read as the node's ow
     publishes ("/desk/gain", "\"park\"");
 }
 
-TEST_CASE ("mount: a PANIC the node could never hold is refused when the namespace loads")
+TEST_CASE ("mount: a PANIC the node could never hold is a warning, and the device still loads")
 {
-    /*  REFUSED, AS A FULL_PATH THAT LIES IS (decision JC, namespace draft
-        §23.11) - on a state node, the one kind that has a value to rest at. A
-        GODOT key is written by whoever wrote the description, a template by
-        hand or a device describing itself as Go.dot does, and a PANIC that is
-        not a value of the node's own type is a mistake in that file: a show
-        that loaded it would promise a resting state the device cannot take.
-        Falling back to the mount's policy in silence would hide exactly that.
+    /*  A WARNING, NOT A REFUSAL (2026-10-02, K1, decision JT, the author's:
+        "stay flexible"; it overrules JC, which refused the namespace). A GODOT
+        key is written by whoever wrote the description, a template by hand or
+        a device describing itself as Go.dot does, and a PANIC that is not a
+        value of the node's own type is a mistake in that file - but one wrong
+        word in somebody else's description must not unmount the whole device
+        and fail every cue aimed at it. So the device loads, the PANIC is
+        ignored and the node rests as the mount says, as on a container or an
+        event, and the mistake is said: a warning naming the address and PANIC,
+        never silence.
 
-        "snap-to" is here because PRD §3.3 spells the policy that way, while the
-        schema, show.rng and this reader say "snap" - a template written from
-        the PRD is refused, which is left for the author (§23.11). */
-    struct Refused { std::string why, node; };
+        "snap-to" is here because PRD §3.3 spelled the policy that way until
+        2026-10-02; it says `snap` now, as the schema, show.rng and this reader
+        do, so "snap-to" is just a word the reader does not know. */
+    struct Ignored { std::string why, node; };
 
-    const std::vector<Refused> refusals
+    const std::vector<Ignored> ignored
     {
         { "out of the node's range",   R"({ "TYPE": "f", "ACCESS": 3, "RANGE": [{ "MIN": -60, "MAX": 0 }], "GODOT": { "PANIC": [5] } })" },
         { "a word for a number",       R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": ["loud"] } })" },
@@ -818,28 +821,112 @@ TEST_CASE ("mount: a PANIC the node could never hold is refused when the namespa
         { "a number for a boolean",    R"({ "TYPE": "T", "ACCESS": 3, "GODOT": { "PANIC": [1] } })" },
     };
 
-    for (const auto& refusal : refusals)
+    for (const auto& entry : ignored)
     {
-        INFO (refusal.why << ": " << refusal.node);
+        INFO (entry.why << ": " << entry.node);
 
-        const auto result = readNamespace (deskDeclaration(), oneNode (refusal.node));
+        const auto result = readNamespace (deskDeclaration(), oneNode (entry.node));
 
-        CHECK_FALSE (result.ok);
-        CHECK_FALSE (result.problems.empty());
+        INFO ("first problem: " << (result.problems.empty() ? std::string ("none") : result.problems.front()));
+        CHECK (result.ok);
+        CHECK (result.problems.empty());
 
-        if (result.problems.empty())
+        /*  THE MOUNT'S POLICY, AND NO VALUE: what the node would have had with
+            no PANIC key at all. */
+        if (result.nodes.empty())
             continue;
 
-        INFO ("problem: " << result.problems.front());
-        CHECK (result.problems.front().find ("/desk/fader") != std::string::npos);
-        CHECK (result.problems.front().find ("PANIC") != std::string::npos);
+        const auto fader = mountedAt (result, "/desk/fader");
+        CHECK (fader.panic == "park");
+        CHECK (fader.panicValues.empty());
+
+        //  And said, once, naming where and what.
+        CHECK (result.warnings.size() == 1);
+
+        if (result.warnings.empty())
+            continue;
+
+        INFO ("warning: " << result.warnings.front());
+        CHECK (result.warnings.front().find ("/desk/fader") != std::string::npos);
+        CHECK (result.warnings.front().find ("PANIC") != std::string::npos);
     }
 
-    /*  AND THE SAME NODE, GIVEN A VALUE IT CAN HOLD, LOADS - so the table above
-        is refusing what it names and not everything. */
+    /*  AND THE SAME NODE, GIVEN A VALUE IT CAN HOLD, TAKES IT AND WARNS OF
+        NOTHING - so the table above is ignoring what it names and not
+        everything. A device whose own policy is `snap` rests there too. */
     const auto taken = readNamespace (deskDeclaration(),
                                       oneNode (R"({ "TYPE": "f", "ACCESS": 3, "RANGE": [{ "MIN": -60, "MAX": 0 }], "GODOT": { "PANIC": [-6] } })"));
-    CHECK (taken.ok);
+    REQUIRE (taken.ok);
+    CHECK (taken.warnings.empty());
+    CHECK (mountedAt (taken, "/desk/fader").panic == "value");
+
+    auto snapping = deskDeclaration();
+    snapping.panic = "snap";
+
+    const auto mistaken = readNamespace (snapping, oneNode (R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": "snap-to" } })"));
+    REQUIRE (mistaken.ok);
+    CHECK (mistaken.warnings.size() == 1);
+    CHECK (mountedAt (mistaken, "/desk/fader").panic == "snap");
+}
+
+TEST_CASE ("mount: a device's PANIC warning reaches the show's warnings, and the device is not a failed one")
+{
+    /*  WHERE THE WARNING GOES (K1). A mount's `problem` row is painted as a
+        failure - it says why a device cannot be used - and this device can.
+        The show already has a place for what is wrong but does not stop it
+        opening, `/godot/document/warnings`, which every client counts and
+        shows the first of; the warning goes there, and to the lines a show
+        prints as it opens. The fixture's console says "snap" on its master;
+        spelled "snap-to", as the PRD spelled it until 2026-10-02, it loads. */
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const auto scratch = copyFixtureToScratch();
+    const auto file = scratch.getChildFile ("namespaces/console.json");
+    const auto text = file.loadFileAsString();
+
+    REQUIRE (text.contains ("\"PANIC\": \"snap\""));
+    REQUIRE (file.replaceWithText (text.replace ("\"PANIC\": \"snap\"", "\"PANIC\": \"snap-to\"")));
+
+    Engine engine;
+    doc::ShowDocument document;
+    MountTable mounts;
+    cue::RunTable runs;
+
+    REQUIRE (doc::Bundle::open (scratch, document).ok);
+
+    const auto lines = loadAllMountsFromBundle (document, mounts, scratch);
+
+    CHECK (mounts.isLoaded ("H2KP7RTV"));
+    CHECK (mounts.problemOf ("H2KP7RTV").empty());
+    CHECK (std::any_of (lines.begin(), lines.end(), [] (const std::string& line)
+                        { return line.find ("/ext/console/masterLevel") != std::string::npos
+                                   && line.find ("PANIC") != std::string::npos; }));
+
+    {
+        ParameterTree parameters { document, engine.commands(), mounts, runs };
+        parameters.markStale();
+
+        EngineState state;
+        const auto snapshot = parameters.publish (0, state);
+
+        const auto* master = snapshot->find ("/ext/console/masterLevel");
+        REQUIRE (master != nullptr);
+        CHECK (master->panic == "park");
+
+        const auto* warnings = snapshot->find ("/godot/document/warnings");
+        REQUIRE (warnings != nullptr);
+        REQUIRE (warnings->soleValue().has_value());
+
+        const auto said = warnings->soleValue()->getString();
+        INFO ("document warnings: " << said);
+        CHECK (said.find ("/ext/console/masterLevel: PANIC") != std::string::npos);
+
+        const auto* problem = snapshot->find ("/godot/mount/H2KP7RTV/problem");
+        REQUIRE (problem != nullptr);
+        CHECK ((! problem->soleValue().has_value() || problem->soleValue()->getString().empty()));
+    }
+
+    scratch.getParentDirectory().deleteRecursively();
 }
 
 TEST_CASE ("mount: a PANIC on an event or a container is ignored, and the namespace still loads")

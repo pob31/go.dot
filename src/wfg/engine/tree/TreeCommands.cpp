@@ -226,6 +226,14 @@ namespace wfg::tree
 
             for (const auto& problem : result.problems)
                 problems.push_back (problem);
+
+            /*  AND WHAT DID NOT STOP IT LOADING (2026-10-02, K1), marked as
+                such, so the lines a show prints as it opens say it too. A
+                client reads the same sentences from `/godot/document/warnings`
+                (`MountTable::warnings`). */
+            if (result.ok)
+                for (const auto& warning : result.warnings)
+                    problems.push_back ("warning: " + warning);
         }
 
         return problems;

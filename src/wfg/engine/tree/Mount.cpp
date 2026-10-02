@@ -295,30 +295,38 @@ namespace wfg::tree
             (namespace draft §3) - one element per type tag, read as the node's
             own types, the first inside the node's range or among its VALS.
 
-            ON A STATE NODE, ANYTHING ELSE IS REFUSED, and the namespace with it,
-            as a FULL_PATH that lies is (decision JC, namespace draft §23.11). A
-            GODOT key is written by whoever wrote the description - a template
+            ON A STATE NODE, ANYTHING ELSE IS A WARNING, and the device loads
+            (2026-10-02, K1, decision JT, the author's: "stay flexible"; until
+            then it refused the namespace, decision JC, namespace draft §23.11).
+            A GODOT key is written by whoever wrote the description - a template
             by hand, or a device that describes itself as Go.dot does, whose own
             OSCQuery reply carries one on every node - and a PANIC the node could
-            never hold is a mistake in that file. A show that loaded it would
-            promise a resting state the device cannot take, and falling back to
-            the mount's policy in silence would hide it.
+            never hold is a mistake in that file. But one wrong word in somebody
+            else's description must not unmount the whole device and fail every
+            cue aimed at it. So the PANIC is ignored, the node keeps the mount's
+            policy as a container or an event does, and the mistake is SAID - a
+            warning naming the address and PANIC - because falling back in
+            silence would hide a resting state nobody got.
 
-            ON A CONTAINER OR AN EVENT, ANYTHING BUT A POLICY IS IGNORED, and the
-            mount's policy stays. Neither has a value to rest at, neither is ever
-            published with a PANIC, and the kind is often inferred rather than
-            declared: a node that is write-only with no VALUE reads as an event,
-            so a hand-written `{"TYPE": "f", "ACCESS": 2, "GODOT": {"PANIC": [0]}}`
-            loaded before 2026-10-02 and must still load. Refusing it would
-            unmount the whole device, and every cue aimed at it would fail.
+            ON A CONTAINER OR AN EVENT, ANYTHING BUT A POLICY IS IGNORED IN
+            SILENCE, and the mount's policy stays. Neither has a value to rest
+            at, neither is ever published with a PANIC, and the kind is often
+            inferred rather than declared: a node that is write-only with no
+            VALUE reads as an event, so a hand-written
+            `{"TYPE": "f", "ACCESS": 2, "GODOT": {"PANIC": [0]}}` says nothing
+            wrong about anything it has.
 
             Nothing APPLIES the value yet (devplan Phase 10). It is read, so the
             tree can publish it back as the array it was. */
-        void applyPanic (const json::Value& panic, Node& out, std::vector<std::string>& problems)
+        void applyPanic (const json::Value& panic, Node& out, std::vector<std::string>& warnings)
         {
-            const auto refuse = [&out, &problems] (const std::string& why)
+            /*  `out.panic` is the mount's policy already (`applyGodot`), and
+                stays it: nothing below changes the node until every element
+                has been read. */
+            const auto ignore = [&out, &warnings] (const std::string& why)
             {
-                problems.push_back (out.address + ": PANIC " + why);
+                warnings.push_back (out.address + ": PANIC " + why + " - ignored; the node rests as the"
+                                    " device does (" + out.panic + ")");
             };
 
             if (panic.isString() && (panic.asString() == "park" || panic.asString() == "snap"))
@@ -332,20 +340,20 @@ namespace wfg::tree
 
             if (panic.isString())
             {
-                refuse ("says \"" + panic.asString() + "\"; it must be \"park\", \"snap\""
+                ignore ("says \"" + panic.asString() + "\"; it must be \"park\", \"snap\""
                         " or an array holding the value the node rests at");
                 return;
             }
 
             if (! panic.isArray())
             {
-                refuse ("must be \"park\", \"snap\" or an array holding the value the node rests at");
+                ignore ("must be \"park\", \"snap\" or an array holding the value the node rests at");
                 return;
             }
 
             if (out.typeTags.empty() || panic.size() != out.typeTags.size())
             {
-                refuse ("holds " + std::to_string (panic.size()) + " value(s) for a node that takes "
+                ignore ("holds " + std::to_string (panic.size()) + " value(s) for a node that takes "
                         + std::to_string (out.typeTags.size()) + " (TYPE \"" + out.typeTags + "\")");
                 return;
             }
@@ -362,14 +370,14 @@ namespace wfg::tree
 
                 if (! raw.has_value())
                 {
-                    refuse (where + "is not a value");
+                    ignore (where + "is not a value");
                     return;
                 }
 
                 if ((tag == 'i' || tag == 'h') && element.isNumber()
                       && ! fitsAWholeNumber (element.asNumber(), tag))
                 {
-                    refuse (where + "is not a whole number an `" + std::string (1, tag) + "` holds");
+                    ignore (where + "is not a whole number an `" + std::string (1, tag) + "` holds");
                     return;
                 }
 
@@ -379,14 +387,15 @@ namespace wfg::tree
                     `i` and `h`, checked above before the coercion truncates it;
                     the first element inside RANGE and among VALS, below; and no
                     number for `T`, which a write takes as an int 0 or 1 but a
-                    JSON number never is - it arrives a double, and is refused.
+                    JSON number never is - it arrives a double, and is ignored,
+                    with a warning.
                     That is also why an `h` value past 2^53 has already been
                     rounded by the JSON reader before anything here sees it. */
                 auto coerced = CommandRegistry::coerceToTag (tag, *raw);
 
                 if (! coerced.has_value() || coerced->isNonFinite())
                 {
-                    refuse (where + "is not a value of type `" + std::string (1, tag) + "`");
+                    ignore (where + "is not a value of type `" + std::string (1, tag) + "`");
                     return;
                 }
 
@@ -400,7 +409,7 @@ namespace wfg::tree
                           && ((out.hasMinimum && element.asNumber() < out.minimum)
                               || (out.hasMaximum && element.asNumber() > out.maximum)))
                     {
-                        refuse (where + "is outside the node's RANGE");
+                        ignore (where + "is outside the node's RANGE");
                         return;
                     }
 
@@ -408,7 +417,7 @@ namespace wfg::tree
                           && std::find (out.enumValues.begin(), out.enumValues.end(), asText (element))
                                == out.enumValues.end())
                     {
-                        refuse (where + "is not one of the node's VALS");
+                        ignore (where + "is not one of the node's VALS");
                         return;
                     }
                 }
@@ -430,7 +439,7 @@ namespace wfg::tree
             After `applyRange` and the kind, which a PANIC holding a value is
             checked against. */
         void applyGodot (const json::Value& node, const MountDeclaration& mount, Node& out,
-                         std::vector<std::string>& problems)
+                         std::vector<std::string>& warnings)
         {
             out.rateCap = mount.rateCap;
             out.anticipatable = mount.anticipatable;
@@ -450,7 +459,7 @@ namespace wfg::tree
             /*  Until 2026-10-02 (H5) this took the key's text, whatever it was,
                 so an array read as "" and was published as `"PANIC": ""`. */
             if (const auto* panic = property (*godot, "PANIC"); panic != nullptr)
-                applyPanic (*panic, out, problems);
+                applyPanic (*panic, out, warnings);
         }
 
         /*  Container, state or event.
@@ -493,7 +502,8 @@ namespace wfg::tree
 
         void collect (const json::Value& node, const std::string& inside,
                       const std::string& rootPath, const MountDeclaration& mount,
-                      std::vector<Node>& out, std::vector<std::string>& problems)
+                      std::vector<Node>& out, std::vector<std::string>& problems,
+                      std::vector<std::string>& warnings)
         {
             const auto address = mount.prefix + inside;
 
@@ -529,7 +539,7 @@ namespace wfg::tree
 
             applyRange (node, built);
             applyUnit (node, built);
-            applyGodot (node, mount, built, problems);
+            applyGodot (node, mount, built, warnings);
 
             /*  VALUE is read for the kind inference above and then dropped.
                 A captured description says what the target happened to be doing
@@ -553,7 +563,7 @@ namespace wfg::tree
                     continue;
                 }
 
-                collect (member.second, inside + "/" + name, rootPath, mount, out, problems);
+                collect (member.second, inside + "/" + name, rootPath, mount, out, problems, warnings);
             }
         }
     }
@@ -647,7 +657,7 @@ namespace wfg::tree
             rootPath = "/";
 
         MountResult result;
-        collect (*parsed.value, {}, rootPath, mount, result.nodes, result.problems);
+        collect (*parsed.value, {}, rootPath, mount, result.nodes, result.problems, result.warnings);
 
         /*  Sorted by address, like every other part of the tree: lookup is a
             binary search and merging is linear. */
@@ -684,7 +694,7 @@ namespace wfg::tree
             return result;
         }
 
-        mounts[mount.id] = Entry { mount, result.nodes };
+        mounts[mount.id] = Entry { mount, result.nodes, result.warnings };
         ++version;
         return result;
     }
@@ -706,7 +716,7 @@ namespace wfg::tree
         MountResult result;
         result.ok = true;
 
-        mounts[mount.id] = Entry { mount, {} };
+        mounts[mount.id] = Entry { mount, {}, {} };
         ++version;
 
         return result;
@@ -750,6 +760,16 @@ namespace wfg::tree
     {
         const auto found = problems.find (mountId);
         return found == problems.end() ? std::string {} : found->second;
+    }
+
+    std::vector<std::string> MountTable::warnings() const
+    {
+        std::vector<std::string> all;
+
+        for (const auto& entry : mounts)
+            all.insert (all.end(), entry.second.warnings.begin(), entry.second.warnings.end());
+
+        return all;
     }
 
     bool MountTable::unload (const std::string& mountId)

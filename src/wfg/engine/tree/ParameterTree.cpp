@@ -2743,7 +2743,23 @@ namespace wfg::tree
                 cached half rebuilds only when somebody remembered to say so.
                 The answer itself costs nothing here - the walk behind it is the
                 analysis cache, which the top of `publish` already asked. */
-            else if (name == "warnings") text = analysis.warningText();
+            else if (name == "warnings")
+            {
+                text = analysis.warningText();
+
+                /*  AND A DEVICE'S FILE, where it is wrong but the device loaded
+                    all the same (2026-10-02, K1: a GODOT.PANIC its node could
+                    never hold). It is the show's, and it did not stop it
+                    opening, which is this node's whole definition; the mount's
+                    `problem` row is for a device that cannot be used. */
+                for (const auto& warning : mounts.warnings())
+                {
+                    if (! text.empty())
+                        text += '\n';
+
+                    text += warning;
+                }
+            }
             else                      text = std::string (row->defaultText);
 
             engineValue (*row, "document", text);
