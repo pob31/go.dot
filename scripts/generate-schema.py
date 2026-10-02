@@ -16,8 +16,10 @@
 
 Produces: src/wfg/engine/document/SchemaTable.generated.h, from
           docs/parameters/godot-parameters.csv.
-Usage:    python3 scripts/generate-schema.py [--check] [--out PATH]
-          --check writes nothing and exits 1 if the committed file has drifted.
+Usage:    python3 scripts/generate-schema.py [--check] [--self-test] [--out PATH]
+          --check writes nothing and exits 1 if the committed file has drifted,
+          or if the literal checker fails its own cases.
+          --self-test runs those cases and nothing else.
 Build requirements: python3 and its standard library. Nothing else.
 
 WHY GENERATE IT AT ALL
@@ -44,7 +46,11 @@ seven lines in Schema.cpp, written by hand, next to a comment saying so.
 """
 
 import argparse
+import contextlib
 import csv
+import io
+import math
+import re
 import sys
 from pathlib import Path
 
@@ -137,10 +143,170 @@ ACCESS = {"r": "read", "w": "write", "rw": "readWrite"}
 KINDS = {"state": "state", "event": "event"}
 PERSIST = {"none": "none", "show": "show", "state": "state"}
 
+# WHAT A PARAMETER RESTS AT (PRD 4.6), the `panic` column: one of these two
+# policies, or one literal value of the row's own type. The two words ALWAYS
+# mean the policy, so a string row cannot rest at the text "park" or "snap".
+PANIC_POLICIES = ("park", "snap")
+
+# A LITERAL IS SPELLED THE WAY THE ENGINE'S OWN READERS TAKE IT, and no looser.
+# Schema::parseValue reads a whole number with std::from_chars - an optional
+# '-', digits, nothing else - and a number with osc::parseDouble: an optional
+# sign, digits with at most one dot, an optional exponent, finite. Python's
+# int() and float() also take '1_000', surrounding spaces, 'nan' and 'inf', and
+# `\d` takes any script's digits, so the shape is checked first, with [0-9] and
+# anchored at \Z, and the conversion only after it.
+INTEGER_SHAPE = re.compile(r"-?[0-9]+\Z")
+NUMBER_SHAPE = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z")
+INTEGER_LIMITS = {"i": (-2**31, 2**31 - 1), "h": (-2**63, 2**63 - 1)}
+
+# The largest finite float32. An `f` row goes on the wire as one, so a literal
+# past it would become an infinity the moment it left - finite as text, and
+# refused by every receiver as a value.
+FLOAT32_MAX = 3.4028234663852886e38
+
+# How a list row's value is split into its elements: the document's own
+# separators, which are std::isspace's in the C locale.
+LIST_SEPARATORS = re.compile(r"[ \t\n\v\f\r]+")
+
 
 def fail(message):
     print("generate-schema: " + message, file=sys.stderr)
     raise SystemExit(2)
+
+
+def check_literal(label, column, text, type_tag, has_min, low, has_max, high, enum_values):
+    """Fails unless `text` is ONE value the row's own type reads, inside the
+    row's own range or enum - the answer Schema::parseValue would give.
+
+    A value the document reader would refuse must not reach the generated
+    table at all: the default because a show would be written with what its
+    own schema rejects, the panic value because it is what a parameter is
+    promised to rest at."""
+    def refuse(why):
+        fail("%s: %s %r %s" % (label, column, text, why))
+
+    if type_tag == "b":
+        refuse("cannot be written: a blob has no literal")
+
+    if type_tag == "T":
+        if text not in ("true", "false"):
+            refuse("is not true or false")
+        return
+
+    if type_tag == "s":
+        if enum_values and text not in enum_values:
+            refuse("is not one of %s" % "|".join(enum_values))
+        return
+
+    if type_tag in INTEGER_LIMITS:
+        if not INTEGER_SHAPE.match(text):
+            refuse("is not a whole number (digits and an optional '-', nothing else)")
+
+        value = int(text)
+        least, most = INTEGER_LIMITS[type_tag]
+
+        if value < least or value > most:
+            refuse("does not fit the %s-bit integer an `%s` row holds"
+                   % (32 if type_tag == "i" else 64, type_tag))
+    else:
+        if not NUMBER_SHAPE.match(text):
+            refuse("is not a number (a sign, digits with one dot, an exponent; no nan or inf)")
+
+        value = float(text)
+
+        if not math.isfinite(value):
+            refuse("is not a finite number")
+
+        if type_tag == "f" and abs(value) > FLOAT32_MAX:
+            refuse("does not fit the 32-bit float an `f` row holds")
+
+    if has_min and value < low:
+        refuse("is below the row's minimum, %s" % repr(low))
+
+    if has_max and value > high:
+        refuse("is above the row's maximum, %s" % repr(high))
+
+
+# THE CHECKER'S OWN CASES: (type tag, range, text, accepted). Run by --self-test
+# and by every --check, so that the ctest `schema.generated` goes red the day
+# the rule loosens - the table's own rows all say `park` today, and a checker
+# that only ever meets `park` would never be caught taking a word for a number.
+LITERAL_CASES = (
+    ("d", "0..60", "10", True),
+    ("d", "0..60", "0.5", True),
+    ("d", "0..60", "+1", True),
+    ("d", "0..60", ".5", True),
+    ("d", "0..60", "1.", True),
+    ("d", "0..60", "1e1", True),
+    ("d", "0..60", "61", False),
+    ("d", "0..60", "-1", False),
+    ("d", "", "loud", False),
+    ("d", "", "nan", False),
+    ("d", "", "inf", False),
+    ("d", "", "1e999", False),
+    ("d", "", "1_0", False),
+    ("d", "", " 1", False),
+    ("d", "", "1e", False),
+    ("d", "", ".", False),
+    ("d", "", chr(0x0661), False),        # an Arabic-Indic one, which `\d` would take
+    ("d", "", "0,5", False),              # the French decimal comma: no numeric type takes it
+    ("d", "", "0x10", False),
+    ("d", "", "3.5e38", True),            # a double holds it ...
+    ("f", "", "3.5e38", False),           # ... a float does not
+    ("f", "", "-3.5e38", False),
+    ("f", "", "3.4e38", True),
+    ("f", "-60..10", "-60", True),
+    ("f", "-60..10", "0.25", True),
+    ("f", "-60..10", "11", False),
+    ("f", "", "0,5", False),
+    ("f", "", "nan", False),
+    ("i", "0..", "3", True),
+    ("i", "0..", "-1", False),
+    ("i", "", "+3", False),
+    ("i", "", "2.5", False),
+    ("i", "", "1e3", False),              # a whole number, but not spelled as one
+    ("i", "", "0x10", False),
+    ("i", "", "0,5", False),
+    ("i", "", "2147483648", False),
+    ("h", "", "2147483648", True),
+    ("h", "", "9223372036854775808", False),
+    ("h", "", "0,5", False),
+    ("T", "", "0,5", False),
+    ("s", "", "Silence", True),
+    ("s", "timeline|sequence", "sequence", True),
+    ("s", "timeline|sequence", "sequnce", False),
+    ("T", "", "false", True),
+    ("T", "", "0", False),
+    ("T", "", "True", False),
+    ("b", "", "", False),
+)
+
+
+def self_test():
+    wrong = []
+
+    for type_tag, range_text, text, accepted in LITERAL_CASES:
+        has_min, low, has_max, high, enum_values = parse_range(range_text, "self-test")
+
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                check_literal("self-test", "panic", text, type_tag,
+                              has_min, low, has_max, high, enum_values)
+            refused = False
+        except SystemExit:
+            refused = True
+
+        if refused == accepted:
+            wrong.append("%s %r in %r: %s" % (type_tag, text, range_text,
+                                              "refused, should be taken" if refused
+                                              else "taken, should be refused"))
+
+    if wrong:
+        print("generate-schema: the literal checker fails its own cases:\n    "
+              + "\n    ".join(wrong), file=sys.stderr)
+        return 1
+
+    return 0
 
 
 def cpp_string(text):
@@ -325,6 +491,38 @@ def build(rows):
         if enum_values and default and default not in enum_values:
             fail("%s: default %r is not one of %s" % (label, default, "|".join(enum_values)))
 
+        # And any default, by the rule a panic literal meets below: the document
+        # reader parses it as the row's type, so a default it would refuse is a
+        # show written with a value its own schema rejects. A list's default is
+        # checked element by element, as the reader takes it.
+        if default:
+            for element in ([e for e in LIST_SEPARATORS.split(default) if e] if is_list else [default]):
+                check_literal(label, "default", element, type_tag,
+                              has_min, low, has_max, high, enum_values)
+
+        # WHAT THE ROW RESTS AT (PRD 4.6): a policy, or one value of its own
+        # type. Nothing applies the value yet (devplan Phase 10); what is
+        # checked here is that it is one, so the day something applies it there
+        # is no row to discover that says `loud` where a number belongs.
+        #   An event has no value at any given time, so it has none to rest at.
+        # A list rests element by element (SchemaTypes.h), and how one literal
+        # would stand for N elements, on the wire and in OSCQuery's PANIC, is
+        # not decided - so a list takes a policy only, until it is.
+        panic = (row["panic"] or "").strip()
+
+        if not panic:
+            fail("%s: panic is empty; say park, snap or the value it rests at" % label)
+
+        if panic not in PANIC_POLICIES:
+            if kind == "event":
+                fail("%s: an event has no value to rest at; its panic is park or snap" % label)
+
+            if is_list:
+                fail("%s: %r rests element by element; its panic is park or snap"
+                     % (label, type_tag + LIST_SUFFIX))
+
+            check_literal(label, "panic", panic, type_tag, has_min, low, has_max, high, enum_values)
+
         key = (owner, address)
         if key in seen:
             fail("%s: %s/%s is defined twice" % (label, owner, address))
@@ -346,7 +544,7 @@ def build(rows):
                 "unit": (row["unit"] or "").strip(),
                 "rateCap": rate_cap_value,
                 "anticipatable": anticipatable == "yes",
-                "panic": (row["panic"] or "").strip(),
+                "panic": panic,
                 "persist": PERSIST[persist],
                 "refers": refers,
                 "description": (row["description"] or "").strip(),
@@ -447,8 +645,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true",
                         help="write nothing; exit 1 if the committed file has drifted")
+    parser.add_argument("--self-test", action="store_true",
+                        help="run the literal checker's own cases and nothing else")
     parser.add_argument("--out", default=None, help="write somewhere else than the default")
     args = parser.parse_args()
+
+    if args.self_test or args.check:
+        if self_test() != 0:
+            return 1
+
+        if args.self_test:
+            print("generate-schema: the literal checker passes its %d cases" % len(LITERAL_CASES))
+            return 0
 
     entries = build(read_rows())
     text = render(entries)

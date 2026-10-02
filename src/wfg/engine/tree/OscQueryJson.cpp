@@ -170,7 +170,15 @@ namespace wfg::tree
             out += "\"KIND\": " + quoted (kindName (node.kind));
             out += ", \"RATE_CAP\": " + osc::formatDouble (node.rateCap);
             out += ", \"ANTICIPATABLE\": " + std::string (node.anticipatable ? "true" : "false");
-            out += ", \"PANIC\": " + quoted (node.panic);
+
+            /*  A POLICY IS A WORD AND A SAFE VALUE IS AN ARRAY (namespace draft
+                §3): spelled as VALUE is, through the same formatter, so a
+                template that declared `[-60]` reads `[-60]` back from us. */
+            if (node.panic == "value" && ! node.panicValues.empty())
+                out += ", \"PANIC\": [" + valueList (node.panicValues) + "]";
+            else
+                out += ", \"PANIC\": " + quoted (node.panic);
+
             out += "}";
         }
 

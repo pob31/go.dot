@@ -229,6 +229,32 @@ namespace wfg::tree
             node.anticipatable = row.anticipatable;
             node.panic = std::string (row.panic);
 
+            /*  A ROW THAT RESTS AT A VALUE says it in its own type's spelling,
+                which the generator has already checked parses (only a single,
+                state row may: lists and events take park or snap). Read here as
+                the value it is, so the tree publishes a number as a number and
+                never the word for one. Every row says `park` today. */
+            if (node.panic != "park" && node.panic != "snap" && ! row.isList && node.kind == Kind::state)
+            {
+                node.panicValues = toOscValues (attribute, node.panic);
+
+                if (node.panicValues.empty())
+                {
+                    /*  CANNOT HAPPEN, AND LOUD IF IT DOES. `generate-schema.py`
+                        refuses a literal the row's own type cannot read, and
+                        `DocumentTests` reads every one back - so this is a
+                        header edited by hand, or the two readers disagreeing.
+                        It asserts, and publishes `park` - the policy that
+                        claims least - rather than a value nobody declared. */
+                    jassertfalse;
+                    node.panic = "park";
+                }
+                else
+                {
+                    node.panic = "value";
+                }
+            }
+
             /*  An event has no value at a given time (PRD §3.3), so it is given
                 none. A nil or a zero would be an answer to a question that has
                 none. */

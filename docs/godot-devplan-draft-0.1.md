@@ -866,6 +866,25 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   not count them as sent.
   Found and named, not closed: a pre-send its scene walked past is out of the
   press's reach.
+- **H5, 2026-10-02 — after a double Esc nothing keeps writing; the panic
+  column checked** (§23.11). One test runs at once the writers a unit rig can
+  run cheaply - a voice's level (a lane and a fade) and speed, a DCA's trim, a
+  desk's values and a value its rate cap holds back, launches and arms (a short
+  media cue in a looping stream) - requires each to have moved just before the
+  press, and finds nothing written after it: every run over within four
+  ticks, at most one level a voice, and nothing in the published tree changed
+  but the clock for fifty ticks. Routing, EQ, inserts, effects sweeps and
+  stops are watched, not exercised; MIDI is H4's tests'. It passed first, H4
+  having closed what it was written to catch. The one move kept: a fader taken
+  for lane recording stays taken and shows the lane's start once (the author's
+  to rule on). The generator now refuses a `panic` that is not `park`, `snap`
+  or one value of the row's own type and width - policies only for blob, list
+  and event rows - and holds every `default` to the same rule, with its own
+  cases run by every `--check`; the table passes untouched. A device's `PANIC`
+  array is read as a state node's safe value and published back as one; one
+  the node could never hold refuses its namespace, and on a container or an
+  event anything but a policy is ignored. PRD §3.3's "snap-to" against the
+  schema's `snap` is left for the author. Nothing applies a panic value yet.
 
 ---
 

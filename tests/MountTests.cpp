@@ -43,7 +43,9 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <chrono>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -51,10 +53,13 @@
 
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <random>
 #include <string>
+#include <vector>
 
 using namespace wfg;
 using namespace wfg::tree;
@@ -666,6 +671,220 @@ TEST_CASE ("mount: a GODOT key overrides what inference would have said")
     CHECK_FALSE (mode->anticipatable);
     CHECK (mode->panic == "park");
     CHECK (mode->enumValues == std::vector<std::string> { "blind", "run", "program" });
+}
+
+//==============================================================================
+/*  A PANIC ARRAY IS THE NODE'S SAFE VALUE (2026-10-02, H5, namespace draft
+    §23.11). §3 lets a template's GODOT.PANIC be "park", "snap" or a JSON array
+    holding the declared safe VALUE - the resting state PRD §4.6 asks of every
+    parameter. The reader took the key's text whatever it was, so an array read
+    as "" and went back out as `"PANIC": ""`: a resting state that says nothing,
+    from a file that had said exactly what it meant. Nothing applies the value
+    yet (devplan Phase 10); what is held here is that it is read as the node's
+    own type, refused when the node could never hold it, and published as the
+    array it was. */
+namespace
+{
+    MountDeclaration deskDeclaration()
+    {
+        MountDeclaration declaration;
+        declaration.id = "K3PV7WRB";
+        declaration.prefix = "/desk";
+        declaration.namespaceFile = "namespaces/desk.json";
+        return declaration;
+    }
+
+    const Node& mountedAt (const MountResult& result, const std::string& address)
+    {
+        const auto found = std::find_if (result.nodes.begin(), result.nodes.end(),
+                                         [&address] (const Node& node) { return node.address == address; });
+
+        REQUIRE_MESSAGE (found != result.nodes.end(), "no mounted node at " << address);
+        return *found;
+    }
+
+    /*  A description holding one node, `/fader` - the shape every refusal
+        below is tried on. */
+    std::string oneNode (const std::string& node)
+    {
+        return R"({ "FULL_PATH": "/", "CONTENTS": { "fader": )" + node + " } }";
+    }
+}
+
+TEST_CASE ("mount: a PANIC array is the node's safe value, read as the node's own type, and goes back out as one")
+{
+    constexpr const char* json = R"JSON({
+      "FULL_PATH": "/",
+      "CONTENTS": {
+        "fader": { "TYPE": "f", "ACCESS": 3, "RANGE": [{ "MIN": -60, "MAX": 10 }], "GODOT": { "PANIC": [-60] } },
+        "trim":  { "TYPE": "d", "ACCESS": 3, "GODOT": { "PANIC": [-0.5] } },
+        "scene": { "TYPE": "i", "ACCESS": 3, "GODOT": { "PANIC": [0] } },
+        "mode":  { "TYPE": "s", "ACCESS": 3, "RANGE": [{ "VALS": ["blind", "run"] }], "GODOT": { "PANIC": ["blind"] } },
+        "mute":  { "TYPE": "T", "ACCESS": 3, "GODOT": { "PANIC": [true] } },
+        "eq":    { "TYPE": "if", "ACCESS": 3, "GODOT": { "PANIC": [2, -6.5] } },
+        "pan":   { "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": "snap" } },
+        "gain":  { "TYPE": "f", "ACCESS": 3 }
+      }
+    })JSON";
+
+    const auto result = readNamespace (deskDeclaration(), json);
+
+    std::string problems;
+
+    for (const auto& problem : result.problems)
+        problems += problem + "\n";
+
+    INFO ("problems: " << problems);
+    REQUIRE (result.ok);
+
+    /*  EACH AS ITS OWN TYPE TAG READS IT: a JSON number is a float on an `f`
+        node, an int on an `i` one, and one value per argument on a node that
+        takes two. */
+    const auto& fader = mountedAt (result, "/desk/fader");
+    CHECK (fader.panic == "value");
+    CHECK (fader.panicValues == std::vector<osc::Value> { osc::Value::float32 (-60.0f) });
+
+    CHECK (mountedAt (result, "/desk/trim").panicValues == std::vector<osc::Value> { osc::Value::float64 (-0.5) });
+    CHECK (mountedAt (result, "/desk/scene").panicValues == std::vector<osc::Value> { osc::Value::int32 (0) });
+    CHECK (mountedAt (result, "/desk/mode").panicValues == std::vector<osc::Value> { osc::Value::string ("blind") });
+    CHECK (mountedAt (result, "/desk/mute").panicValues == std::vector<osc::Value> { osc::Value::boolean (true) });
+    CHECK (mountedAt (result, "/desk/eq").panicValues
+             == std::vector<osc::Value> { osc::Value::int32 (2), osc::Value::float32 (-6.5f) });
+
+    //  A policy is still a word, and a node that says nothing has the declaration's.
+    const auto& pan = mountedAt (result, "/desk/pan");
+    CHECK (pan.panic == "snap");
+    CHECK (pan.panicValues.empty());
+
+    const auto& gain = mountedAt (result, "/desk/gain");
+    CHECK (gain.panic == "park");
+    CHECK (gain.panicValues.empty());
+
+    /*  AND IT GOES BACK OUT AS THE ARRAY IT WAS, spelled as VALUE is - which is
+        the one place a decimal could meet the French locale, so `-0.5` is
+        checked under both. */
+    const TreeSnapshot snapshot { 0, std::make_shared<const std::vector<Node>>(),
+                                  std::make_shared<const std::vector<Node>> (result.nodes), {} };
+
+    const auto publishes = [&snapshot] (const std::string& address, const std::string& panic)
+    {
+        const auto text = OscQueryJson::describe (snapshot, address);
+        INFO (address << ": " << text);
+        CHECK (text.find ("\"PANIC\": " + panic) != std::string::npos);
+    };
+
+    publishes ("/desk/fader", "[-60]");
+    publishes ("/desk/trim", "[-0.5]");
+    publishes ("/desk/mode", "[\"blind\"]");
+    publishes ("/desk/mute", "[true]");
+    publishes ("/desk/eq", "[2, -6.5]");
+    publishes ("/desk/pan", "\"snap\"");
+    publishes ("/desk/gain", "\"park\"");
+}
+
+TEST_CASE ("mount: a PANIC the node could never hold is refused when the namespace loads")
+{
+    /*  REFUSED, AS A FULL_PATH THAT LIES IS (decision JC, namespace draft
+        §23.11) - on a state node, the one kind that has a value to rest at. A
+        GODOT key is written by whoever wrote the description, a template by
+        hand or a device describing itself as Go.dot does, and a PANIC that is
+        not a value of the node's own type is a mistake in that file: a show
+        that loaded it would promise a resting state the device cannot take.
+        Falling back to the mount's policy in silence would hide exactly that.
+
+        "snap-to" is here because PRD §3.3 spells the policy that way, while the
+        schema, show.rng and this reader say "snap" - a template written from
+        the PRD is refused, which is left for the author (§23.11). */
+    struct Refused { std::string why, node; };
+
+    const std::vector<Refused> refusals
+    {
+        { "out of the node's range",   R"({ "TYPE": "f", "ACCESS": 3, "RANGE": [{ "MIN": -60, "MAX": 0 }], "GODOT": { "PANIC": [5] } })" },
+        { "a word for a number",       R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": ["loud"] } })" },
+        { "an empty array",            R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": [] } })" },
+        { "two values for one tag",    R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": [0, 1] } })" },
+        { "an unknown word",           R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": "freeze" } })" },
+        { "the PRD's own spelling",    R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": "snap-to" } })" },
+        { "an object",                 R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": { "x": 1 } } })" },
+        { "a bare number",             R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": 0 } })" },
+        { "a null in the array",       R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": [null] } })" },
+        { "past what a float holds",   R"({ "TYPE": "f", "ACCESS": 3, "GODOT": { "PANIC": [1e300] } })" },
+        { "not whole, on an int",      R"({ "TYPE": "i", "ACCESS": 3, "GODOT": { "PANIC": [2.5] } })" },
+        { "past what an int holds",    R"({ "TYPE": "i", "ACCESS": 3, "GODOT": { "PANIC": [3000000000] } })" },
+        { "not one of the values",     R"({ "TYPE": "s", "ACCESS": 3, "RANGE": [{ "VALS": ["slow", "medium"] }], "GODOT": { "PANIC": ["fast"] } })" },
+        { "a number for a boolean",    R"({ "TYPE": "T", "ACCESS": 3, "GODOT": { "PANIC": [1] } })" },
+    };
+
+    for (const auto& refusal : refusals)
+    {
+        INFO (refusal.why << ": " << refusal.node);
+
+        const auto result = readNamespace (deskDeclaration(), oneNode (refusal.node));
+
+        CHECK_FALSE (result.ok);
+        CHECK_FALSE (result.problems.empty());
+
+        if (result.problems.empty())
+            continue;
+
+        INFO ("problem: " << result.problems.front());
+        CHECK (result.problems.front().find ("/desk/fader") != std::string::npos);
+        CHECK (result.problems.front().find ("PANIC") != std::string::npos);
+    }
+
+    /*  AND THE SAME NODE, GIVEN A VALUE IT CAN HOLD, LOADS - so the table above
+        is refusing what it names and not everything. */
+    const auto taken = readNamespace (deskDeclaration(),
+                                      oneNode (R"({ "TYPE": "f", "ACCESS": 3, "RANGE": [{ "MIN": -60, "MAX": 0 }], "GODOT": { "PANIC": [-6] } })"));
+    CHECK (taken.ok);
+}
+
+TEST_CASE ("mount: a PANIC on an event or a container is ignored, and the namespace still loads")
+{
+    /*  NEITHER HAS A VALUE TO REST AT, AND THE KIND IS OFTEN ONLY INFERRED
+        (decision JC). A node that is write-only with no VALUE reads as an
+        event, so a hand-written `go` with a PANIC array loaded before
+        2026-10-02 - and refusing it now would unmount the whole device, and
+        every cue aimed at it would fail with `bad-address`. Anything but a
+        policy word is ignored there, the mount's policy stays, and nothing is
+        published: a container and an event declare their KIND and stop. */
+    constexpr const char* json = R"JSON({
+      "FULL_PATH": "/",
+      "CONTENTS": {
+        "go":   { "TYPE": "f", "ACCESS": 2, "GODOT": { "PANIC": [0] } },
+        "cut":  { "TYPE": "f", "ACCESS": 2, "GODOT": { "PANIC": "loud" } },
+        "bank": { "GODOT": { "PANIC": [1] },
+                  "CONTENTS": { "level": { "TYPE": "f", "ACCESS": 3 } } }
+      }
+    })JSON";
+
+    const auto result = readNamespace (deskDeclaration(), json);
+
+    std::string problems;
+
+    for (const auto& problem : result.problems)
+        problems += problem + "\n";
+
+    INFO ("problems: " << problems);
+    REQUIRE (result.ok);
+
+    for (const auto* address : { "/desk/go", "/desk/cut", "/desk/bank" })
+    {
+        INFO (address);
+        const auto& node = mountedAt (result, address);
+
+        CHECK (node.kind != Kind::state);
+        CHECK (node.panic == "park");
+        CHECK (node.panicValues.empty());
+    }
+
+    CHECK (mountedAt (result, "/desk/go").kind == Kind::event);
+    CHECK (mountedAt (result, "/desk/bank").kind == Kind::container);
+
+    const TreeSnapshot snapshot { 0, std::make_shared<const std::vector<Node>>(),
+                                  std::make_shared<const std::vector<Node>> (result.nodes), {} };
+
+    CHECK (OscQueryJson::describe (snapshot, "/desk/go").find ("PANIC") == std::string::npos);
 }
 
 TEST_CASE ("mount: a multi-argument node keeps its types and its first argument's range")

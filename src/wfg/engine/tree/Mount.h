@@ -70,6 +70,23 @@
         not know whether sending early is revocable on somebody else's box, and
         guessing yes is the guess that breaks a show.
 
+      * A NODE'S OWN PANIC MAY BE A VALUE (2026-10-02, H5). The declaration's
+        is a policy, `park` or `snap`, and only a policy (show.rng), because a
+        device has nodes of many types and no one value could suit them all. A
+        node's GODOT.PANIC may be either word or a JSON array holding the
+        declared safe VALUE (namespace draft §3): read as the node's own types,
+        it becomes the word "value" plus `Node::panicValues`. On a state node,
+        one the node could never hold - an unknown word, out of its range, not
+        one of its VALS, the wrong type or count - refuses the namespace, as a
+        FULL_PATH that lies does. On a container or an event anything but a
+        policy is ignored: neither has a value, and an event is often only
+        inferred. Nothing applies a panic value yet (devplan Phase 10).
+
+        AND, A TRAP FOR WHOEVER APPLIES IT: these are copied onto the nodes
+        when the namespace loads, and `updateDeclaration` keeps the nodes - so
+        an edit of the device's rate cap, anticipatability or panic while the
+        show is open reaches the nodes only once the namespace is read again.
+
       * A WRITE TO A READ-ONLY NODE IS REFUSED, like anywhere else, and an
         accepted one lands in the tree, in the log, and on the wire. This table
         does the first two and hands the third to a MountSender, which is what
@@ -220,6 +237,8 @@ namespace wfg::tree
 
         double rateCap = 50.0;
         bool anticipatable = false;
+
+        /** `park` or `snap`: a policy, never a value - see the note at the top. */
         std::string panic = "park";
 
         /*  Whether two declarations say the same thing, which is how the

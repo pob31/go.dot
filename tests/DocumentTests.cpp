@@ -38,7 +38,13 @@
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/EphemeralState.h>
+#include <wfg/engine/document/Schema.h>
 #include <wfg/engine/log/Replay.h>
+
+/*  AND THE GENERATED TABLE ITSELF, for one guard: every row as the generator
+    wrote it, its panic value and its default read back by the document's own
+    reader (H5, namespace draft §23.11). */
+#include <wfg/engine/document/SchemaTable.generated.h>
 
 /*  THE TREE, in a file about the document, for one reason: `order` is a derived
     value. The document refuses to store it - that is what derived means - so
@@ -56,13 +62,17 @@
 
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -266,6 +276,103 @@ TEST_CASE ("schema: no two rows on one element share a name")
 
     INFO ("rows examined across every element: " << rowsExamined);
     CHECK (rowsExamined > 100);
+}
+
+TEST_CASE ("schema: every row's panic is park, snap, or a value the row itself would take")
+{
+    /*  THE GENERATOR'S RULE, ASKED A SECOND TIME, of what it wrote (2026-10-02,
+        H5, namespace draft §23.11). PRD §4.6 promises every parameter a
+        defined resting state, and the `panic` column is where each row
+        declares it: a policy, `park` or `snap`, or one literal value of the
+        row's own type. `scripts/generate-schema.py` refuses anything else
+        before it writes the header; this reads the committed header back
+        through the document's own reader, so a value that slipped past the
+        script - or a header edited by hand - fails here, in the unit suite,
+        rather than on the day something applies it.
+
+        Every row says `park` today, so the literal half examines nothing yet.
+        The walk says how much it looked at, as the guard above does, because a
+        check over an empty table passes in silence.
+
+        And THE DEFAULT, by the same reader: a default the document would refuse
+        is a show written with a value its own schema rejects. The generator
+        checks it too, since H5; this is the second opinion. */
+
+    /*  ONE VALUE, AS THE GENERATOR READS IT: what `Schema::parseValue` takes,
+        and narrower where the wire is - an `i` row is a 32-bit integer and an
+        `f` row a 32-bit float, though the document reader holds both wider. */
+    const auto readsAs = [] (const Attribute& attribute, std::string_view text)
+    {
+        doc::Value parsed;
+
+        if (! Schema::parseValue (attribute, text, parsed).ok)
+            return false;
+
+        if (attribute.oscTypeTag() == 'i')
+            return parsed.getInteger() >= std::numeric_limits<std::int32_t>::min()
+                && parsed.getInteger() <= std::numeric_limits<std::int32_t>::max();
+
+        if (attribute.oscTypeTag() == 'f')
+            return std::abs (parsed.getNumber()) <= static_cast<double> (std::numeric_limits<float>::max());
+
+        return true;
+    };
+
+    //  A list's text, element by element, split as the document splits it.
+    const auto everyElementReadsAs = [&readsAs] (const Attribute& attribute, std::string_view text)
+    {
+        constexpr std::string_view separators = " \t\n\v\f\r";
+        std::size_t at = 0;
+
+        while (at < text.size())
+        {
+            const auto start = text.find_first_not_of (separators, at);
+
+            if (start == std::string_view::npos)
+                break;
+
+            const auto end = std::min (text.find_first_of (separators, start), text.size());
+
+            if (! readsAs (attribute, text.substr (start, end - start)))
+                return false;
+
+            at = end;
+        }
+
+        return true;
+    };
+
+    auto examined = 0;
+    auto literals = 0;
+
+    for (const auto& row : generated::attributes)
+    {
+        ++examined;
+
+        INFO ("row " << row.owner << "," << row.name << ": panic \"" << row.panic
+                     << "\", default \"" << row.defaultText << "\"");
+
+        const Attribute attribute { row.owner, &row };
+
+        if (row.hasDefault)
+            CHECK ((row.isList ? everyElementReadsAs (attribute, row.defaultText)
+                               : readsAs (attribute, row.defaultText)));
+
+        CHECK_FALSE (row.panic.empty());
+
+        if (row.panic == "park" || row.panic == "snap")
+            continue;
+
+        ++literals;
+
+        //  A list rests element by element and an event has no value: policies only.
+        CHECK_FALSE (row.isList);
+        CHECK (row.kind == doc::Kind::state);
+        CHECK (readsAs (attribute, row.panic));
+    }
+
+    INFO ("rows examined: " << examined << ", of which resting at a value: " << literals);
+    CHECK (examined > 300);
 }
 
 TEST_CASE ("identifiers: shape, alphabet and round trip")

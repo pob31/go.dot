@@ -35,6 +35,8 @@
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/MountSender.h>
+#include <wfg/engine/tree/TreeSnapshot.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
@@ -58,6 +60,8 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -14074,4 +14078,378 @@ TEST_CASE ("go.doh: the GO's cue deleted before the Doh - refused at the pointer
     CHECK (finishedOf (rig) == finished);
     CHECK (rig.spelled() == history);
     CHECK_FALSE (rig.runs.find (memoRun)->takenBack);
+}
+
+//==============================================================================
+/*  AFTER A DOUBLE ESC, NOTHING GO.DOT STARTED KEEPS WRITING (2026-10-02, H5,
+    namespace draft §23.11).
+
+    WHAT `park` PROMISES. Every row's panic value is `park` - the parameter
+    rests where it is (PRD §4.6) - and a resting place only means something if
+    nothing moves the parameter after the press. §4.4's double Esc "drops all
+    actions": so after it, nothing Go.dot started may write again.
+
+    WHAT IS LIVE, AND WHAT IS ONLY WATCHED. The rig runs these writers at once,
+    and the case requires each to have moved just before the press: the voice's
+    level (a level lane and a level fade), its speed (a speed fade, DS), a DCA's
+    trim (a DCA fade), a desk's values and a value its rate cap holds back (a
+    looping stream of network cues), and launches and arms (a short media cue
+    in that stream, launched afresh every round). After the press it watches
+    every one of them, and the whole published tree, for fifty ticks. The
+    routing, the EQ, the inserts, a second effects sweep, a stop placed ahead,
+    and a stop or a kill after the settle are WATCHED, NOT EXERCISED: nothing in
+    the rig writes them, so their checks guard against a writer appearing, and
+    prove nothing about one being stopped. MIDI is not here at all: H4's
+    `MidiTests` cases are what cover a double Esc on it (§23.10).
+
+    THE ONE MOVE IT ACCEPTS is not here but in `LaneRecordTests`: a fader taken
+    for lane recording stays taken and shows the lane's start two ticks after
+    the press (decisions DN and DG, kept by JE). It is a surface's readout, not
+    an action on the show; the case there pins it for the author to rule on. */
+namespace
+{
+    /*  A desk with a writable float fader, a writable integer scene and a
+        read-only meter, as `NetworkCueTests` mounts one. The stream writes the
+        fader. */
+    constexpr const char* stopRigDesk = R"JSON({
+      "FULL_PATH": "/",
+      "CONTENTS": {
+        "fader": { "FULL_PATH": "/fader", "TYPE": "f", "ACCESS": 3 },
+        "scene": { "FULL_PATH": "/scene", "TYPE": "i", "ACCESS": 3 },
+        "meter": { "FULL_PATH": "/meter", "TYPE": "f", "ACCESS": 1 }
+      }
+    })JSON";
+
+    /*  EVERY WRITER THE RIG CAN RUN CHEAPLY, AT ONCE: the lane rig's media cue,
+        sounding on a DCA with a level lane drawn over it; a four-second fade on
+        its level and another on its speed; a four-second fade on the DCA's
+        trim; and a stream - a group looping for ever, a network cue writing a
+        desk fader, a short media cue, and the fader again - into a device
+        capped at half a hertz, so after its first send every later value is
+        held back for the length of the case.
+
+        ITS OWN TICK, because the base rig's neither moves the sample clock,
+        flushes a sender nor answers the disk. Here the disk answers every arm
+        at the next tick, and the stream's media cue sounds for three ticks from
+        its launch and then stops, as a file that short would; a run already
+        being stopped is never sounded. The sender has no socket, which is a
+        complete configuration (MountSender.h): `pending()` is what it would
+        still send. */
+    struct StopRig : LaneRig
+    {
+        StopRig()
+        {
+            runner.setDcas (&dcas);
+            runner.setMounts (&mounts, &sender);
+            parameters.setDcas (&dcas);
+
+            tree::MountDeclaration desk;
+            desk.id = "K3PV7WRB";
+            desk.prefix = "/desk";
+            desk.namespaceFile = "namespaces/desk.json";
+            desk.port = 9000;
+            desk.rateCap = 0.5;                 // one send of an address every hundred flushes
+            REQUIRE (mounts.load (desk, stopRigDesk).ok);
+
+            band = document.createDca ("Band").id;
+            put ("/godot/cue/" + mediaId + "/dca", band);
+            put ("/godot/cue/" + fadeId + "/duration", "4");
+
+            dcaFadeId = document.createCue (listId, 4, "fade", "Band down").id;
+            put ("/godot/cue/" + dcaFadeId + "/dca", band);
+            put ("/godot/cue/" + dcaFadeId + "/level", "-20");
+            put ("/godot/cue/" + dcaFadeId + "/duration", "4");
+
+            streamId = document.createCue (listId, 5, "group", "Stream").id;
+            put ("/godot/cue/" + streamId + "/advance", "auto");
+            put ("/godot/cue/" + streamId + "/loops", "0");
+            member (0, "f:0.25");
+
+            blipId = document.createCue (streamId, 1, "media", "Blip").id;
+            REQUIRE_FALSE (blipId.empty());
+            put ("/godot/cue/" + blipId + "/file", "blip.wav");
+
+            member (2, "f:0.75");
+
+            //  The speed fade (DS): the level left alone, the speed to a half.
+            speedFadeId = document.createCue (listId, 6, "fade", "Slow down").id;
+            put ("/godot/cue/" + speedFadeId + "/target", mediaId);
+            put ("/godot/cue/" + speedFadeId + "/levelOn", "false");
+            put ("/godot/cue/" + speedFadeId + "/rateOn", "true");
+            put ("/godot/cue/" + speedFadeId + "/rate", "0.5");
+            put ("/godot/cue/" + speedFadeId + "/duration", "4");
+
+            drawLane ("0 0 10 -40");
+        }
+
+        void put (const std::string& address, const std::string& text)
+        {
+            REQUIRE_MESSAGE (document.setAttribute (address, text).ok, address << " = " << text);
+        }
+
+        void member (int index, const std::string& atom)
+        {
+            const auto id = document.createCue (streamId, index, "osc", "Fader").id;
+            REQUIRE_FALSE (id.empty());
+
+            put ("/godot/cue/" + id + "/address", "/desk/fader");
+            put ("/godot/cue/" + id + "/value", atom);
+            put ("/godot/cue/" + id + "/wait", "none");
+        }
+
+        /*  THE DISK AND THE SHORT FILE, done by hand ahead of each tick. Every
+            arm asked for is answered - and counted first, because answering
+            empties the fake's list - and the stream's media cue sounds from the
+            tick it is seen playing, for three ticks. */
+        void answerTheAudioSide()
+        {
+            armsAsked += audio.arms.size();
+            audio.completeArms (engine);
+
+            for (const auto& run : runs.all())
+            {
+                if (run.cue != blipId || run.isFinished() || run.track < 0 || run.launchedAtSample <= 0)
+                    continue;
+
+                const auto since = blipSince.find (run.id);
+
+                if (since == blipSince.end())
+                {
+                    if (run.state == cue::runState::playing)
+                    {
+                        blipSince.emplace (run.id, tick);
+                        audio.playing.insert (run.track);
+                    }
+                }
+                else if (tick - since->second >= 3)
+                {
+                    audio.playing.erase (run.track);
+                }
+            }
+        }
+
+        /*  One tick of the real loop, the sound a tick further on: the audio
+            side answers, the Runner observes, the engine applies, and what the
+            tick wrote leaves. */
+        Engine::TickResult step()
+        {
+            answerTheAudioSide();
+            audio.samples += 960;
+            runner.beforeTick (engine, tick);
+            auto result = engine.processTick (tick++);
+            sender.flush();
+            return result;
+        }
+
+        Engine::TickResult send (const std::string& name, std::vector<osc::Value> args = {})
+        {
+            REQUIRE (engine.submit ("cli", name, std::move (args)));
+            return step();
+        }
+
+        /*  Steps until `ready` holds and answers how many steps that took, or
+            -1 when it never did within `bound`. */
+        template <typename Predicate>
+        int stepsUntil (Predicate ready, int bound)
+        {
+            for (int n = 0; n < bound; ++n)
+            {
+                if (ready())
+                    return n;
+
+                step();
+            }
+
+            return ready() ? bound : -1;
+        }
+
+        bool allFinished() const
+        {
+            return std::all_of (runs.all().begin(), runs.all().end(),
+                                [] (const cue::Run& run) { return run.isFinished(); });
+        }
+
+        std::shared_ptr<const tree::TreeSnapshot> publish()
+        {
+            parameters.markStale();
+            state.tick = tick;
+            return parameters.publish (tick, state);
+        }
+
+        cue::DcaTable dcas;
+        tree::MountTable mounts;
+        tree::MountSender sender;
+        tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+        tree::EngineState state;
+        std::string band, dcaFadeId, speedFadeId, streamId, blipId;
+        std::size_t armsAsked = 0;
+        std::map<std::string, std::int64_t> blipSince;
+    };
+
+    /*  WHAT A PUBLISHED TREE MAY CHANGE WITH NOTHING WRITING: the clock, and
+        nothing else (JF). Kept to what the case below needed, each entry with
+        its reason, because every entry is a place the invariant stops looking. */
+    bool isClockReadout (const std::string& address)
+    {
+        //  The engine's tick: it is the clock, and it moves by being one.
+        return address == "/godot/engine/tick";
+    }
+}
+
+TEST_CASE ("double Esc: nothing Go.dot started keeps writing, for fifty ticks after")
+{
+    StopRig rig;
+
+    //  EVERY WRITER, running.
+    const auto media = rig.launch();
+
+    CHECK (rig.send ("cue.fire", { osc::Value::string (rig.fadeId) }).rejected == 0);
+    CHECK (rig.send ("cue.fire", { osc::Value::string (rig.speedFadeId) }).rejected == 0);
+    CHECK (rig.send ("cue.fire", { osc::Value::string (rig.dcaFadeId) }).rejected == 0);
+    CHECK (rig.send ("cue.fire", { osc::Value::string (rig.streamId) }).rejected == 0);
+
+    for (int n = 0; n < 20; ++n)
+        rig.step();
+
+    /*  EACH LIVE WRITER SEEN MOVING in the twenty ticks before the press - long
+        enough for the stream to go round with its media cue in it. Without
+        this the invariant below passes by watching writers that had already
+        stopped, which is how a guard like this fails without anybody
+        noticing. */
+    {
+        const auto levels = rig.audio.levels.size();
+        const auto ratePoints = rig.audio.ratePoints.size();
+        const auto launches = rig.audio.launches.size();
+        const auto arms = rig.armsAsked;
+        const auto revision = rig.mounts.revision();
+        const auto trim = rig.dcas.trimOf (rig.band);
+
+        for (int n = 0; n < 20; ++n)
+            rig.step();
+
+        REQUIRE (rig.audio.levels.size() > levels);         // the lane and the level fade, on the voice
+        REQUIRE (rig.audio.ratePoints.size() > ratePoints); // the speed fade, on the voice
+        REQUIRE (rig.audio.launches.size() > launches);     // the stream's media cue, launched again
+        REQUIRE (rig.armsAsked > arms);                     // ... and armed again before it
+        REQUIRE (rig.mounts.revision() > revision);         // the stream, on the desk's tree
+        REQUIRE (rig.dcas.trimOf (rig.band) < trim);        // the DCA fade, going down
+        REQUIRE (rig.runner.fades().size() == 3u);          // level, speed and DCA, all still running
+        REQUIRE (rig.sender.pending() == 1u);               // a value the cap is holding back
+        REQUIRE_FALSE (rig.runs.find (media)->isFinished());
+    }
+
+    SUBCASE ("on its own") {}
+
+    SUBCASE ("in the middle of Esc's panic fade")
+    {
+        /*  Every real double Esc is two presses (§23.2, ER): the second lands
+            on Esc's teardown, inside its fade. */
+        rig.put ("/godot/audio/panicFade", "2");
+        CHECK (rig.send ("run.stopAll").rejected == 0);
+
+        for (int n = 0; n < 10; ++n)
+            rig.step();
+
+        REQUIRE_FALSE (rig.runs.find (media)->isFinished());
+    }
+
+    //  THE PRESS.
+    CHECK (rig.send ("run.killAll").rejected == 0);
+
+    /*  FROM THE PRESS ON: what no tick after it may add to. */
+    const auto& audio = rig.audio;
+    const auto launches = audio.launches.size();
+    const auto arms = rig.armsAsked;
+    const auto ratePoints = audio.ratePoints.size();
+    const auto stopsAt = audio.stopsAt.size();
+    const auto routingPushes = audio.routingPushes;
+    const auto eqPushes = audio.eqPushes;
+    const auto fxEnables = audio.fxEnables.size();
+    const auto fxValues = audio.fxValues.size();
+    const auto fxShapes = audio.fxShapes.size();
+    const auto fxStates = audio.fxStates.size();
+    const auto sweeps = audio.sweeps.size();
+    const auto levels = audio.levels.size();
+    const auto trim = rig.dcas.trimOf (rig.band);
+    const auto revision = rig.mounts.revision();
+
+    //  The value the cap was holding went with the press (H4).
+    CHECK (rig.sender.pending() == 0u);
+
+    /*  EVERYTHING ENDS, AND PROMPTLY. Measured on this rig (2026-10-02): every
+        run is over three ticks after the press on its own, and one inside
+        Esc's fade, with no level, speed, launch or arm reaching the audio side
+        in between. The bound is a tick above the slower, so it fails when the
+        teardown takes a tick more than it does today - which is the point: a
+        double Esc is immediate. The ticks are the engine's own, counted by
+        this rig and owned by it; nothing here waits on a clock it does not
+        drive. */
+    const auto settledIn = rig.stepsUntil ([&rig] { return rig.allFinished(); }, 50);
+    INFO ("every run over " << settledIn << " ticks after the press");
+    REQUIRE (settledIn >= 0);
+    CHECK (settledIn <= 4);
+
+    const auto stopped = audio.stopped.size();
+    const auto kills = audio.kills.size();
+    const auto before = rig.publish();
+
+    //  FIFTY TICKS, the sample clock still running, as a sound card's would.
+    for (int n = 0; n < 50; ++n)
+        rig.step();
+
+    CHECK (audio.launches.size() == launches);
+    CHECK (rig.armsAsked == arms);
+    CHECK (audio.ratePoints.size() == ratePoints);
+    CHECK (audio.stopsAt.size() == stopsAt);
+    CHECK (audio.routingPushes == routingPushes);
+    CHECK (audio.eqPushes == eqPushes);
+    CHECK (audio.fxEnables.size() == fxEnables);
+    CHECK (audio.fxValues.size() == fxValues);
+    CHECK (audio.fxShapes.size() == fxShapes);
+    CHECK (audio.fxStates.size() == fxStates);
+    CHECK (audio.sweeps.size() == sweeps);
+    CHECK (audio.stopped.size() == stopped);
+    CHECK (audio.kills.size() == kills);
+
+    /*  AT MOST ONE LEVEL A VOICE AFTER THE PRESS: the tick after it applies
+        levels before it cuts the voice (`applyLevels` runs before
+        `enforceStops`), so one push may still reach a voice being cut - and
+        none after that. */
+    std::map<int, int> pushesAfterThePress;
+
+    for (auto at = levels; at < audio.levels.size(); ++at)
+        ++pushesAfterThePress[audio.levels[at].first];
+
+    for (const auto& [track, pushes] : pushesAfterThePress)
+    {
+        INFO ("level pushes to track " << track << " after the press: " << pushes);
+        CHECK (pushes <= 1);
+    }
+
+    //  The DCA rests where its fade had got to (plan decision 8: park on release).
+    CHECK (same (rig.dcas.trimOf (rig.band), trim));
+
+    //  Nothing more reached the desk's tree, and nothing waits to reach the desk.
+    CHECK (rig.mounts.revision() == revision);
+    CHECK (rig.sender.pending() == 0u);
+
+    CHECK (rig.runner.fades().empty());
+    CHECK (rig.runner.sends().empty());
+
+    /*  AND THE WHOLE PUBLISHED TREE, which is what every client and every
+        surface reads: nothing appears, and nothing but the clock changes. A
+        node may leave - a finished run leaves the tree once its retention is
+        up - and leaving is not writing. */
+    const auto moved = tree::diff (*before, *rig.publish());
+
+    CHECK (moved.added.empty());
+
+    std::string unexplained;
+
+    for (const auto& address : moved.valueChanged)
+        if (! isClockReadout (address))
+            unexplained += address + "\n";
+
+    INFO ("changed after the press, with nothing meant to write:\n" << unexplained);
+    CHECK (unexplained.empty());
 }

@@ -22,8 +22,13 @@
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace wfg::tree
 {
@@ -246,13 +251,186 @@ namespace wfg::tree
                 out.unit = unit->asString();
         }
 
+        /*  One element of a PANIC array as the OSC value it spells, before it
+            is read as the node's own type: a JSON number is a double, as every
+            number in a description is. A null, an object or an array has no
+            value to be. */
+        std::optional<osc::Value> literalOf (const json::Value& element)
+        {
+            if (element.isNumber()) return osc::Value::float64 (element.asNumber());
+            if (element.isBool())   return osc::Value::boolean (element.asBool());
+            if (element.isString()) return osc::Value::string (element.asString());
+
+            return std::nullopt;
+        }
+
+        /*  Whether a JSON number is a whole number an `i` or `h` argument can
+            hold. Checked BEFORE the coercion, which truncates: 2.5 would rest
+            at 2, a value nobody declared, and a number past the type's width
+            would be a conversion with no defined answer. Spelled with `modf`
+            and two comparisons, never `==` on a double. */
+        bool fitsAWholeNumber (double number, char typeTag)
+        {
+            if (! std::isfinite (number))
+                return false;
+
+            double whole = 0.0;
+            const auto fraction = std::modf (number, &whole);
+
+            if (fraction < 0.0 || fraction > 0.0)
+                return false;
+
+            const auto least = typeTag == 'i' ? static_cast<double> (std::numeric_limits<std::int32_t>::min())
+                                              : static_cast<double> (std::numeric_limits<std::int64_t>::min());
+            const auto most = typeTag == 'i' ? static_cast<double> (std::numeric_limits<std::int32_t>::max())
+                                             : static_cast<double> (std::numeric_limits<std::int64_t>::max());
+
+            /*  `most` for 64 bits rounds UP to 2^63 as a double, which is
+                already past the type - hence `<` there and not `<=`. */
+            return number >= least && (typeTag == 'i' ? number <= most : number < most);
+        }
+
+        /*  WHAT THE NODE RESTS AT (PRD §4.6), from the file's GODOT.PANIC:
+            "park", "snap", or a JSON array holding the declared safe VALUE
+            (namespace draft §3) - one element per type tag, read as the node's
+            own types, the first inside the node's range or among its VALS.
+
+            ON A STATE NODE, ANYTHING ELSE IS REFUSED, and the namespace with it,
+            as a FULL_PATH that lies is (decision JC, namespace draft §23.11). A
+            GODOT key is written by whoever wrote the description - a template
+            by hand, or a device that describes itself as Go.dot does, whose own
+            OSCQuery reply carries one on every node - and a PANIC the node could
+            never hold is a mistake in that file. A show that loaded it would
+            promise a resting state the device cannot take, and falling back to
+            the mount's policy in silence would hide it.
+
+            ON A CONTAINER OR AN EVENT, ANYTHING BUT A POLICY IS IGNORED, and the
+            mount's policy stays. Neither has a value to rest at, neither is ever
+            published with a PANIC, and the kind is often inferred rather than
+            declared: a node that is write-only with no VALUE reads as an event,
+            so a hand-written `{"TYPE": "f", "ACCESS": 2, "GODOT": {"PANIC": [0]}}`
+            loaded before 2026-10-02 and must still load. Refusing it would
+            unmount the whole device, and every cue aimed at it would fail.
+
+            Nothing APPLIES the value yet (devplan Phase 10). It is read, so the
+            tree can publish it back as the array it was. */
+        void applyPanic (const json::Value& panic, Node& out, std::vector<std::string>& problems)
+        {
+            const auto refuse = [&out, &problems] (const std::string& why)
+            {
+                problems.push_back (out.address + ": PANIC " + why);
+            };
+
+            if (panic.isString() && (panic.asString() == "park" || panic.asString() == "snap"))
+            {
+                out.panic = panic.asString();
+                return;
+            }
+
+            if (out.kind != Kind::state)
+                return;
+
+            if (panic.isString())
+            {
+                refuse ("says \"" + panic.asString() + "\"; it must be \"park\", \"snap\""
+                        " or an array holding the value the node rests at");
+                return;
+            }
+
+            if (! panic.isArray())
+            {
+                refuse ("must be \"park\", \"snap\" or an array holding the value the node rests at");
+                return;
+            }
+
+            if (out.typeTags.empty() || panic.size() != out.typeTags.size())
+            {
+                refuse ("holds " + std::to_string (panic.size()) + " value(s) for a node that takes "
+                        + std::to_string (out.typeTags.size()) + " (TYPE \"" + out.typeTags + "\")");
+                return;
+            }
+
+            std::vector<osc::Value> values;
+
+            for (std::size_t i = 0; i < panic.size(); ++i)
+            {
+                const auto& element = *panic.at (i);
+                const auto tag = out.typeTags[i];
+                const auto where = "element " + std::to_string (i) + " ";
+
+                const auto raw = literalOf (element);
+
+                if (! raw.has_value())
+                {
+                    refuse (where + "is not a value");
+                    return;
+                }
+
+                if ((tag == 'i' || tag == 'h') && element.isNumber()
+                      && ! fitsAWholeNumber (element.asNumber(), tag))
+                {
+                    refuse (where + "is not a whole number an `" + std::string (1, tag) + "` holds");
+                    return;
+                }
+
+                /*  COERCED AS A WRITE TO THIS NODE WOULD BE (`coerceToTag`: a
+                    number into a numeric tag, a string into `s`, a boolean into
+                    `T`), and held to MORE than a write is: a whole number for
+                    `i` and `h`, checked above before the coercion truncates it;
+                    the first element inside RANGE and among VALS, below; and no
+                    number for `T`, which a write takes as an int 0 or 1 but a
+                    JSON number never is - it arrives a double, and is refused.
+                    That is also why an `h` value past 2^53 has already been
+                    rounded by the JSON reader before anything here sees it. */
+                auto coerced = CommandRegistry::coerceToTag (tag, *raw);
+
+                if (! coerced.has_value() || coerced->isNonFinite())
+                {
+                    refuse (where + "is not a value of type `" + std::string (1, tag) + "`");
+                    return;
+                }
+
+                /*  THE FIRST ARGUMENT'S RANGE ONLY, as `applyRange` keeps only
+                    the first entry of RANGE. Compared against the number the
+                    file wrote, not its float, so a bound of 0.1 holds a PANIC of
+                    0.1 on an `f` node. */
+                if (i == 0)
+                {
+                    if (element.isNumber()
+                          && ((out.hasMinimum && element.asNumber() < out.minimum)
+                              || (out.hasMaximum && element.asNumber() > out.maximum)))
+                    {
+                        refuse (where + "is outside the node's RANGE");
+                        return;
+                    }
+
+                    if (! out.enumValues.empty()
+                          && std::find (out.enumValues.begin(), out.enumValues.end(), asText (element))
+                               == out.enumValues.end())
+                    {
+                        refuse (where + "is not one of the node's VALS");
+                        return;
+                    }
+                }
+
+                values.push_back (*coerced);
+            }
+
+            out.panic = "value";
+            out.panicValues = std::move (values);
+        }
+
         /*  The four declarations of PRD §3.3, taken from the mount unless the
             file overrides them.
 
             A namespace file MAY carry a GODOT key, and that is the whole point
             of §3.22: a hand-written template can declare what a captured one
-            can only imply, and the engine cannot tell the two apart. */
-        void applyGodot (const json::Value& node, const MountDeclaration& mount, Node& out)
+            can only imply, and the engine cannot tell the two apart.
+
+            After `applyRange` and the kind, which a PANIC holding a value is
+            checked against. */
+        void applyGodot (const json::Value& node, const MountDeclaration& mount, Node& out,
+                         std::vector<std::string>& problems)
         {
             out.rateCap = mount.rateCap;
             out.anticipatable = mount.anticipatable;
@@ -269,8 +447,10 @@ namespace wfg::tree
             if (const auto* anticipatable = property (*godot, "ANTICIPATABLE"); anticipatable != nullptr)
                 out.anticipatable = anticipatable->asBool();
 
+            /*  Until 2026-10-02 (H5) this took the key's text, whatever it was,
+                so an array read as "" and was published as `"PANIC": ""`. */
             if (const auto* panic = property (*godot, "PANIC"); panic != nullptr)
-                out.panic = panic->asString();
+                applyPanic (*panic, out, problems);
         }
 
         /*  Container, state or event.
@@ -349,7 +529,7 @@ namespace wfg::tree
 
             applyRange (node, built);
             applyUnit (node, built);
-            applyGodot (node, mount, built);
+            applyGodot (node, mount, built, problems);
 
             /*  VALUE is read for the kind inference above and then dropped.
                 A captured description says what the target happened to be doing

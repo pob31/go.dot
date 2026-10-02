@@ -94,7 +94,21 @@ namespace wfg::tree
         // The GODOT key: PRD §3.3's four declarations.
         double rateCap = 50.0;
         bool anticipatable = false;
+
+        /*  WHAT THE NODE RESTS AT (PRD §4.6), as one of three words: "park"
+            (it stays where it is), "snap", or "value" - it rests at the value
+            in `panicValues`. A policy is a word and a value is a value, so the
+            two are kept apart rather than one string that might be either: a
+            string node resting at the text "park" would otherwise read as the
+            policy. Nothing APPLIES any of them yet (devplan Phase 10); they are
+            declared, checked where they are read, and published. */
         std::string panic = "park";
+
+        /*  THE DECLARED SAFE VALUE, when `panic` is "value", and empty
+            otherwise: one element per type tag, as `values` is, so it is
+            written out exactly as VALUE is - an array in OSCQuery's PANIC
+            (namespace draft §3). */
+        std::vector<osc::Value> panicValues;
 
         //======================================================================
         /*  The value, when the node has one. EMPTY for a container, and empty

@@ -393,6 +393,16 @@ carries its own `GODOT` key — which it may, so that a hand-written template an
 one are indistinguishable to the engine (§3.22). Without a key, `KIND` is inferred:
 `ACCESS` write-only and no `VALUE` → `event`, otherwise `state`.
 
+*(2026-10-02, H5: the array form is honoured now. Until then the reader took the key's text
+whatever it was, so `"PANIC": [-60]` read as an empty word and went back out as `"PANIC": ""`.
+An array is read as the node's own types - one element per type tag, the first inside the node's
+range or among its `VALS` - and published back as the array it was, spelled as `VALUE` is. A
+`PANIC` a state node could never hold refuses the namespace; on a container or an event, which have
+no value and are never published with one, anything but `"park"` or `"snap"` is ignored (§23.11).
+A mount's own `panic` stays `park` or `snap`: a device has nodes of many types. And the
+parameter table's `panic` column takes a literal of the row's own type too, checked by the
+generator (`docs/parameters/README.md`). Nothing applies any of them yet: devplan Phase 10.)*
+
 ## 4. Change notification
 
 - A value change on a listened node → one binary OSC message per tick, at most, to each
@@ -455,7 +465,7 @@ grammar, and it grows with it.
 | `Cue` | `id`; `number` string; `name` string; `notes` string; `enabled` bool (true); `colour` string; `preWait`, `postWait` double seconds (0) | — |
 | `Group` | every `Cue` attribute, plus `mode` enum (`sequence`) and `advance` enum (`manual`) | `(Cue \| Group)*` |
 | `Mounts` | — | `Mount*` |
-| `Mount` | `id`; `prefix` string; `transport` enum (`udp`); `namespace` string; `rateCap` double Hz (50, cap 3); `anticipatable` bool (false); `panic` enum (`park`) | — |
+| `Mount` | `id`; `prefix` string; `transport` enum (`udp`); `namespace` string; `rateCap` double Hz (50, cap 3); `anticipatable` bool (false); `panic` enum `park` \| `snap` (`park`) | — |
 
 Example, canonical:
 
@@ -7654,6 +7664,9 @@ a stop and then kills, each applied harmlessly to a table already stopping. The 
 **PANIC** button at the far right of GO's row, the same height and as far from it as the row allows;
 the page has *stop all* and *kill all* on its running pane's header. What double Esc does NOT yet do
 is park mounted parameters at their §4.6 panic values - that is the mount table's, and Phase 10's.
+*(2026-10-02, H5: still so for `snap` and for a declared value. For `park`, which every row says,
+§23.11's invariant shows that none of the writers it runs - levels, speed, a DCA trim, a desk's
+values, launches - writes after the press, so a parameter they move stays where it was.)*
 
 **A ROW DRAGGED IN THE LIST (2026-09-18).** *"Can we have drag and drop reordering? Can we also have
 drag and drop onto a fade to set its target? Can we also use its user ID (not only the unique ID) to
@@ -9839,7 +9852,8 @@ is flat by construction and `eq.reset` returns it there. A plugin parameter the 
 not name rests at the set entry's **baseline** — the value the instance holds after the entry's
 preset was applied at open, the factory default with no preset — and the published `default` under
 `param/<n>` is that baseline once the child has reported it. The CSV `panic` column says `park`
-throughout and is metadata still: Phase 10 applies it.
+throughout and is metadata still: Phase 10 applies it. *(2026-10-02, H5: checked now - the
+generator refuses a value the row could not hold, §23.11 - and still applied by nothing.)*
 
 **Replay** runs handlers and no hooks (§12.1), and every write above is a handler: the EQ rows
 and `values` are in the log as `node.set` records, the arms carry them, and `plugin.failed` marks
@@ -14726,6 +14740,170 @@ each recorded as having started something, each now applied and doing nothing. E
 note held on a real synth, then a double Esc - exactly one note-off, the note stops; a note a cue has
 already ended - nothing more; Esc - nothing; a surface beside it keeping its LEDs and faders; and a
 lighting desk behind a rate cap, its held value never arriving after a double Esc.
+
+### 23.11 After a double Esc nothing keeps writing; the panic column checked (H5)
+
+**What it means.** Every parameter declares where it rests when the show is stopped in an
+emergency (PRD §4.6), and every row of the parameter table says `park`: it stays where it is. That
+promise is only worth something if nothing moves the parameter after the press. This stage tests
+it for the double Esc with one case that runs, at once, every writer a unit rig can run cheaply, and
+then watches them, and the whole published tree, for fifty ticks. It also readies the `panic`
+column itself - checked where it is written, read where a device describes it, published back -
+without applying anything: what `snap` snaps to, and which command applies a declared value, are
+still the author's, parked until after video.
+
+**The invariant** (`GoTests`, "double Esc: nothing Go.dot started keeps writing, for fifty ticks
+after"). A media cue sounds on a DCA with a level lane drawn over it; one four-second fade moves its
+level, another its speed (DS), a third the DCA's trim; and a group loops for ever - a network cue
+writing a desk fader, a short media cue, the fader again - into a device capped at half a hertz, so
+after the first send every later value is held back. The rig's own tick answers every arm at the
+next tick and lets the short cue sound for three.
+
+- **Live, and required to have moved in the twenty ticks before the press:** the voice's level,
+  its speed, the DCA trim, the desk's values, a value the cap holds back, launches and arms (the
+  short cue, launched afresh every round), and the three fades running.
+- **Watched, not exercised:** the routing, the EQ, the inserts, a second effects sweep, a stop
+  placed ahead, and a stop or a kill once all is over. Nothing in the rig writes them, so their
+  checks guard against a writer appearing and prove nothing about one being stopped.
+- **Not covered:** MIDI. H4's `MidiTests` cases are what cover a double Esc on it (§23.10).
+
+Then the double Esc, on its own and pressed inside Esc's two-second panic fade, as a real double
+press lands (§23.2, ER). From the press on: no launch, no arm, no speed placed, no stop placed, no
+routing, EQ or insert, no second sweep, the DCA trim where its fade had got to (plan decision 8,
+park on release), nothing more on the desk's tree, nothing waiting to leave, and at most one level a
+voice - the tick after the press applies levels before it cuts the voice (`applyLevels` runs before
+`enforceStops`), so one push may still reach a voice being cut, and none after (JG). Every run is
+over within four ticks (JG): measured, three on its own and one inside Esc's fade, with no level,
+speed, launch or arm reaching the audio side in between; the ticks are the engine's own, which the
+rig drives. From there no stop or kill reaches the audio side, and the published tree changes
+nothing but the engine's tick for fifty ticks (JF). A node may leave the tree - a finished run does
+once its retention is up - and none may appear.
+
+**It found nothing, and that is H4's doing.** The brief, written from reading before H4 landed,
+expected two failures: the value the rate cap held left on its turn after the press, and a cue
+whose disk answered in the press's own tick was launched. H4 closed both (§23.10; the second's
+case moved there). So the invariant passed on its first run, and is a net. To show it is not an
+empty one it was run with the press taken out. On its own, every live family failed - the value
+still held back, the settle, launches, arms, speed, level pushes (a hundred to the voice), the trim,
+the desk's tree, the fades still running - and so did the published tree, where the desk fader, the
+DCA trim, the voice's run level and speed, five runs' positions, the stream's round and members,
+and the run order had moved, and nodes appeared. The watched-only families stayed green, as they
+must with no writer. With Esc and no double Esc after it, the value held back, the settle, the
+panic fade's level pushes and its stop, and the voice's published level, position and state
+failed.
+
+**The one move it accepts** (JE; `LaneRecordTests`, "after a double Esc the taken fader keeps its
+strip and rests where the lane starts, and nothing moves it again"). A fader taken for lane
+recording stays taken after a double Esc - only `lane.free`, or arming no cue, lets it go (DN) - and
+once the killed pass is dropped (DM) the fader sits where the lane starts again (DG): two ticks
+after the press, `/godot/surface/laneRide` goes from the hand's level to the lane's first, and a
+motorised strip follows it. It is a surface's readout of the show, not an action on it, and the hand
+that took the fader is the one that lets it go - so it is kept, by the orchestrator's ruling, against
+the plan's line that the case "checks that a fader taken for recording is let go". The case pins
+today's behaviour; it is the one to change if the author rules that a double Esc frees the fader.
+
+**The panic column, checked** (IZ, JA, JD). `scripts/generate-schema.py` copied the column without
+looking at it. It now refuses a row whose `panic` is empty, or is neither a policy nor one literal
+value of the row's own type, spelled exactly as the document reader takes it and narrow enough for
+the wire - an `i` row's whole number in 32 bits, an `f` row's number in a 32-bit float - the rule
+`docs/parameters/README.md` gives in full. Python's own `int()` and `float()` take `1_000`, spaces,
+`nan` and `inf`, and `\d` any script's digits, so the shape is checked first with `[0-9]` anchored
+at the end, and converted only after. A blob row, a list row and an event row take a policy only.
+Every `default` is held to the same rule. Today's table passes untouched: 399 rows, every one
+`park`, every default a value its row reads, and the generated header byte for byte the same.
+Because no row exercises the literal half, the checker carries its own 47 cases - a decimal comma,
+`0x10`, `1e3` on an integer row, a float past 32 bits among them - run by `--self-test` and by every
+`--check`, so the ctest `schema.generated` goes red the day the rule loosens; it did, with the
+finiteness, width and float checks taken out. `DocumentTests` reads the committed header back
+through `Schema::parseValue`, with the same widths, as a second opinion from the engine's side. And
+the tree, which reads a row's literal as the value it is, asserts if one ever fails to parse, and
+publishes `park` - it does not fall back in silence.
+
+**A device's PANIC read as a value** (JB, JC). §3 lets a description's `GODOT.PANIC` be `"park"`,
+`"snap"` or a JSON array holding the declared safe `VALUE`. The mount reader took the key's text
+whatever it was, so an array read as an empty word and was published as `"PANIC": ""`. An array on
+a state node is now read as the node's own types, one element per type tag. Each is coerced as a
+write to that node would be (`CommandRegistry::coerceToTag`), and held to more than a write is: a
+whole number for an `i` or `h` argument, checked before the coercion, which would truncate 2.5 to
+2; the first element inside the node's `RANGE` and among its `VALS`, the only bounds the reader
+keeps; and no number for a `T`, which a write would take as 0 or 1 but a JSON number never is. A
+JSON number is a double, so an `h` value past 2^53 has been rounded before any of this sees it. The
+node holds the word `value` beside `Node::panicValues`, so every comparison with `park` and `snap`
+stays a comparison of words, and OSCQuery publishes the array back spelled as `VALUE` is - `-0.5`
+under the French locale too. A row of the parameter table that rests at a literal is published the
+same way, though none does yet.
+
+On a state node, anything else - an unknown word, an object, a bare number, the wrong count, a
+value out of range or of the wrong type - refuses the namespace, as a `FULL_PATH` that lies does. A
+`GODOT` key is written by whoever wrote the description: a template by hand, or a device that
+describes itself as Go.dot does, whose own OSCQuery reply carries one on every node. On a container
+or an event, anything but a policy word is ignored and the mount's policy stays: neither has a value
+to rest at, neither is ever published with a `PANIC`, and an event is often only inferred - a node
+that is write-only with no `VALUE` reads as one, so a hand-written `{"TYPE": "f", "ACCESS": 2,
+"GODOT": {"PANIC": [0]}}` loaded before this stage and must still load. Refusing it would unmount
+the whole device, and every cue aimed at it would fail with `bad-address`. A mount's own `panic`
+stays `park` or `snap` (`show.rng`): a device has nodes of many types.
+
+**Left for the author: the policy's spelling.** PRD §3.3 calls the second policy *snap-to*; the
+schema, `show.rng`, this document and the reader say `snap`. A description written from the PRD,
+`"PANIC": "snap-to"` on a state node, is now refused. The PRD is not edited here.
+
+**Not changed, and worth knowing.**
+
+- **Nothing applies a panic value.** `snap` and declared values are read, checked and published,
+  and nothing acts on them.
+- **A device's metadata is copied onto its nodes when its namespace loads**, and
+  `MountTable::updateDeclaration` keeps the nodes: an edit of a mount's `panic`, rate cap or
+  anticipatability while the show is open reaches its nodes only when the namespace is read again
+  (a changed prefix or file). Out of this stage; named in `Mount.h` for whoever applies the value.
+- **Esc is unchanged**, and so is everything a double Esc does: no handler changed here.
+
+**What it changes for a replay.** Nothing: no handler, hook or record changed. What changes is
+what loads - a namespace file with a `PANIC` a state node could never hold, which used to load with
+that `PANIC` read as `""` or kept as an unknown word, now refuses, and the show opens with that
+device's problem said. No fixture has one: the only `PANIC` in a namespace fixture is
+`console.json`'s `"snap"`.
+
+**Tests**, each written first and run against the code before its change:
+
+- `MountTests` "a PANIC array is the node's safe value, read as the node's own type, and goes back
+  out as one" - a float, a double, an integer, an enum, a boolean and a two-argument node, a policy
+  word and a node with no key. It failed on every value (the panic word `""`, every `panicValues`
+  empty) and on every array published (`"PANIC": ""`); the two words passed.
+- `MountTests` "a PANIC the node could never hold is refused when the namespace loads" - fourteen
+  ways on a state node, `"snap-to"` among them, each refused with a problem naming the address and
+  `PANIC`, and the same node with a value it can hold loading. Every one loaded before.
+- `MountTests` "a PANIC on an event or a container is ignored, and the namespace still loads" (the
+  review's) - an inferred event with an array, one with an unknown word, and a container with an
+  array: the namespace loads, each keeps the mount's `park`, and the event publishes no `PANIC`. On
+  the stage's first build, which refused them, it failed: the namespace refused, three problems.
+- The generator, through a scratch harness that feeds `build()` the real table with one cell
+  changed (not committed; the self-test is what stays): 23 of its 35 probes - every one that should
+  be refused - were accepted before, and none after. The float check was added after the review;
+  with it taken out, the self-test fails on its two cases.
+- `DocumentTests` "every row's panic is park, snap, or a value the row itself would take" - a net:
+  every row says `park` and every default reads, so it passed before and after; it counts what it
+  examined.
+- `GoTests` "double Esc: nothing Go.dot started keeps writing, for fifty ticks after" - a net, as
+  above, shown to be one by taking the press out.
+- `LaneRecordTests` "after a double Esc the taken fader keeps its strip..." - pins JE; passed before
+  and after.
+- Not added: the brief's `NetworkCueTests` case for the held value is H4's "double Esc: a value the
+  rate cap is holding never leaves, and the cue waiting on it ends", and its disk case is H4's too.
+
+**The decisions.** Letters follow §23.10's. The orchestrator's rulings are on the brief's open
+questions and on the stage's review, 2026-10-02; all are the author's to overrule.
+
+| | Decision | Whose |
+|---|---|---|
+| IZ | **A row rests at a policy or at one value of its own type**: `park` or `snap`, or one literal spelled as the document reader takes it, inside the row's range or enum and its type's width on the wire (32 bits for `i`, a 32-bit float for `f`); the two words always mean the policy; a blob, list or event row takes a policy only; never empty | the orchestrator's ruling (lists and events); the spelling the brief's, after the engine's own readers; the float width the review's |
+| JA | **A default meets the same rule**, a list's element by element: none of the 399 fails, the header unchanged | the orchestrator's ruling |
+| JB | **A device's PANIC array is the node's safe value**: one element per type tag, coerced as a write would be and held to more - a whole number for `i`/`h` checked before the coercion that would truncate it, the first inside the node's RANGE and VALS, no number for `T`; held as the word `value` beside `panicValues`, and published back as the array | the orchestrator's ruling (the representation); the rest the brief's |
+| JC | **On a state node, a PANIC it could never hold refuses the namespace**, as a FULL_PATH that lies does; **on a container or an event, anything but a policy is ignored** and the mount's policy stays | the orchestrator's ruling, and the review's: an event is often only inferred, and a description that loaded before must still load; ignoring an unknown word there too, not only an array, the implementer's, for the same reason |
+| JD | **The checker is tested on every `--check`**: its own table of good and bad literals, so `schema.generated` goes red the day the rule loosens, with no new ctest entry | implementer's call (the brief's optional `--self-test`, kept out of `tests/CMakeLists.txt` in a shared checkout) |
+| JE | **After a double Esc a fader taken for lane recording stays taken**, and shows the lane's start once, two ticks after the press - the one move the invariant accepts | the orchestrator's ruling (DN and DG kept), against the plan's "let go"; the author's to rule on |
+| JF | **The invariant allows the clock and nothing else**: the engine's tick may change; a node may leave the tree, and none may appear or change | implementer's call |
+| JG | **The teardown is bounded**: every run over within four ticks of the press (three measured), and at most one level a voice after it | the review's |
 
 ## 24. Go Doh! — taking back the last GO
 

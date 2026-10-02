@@ -477,6 +477,47 @@ TEST_CASE ("lane record: a pass nobody touched writes nothing, and a killed one 
     }
 }
 
+TEST_CASE ("lane record: after a double Esc the taken fader keeps its strip and rests where the lane starts, and nothing moves it again")
+{
+    /*  THE ONE MOVE AFTER A DOUBLE ESC (2026-10-02, H5, namespace draft
+        §23.11). After the press nothing Go.dot started writes again
+        (`GoTests`, "nothing Go.dot started keeps writing") - but a fader taken
+        for lane recording stays taken (DN: only `lane.free`, or arming no cue,
+        lets it go), and once the killed pass is dropped (DM) the fader sits where
+        the lane starts again (DG), two ticks after the press. A motorised strip
+        follows that node, so the fader moves once, from the hand's -9 to the
+        lane's -20, and then never again.
+
+        Kept (decision JE): it is a surface's readout of the show, not an
+        action on it, and the hand that took the fader is the one that lets it
+        go. Pinned so that the day the author rules that a double Esc frees the
+        fader, this is the case that changes. */
+    Rig rig;
+    rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -20");
+    rig.startPass();
+
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
+    rig.play (30);
+
+    REQUIRE (rig.published (ride) == "-9");
+
+    rig.send ("run.killAll", {}, "window");
+    rig.play (3);
+
+    CHECK_FALSE (rig.lanes.recording);
+    CHECK (rig.lanes.taken());
+    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/target") == ride);
+    CHECK (rig.published (ride) == "-20");
+
+    const auto settled = rig.published (ride);
+    rig.play (50);
+
+    CHECK (rig.published (ride) == settled);
+    CHECK (rig.lanes.taken());
+    CHECK (rig.laneOfCue().size() == 1u);       // the drawn lane, the ride dropped (DM)
+}
+
 TEST_CASE ("lane record: a touch with no move latches where the fader was, not at a level left over")
 {
     Rig rig;
