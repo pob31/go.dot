@@ -694,6 +694,9 @@ namespace
         return declaration;
     }
 
+    /*  A caller keeps a copy of the node, not a reference: GCC 13's
+        -Wdangling-reference takes the address string made for the call
+        for what the returned node lives in. */
     const Node& mountedAt (const MountResult& result, const std::string& address)
     {
         const auto found = std::find_if (result.nodes.begin(), result.nodes.end(),
@@ -740,7 +743,7 @@ TEST_CASE ("mount: a PANIC array is the node's safe value, read as the node's ow
     /*  EACH AS ITS OWN TYPE TAG READS IT: a JSON number is a float on an `f`
         node, an int on an `i` one, and one value per argument on a node that
         takes two. */
-    const auto& fader = mountedAt (result, "/desk/fader");
+    const auto fader = mountedAt (result, "/desk/fader");
     CHECK (fader.panic == "value");
     CHECK (fader.panicValues == std::vector<osc::Value> { osc::Value::float32 (-60.0f) });
 
@@ -752,11 +755,11 @@ TEST_CASE ("mount: a PANIC array is the node's safe value, read as the node's ow
              == std::vector<osc::Value> { osc::Value::int32 (2), osc::Value::float32 (-6.5f) });
 
     //  A policy is still a word, and a node that says nothing has the declaration's.
-    const auto& pan = mountedAt (result, "/desk/pan");
+    const auto pan = mountedAt (result, "/desk/pan");
     CHECK (pan.panic == "snap");
     CHECK (pan.panicValues.empty());
 
-    const auto& gain = mountedAt (result, "/desk/gain");
+    const auto gain = mountedAt (result, "/desk/gain");
     CHECK (gain.panic == "park");
     CHECK (gain.panicValues.empty());
 
@@ -871,7 +874,7 @@ TEST_CASE ("mount: a PANIC on an event or a container is ignored, and the namesp
     for (const auto* address : { "/desk/go", "/desk/cut", "/desk/bank" })
     {
         INFO (address);
-        const auto& node = mountedAt (result, address);
+        const auto node = mountedAt (result, address);
 
         CHECK (node.kind != Kind::state);
         CHECK (node.panic == "park");
