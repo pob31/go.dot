@@ -39,9 +39,12 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/log/Replay.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -121,7 +124,9 @@ namespace
     //==========================================================================
     struct Rig
     {
-        Rig()
+        /*  `populate` false is a bare rig, for a replay: the show is read from
+            the session's own canonical XML instead. */
+        explicit Rig (bool populate = true)
         {
             engine.log().openInMemory ({});
 
@@ -138,6 +143,9 @@ namespace
             runner.setTouches (&touches);
             runner.setLanes (&lanes);
             parameters.setLanes (&lanes);
+
+            if (! populate)
+                return;
 
             listId = document.createList ("Sound").id;
             mediaId = document.createCue (listId, 0, "media", "Bed").id;
@@ -534,10 +542,20 @@ TEST_CASE ("lane record: a double Esc lets the taken fader go - its strip rides 
         REQUIRE (rig.published (ride) == "-20");
     }
 
+    SUBCASE ("armed, still waiting for a touch")
+    {
+        /*  The review of K4: a lane armed and waiting is disarmed as well - the
+            next fader touched after the press is touched, not taken. */
+        REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied >= 1);
+        REQUIRE (rig.lanes.waiting());
+        REQUIRE (rig.published ("/godot/surface/lane") == rig.mediaId);
+    }
+
     REQUIRE (rig.send ("run.killAll", {}, "window").rejected == 0);
 
     //  Let go in the press's own drain: nothing waits for a hook.
     CHECK_FALSE (rig.lanes.taken());
+    CHECK_FALSE (rig.lanes.waiting());
     CHECK_FALSE (rig.lanes.recording);
     CHECK (rig.lanes.cue().empty());
 
@@ -558,6 +576,55 @@ TEST_CASE ("lane record: a double Esc lets the taken fader go - its strip rides 
 
     //  And a pass needs a fader again.
     CHECK (rig.send ("lane.record").rejected == 1);
+}
+
+TEST_CASE ("lane record: a session with a double Esc in the middle of a pass replays record for record")
+{
+    /*  THE FREE IS THE HANDLER'S (KO; the review of K4 asked for the proof):
+        `run.killAll` lets the fader go inside its own handler, so a replay -
+        which runs no hook - frees it in the same record, and the records
+        after it (the hand's writes on a ride that has gone, a new arming)
+        are answered the same way. */
+    Rig rig;
+    rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -20");
+    rig.startPass();
+
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
+    rig.play (30);
+
+    rig.send ("run.killAll", {}, "window");
+    rig.play (5);
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-4.0) }, "surface:PANEL");
+    rig.send ("lane.record");                               // refused: no fader
+    rig.send ("lane.arm", { osc::Value::string (rig.mediaId) });
+    rig.play (3);
+
+    REQUIRE_FALSE (rig.lanes.taken());
+    REQUIRE (rig.lanes.waiting());
+
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    Rig fresh { false };
+    const auto read = doc::CanonicalXml::read (show, fresh.document);
+
+    for (const auto& problem : read.problems)
+        MESSAGE (problem);
+
+    REQUIRE (read.ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+    CHECK (result.recordsReplayed == result.recordsExpected);
+    CHECK_FALSE (fresh.lanes.taken());
+    CHECK_FALSE (fresh.lanes.recording);
+    CHECK (fresh.lanes.cue() == rig.mediaId);
 }
 
 TEST_CASE ("lane record: Esc keeps the taken fader, and the pass it ended keeps its ride")

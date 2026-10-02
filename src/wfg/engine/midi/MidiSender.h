@@ -59,6 +59,24 @@ namespace wfg::monitor { class TrafficTap; }
 
 namespace wfg::midi
 {
+    /*  ONE DEVICE BEHIND A PORT, as the sending thread sees it: a JUCE output
+        in the product (`bind` opens one), a fake in a test - the seam that lets
+        the thread itself, its start and its stop, be driven on a machine with
+        no MIDI port (2026-10-02, the review of K4). Called on the sending
+        thread only, outside every lock. */
+    class Output
+    {
+    public:
+        virtual ~Output() = default;
+
+        /*  Sends now, and may block: a SysEx holds the thread until the port
+            has taken it, and a driver that is not ready is retried. */
+        virtual void sendNow (const Bytes& bytes) = 0;
+
+        /** The device's name, for the network monitor. */
+        virtual std::string name() const = 0;
+    };
+
     class MidiSender final : public MidiSink
     {
     public:
@@ -87,6 +105,12 @@ namespace wfg::midi
                    const std::string& deviceName, const std::string& wantedId,
                    std::string& matchedId, std::string& why);
 
+        /*  Puts an output behind a port's name - what `bind` does with the
+            device it opened, and what a test does with a fake. A port that had
+            another output forgets the notes the old one was playing. Safe
+            while the sending thread runs. */
+        void attach (const std::string& portId, std::shared_ptr<Output> output);
+
         /** Closes a port's device and forgets it. Safe while the sending thread runs. */
         void unbind (const std::string& portId);
 
@@ -96,11 +120,13 @@ namespace wfg::midi
         /** Starts the sending thread. Nothing leaves before this. */
         void start();
 
-        /*  Stops it, after whatever is queued has gone - and then ends every
-            note a cue left sounding, one note-off a key, as a double Esc does
-            (2026-10-02, K4, namespace draft §23.15; §23.10 had named it a gap).
-            The one road out: the destructor calls it, and the show closing -
-            quitting, or the window going as another show opens - ends here. */
+        /*  Stops it, after what the cues still had queued has gone - a
+            surface's traffic is dropped - and then ends every note a cue left
+            sounding, one note-off a key, as a double Esc does (2026-10-02, K4,
+            namespace draft §23.15; §23.10 had named it a gap). Each port is
+            given a budget of time for that last delivery. `serve` calls it as
+            soon as the tick thread has stopped, and the destructor again,
+            which then does nothing. Safe to call when never started. */
         void stop();
 
         /*  Queues one message. Tick thread; takes a mutex for a push_back and
@@ -139,7 +165,7 @@ namespace wfg::midi
         std::string enqueue (Outgoing message);
 
         /** What `run` sends, shown to the monitor on its way. */
-        void deliver (juce::MidiOutput& device, const Bytes& bytes);
+        void deliver (Output& device, const Bytes& bytes);
         std::atomic<monitor::TrafficTap*> tap { nullptr };
 
         /*  SHARED, SO A PORT CAN BE REBOUND WHILE THE SHOW RUNS (2026-09-25):
@@ -151,10 +177,10 @@ namespace wfg::midi
         struct Bound
         {
             std::string port;
-            std::shared_ptr<juce::MidiOutput> device;
+            std::shared_ptr<Output> device;
         };
 
-        std::shared_ptr<juce::MidiOutput> deviceFor (const std::string& portId) const;
+        std::shared_ptr<Output> deviceFor (const std::string& portId) const;
 
         mutable std::mutex boundMutex;
         std::vector<Bound> bound;

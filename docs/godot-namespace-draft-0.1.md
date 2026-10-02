@@ -14835,7 +14835,9 @@ today's behaviour; it is the one to change if the author rules that a double Esc
 double Esc's handler now frees the fader as `lane.free` would: the strip rides what it rode before,
 the ride node leaves the tree, and nothing moves to the lane's start - so the invariant accepts no
 move at all. The case was turned round to match and renamed "a double Esc lets the taken fader go",
-§23.15, KO.)*
+§23.15, KO. The review's correction, the same day: the TREE does not move, but a motorised fader
+still does, once - it flies to the strip's previous target (a DCA's trim, or the bottom for a strip
+riding nothing) after the hand lifts, and a hand still down is deaf until then, KX; bench item 18.)*
 
 **The panic column, checked** (IZ, JA, JD). `scripts/generate-schema.py` copied the column without
 looking at it. It now refuses a row whose `panic` is empty, or is neither a policy nor one literal
@@ -15521,11 +15523,15 @@ times with a millisecond's sleep between (`juce_Midi_windows.cpp`) - up to three
 second at Windows' default timer - so a port that holds the thread more than 40 ms over a message of
 three bytes or fewer is taken as not taking messages, and is sent nothing more in that pass: the
 cost of a dead port is one message, not one per note. A SysEx's own wait is JUCE's, as it was
-before K4.
+before K4. *(2026-10-02, the review of K4: a slow port is not a dead one - three of JUCE's own
+retries pass 40 ms. Replaced by a budget of 250 ms a port for the whole close, KR revised; and a
+surface's traffic still queued is dropped at the close, KY. Below.)*
 
 **What does not change.** Esc drops nothing and ends no note; the pane's kill drops nothing of its
 run's output (IX's first half stands); a port switched off after its note-on still gets the note-off
-(§23.10); the surface bridge's traffic is never dropped and owes no note-off.
+(§23.10); the surface bridge's traffic is never dropped and owes no note-off. *(2026-10-02, the
+review of K4: at the close, a surface's traffic still queued is dropped, KY; a double Esc still never
+drops it.)*
 
 **What it changes for a replay.**
 
@@ -15585,7 +15591,7 @@ The new cases under C and `fr-FR`: 5 cases, 179 assertions each. Whole files und
 | KO | **A double Esc lets the lane's fader go, as `lane.free` would; Esc keeps it**: the lane forgotten, the strip back on what it rode, a pass under way dropped with its ride (DM) and no `lane.stop` after it; nothing sent to the lane's start. In the press's handler, beside `dropOutputs` (IH) | the author's, 2026-10-02, overruling JE; the handler, and freeing under a pass that `lane.free` would refuse, the implementer's |
 | KP | **The hand's end of a pass is `run.stop`** - the pane's stop: the voice stopped and its tail ringing, the run not `killed` (so decision S no longer suspends a persistent cue for it), and an abort under K2's rule (`stopEndsWait`, no post-wait), not an authored ending | the author's, 2026-10-02 ("graceful stop"), overruling GB; abort rather than authored ending the implementer's, the author's to overrule |
 | KQ | **The show closing ends every note a cue left down**: after what is still queued, one `0x8n key 0` a port, channel and key the note record holds, the queued cue messages for ports with a device counted first; nothing to a synth Go.dot never played | the author's, 2026-10-02 ("note off on quit"), closing IX's second half; after the queue, not ahead of it as the double Esc's, the implementer's |
-| KR | **The close is bounded per port**: one pass, nothing retried by Go.dot; a port that holds the thread more than 40 ms over a message of three bytes or fewer is sent nothing more in that pass | implementer's call |
+| KR | **The close is bounded per port**: one pass, nothing retried by Go.dot; a port that holds the thread more than 40 ms over a message of three bytes or fewer is sent nothing more in that pass | implementer's call. *Revised after the review, 2026-10-02: a budget of 250 ms a port for the whole close - a port whose sends have held the thread that long in all is sent nothing more - since a single short message over 40 ms is a slow port as often as a dead one* |
 
 **Named limits.**
 
@@ -15595,7 +15601,110 @@ The new cases under C and `fr-FR`: 5 cases, 179 assertions each. Whole files und
 - **A process killed rather than closed** - a crash, Task Manager, the black-box harness's
   `terminate()` - runs no destructor and sends nothing.
 - **A SysEx still queued at the close** can hold the thread as long as JUCE waits for it, as it
-  could before K4: the 40 ms cap is for short messages only.
+  could before K4: the 40 ms cap is for short messages only. *(2026-10-02, the review of K4: a
+  surface's is dropped at the close now, KY; a cue's own SysEx still can - one call that never
+  returns is out of any budget's reach, and the quit waits on it.)*
+- **The show replaced in the same process sends no note-off** (the review of K4): `document.revert`
+  and `document.recover` put another show in place while `serve` runs, and the sender, its note
+  record and its ports carry on - a note the old show left down rings until a cue or a double Esc
+  ends it, or the process closes.
+- **On Linux, a burst can be lost silently** (the review of K4): JUCE's ALSA output sends without
+  blocking, so a close with more note-offs than the sequencer's pool holds can drop some, and nothing
+  says so.
+
+**The review's follow-up (2026-10-02).** K4's review found one fault that matters and several gaps.
+Each is closed here; the sentences above that it made false carry a dated note.
+
+- **A hand on the fader at the double Esc moved the DCA** (KX). The fader is freed in the press's
+  own drain, so from the next snapshot the strip's target is its DCA's trim again. The bridge's
+  `followTouches` let go of the hand's touch on the ride, but the hand was still down (`handDown`),
+  and its next position became a `node.set` on the trim, at the level it had been riding the lane at
+  - a DCA silently down for the next GO. Now a strip whose hand is down while it rides the lane's
+  node (`Strip::onLane`, set by `followTouches` and by the touch itself) goes DEAF (`Strip::deaf`)
+  when that target goes from under it: its fader positions write nothing, and what the hand asked
+  that tick is dropped, until the hand LIFTS. Touched again, it rides what it rides now. The motor,
+  held while the hand is down, flies to the strip's target only after the lift. The touch that takes
+  a waiting lane is on the lane from that touch, so a take refused, or freed in the same drain, also
+  leaves the hand deaf rather than moving what the strip rode before - the taking touch "does
+  nothing else" (DF). The virtual panel needs nothing: a drag writes to the node it grabbed, the
+  ride, for the whole drag, and never to the strip's new target.
+- **The close is tested through the real sender.** `midi::Output` is a seam in `MidiSender`: one
+  device behind a port, a JUCE output in the product (`bind` opens one and calls `attach`), a fake in
+  a test. `start` and `stop` now run the real sending thread against a fake port.
+- **A lost wake-up could hang the quit.** `MidiSender::stop` cleared `running` and notified without
+  the queue lock, while the sending thread reads `running` under that lock and then waits: a clear
+  landing between the read and the wait was never heard, and the join waited for ever on an idle
+  thread. Older than K4, and the close now leans on that join. `running` is cleared under the queue
+  lock, so the store is either seen by the read or reaches the wait as a notify.
+- **The single-message cap took a slow port for a dead one** (KR revised). JUCE's own retry on
+  Windows sleeps a millisecond up to fifty times, at a 15.6 ms timer: three "not ready" answers are
+  over 40 ms on a port that is alive. Now each port has a budget of 250 ms for the whole close: a
+  port whose sends have held the thread that long in all is sent nothing more; a dead port costs its
+  budget and at most one message more, a slow one gets every note-off the budget covers.
+- **The note-offs go sooner** (KZ). `serve` calls `midiOut.stop()` right after `ticks.stop()`, before
+  the save is settled, the audio device closed and the servers stopped - seconds a held note rang
+  through. The destructor's own `stop` then does nothing. `serve` is the only mode that owns a
+  `MidiSender`; a replay has none.
+- **A surface's traffic still queued is dropped at the close** (KY). A display's SysEx can hold the
+  thread on JUCE's done flag for as long as its port takes it, with the note-offs behind it; the
+  surface is closing with the show. A cue's own messages still go first, in order, and its note-offs
+  after them.
+- **What the motor does after the free, on a sampler strip.** Read from the code, not tested: a
+  sampler strip taken for a lane goes back to the run that holds its slot (`RunTable::holderOf`).
+  After a double Esc that is nobody once the killed bank's clips have ended, a tick or two later -
+  unless the bank is the standby's preparation the press left ready, whose armed member then holds
+  it - and a strip riding nothing has its motor sent to the bottom, where the next clip's fader
+  starts (`paintStrip`). A DCA strip's motor flies to its trim.
+
+**The follow-up's tests**, each written first:
+
+- `SurfaceBridgeTests` "a hand on a lane's fader when a double Esc lets it go writes nothing to what
+  the strip rides next, until it lifts" - a D700-style MCU strip pinned to a DCA, taken for the lane,
+  the hand down - in one subcase touched on the ride, in the other the very touch that took it -
+  then the lane freed: two moves with the hand down write nothing to the trim, which stays at 0
+  dB; lifted, touched and moved, the trim follows. Before: both subcases failed - the trim written,
+  at -55.4 dB.
+- `MidiTests` "midi sender: stopping it ends a note a cue left down, once, and sends nothing a synth
+  never played" - the real thread and a fake port: a held note, a note its cue ended, a surface's
+  LED and a second port never played; at `stop`, exactly one `0x81 60 0`, nothing for the ended
+  note, the LED or the other port, and a second `stop` sends nothing. Passed on K4's code: the close
+  is K4's, this is its first test through the thread.
+- `MidiTests` "midi sender: a slow port still gets every note-off at the close" - three notes held on
+  a port taking 45 ms a message: three note-offs. Before (the 40 ms cap): one of three.
+- `MidiTests` "midi sender: a port that does not take messages holds the close for a bounded time" -
+  ten notes on a port taking 100 ms a message: between one and nine note-offs, the close under
+  700 ms. A guard: it passed under the old cap as well.
+- `MidiTests` "midi sender: started and stopped with nothing to send, it always returns" - two
+  hundred starts and stops, and a stop never started. A net: the lost wake-up's window is a few
+  instructions wide, and the lock is what closes it.
+- `MidiTests` "midi send queue: the show closing…" - a new subcase: a surface's SysEx and LED still
+  queued are dropped, the held note's note-off the only message. Before: three messages. The
+  subcase that kept a surface's SysEx ahead of the note-offs now keeps a cue's blackout there.
+- `LaneRecordTests` "a double Esc lets the taken fader go…" - a third subcase: a lane armed and still
+  waiting for a touch is disarmed. With the press's `freeLane` taken out, it failed three checks (the
+  lane still waiting and published).
+- `LaneRecordTests` "a session with a double Esc in the middle of a pass replays record for record"
+  - a pass, the hand at -9, a double Esc, then the hand writing the ride, a refused `lane.record`
+  and a new arming; the session's log replayed into a bare rig from the show's own XML: no
+  mismatch, every record replayed, the fresh table freed and armed again. A guard of the handler
+  rule: with `freeLane` taken out the session itself keeps the fader, so it cannot fail first on
+  the replay.
+- `GoTests` "persistent: a bed whose lane pass the hand ends is stopped, not killed, and the next GO
+  puts it back" - KP's consequence pinned: the pass's run ended not `killed`, the bed not suspended,
+  and live again after the next step. With the hand's stop put back to `run.kill`, it failed three
+  checks - killed, suspended, silent.
+
+Under C and `fr-FR`, the follow-up's cases with K4's: 12 cases, 337 assertions each. Whole files
+under C: `LaneRecordTests` 12 cases, 348 assertions; `MidiTests` 34, 577; `SurfaceBridgeTests` 50,
+2687; `GoTests` 309, 5539 - all green. Every `wfg.replay.*` fixture and the drivers `lane-record`,
+`lane-level` and `phase6-surfaces`, under both locales: 64 of 64. No replay changes: the bridge's
+deafness writes no record (it is what a surface does not submit), and the sender's close none.
+
+| | Decision | Whose |
+|---|---|---|
+| KX | **A hand on the lane's fader when the lane lets it go is deaf until it lifts**: its positions write nothing to what the strip rides next, and the motor flies there only after the lift; a taking touch counts as on the lane | the review's, 2026-10-02; the taking touch the implementer's |
+| KY | **At the close, a surface's traffic still queued is dropped**; a cue's goes, then the note-offs | the review's, 2026-10-02 |
+| KZ | **`serve` stops the MIDI sender as soon as the tick thread has stopped**, before the save, the device and the servers are closed | the review's, 2026-10-02 |
 
 **Owed to the bench**, in `docs/handoffs/2026-09-06-audio-hardware-checklist.md` (items 17-19): a note held on a
 real synth, then the show closed - exactly one note-off, the note stops; a note a cue already

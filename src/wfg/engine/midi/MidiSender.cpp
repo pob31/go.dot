@@ -20,11 +20,35 @@
 
 #include <algorithm>
 #include <chrono>
+#include <map>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::midi
 {
+    namespace
+    {
+        /*  THE PRODUCT'S OUTPUT: a JUCE device, opened by `bind`. */
+        class JuceOutput final : public Output
+        {
+        public:
+            explicit JuceOutput (std::unique_ptr<juce::MidiOutput> deviceToUse)
+                : device (std::move (deviceToUse)) {}
+
+            void sendNow (const Bytes& bytes) override
+            {
+                device->sendMessageNow (juce::MidiMessage { bytes.data(), static_cast<int> (bytes.size()) });
+            }
+
+            std::string name() const override { return device->getName().toStdString(); }
+
+        private:
+            std::unique_ptr<juce::MidiOutput> device;
+        };
+    }
+
     MidiSender::~MidiSender()
     {
         stop();
@@ -43,7 +67,7 @@ namespace wfg::midi
     void MidiSender::unbind (const std::string& portId)
     {
         //  Closed here, after the lock is let go - or by the sender, if it is mid-send.
-        std::shared_ptr<juce::MidiOutput> closing;
+        std::shared_ptr<Output> closing;
 
         {
             const std::lock_guard<std::mutex> lock { boundMutex };
@@ -67,7 +91,7 @@ namespace wfg::midi
         }
     }
 
-    std::shared_ptr<juce::MidiOutput> MidiSender::deviceFor (const std::string& portId) const
+    std::shared_ptr<Output> MidiSender::deviceFor (const std::string& portId) const
     {
         const std::lock_guard<std::mutex> lock { boundMutex };
 
@@ -128,8 +152,13 @@ namespace wfg::midi
         /*  A SECOND BINDING REPLACES THE FIRST rather than being refused. Two
             `--midi-out=Lights=...` on one command line is somebody correcting
             themselves, and the last one is what they meant. */
-        std::shared_ptr<juce::MidiOutput> replaced;
-        std::shared_ptr<juce::MidiOutput> opened { std::move (device) };
+        attach (portId, std::make_shared<JuceOutput> (std::move (device)));
+        return true;
+    }
+
+    void MidiSender::attach (const std::string& portId, std::shared_ptr<Output> output)
+    {
+        std::shared_ptr<Output> replaced;
 
         /*  A NAME PUT ON ANOTHER DEVICE FORGETS WHAT THE OLD ONE WAS PLAYING,
             as an unbind does: the live rebind releases a port and binds it
@@ -152,18 +181,16 @@ namespace wfg::midi
             if (existing != bound.end())
             {
                 replaced = std::move (existing->device);
-                existing->device = std::move (opened);
+                existing->device = std::move (output);
             }
             else
             {
-                bound.push_back ({ portId, std::move (opened) });
+                bound.push_back ({ portId, std::move (output) });
             }
 
             if (replaced != nullptr)
                 outbox.forgetPort (portId);
         }
-
-        return true;
     }
 
     bool MidiSender::isBound (const std::string& portId) const
@@ -185,8 +212,19 @@ namespace wfg::midi
 
     void MidiSender::stop()
     {
-        if (! running.exchange (false))
-            return;
+        /*  CLEARED UNDER THE QUEUE LOCK (2026-10-02, the review of K4). The
+            sending thread reads `running` under that lock and then waits on
+            it; cleared without the lock, the store and the notify could both
+            land between its read and its wait - the wake-up lost, and the join
+            below waiting for ever on a thread asleep over an empty queue. Under
+            the lock the store is either before the read, which sees it, or
+            after the wait has begun, which the notify reaches. */
+        {
+            const std::lock_guard<std::mutex> lock { queueMutex };
+
+            if (! running.exchange (false))
+                return;
+        }
 
         wakeUp.notify_all();
 
@@ -246,7 +284,7 @@ namespace wfg::midi
         while (running.load (std::memory_order_relaxed))
         {
             Outgoing next;
-            std::shared_ptr<juce::MidiOutput> device;
+            std::shared_ptr<Output> device;
 
             {
                 std::unique_lock<std::mutex> lock { queueMutex };
@@ -286,10 +324,12 @@ namespace wfg::midi
             deliver (*device, next.bytes);
         }
 
-        /*  WHATEVER IS STILL QUEUED GOES, because a show that is closing has
-            usually just sent the blackout. Bounded by what is in hand rather
-            than by the queue, so a producer that never stopped cannot hold the
-            shutdown open.
+        /*  WHAT A CUE STILL HAD QUEUED GOES, because a show that is closing
+            has usually just sent the blackout. Bounded by what is in hand
+            rather than by the queue, so a producer that never stopped cannot
+            hold the shutdown open. A SURFACE'S traffic still queued is dropped
+            (2026-10-02, the review of K4): the surface closes with the show,
+            and a display's SysEx could hold the thread ahead of the note-offs.
 
             AND THEN A NOTE-OFF FOR EVERY NOTE A CUE LEFT DOWN (2026-10-02, K4,
             namespace draft §23.15): one `0x8n key 0` a port, channel and key
@@ -299,15 +339,19 @@ namespace wfg::midi
             up inside it in the header's order (`queueMutex`, then
             `boundMutex`).
 
-            BOUNDED, SO A DEAD PORT CANNOT HOLD THE QUIT: one pass over what is
-            in hand, nothing retried here - and a port that keeps the thread
-            more than `givingUp` over a message of three bytes or fewer is not
-            taking messages, and is sent nothing more in this pass. A device
-            that has gone answers its send with an error at once; a driver that
-            says it is not ready is retried by JUCE itself, fifty times a
-            millisecond's sleep apart on Windows (juce_Midi_windows.cpp), which
-            is what this caps at one message a port. A SysEx's own wait is
-            JUCE's, as it was before. */
+            A BUDGET A PORT, SO A PORT THAT DOES NOT TAKE MESSAGES CANNOT HOLD
+            THE QUIT FOR LONG (the review of K4 revised the first cap, KR): one
+            pass over what is in hand, nothing retried here, and a port whose
+            sends have held the thread `budget` in all is sent nothing more in
+            this pass. A device that has gone answers its send with an error at
+            once; a driver that says it is not ready is retried by JUCE itself,
+            fifty times a millisecond's sleep apart on Windows
+            (juce_Midi_windows.cpp) - most of a second for one message at the
+            default timer - so a dead port costs its budget and at most one
+            message more. A port that is only slow gets every note-off its
+            budget covers, which a single-message cap had taken for dead. What
+            no budget can bound is one call that never returns: a cue's SysEx
+            JUCE waits on for good. */
         std::deque<Outgoing> remaining;
 
         {
@@ -316,12 +360,14 @@ namespace wfg::midi
                                                 { return deviceFor (portId) != nullptr; });
         }
 
-        constexpr auto givingUp = std::chrono::milliseconds (40);
-        std::vector<std::string> notTaking;
+        constexpr auto budget = std::chrono::milliseconds (250);
+        std::map<std::string, std::chrono::steady_clock::duration> spent;
 
         for (const auto& item : remaining)
         {
-            if (std::find (notTaking.begin(), notTaking.end(), item.port) != notTaking.end())
+            auto& used = spent[item.port];
+
+            if (used >= budget)
                 continue;
 
             const auto device = deviceFor (item.port);
@@ -331,21 +377,17 @@ namespace wfg::midi
 
             const auto began = std::chrono::steady_clock::now();
             deliver (*device, item.bytes);
-
-            if (item.bytes.size() <= 3 && std::chrono::steady_clock::now() - began > givingUp)
-                notTaking.push_back (item.port);
+            used += std::chrono::steady_clock::now() - began;
         }
     }
 
-    void MidiSender::deliver (juce::MidiOutput& device, const Bytes& bytes)
+    void MidiSender::deliver (Output& device, const Bytes& bytes)
     {
-        const juce::MidiMessage message { bytes.data(), static_cast<int> (bytes.size()) };
-
-        device.sendMessageNow (message);
+        device.sendNow (bytes);
         delivered.fetch_add (1, std::memory_order_relaxed);
 
         if (auto* watching = tap.load (std::memory_order_acquire); watching != nullptr && watching->isListening())
             watching->record (monitor::Direction::out, monitor::Medium::midi, monitor::Road::midi,
-                              device.getName().toStdString(), bytes.data(), bytes.size());
+                              device.name(), bytes.data(), bytes.size());
     }
 }

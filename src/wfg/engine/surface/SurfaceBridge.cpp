@@ -55,6 +55,9 @@ namespace wfg::surface
 
         constexpr std::size_t stripsPerBank = 8;
 
+        /*  The node a strip taken for a lane rides (namespace draft §20.9, DJ). */
+        constexpr std::string_view laneRideAddress = "/godot/surface/laneRide";
+
         /*  THE DEVICE ID ON EVERY SYSEX, whatever the surface says it is: both
             of the D700's banks accept 0x14 (protocol §2.1), and the bank is the
             port a message goes to, never the id inside it. */
@@ -501,6 +504,17 @@ namespace wfg::surface
             //  The hand.
             bool handDown = false;          // the fader's touch sense
             std::string touched;            // the address this surface's node.touch holds for it
+
+            /*  A HAND ON A LANE'S FADER WHEN THE LANE LET IT GO (2026-10-02,
+                the review of K4, namespace draft §23.15): `onLane` while the
+                hand is down on a strip riding the lane's node; `deaf` once that
+                target went from under it - a double Esc frees the fader in its
+                own drain - until the hand lifts. Deaf, the fader's positions
+                write nothing: the hand was riding the lane, and its next move
+                would otherwise be a write to the DCA or clip the strip rides
+                again, at the lane's level. */
+            bool onLane = false;
+            bool deaf = false;
             bool gateDown = false;          // a V-Pot press held on a sampler strip
             int padOrder = 0;               // midiPads: when this pad went down; 0 while it is up
             Write pending;
@@ -716,6 +730,8 @@ namespace wfg::surface
                 strip.gateDown = false;
                 strip.padOrder = 0;
                 strip.handDown = false;
+                strip.onLane = false;
+                strip.deaf = false;
                 strip.touched.clear();
                 strip.pending = Write {};
             }
@@ -1278,6 +1294,25 @@ namespace wfg::surface
                         it all the same, since `handDown` holds the motor, and
                         what it moves goes to the new node: a ride with no
                         touch, which starts nothing. */
+                    /*  AND A HAND THAT WAS RIDING THE LANE GOES DEAF when the
+                        lane lets the fader go under it (see `Strip::deaf`):
+                        what the strip rides now never hears that hand, which
+                        has to lift and land again to move it. Whatever it
+                        asked this tick before the target moved is dropped. */
+                    if (strip.handDown)
+                    {
+                        if (targetOf (strip) == laneRideAddress)
+                        {
+                            strip.onLane = true;
+                        }
+                        else if (strip.onLane)
+                        {
+                            strip.onLane = false;
+                            strip.deaf = true;
+                            strip.pending = Write {};
+                        }
+                    }
+
                     if (! strip.handDown || strip.touched.empty() || targetOf (strip) == strip.touched)
                         continue;
 
@@ -1341,6 +1376,14 @@ namespace wfg::surface
                             -11.08, and REC kept that. The bridge's own motor
                             reckoning stands. A surface with no touch sense has
                             only hands to send positions, so every one counts. */
+                        /*  A DEAF HAND (`Strip::deaf`) is where the fader is,
+                            and nothing more, until it lifts. */
+                        if (strip->deaf)
+                        {
+                            strip->motor = event.value;
+                            break;
+                        }
+
                         if (box.topology.hasTouch && ! strip->handDown)
                         {
                             /*  BUT STILL WHERE THE FADER IS: a report well away
@@ -1427,8 +1470,17 @@ namespace wfg::surface
                 if (laneState().waiting)
                 {
                     submit (commandFrom (box.origin, "lane.take", { osc::Value::string (strip.id) }));
+
+                    /*  ON THE LANE FROM THIS TOUCH: should the lane not have the
+                        fader by the time its target is read again - the take
+                        refused, or freed in the same drain by a double Esc -
+                        the hand goes deaf (`Strip::deaf`) rather than moving
+                        what the strip rode before. */
+                    strip.onLane = true;
                     return;
                 }
+
+                strip.onLane = targetOf (strip) == laneRideAddress;
 
                 if (const auto& target = targetOf (strip); ! target.empty())
                 {
@@ -1443,6 +1495,8 @@ namespace wfg::surface
                 return;
 
             strip.handDown = false;
+            strip.onLane = false;
+            strip.deaf = false;
 
             /*  What was TOUCHED is what is released, which is not always the
                 target now: a handover may have moved it (followTouches). */

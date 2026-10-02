@@ -985,6 +985,101 @@ TEST_CASE ("surface bridge: while a lane waits a touch takes the fader, and with
     CHECK (desk.submitted[0].command == "lane.stop");
 }
 
+TEST_CASE ("surface bridge: a hand on a lane's fader when a double Esc lets it go writes nothing to what the strip rides next, until it lifts")
+{
+    /*  THE HAND OUTLIVES THE ASSOCIATION (2026-10-02, the review of K4,
+        namespace draft §23.15). A double Esc frees the fader in its own drain
+        (KO), and the strip's target goes back to its DCA's trim from the next
+        snapshot. A hand still on the fader then was a hand moving the DCA: its
+        next position became a `node.set` on the trim, at the level it had been
+        riding the lane at - a DCA silently down for the next GO. So a strip
+        whose hand was on the lane's ride when the ride went is DEAF until the
+        hand lifts; touched again, it rides what it rides now. */
+    Desk desk;
+
+    cue::LaneTable lanes;
+    desk.parameters.setLanes (&lanes);
+
+    const auto mcu = desk.makeSurface ("mcu", "Desk");
+    const auto band = desk.makeDca ("Band");
+    const auto& strips = desk.strips[mcu];
+    desk.pin (strips[1], band);
+
+    const auto list = desk.document.createList ("Sound").id;
+    const auto bed = desk.document.createCue (list, 0, "media", "Bed").id;
+    const auto trim = "/godot/dca/" + band + "/trim";
+    const auto target = "/godot/slot/" + strips[1] + "/target";
+
+    desk.declare ({ desk.spec (mcu, "mcu", { "PORTMCU1" }) }, { { "PORTMCU1", plugged ("Desk port") } });
+    desk.ticks (3);
+    REQUIRE (desk.published (target) == trim);
+
+    lanes.arm (bed);
+
+    SUBCASE ("the hand touched the ride")
+    {
+        lanes.take (strips[1]);
+        desk.ticks (2);
+        REQUIRE (desk.published (target) == "/godot/surface/laneRide");
+
+        desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x7f });
+        desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x30 });
+        desk.tickOnce();
+    }
+
+    SUBCASE ("the hand that took the fader never lifted")
+    {
+        desk.ticks (1);
+        desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x7f });         // the touch that takes it (DF)
+        lanes.take (strips[1]);                                 // what its `lane.take` does, in the drain
+        desk.tickOnce();
+
+        REQUIRE_FALSE (desk.submitted.empty());
+        CHECK (desk.submitted.back().command == "lane.take");
+        desk.ticks (2);
+        REQUIRE (desk.published (target) == "/godot/surface/laneRide");
+
+        desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x30 });
+        desk.tickOnce();
+    }
+
+    //  The double Esc's `freeLane`: the strip rides the trim again from the next snapshot.
+    lanes.free();
+    desk.tickOnce();
+    REQUIRE (desk.published (target) == trim);
+    desk.clear();
+
+    const auto wroteTheTrim = [&desk, &trim]
+    {
+        for (const auto& event : desk.submitted)
+            if (event.command == "node.set" && ! event.args.empty() && event.args[0].getString() == trim)
+                return true;
+
+        return false;
+    };
+
+    //  The hand still down, moving: deaf.
+    desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x50 });
+    desk.tickOnce();
+    desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x20 });
+    desk.ticks (2);
+
+    CHECK_FALSE (wroteTheTrim());
+    CHECK (desk.dcas.trimOf (band) == doctest::Approx (0.0));
+
+    //  Lifted, then touched and moved again: the trim follows the hand.
+    desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x00 });
+    desk.ticks (2);
+    CHECK_FALSE (wroteTheTrim());
+
+    desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x7f });
+    desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x48 });
+    desk.ticks (2);
+
+    CHECK (wroteTheTrim());
+    CHECK (desk.dcas.trimOf (band) < 0.0);
+}
+
 TEST_CASE ("surface bridge: the V-Pot press is a sampler strip's gate, and puts a DCA back to nought")
 {
     Desk desk;

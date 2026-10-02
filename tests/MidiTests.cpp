@@ -1402,19 +1402,34 @@ TEST_CASE ("midi send queue: the show closing ends every note a cue started, onc
         CHECK (last.front().bytes == midi::Bytes { 0x91, 60, 100 });
     }
 
-    SUBCASE ("one note-off a key, after what is still waiting")
+    SUBCASE ("one note-off a key, after the cues' messages still waiting")
     {
         leaves (queue, cueMessage (port, { 0x91, 60, 100 }, "RUN00001"));
         leaves (queue, cueMessage (port, { 0x91, 60, 80 }, "RUN00002"));
         leaves (queue, cueMessage (port, { 0x92, 64, 100 }));
-        queue.push ({ port, { 0xF0, 0x7E, 0x7F, 0xF7 }, {}, false });   // a surface's SysEx
+        queue.push (cueMessage (port, { 0xB1, 7, 0 }));                  // a cue's blackout
 
         const auto last = queue.takeAllForClose (everyPort);
 
         REQUIRE (last.size() == 3u);
-        CHECK (last[0].bytes == midi::Bytes { 0xF0, 0x7E, 0x7F, 0xF7 });
+        CHECK (same (last[0], cueMessage (port, { 0xB1, 7, 0 })));
         CHECK (same (last[1], noteOffFor (port, 0x81, 60)));
         CHECK (same (last[2], noteOffFor (port, 0x82, 64)));
+    }
+
+    SUBCASE ("a surface's traffic still waiting is dropped, so nothing holds the note-offs back")
+    {
+        /*  The review of K4: a surface's display SysEx can hold the thread for
+            as long as JUCE waits for its port, and the surface is closing with
+            the show. A cue's message still goes. */
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+        queue.push ({ port, { 0xF0, 0x00, 0x00, 0x66, 0x14, 0x12, 0x00, 0x41, 0xF7 }, {}, false });
+        queue.push ({ port, { 0x90, 0x5D, 0x7F }, {}, false });
+
+        const auto last = queue.takeAllForClose (everyPort);
+
+        REQUIRE (last.size() == 1u);
+        CHECK (same (last[0], noteOffFor (port, 0x81, 60)));
     }
 }
 
@@ -1692,4 +1707,166 @@ TEST_CASE ("midi: a double Esc on a sender with nothing bound is harmless")
 
     CHECK (outputs.sendForRun ("RUN00001", "PRT00001", { 0x90, 60, 100 }) == midi::sendError::noPort);
     CHECK (outputs.dropQueued() == 0u);
+}
+
+//==============================================================================
+/*  THE SENDING THREAD ITSELF, STARTED AND STOPPED (2026-10-02, the review of
+    K4, namespace draft §23.15). `midi::Output` is the seam: the sender's own
+    thread sends to a fake port, so the close is driven through `start` and
+    `stop` as the product drives it - not by hand. */
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <mutex>
+#include <thread>
+
+namespace
+{
+    /*  A port that records what reached it, and can be made slow: each send
+        holds the sending thread for `delayMs`, as a driver retrying a port
+        that says it is not ready does. */
+    struct FakePort final : midi::Output
+    {
+        void sendNow (const midi::Bytes& bytes) override
+        {
+            if (const auto ms = delayMs.load(); ms > 0)
+                std::this_thread::sleep_for (std::chrono::milliseconds (ms));
+
+            const std::lock_guard<std::mutex> lock { wireLock };
+            received.push_back (bytes);
+        }
+
+        std::string name() const override { return "Fake synth"; }
+
+        std::vector<midi::Bytes> wire() const
+        {
+            const std::lock_guard<std::mutex> lock { wireLock };
+            return received;
+        }
+
+        std::size_t count (const midi::Bytes& bytes) const
+        {
+            const auto all = wire();
+            return static_cast<std::size_t> (std::count (all.begin(), all.end(), bytes));
+        }
+
+        std::atomic<int> delayMs { 0 };
+        mutable std::mutex wireLock;
+        std::vector<midi::Bytes> received;
+    };
+
+    /*  Until the sending thread has sent `wanted` messages, or five seconds. */
+    bool waitForSent (const midi::MidiSender& outputs, std::size_t wanted)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (5);
+
+        while (outputs.sent() < wanted)
+        {
+            if (std::chrono::steady_clock::now() > until)
+                return false;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (1));
+        }
+
+        return true;
+    }
+}
+
+TEST_CASE ("midi sender: stopping it ends a note a cue left down, once, and sends nothing a synth never played")
+{
+    midi::MidiSender outputs;
+    const auto synth = std::make_shared<FakePort>();
+    const auto other = std::make_shared<FakePort>();
+    outputs.attach ("PRT00001", synth);
+    outputs.attach ("PRT00002", other);
+    outputs.start();
+
+    REQUIRE (outputs.sendForRun ("RUN00001", "PRT00001", { 0x91, 60, 100 }).empty());   // held
+    REQUIRE (outputs.sendForRun ("RUN00002", "PRT00001", { 0x91, 62, 100 }).empty());
+    REQUIRE (outputs.sendForRun ("RUN00002", "PRT00001", { 0x81, 62, 0 }).empty());     // ended
+    REQUIRE (outputs.send ("PRT00001", { 0x90, 0x5D, 0x7F }).empty());                 // a surface's LED
+    REQUIRE (waitForSent (outputs, 4));
+
+    outputs.stop();
+
+    const auto wire = synth->wire();
+    REQUIRE (wire.size() == 5u);
+    CHECK (wire.back() == midi::Bytes { 0x81, 60, 0 });
+    CHECK (synth->count ({ 0x81, 60, 0 }) == 1u);
+    CHECK (synth->count ({ 0x81, 62, 0 }) == 1u);                  // the cue's own, and no more
+    CHECK (synth->count ({ 0x80, 0x5D, 0 }) == 0u);
+    CHECK (other->wire().empty());
+
+    //  A second stop - the destructor's - sends nothing more.
+    outputs.stop();
+    CHECK (synth->wire().size() == 5u);
+}
+
+TEST_CASE ("midi sender: a slow port still gets every note-off at the close")
+{
+    /*  A port that takes 45 ms a message is slow, not dead: the review's case
+        against K4's first cap, which took any short message over 40 ms as a
+        dead port and sent it nothing more - one note-off of three. */
+    midi::MidiSender outputs;
+    const auto synth = std::make_shared<FakePort>();
+    outputs.attach ("PRT00001", synth);
+    outputs.start();
+
+    for (const std::uint8_t key : { std::uint8_t { 60 }, std::uint8_t { 64 }, std::uint8_t { 67 } })
+        REQUIRE (outputs.sendForRun ("RUN00001", "PRT00001", { 0x91, key, 100 }).empty());
+
+    REQUIRE (waitForSent (outputs, 3));
+    synth->delayMs = 45;
+
+    outputs.stop();
+
+    CHECK (synth->count ({ 0x81, 60, 0 }) == 1u);
+    CHECK (synth->count ({ 0x81, 64, 0 }) == 1u);
+    CHECK (synth->count ({ 0x81, 67, 0 }) == 1u);
+}
+
+TEST_CASE ("midi sender: a port that does not take messages holds the close for a bounded time")
+{
+    /*  Ten notes held on a port that now takes 100 ms a message: the close
+        gives that port its budget and moves on, rather than a second. */
+    midi::MidiSender outputs;
+    const auto synth = std::make_shared<FakePort>();
+    outputs.attach ("PRT00001", synth);
+    outputs.start();
+
+    for (std::uint8_t key = 60; key < 70; ++key)
+        REQUIRE (outputs.sendForRun ("RUN00001", "PRT00001", { 0x91, key, 100 }).empty());
+
+    REQUIRE (waitForSent (outputs, 10));
+    synth->delayMs = 100;
+
+    const auto began = std::chrono::steady_clock::now();
+    outputs.stop();
+    const auto took = std::chrono::steady_clock::now() - began;
+
+    const auto offs = synth->wire().size() - 10u;
+    CHECK (offs >= 1u);
+    CHECK (offs < 10u);
+    CHECK (took < std::chrono::milliseconds (700));
+}
+
+TEST_CASE ("midi sender: started and stopped with nothing to send, it always returns")
+{
+    /*  THE LOST WAKE-UP (the review of K4). `stop` used to clear `running`
+        and notify without the queue lock, while the sending thread reads
+        `running` under it before it waits: a clear landing between that read
+        and the wait was never heard, and the join waited for ever. A net -
+        the window is a few instructions wide and no loop of this length is
+        sure to hit it; what makes it impossible is the lock (MidiSender.cpp). */
+    for (int round = 0; round < 200; ++round)
+    {
+        midi::MidiSender outputs;
+        outputs.attach ("PRT00001", std::make_shared<FakePort>());
+        outputs.start();
+        outputs.stop();
+    }
+
+    midi::MidiSender never;
+    never.stop();                                   // never started: returns
+    CHECK (never.sent() == 0u);
 }

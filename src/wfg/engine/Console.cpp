@@ -5213,6 +5213,14 @@ namespace
             }
 
             ticks.stop();
+
+            /*  THE NOTES A CUE LEFT DOWN ARE ENDED NOW (2026-10-02, the review
+                of K4, namespace draft §23.15), not when `midiOut` goes out of
+                scope: the tick thread that feeds it has just stopped, and what
+                follows - the save settled, the audio device closed, the
+                servers stopped - can take seconds a held note would ring
+                through. The destructor's own `stop` then does nothing. */
+            midiOut.stop();
         }
 
         /*  A CLEAN EXIT TIDIES `recovery/` AWAY ONLY WHEN THERE IS NOTHING IN IT

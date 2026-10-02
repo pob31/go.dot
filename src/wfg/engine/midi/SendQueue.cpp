@@ -162,11 +162,18 @@ namespace wfg::midi
     {
         auto out = takeAll();
 
-        /*  AFTER WHAT IS WAITING, not ahead of it as the double Esc puts them:
-            nothing is dropped here, so a note-on still queued leaves at the
-            close, and its note-off has to follow it. */
+        /*  A SURFACE'S TRAFFIC IS DROPPED (2026-10-02, the review of K4): the
+            surface closes with the show, and a display's SysEx queued ahead
+            would hold the note-offs back for as long as its port takes it. */
+        out.erase (std::remove_if (out.begin(), out.end(),
+                                   [] (const Outgoing& item) { return ! item.cue; }),
+                   out.end());
+
+        /*  AFTER WHAT A CUE STILL HAD WAITING, not ahead of it as the double
+            Esc puts them: a cue's message is not dropped here, so a note-on
+            still queued leaves at the close, and its note-off has to follow. */
         for (const auto& message : out)
-            if (message.cue && reaches (message.port))
+            if (reaches (message.port))
                 ledger.observe (message);
 
         for (auto& release : ledger.releaseAll())

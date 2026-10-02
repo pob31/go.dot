@@ -220,7 +220,9 @@ lane table; what it cannot check is a synth on a cable and a motor fader.
 18. On the D700, a fader taken for a lane (Rec in the waveform, then touch the fader), a pass
     running with the hand on it. **Double Esc**: the fader goes back to what it rode before it was
     taken (its DCA, or the sampler clip on it) - no move to the lane's start first - and the strip's
-    screen no longer reads `lane`. **Esc** instead: the fader stays on the lane, and Rec starts the
-    next pass with nothing taken again.
+    screen no longer reads `lane`. With the hand still on the fader, moving it moves nothing - the
+    DCA's trim stays where it was - and the motor flies to the DCA's level only once the hand lifts.
+    **Esc** instead: the fader stays on the lane, and Rec starts the next pass with nothing taken
+    again.
 19. A media cue with a reverb insert, its lane recorded: **Rec pressed again** ends the pass and the
     reverb's tail rings out - it is not cut, as it was before K4.

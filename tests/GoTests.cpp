@@ -41,6 +41,8 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/FxRows.h>
+#include <wfg/engine/cue/LaneCommands.h>
+#include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/audio/CueMatrix.h>
@@ -10939,6 +10941,58 @@ TEST_CASE ("persistent: a kill leaves it silent, and a load-to-time brings it ba
 
     rig.step();
     rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    CHECK (rig.liveBed() != nullptr);
+}
+
+TEST_CASE ("persistent: a bed whose lane pass the hand ends is stopped, not killed, and the next GO puts it back")
+{
+    /*  K4's KP, pinned (the review, 2026-10-02). The hand's end of a pass was a
+        kill, and decision S suspends a persistent cue for the session when a
+        run of it is killed - so recording a lane on a bed took the bed out of
+        the show until a load-to-time. It is the pane's stop now: the run is
+        not killed, nothing is suspended, and the next step puts the bed back
+        as it puts back one that ended on its own. */
+    PersistentRig rig;
+
+    cue::LaneTable lanes;
+    cue::registerLaneCommands (rig.engine.commands(), rig.engine, rig.runner, rig.document, lanes);
+    rig.runner.setLanes (&lanes);
+
+    //  The table alone stands for the fader: a pass asks for nothing more.
+    lanes.arm (rig.bed);
+    lanes.take ("STRP0001");
+
+    REQUIRE (rig.submitAndTick ("lane.record").rejected == 0);
+    const auto pass = lanes.run;
+    REQUIRE_FALSE (pass.empty());
+
+    rig.audio.completeArms (rig.engine);
+    rig.settle (5);
+    REQUIRE (rig.runs.find (pass) != nullptr);
+    REQUIRE_FALSE (rig.runs.find (pass)->isFinished());
+
+    REQUIRE (rig.submitAndTick ("lane.stop").rejected == 0);
+    rig.settle (3);
+
+    /*  The audio side reports it stopped, as the kill case has it do. */
+    if (! rig.runs.find (pass)->isFinished())
+    {
+        REQUIRE (rig.engine.submit (origin::engine, "run.ended", { osc::Value::string (pass) }));
+        rig.tickOnce();
+    }
+
+    REQUIRE (rig.runs.find (pass)->isFinished());
+    CHECK_FALSE (rig.runs.find (pass)->killed);
+    CHECK (rig.liveBed() == nullptr);
+
+    rig.step();
+    rig.settle();
+
+    CHECK_FALSE (rig.runner.isSuspended (rig.bed));
+
     rig.audio.completeArms (rig.engine);
     rig.settle();
 

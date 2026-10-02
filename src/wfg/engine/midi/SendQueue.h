@@ -136,9 +136,10 @@ namespace wfg::midi
         /** Everything still waiting, for the shutdown's last delivery. */
         std::deque<Outgoing> takeAll();
 
-        /*  THE SHOW CLOSING (2026-10-02, K4, namespace draft §23.15): everything
-            still waiting, in order, and after it one note-off for every key a
-            cue started and nothing ended - the double Esc's `0x8n key 0`, as no
+        /*  THE SHOW CLOSING (2026-10-02, K4, namespace draft §23.15): every cue
+            message still waiting, in order - a surface's is dropped, since the
+            review of K4 - and after it one note-off for every key a cue
+            started and nothing ended - the double Esc's `0x8n key 0`, as no
             cue's - so a synth Go.dot played is not left holding a note when the
             port closes, and a synth it never played is sent nothing. A waiting
             cue message is counted into the record first, as it will leave, but
