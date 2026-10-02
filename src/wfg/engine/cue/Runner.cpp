@@ -4306,7 +4306,13 @@ namespace wfg::cue
             the sound goes. `done` here would publish a silence that has not
             happened yet. ASKED, and by whom (2026-10-01, namespace draft §24):
             the GO of the cue doing the stopping, so a Doh can tell its own
-            GO's stop from another hand's. */
+            GO's stop from another hand's.
+
+            A GROUP SAYS SO TOO, and its scene plays on regardless (2026-10-02,
+            K3, namespace draft §23.14): this job holds the group to the fade's
+            end as `enforceStops` holds a voice, and the group's own job waits
+            for it before stopping any member (`fadingToItsStop`). Not an abort,
+            so no `stopEndsWait` on the group (K2, JX). */
         if (stopWhenDone)
             if (auto* stopping = runs.find (targetId))
                 stopping->askStop (goOfRun (self));
@@ -7225,7 +7231,15 @@ namespace wfg::cue
                     draft §23.6). The hand-back asked only whether the target's
                     stop had been issued: the running pane killing the stop cue
                     and its target in one drain handed the killed target back to
-                    `playing`, and the kill was lost - the cue played on. */
+                    `playing`, and the kill was lost - the cue played on.
+
+                    STILL NEVER A GROUP SINCE K3 (2026-10-02, §23.14), though
+                    the group's job now waits for this fade before it asks its
+                    members anything: handed back by a hook, with no record, a
+                    group would be `playing` live and `stopping` in a replay,
+                    and a GO on its row decides between the two (`fireStandby`).
+                    So the stop it was asked lands now, gracefully - the job
+                    that held it to the fade's end is gone. */
                 /*  AND NOT A VOICE DOH! TOOK BACK (2026-10-01, namespace
                     draft §24): it is on its way out whatever becomes of the run
                     that set this stop going. The Doh gave it no fade of its own
@@ -7965,7 +7979,28 @@ namespace wfg::cue
                                                || job.phase == groupPhase::members || job.phase == groupPhase::footer)
                                          && ! heardUnder (job.run, goOfRun (job.run));
 
-                if (job.phase != groupPhase::footer || ! graceful || givenBack)
+                /*  A FADE-AND-STOP IS A FADE UNTIL IT ARRIVES (2026-10-02, K3,
+                    namespace draft §23.14; the author: "Fade and stop is a fade
+                    behaviour, not a stop feature that just stops"). A stop cue's
+                    `fade`, or a fade cue that stops when done, marks the group
+                    `stopping` from its first tick - a cue on its way out says
+                    so - and this branch used to stop its members on the next:
+                    the scene ended at once, and only its level, already over
+                    nothing, moved for the duration. Now, while such a job holds
+                    the group and its stop is still ahead, the job plays the
+                    scene on as it would - members sounding, the sequence
+                    advancing, under the fading level - and once the stop is due
+                    the branch below brings it down as any stop of the group
+                    does: members aborted (K2), footer run, under the level the
+                    fade has left at silence. The one path a cue's fade-and-stop
+                    takes, where `enforceStops` holds the voice to the fade's
+                    end. An abort on it or above it lets go at once
+                    (`fadingToItsStop`); a preparation is given back as before. */
+                const auto fading = graceful && ! givenBack
+                                      && job.phase != groupPhase::preparing && job.phase != groupPhase::prepared
+                                      && fadingToItsStop (*run);
+
+                if (! fading && (job.phase != groupPhase::footer || ! graceful || givenBack))
                 {
                     /*  A GROUP THAT NEVER STARTED HAS NO FOOTER (2026-09-30,
                         namespace draft §23). Stopped while the horizon was still
@@ -9155,6 +9190,54 @@ namespace wfg::cue
         }
 
         return false;
+    }
+
+    bool Runner::fadingToItsStop (const Run& group) const
+    {
+        /*  HELD WHILE ITS STOP IS STILL AHEAD. A `hard` stop is a fade of no
+            length, due on the tick it was asked, and so never holds: the scene
+            stops at once, as it always did. A fade that took over from a
+            fade-and-stop inherits the stop's tick, so riding the level back up
+            keeps the scene going to that tick, as it keeps a cue. */
+        const auto held = std::any_of (running.begin(), running.end(),
+                                       [this, &group] (const FadeJob& job)
+                                       {
+                                           return job.stopWhenDone && job.heldRun() == group.id
+                                                    && currentTick < job.stopsAtTick;
+                                       });
+
+        if (! held)
+            return false;
+
+        /*  BUT AN ABORT DOES NOT WAIT FOR A FADE, on the group or anywhere
+            above it. Esc, the pane's stop and the stop a stopping scene's job
+            sends each member all mark what they stop (`stopEndsWait`, K2), a
+            kill marks it `skipFooter`, a Doh `takenBack` - all handler-written.
+            Above, because a stopping scene leaves a member already on its way
+            out to finish (`endMember`): without the walk, Esc on an act left a
+            scene a stop cue was fading inside it playing on to the fade's end,
+            its sequence launching members after the press. Bounded by the
+            table, as `underAKill` is; a finished parent ends the walk, as it
+            ends `stopEveryRoot`'s (JV). */
+        const auto* at = &group;
+
+        for (std::size_t guard = 0; at != nullptr && guard <= runs.all().size(); ++guard)
+        {
+            if (at->stopEndsWait || at->skipFooter || at->takenBack)
+                return false;
+
+            if (at->parent.empty())
+                break;
+
+            const auto* above = runs.find (at->parent);
+
+            if (above == nullptr || above->isFinished())
+                break;
+
+            at = above;
+        }
+
+        return true;
     }
 
     bool Runner::beingKilled (const Run& run) const

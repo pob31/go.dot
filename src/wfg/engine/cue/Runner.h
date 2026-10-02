@@ -1522,6 +1522,14 @@ namespace wfg::cue
             the same (namespace draft §23.2). */
         bool underAKill (const Run& run) const;
 
+        /*  WHETHER A FADE-AND-STOP IS STILL FADING A GROUP DOWN (2026-10-02,
+            K3, namespace draft §23.14): a job that ends in a stop holds it - a
+            stop cue's `fade`, a fade cue that stops when done - its stop not
+            yet due, and no abort on the group or above it. While it holds,
+            the group's job plays the scene on under the fading level instead
+            of stopping its members. Hook state, read by a hook. */
+        bool fadingToItsStop (const Run& group) const;
+
         /*  WHETHER A KILL HAS REACHED A RUN AND STILL STANDS: its own
             (`skipFooter`, which only `run.kill` and a double Esc write, with
             the stop it asked - a seek withdraws that) or one above it. Since

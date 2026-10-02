@@ -1703,7 +1703,10 @@ stays deferred, as §4.4 itself says.)* *(2026-09-30, H1: as built, a group aske
 members whichever way it was asked, so a group inside a group skipped its footer under a stop cue
 and under Esc. It now stops them when it was stopped and kills them only when it was killed, §23.2.)*
 *(2026-10-01: Go Doh! is no longer deferred - PRD §3.32 specifies it, §24 builds it, and the
-desktop's Doh! button sits directly left of PANIC.)*
+desktop's Doh! button sits directly left of PANIC.)* *(2026-10-02, K3: "per the verb" was not true of
+`fade`, which stopped the members at once and faded only the group's level over the duration. A
+fade-and-stop now plays the scene on under its fading level and stops it, footer and all, at the
+fade's end, §23.14.)*
 
 ### 12.5 Groups — `/godot/cue/<id>` grows, and two children appear
 
@@ -12433,6 +12436,8 @@ nothing a kill has reached launches or fires after it, `Runner::dropOutputs`, §
 descend into a live group (`fireStandby`, `prepareStandby`) pass over one that is stopping and make
 a fresh run: a member spawned into the dying group would be killed by it on the next tick, a GO that
 made no sound. Before, the group was gone a tick after Esc and a GO entered it afresh anyway.
+*(2026-10-02, K3: and for as long as a stop cue's fade-and-stop, which now plays the scene on to the
+fade's end, §23.14 - a GO on its row starts a fresh run beside it, read from the code.)*
 
 The desktop's Esc notice says the number: *"Esc: every cue fading out over 1 s, footers run - Esc
 again cuts at once"*.
@@ -13203,7 +13208,11 @@ asked. `run.kill` marks a run to skip its footer (`skipFooter`) and as the opera
   fade (and under silence at once, for a `hard` stop cue - which is why a mic member of a group a
   hard stop cue is aimed at is stopped rather than killed, and rings behind a level already at
   silence). Recorded as a known gap; out of this stage, and the author's to rule on. *(2026-10-02,
-  K2: and the members it stops at once owe no post-wait, §23.13, JX.)*
+  K2: and the members it stops at once owe no post-wait, §23.13, JX.)* *(2026-10-02, K3: ruled and
+  changed - "Fade and stop is a fade behaviour, not a stop feature that just stops". The scene now
+  plays on under its fading level, members sounding and its sequence advancing, and is stopped at the
+  fade's end - its members aborted, its footer run under the silence the fade left; a fade cue that
+  stops when done the same; a `hard` stop cue unchanged, §23.14, KJ-KN.)*
 - **Under Esc a member's post-wait still runs out** before its group's footer: Esc is the path of
   normal completion entered early, and a post-wait is part of how a member completes. A member that
   has just begun a thirty-second post-wait keeps its voice and its slots, and its scene waits for
@@ -15057,7 +15066,7 @@ H5, but with the mount's policy rather than the bad word) and says so.
 | A member a stopping scene's job reaches (`run.stop` or `run.kill`, its record) - whoever stopped the scene, a stop cue included | yes | none begun; one under way ends with `run.done` |
 | `audio.clockMoved` (stops every root the Esc way) | yes | none begun; one under way ends |
 | A stop cue aimed at a CUE, `hard` or `fade` (`fireStop` through `beginFade`) | no | kept: begun when the cue ends; one under way keeps its deadline |
-| A stop cue aimed at a SCENE, `hard` or `fade` | no, on the scene | the scene's own post-wait kept - it still spaces what follows; its members are aborted by its job (row 4) |
+| A stop cue aimed at a SCENE, `hard` or `fade` | no, on the scene | the scene's own post-wait kept - it still spaces what follows; its members are aborted by its job (row 4) - *at the fade's end for `fade` (2026-10-02, K3, §23.14)* |
 | A fade cue that ends in a stop (`beginFade`) | no | kept |
 | A speed fade that ends in a stop (`beginRateFade`) | no | kept |
 | A sampler clip's release, the second press on its strip (`beginReleaseFade`) | no | kept |
@@ -15198,6 +15207,134 @@ code before the review's cases, with JV's drop walk put back as it was for the s
 post-wait - the footer at the end of the panic fade, not after the wait - and the member's reverb
 left to ring out rather than cut; and a stop cue fading an ambience bed inside an automatic
 sequence - the next cue after the bed's post-wait, counted from the fade's end.
+
+### 23.14 A fade-and-stop on a scene is a fade (K3)
+
+**The ruling.** The author, 2026-10-02 (6a): *"Fade and stop is a fade behaviour, not a stop
+feature that just stops (microfade to prevent a click only)."* It settles the gap §23.2 recorded and
+left to him ("Not changed", the first item). The PRD already says it: §3.8 names the mode
+**fade-and-stop (duration + curve)** beside **hard stop**, and "targeting a group stops it
+recursively by default" - a fade, then the stop, recursively. The build did the stop first.
+
+**The gap.** A stop cue with the `fade` verb aimed at a group - or a fade cue with "stop when done"
+- marks the group `stopping` from the first tick of the fade (`beginFade`, a handler: a cue on its
+way out says so). The group's job read that state on the next tick and stopped every member, each
+running its own ending; the footer followed at once. What moved over the duration was the group's
+own level, over members that had already gone and under a footer already running. A ten-second
+fade-out of a scene was a hard stop with a ten-second fade of nothing.
+
+**The fix: the hold a cue already has, in the group's job.** A cue's fade-and-stop is `stopping`
+from the first tick too, and `enforceStops` holds its voice until the fade's job lands the stop at
+the end. A group has no voice: its stop is its job's stopping branch (`Runner::advanceGroups`), so
+the hold goes there. While a job that ends in a stop holds the group and its stop is still ahead
+(`Runner::fadingToItsStop`: `stopWhenDone`, `heldRun()` the group, `currentTick < stopsAtTick`), the
+job passes over the stopping branch and runs the scene on exactly as it would: header, members,
+the sequence advancing, a member that ends handing over to the next, all under the group's level
+as the fade moves it. On the tick the stop falls due the hold is gone and the branch does what a
+stop of the group does: each member stopped with `run.stop` (an abort, K2's row 4 - no post-wait),
+then the footer, then the group's own `run.ended`, which keeps the group's post-wait (JX: the fade
+is the scene's authored ending; `stopEndsWait` is never set on the group by it). The level is
+already at silence a tick before the members are asked. One path for the stop cue's `fade` and the
+fade cue's "stop when done", since both are `beginFade` with `stopWhenDone`. A `hard` stop is a fade
+of no length, due on the tick it was asked, so it never holds: unchanged.
+
+**An abort does not wait for a fade.** The hold lets go at once when the group, or any unfinished
+run above it, carries an abort's handler-written mark: `stopEndsWait` (Esc, the pane's stop, the
+stop a stopping scene's job sends each member), `skipFooter` (a kill, a double Esc), or `takenBack`
+(Doh!). Above, because a stopping scene leaves a member that is already `stopping` to finish
+(`endMember`, EJ). Esc reaches the stop cue's own run as well, which lets the hold go by itself;
+the pane's stop on an act does not, and without the walk it left a scene a stop cue was fading
+inside the act playing on to the fade's end, the act's footer waiting behind it.
+
+**Before and after.**
+
+| What happens | Before K3 | Since K3 |
+|---|---|---|
+| A stop cue, `fade` over N s, on a playing scene | members stopped on the next tick, footer at once, the level fading over nothing | the scene plays on - members sounding, the sequence advancing - under a level fading over N s; at N s, its members stopped (aborted, K2), its footer run once under silence, its own post-wait kept |
+| A fade cue with "stop when done" on a scene | as above | as above: the same path |
+| A stop cue, `hard`, on a scene | stopped at once | unchanged |
+| The scene ends on its own during the fade | could not: it was already stopped | ends as it would, footer once; the stop cue's run ends at the fade's end, with nothing left to stop |
+| Esc during the fade | the scene already gone | the hold lets go at once: the members' voices take the panic fade and stop at its end, the footer runs once after them - not at the stop cue's end |
+| A double Esc during the fade | the scene already gone (its footer had run) | cut at once, no footer |
+| The pane's stop on the scene during the fade | already stopping | stopped at once, gracefully, footer and all |
+| A stopping scene above it (Esc, the pane's stop, its own job's stop from further up) | already stopped | the hold lets go; the scene comes down innermost-first |
+| A stop cue aimed at the scene above it (an authored stop) | already stopped | the faded scene is left to its fade, as a cue a stop cue is fading is left to finish (EJ); the outer footer waits for it |
+| The stop cue's own run stopped or killed during the fade - the pane, the scene the stop cue sits in ending | nothing more to do | the scene is not handed back (EK) and its stop lands at once, gracefully |
+| A fade over it, riding the level back up | members already gone | the scene plays on at the new level and stops at the first stop's tick (the takeover rule, author 2026-09-06) - read from the code |
+| A GO on a row of the fading scene | a fresh scene (the old one gone a tick later) | a fresh run of the scene beside the fading one, as during Esc's panic fade (§21.3) - read from the code |
+| Doh! of the GO that fired the stop cue | the stop cue left to run (D1) | the same: the scene goes on fading and stops at its end |
+
+**What it changes for a replay.** Nothing in a handler. The group is `stopping` from the same record
+as before, in the session and in a replay alike; what moved is a hook's decision - when the group's
+job submits its members' `run.stop`, launches the next member, begins its footer - and every one of
+those is a logged record that a replay re-injects at its tick. An older log replays as the older
+session played, a new one as the new. No fixture holds a fade-and-stop on a group (`fade-stop` and
+`phase2` fade a media cue; `sampler`'s transport cue is `hard`), and every `wfg.replay.*` fixture
+(58, C and fr_FR) replays record for record. The black-box drivers that fire stop cues -
+`first-sound` (a fade-and-stop on a cue), `phase3` (`advance`), `phase6-sampler` (a hard stop on a
+bank), `phase9c-take` (the take verbs) - pass under both locales (8); none was re-recorded, and none
+exercises this path, which is the unit suite's.
+
+**Tests.** `GoTests` "stop levels: a fade-and-stop on a scene is a fade, and the scene stops at its
+end", on an automatic scene [Bed, a sounding media cue; One; Two; Three] with a footer [Release], and
+a stop cue aimed at it. Each subcase was run on the code before this change:
+
+- **over two seconds**: at one second the bed still `playing` and not stopped, the scene's level
+  between -70 and -50 dB, no footer; the bed finished 45 to 60 ticks later, stopped not killed, the
+  level at silence; the footer once; One never ran. Before: failed five checks - the bed already
+  stopped and finished, the footer already run, the level not yet at silence when the bed ended;
+- **guard - a hard stop** stops the bed within five ticks, the footer once: passed before and after;
+- **Esc during a four-second fade** (panic fade 1 s): the bed `playing` at Esc, then aborted
+  (`stopEndsWait`), not stopped at once, finished within sixty ticks, never killed; the scene done
+  twenty ticks after, the footer once, One never ran. Before: failed on the bed (already stopped);
+- **the scene finishing on its own** twenty ticks into a four-second fade: One and Three run, the
+  footer once, the bed never stopped, the stop cue's run ended by the fade's end. Before: failed
+  three - the sequence never carried on, and the bed was stopped;
+- **a fade cue with "stop when done"** on the scene: as the stop cue. Before: failed two;
+- **a double Esc during the fade**: the bed killed, no footer. Before: failed two (the bed only
+  stopped, the footer already run);
+- **the pane's stop on the scene during the fade**: stopped at once, the footer once - a guard,
+  passed before;
+- **pinned - the stop cue's own run killed during the fade**: the scene's stop lands at once, the
+  footer once (KM) - passed before, where the scene was already stopped;
+- **an abort on an outer scene** - Esc, then the pane's stop on it - while a stop cue fades the
+  scene inside it [Bed, After]: the bed down within sixty ticks, After never launched, both footers,
+  nothing killed. Before: failed on the bed (already stopped). With the walk above taken out of this
+  change, the pane's stop failed four (the bed not down in sixty ticks, the scenes not over, neither
+  footer) and Esc passed, for the reason given above.
+
+Under C and `fr-FR`, 168 assertions each. The whole of `GoTests`, `VerifiedCueTests`, `MicTests` and
+`SamplerTests` under C: 389 cases, 7581 assertions, green; and every other case whose name says
+stop, fade, Esc or Doh (131, 30961 assertions). No existing case changed: "Esc: a group a stop cue
+is fading out stops with everything else" and "... is never handed back, however long its member
+takes" pass as they were, Esc now letting go of the hold rather than finding the scene already down.
+
+**The decisions.**
+
+| | Decision | Whose |
+|---|---|---|
+| KJ | **A fade-and-stop on a group is a fade, then a stop**: the scene plays on as it would - members sounding, its sequence advancing, a member ending into the next - under the group's level fading over the duration; at the end it is stopped as a stop of the group stops it, its members aborted (K2) and its footer run; the group's own post-wait is kept (JX). The stop cue's `fade` and the fade cue's "stop when done" alike; `hard` unchanged | the author's, 2026-10-02 (6a); "the scene goes on" rather than freezing its sequence is the implementer's reading of it |
+| KK | **The footer plays under the level the fade left - silence**: the group's level trims every run under it, its footer's included, and is not put back for the footer. A footer releases channels and sends values; a sound written into it is part of the scene the designer faded out. Put back, it would jump from silence to full at the end of a fade-out | implementer's call; the author's to overrule |
+| KL | **An abort does not wait for the fade**: an abort's mark on the group or on any unfinished run above it - `stopEndsWait`, `skipFooter`, `takenBack` - lets the hold go at once. So Esc, a double Esc, the pane's stop and Doh! on the scene act as they would on any scene, and the pane's stop on a group being faded is a stop now - where the pane's stop on a CUE a fade-and-stop holds still waits for the fade (`enforceStops`, older; JZ's residue) | implementer's call |
+| KM | **A group is still never handed back (EK)**: when the fade's own run is stopped or killed during the fade, the group's stop lands at once, gracefully. A cue in the same place is handed back to `playing` - a hook writing state with no record, which a group cannot afford: a GO on its row decides between `playing` and `stopping` (`fireStandby`), so a group handed back live and left `stopping` in a replay would part the two | implementer's call; the asymmetry the author's to rule on with the hand-back itself (JZ) |
+| KN | **The hold is a hook's, and the state the handler's**: the group stays `stopping` from the fade's first tick - the readout says it is on its way out, a GO on its row starts the scene afresh, the horizon builds a fresh preparation - and only the group's job waits. No handler changed, so no log changes meaning | implementer's call |
+
+**Named limits.**
+
+- **A second stop cue during the fade inherits the first one's tick**: the takeover keeps the stop
+  already coming at the tick it was going to land on (`resolveTakeover`, author 2026-09-06), and
+  does so even when the new stop is sooner - a `hard` stop over a ten-second fade takes the level to
+  silence at once and leaves the scene playing silently to the tenth second. Older than K3, and the
+  same for a cue; the sooner of the two stops is the obvious mend, not made here.
+- **A preparation the horizon left under a scene being faded** is not given back by the horizon
+  while the scene is `stopping` (`leftBehind`: under a group being stopped, its own job gives it
+  back) - which it now does at the fade's end rather than a tick after the stop cue. Read from the
+  code; not a case found in a show.
+
+**Owed to the bench:** on the MADIface, a stop cue fading a scene of a bed and a running sequence
+over ten seconds - the sequence still advancing during the fade, the fade smooth, nothing heard
+when the members stop under silence at its end - and a footer that sends a value to the desk, sent
+once, at the end of the fade.
 
 ## 24. Doh! — taking back the last GO
 
