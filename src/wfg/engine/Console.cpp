@@ -3228,9 +3228,10 @@ namespace
             that it was named and absent is the interesting part. */
         for (const auto& [named, seconds] : *mediaInfo.durations())
         {
-            const auto file = target.isDirectory()
-                                ? target.getChildFile ("media").getChildFile (juce::String (named))
-                                : juce::File (juce::String (named));
+            const juce::File file { juce::String (wfg::audio::resolveMediaPath (
+                                      target.isDirectory() ? target.getChildFile ("media").getFullPathName().toStdString()
+                                                           : std::string(),
+                                      named)) };
 
             headerLines.push_back ("media " + named + " "
                                      + std::to_string (file.existsAsFile() ? file.getSize() : 0)

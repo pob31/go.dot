@@ -734,6 +734,71 @@ TEST_CASE ("media info: the files a show names, in the order it names them, each
     CHECK (audio::resolveMediaPath (std::string(), "/somewhere/rain.wav") == "/somewhere/rain.wav");
 }
 
+TEST_CASE ("media info: a performance finds its own sound first, then the show's around it")
+{
+    /*  A Show is the piece, a Performance each event of it, folded inside the
+        show's folder (author, 2026-10-01):
+
+            Hamlet/media/            the piece's sounds
+            Hamlet/Paris/media/      the performance's own
+
+        One resolver answers both, so the duration, the colours, the log line
+        and the file played cannot disagree about which file a cue means. */
+    ScratchFolder scratch;
+    const auto showMedia = scratch.folder.getChildFile ("Hamlet").getChildFile ("media");
+    const auto ownMedia = scratch.folder.getChildFile ("Hamlet").getChildFile ("Paris").getChildFile ("media");
+    REQUIRE (writeSilence (showMedia.getChildFile ("storm.wav"), 8000, 800));
+    REQUIRE (writeSilence (showMedia.getChildFile ("both.wav"), 8000, 800));
+    REQUIRE (writeSilence (ownMedia.getChildFile ("both.wav"), 8000, 800));
+    REQUIRE (writeSilence (ownMedia.getChildFile ("announce.wav"), 8000, 800));
+
+    const auto own = ownMedia.getFullPathName().toStdString();
+    const auto path = [] (const juce::File& f) { return f.getFullPathName().toStdString(); };
+
+    //  Its own first, even when the show has one of the same name.
+    CHECK (audio::resolveMediaPath (own, "announce.wav") == path (ownMedia.getChildFile ("announce.wav")));
+    CHECK (audio::resolveMediaPath (own, "both.wav") == path (ownMedia.getChildFile ("both.wav")));
+    CHECK (audio::mediaRootOf (own, "both.wav") == own);
+
+    //  Then the show's.
+    CHECK (audio::resolveMediaPath (own, "storm.wav") == path (showMedia.getChildFile ("storm.wav")));
+    CHECK (audio::mediaRootOf (own, "storm.wav") == path (showMedia));
+
+    //  Neither: reported where it should have been, its own.
+    CHECK (audio::resolveMediaPath (own, "gone.wav") == path (ownMedia.getChildFile ("gone.wav")));
+    CHECK (audio::mediaRootOf (own, "gone.wav") == own);
+
+    //  The show itself has nothing around it to fall back on, and needs nothing.
+    CHECK (audio::resolveMediaPath (path (showMedia), "storm.wav") == path (showMedia.getChildFile ("storm.wav")));
+}
+
+TEST_CASE ("media info: a name that would leave media/ is nobody's file")
+{
+    /*  "No legacy to look after" (author, 2026-10-01): `../` used to reach
+        anywhere on the disk a show was copied to. Now it, and an absolute
+        path, resolve to a file that is not there - and so fail as a missing
+        sound - even where one exists at the place the name points. */
+    ScratchFolder scratch;
+    const auto media = scratch.folder.getChildFile ("Show").getChildFile ("media");
+    REQUIRE (writeSilence (scratch.folder.getChildFile ("outside.wav"), 8000, 800));
+    REQUIRE (media.createDirectory());
+
+    const auto own = media.getFullPathName().toStdString();
+
+    for (const auto* named : { "../../outside.wav", "sub/../../../outside.wav", "..\\..\\outside.wav" })
+    {
+        const juce::File resolved { juce::String (audio::resolveMediaPath (own, named)) };
+        CHECK_FALSE (resolved.existsAsFile());
+        CHECK (resolved.isAChildOf (media));
+    }
+
+    const auto absolute = scratch.folder.getChildFile ("outside.wav").getFullPathName().toStdString();
+    CHECK_FALSE (juce::File (juce::String (audio::resolveMediaPath (own, absolute))).existsAsFile());
+
+    //  Dots that are part of a name are a name.
+    CHECK (audio::resolveMediaPath (own, "take..final.wav") == media.getChildFile ("take..final.wav").getFullPathName().toStdString());
+}
+
 TEST_CASE ("media info: the lengths move only when one is learned, and a publish never writes to them")
 {
     /*  §14.12's law, AMENDED 2026-09-22. It used to be that the durations

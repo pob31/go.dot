@@ -269,7 +269,7 @@ namespace wfg::audio
 
         const auto working = Clock::now();
 
-        const auto cacheFolder = timbreCacheFolder (mediaFolder);
+        const auto cacheFolder = timbreCacheFolder (mediaRootOf (mediaFolder, named));
         const auto cacheFile = cacheFolder.empty()
                                  ? juce::File()
                                  : juce::File (juce::String (cacheFolder))

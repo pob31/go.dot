@@ -3396,12 +3396,11 @@ namespace wfg::cue
             bundle-relative, which is how the document writes it and the key
             the analyser files its records under; the audio side wants the
             path on disk. */
-        if (named.empty() || mediaFolder.empty())
+        if (named.empty())
             return named;
 
-        return juce::File (juce::String (mediaFolder))
-                   .getChildFile (juce::String (named))
-                   .getFullPathName().toStdString();
+        //  The one resolver: own media/, then the show's around it (MediaInfo.h).
+        return audio::resolveMediaPath (mediaFolder, named);
     }
 
     //==============================================================================

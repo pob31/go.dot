@@ -802,6 +802,32 @@ TEST_CASE ("timbre: the frame at a moment is the finest one whose stretch holds 
 }
 
 //==============================================================================
+TEST_CASE ("timbre cache: a sound the performances share is analysed once, beside the show's copy")
+{
+    /*  A Show's performances sit inside its folder and find its sounds there
+        (MediaInfo.h, resolveMediaPath). The colours go beside the file they
+        describe: in the SHOW's media/.timbre, so the second performance to
+        look reads what the first one wrote, and no performance's own folder
+        gains a copy. */
+    ScratchFolder scratch;
+    const auto showMedia = scratch.folder.getChildFile ("Hamlet").getChildFile ("media");
+    const auto paris = scratch.folder.getChildFile ("Hamlet").getChildFile ("Paris").getChildFile ("media");
+    const auto lyon = scratch.folder.getChildFile ("Hamlet").getChildFile ("Lyon").getChildFile ("media");
+    REQUIRE (paris.createDirectory());
+    REQUIRE (lyon.createDirectory());
+    REQUIRE (writeWav (showMedia.getChildFile ("storm.wav"), sineAt (500.0, 0.5, 48000.0, 0.5f), 48000));
+
+    const auto first = audio::analyseMediaFile (paris.getFullPathName().toStdString(), "storm.wav", false);
+    REQUIRE (first.outcome == audio::MediaAnalysis::Outcome::built);
+    CHECK (cacheFileFor (showMedia, first.contentHash).existsAsFile());
+    CHECK_FALSE (paris.getChildFile (".timbre").exists());
+
+    const auto second = audio::analyseMediaFile (lyon.getFullPathName().toStdString(), "storm.wav", false);
+    CHECK (second.outcome == audio::MediaAnalysis::Outcome::cached);
+    CHECK (second.contentHash == first.contentHash);
+    CHECK_FALSE (lyon.getChildFile (".timbre").exists());
+}
+
 TEST_CASE ("timbre cache: a file is analysed once, keyed by its bytes, and a second look does no work")
 {
     ScratchFolder scratch;

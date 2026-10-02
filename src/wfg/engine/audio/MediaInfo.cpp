@@ -59,12 +59,65 @@ namespace wfg::audio
         return static_cast<double> (reader->lengthInSamples) / reader->sampleRate;
     }
 
+    namespace
+    {
+        /*  A name that would leave media/: absolute - a leading slash, or a
+            drive on Windows - or with a ".." part anywhere. Not a ":" on its
+            own, which a Mac or Linux file may have in its name. */
+        bool leavesMedia (const std::string& named)
+        {
+            if (named.empty())
+                return false;
+
+            if (named.front() == '/' || named.front() == '\\'
+                  || (named.size() > 1 && named[1] == ':'))
+                return true;
+
+            juce::StringArray parts;
+            parts.addTokens (juce::String (named), "/\\", {});
+
+            return parts.contains ("..");
+        }
+
+        //  The folder around the show's: <show>/media -> <show>/.. -> its media/.
+        juce::File aroundOf (const juce::File& own)
+        {
+            return own.getParentDirectory().getParentDirectory().getChildFile ("media");
+        }
+    }
+
+    std::string mediaRootOf (const std::string& mediaFolder, const std::string& named)
+    {
+        if (mediaFolder.empty() || named.empty() || leavesMedia (named))
+            return mediaFolder;
+
+        const juce::File own { juce::String (mediaFolder) };
+
+        if (own.getChildFile (juce::String (named)).existsAsFile())
+            return mediaFolder;
+
+        const auto around = aroundOf (own);
+
+        if (around != own && around.getChildFile (juce::String (named)).existsAsFile())
+            return around.getFullPathName().toStdString();
+
+        return mediaFolder;
+    }
+
     std::string resolveMediaPath (const std::string& mediaFolder, const std::string& named)
     {
         if (mediaFolder.empty())
             return named;
 
-        return juce::File (juce::String (mediaFolder)).getChildFile (juce::String (named))
+        /*  NOTHING OUTSIDE media/ (author, 2026-10-01: "no legacy to look
+            after"): such a name resolves to a file that is not there, so the
+            cue fails as a missing sound, in words, rather than reaching
+            anywhere on the disk a show was copied to. */
+        if (leavesMedia (named))
+            return juce::File (juce::String (mediaFolder)).getChildFile ("not-a-file-in-this-show")
+                       .getFullPathName().toStdString();
+
+        return juce::File (juce::String (mediaRootOf (mediaFolder, named))).getChildFile (juce::String (named))
                    .getFullPathName().toStdString();
     }
 

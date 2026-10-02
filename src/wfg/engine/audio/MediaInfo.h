@@ -120,13 +120,28 @@ namespace wfg::audio
         build has no reader for. Never throws. */
     double mediaDurationSeconds (const std::string& absolutePath);
 
-    /*  WHERE A `file` THE DOCUMENT NAMES IS, on this machine: relative to the
-        bundle's `media/` folder, or taken as given when there is no folder to
-        be relative to - the way the runner resolves it, so that the duration
-        published, the colours drawn and the file played are one file. The
-        durations walk and the analyser (PR 5.7) both ask this, and nothing
-        else spells it. */
+    /*  WHERE A `file` THE DOCUMENT NAMES IS, on this machine: in the show's
+        own `media/` folder, or failing that in the `media/` of the folder
+        AROUND the show - a show's performances find the show's sounds that
+        way (author, 2026-10-01: a Show is the piece, a Performance each
+        event of it, folded inside it, sharing its sounds). Neither has it:
+        own's path, so a missing sound is reported where it belongs. Taken as
+        given when there is no folder to be relative to.
+
+        A NAME THAT WOULD LEAVE media/ - absolute, or with a ".." part - is
+        nobody's file: it resolves to one that is not there, and the cue fails
+        as a missing sound.
+
+        The runner, the durations walk, the analyser and the log all ask
+        this, so that the duration published, the colours drawn, the line
+        logged and the file played are one file; nothing else spells it. */
     std::string resolveMediaPath (const std::string& mediaFolder, const std::string& named);
+
+    /*  Which `media/` folder `named` was found in - the show's own or the one
+        around it - and the show's own when neither has it. The colours'
+        cache (`.timbre`) goes beside the file it describes, so a sound the
+        performances share is analysed once, in the show's folder. */
+    std::string mediaRootOf (const std::string& mediaFolder, const std::string& named);
 
     /*  EVERY DISTINCT `file` A MEDIA CUE IN THIS SHOW NAMES, in the order the
         show first names it, and never an empty one. Reads the document and

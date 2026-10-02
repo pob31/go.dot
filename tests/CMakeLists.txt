@@ -934,6 +934,15 @@ add_test(NAME blackbox.import-playback.fr_FR
 set_tests_properties(blackbox.import-playback.C blackbox.import-playback.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 60)
 
+# A Performance plays its Show's sound: a cue in Hamlet/Paris naming storm.wav
+# finds Hamlet/media/storm.wav, through the one resolver (audio/MediaInfo.h).
+add_test(NAME blackbox.performance-media.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/performance_media.py" --wfg-locale=C)
+add_test(NAME blackbox.performance-media.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/performance_media.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.performance-media.C blackbox.performance-media.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 60)
+
 # The output list, and the patch that follows it until a cue has played. Hosted,
 # because the latch is at a real launch: without --hosted the run sits at
 # `armed` and never reaches it.

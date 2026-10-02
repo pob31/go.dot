@@ -15464,3 +15464,61 @@ The new engine and client cases ran in both locales, the window cases under both
   order, the window's comma a decimal point.
 
 What the tests cannot see is on the bench's list above.
+
+## 25. A Show and its Performances
+
+Written from 2026-10-01, when the author asked how to keep "one folder for a tour and a file for each
+venue or show", and the talk turned up the real need: **a show evolves, performance after
+performance**, on tour or in a long run in one venue - and Go.dot's word "show" had meant both the
+piece and one event of it. PRD §3.20 carries the decided text; this section is how it is built.
+
+### 25.1 Decisions
+
+- **JH - Two words.** A **Show** is the piece. A **Performance** is each event of it, "whether in a
+  different venue or not". Everywhere Go.dot says which it means.
+- **JI - The show is the master.** The piece changes by editing the show. A new performance is a
+  copy of the show, or of any earlier performance used as a template - "if a venue is similar to
+  another and this can happen in random order". Past performances are not frozen: they are
+  templates. Any of cues, levels and trims, the room (interface, outputs, devices), extra media (a
+  preshow announcement) and recordings may differ from one performance to the next.
+- **JJ - A performance is a whole bundle, folded inside its show's folder.** `Hamlet/` is the show
+  (`Hamlet.wfg`, `show.xml`, `state.xml`, `media/`); `Hamlet/2026-10-03 Paris/` is a performance,
+  a bundle like any other. `Bundle::open` reads only the files it knows, so a show folder can hold
+  its performances, and each opens in a window of its own (§14.16, a window per document).
+- **JK - Sounds: its own first, then the folder around it's.** A document finds a `file` in its own
+  `media/`, then in the `media/` of the folder around it - for a performance, the show's - with no
+  marker file (the author's "any media/ around a show"). Neither has it: the document's own path,
+  so a missing sound is reported where it belongs. One resolver does this for every reader -
+  `audio::resolveMediaPath` (`audio/MediaInfo.h`), which the runner, the durations walk, the
+  analyser and the log header all ask - and the colours' cache goes beside the file it describes
+  (`audio::mediaRootOf`), so a sound the performances share is analysed once, in the show's folder.
+  This amends decision Y's and §11.2's "relative to the bundle's `media/`" for reading; writing is
+  unchanged.
+- **JL - What is written goes in the document's own `media/`.** An import - in the show, a sound of
+  the piece, found by every performance; in a performance, a sound of that event, such as an
+  announcement - and a recorded take, which belongs to the performance it was recorded at.
+- **JM - Nothing names a file outside `media/`.** "No legacy to look after" (the author): a `file`
+  that is absolute, or has a `..` part, resolves to no file and fails as a missing sound. Until
+  this, `../` reached anywhere on the disk a show was copied to. A `:` alone is a name - a Mac or
+  Linux file may have one.
+
+### 25.2 Stages
+
+1. **The resolver** (JK, JM) - *built 2026-10-02*. `resolveMediaPath` looks in the folder around;
+   the runner's own copy of it and the log header's inline one are gone. Tested by `MediaCueTests`
+   ("a performance finds its own sound first, then the show's around it"; "a name that would leave
+   media/ is nobody's file"), `TimbreTests` ("a sound the performances share is analysed once,
+   beside the show's copy") and `blackbox.performance-media.*`, a cue in `Hamlet/Paris` playing
+   `Hamlet/media/storm.wav` in a hosted render.
+2. **New performance…** (JI, JJ) - *built 2026-10-02*. File > "New performance…" in a show's or a
+   performance's window asks for a name (today's date suggested), writes the document into
+   `<Show>/<name>/` with one `document.saveAs` - followed from the window's timer until the copy's
+   manifest, `show.xml` and `state.xml` are on the disk, as the empty show's Save is - copies a
+   template performance's own `media/` beside it (the show's are found from around), and opens it in
+   a window of its own. A document whose folder sits in a folder holding a `.wfg` is a performance:
+   its window is titled "Go.dot - Hamlet - Paris". Tried here: the title. The dialog and the copy are
+   the author's to try.
+3. **Back to the show** - *(proposed, not designed)*. Sending a performance's change to the show,
+   cue by cue by ID. Open: the show may be open in another window (its own engine); a cue's local
+   sounds would move to the show's `media/`; a cue new to the show needs a place in its list. Each
+   needs the author's answer before it is built.
