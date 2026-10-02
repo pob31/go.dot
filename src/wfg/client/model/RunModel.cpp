@@ -354,21 +354,18 @@ namespace wfg::client::model
                       && at (snapshot, id, "pruned") != "false";
             row.asserted = flag (snapshot, "/godot/run/" + id + "/asserted") == Flag::yes;
 
-            if (row.kind == "group" && ! row.cueId.empty())
-            {
-                const auto group = "/godot/cue/" + row.cueId + "/";
-                const auto mode = text (snapshot, group + "mode");
+            /*  WHETHER A SEEK WOULD MOVE IT, as the ENGINE says (K9, 2026-10-02,
+                namespace draft §23.18). This read the cue's mode and offered a
+                scrub on every timeline and every sequence that advances by
+                itself - and the engine moved none that loops, shuffles, plays
+                some of its members or has a header, so the head the hand
+                dragged went back. The rule now lives in one place, the
+                engine's, and the console reads the same node. */
+            row.seekable = flag (snapshot, "/godot/run/" + id + "/seekable") == Flag::yes;
 
-                /*  A SAMPLER GROUP IS NEVER TIMED, whatever its `advance` says:
-                    a hand launches its members (§16.5 - the walk calls it not a
-                    chain), so there is no second of it to seek to, and a strip
-                    that offered a scrub would be offering a seek to nowhere. */
-                row.timedGroup = mode == "timeline"
-                              || (mode != "sampler" && text (snapshot, group + "advance") == "auto");
-
-                if (mode == "sampler")
-                    samplerGroups.insert (id);
-            }
+            if (row.kind == "group" && ! row.cueId.empty()
+                 && text (snapshot, "/godot/cue/" + row.cueId + "/mode") == "sampler")
+                samplerGroups.insert (id);
 
             /*  WHAT IT IS WAITING FOR, and for a sampler member the strip it
                 is on - read for every run, since a run is a member of a sampler

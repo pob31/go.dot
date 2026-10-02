@@ -70,8 +70,11 @@
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <juce_data_structures/juce_data_structures.h>
+
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -264,6 +267,55 @@ namespace wfg::cue
                    const tree::MountTable* mounts,
                    const Aim& aim,
                    const std::vector<Step>* steps);
+
+    //==============================================================================
+    /*  ONE ROUND OF A SCENE, SOLVED AS IF IT PLAYED ONCE (K9, 2026-10-02,
+        namespace draft §23.18; the author's ruling).
+
+        The walk times a scene's members only when nothing in the way of the
+        arithmetic is unknown - one round, every member, in the written order,
+        no header. A RUNNING scene knows the rest: which round it is in and
+        which members that round plays, in which order (`Run::round`, written by
+        `run.round`'s handler), and that its header is over once a round has
+        begun. So the round in progress is the scene asked again as if it
+        played that round once: the same group, its members in the round's
+        order and only those, one round, no header, no pre-wait - the walk and
+        `planTarget` unchanged, asked of a copy, so a member of a round lands
+        exactly where a member of a scene that plays once would.
+
+        `seconds` is seconds into the round. The runs are the round's members
+        and what they hold, with their ancestors from the scene down (the scene
+        first); the scene itself is the caller's. `length` is the round's on the
+        clock when every member's is known. `starts` is where each cue the walk
+        timed begins in the round, for a jump that aims at one. */
+    struct RoundPlan
+    {
+        std::vector<PlannedRun> runs;
+        std::optional<double> length;
+        std::map<std::string, double> starts;
+        std::vector<Confusion> confused;
+
+        /*  The second into the round it was solved at: the one asked for,
+            clamped to the round - nought at its start, its length at its end,
+            where every member is over. */
+        double at = 0.0;
+    };
+
+    RoundPlan solveRound (const doc::ShowDocument& document,
+                          const std::map<std::string, double>* durations,
+                          const juce::ValueTree& group,
+                          const std::vector<std::string>& round,
+                          double seconds);
+
+    /*  WHETHER THE WALK TIMES THIS GROUP'S MEMBERS AS IT IS WRITTEN - a
+        timeline or an automatic sequence, one round, every member, in order,
+        no header - which is the shape a seek seats from the static solve, in
+        its own pre-wait too. Its pair, `roundSolvable`, is the wider shape a
+        RUNNING scene can be placed in by `solveRound`: a timeline or an
+        automatic sequence, whatever its loops, selection, play or header. A
+        manual group and a sampler bank are neither. */
+    bool walkTimes (const juce::ValueTree& group);
+    bool roundSolvable (const juce::ValueTree& group);
 
     //==============================================================================
     /*  THE PERSISTENT MODE (§3.29, §13.11): what a list's persistent section

@@ -3334,6 +3334,9 @@ namespace wfg::tree
                 else if (name == "pending")   text = joinIds (run.pending);
                 else if (name == "warning")   text = run.warning;
                 else if (name == "asserted")  text = run.asserted ? "true" : "false";
+
+                //  Whether a seek would move it, as the Runner keeps it (K9, namespace draft §23.18).
+                else if (name == "seekable")  text = run.seekable && ! run.isFinished() ? "true" : "false";
                 else if (name == "strip")     text = run.strip;
                 else if (name == "held")      text = run.held ? "true" : "false";
                 else if (name == "solo")      text = run.solo ? "true" : "false";

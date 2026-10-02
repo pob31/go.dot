@@ -66,11 +66,13 @@ namespace wfg::client::model
         bool pruned = false;
         bool asserted = false;
 
-        /*  WHETHER A GROUP RUN CAN BE SCRUBBED: its cue is a timeline, or a
-            sequence that advances on its own, so the engine can say where
-            every member is at a second of it. A manual sequence has an
-            operator between its members and no second to seek to. */
-        bool timedGroup = false;
+        /*  WHETHER A SEEK WOULD MOVE IT, read from the engine's
+            `run/seekable` (K9, 2026-10-02, namespace draft §23.18) rather than
+            worked out here from the cue's mode: a scene the machine paces that
+            the engine can place a second in - as written, or within the round
+            it is in - and a sound not over. A manual sequence has an operator
+            between its members and no second to seek to, and is never one. */
+        bool seekable = false;
 
         /*  WHETHER A SURFACE'S ROTARIES ARE AIMED AT THIS RUN'S CUE (author,
             2026-09-25): a click on a media run's name aims them, and the row

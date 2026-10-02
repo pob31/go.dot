@@ -2038,7 +2038,19 @@ namespace wfg::cue
                 and `position` counts from it, so a scene seated `offset`
                 seconds in reads `offset` seconds in - and a client scrubbing
                 it sees the head land where the hand put it. */
+            const auto launchedBefore = run->launchRequestedAtTick;
             run->launchRequestedAtTick = tick - ticksFor (wants.offset);
+
+            /*  AND ITS ROUNDS MOVE WITH IT (K9, 2026-10-02, namespace draft
+                §23.18): where the round in progress began, and the first, are
+                kept against the scene's own start, so a later seek reads the
+                round's second off the same clock the scene now reads. */
+            if (! madeHere && run->iteration >= 1)
+            {
+                const auto moved = run->launchRequestedAtTick - launchedBefore;
+                run->roundStartedAtTick += moved;
+                run->firstRoundAtTick += moved;
+            }
 
             /*  TWO OF THESE HAVE TO BE WRITTEN BY HAND AND IT IS NOT OBVIOUS
                 WHICH. A run made by `create` leaves `iterations` at one and
@@ -2062,9 +2074,11 @@ namespace wfg::cue
                 A RUN ALREADY STANDING IN A ROUND KEEPS IT, with the count and
                 the seed it was fired with and the round it drew: the scene a
                 seek re-seats at a second of itself is in the round it was in.
-                Only a scene the walk can time comes here that way - one that
-                plays once, with no header (`seekGroup`, HX) - so what this keeps
-                is round one, as it was drawn. A standing run that never began
+                Since K9 (2026-10-02, §23.18) that is any scene the machine
+                paces that has begun a round - one that loops, shuffles, plays
+                some of its members or has a header among them, sought within
+                the round it is in - so what this keeps is the round it is in,
+                as it was drawn, not only round one. A standing run that never began
                 one - sought in its own pre-wait - is seated as a new one is.
                 Handler state on both sides: a replay seats the same round.
 
@@ -2080,6 +2094,12 @@ namespace wfg::cue
                 run->seed = static_cast<std::int32_t> (numberOf (cue, "seed"));
                 run->round = membersOf (cue);
                 run->iteration = 1;
+
+                /*  Its round began when its pre-wait ended, as the seat dates
+                    it (K9): the seconds a seated scene's offset counts include
+                    its own pre-wait, the walk's convention. */
+                run->roundStartedAtTick = run->launchRequestedAtTick + run->preWaitTicks;
+                run->firstRoundAtTick = run->roundStartedAtTick;
             }
         }
 
@@ -2188,25 +2208,77 @@ namespace wfg::cue
             GroupJob job;
             job.run = found->second;
             job.phase = groupPhase::members;
-            job.phaseCues = membersOf (cue);
+
+            /*  THE ROUND IT IS IN, not the group's members as written (K9,
+                2026-10-02, namespace draft §23.18): a scene a seek re-seats in
+                its second round of a shuffle plays that round's order, and a
+                "play two of five" that round's two. A run the seat made holds
+                the members as written, which is the round it wrote. */
+            const auto* seated = runs.find (job.run);
+            job.phaseCues = seated != nullptr && seated->iteration > 0 ? seated->round
+                                                                       : membersOf (cue);
             job.nextMember = job.phaseCues.size();
+
+            /*  THE CHILDREN THIS SEAT MADE ARE THE ROUND'S (K9). A scene a seek
+                re-seats keeps the runs of what it played before - ended, but
+                still its children - and a round counts its own: taken, so no
+                phase adopts one again, but not the runs the round waits on. */
+            const auto madeBySeat = [&runFor] (const Run& child)
+            {
+                const auto mine = runFor.find (child.cue);
+                return mine != runFor.end() && mine->second == child.id;
+            };
+
+            const Run* firstDue = nullptr;
+            auto lastSeated = std::size_t { 0 };
+            auto anySeated = false;
 
             for (const auto* child : runs.childrenOf (job.run))
             {
                 job.taken.push_back (child->id);
+
+                if (! madeBySeat (*child))
+                    continue;
+
                 job.phaseRuns.push_back (child->id);
 
                 if (! child->isFinished() && child->state != runState::waiting)
                     job.awaiting = child->id;
+
+                if (child->state == runState::waiting
+                     && (firstDue == nullptr || child->dueTick < firstDue->dueTick))
+                    firstDue = child;
+
+                if (const auto at = std::find (job.phaseCues.begin(), job.phaseCues.end(), child->cue);
+                    at != job.phaseCues.end())
+                {
+                    lastSeated = std::max (lastSeated,
+                                           static_cast<std::size_t> (at - job.phaseCues.begin()) + 1);
+                    anySeated = true;
+                }
             }
 
             job.launched = job.phaseRuns.size();
 
             /*  A SEQUENCE ADVANCES ON THE MEMBER IT IS WAITING FOR, so
                 `nextMember` is where the plan left off rather than the end of
-                the list - otherwise the chain would stop at the jump. */
+                the list - otherwise the chain would stop at the jump.
+
+                AND WHERE THE PLAN LEFT OFF IS ITS LAST MEMBER SEATED, not the
+                one after the member sounding (K9). The solver seats every
+                member of a timed sequence - over, sounding, or due at its
+                second - and one counted on from the member sounding spawned
+                the next member again when its turn came, beside the run seated
+                due: it played twice (§23.8, "Not changed"). And a seat that
+                lands between two members - in a post-wait, in the next one's
+                pre-wait - has nothing sounding to wait on, so it waits on the
+                member due first; with nothing awaited it waited for an armed
+                member nothing would arm, for ever. */
             if (textOf (cue, "mode") != "timeline")
             {
+                if (job.awaiting.empty() && firstDue != nullptr)
+                    job.awaiting = firstDue->id;
+
                 const auto* awaited = runs.find (job.awaiting);
                 const auto at = awaited != nullptr
                                   ? std::find (job.phaseCues.begin(), job.phaseCues.end(),
@@ -2216,6 +2288,9 @@ namespace wfg::cue
                 job.nextMember = at != job.phaseCues.end()
                                    ? static_cast<std::size_t> (at - job.phaseCues.begin()) + 1
                                    : job.phaseCues.size();
+
+                if (anySeated)
+                    job.nextMember = std::max (job.nextMember, lastSeated);
             }
 
             scheduled.push_back (job);
@@ -2223,6 +2298,45 @@ namespace wfg::cue
     }
 
     //==============================================================================
+    bool Runner::seekableNow (const Run& run) const
+    {
+        if (run.isFinished())
+            return false;
+
+        /*  A SOUND: what `seekMedia` takes - not one Doh! took back, which is
+            coming down under the Doh's fade. Whether there is a head to drag
+            yet (launched, a length to drag against) is the pane's to see. */
+        if (run.kind == "media")
+            return ! run.takenBack && document.findById (run.cue).isValid();
+
+        if (run.kind != "group")
+            return false;
+
+        const auto group = document.findById (run.cue);
+
+        /*  THE MACHINE PACES IT, or there is no second to seek to: a manual
+            group has a person between its members, and a sampler bank is
+            played by hand. A scene the walk times as written can be seated
+            at any second, in its own pre-wait too (HV); any other the machine
+            paces, once it has begun a round - which its header, if it has
+            one, has finished by then (K9, the author's ruling). */
+        if (! roundSolvable (group) || listOfCue (run.cue).empty())
+            return false;
+
+        return walkTimes (group) || (run.iteration >= 1 && ! run.round.empty());
+    }
+
+    void Runner::mirrorSeekable()
+    {
+        /*  Written only where it changes: a finished run answers at once and
+            keeps its nought, so the table is not searched for every run it
+            has ever held, every tick. */
+        for (const auto& snapshot : runs.all())
+            if (const auto now = seekableNow (snapshot); now != snapshot.seekable)
+                if (auto* run = runs.find (snapshot.id))
+                    run->seekable = now;
+    }
+
     bool Runner::seekMedia (Engine& engine, std::int64_t tick, const std::string& runId,
                             double seconds)
     {
@@ -2362,52 +2476,139 @@ namespace wfg::cue
             and no step moved. */
         const auto sceneCue = run->cue;
 
-        /*  THE SCENE AT THAT SECOND, asked of the solver exactly as a jump asks
-            it, and only the part under the scene is taken: what it found for
-            the rest of the list is the jump's business, and a scrub on one
-            group leaves everything beside it sounding as it was. */
-        const auto plan = solve (document, durations, mounts, { listId, sceneCue, seconds });
-
-        if (! plan.ok)
-            return used;
+        const auto group = document.findById (sceneCue);
 
         std::vector<PlannedRun> wanted;
+        auto sceneSeconds = seconds;
 
-        for (const auto& wants : plan.runs)
-            if (wants.cue == run->cue
-                 || std::find (wants.ancestors.begin(), wants.ancestors.end(), run->cue)
-                      != wants.ancestors.end())
-                wanted.push_back (wants);
+        /*  A SCENE THE WALK TIMES AS WRITTEN - a timeline or an automatic
+            sequence that plays its members once, in order, with no header - is
+            asked of the solver at that second, exactly as a jump asks it, in
+            its own pre-wait too (HV). */
+        if (walkTimes (group))
+        {
+            /*  Only the part under the scene is taken: what the solver found
+                for the rest of the list is the jump's business, and a scrub on
+                one group leaves everything beside it sounding as it was. */
+            const auto plan = solve (document, durations, mounts, { listId, sceneCue, seconds });
 
-        /*  NOTHING PLACED UNDER IT, NOTHING DONE (2026-10-01, the J1 review,
-            namespace draft §23.8, HX). The walk gives a scene's members their
-            seconds only when nothing in the way of the arithmetic is unknown -
-            one round, every member, in the written order, no header, and the
-            machine pacing it (§13.8) - and for any other scene the solver
-            places none of them: a scene that loops, shuffles or plays some of
-            its members, a timeline with a header, a manual group. A seek there
-            has nothing to seat, and it ended every member all the same and
-            seated the scene alone, over a job with nothing left to wait for.
-            With the seat keeping the round its scene is in (HV), a timeline in
-            its last round - where one with a header that plays once always is -
-            ran its footer there and then and ended where the hand had put it,
-            and so did a manual group in its second round, whatever its operator
-            still had to fire; before J1 both began their round again from the
-            top. An automatic sequence awaited nothing for ever, either way.
+            if (! plan.ok)
+                return used;
 
-            So it is applied and changes nothing - its members, its round, its
-            step - as a seek on a run that is over is: the scene plays on where
-            it was, and the head the hand dragged goes back to where the sound
-            is. The solver reads the document and the media lengths, which a
-            replay has from the log, so a replay takes the same road. */
-        const auto placedUnder = std::any_of (wanted.begin(), wanted.end(),
-                                              [&sceneCue] (const PlannedRun& other)
-                                              {
-                                                  return other.cue != sceneCue;
-                                              });
+            for (const auto& wants : plan.runs)
+                if (wants.cue == run->cue
+                     || std::find (wants.ancestors.begin(), wants.ancestors.end(), run->cue)
+                          != wants.ancestors.end())
+                    wanted.push_back (wants);
 
-        if (! placedUnder)
-            return used;
+            /*  NOTHING PLACED UNDER IT, NOTHING DONE (2026-10-01, the J1 review,
+                namespace draft §23.8, HX). The walk gives a scene's members their
+                seconds only when nothing in the way of the arithmetic is unknown -
+                one round, every member, in the written order, no header, and the
+                machine pacing it (§13.8) - and for any other scene the solver
+                places none of them: a scene that loops, shuffles or plays some of
+                its members, a timeline with a header, a manual group. A seek there
+                has nothing to seat, and it ended every member all the same and
+                seated the scene alone, over a job with nothing left to wait for.
+                With the seat keeping the round its scene is in (HV), a timeline in
+                its last round - where one with a header that plays once always is -
+                ran its footer there and then and ended where the hand had put it,
+                and so did a manual group in its second round, whatever its operator
+                still had to fire; before J1 both began their round again from the
+                top. An automatic sequence awaited nothing for ever, either way.
+
+                So it is applied and changes nothing - its members, its round, its
+                step - as a seek on a run that is over is: the scene plays on where
+                it was, and the head the hand dragged goes back to where the sound
+                is. The solver reads the document and the media lengths, which a
+                replay has from the log, so a replay takes the same road. */
+            /*  (K9, 2026-10-02, §23.18:) the shapes it named are sought in their
+                round below, a manual group still not; what is left here is a
+                scene of the walk's shape whose members' lengths this build cannot
+                read, which the solver cannot place either. */
+            const auto placedUnder = std::any_of (wanted.begin(), wanted.end(),
+                                                  [&sceneCue] (const PlannedRun& other)
+                                                  {
+                                                      return other.cue != sceneCue;
+                                                  });
+
+            if (! placedUnder)
+                return used;
+        }
+        else
+        {
+            /*  ANY OTHER SCENE IS SOUGHT WHERE IT CAN SAY IT IS (K9, 2026-10-02,
+                namespace draft §23.18; the author's ruling, which narrows HX). A running
+                scene the walk cannot time knows what the walk did not: which round
+                it is in and which members that round plays, in which order
+                (`round`, from `run.round`'s handler), and when that round began
+                (`roundStartedAtTick`, the same handler's). So a timeline or an
+                automatic sequence that loops, shuffles or plays some of its
+                members is sought WITHIN ITS CURRENT ROUND: the round solved as if
+                it played once (`solveRound`), its members seated at the round's
+                second, the scene keeping its round, its count and its seed (HV).
+                The seconds asked are the scene's own, as its `position` reads,
+                which spans its rounds: the round's second is that less where the
+                round began, clamped to the round - before it is its start, past it
+                its end, where every member is over and the scene goes on as it
+                would there, to its next round or its footer. A timeline with a
+                header is sought once its header is over, which is once it has
+                begun a round; a second inside the header changes nothing, nor
+                does a seek while the header still plays. A manual group and a
+                sampler bank still change nothing (`seekableNow`). All of it read
+                from handler state, so a replay takes the same road. */
+            if (! seekableNow (*run) || run->iteration < 1 || run->round.empty())
+                return used;
+
+            const auto launchedAt = run->launchRequestedAtTick;
+            const auto askedTicks = static_cast<std::int64_t> (ticksFor (seconds));
+            const auto roundAt = std::max (std::int64_t { 0 }, run->roundStartedAtTick - launchedAt);
+
+            if (! membersOf (group.getChildWithName ("Header")).empty()
+                  && askedTicks < run->firstRoundAtTick - launchedAt)
+                return used;
+
+            const auto intoRound = static_cast<double> (askedTicks - roundAt)
+                                     / static_cast<double> (TickClock::rateHz);
+
+            const auto inRound = solveRound (document, durations, group, run->round,
+                                             std::max (0.0, intoRound));
+
+            if (inRound.runs.empty())
+                return used;
+
+            sceneSeconds = static_cast<double> (roundAt + ticksFor (inRound.at))
+                             / static_cast<double> (TickClock::rateHz);
+
+            /*  The scene's own groups, outermost first, which the round's runs
+                hang under: what `seatPlan` reads is the last of them. */
+            std::vector<std::string> above;
+
+            for (auto parent = run->parent; ! parent.empty();)
+            {
+                const auto* up = runs.find (parent);
+
+                if (up == nullptr)
+                    break;
+
+                above.insert (above.begin(), up->cue);
+                parent = up->parent;
+            }
+
+            wanted.clear();
+
+            PlannedRun scene;
+            scene.cue = sceneCue;
+            scene.ancestors = above;
+            scene.offset = sceneSeconds;
+            wanted.push_back (scene);
+
+            for (auto member : inRound.runs)
+            {
+                member.ancestors.insert (member.ancestors.begin(), above.begin(), above.end());
+                wanted.push_back (member);
+            }
+        }
 
         /*  WHAT IT HELD IS ENDED FIRST, the way a jump ends what it abandons:
             every descendant, no footer, its jobs retired and its voices and
@@ -2473,7 +2674,7 @@ namespace wfg::cue
 
         /*  The scene's step follows it: fired, as far as the history is now
             concerned, `seconds` ago. */
-        lists.refired (listId, sceneCue, tick - ticksFor (seconds));
+        lists.refired (listId, sceneCue, tick - ticksFor (sceneSeconds));
 
         return used;
     }
@@ -10140,6 +10341,7 @@ namespace wfg::cue
             theatre. */
         advanceWaits (engine, tick);
         advanceGroups (engine);
+        mirrorSeekable();
         samplerEdges (engine);
         releaseSolos();
         armStandby (engine);

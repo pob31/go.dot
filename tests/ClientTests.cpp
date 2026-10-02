@@ -5198,32 +5198,45 @@ TEST_CASE ("client: a scrub sends one record per position it settles on, and one
 }
 
 //==============================================================================
-TEST_CASE ("client: a group run says whether it can be scrubbed, from its cue's mode")
+TEST_CASE ("client: a run says whether it can be scrubbed as the engine says, never from its cue's mode")
 {
     Rig rig;
 
-    /*  A timeline and a manual sequence side by side, and a run of each read
-        back through the rows: the pane offers a scrub on the first alone. */
+    /*  K9 (2026-10-02, namespace draft §23.18). The row worked it out from the
+        cue's mode and offered a scrub on every timeline - one that loops, before
+        its first round, or in its header, where the engine moves nothing - so
+        the head the hand dragged went back. It reads the engine's own
+        `run/seekable` now: a timeline the engine says yes to, a timeline in its
+        header it says no to, and a manual sequence, which it never says yes to. */
     const auto listId = rig.document.createList ("Sound").id;
     const auto timeline = rig.document.createCue (listId, 0, "group", "Scene").id;
-    const auto manual = rig.document.createCue (listId, 1, "group", "Act").id;
-    rig.document.setAttribute ("/godot/cue/" + timeline + "/mode", "timeline");
+    const auto looping = rig.document.createCue (listId, 1, "group", "Rain").id;
+    const auto manual = rig.document.createCue (listId, 2, "group", "Act").id;
+
+    for (const auto& id : { timeline, looping })
+        rig.document.setAttribute ("/godot/cue/" + id + "/mode", "timeline");
+
+    rig.document.setAttribute ("/godot/cue/" + looping + "/loops", "0");
 
     rig.runs.create ("RUNTIME1", timeline, "group");
+    rig.runs.create ("RUNL00P1", looping, "group");
     rig.runs.create ("RUNMANU1", manual, "group");
+
+    //  What the Runner's hook mirrors every tick; here, the engine's answer set by hand.
+    rig.runs.find ("RUNTIME1")->seekable = true;
 
     const auto rows = model::readRuns (*rig.publish (1));
 
-    auto sawTimed = false, sawManual = false;
+    auto seen = 0;
 
     for (const auto& row : rows)
     {
-        if (row.id == "RUNTIME1") { sawTimed = true; CHECK (row.timedGroup); }
-        if (row.id == "RUNMANU1") { sawManual = true; CHECK_FALSE (row.timedGroup); }
+        if (row.id == "RUNTIME1") { ++seen; CHECK (row.seekable); }
+        if (row.id == "RUNL00P1") { ++seen; CHECK_FALSE (row.seekable); }
+        if (row.id == "RUNMANU1") { ++seen; CHECK_FALSE (row.seekable); }
     }
 
-    CHECK (sawTimed);
-    CHECK (sawManual);
+    CHECK (seen == 3);
 }
 
 //==============================================================================

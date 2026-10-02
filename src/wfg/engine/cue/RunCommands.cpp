@@ -220,7 +220,7 @@ namespace wfg::cue
                         { { "run", 's', false }, { "seed", 'i', false },
                           { "cue", 's', true, true } },
                         false,
-                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             auto* run = runs.find (args[0].getString());
 
@@ -262,6 +262,18 @@ namespace wfg::cue
                                 during a show and zero through every replay,
                                 since a replay runs no hooks. */
                             ++run->iteration;
+
+                            /*  AND WHEN IT BEGAN (K9, 2026-10-02, namespace
+                                draft §23.18), from the record's own tick, so a
+                                replay dates it the same: a seek of a scene the
+                                walk cannot time places the round's second from
+                                here, and a scene with a header reached its
+                                members at the first. */
+                            run->roundStartedAtTick = context.tick;
+
+                            if (run->iteration == 1)
+                                run->firstRoundAtTick = context.tick;
+
                             return Outcome::ok (args);
                         } });
 

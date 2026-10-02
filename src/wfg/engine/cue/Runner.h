@@ -756,12 +756,30 @@ namespace wfg::cue
             it. Nothing beside the group is touched: a bed the operator started
             earlier keeps sounding as it was. Returns every identifier it drew,
             in order, for the record. A group the walk cannot time - a manual
-            sequence, a loop, a shuffle - returns nothing and changes nothing. */
+            sequence, a loop, a shuffle - returns nothing and changes nothing.
+
+            (K9, 2026-10-02, namespace draft §23.18:) A SCENE THE WALK CANNOT
+            TIME IS SOUGHT IN THE ROUND IT IS IN, once one has begun: a timeline
+            or an automatic sequence that loops, shuffles, plays some of its
+            members or has a header. `seconds` are the scene's own, as its
+            `position` reads; the round's second is that less where the round
+            began, clamped to the round, and a second inside a header changes
+            nothing. A manual group and a sampler bank still change nothing. */
         bool seekMedia (Engine& engine, std::int64_t tick, const std::string& runId,
                         double seconds);
         std::vector<std::string> seekGroup (Engine& engine, std::int64_t tick,
                                             const std::string& runId, double seconds,
                                             const std::vector<std::string>& supplied);
+
+        /*  WHETHER A SEEK SENT NOW WOULD MOVE THIS RUN (K9): the gate both
+            `seekGroup` and `seekMedia` keep, read from handler state and the
+            document alone, so the handler may ask it. A media run that is not
+            over and Doh! has not taken back; a group run the machine paces - a
+            timeline or an automatic sequence - that the walk times as written
+            (in its own pre-wait too), or that has begun a round. Published as
+            `run/seekable` through `mirrorSeekable`, so the clients offer the
+            scrub where this says yes and nowhere else. */
+        bool seekableNow (const Run& run) const;
 
         /*  Where the media lengths live, for the solve behind a jump.
 
@@ -1557,6 +1575,10 @@ namespace wfg::cue
         void advanceWaits (Engine& engine, std::int64_t tick);
         void armStandby (Engine& engine);
         void advanceGroups (Engine& engine);
+
+        /*  `Run::seekable`, a readout, written every tick from `seekableNow`
+            for every run not over (K9). A hook's: nothing is logged. */
+        void mirrorSeekable();
 
         /*  A PREPARATION GIVEN BACK, as records: every value the block under
             `runId` pre-sent is written back with an ordinary `node.set`, and

@@ -35,7 +35,7 @@ installDocument();
 
 const { tree } = await import("../../clients/console/plumbing/tree.js");
 const { timeCell, listRows } = await import("../../clients/console/views/didi.js");
-const { stateMark } = await import("../../clients/console/views/gogo.js");
+const { stateMark, offersSeek } = await import("../../clients/console/views/gogo.js");
 const { selection } = await import("../../clients/console/model/selection.js");
 const { folded } = await import("../../clients/console/model/remember.js");
 
@@ -130,6 +130,39 @@ test("a run says playing and armed as marks, and every other state as its word",
     assert.match(said, new RegExp(">" + state + "<"));
     assert.equal(said.includes("mark"), false);
   }
+});
+
+test("a run offers the seek box where the engine says a seek would move it, and nowhere else", () => {
+  /*  K9 (2026-10-02, namespace draft §23.18). The row worked it out from the
+      cue: every timeline and every sequence that advances by itself - a
+      looping one before its first round, one in its header, a sampler bank -
+      where the engine moved nothing. It reads `run/seekable` now. */
+  const run = (id, kind, state, seekable) => [
+    { FULL_PATH: "/godot/run/" + id + "/kind", TYPE: "s", ACCESS: 1, VALUE: [kind] },
+    { FULL_PATH: "/godot/run/" + id + "/state", TYPE: "s", ACCESS: 1, VALUE: [state] },
+    { FULL_PATH: "/godot/run/" + id + "/cue", TYPE: "s", ACCESS: 1, VALUE: ["C" + id] },
+    { FULL_PATH: "/godot/run/" + id + "/seekable", TYPE: "T", ACCESS: 1, VALUE: [seekable] },
+  ];
+  const cue = (id, mode, advance) => [
+    { FULL_PATH: "/godot/cue/C" + id + "/mode", TYPE: "s", ACCESS: 3, VALUE: [mode] },
+    { FULL_PATH: "/godot/cue/C" + id + "/advance", TYPE: "s", ACCESS: 3, VALUE: [advance] },
+  ];
+
+  serve([
+    ...run("TIMED", "group", "playing", true), ...cue("TIMED", "timeline", "manual"),
+    ...run("LOOPS", "group", "playing", false), ...cue("LOOPS", "timeline", "manual"),
+    ...run("BANK", "group", "playing", false), ...cue("BANK", "sampler", "auto"),
+    ...run("ACT", "group", "playing", false), ...cue("ACT", "sequence", "manual"),
+    ...run("FILE", "media", "playing", true),
+    ...run("WAIT", "media", "waiting", true),
+  ]);
+
+  assert.equal(offersSeek("TIMED"), true);
+  assert.equal(offersSeek("LOOPS"), false);     // a timeline the engine cannot place a second in yet
+  assert.equal(offersSeek("BANK"), false);      // a sampler bank, which the console used to offer
+  assert.equal(offersSeek("ACT"), false);
+  assert.equal(offersSeek("FILE"), true);
+  assert.equal(offersSeek("WAIT"), false);      // no head to move before it plays
 });
 
 test("the inspector keeps decisions and folds away what the engine says back", async () => {

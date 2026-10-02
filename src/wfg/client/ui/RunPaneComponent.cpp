@@ -927,18 +927,21 @@ namespace wfg::client::ui
     //==============================================================================
     bool RunPaneComponent::scrubbable (const model::RunRow& entry) const
     {
-        /*  A SOUND WITH A KNOWN LENGTH, OR A SCENE THE ENGINE CAN TIME. A
-            media run in its pre-wait, or armed and not let go, has no head
-            to move; a fade, a wait or a message has no material; a manual
-            sequence has an operator between its members and no second to
-            seek to. What is left is what `run.seek` accepts. */
-        if (entry.state != "playing")
+        /*  A SOUND WITH A KNOWN LENGTH, OR A SCENE THE ENGINE CAN PLACE A
+            SECOND IN. A media run in its pre-wait, or armed and not let go,
+            has no head to move; a fade, a wait or a message has no material;
+            a manual sequence has an operator between its members and no
+            second to seek to. What is left is what `run.seek` accepts - which
+            the engine says, run by run (`run/seekable`, K9): a scene that
+            loops is sought within its round, one with a header once the
+            header is over, and the pane offers neither before then. */
+        if (entry.state != "playing" || ! entry.seekable)
             return false;
 
         if (entry.kind == "media")
             return entry.launched() && lengthOf (entry) > 0.0;
 
-        return entry.kind == "group" && entry.timedGroup;
+        return entry.kind == "group";
     }
 
     double RunPaneComponent::extentOf (const model::RunRow& entry) const

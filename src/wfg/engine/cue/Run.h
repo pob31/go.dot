@@ -873,6 +873,18 @@ namespace wfg::cue
         /** Which round is in progress, counting from one; 0 before the first. */
         int iteration = 0;
 
+        /*  WHEN THE ROUND IN PROGRESS BEGAN, AND WHEN THE FIRST ONE DID, as
+            ticks (K9, 2026-10-02, namespace draft §23.18). Stamped by
+            `run.round`'s handler from its own tick - the one place a round
+            begins, live and on replay - and by the seat that puts a run in a
+            round without drawing one, which moves them with the scene's own
+            `launchRequestedAtTick` when it re-dates the scene. What a seek of
+            a scene the walk cannot time reads: the round's second is the
+            scene's second less the first, and a scene with a header has not
+            reached its members before the second. Nought before any round. */
+        std::int64_t roundStartedAtTick = 0;
+        std::int64_t firstRoundAtTick = 0;
+
         /*  How many rounds this run will play, copied from the group when it
             started - so an edit to `loops` changes the next run and not this
             one, the same rule the waits follow. Zero is for ever. */
@@ -1004,6 +1016,14 @@ namespace wfg::cue
             as `run/asserted`, so a running pane can tell a sound the operator
             started from one the machine put back. */
         bool asserted = false;
+
+        /*  WHETHER A `run.seek` SENT NOW WOULD MOVE IT (K9, 2026-10-02,
+            namespace draft §23.18), published as `run/seekable` so the clients
+            offer a scrub exactly where the engine honours one rather than each
+            keeping its own copy of the rule. A READOUT, like `phase`: mirrored
+            every tick by a hook from `Runner::seekableNow`, the function the
+            seek's handler asks, never logged, and false through a replay. */
+        bool seekable = false;
 
         /*  Whether the tick thread has already told the audio side to stop this
             run's voice.

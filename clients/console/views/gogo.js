@@ -81,6 +81,18 @@ function stateMark(state) {
          '" role="img" aria-label="' + esc(state) + '">' + mark + "</span>";
 }
 
+/*  WHETHER A RUN'S ROW OFFERS THE SEEK BOX: playing, and the engine says a
+    seek would move it (`run/seekable`, K9, namespace draft §23.18) - a sound,
+    or a scene it can place a second in. */
+function offersSeek(id) {
+  const engineSays = tree.run(id, "seekable", false);
+  const kind = tree.run(id, "kind", "");
+
+  return tree.run(id, "state", "armed") === "playing"
+    && (engineSays === true || engineSays === "true")
+    && (kind === "media" || kind === "group");
+}
+
 /*  THE RUNNING PANE, as a tree: a group's run holds its members' runs, which is
     what `parent` and `children` publish. Present tense - a finished run is kept
     for five seconds and then stops being published at all, which is why nothing
@@ -203,14 +215,16 @@ function runRow(id, depth, out) {
 
   const finished = state === "done" || state === "failed";
 
-  /*  WHAT CAN BE SEEKED: a sounding file, or a running scene the engine can
-      time - a timeline, or a sequence that advances on its own. The desktop
-      scrubs these by dragging; here a second is typed (gestures/fields.js). */
-  const cueOf = tree.run(id, "cue", "");
-  const timed = kind === "group"
-    && (tree.get("/godot/cue/" + cueOf + "/mode", "") === "timeline"
-        || tree.get("/godot/cue/" + cueOf + "/advance", "") === "auto");
-  const seekable = state === "playing" && (kind === "media" || timed);
+  /*  WHAT CAN BE SEEKED: what the ENGINE says a seek would move, run by run
+      (`run/seekable`, K9, namespace draft §23.18) - a sounding file, or a
+      running scene it can place a second in: as written, or within the round
+      it is in. This read the cue's mode and offered the box on every timeline
+      and every sequence that advances by itself - a sampler bank among them,
+      which the desktop never offered - and the engine moved none that loops,
+      shuffles or has a header. One rule, the engine's, read the same way by
+      both clients. The desktop scrubs by dragging; here a second is typed
+      (gestures/fields.js), the scene's own second as its row's clock reads. */
+  const seekable = offersSeek(id);
 
   out.push({ key: "run:" + id, html:
     '<div class="run" data-s="' + esc(state) + '"' +
@@ -261,4 +275,4 @@ function renderRuns() {
   reconcile(pane, out);
 }
 
-export { renderRuns, stateMark };
+export { renderRuns, stateMark, offersSeek };
