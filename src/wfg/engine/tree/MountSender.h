@@ -57,12 +57,20 @@
     datagram, because bundle support is uneven in the field and Phase 4's
     timetagged bundles to Go.dot's OWN processors are a different feature with a
     different reason.
+
+    AND A DOUBLE ESC EMPTIES IT (2026-10-02, namespace draft §23.10). PRD §4.4's
+    immediate level "drops all actions", and a value a rate cap is holding back
+    is an action still to come: left queued, it went out on its turn, seconds
+    after the press that promised nothing more would. `dropQueued` is that
+    drop, and every ticket it drops is answered at once, so nothing waiting on
+    one waits for ever.
 */
 
 #include <wfg/engine/osc/OscValue.h>
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -130,20 +138,45 @@ namespace wfg::tree
             Returns a ticket that names this message for the rest of its short
             life. `outcomeOf` answers with it after the flush, which is what
             lets a cue whose wait is `sent` report what actually happened rather
-            than what was asked for. */
+            than what was asked for.
+
+            `owner` is the run that wrote it, empty for a write nobody's run
+            made - a client's `node.set`, a restore. Only `dropQueued` reads it,
+            and a re-written address takes its newest writer's. */
         std::uint64_t queue (const std::string& mountId, const Destination&,
-                             const std::string& address, const osc::Value&);
+                             const std::string& address, const osc::Value&,
+                             const std::string& owner = {});
 
         /*  Sends everything queued and empties the queue. Tick thread, once per
             tick, AFTER the tick's commands have been applied - anything else
             sends a tick's writes in the middle of the tick that made them. */
         void flush();
 
+        /*  DROPS WHAT IS STILL WAITING: a double Esc's half of this class (PRD
+            §4.4, "drops all actions"). Tick thread, in the press's own drain,
+            so the flush that ends that tick has nothing of it to send - and
+            that holds while the clock is down too, where the flush still runs
+            and no hook does.
+
+            Every message goes but the ones `keep` names by their owner - what
+            the press leaves ready (the standby's pre-sends) - kept in their
+            order. Each dropped ticket is answered `failed` at once, so a `sent`
+            wait never hangs on it, and `wasDropped` says why. The rate cap's
+            clock is left as it was: the cap is the device's tolerance, so a
+            value written after the press still waits its turn, counted from
+            the last value that really went. Returns how many were dropped. */
+        std::size_t dropQueued (const std::function<bool (const std::string& owner)>& keep = {});
+
         //======================================================================
         enum class Outcome { pending, sent, failed };
 
         /** What became of one queued message. */
         Outcome outcomeOf (std::uint64_t ticket) const;
+
+        /*  Whether that ticket was dropped by `dropQueued` - answered `failed`
+            there, but never sent and never tried: nothing went wrong on the
+            wire. False for a ticket this object no longer remembers. */
+        bool wasDropped (std::uint64_t ticket) const;
 
         /** How many messages have left for a mount since the show opened. */
         std::size_t sentFor (const std::string& mountId) const;
@@ -167,6 +200,7 @@ namespace wfg::tree
             Destination destination;
             std::string address;
             osc::Value value;
+            std::string owner;
         };
 
         osc::UdpEndpoint* udp = nullptr;
@@ -175,10 +209,22 @@ namespace wfg::tree
         std::map<std::string, std::size_t> queuedAt;   // address -> index in queued
         std::map<std::string, std::size_t> sent;       // mount id -> count
 
+        /*  One ticket's answer: what became of it, and whether a double Esc
+            dropped it rather than a flush trying it. */
+        struct Answer
+        {
+            std::uint64_t ticket = 0;
+            Outcome outcome = Outcome::pending;
+            bool dropped = false;
+        };
+
         /*  What the last few flushes did, newest last. Bounded because it is a
             diagnostic and a handful of cues' worth of answers, never a log: the
             log is the log, and §3.15 keeps per-message readouts out of it. */
-        std::deque<std::pair<std::uint64_t, bool>> outcomes;
+        std::deque<Answer> outcomes;
+
+        /** The answers beyond what is kept, oldest first, let go. */
+        void forgetOldAnswers();
 
         std::uint64_t nextTicket = 1;
 

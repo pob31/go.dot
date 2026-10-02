@@ -1045,9 +1045,10 @@ namespace wfg::cue
 
         /*  AN OSC RUN A DOUBLE ESC KILLED IN THE VERY DRAIN THAT LAUNCHED IT:
             its message was still queued when the press dropped it, so it never
-            left. Stamped from H4 on, by the commit that makes the press drop
-            the sender's queue (namespace draft §24, L31): until then such a
-            message still leaves at the tick's flush, and nothing stamps it. */
+            left. Stamped by the press's own handler (`Runner::dropOutputs`,
+            since 2026-10-02, H4, namespace draft §23.10 and §24, L31), from the
+            run's kind, its launch tick and the kill marks - never from whether
+            a sender was there, so a replay stamps the same runs. */
         bool sendDropped = false;
 
         /*  A STOP ASKED, through the one door every handler that asks one uses:

@@ -144,6 +144,8 @@ add_library(wfg_engine STATIC
     wfg/engine/midi/MidiSender.h
     wfg/engine/midi/PortTable.h
     wfg/engine/midi/MidiSender.cpp
+    wfg/engine/midi/SendQueue.h
+    wfg/engine/midi/SendQueue.cpp
     wfg/engine/midi/PortBinder.h
     wfg/engine/midi/PortBinder.cpp
     wfg/engine/surface/McuCodec.h

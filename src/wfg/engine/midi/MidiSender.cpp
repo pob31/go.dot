@@ -53,6 +53,15 @@ namespace wfg::midi
                     break;
                 }
         }
+
+        /*  AND ITS NOTES ARE FORGOTTEN (2026-10-02, namespace draft §23.10): the
+            device that heard them is closed, and a later note-off for them
+            would reach whatever is put behind the name next - a synth Go.dot
+            never played. After the bound lock, never inside it. */
+        {
+            const std::lock_guard<std::mutex> lock { queueMutex };
+            outbox.forgetPort (portId);
+        }
     }
 
     std::shared_ptr<juce::MidiOutput> MidiSender::deviceFor (const std::string& portId) const
@@ -119,7 +128,18 @@ namespace wfg::midi
         std::shared_ptr<juce::MidiOutput> replaced;
         std::shared_ptr<juce::MidiOutput> opened { std::move (device) };
 
+        /*  A NAME PUT ON ANOTHER DEVICE FORGETS WHAT THE OLD ONE WAS PLAYING,
+            as an unbind does: the live rebind releases a port and binds it
+            again, and the device now behind it never heard those notes.
+
+            THE SWAP AND THE FORGETTING UNDER BOTH LOCKS, in the order the
+            header gives - `queueMutex`, then `boundMutex` (the review of H4,
+            2026-10-02). With the queue let go between them, the sending thread
+            could find the new device, send a note-on to it and record it, and
+            the forgetting would then erase a note the new device is playing.
+            The old device is closed after both are let go, as `replaced` goes. */
         {
+            const std::lock_guard<std::mutex> queueLock { queueMutex };
             const std::lock_guard<std::mutex> lock { boundMutex };
 
             const auto existing = std::find_if (bound.begin(), bound.end(),
@@ -135,6 +155,9 @@ namespace wfg::midi
             {
                 bound.push_back ({ portId, std::move (opened) });
             }
+
+            if (replaced != nullptr)
+                outbox.forgetPort (portId);
         }
 
         return true;
@@ -170,47 +193,84 @@ namespace wfg::midi
 
     std::string MidiSender::send (const std::string& port, const Bytes& bytes)
     {
-        if (bytes.empty())
+        return enqueue ({ port, bytes, {}, false });
+    }
+
+    std::string MidiSender::sendForRun (const std::string& runId, const std::string& port,
+                                        const Bytes& bytes)
+    {
+        return enqueue ({ port, bytes, runId, true });
+    }
+
+    std::string MidiSender::enqueue (Outgoing message)
+    {
+        if (message.bytes.empty())
             return sendError::badMessage;
 
         /*  ASKED BEFORE IT IS QUEUED, so that a cue naming a port nobody bound
             fails on the tick it fired rather than silently going into a queue
             that will drop it. The run wants to say `no-port` while the operator
             is still looking at the cue that did it. */
-        if (! isBound (port))
+        if (! isBound (message.port))
             return sendError::noPort;
 
         {
             const std::lock_guard<std::mutex> lock { queueMutex };
-            queue.push_back ({ port, bytes });
+            outbox.push (std::move (message));
         }
 
         wakeUp.notify_one();
         return {};
     }
 
+    std::size_t MidiSender::dropQueued()
+    {
+        std::size_t dropped = 0;
+
+        {
+            const std::lock_guard<std::mutex> lock { queueMutex };
+            dropped = outbox.dropQueued();
+        }
+
+        /*  The note-offs are new work for the sending thread, whatever was
+            dropped to make room for them. */
+        wakeUp.notify_one();
+        return dropped;
+    }
+
     void MidiSender::run()
     {
         while (running.load (std::memory_order_relaxed))
         {
-            Queued next;
+            Outgoing next;
+            std::shared_ptr<juce::MidiOutput> device;
 
             {
                 std::unique_lock<std::mutex> lock { queueMutex };
 
                 wakeUp.wait (lock, [this]
                 {
-                    return ! queue.empty() || ! running.load (std::memory_order_relaxed);
+                    return ! outbox.empty() || ! running.load (std::memory_order_relaxed);
                 });
 
-                if (queue.empty())
+                if (! outbox.pop (next))
                     continue;
 
-                next = std::move (queue.front());
-                queue.pop_front();
-            }
+                /*  THE DEVICE LOOKED UP BEFORE THE QUEUE IS LET GO (2026-10-02,
+                    namespace draft §23.10), and the note record told while it
+                    is still held: a double Esc on the tick thread then finds a
+                    note-on either still in the queue - dropped, never heard - or
+                    in the record, its note-off queued behind the send below.
+                    Looked up after the lock, a note-on taken in between was
+                    neither, and its note would have rung on. A message with no
+                    device is not going anywhere, so the record never hears of
+                    it. `queueMutex` then `boundMutex`, the order the header
+                    gives. */
+                device = deviceFor (next.port);
 
-            const auto device = deviceFor (next.port);
+                if (device != nullptr)
+                    outbox.markLeaving (next);
+            }
 
             if (device == nullptr)
                 continue;
@@ -218,7 +278,8 @@ namespace wfg::midi
             /*  THE BLOCKING CALL, on the thread this class exists to give it.
                 A hundred-byte dump holds this for about thirty milliseconds on
                 Windows and nothing above it notices - outside `boundMutex`,
-                which the tick thread's `isBound` takes. */
+                which the tick thread's `isBound` also takes, and outside the
+                queue lock, which its `send` takes. */
             deliver (*device, next.bytes);
         }
 
@@ -226,11 +287,11 @@ namespace wfg::midi
             usually just sent the blackout. Bounded by what is in hand rather
             than by the queue, so a producer that never stopped cannot hold the
             shutdown open. */
-        std::deque<Queued> remaining;
+        std::deque<Outgoing> remaining;
 
         {
             const std::lock_guard<std::mutex> lock { queueMutex };
-            remaining.swap (queue);
+            remaining = outbox.takeAll();
         }
 
         for (const auto& item : remaining)

@@ -42,6 +42,7 @@
 
 #include <wfg/engine/midi/MidiSink.h>
 #include <wfg/engine/midi/PortTable.h>
+#include <wfg/engine/midi/SendQueue.h>
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
@@ -95,12 +96,25 @@ namespace wfg::midi
         /** Starts the sending thread. Nothing leaves before this. */
         void start();
 
-        /** Stops it, after whatever is queued has gone. */
+        /*  Stops it, after whatever is queued has gone. Notes a cue left
+            sounding are not ended here: the author's rule is for a double Esc
+            (namespace draft §23.10 names this as a gap). */
         void stop();
 
         /*  Queues one message. Tick thread; takes a mutex for a push_back and
             never waits on a port. */
         std::string send (const std::string& port, const Bytes& bytes) override;
+
+        /*  The same for a cue's message, marked as the show's and carrying its
+            run: the kind a double Esc drops, and the only kind whose notes are
+            recorded once they leave. */
+        std::string sendForRun (const std::string& runId, const std::string& port,
+                                const Bytes& bytes) override;
+
+        /*  DOUBLE ESC: the queue's cue messages dropped and the note-offs put
+            at its front (`SendQueue::dropQueued`), under the queue lock and
+            nothing else - a push_back's worth of waiting, never a port's. */
+        std::size_t dropQueued() override;
 
         const std::vector<std::string>& problems() const noexcept { return refusals; }
 
@@ -117,6 +131,10 @@ namespace wfg::midi
 
     private:
         void run();
+
+        /*  `send` and `sendForRun`'s one road: the same refusals, then a
+            push_back under the queue lock. */
+        std::string enqueue (Outgoing message);
 
         /** What `run` sends, shown to the monitor on its way. */
         void deliver (juce::MidiOutput& device, const Bytes& bytes);
@@ -136,19 +154,21 @@ namespace wfg::midi
 
         std::shared_ptr<juce::MidiOutput> deviceFor (const std::string& portId) const;
 
-        struct Queued
-        {
-            std::string port;
-            Bytes bytes;
-        };
-
         mutable std::mutex boundMutex;
         std::vector<Bound> bound;
         std::vector<std::string> refusals;
 
+        /*  THE ORDER THE TWO LOCKS ARE TAKEN IN, when one is held while the
+            other is asked for: `queueMutex`, then `boundMutex` - the sending
+            thread looks a message's device up before it lets the queue go, so
+            the note record hears of a note-on only once it is sure to leave.
+            `bind` takes both in that order around a device it puts behind a
+            name, so a note the new device plays is never forgotten with the
+            old one's. Never the other way round: `send` and `unbind` take the
+            two one after the other, never one inside the other. */
         mutable std::mutex queueMutex;
         std::condition_variable wakeUp;
-        std::deque<Queued> queue;
+        SendQueue outbox;
 
         std::atomic<bool> running { false };
         std::atomic<std::size_t> delivered { 0 };

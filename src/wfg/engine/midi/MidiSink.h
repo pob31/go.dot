@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -71,5 +72,29 @@ namespace wfg::midi
             implementation that talks to hardware queues here and sends
             somewhere else. */
         virtual std::string send (const std::string& port, const Bytes& bytes) = 0;
+
+        /*  A CUE'S MESSAGE, which is the one kind a double Esc may drop
+            (2026-10-02, namespace draft §23.10): the same queue as `send`,
+            marked as the show's output and carrying the run that sent it. A
+            surface's feedback goes through `send` and is never dropped - its
+            LEDs and motor faders would be left showing what the bridge thinks
+            it last said - nor counted as a note the show started, since its
+            LEDs are note-ons.
+
+            Its own name and not an overload of `send`, which the strict build
+            refuses (-Woverloaded-virtual). A sink with nothing to drop - a
+            recording one, a null one - is complete with this default. */
+        virtual std::string sendForRun (const std::string&, const std::string& port, const Bytes& bytes)
+        {
+            return send (port, bytes);
+        }
+
+        /*  DOUBLE ESC (PRD §4.4, "drops all actions"; the author, 2026-09-30,
+            for the notes): every cue message not yet gone is dropped, and one
+            note-off goes for each note a cue started on a port, a channel and
+            a key that nothing has ended since - only those, no all-notes-off,
+            and nothing to a synth Go.dot never played. Tick thread; never waits
+            on a port. Answers how many were dropped. */
+        virtual std::size_t dropQueued() { return 0; }
     };
 }

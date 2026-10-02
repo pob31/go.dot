@@ -2679,7 +2679,15 @@ namespace wfg::cue
         auto* run = runs.find (runId);
 
         /*  NOR ONE GO DOH! TOOK BACK (2026-10-01): it fires nothing more. */
-        if (run == nullptr || run->isFinished() || run->takenBack)
+        /*  NOR ONE A KILL HAS REACHED (2026-10-02, H4, namespace draft §23.10).
+            A killed scene ends its members a tick after the press, from its own
+            job, and a member's fire can drain after the press in between: its
+            pre-wait running out the tick after, or its launch asked for by the
+            scene's job in the press's own tick. It fired - a MIDI note-on after
+            the note-offs, ringing with nothing to end it; a value queued after
+            the queue was emptied. "Drops all actions" reaches what was still to
+            be asked for. Handler state, so a replay fires the same nothing. */
+        if (run == nullptr || run->isFinished() || run->takenBack || beingKilled (*run))
             return;
 
         const auto cue = document.findById (run->cue);
@@ -5041,6 +5049,63 @@ namespace wfg::cue
         audio->resetEffects (ready);
     }
 
+    void Runner::dropOutputs (std::int64_t tick)
+    {
+        /*  WHAT THE PRESS'S OWN DRAIN QUEUED NEVER LEFT (namespace draft §24,
+            HQ, L31): the sender flushes once a tick, after the drain, so an osc
+            run launched earlier in this drain - and killed by this press - had
+            its message in the queue emptied below. It is marked so that Go
+            Doh! does not count it as sent. Decided from handler state - the
+            kind, the launch tick, the kill marks the run table's half has just
+            written - and never from whether there is a sender, so a replay,
+            which has none, marks the same runs. A message a rate cap held from
+            an earlier tick, a pre-send this tick's hook wrote, and a MIDI
+            message - which goes to its own thread at once and may have left -
+            are dropped where no handler can see them, and are not marked
+            (L31). */
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.kind != "osc" || snapshot.isFinished() || snapshot.launchRequestedAtTick <= 0
+                  || snapshot.launchRequestedAtTick != tick || ! beingKilled (snapshot))
+                continue;
+
+            if (auto* dropped = runs.find (snapshot.id))
+                dropped->sendDropped = true;
+        }
+
+        /*  THE NETWORK SENDER'S QUEUE, a value a rate cap holds back included,
+            but for the pre-sends of what the press leaves ready: the standby's
+            scene keeps its readiness through a double Esc (§23.3), and the GO
+            after it counts those pre-sends as done - dropped, the desk would
+            never get a value the scene believes it holds. */
+        if (sender_ != nullptr)
+            sender_->dropQueued ([this] (const std::string& owner) { return sparedByThePress (owner); });
+
+        /*  THE MIDI QUEUE: the cues' messages dropped, the surfaces' kept, and
+            a note-off for each note a cue started that nothing has ended. */
+        if (midiOut != nullptr)
+            midiOut->dropQueued();
+
+        /*  A START CUE'S FIRE IS SUBMITTED BY THE NEXT TICK'S HOOK, so one fired
+            earlier in this drain would fire its target a tick after the press.
+            A hook's list: a replay never had the record, and does not now. And
+            one the hook of this very tick submitted, draining behind the press,
+            is answered by `cue.fire` itself (`killedInDrain`). */
+        startsToFire.clear();
+        killedAtTick = tick;
+
+        /*  THE PERSISTENT PASS A GO BEFORE THE PRESS OPENED IS TAKEN BACK (the
+            review of H4, 2026-10-02): PRD §3.29 has the NEXT GO restore the
+            section after a double Esc, and a pass owed to an earlier step - not
+            yet run, or waiting for the desks' answers - put the beds back right
+            after the press. The step is counted as asserted, so only a step
+            taken after the press opens a pass. Hook state, as the start cues'
+            list: a replay takes `run.assert` from the log, and the log now has
+            none. */
+        assertedFor = lists.stepsTaken();
+        assertDue = -1;
+    }
+
     bool Runner::goTooSoon (std::int64_t tick) const
     {
         if (lastGoTick < 0)
@@ -5306,7 +5371,8 @@ namespace wfg::cue
     {
         /*  WHAT LEFT IS DECIDED AT THE SEND (§24, HQ): a device the run was
             routed to, a launch, and nothing that says nothing was written - a
-            double Esc's drop of its own drain among them once H4 stamps it. */
+            double Esc's drop of its own drain among them (`sendDropped`, since
+            H4, §23.10). */
         if (run.sentTo.empty() || ! hasLaunchEvidence (run) || run.sendDropped)
             return false;
 
@@ -6650,11 +6716,13 @@ namespace wfg::cue
             return;
         }
 
+        /*  Queued in the run's name, which is how a double Esc knows a
+            pre-send of the standby it spares from what it drops (§23.10). */
         if (sender_ != nullptr && declaration != nullptr)
             job.ticket = sender_->queue (written.mountId,
                                          { declaration->host, declaration->port,
                                            declaration->rateCap },
-                                         job.address, written.value);
+                                         job.address, written.value, job.self);
 
         if (job.wait == OscWait::verified)
         {
@@ -6766,7 +6834,10 @@ namespace wfg::cue
             return;
         }
 
-        const auto problem = midiOut->send (portId, built.bytes);
+        /*  AS A CUE'S MESSAGE, carrying its run (2026-10-02, H4, namespace draft
+            §23.10): the kind a double Esc drops while it is still queued, and
+            whose notes the sender remembers once they have left. */
+        const auto problem = midiOut->sendForRun (self, portId, built.bytes);
 
         if (! problem.empty())
             job.failure = problem;
@@ -6789,9 +6860,17 @@ namespace wfg::cue
                 A `verified` cue that somebody gave up on is the case - the
                 device is not answering and the operator would like the show to
                 stop asking. */
+            /*  AND KILLED FROM ABOVE (2026-10-02, H4, namespace draft §23.10). A
+                member of a killed scene is reached by the scene's job a tick
+                after the press, and in that tick its job went on: a pre-send
+                still asking read its answer and wrote the value - a datagram
+                after the press, and a desk value nothing would put back - and
+                a `sent` wait read its dropped ticket as a send that failed.
+                Ended here, as the kill would have ended it a tick later. */
             const auto* selfRun = runs.find (job.self);
 
-            if (selfRun != nullptr && selfRun->state == runState::stopping)
+            if (selfRun != nullptr && ! selfRun->isFinished()
+                  && (selfRun->state == runState::stopping || beingKilled (*selfRun)))
             {
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 job.finished = true;
@@ -6918,6 +6997,19 @@ namespace wfg::cue
                 because that is when a report is allowed to leave, not because
                 it waited for anything. */
             if (job.wait == OscWait::none || sender_ == nullptr || job.ticket == 0)
+            {
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                job.finished = true;
+                continue;
+            }
+
+            /*  DROPPED BY A DOUBLE ESC (2026-10-02, H4, namespace draft §23.10):
+                ended, never failed - the press is the account, and nothing went
+                wrong on the wire. A run the press killed is ended above before
+                it gets here; this is for a drop that reaches a run nobody
+                killed, so that it reads as what happened rather than as
+                `send-failed`. */
+            if (sender_->wasDropped (job.ticket))
             {
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 job.finished = true;
@@ -7587,8 +7679,9 @@ namespace wfg::cue
         auto* run = runs.find (runId);
 
         /*  NOR ONE GO DOH! TOOK BACK (2026-10-01): its job's launch, decided
-            before the Doh, launches nothing. */
-        if (run == nullptr || run->isFinished() || run->takenBack)
+            before the Doh, launches nothing. Nor one a kill has reached, which
+            `fireNow` says why (H4): its pre-wait is not begun either. */
+        if (run == nullptr || run->isFinished() || run->takenBack || beingKilled (*run))
             return;
 
         /*  The same fork the top-level path takes, and it has to be the same
@@ -9048,6 +9141,35 @@ namespace wfg::cue
         return false;
     }
 
+    bool Runner::beingKilled (const Run& run) const
+    {
+        /*  ITS OWN KILL STILL STANDING: `skipFooter`, which nothing clears, and
+            the stop it asked, which a seek withdraws - a seek brings a killed
+            cue back, playing where the hand put it, and it must launch. Both
+            handler-written (§24.1), so a handler may decide by them. */
+        return (run.skipFooter && run.stopAsked) || underAKill (run);
+    }
+
+    bool Runner::sparedByThePress (const std::string& runId) const
+    {
+        /*  UP TO THE ROOT, as `stopEveryRoot` finds one - no parent, or a parent
+            gone - bounded by the table as `underAKill` is. An empty name - a
+            client's `node.set`, a restore - is nobody's, and is not spared. */
+        const auto* at = runs.find (runId);
+
+        for (std::size_t guard = 0; at != nullptr && guard <= runs.all().size(); ++guard)
+        {
+            const auto* above = at->parent.empty() ? nullptr : runs.find (at->parent);
+
+            if (above == nullptr)
+                return ! at->isFinished() && at->onlyPrepared() && ! runs.askedForUnder (at->id);
+
+            at = above;
+        }
+
+        return false;
+    }
+
     std::vector<std::string> Runner::armablesFor (const juce::ValueTree& cue) const
     {
         const auto element = cue.getType().toString();
@@ -9254,6 +9376,15 @@ namespace wfg::cue
             auto* run = runs.find (snapshot.id);
 
             if (run == nullptr || ! run->launchRequested || run->isFinished())
+                continue;
+
+            /*  NOR ONE A KILL HAS REACHED (2026-10-02, H4, namespace draft
+                §23.10). The disk's answer is a record, and it can drain ahead
+                of the press in the press's own tick: the run is ready in the
+                drain that kills it, and this loop - before `enforceStops` cuts
+                the voice - launched it, placed its speed and reported it
+                started, a cue the press had dropped. */
+            if (beingKilled (*run))
                 continue;
 
             /*  Not until the audio side says the voice is ready. A launch
@@ -10848,19 +10979,29 @@ namespace wfg::cue
                 specialised.description = "Drops every run now: double Esc. No footer runs, and the world is left"
                                           " as it was; every voice in Go.dot's own graph is silenced and every EQ"
                                           " and rack channel's insert emptied, but the standby's, whose preparation"
-                                          " is left ready.";
+                                          " is left ready. What is still waiting to leave - a value a rate cap holds"
+                                          " back, a cue's MIDI message - is dropped, and every note a cue started"
+                                          " gets its note-off.";
 
             /*  AND THE LAST GO HEARS IT (2026-10-01, namespace draft §24): after
                 an Esc, Go Doh! moves the pointer back and leaves the runs to Esc,
                 whose footers have run.
 
-                NOT YET WHAT A DOUBLE ESC DROPPED (§24, HQ, L31). An osc run it
-                kills in the very drain that launched it would never have left -
-                once H4 empties the sender's queue at the press. Until then the
-                message still leaves at the tick's flush, so nothing is marked
-                `sendDropped` here: H4 marks it in the commit that drops it, and
-                meanwhile such a cue counts as sent, so a device left to its
-                operator is not sent it a second time. */
+                AND A DOUBLE ESC DROPS WHAT IS STILL WAITING TO LEAVE (2026-10-02,
+                H4, namespace draft §23.10): the network sender's queue - a value
+                a rate cap holds back included - and the cues' MIDI messages, with
+                a note-off for each note a cue started; a start cue's fire still
+                to come; and the osc runs it kills in the very drain that
+                launched them are marked `sendDropped` (§24, HQ, L31), their
+                message gone with the queue. HERE, IN THE HANDLER, and not in a
+                hook: the flush that ends this tick would otherwise send a held
+                value whose turn fell on it, and while the clock is down the
+                flush still runs and no hook does. AFTER the run table's half, so
+                the marks say which roots the press killed and which it spared.
+                Nothing is submitted and the applied record is the plain one, so
+                a replay - no sender, no sink - writes the same log and marks the
+                same runs. Esc drops nothing: it is normal completion entered
+                early, and what was queued goes. */
             specialised.handler = [&runner, graceful, before = plain->handler]
                                   (CommandContext& context, const std::vector<osc::Value>& args)
             {
@@ -10869,14 +11010,18 @@ namespace wfg::cue
                 if (graceful)
                 {
                     runner.beginPanicFade (context.tick);
-                }
-                else
-                {
-                    runner.dropStopFades();
-                    runner.resetEffects();
+                    return before (context, args);
                 }
 
-                return before (context, args);
+                runner.dropStopFades();
+                runner.resetEffects();
+
+                auto outcome = before (context, args);
+
+                if (outcome.applied)
+                    runner.dropOutputs (context.tick);
+
+                return outcome;
             };
 
             registry.add (std::move (specialised));
@@ -11329,6 +11474,15 @@ namespace wfg::cue
                             if (! document.findById (cueId).isValid())
                                 return Outcome::rejected (reason::unknownId);
 
+                            /*  NOR THE PASS'S RECORD BEHIND A DOUBLE ESC (the
+                                review of H4, 2026-10-02, namespace draft §23.10):
+                                decided by the hook in the press's tick, it drains
+                                after the press, and the next GO is what restores
+                                the section (PRD §3.29). Applied and nothing. */
+                            if (context.origin != nullptr && *context.origin == origin::engine
+                                  && runner.killedInDrain (context.tick))
+                                return Outcome::ok (args);
+
                             const auto id = args.size() > 1 ? args[1].getString()
                                                             : std::string {};
 
@@ -11527,6 +11681,16 @@ namespace wfg::cue
                                 no step, no press. First of all, before any other
                                 answer, so nothing below acts on it. */
                             if (cause != 0 && runner.causeTakenBack (cause))
+                                return Outcome::ok (args);
+
+                            /*  NOR THE ENGINE'S OWN FIRE BEHIND A DOUBLE ESC (the
+                                review of H4, 2026-10-02, namespace draft §23.10):
+                                a start cue's fire the hook submitted in this tick,
+                                before the press, drains after it - and would make
+                                a fresh run nothing has marked, sounding after the
+                                press that drops every action. Applied and nothing.
+                                A fire by name - a hand - still fires. */
+                            if (from == origin::engine && runner.killedInDrain (context.tick))
                                 return Outcome::ok (args);
 
                             /*  A MANUAL SEQUENCE GROUP HAS NOBODY TO BE ITS

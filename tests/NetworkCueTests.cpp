@@ -985,6 +985,208 @@ TEST_CASE ("rate cap: a message that is waiting is not a message that failed")
 }
 
 //==============================================================================
+/*  A DOUBLE ESC DROPS WHAT IS STILL WAITING TO LEAVE (2026-10-02, H4, namespace
+    draft §23.10). PRD §4.4's immediate level "drops all actions", and a value a
+    rate cap is holding back is an action still to come: until H4 it went out on
+    its turn, seconds after the press. Every case here but the guards failed on
+    the code before H4 - the drop did not exist, and the held value left. */
+TEST_CASE ("mount sender: a double Esc drops what is still waiting, and answers each ticket failed")
+{
+    osc::UdpEndpoint socket;
+    REQUIRE (socket.start (0, [] (osc::Datagram) {}));
+
+    Listener listener;
+    tree::MountSender sender { socket };
+
+    /*  Two hertz: one send of an address every twenty-five flushes. */
+    const tree::MountSender::Destination slow { "127.0.0.1", listener.port(), 2.0 };
+
+    const auto first = sender.queue ("M1", slow, "/ext/console/fader", osc::Value::float32 (0.1f));
+    sender.flush();
+    REQUIRE (listener.waitFor (1));
+
+    const auto held = sender.queue ("M1", slow, "/ext/console/fader", osc::Value::float32 (0.2f));
+    sender.flush();
+    REQUIRE (sender.stillQueued (held));
+
+    /*  ANSWERED AT ONCE, so a `sent` wait on it ends rather than hangs - failed,
+        and dropped rather than refused by the wire. */
+    CHECK (sender.dropQueued() == 1u);
+    CHECK (sender.pending() == 0u);
+    CHECK_FALSE (sender.stillQueued (held));
+    CHECK (sender.outcomeOf (held) == tree::MountSender::Outcome::failed);
+    CHECK (sender.wasDropped (held));
+    CHECK_FALSE (sender.wasDropped (first));
+
+    SUBCASE ("nothing of it leaves, however long the cap would have held it")
+    {
+        for (int n = 0; n < 30; ++n)
+            sender.flush();
+
+        CHECK (sender.sentFor ("M1") == 1u);
+        CHECK_FALSE (listener.waitFor (2, 150));
+    }
+
+    SUBCASE ("a value written after the press still waits its turn: the cap is the device's, not the press's")
+    {
+        const auto after = sender.queue ("M1", slow, "/ext/console/fader", osc::Value::float32 (0.3f));
+        sender.flush();
+
+        CHECK (sender.stillQueued (after));
+        CHECK (sender.outcomeOf (after) == tree::MountSender::Outcome::pending);
+        CHECK_FALSE (sender.wasDropped (after));
+    }
+
+    SUBCASE ("what the caller names is kept, in its order")
+    {
+        /*  The standby's pre-send, which the press leaves ready (§23.3): its
+            owner is named and its message goes on its turn. */
+        const auto kept = sender.queue ("M1", slow, "/ext/console/fader", osc::Value::float32 (0.4f), "READY001");
+        const auto other = sender.queue ("M1", slow, "/ext/console/level", osc::Value::float32 (0.5f), "KILLED01");
+
+        CHECK (sender.dropQueued ([] (const std::string& owner) { return owner == "READY001"; }) == 1u);
+        CHECK (sender.stillQueued (kept));
+        CHECK_FALSE (sender.wasDropped (kept));
+        CHECK (sender.wasDropped (other));
+        CHECK (sender.pending() == 1u);
+    }
+}
+
+TEST_CASE ("double Esc: a value the rate cap is holding never leaves, and the cue waiting on it ends")
+{
+    NetworkRig rig;
+
+    auto capped = *rig.mounts.declarationOf ("K3PV7WRB");
+    capped.rateCap = 2.0;
+    REQUIRE (rig.mounts.updateDeclaration (capped));
+
+    rig.fire (rig.makeOsc ("/desk/fader", "f:0.25", "none"));
+    REQUIRE (rig.listener.waitFor (1));
+
+    /*  Fired by name, not by GO, so the GO debounce has no say. */
+    const auto held = rig.makeOsc ("/desk/fader", "f:0.75", "sent");
+    rig.fire (held);
+    REQUIRE (rig.sender.pending() == 1u);
+
+    REQUIRE (rig.engine.submit ("cli", "run.killAll", {}));
+    rig.tickOnce();
+
+    CHECK (rig.sender.pending() == 0u);
+
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    CHECK_FALSE (rig.listener.waitFor (2, 150));
+    CHECK (rig.listener.count() == 1u);
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+    /*  ENDED, NOT FAILED: the kill is the account (§23.10). */
+    const auto* run = rig.runOf (held);
+    REQUIRE (run != nullptr);
+    CHECK (run->state == cue::runState::done);
+    CHECK (run->error.empty());
+    CHECK (rig.runner.sends().empty());
+
+    /*  The tree keeps what the cue wrote, and the desk never heard it: the
+        world left in a state nobody declared, which §4.4 names as the price. */
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+}
+
+TEST_CASE ("double Esc: a group member's held value is dropped, and the member ends rather than failing")
+{
+    /*  A MEMBER IS KILLED A TICK AFTER ITS GROUP, by the group's own job - and
+        in that tick its job used to read the dropped ticket as a send that
+        failed. Being killed from above is the account (§23.10). */
+    NetworkRig rig;
+
+    auto capped = *rig.mounts.declarationOf ("K3PV7WRB");
+    capped.rateCap = 2.0;
+    REQUIRE (rig.mounts.updateDeclaration (capped));
+
+    const auto group = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + group + "/advance", "auto").ok);
+
+    const auto member = rig.document.createCue (group, 0, "osc", "Desk").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/address", "/desk/fader").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/value", "f:0.75").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/wait", "sent").ok);
+
+    rig.fire (rig.makeOsc ("/desk/fader", "f:0.25", "none"));
+    REQUIRE (rig.listener.waitFor (1));
+
+    rig.fire (group);
+
+    for (int n = 0; n < 20 && rig.sender.pending() == 0u; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.sender.pending() == 1u);
+    REQUIRE (rig.runOf (member) != nullptr);
+    REQUIRE (rig.runOf (group) != nullptr);
+
+    const auto memberRun = rig.runOf (member)->id;
+    const auto groupRun = rig.runOf (group)->id;
+
+    REQUIRE (rig.engine.submit ("cli", "run.killAll", {}));
+    rig.tickOnce();
+
+    CHECK (rig.sender.pending() == 0u);
+
+    for (int n = 0; n < 10 && ! (rig.runs.find (memberRun)->isFinished()
+                                  && rig.runs.find (groupRun)->isFinished()); ++n)
+        rig.tickOnce();
+
+    INFO ("member " << rig.runs.find (memberRun)->state << ", " << rig.runs.find (memberRun)->error);
+    CHECK (rig.runs.find (memberRun)->state == cue::runState::done);
+    CHECK (rig.runs.find (memberRun)->error.empty());
+    CHECK (rig.runs.find (groupRun)->isFinished());
+
+    for (int n = 0; n < 30; ++n)
+        rig.tickOnce();
+
+    CHECK_FALSE (rig.listener.waitFor (2, 150));
+    CHECK (rig.listener.count() == 1u);
+    CHECK (rig.runner.sends().empty());
+}
+
+TEST_CASE ("Esc: a value the rate cap is holding still leaves on its turn")
+{
+    /*  A GUARD, passing before H4 and after it: Esc is normal completion entered
+        early (§4.4), so what was queued goes, and only the double press drops. */
+    NetworkRig rig;
+
+    auto capped = *rig.mounts.declarationOf ("K3PV7WRB");
+    capped.rateCap = 2.0;
+    REQUIRE (rig.mounts.updateDeclaration (capped));
+
+    rig.fire (rig.makeOsc ("/desk/fader", "f:0.25", "none"));
+    REQUIRE (rig.listener.waitFor (1));
+
+    const auto held = rig.makeOsc ("/desk/fader", "f:0.75", "sent");
+    rig.fire (held);
+    REQUIRE (rig.sender.pending() == 1u);
+
+    REQUIRE (rig.engine.submit ("cli", "run.stopAll", {}));
+    rig.tickOnce();
+
+    CHECK (rig.sender.pending() == 1u);
+
+    for (int n = 0; n < 30 && rig.sender.pending() > 0u; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.listener.waitFor (2));
+
+    const auto second = rig.listener.all()[1];
+    const auto decoded = osc::decode (second.bytes.data(), second.bytes.size());
+    REQUIRE (decoded.ok);
+    REQUIRE_FALSE (decoded.packet.args.empty());
+    CHECK (decoded.packet.args.front() == osc::Value::float32 (0.75f));
+
+    REQUIRE (rig.runOf (held) != nullptr);
+    CHECK (rig.runOf (held)->state == cue::runState::done);
+}
+
+//==============================================================================
 /*  GO DOH! AND A DEVICE LEFT TO ITS OPERATOR (PRD §3.32, namespace draft §24;
     the author, 2026-10-01).
 
@@ -1097,7 +1299,10 @@ namespace
         nothing of - never from the sender or the mount table, so a fresh
         engine reading the show and the log reaches the same runs. The warning
         is a hook's readout and is not asked: a replay runs no hook. */
-    void replaysTheSame (DohRig& session)
+    /*  `withSender` false is `wfg replay`'s own shape: no sender at all, so
+        nothing a double Esc drops can have been dropped there (§23.10) - and
+        the session must come out the same all the same. */
+    void replaysTheSame (DohRig& session, bool withSender = true)
     {
         const auto show = doc::CanonicalXml::write (session.document);
         const auto original = LogFile::parse (session.engine.log().contents());
@@ -1113,6 +1318,9 @@ namespace
         desk.host = "127.0.0.1";
         desk.port = fresh.listener.port();
         REQUIRE (fresh.mounts.declare (desk).ok);
+
+        if (! withSender)
+            fresh.runner.setMounts (&fresh.mounts, nullptr);
 
         const auto read = doc::CanonicalXml::read (show, fresh.document);
 
@@ -1137,6 +1345,7 @@ namespace
             CHECK (again->takenBack == run.takenBack);
             CHECK (again->sendsLeft == run.sendsLeft);
             CHECK (again->sentTo == run.sentTo);
+            CHECK (again->sendDropped == run.sendDropped);
         }
     }
 }
@@ -1629,22 +1838,49 @@ TEST_CASE ("go.doh: what left is decided at the send")
                  == std::string (takeBack ? "" : cue::runWarning::leftToOperator));
     }
 
-    /*  UNTIL H4 A DOUBLE ESC DROPS NOTHING THAT IS QUEUED (namespace draft §24,
-        L31): the message the GO queued in the press's own drain still leaves
-        at the tick's flush - so it counts as sent, and the corrected GO sends
-        the desk left to its operator nothing more. Stamping it "never left"
-        ahead of H4, as the first build did, sent it a second time. */
-    SUBCASE ("a double Esc in the GO's own drain: until H4 drops the queue the message leaves, and is not sent again")
+    /*  A DOUBLE ESC IN THE GO'S OWN DRAIN DROPS WHAT THE GO QUEUED (2026-10-02,
+        H4, namespace draft §23.10; §24, HQ, L31): the flush that ends the tick
+        finds nothing, so the message never left - the run is stamped
+        `sendDropped`, it does not count as sent, and the corrected GO sends the
+        desk the cue it never had. The stamp is the handler's, from the runs
+        launched in that drain, so a replay with no sender stamps the same run.
+        Until H4 the message left, and this said so: it counted as sent, and the
+        corrected GO sent nothing. */
+    SUBCASE ("a double Esc in the GO's own drain: the message never left, so the corrected GO sends it")
     {
-        rig.park (lx);
+        //  Parked through the command, so the replay at the end is given the pointer too.
+        REQUIRE (rig.press ("standby.set", { osc::Value::string (lx) }).rejected == 0);
+        rig.tickOnce();
         rig.engine.submit ("cli", "go", {});
         rig.engine.submit ("cli", "run.killAll", {});
         rig.tickOnce();
 
         const auto* first = rig.newestRunOf (lx);
         REQUIRE (first != nullptr);
-        CHECK_FALSE (first->sendDropped);
+        CHECK (first->sendDropped);
+        CHECK (rig.received ("/lx/go") == 0u);
+
+        rig.ticks (3);
+        REQUIRE (rig.press ("go.doh").rejected == 0);
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (2);
+
         CHECK (rig.received ("/lx/go") == 1u);
+        CHECK (rig.newestRunOf (lx)->warning.empty());
+
+        replaysTheSame (rig, false);
+    }
+
+    /*  A GUARD: the stamp is for the press's own drain. A message the flush of
+        the GO's tick had already sent left, and counts. */
+    SUBCASE ("a double Esc on the tick after the GO: it had left, so it is not sent again")
+    {
+        rig.park (lx);
+        REQUIRE (rig.press ("go").rejected == 0);
+        REQUIRE (rig.received ("/lx/go") == 1u);
+
+        REQUIRE (rig.press ("run.killAll").rejected == 0);
+        CHECK_FALSE (rig.newestRunOf (lx)->sendDropped);
 
         rig.ticks (3);
         REQUIRE (rig.press ("go.doh").rejected == 0);
@@ -1671,6 +1907,31 @@ TEST_CASE ("go.doh: what left is decided at the send")
         CHECK (rig.received ("/lx/go") == 1u);
         CHECK (rig.newestRunOf (lx)->warning == std::string (cue::runWarning::leftToOperator));
     }
+}
+
+TEST_CASE ("double Esc: a session whose outputs were dropped replays record for record with no sender")
+{
+    /*  THE DROP IS NO RECORD'S BUSINESS (namespace draft §23.10). `run.killAll`
+        empties the sender inside its handler, and a replay runs that handler
+        with no sender at all - so the handler must neither submit anything
+        nor log what it dropped, or the replay's applied arguments part from
+        the night's. A guard, passing before H4 and after it. */
+    DohRig rig;
+
+    auto capped = *rig.mounts.declarationOf ("K3PV7WRB");
+    capped.rateCap = 2.0;
+    REQUIRE (rig.mounts.updateDeclaration (capped));
+
+    rig.fire (rig.makeOsc ("/desk/fader", "f:0.25", "none"));
+    REQUIRE (rig.listener.waitFor (1));
+
+    rig.fire (rig.makeOsc ("/desk/fader", "f:0.75", "sent"));
+    REQUIRE (rig.sender.pending() == 1u);
+
+    REQUIRE (rig.engine.submit ("cli", "run.killAll", {}));
+    rig.ticks (5);
+
+    replaysTheSame (rig, false);
 }
 
 TEST_CASE ("go.doh: two Dohs on one list - each cue left with the desk keeps its own entry")

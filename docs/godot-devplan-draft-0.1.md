@@ -799,6 +799,13 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   rename, on Windows by handle with POSIX semantics, so that a program reading
   the file stops no save. The driver is registered with the fixes it failed
   first on.
+- **H3, 2026-10-01 — a double Esc silences Go.dot's own effects** (§23.6). A
+  voice's kill stops it, silences its output, clears its EQ and resets its
+  inserts while still heard; the press sweeps every idle voice to silence and
+  every idle EQ, leaving what the press keeps ready; no level reaches a cut run;
+  a kill goes through a stop cue's fade hold at once. Inserts on voices are not
+  reset in a burst (one plugin process resets lanes in series; GE); AU and LV2
+  inserts are silenced by the level.
 - **J3, 2026-10-01 — a MIDI port switched off sends nothing** (§23.7). Its row
   had always said so and the engine never read it: a cue on a bound port with
   `Tx` off went out on the cable. It now runs, sends nothing and ends
@@ -846,6 +853,19 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   its operator sent the same cue twice. Until D2 the corrected GO starts the
   cue from the top; D2 to D5 pause and carry on, put back, report, and drive it
   end to end.
+- **H4, 2026-10-02 — a double Esc drops what is still waiting to leave**
+  (§23.10). A value a rate cap held back went out on its turn after the press,
+  the MIDI queue sent everything it held, and no note-off existed anywhere. The
+  press's own handler now empties the network sender - keeping the standby's
+  pre-sends, which the press leaves ready - drops the cues' MIDI messages (a
+  surface's never) and sends one note-off per port, channel and key for each
+  note a cue started and nothing ended (the author's rule); nothing a kill has
+  reached launches, fires or writes after it, nor a start cue's fire or a
+  persistent pass decided before it - the next GO restores the section; and the
+  osc runs it kills in its own drain are stamped `sendDropped`, so Go Doh! does
+  not count them as sent.
+  Found and named, not closed: a pre-send its scene walked past is out of the
+  press's reach.
 
 ---
 

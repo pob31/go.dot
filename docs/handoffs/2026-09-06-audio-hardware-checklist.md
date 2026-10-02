@@ -183,3 +183,25 @@ a bed, and the question is what it does to a transient.
 *Re-measured 2026-09-24, at the Tracktion pin `13b5132`:* the wrap is now exact in every cell,
 48 kHz at 512 and 1024 frames included (`docs/spikes/spike03b-loop-joins.md`). Item 11 no
 longer has a measured blemish behind it; it stays as a listen through a real device.
+
+## A double Esc and what was still on its way — added by H4 (2026-10-02)
+
+A double Esc now drops what a cue handed over and had not yet left - a value a network device's
+rate cap was holding back, a cue's MIDI message still in the sender's queue - and sends a note-off
+for each note a cue started on a synth and nothing has ended: one per port, channel and key, and
+nothing else (the author's rule, 2026-09-30; namespace draft §23.10). The unit suite checks the
+queue and the note record through a sink that sends by hand. What it cannot check is a synth on a
+cable, and the sending thread's own timing.
+
+13. A MIDI cue holds a note on a real synth (a `noteOn`, nothing after it). **Double Esc**: the
+    note stops, and the network monitor shows exactly one note-off for it, `8n key 00` on the
+    cue's channel - not an all-notes-off, and nothing on any other port.
+14. The same note **already ended** by a cue's own note-off (or a note-on at velocity nought),
+    then a double Esc: nothing more goes out. And **Esc** with the note held: nothing goes out and
+    the note rings on, as Esc promises.
+15. A D700 (or any surface on a port of its own) lit and showing faders while a synth note is held:
+    after the double Esc its LEDs and motor faders are where they were - its traffic is never
+    dropped - and the synth gets its note-off.
+16. A lighting desk on a mount whose `rateCap` is low (two hertz): a cue writes, then another
+    within half a second, then a double Esc - the second value never arrives at the desk, on the
+    monitor or on the desk itself.

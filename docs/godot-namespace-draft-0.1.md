@@ -12409,7 +12409,9 @@ panic's, a stop cue's fade, a sampler release - so the roots `run.killAll` marks
 *(2026-10-01, H3: and it sweeps Go.dot's own effects once, `Runner::resetEffects` - every voice
 silenced, every EQ and every rack channel's inserts emptied, the standby's left as its arm made it -
 and the kill that follows empties what it reaches; and a single kill, the pane's, no longer waits
-behind such a job either, §23.6.)*
+behind such a job either, §23.6.)* *(2026-10-02, H4: and it drops what is still waiting to leave - a
+value a rate cap holds back, a cue's MIDI message - with a note-off for each note a cue started, and
+nothing a kill has reached launches or fires after it, `Runner::dropOutputs`, §23.10.)*
 
 **A GO during the fade.** A group can now be `stopping` for as long as the fade. Both walks that
 descend into a live group (`fireStandby`, `prepareStandby`) pass over one that is stopping and make
@@ -14491,6 +14493,240 @@ And the review's, each run on the first build of J2 before its fix:
 | ID | **An arm under a manual group playing its members is given back when the pointer has passed it** - not the pointer's own, not under a group still in its header or only made ready, not under a timeline, automatic sequence or sampler bank | the review's finding, older than J2: §23.9 had read the exclusion of arms as complete, and a manual group never takes an arm only the pointer wanted. A hook's decision |
 | IE | **A block's preparing phase launches no block nested in it**: the scene under it waits for a GO, launched by its parent's members once a GO has entered the parent | the review's finding, older than J2 and widened by IB: a header the horizon could take ahead let the nested scene out of its hold and play with no GO, and a bank so launched closed the others. Fixed at the root rather than by guarding IB's takeover alone. A hook's decision |
 
+### 23.10 A double Esc drops what is still waiting to leave (H4)
+
+**What it means.** After a double Esc nothing a cue handed over before the press goes out after it,
+but the standby's pre-sends, which the press leaves ready (IU). A value a network device's rate cap
+was holding back is dropped, where it used to leave on its turn after the press - half a second
+later at two hertz, two seconds at a half. A cue's MIDI message still in the sender's queue is
+dropped. And every note a cue started on a synth and nothing has ended gets its note-off - one for
+each port, channel and key, and nothing else: no all-notes-off, and nothing to a synth Go.dot never
+played (the author's, 2026-09-30). Nothing a killed run still had in hand starts after the press
+either: a scene's next member, a pre-wait running out, a disk answering in the press's own tick, a
+start cue's fire of its target; and the persistent pass a GO just before the press had opened is
+taken back, so the next GO restores the section (PRD §3.29). Esc is unchanged: it is normal
+completion entered early, and what it finds queued goes.
+
+**The gap.**
+
+- **The network sender had no drop.** Every write to a mounted node is queued and leaves at the
+  tick's flush; a node whose mount caps its rate keeps its newest value queued until its turn. A
+  double Esc ended the cue's run and left the message, which went out on its turn, after the
+  press.
+- **The MIDI queue had no drop and no memory.** A cue's message went to the sender's queue with
+  the surface bridge's traffic, and the sending thread sent all of it. Nothing recorded a note-on,
+  and there was no note-off anywhere in the engine: a note a cue held rang through the press.
+- **A killed scene's members had a tick to act in.** A group's job ends its members a tick after
+  the press (§23.2). In that tick a member's network job went on: a pre-send still asking what the
+  desk held read its answer and wrote - a datagram after the press, and a desk value nothing would
+  put back - and a `sent` wait read its dropped ticket as a send that failed. A member whose launch
+  the scene's job asked for in the press's own tick, or whose pre-wait ran out in the next, fired:
+  a MIDI note-on after the note-offs, ringing with nothing to end it.
+- **The launch loop asked only whether a run was finished.** The disk's answer is a record, and it
+  can drain ahead of the press in the press's tick: the run was ready in the drain that killed it,
+  and the next tick's loop launched it, placed its speed and reported it started before the kill
+  reached the voice.
+- **A start cue's fire is the next tick's hook's**, so one fired in the press's drain fired its
+  target a tick after the press - and one fired the tick before had its fire submitted by the hook of
+  the press's own tick, which drained behind the press and made a fresh run nothing had marked (the
+  review, 2026-10-02).
+- **The persistent pass a GO opens ran after a double Esc** (the review, 2026-10-02). A GO's step
+  opens a pass on the next tick, which waits up to half a second for the desks' answers; pressed in
+  between, a double Esc was followed by the beds being put back - or, the pass already decided in
+  the press's own tick, by its `run.assert` draining behind the press. PRD §3.29 has the NEXT GO
+  restore the section.
+- **`sendDropped` was read and never written** (§24, HQ, L31): D1 left it for the commit that
+  drops the queue.
+
+**The fix.**
+
+- **The network sender drops** (`MountSender::dropQueued`). Every message goes, in the press's own
+  drain, so the flush that ends the tick has nothing of it to send. Each dropped ticket is answered
+  at once, `failed` and marked dropped (`wasDropped`), so a `sent` wait never hangs; the rate cap's
+  clock is left as it was, so a value written after the press still waits its turn, counted from the
+  last value that really went. What the press leaves ready keeps its pre-sends: a message is queued
+  in its run's name, and one whose run hangs from a root the press spares - only made ready, nobody
+  having reached into it, `stopEveryRoot`'s own rule - stays, in its place (IU).
+- **The MIDI sender drops, and remembers** (`midi/SendQueue`, JUCE-free so every runner tests it).
+  A cue's message now goes through `MidiSink::sendForRun`, which marks it as the show's and carries
+  its run; the surface bridge's `send` is unchanged. The sending thread takes a message, looks its
+  device up and tells the note record - all under the queue lock, `queueMutex` then `boundMutex` and
+  never the other way - and sends outside both, so the record hears only of what leaves (IR). The
+  record (`NoteLedger`) is a set per port, channel and key with the runs that pressed it beside it
+  (IK): a cue's note-on above velocity nought starts a key; a note-off, or a note-on at nought, ends
+  it; a cue's All Sound Off or All Notes Off ends its port and channel (IL); an unbind or a rebind of
+  the port forgets its keys (IM). A double Esc (`MidiSender::dropQueued`) drops every cue message
+  still queued and puts one `0x8n key 0` per key at the FRONT of the queue, tagged as no cue's, so a
+  second press before they have gone neither drops nor repeats them, and a surface's SysEx waiting
+  behind cannot hold them back (IQ). They show in the network monitor like any other output.
+- **The press's handler does it** (`Runner::dropOutputs`), from the `run.killAll` wrapper in
+  `registerGoCommands`, after the run table's half has marked the roots (IH): it marks
+  `sendDropped`, empties the network sender, drops the MIDI queue, forgets the start cues' fires
+  still to be submitted, takes back the persistent pass still owed to a step before the press - the
+  step counted as asserted, the pass's wait cleared (IY) - and notes the press's tick
+  (`killedInDrain`), so that the engine's own `cue.fire` and `run.assert` that a hook submitted
+  before the press, draining behind it in the same tick, are applied and do nothing (IV, IY); a fire
+  by a hand still fires. In the handler and not in a hook, for two reasons: the flush that ends the
+  press's tick runs before any hook of the next one, and during an audio outage the clock's thread
+  still flushes every twenty milliseconds and runs no hook at all, while `run.killAll` is admitted.
+  It submits nothing and changes nothing in the press's record, so a replay - no sender, no sink -
+  writes the same log.
+- **`sendDropped` is stamped** (IW): every unfinished osc run a kill has reached whose launch tick is
+  the press's tick - launched earlier in the press's own drain, its message queued there and gone
+  with the queue. From handler state alone - kind, launch tick, kill marks - and never from whether a
+  sender is there, so a replay stamps the same runs; Go Doh! does not count it as sent, and the
+  corrected GO sends the device what it never had (§24, HQ, L31).
+- **Nothing a kill has reached starts anything** (IV, `Runner::beingKilled`): a run whose own kill
+  still stands - `skipFooter` with the stop it asked, which a seek withdraws when it brings a killed
+  cue back - or that is under a kill. `fireNow` and `launchRun` fire and begin nothing for it (handler
+  state, so a replay fires the same nothing), `launchIfDue` launches nothing for it, and a network
+  cue's job ends its run there and then, as the kill would a tick later. A ticket dropped from a run
+  nobody killed ends that run `done` (IJ).
+
+**What does not change.**
+
+- **Esc** drops nothing, stamps nothing and ends no note.
+- **The surface bridge's traffic** is never dropped: it sends only what differs from what it last
+  sent, so a dropped LED or motor fader would stay wrong until something moved it again.
+- **The pane's kill of one cue** drops nothing of that run's queued output (IX).
+- **The tree and the wire part company**: a write reaches the mount table before the queue, so after
+  a drop `/desk/...` shows a value the device never received, until the next write. §4.4 names the
+  price: the world may be left in a state nobody declared.
+- **A superseded ticket was already answered `sent`** when its address was written again (the
+  coalescing rule); the drop cannot take that back, and a killed run is ended by its kill before
+  anything reads it.
+
+**Honest limits.**
+
+- **A note still down when the show closes gets no note-off** (IX): `MidiSender::stop` delivers
+  what is queued and nothing more. The author's rule is the double Esc's.
+- **What `sendDropped` cannot see** (L31): a message a rate cap held from an earlier tick, a
+  pre-send this tick's hook wrote, and a MIDI message launched in the press's drain - which goes to
+  the sending thread at once and may already have left - are dropped where no handler sees them, and
+  count as sent.
+- **And what it marks wrongly during an audio outage** (the review, 2026-10-02; L31). With the clock
+  down, every drain runs at the tick the clock froze on, and no hook runs. An osc run launched on that
+  last live tick has left - the flush still runs - yet a double Esc during the outage finds its launch
+  tick equal to its own, and marks it `sendDropped`: Go Doh! then counts it as never sent, and a
+  corrected GO sends a device left to its operator the cue a second time. Not mended: it needs the
+  outage itself in handler state.
+- **A spared pre-send loses its place to a killed cue's later write** (the review, 2026-10-02). The
+  queue keeps one message an address, its newest writer's, so a standby's pre-send that a rate cap is
+  holding and a killed cue then writes on the same address is that cue's message by the press - and
+  dropped with it. Keeping it would send the killed cue's value. The desk keeps what it held, the
+  scene believes it pre-sent, and nothing sends it again until the address is written.
+- **A port switched off after its note-on still gets the note-off**: the switch (`tx`) is read when
+  a cue fires, and the note the record holds was played while it was on.
+- **A note-off the press queued for a port unbound before it leaves** is dropped with the port's
+  device; one rebound in that instant would reach the new device. The window is the sending
+  thread's next pop.
+- **Found on the way, and not closed here: a pre-send its scene walked past is out of the press's
+  reach.** A scene adopted by a GO while its header's pre-send was still asking (§23.9, "not
+  changed") ends at once when it has nothing else to do, and the pre-send is left asking under a
+  scene that is over. `stopEveryRoot` counts a run as a root only when its parent is missing from the
+  table, and a finished run is never removed from it - so neither Esc nor a double Esc reaches that
+  pre-send, and its answer still writes after the press, until its own timeout. The fix belongs to
+  `stopEveryRoot` (a parent that has finished counts as gone, which its own comment says it means)
+  and changes Esc as well, so it is left for a ruling. `VerifiedCueTests`' case below holds its
+  scene in its members phase to test the road this stage closes.
+
+**Tests**, each written first. The new calls could not compile against the tree before this stage,
+so it was first built with them declared and doing nothing - every behaviour as before - and each
+case failed there unless named a guard:
+
+- `NetworkCueTests` "mount sender: a double Esc drops what is still waiting, and answers each ticket
+  failed" - a two-hertz cap: the held ticket answered `failed` and dropped, nothing more on the wire
+  in thirty flushes, a value written after the press still waiting its turn, and a caller's named
+  owner kept. It failed on every check that asks for the drop - nothing dropped, the held ticket
+  still pending, and two sends in thirty flushes; the value written after the press, coalesced into
+  the held one there, passed.
+- `NetworkCueTests` "double Esc: a value the rate cap is holding never leaves, and the cue waiting on
+  it ends" - the queue empty after the press's tick, one datagram in all, the run `done` with no
+  error, the tree holding the value. It failed on the queue (one still waiting after the press) and
+  on the datagrams and the sender's count (two each).
+- `NetworkCueTests` "double Esc: a group member's held value is dropped, and the member ends rather
+  than failing" - one datagram, the member `done`. It failed on the queue and the datagrams (two);
+  with the drop built and neither the kill-from-above in the job loop nor the dropped-ticket branch,
+  on the member: `failed`, `send-failed`.
+- `NetworkCueTests` "go.doh: what left is decided at the send" - its double-Esc SUBCASE, which pinned
+  the message leaving until H4, now requires it dropped: `sendDropped` stamped, nothing received, the
+  corrected GO sending the desk the cue once, no warning, and the session replayed with no sender,
+  `sendDropped` compared run for run. It failed on the stamp, the datagram and the warning. A new
+  SUBCASE - a double Esc on the tick after the GO stamps nothing, and the cue is not sent again - is a
+  guard.
+- `MidiTests` "midi send queue: a double Esc drops the cues' messages and ends every note that left,
+  once" - the queue alone: a note that left ended and the waiting message dropped; a note already
+  ended, by a note-off or a note-on at nought, given nothing; a note-on that never left given no
+  note-off; a cue's own note-off still waiting replaced by the record's; a surface's traffic kept and
+  its note-ons not recorded; the note-offs ahead of a waiting SysEx; a second press neither dropping
+  nor repeating them; one note-off per port, channel and key, the runs kept; All Notes Off and All
+  Sound Off; a port given another device. It failed on its first REQUIRE (no note recorded).
+- `MidiTests` "midi cue: double Esc sends exactly one note-off for a note a cue started, and Esc sends
+  none" - through the Runner, the sending thread done by hand: the run carried with the note-on, the
+  waiting CC dropped, one `0x81 60 0`, nothing after the cue's own note-off, and Esc dropping
+  nothing. It failed on the run (none carried), the drop (never asked) and the note-off.
+- `MidiTests` "midi cue: a member a killed scene was about to launch sends nothing after the press" -
+  the scene's job asks for the member's launch in the press's own tick: no note-on on the wire, the
+  run ended never launched. It failed on both (the note-on left; launched at tick 5).
+- `MidiTests` "midi: a double Esc on a sender with nothing bound is harmless" - the real sender with
+  no device: `no-port`, and nothing to drop. A net: it compiled only once the calls existed.
+- `GoTests` "double Esc: a cue whose disk answers as the press lands is never launched" (H5's,
+  moved here) - no launch and no speed placed after the press, the run over within five ticks. It
+  failed on both counts (one launch, one rate point).
+- `GoTests` "double Esc: a start cue's target fires nothing after the press" - fired in the press's
+  own drain, or the tick before so that its fire drains behind the press: its target never runs;
+  without the press it fires, so the case is not empty. The first failed with the press (the target
+  ran); the second, the review's, failed on the first build of this stage the same way.
+- `GoTests` "persistent: a double Esc right after a GO takes back the pass that GO opened, and the
+  next GO brings the section back" (the review's) - the press in the GO's own drain, and on the tick
+  after with the pass already decided: no run of the bed, and the next GO puts it back, asserted. Both
+  failed on the first build of this stage (the bed was put back).
+- `VerifiedCueTests` "double Esc: a pre-send of the GO's scene still asking when the press lands
+  writes nothing when its answer comes" - the answer in the press's own drain: nothing written,
+  nothing sent, the run ended. Run with H4 built and the job loop's kill-from-above switched off -
+  that loop as it was before H4 - it failed on the desk value (0.8 written) and the datagram (one
+  sent). Its first draft, a scene with nothing but the header, failed on the code before H4 and on
+  H4 alike, and is how the limit above was found: the scene had ended at the GO.
+- `VerifiedCueTests` "double Esc: the standby's pre-send already on its way still leaves" - written
+  in the press's tick, it leaves, and the scene is still made ready. A guard before H4, where nothing
+  was dropped; on H4 built with the drop keeping nothing, it failed on the datagram (none sent).
+- Guards, passing before and after: `NetworkCueTests` "Esc: a value the rate cap is holding still
+  leaves on its turn" and "double Esc: a session whose outputs were dropped replays record for record
+  with no sender".
+
+**The decisions.** Letters follow §23.9's; IF is skipped as the word it reads as, and so are IN, IO,
+IP, IS and IT. The orchestrator's rulings are on the brief's open questions, 2026-10-02; all but IG
+are the author's to overrule.
+
+| | Decision | Whose |
+|---|---|---|
+| IG | **The note-offs a double Esc owes**: one for each note a cue started and nothing has ended - per port, channel and key - and nothing else: no all-notes-off, nothing to a synth Go.dot never played | the author's, 2026-09-30 |
+| IH | **The drop is the press's handler's**, after the run table's half has marked the roots: never a hook, which neither the press's own flush nor a clock that is down waits for; it submits nothing and its applied record is the plain one | the orchestrator's ruling; "after the run table's half" the implementer's, so the kill marks are there to read |
+| IJ | **A dropped ticket ends its run `done`, never failed**: the press is the account, and a run the press killed is ended by its kill first; no new `run/error` word | the orchestrator's ruling, against the brief's `dropped` error |
+| IK | **The note record is a set per port, channel and key**, the runs that pressed it kept beside it for Go Doh! (L26); one note-off a key however many note-ons, spelled `0x8n key 0`; a note-on at velocity nought ends a key, as a synth reads it | the orchestrator's rulings; the velocity-nought reading the brief's |
+| IL | **A cue's All Sound Off (CC 120) or All Notes Off (CC 123) that leaves ends that port and channel's keys**: the cue has ended them itself | the orchestrator's ruling |
+| IM | **A port unbound, or put on another device, forgets its keys**: a later note-off would reach a synth that never heard the note-on | the orchestrator's ruling |
+| IQ | **Only a cue's messages are dropped or recorded**: `sendForRun` marks them; the surface bridge's traffic is never dropped, and its note-ons - LED colours - are no note of the show's; the note-offs go to the front of the queue as no cue's | the orchestrator's ruling; the front of the queue the brief's |
+| IR | **The record hears only what leaves**: the sending thread looks the device up and tells the record before it lets the queue go - `queueMutex` then `boundMutex`, never the other way - and sends outside both; a rebind swaps the device and forgets the old one's notes under both locks, in that order | implementer's call, as the brief drew it: looked up after the lock, a note-on taken just before a press was in neither the queue nor the record, and rang on; the rebind's two locks the review's (2026-10-02), or a note the new device played was forgotten with the old one's |
+| IU | **What the press leaves ready keeps its pre-sends on their way**: the network sender keeps a message whose run hangs from a root the press spares, in its place, and drops the rest; messages are queued in their run's name | implementer's call, departing from the brief's "drop everything": the GO after the press adopts the standby's scene with its pre-sends counted as done, and a dropped one left the desk without a value the scene believes it holds - as FY spared the standby's voice from H3's sweep |
+| IV | **Nothing a kill has reached starts anything**: `fireNow`, `launchRun`, `launchIfDue` and a network cue's job pass over a run whose own kill still stands (`skipFooter` with the stop it asked) or that is under one; a start cue's fire still to be submitted is dropped, and one the press's own tick's hook submitted, draining behind the press, is applied and does nothing (an engine `cue.fire` after `run.killAll` in one tick; a fire by name still fires) | the orchestrator's ruling, adopting the brief's optional guards and H5's `launchIfDue` guard; reading the run's own kill through its stop is the implementer's, so a seek that brings a killed cue back still launches it; the fire behind the press the review's (2026-10-02) |
+| IW | **`sendDropped` is stamped by the press's handler**: every unfinished osc run a kill has reached that was launched in the press's own drain; never from whether a sender is there | the orchestrator's ruling, the design's GX (§24, HQ) |
+| IX | **Two things named and not built**: the pane's kill of one run drops nothing of its queued output (per-run drops are Go Doh!'s), and a show closing sends no note-off for a note still down | the orchestrator's rulings |
+| IY | **A double Esc takes back the persistent pass still owed**: the step a GO before the press took is counted as asserted and the pass's wait cleared, and a `run.assert` the pass submitted in the press's own tick, draining behind the press, is applied and does nothing; the next GO restores the section | the review's (2026-10-02), PRD §3.29's "the next GO restoring the declared world"; the `run.assert` behind the press the implementer's, found writing the review's case |
+
+**What it changes for a replay.** The drop, the note-offs and the stamp change no record: a
+replay, with no sender and no sink, runs the same handler and stamps the same runs. What a replay
+of an older log meets differently is the handlers' own new answers - a member a hook launched
+behind the press, an engine `cue.fire` or `run.assert` drained behind a `run.killAll` in one tick:
+each recorded as having started something, each now applied and doing nothing. Every
+`wfg.replay.*` fixture was run under C and fr_FR, with the black-box drivers `phase2`, `phase6`,
+`triggers` and `first-sound`; none holds the shape, and none was re-recorded.
+
+**Owed to the bench**, in `docs/handoffs/2026-09-06-audio-hardware-checklist.md` (items 13-16): a
+note held on a real synth, then a double Esc - exactly one note-off, the note stops; a note a cue has
+already ended - nothing more; Esc - nothing; a surface beside it keeping its LEDs and faders; and a
+lighting desk behind a rate cap, its held value never arriving after a double Esc.
+
 ## 24. Go Doh! — taking back the last GO
 
 Written from 2026-10-01. PRD §3.32 is the law for Go Doh!: the third of §4.4's stops, for the GO
@@ -14548,6 +14784,8 @@ Every decision a Doh makes must come out the same there, so every handler from h
   no parent and in a block nobody has entered, and only there may it be read: H4's stamp of
   `sendDropped` will follow the kill's own rule for which roots it spares (§23.3). *(2026-10-01, the
   review: D1 no longer stamps `sendDropped` - see HQ - so no Doh decision reads the mark at all.)*
+  *(2026-10-02, H4: the stamp is taken after the run table's half has marked the roots, from the kill
+  marks it wrote, so it follows that rule without reading the mark itself, §23.10.)*
 - **A live Player call from a handler** - `audio->stop`, as a jump's sweep and a seek already make -
   is allowed: the Player is absent in a replay, and the report the call causes arrives once, from the
   log.
@@ -14737,7 +14975,7 @@ built.
 | HN | GU | **The Doh's own persistent pass sends nothing to a device left to its operator**: the persistent OSC and MIDI cues whose effective setting is `leave`, on every list, are named against the Doh's `d` step and skipped on the pass that step opens; media, mic and the devices that take back are asserted as ever. After an Esc between the GO and the Doh that pass asserts nothing at all - Esc brought the beds down, and a Doh never undoes an Esc - and the next step asserts the section *(the review, 2026-10-01)* | the design's call |
 | HO | GV | **A pre-send the GO committed is the GO's**: on a device left to its operator it joins the left set once its write is known (done, or failed `disagreed`); the give-back of an unheard block puts back only the pre-sends that take back - the Doh clears the restore of the GO's own pre-sends that leave, and a next scene the horizon prepared under the GO's act keeps its own (L34) *(the review, 2026-10-01: the first build cleared that one too, and the desk kept the next scene's value)*; the horizon leaves out every cue a mark names | the design's call |
 | HP | GW | **What was left lives by its marked cue**: a GO that reaches the cue consumes it - undone when that GO made no run of the cue it stood on, which is decision N's ignore; a start cue's fire of it caused by a GO files it under that GO; a GO before the cue keeps it and one past it drops it; a fire by name, a trigger and a jump drop it; a second Doh, Esc, a double Esc and a pointer move keep it | the design's call, after the author's own case: GO 12 fired when 11.5 was due, Doh!, GO 11.5, GO 12 - the desk gets 12's cue once in all |
-| HQ | GX | **What left is decided at the send**: the device the document routed the send to, its `tx` on, stamped on the run when it fires (`sentTo`); a send counts unless it failed writing nothing (`bad-address`, `read-only`, `type-mismatch`, `no-port`, `bad-message`, `send-failed`), a double Esc dropped it in the drain that launched it (`sendDropped`, stamped from H4, which does the dropping - *the review, 2026-10-01: until then the message still leaves, and stamping it sent it a second time to a device left to its operator*), or it is a pre-send whose write is not known yet; the setting is read from the remembered device, a device gone since reading `leave` | the design's call |
+| HQ | GX | **What left is decided at the send**: the device the document routed the send to, its `tx` on, stamped on the run when it fires (`sentTo`); a send counts unless it failed writing nothing (`bad-address`, `read-only`, `type-mismatch`, `no-port`, `bad-message`, `send-failed`), a double Esc dropped it in the drain that launched it (`sendDropped`, stamped from H4, which does the dropping - *the review, 2026-10-01: until then the message still leaves, and stamping it sent it a second time to a device left to its operator*; *2026-10-02: stamped since H4, §23.10*), or it is a pre-send whose write is not known yet; the setting is read from the remembered device, a device gone since reading `leave` | the design's call |
 | HR | GY | **The Doh never sends a device left to its operator anything late** (D3): a cue the GO stopped whose time has passed, and a relaunched scene's leave cues placed before its relaunch second, are named rather than sent | the design's call |
 | HS | - | **A scene nobody heard is given back from wherever its job had got to, its footer included**: what it pre-sent goes back on its first stopping tick, before the horizon prepares it again; what a job still drives under it - a fade or a stop cue the GO fired on a cue outside it - is let finish, and the scene is revoked then; what nothing drives - a member spawned and never launched, a fade whose job Esc or a double Esc let go of - is asked to stop the way the scene is stopping, everything under a kill; a scene inside it gives itself back, and it waits for that one, innermost first | the implementer's, the review of 2026-10-01: the design said H2's road; the first build held the restores back behind every fade and waited on runs nothing would end |
 | HT | - | **A sooner stop keeps winning**: the Doh pushes no fade on a heard voice that a stop due sooner already holds, and when the run that set that stop going is stopped first - its scene ending its members - the job lets go of that run and lands the stop itself, decided from `takenBack`; Esc's own per-voice fade, which the Doh shares, takes over whatever a sounding voice carries, as it always did | the implementer's, the review of 2026-10-01 |
@@ -14779,7 +15017,7 @@ until that stage lands.
 | L28 | *Withdrawn*: J2 makes a GO on a scene row inside a running act adopt the block the horizon prepared there | - |
 | L29 | **Every device is left to its operator until somebody says otherwise** - Go.dot's own processors reached over OSC included: a WFS-DIY's values are not put back and its cues not sent again by a Doh until its row says take back | the author's "always leave to its operator" |
 | L30 | The setting governs what had already left. What the early GO had not sent yet is taken down with its runs and sent by the corrected GO at its own time, whatever the setting - a lighting scene caught part-way leaves its first cues to the light operator and sends the rest on the corrected GO's clock | "not sent again", for what had left |
-| L31 | A left cue run again keeps its pre-wait and post-wait and sends nothing, ending `left-to-operator` whatever its wait. A send that failed writing nothing did not leave, and the corrected GO sends it. A pre-send whose read-back had not come back by the Doh is not counted. Until H4 a double Esc drops nothing from the sender's queue, so every message it finds there still leaves and counts as sent; from H4, what it drops of its own drain is stamped and does not count, and a message a rate cap held since an earlier tick, or a MIDI message launched in the double Esc's drain, still counts though it may not have left *(the review, 2026-10-01: D1 had stamped its own drain ahead of H4, and the corrected GO sent a message that had left a second time)* | "not sent again", with a first GO's timing |
+| L31 | A left cue run again keeps its pre-wait and post-wait and sends nothing, ending `left-to-operator` whatever its wait. A send that failed writing nothing did not leave, and the corrected GO sends it. A pre-send whose read-back had not come back by the Doh is not counted. Until H4 a double Esc drops nothing from the sender's queue, so every message it finds there still leaves and counts as sent; from H4, what it drops of its own drain is stamped and does not count, and a message a rate cap held since an earlier tick, or a MIDI message launched in the double Esc's drain, still counts though it may not have left *(the review, 2026-10-01: D1 had stamped its own drain ahead of H4, and the corrected GO sent a message that had left a second time)* *(2026-10-02: H4 is built - the queue is dropped and the press's own drain stamped, §23.10; during an audio outage, where every drain runs at the frozen tick, a double Esc also stamps an osc run launched on the last live tick, which had left - counted as unsent, a corrected GO sends it to a device left to its operator a second time)* | "not sent again", with a first GO's timing |
 | L32 | **Once per cue**: the first run the corrected GO makes, adopts or causes for a left cue sends nothing; a scene that starts from the top and loops sends it in its later rounds. A GO that reaches the marked cue through automatic sequences consumes the entry for the run it will spawn; a sequence stopped before it gets there leaves that run unmade, and a later GO on the cue sends it | "the corrected GO does not send it again" |
 | L33 | An address two of the GO's cues wrote, one left and one taken back, follows the last writer | one decision per address |
 | L34 | The horizon's preparation of the next scene, made after the GO, follows §23.3's rule whatever the setting: given back, its pre-sends put back, pre-sent again. A pre-send the GO itself committed is the GO's (HO). Only a device declared anticipatable is ever pre-sent to, so a lighting desk sees none | the setting is about what a GO sent or committed |
@@ -14867,8 +15105,8 @@ HT), and the standby's arm (`waitingForVoice`: the cue armed again once its old 
 `stopping`.
 
 **The Go Doh! setting** (`cue/DohSetting.h`, read only from the document), `sentTo` stamped in
-`fireKind`, `sendDropped` read but not yet stamped (H4 stamps it), `countsAsSent`, the left set taken before
-anything moves, `sendsLeft` making `writeOscNow` and `fireMidi` send nothing and `advanceSends` end the
+`fireKind`, `sendDropped` read but not yet stamped (H4 stamps it - *2026-10-02: it does, §23.10*),
+`countsAsSent`, the left set taken before anything moves, `sendsLeft` making `writeOscNow` and `fireMidi` send nothing and `advanceSends` end the
 run `left-to-operator`, the marks with `reaches` and `isPast` read from the list's own order, and the
 horizon leaving out what a mark names (`beginPreparation`).
 
@@ -14903,7 +15141,8 @@ too.
 - **`sendDropped` waits for H4** *(the review, 2026-10-01)*: a double Esc does not yet drop a message
   queued in its own drain, so nothing is stamped and such a message, which goes out, counts as sent -
   the corrected GO does not send it to a device left to its operator a second time. H4 stamps it in
-  the commit that drops it (HQ, L31).
+  the commit that drops it (HQ, L31). *(2026-10-02: it has - the double Esc drops the queue and
+  stamps its own drain, §23.10.)*
 - **The mark is `DohMark { left }`**: D1 has no resume root, so `markFire` and `forgetGoOnJump` stand
   in for the design's `dropMark` and `dropLeft`; `notePlayed` is its `notePress`.
 - **The cells' explanation is the row's tooltip**: the settings lists have no tooltip per cell.
@@ -14932,7 +15171,7 @@ case written first that failed on the first build (the nets below say so where t
   Doh found the act "stopped by another hand".
 - **After an Esc, the Doh's own persistent pass asserts nothing** (HN): it had put the beds Esc brought
   down back at the press - a Doh undoing an Esc.
-- **`sendDropped` waits for H4** (HQ, L31), as above.
+- **`sendDropped` waits for H4** (HQ, L31), as above. *(2026-10-02: stamped since H4, §23.10.)*
 - **Esc's per-voice fade is Esc's again; the Doh's sooner stop keeps winning** (HT): the first build
   moved the Doh's "a stop due sooner wins" test into the fade Esc shares, so under Esc a cue a seek had
   put back to `playing` under its fade-and-stop kept that stop - still held by the stop cue's run,
@@ -14964,7 +15203,7 @@ case written first that failed on the first build (the nets below say so where t
 Doh! forgetting the resume, `list/resume`. D3: the desk, levels, stops, takes, flags, sampler banks,
 the report, `go.dohRelaunch` and `list.dohReport`. D4: the report's words for every device and cue
 left to an operator, and the client's notice. D5: the end-to-end drive. H4: the double Esc's own drain dropped from the sender's queue, and
-`sendDropped` stamped with it. **Owed to the bench and to
+`sendDropped` stamped with it *(2026-10-02: built, §23.10)*. **Owed to the bench and to
 the author's eye**: the button and F9 on screen, the inspector's words, and a lighting desk left to
 its operator through a Doh and a corrected GO.
 

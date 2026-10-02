@@ -4620,6 +4620,74 @@ TEST_CASE ("stop levels: a double Esc never waits out a post-wait")
 }
 
 //==============================================================================
+/*  DOUBLE ESC DROPS WHAT WAS STILL TO COME (2026-10-02, H4, namespace draft
+    §23.10): nothing a killed run had in hand starts after the press. */
+TEST_CASE ("double Esc: a cue whose disk answers as the press lands is never launched")
+{
+    /*  The disk's answer is a record queued ahead of the press, so the run is
+        ready in the very drain that kills it - and the launch loop, which runs
+        on the next tick before the kill reaches the voice, asked only whether
+        the run was finished. It launched a cue the press had dropped, placed
+        its speed, and only then was the voice cut. */
+    FadeRig rig;
+    rig.fire (rig.mediaId);
+    REQUIRE_FALSE (rig.audio.arms.empty());
+    const auto run = rig.runs.all().front().id;
+
+    rig.audio.completeArms (rig.engine);
+    REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+
+    REQUIRE (rig.runs.find (run)->state == cue::runState::stopping);
+    REQUIRE (rig.runs.find (run)->armConfirmed);
+    REQUIRE (rig.runs.find (run)->skipFooter);
+
+    const auto launches = rig.audio.launches.size();
+    const auto ratePoints = rig.audio.ratePoints.size();
+
+    rig.tickOnce();
+
+    CHECK (rig.audio.launches.size() == launches);
+    CHECK (rig.audio.ratePoints.size() == ratePoints);
+    CHECK (rig.tickUntil ([&] { return rig.runs.find (run)->isFinished(); }, 5));
+}
+
+TEST_CASE ("double Esc: a start cue's target fires nothing after the press")
+{
+    /*  A start cue's fire of its target is submitted by the next tick's hook.
+        So a start cue fired in the press's drain - before the press - fired its
+        target a tick after the press that drops every action; and one fired the
+        tick before had its fire submitted by the press's own tick's hook, which
+        drained behind the press and made a fresh run nothing had marked (the
+        review, 2026-10-02). */
+    Rig rig;
+    const auto start = rig.document.createCue (rig.listId, 2, "start", "Go the memo").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + start + "/target", rig.memoId).ok);
+
+    auto pressed = true;
+    auto tickBefore = false;
+
+    SUBCASE ("fired in the press's own drain") {}
+    SUBCASE ("fired the tick before: its fire drains behind the press") { tickBefore = true; }
+    SUBCASE ("without the press, the target fires - the case is not empty") { pressed = false; }
+
+    REQUIRE (rig.engine.submit ("cli", "cue.fire", { osc::Value::string (start) }));
+
+    if (tickBefore)
+        rig.tickOnce();
+
+    if (pressed)
+        REQUIRE (rig.engine.submit ("cli", "run.killAll", {}));
+
+    rig.tickOnce();
+    REQUIRE_FALSE (rig.runOf (start).empty());
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (rig.memoId).empty() == pressed);
+}
+
+//==============================================================================
 /*  THE LEAST TIME BETWEEN TWO GOs (PRD §3.7's GO debounce, a show setting
     since 2026-09-28, author: "a 'time between' Go's"). */
 TEST_CASE ("go: inside the least time between two GOs a GO is refused, and the standby does not move")
@@ -9969,6 +10037,46 @@ TEST_CASE ("persistent: a double Esc leaves it silent, suspends nothing, and the
     REQUIRE (again != nullptr);
     CHECK (again->id != first);
     CHECK (again->asserted);
+}
+
+TEST_CASE ("persistent: a double Esc right after a GO takes back the pass that GO opened, and the next GO brings the section back")
+{
+    /*  PRD §3.29: after a double Esc the NEXT GO restores the declared world.
+        A pass the GO before the press had already opened put the bed back right
+        after the press instead - opened in the press's own drain and run on the
+        next tick, or run in the press's tick and its record drained behind the
+        press (the review, 2026-10-02, namespace draft §23.10). */
+    PersistentRig rig;
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.memoId) }).applied == 1);
+
+    auto sameDrain = true;
+
+    SUBCASE ("in the GO's own drain") {}
+    SUBCASE ("on the tick after the GO, its pass decided ahead of the press") { sameDrain = false; }
+
+    REQUIRE (rig.engine.submit ("cli", "go", {}));
+
+    if (! sameDrain)
+        rig.tickOnce();
+
+    REQUIRE (rig.engine.submit ("cli", "run.killAll", {}));
+    rig.tickOnce();
+
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    CHECK (rig.runOf (rig.bed).empty());
+    CHECK (rig.liveBed() == nullptr);
+
+    /*  And the next GO brings it back, as it does after any double Esc. */
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    REQUIRE (rig.liveBed() != nullptr);
+    CHECK (rig.liveBed()->asserted);
 }
 
 TEST_CASE ("persistent: a jump leaves the section sounding")

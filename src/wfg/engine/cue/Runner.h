@@ -926,6 +926,39 @@ namespace wfg::cue
             which has no Player, is the same with it or without. */
         void resetEffects();
 
+        /*  AND WHAT IS STILL WAITING TO LEAVE (2026-10-02, H4, namespace draft
+            §23.10): the double Esc's half that reaches the wire, called by its
+            handler after the run table's half has marked the roots, so it
+            knows which runs the press killed and which it spared.
+
+            - The network sender's queue is emptied - a value a rate cap holds
+              back included - but for the pre-sends of what the press leaves
+              ready (the standby's prepared scene), which go on their turn.
+            - The MIDI sink drops every cue message not yet gone and ends each
+              note a cue started (`MidiSink::dropQueued`).
+            - A start cue's fire still to be submitted is dropped.
+            - Every osc run the press killed in the very drain that launched it
+              is marked `sendDropped` (§24, HQ, L31): its message was queued
+              there and is gone, so it never left.
+
+            - The persistent pass a GO before the press opened is taken back:
+              the next GO restores the section (PRD §3.29).
+
+            The mark is decided from handler state alone - the run's kind, its
+            launch tick against `tick`, the kill marks - so a replay, which has
+            no sender and no sink, marks the same runs. Nothing is submitted
+            and the press's record is not changed. */
+        void dropOutputs (std::int64_t tick);
+
+        /*  WHETHER A DOUBLE ESC WAS APPLIED EARLIER IN THIS DRAIN (the review
+            of H4, 2026-10-02, namespace draft §23.10). The engine's own fires
+            that a hook decided before the press - a start cue's target, the
+            persistent pass - can drain behind it in the same tick, and would
+            start something fresh after the press that drops every action; their
+            handlers ask this and do nothing. Handler state: the press's handler
+            writes it, so a replay asks the same. */
+        bool killedInDrain (std::int64_t tick) const noexcept { return killedAtTick >= 0 && killedAtTick == tick; }
+
         /*  THE LEAST TIME BETWEEN TWO GOs (PRD §3.7's GO debounce, a show
             setting since 2026-09-28): whether a GO at `tick` falls inside the
             show's `list/goDebounce` of the last GO that fired something. The
@@ -1489,6 +1522,19 @@ namespace wfg::cue
             the same (namespace draft §23.2). */
         bool underAKill (const Run& run) const;
 
+        /*  WHETHER A KILL HAS REACHED A RUN AND STILL STANDS: its own
+            (`skipFooter`, which only `run.kill` and a double Esc write, with
+            the stop it asked - a seek withdraws that) or one above it. Since
+            H4 (namespace draft §23.10) what keeps a run from launching, firing
+            or writing after the press: nothing a kill has reached starts
+            anything. Handler state, so a handler may decide by it. */
+        bool beingKilled (const Run& run) const;
+
+        /*  WHETHER A RUN HANGS FROM A ROOT THE DOUBLE ESC SPARES: one only made
+            ready, nobody having reached into it - the rule `stopEveryRoot`
+            spares by (§23.3). What its pre-sends have queued goes out (§23.10). */
+        bool sparedByThePress (const std::string& runId) const;
+
         /*  A SAMPLER GROUP'S MEMBERS PHASE, every tick: arm every member that
             has no run onto its strip, let a closing group finish, end the idle
             members on strips another group took, and hand a voice to a member
@@ -1763,6 +1809,9 @@ namespace wfg::cue
 
         std::uint64_t assertedFor = 0;
         std::int64_t assertDue = -1;
+
+        /*  The tick of the last double Esc applied, or -1: `killedInDrain`. */
+        std::int64_t killedAtTick = -1;
 
         /*  Cues the operator killed, which stay killed for the session (decision
             S). Cleared by a load-to-time, which is a new answer to the same

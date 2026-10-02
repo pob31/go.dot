@@ -25,7 +25,8 @@
 namespace wfg::tree
 {
     std::uint64_t MountSender::queue (const std::string& mountId, const Destination& destination,
-                                      const std::string& address, const osc::Value& value)
+                                      const std::string& address, const osc::Value& value,
+                                      const std::string& owner)
     {
         const auto ticket = nextTicket++;
 
@@ -48,17 +49,18 @@ namespace wfg::tree
                 three-valued wait exists to make visible. It reports SENT and
                 not failed: what the caller asked for was that this address
                 reach the target this tick, and it will. */
-            outcomes.emplace_back (message.ticket, true);
+            outcomes.push_back ({ message.ticket, Outcome::sent, false });
 
             message.ticket = ticket;
             message.mountId = mountId;
             message.destination = destination;
             message.value = value;
+            message.owner = owner;
             return ticket;
         }
 
         queuedAt[address] = queued.size();
-        queued.push_back (Message { ticket, mountId, destination, address, value });
+        queued.push_back (Message { ticket, mountId, destination, address, value, owner });
         return ticket;
     }
 
@@ -122,7 +124,7 @@ namespace wfg::tree
                 ++sent[message.mountId];
 
             lastSentAt[message.address] = flushes;
-            outcomes.emplace_back (message.ticket, ok);
+            outcomes.push_back ({ message.ticket, ok ? Outcome::sent : Outcome::failed, false });
         }
 
         queued = std::move (waiting);
@@ -131,6 +133,45 @@ namespace wfg::tree
         for (std::size_t index = 0; index < queued.size(); ++index)
             queuedAt[queued[index].address] = index;
 
+        forgetOldAnswers();
+    }
+
+    std::size_t MountSender::dropQueued (const std::function<bool (const std::string& owner)>& keep)
+    {
+        /*  WHAT IS KEPT KEEPS ITS PLACE, for the reason the coalescing keeps
+            the first write's: a pre-send that sets a mode and then a parameter
+            of that mode still arrives in that order. */
+        std::vector<Message> kept;
+        std::size_t dropped = 0;
+
+        for (auto& message : queued)
+        {
+            if (keep && keep (message.owner))
+            {
+                kept.push_back (std::move (message));
+                continue;
+            }
+
+            /*  ANSWERED NOW, as a superseded message is: nothing will ever
+                flush it, and a cue waiting on a ticket that cannot arrive is a
+                cue that hangs. `failed`, because it did not reach the target;
+                marked dropped, because nothing went wrong on the wire. */
+            outcomes.push_back ({ message.ticket, Outcome::failed, true });
+            ++dropped;
+        }
+
+        queued = std::move (kept);
+        queuedAt.clear();
+
+        for (std::size_t index = 0; index < queued.size(); ++index)
+            queuedAt[queued[index].address] = index;
+
+        forgetOldAnswers();
+        return dropped;
+    }
+
+    void MountSender::forgetOldAnswers()
+    {
         while (outcomes.size() > outcomesKept)
             outcomes.pop_front();
     }
@@ -150,14 +191,23 @@ namespace wfg::tree
         /*  From the back, because the answer a caller wants is almost always
             the most recent flush's - a cue asks one tick after it queued. */
         for (auto entry = outcomes.rbegin(); entry != outcomes.rend(); ++entry)
-            if (entry->first == ticket)
-                return entry->second ? Outcome::sent : Outcome::failed;
+            if (entry->ticket == ticket)
+                return entry->outcome;
 
         /*  Not flushed yet, or flushed so long ago that the answer has been
             dropped. `pending` is the honest word for both: this object no
             longer knows, and a caller still asking about a ticket five hundred
             messages old has a bug of its own. */
         return Outcome::pending;
+    }
+
+    bool MountSender::wasDropped (std::uint64_t ticket) const
+    {
+        for (auto entry = outcomes.rbegin(); entry != outcomes.rend(); ++entry)
+            if (entry->ticket == ticket)
+                return entry->dropped;
+
+        return false;
     }
 
     std::size_t MountSender::sentFor (const std::string& mountId) const

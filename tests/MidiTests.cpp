@@ -1145,3 +1145,408 @@ TEST_CASE ("go.doh: a MIDI cue that found no port sent nothing, so the corrected
     CHECK (rig.sink.sent.size() == 1u);
     CHECK (rig.newestRunOf (note)->warning.empty());
 }
+
+//==============================================================================
+/*  A DOUBLE ESC AND THE MIDI CABLE (2026-10-02, H4, namespace draft §23.10).
+
+    PRD §4.4's immediate level "drops all actions": a cue's message still in the
+    sender's queue is dropped. And the author's rule for what was already played
+    (2026-09-30): a note-off for each note Go.dot started and has not ended -
+    nothing else, no all-notes-off, and nothing to a synth Go.dot never played.
+    The surface bridge's traffic shares the queue and is never dropped. Every
+    case failed on the code before H4 but the last, a net: there was no queue to
+    ask, no drop, and no note-off anywhere in the engine. */
+#include <wfg/engine/midi/SendQueue.h>
+
+namespace
+{
+    /*  The sending thread, by hand: what `MidiSender::run` does with a message
+        whose port has a device - taken, shown to the note record, sent. */
+    void leaves (midi::SendQueue& queue, midi::Outgoing item)
+    {
+        queue.push (std::move (item));
+
+        midi::Outgoing next;
+        REQUIRE (queue.pop (next));
+        queue.markLeaving (next);
+    }
+
+    midi::Outgoing cueMessage (const std::string& port, midi::Bytes bytes, const std::string& run = "RUN00001")
+    {
+        return { port, std::move (bytes), run, true };
+    }
+
+    midi::Outgoing noteOffFor (const std::string& port, std::uint8_t status, std::uint8_t key)
+    {
+        return { port, { status, key, 0 }, {}, false };
+    }
+
+    bool same (const midi::Outgoing& a, const midi::Outgoing& b)
+    {
+        return a.port == b.port && a.bytes == b.bytes && a.run == b.run && a.cue == b.cue;
+    }
+}
+
+TEST_CASE ("midi send queue: a double Esc drops the cues' messages and ends every note that left, once")
+{
+    midi::SendQueue queue;
+    const std::string port = "PRT00001";
+
+    SUBCASE ("a note that left is ended, and the cue message still waiting is dropped")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+        queue.push (cueMessage (port, { 0xB1, 7, 90 }));
+        REQUIRE (queue.notes().sounding() == 1u);
+
+        CHECK (queue.dropQueued() == 1u);
+
+        REQUIRE (queue.waiting().size() == 1u);
+        CHECK (same (queue.waiting().front(), noteOffFor (port, 0x81, 60)));
+
+        midi::Outgoing next;
+        REQUIRE (queue.pop (next));
+        CHECK (queue.empty());
+        CHECK (queue.notes().sounding() == 0u);
+    }
+
+    SUBCASE ("a note a cue already ended gets nothing more - by a note-off, or a note-on at velocity nought")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+
+        SUBCASE ("note-off") { leaves (queue, cueMessage (port, { 0x81, 60, 0 })); }
+        SUBCASE ("note-on at nought") { leaves (queue, cueMessage (port, { 0x91, 60, 0 })); }
+
+        CHECK (queue.notes().sounding() == 0u);
+        CHECK (queue.dropQueued() == 0u);
+        CHECK (queue.waiting().empty());
+    }
+
+    SUBCASE ("a note-on that never left is dropped, and gets no note-off")
+    {
+        queue.push (cueMessage (port, { 0x91, 60, 100 }));
+
+        CHECK (queue.dropQueued() == 1u);
+        CHECK (queue.waiting().empty());
+        CHECK (queue.notes().sounding() == 0u);
+    }
+
+    SUBCASE ("a cue's own note-off still waiting is dropped, and the record's one goes in its place")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+        queue.push (cueMessage (port, { 0x81, 60, 0 }));
+
+        CHECK (queue.dropQueued() == 1u);
+        REQUIRE (queue.waiting().size() == 1u);
+        CHECK (same (queue.waiting().front(), noteOffFor (port, 0x81, 60)));
+    }
+
+    SUBCASE ("a surface's traffic is never dropped, and its note-ons are no note of the show's")
+    {
+        /*  A D700's LED colour is a note-on (PRD §3.16). */
+        leaves (queue, { port, { 0x90, 0x5D, 0x7F }, {}, false });
+        queue.push ({ port, { 0x90, 0x5E, 0x7F }, {}, false });
+
+        CHECK (queue.dropQueued() == 0u);
+        REQUIRE (queue.waiting().size() == 1u);
+        CHECK (queue.waiting().front().bytes == midi::Bytes { 0x90, 0x5E, 0x7F });
+        CHECK (queue.notes().sounding() == 0u);
+    }
+
+    SUBCASE ("the note-offs go ahead of what is still waiting")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+        queue.push ({ port, { 0xF0, 0x7E, 0x7F, 0xF7 }, {}, false });   // a surface's SysEx
+
+        CHECK (queue.dropQueued() == 0u);
+        REQUIRE (queue.waiting().size() == 2u);
+        CHECK (same (queue.waiting().front(), noteOffFor (port, 0x81, 60)));
+    }
+
+    SUBCASE ("a second double Esc before they have gone neither drops nor repeats them")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+        leaves (queue, cueMessage (port, { 0x91, 64, 100 }));
+
+        CHECK (queue.dropQueued() == 0u);
+        REQUIRE (queue.waiting().size() == 2u);
+
+        CHECK (queue.dropQueued() == 0u);
+        REQUIRE (queue.waiting().size() == 2u);
+        CHECK (same (queue.waiting()[0], noteOffFor (port, 0x81, 60)));
+        CHECK (same (queue.waiting()[1], noteOffFor (port, 0x81, 64)));
+    }
+
+    SUBCASE ("one note-off per port, channel and key - however many cues pressed it")
+    {
+        const std::string other = "PRT00002";
+
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }, "RUN00001"));
+        leaves (queue, cueMessage (port, { 0x91, 60, 80 }, "RUN00002"));     // the same key again
+        leaves (queue, cueMessage (port, { 0x92, 60, 100 }));                // channel 3
+        leaves (queue, cueMessage (other, { 0x91, 60, 100 }));
+        leaves (queue, cueMessage (other, { 0x9F, 60, 100 }));               // channel 16
+
+        CHECK (queue.notes().sounding() == 4u);
+        CHECK (queue.notes().runsOf (port, 1, 60) == std::vector<std::string> { "RUN00001", "RUN00002" });
+
+        CHECK (queue.dropQueued() == 0u);
+        REQUIRE (queue.waiting().size() == 4u);
+        CHECK (same (queue.waiting()[0], noteOffFor (port, 0x81, 60)));
+        CHECK (same (queue.waiting()[1], noteOffFor (port, 0x82, 60)));
+        CHECK (same (queue.waiting()[2], noteOffFor (other, 0x81, 60)));
+        CHECK (same (queue.waiting()[3], noteOffFor (other, 0x8F, 60)));
+    }
+
+    SUBCASE ("a cue's All Notes Off or All Sound Off ends that port and channel's notes")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+        leaves (queue, cueMessage (port, { 0x91, 64, 100 }));
+        leaves (queue, cueMessage (port, { 0x92, 67, 100 }));
+
+        SUBCASE ("All Notes Off") { leaves (queue, cueMessage (port, { 0xB1, 123, 0 })); }
+        SUBCASE ("All Sound Off") { leaves (queue, cueMessage (port, { 0xB1, 120, 0 })); }
+
+        CHECK (queue.notes().sounding() == 1u);
+        CHECK (queue.dropQueued() == 0u);
+        REQUIRE (queue.waiting().size() == 1u);
+        CHECK (same (queue.waiting().front(), noteOffFor (port, 0x82, 67)));
+    }
+
+    SUBCASE ("a port given another device forgets what the old one was playing")
+    {
+        const std::string other = "PRT00002";
+
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+        leaves (queue, cueMessage (other, { 0x91, 62, 100 }));
+
+        queue.forgetPort (port);
+
+        CHECK (queue.dropQueued() == 0u);
+        REQUIRE (queue.waiting().size() == 1u);
+        CHECK (same (queue.waiting().front(), noteOffFor (other, 0x81, 62)));
+    }
+}
+
+//==============================================================================
+namespace
+{
+    /*  A sink built on the real queue, with the sending thread done by hand
+        (`drain`), so a case can stop between what was handed over and what
+        left. */
+    struct QueueingSink final : midi::MidiSink
+    {
+        std::string send (const std::string& port, const midi::Bytes& bytes) override
+        {
+            outbox.push ({ port, bytes, {}, false });
+            return {};
+        }
+
+        std::string sendForRun (const std::string& runId, const std::string& port,
+                                const midi::Bytes& bytes) override
+        {
+            outbox.push ({ port, bytes, runId, true });
+            return {};
+        }
+
+        std::size_t dropQueued() override
+        {
+            ++drops;
+            return outbox.dropQueued();
+        }
+
+        void drain()
+        {
+            midi::Outgoing next;
+
+            while (outbox.pop (next))
+            {
+                outbox.markLeaving (next);
+                wire.push_back (next);
+            }
+        }
+
+        midi::SendQueue outbox;
+        std::vector<midi::Outgoing> wire;
+        int drops = 0;
+    };
+
+    struct MidiStopRig
+    {
+        MidiStopRig()
+        {
+            runner.setMidiSink (&sink);
+
+            doc::registerDocumentCommands (engine.commands(), document);
+            cue::registerCueCommands (engine.commands(), document, focus);
+            cue::registerRunCommands (engine.commands(), runs);
+            cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+            listId = document.createList ("Show").id;
+            port = declarePort (document, "Synth");
+        }
+
+        /*  A MIDI cue on channel 2 of the synth. */
+        std::string midiCue (const std::string& parent, int index, const char* type, int data1, int data2)
+        {
+            const auto id = document.createCue (parent, index, "midi", "Synth").id;
+            const auto base = "/godot/cue/" + id + "/";
+
+            REQUIRE (document.setAttribute (base + "port", port).ok);
+            REQUIRE (document.setAttribute (base + "type", type).ok);
+            REQUIRE (document.setAttribute (base + "channel", "2").ok);
+            REQUIRE (document.setAttribute (base + "data1", std::to_string (data1)).ok);
+            REQUIRE (document.setAttribute (base + "data2", std::to_string (data2)).ok);
+            return id;
+        }
+
+        void tickOnce()
+        {
+            runner.beforeTick (engine, tick);
+            engine.processTick (tick++);
+        }
+
+        void press (const char* command, std::vector<osc::Value> args = {})
+        {
+            REQUIRE (engine.submit ("cli", command, std::move (args)));
+            tickOnce();
+        }
+
+        void fire (const std::string& cueId) { press ("cue.fire", { osc::Value::string (cueId) }); }
+
+        const cue::Run* runOf (const std::string& cueId) const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == cueId)
+                    return &run;
+
+            return nullptr;
+        }
+
+        Engine engine;
+        doc::ShowDocument document;
+        cue::RunTable runs;
+        cue::Focus focus;
+        doc::IdRegistry runIds = doc::IdRegistry::withSeed (47);
+        cue::Runner runner { document, runs, runIds, focus };
+        QueueingSink sink;
+
+        std::string listId, port;
+        std::int64_t tick = 0;
+    };
+}
+
+TEST_CASE ("midi cue: double Esc sends exactly one note-off for a note a cue started, and Esc sends none")
+{
+    MidiStopRig rig;
+    const auto note = rig.midiCue (rig.listId, 0, "noteOn", 60, 100);
+    const auto swell = rig.midiCue (rig.listId, 1, "controlChange", 7, 90);
+
+    rig.fire (note);
+    rig.sink.drain();
+
+    REQUIRE (rig.sink.wire.size() == 1u);
+    CHECK (rig.sink.wire[0].bytes == midi::Bytes { 0x91, 60, 100 });
+
+    /*  THE RUN RIDES WITH IT: what Go Doh! will ask the note record for. */
+    REQUIRE (rig.runOf (note) != nullptr);
+    CHECK (rig.sink.wire[0].run == rig.runOf (note)->id);
+    CHECK (rig.sink.wire[0].cue);
+
+    SUBCASE ("double Esc: the waiting message dropped, one note-off for the note")
+    {
+        rig.fire (swell);                                   // handed over, not yet gone
+        REQUIRE (rig.sink.outbox.size() == 1u);
+
+        rig.press ("run.killAll");
+
+        CHECK (rig.sink.drops == 1);
+        REQUIRE (rig.sink.outbox.size() == 1u);
+        CHECK (rig.sink.outbox.waiting().front().port == rig.port);
+        CHECK (rig.sink.outbox.waiting().front().bytes == midi::Bytes { 0x81, 60, 0 });
+
+        rig.sink.drain();
+
+        REQUIRE (rig.sink.wire.size() == 2u);
+        CHECK (rig.sink.wire.back().bytes == midi::Bytes { 0x81, 60, 0 });
+        CHECK (rig.sink.outbox.notes().sounding() == 0u);
+
+        for (const auto& message : rig.sink.wire)
+            CHECK (message.bytes.front() != 0xB1);           // the swell never left
+    }
+
+    SUBCASE ("double Esc after the cue's own note-off: nothing more")
+    {
+        const auto release = rig.midiCue (rig.listId, 2, "noteOff", 60, 0);
+        rig.fire (release);
+        rig.sink.drain();
+        REQUIRE (rig.sink.wire.size() == 2u);
+
+        rig.press ("run.killAll");
+
+        CHECK (rig.sink.drops == 1);
+        CHECK (rig.sink.outbox.empty());
+        rig.sink.drain();
+        CHECK (rig.sink.wire.size() == 2u);
+    }
+
+    SUBCASE ("Esc drops nothing and ends no note")
+    {
+        rig.fire (swell);
+        REQUIRE (rig.sink.outbox.size() == 1u);
+
+        rig.press ("run.stopAll");
+
+        CHECK (rig.sink.drops == 0);
+        REQUIRE (rig.sink.outbox.size() == 1u);
+        CHECK (rig.sink.outbox.waiting().front().bytes == midi::Bytes { 0xB1, 7, 90 });
+        CHECK (rig.sink.outbox.notes().sounding() == 1u);
+    }
+}
+
+TEST_CASE ("midi cue: a member a killed scene was about to launch sends nothing after the press")
+{
+    /*  DROP ALL ACTIONS REACHES WHAT WAS STILL TO BE ASKED FOR (namespace draft
+        §23.10). A killed scene ends its members a tick after the press, from its
+        own job - and in the press's tick that job had already asked for its
+        next member's launch, which drains after the press. The member fired:
+        its note-on left after the note-offs, and rang with nothing to end it. */
+    MidiStopRig rig;
+
+    const auto scene = rig.document.createCue (rig.listId, 0, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    rig.document.createCue (scene, 0, "memo", "Count in");
+    const auto note = rig.midiCue (scene, 1, "noteOn", 60, 100);
+
+    rig.fire (scene);
+
+    for (int n = 0; n < 20 && rig.runOf (note) == nullptr; ++n)
+        rig.tickOnce();
+
+    /*  Spawned, and its launch asked for in the next tick's hook - the press's. */
+    REQUIRE (rig.runOf (note) != nullptr);
+    REQUIRE (rig.runOf (note)->state == cue::runState::armed);
+    const auto noteRun = rig.runOf (note)->id;
+
+    rig.press ("run.killAll");
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    rig.sink.drain();
+
+    CHECK (rig.sink.wire.empty());
+    CHECK (rig.sink.outbox.notes().sounding() == 0u);
+    CHECK (rig.runs.find (noteRun)->isFinished());
+    CHECK (rig.runs.find (noteRun)->launchRequestedAtTick == 0);
+}
+
+TEST_CASE ("midi: a double Esc on a sender with nothing bound is harmless")
+{
+    /*  The real sender, with no device and no thread - every CI runner's
+        machine. A net: it compiled only once the two calls existed, and
+        nothing bound leaves nothing to drop. */
+    midi::MidiSender outputs;
+
+    CHECK (outputs.sendForRun ("RUN00001", "PRT00001", { 0x90, 60, 100 }) == midi::sendError::noPort);
+    CHECK (outputs.dropQueued() == 0u);
+}

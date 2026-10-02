@@ -1114,6 +1114,107 @@ TEST_CASE ("prepare: a read that comes back after its scene was given back write
     }
 }
 
+//==============================================================================
+/*  A DOUBLE ESC AND THE PRE-SENDS (2026-10-02, H4, namespace draft §23.10). */
+TEST_CASE ("double Esc: a pre-send of the GO's scene still asking when the press lands writes nothing when its answer comes")
+{
+    /*  A MEMBER IS KILLED A TICK AFTER ITS SCENE, by the scene's own job - and
+        in that tick a pre-send still asking what the desk held read the answer
+        and wrote its value: a datagram after the press that drops every
+        action, and a desk value nothing would put back. Being killed from
+        above now ends the job first. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.runner.setMounts (&rig.mounts, &rig.sender, nullptr);   // the test answers the read itself
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+
+    /*  A member that holds the scene in its members phase: a scene with
+        nothing but its header ends at the GO, its pre-send left asking under
+        a scene that is over (§23.10 names that road). */
+    const auto hold = rig.document.createCue (scene.group, 0, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "10").ok);
+
+    rig.setStandby (scene.group);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    const auto* presend = rig.runOf (scene.cue);
+    REQUIRE (presend != nullptr);
+    REQUIRE (presend->restoreAtom.empty());                 // still asking
+    const auto presendRun = presend->id;
+
+    REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
+    const auto blockId = rig.runs.preparedRunOf (scene.group)->id;
+
+    /*  The GO adopts the scene, the pre-send still out: the press now kills it. */
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE_FALSE (rig.runs.find (blockId)->onlyPrepared());
+    REQUIRE_FALSE (rig.runs.find (blockId)->isFinished());
+    REQUIRE_FALSE (rig.runs.find (presendRun)->isFinished());
+
+    /*  The press, and the desk's answer in the same drain. */
+    rig.engine.submit ("cli", "run.killAll", {});
+    rig.engine.submit ("mount:K3PV7WRB", "mount.readback",
+                       { osc::Value::string ("K3PV7WRB"), osc::Value::string ("/desk/fader"),
+                         osc::Value::float32 (0.2f) });
+    rig.tickOnce();
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (presendRun)->isFinished());
+    CHECK (rig.mounts.valueOf ("/desk/fader") == nullptr);   // nothing written to the desk
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 0u);
+}
+
+TEST_CASE ("double Esc: the standby's pre-send already on its way still leaves")
+{
+    /*  WHAT THE PRESS LEAVES READY KEEPS WHAT MAKES IT READY (§23.3, §23.10).
+        The standby's prepared scene is spared by a double Esc, and the GO after
+        it adopts the scene with its pre-send counted as done - so a pre-send
+        written in the press's own tick, still in the sender's queue, has to
+        leave: dropped, the desk would never get the value the scene believes
+        it holds, and nothing would send it again. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.runner.setMounts (&rig.mounts, &rig.sender, nullptr);
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+
+    rig.setStandby (scene.group);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
+    const auto blockId = rig.runs.preparedRunOf (scene.group)->id;
+
+    /*  The desk answers; the pre-send writes in the next tick's hook - the
+        press's - and its value is queued when the press drains. */
+    rig.engine.submit ("mount:K3PV7WRB", "mount.readback",
+                       { osc::Value::string ("K3PV7WRB"), osc::Value::string ("/desk/fader"),
+                         osc::Value::float32 (0.2f) });
+    rig.tickOnce();
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 0u);
+
+    rig.engine.submit ("cli", "run.killAll", {});
+    rig.tickOnce();
+
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+    /*  And the scene is still the standby's, made ready. */
+    REQUIRE (rig.runs.find (blockId) != nullptr);
+    CHECK_FALSE (rig.runs.find (blockId)->isFinished());
+    CHECK (rig.runs.preparedRunOf (scene.group) != nullptr);
+}
+
 TEST_CASE ("prepare: a block whose pre-sent value came back equal says verified")
 {
     /*  The one word of §13.6's six that means the DESK AGREES, rather than that
