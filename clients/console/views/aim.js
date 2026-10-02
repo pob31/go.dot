@@ -72,7 +72,7 @@ function renderSteps(focus, atCue) {
     const parts = step.split(":");
     const at = Number(parts[0]);
     const cue = parts[1] || "";
-    // A strip press, and a GO taken back by Go Doh! (PRD 3.32), have words too.
+    // A strip press, and a GO taken back by Doh! (PRD 3.32), have words too.
     const how = parts[2] === "g" ? "GO" : parts[2] === "f" ? "fired by name"
       : parts[2] === "p" ? "a strip press" : parts[2] === "d" ? "a Doh!" : "a trigger";
 

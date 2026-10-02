@@ -7122,12 +7122,12 @@ TEST_CASE ("client: a mic cue's take is read off its channel's rows, said in wor
 }
 
 //==============================================================================
-/*  GO DOH! IN THE DESKTOP CLIENT (PRD §3.32, D1, 2026-10-01): its refusals are
+/*  DOH! IN THE DESKTOP CLIENT (PRD §3.32, D1, 2026-10-01): its refusals are
     sentences on the transport's line, its button names the GO it would take
     back while the window is open, its step reads as a word in the history, and
     its setting is read off the rows of the devices and the cues. Each failed
     before D1: no such words, no gesture, no rows. */
-TEST_CASE ("client: Go Doh!'s refusals are sentences, its step is a word, and its button names the GO it would take back")
+TEST_CASE ("client: Doh!'s refusals are sentences, its step is a word, and its button names the GO it would take back")
 {
     model::TransportReading reading;
     reading.dohWindow = "10";
@@ -7186,7 +7186,101 @@ TEST_CASE ("client: Go Doh!'s refusals are sentences, its step is a word, and it
     CHECK (lines[0].offset == doctest::Approx (10.0));
 }
 
-TEST_CASE ("client: Go Doh!'s choice on an OSC or a MIDI cue says what its device says, and writes the cue's own row")
+/*  THE DOH! BUTTON'S OWN COLOUR, FADING AS ITS WINDOW RUNS OUT (the author,
+    2026-10-02: "I would display the button in a distinctive colour and fade
+    out when the Doh! timer is over"; K7). Open, in its colour, while the last
+    GO can still be taken back; fading over the window's last two seconds - half
+    the window when it is shorter than four - and over, the idle look and no
+    click, from the tick a press would start being refused. All of it read off
+    the engine's tick, the GO's tick and the show's window: never a clock of
+    this window's own. Failed before K7: the reading had no such answer. */
+TEST_CASE ("client: the Doh! button is open, fades as its window runs out, and is over on the engine's tick")
+{
+    model::TransportReading reading;
+    reading.dohWindow = "10";
+    reading.doh = "7K2QM9X4 B3N8R5TW 1000";
+    reading.dohCue = "12";
+
+    const auto at = [&reading] (const char* tick)
+    {
+        reading.tick = tick;
+        return reading.dohLook();
+    };
+
+    //  Nothing to take back: over, and the button plain.
+    {
+        model::TransportReading none;
+        none.tick = "1100";
+        CHECK (none.dohLook().phase == model::DohPhase::over);
+        CHECK (none.dohLook().strength == doctest::Approx (0.0));
+        CHECK (none.dohTip().find ("left") == std::string::npos);
+    }
+
+    //  The GO's own tick: open, the colour whole, ten seconds left.
+    auto look = at ("1000");
+    CHECK (look.phase == model::DohPhase::open);
+    CHECK (look.strength == doctest::Approx (1.0));
+    CHECK (look.secondsLeft == 10);
+    CHECK (reading.dohTip().find ("10 s left") != std::string::npos);
+
+    //  Two seconds before the end, still whole; one tick later, fading.
+    look = at ("1400");
+    CHECK (look.phase == model::DohPhase::open);
+    CHECK (look.strength == doctest::Approx (1.0));
+    CHECK (look.secondsLeft == 2);
+
+    look = at ("1401");
+    CHECK (look.phase == model::DohPhase::fading);
+    CHECK (look.strength == doctest::Approx (0.99));
+
+    look = at ("1450");
+    CHECK (look.phase == model::DohPhase::fading);
+    CHECK (look.strength == doctest::Approx (0.5));
+    CHECK (look.secondsLeft == 1);
+    CHECK (reading.dohCaption() == "Doh! 12");
+
+    //  The last tick inside the window: almost idle, still a Doh!.
+    look = at ("1499");
+    CHECK (look.phase == model::DohPhase::fading);
+    CHECK (look.strength == doctest::Approx (0.01));
+    CHECK (reading.dohCaption() == "Doh! 12");
+
+    //  The tick a press is refused: over, the idle look, no seconds.
+    look = at ("1500");
+    CHECK (look.phase == model::DohPhase::over);
+    CHECK (look.strength == doctest::Approx (0.0));
+    CHECK (look.secondsLeft == 0);
+    CHECK (reading.dohCaption() == "Doh!");
+    CHECK (reading.dohTip().find ("left") == std::string::npos);
+
+    //  A one-second window fades over its second half.
+    reading.dohWindow = "1";
+    CHECK (at ("1024").phase == model::DohPhase::open);
+    CHECK (at ("1025").phase == model::DohPhase::open);
+    CHECK (at ("1026").phase == model::DohPhase::fading);
+    CHECK (at ("1026").strength == doctest::Approx (24.0 / 25.0));
+    CHECK (at ("1049").phase == model::DohPhase::fading);
+    CHECK (at ("1050").phase == model::DohPhase::over);
+
+    //  Doh! switched off: always over.
+    reading.dohWindow = "0";
+    CHECK (at ("1000").phase == model::DohPhase::over);
+
+    //  A tick older than the GO's - a reading behind the record - is not open.
+    reading.dohWindow = "10";
+    CHECK (at ("999").phase == model::DohPhase::over);
+
+    /*  AND ITS COLOUR IS ITS OWN: a token of the theme, neither GO's yellow,
+        PANIC's red, the standby's amber nor the grey of a GO with no audio. */
+    const model::Theme theme;
+    const auto& names = model::Theme::colourNames();
+    CHECK (std::find (names.begin(), names.end(), "doh") != names.end());
+
+    for (const auto* other : { "go", "go-idle", "failed", "standby" })
+        CHECK_MESSAGE (theme.colour ("doh") != theme.colour (other), other);
+}
+
+TEST_CASE ("client: Doh!'s choice on an OSC or a MIDI cue says what its device says, and writes the cue's own row")
 {
     Rig rig;
 
@@ -7229,15 +7323,15 @@ TEST_CASE ("client: Go Doh!'s choice on an OSC or a MIDI cue says what its devic
     CHECK (field.writable);
     REQUIRE (field.choices.size() == 3u);
     CHECK (field.choices[0].first == "device");
-    CHECK (field.choices[0].second == "as the device (leave)");
+    CHECK (field.choices[0].second == "as the device (Meh)");
     CHECK (field.choices[1].first == "takeBack");
-    CHECK (field.choices[1].second == "take back");
+    CHECK (field.choices[1].second == "Undo(h)");
     CHECK (field.choices[2].first == "leave");
-    CHECK (field.choices[2].second == "leave to its operator");
+    CHECK (field.choices[2].second == "Meh");
 
     rig.apply (4, "window", "node.set",
                { osc::Value::string ("/godot/mount/G1JS4VWE/doh"), osc::Value::string ("takeBack") });
-    CHECK (dohField (5, light, "timeout").choices[0].second == "as the device (take back)");
+    CHECK (dohField (5, light, "timeout").choices[0].second == "as the device (Undo(h))");
 
     //  A MIDI cue the same, through its port.
     rig.apply (6, "window", "port.create", { osc::Value::string ("Keys") });
@@ -7254,31 +7348,31 @@ TEST_CASE ("client: Go Doh!'s choice on an OSC or a MIDI cue says what its devic
     rig.apply (9, "window", "node.set",
                { osc::Value::string ("/godot/cue/" + note + "/port"), osc::Value::string (ports[0].id) });
 
-    CHECK (dohField (10, note, "wait").choices[0].second == "as the device (leave)");
+    CHECK (dohField (10, note, "wait").choices[0].second == "as the device (Meh)");
 
     rig.apply (11, "window", "node.set",
                { osc::Value::string ("/godot/port/" + ports[0].id + "/doh"), osc::Value::string ("takeBack") });
     rig.apply (12, "window", "node.set",
                { osc::Value::string ("/godot/port/" + ports[0].id + "/audible"), osc::Value::string ("true") });
-    CHECK (dohField (13, note, "wait").choices[0].second == "as the device (take back)");
+    CHECK (dohField (13, note, "wait").choices[0].second == "as the device (Undo(h))");
 
     const auto after = model::readPorts (*rig.publish (14));
     REQUIRE (after.size() == 1u);
     CHECK (after[0].audible);
     CHECK (after[0].doh == "takeBack");
-    CHECK (after[0].dohWord() == "Take back");
+    CHECK (after[0].dohWord() == "Undo(h)");
 
     //  And a device's row reads its setting in words.
     const auto devices = model::readDevices (*rig.publish (15));
     REQUIRE (devices.size() == 2u);
     CHECK (devices[0].id == "G1JS4VWE");
-    CHECK (devices[0].dohWord() == "Take back");
-    CHECK (devices[1].dohWord() == "Leave");
+    CHECK (devices[0].dohWord() == "Undo(h)");
+    CHECK (devices[1].dohWord() == "Meh");
 }
 
 TEST_CASE ("client: the Doh! button names the GO the engine would take back, and stops naming it once a Doh, a fire by name or a jump has spent it")
 {
-    /*  END TO END (namespace draft §24.4): the engine publishes what Go Doh!
+    /*  END TO END (namespace draft §24.4): the engine publishes what Doh!
         would take back at `/godot/list/doh`, and the transport reads the cue's
         number off the same snapshot - "Doh! 1" after a GO on cue 1. Every road
         that spends that GO clears it, so the button never names a GO a press

@@ -756,8 +756,8 @@ level - since filtered, the author's way (namespace draft §22.11).
 
 - **LTC/MTC chase and generate**; tick re-anchoring when chasing (PRD §3.14 —
   settle the derivation before writing the transport).
-- **Esc / double Esc / Go Doh!** per PRD §4.4: graceful abort runs footers;
-  immediate skips them and kills internal processing only; Go Doh! recovers an
+- **Esc / double Esc / Doh!** per PRD §4.4: graceful abort runs footers;
+  immediate skips them and kills internal processing only; Doh! recovers an
   early trigger within the anticipation window. Revert-of-GO (§4.5).
 - Panic values on every node honoured.
 - Debounce as a user preference.
@@ -769,7 +769,7 @@ level - since filtered, the author's way (namespace draft §22.11).
 **Done when:** a show chases timecode from an external source without drift or
 discontinuity, and each stop level does exactly its guarantee and nothing more.
 
-**Needs from the author:** the Go Doh! inventory of in-flight objects (PRD
+**Needs from the author:** the Doh! inventory of in-flight objects (PRD
 §4.4, deferred) - *met: the author's answers of 2026-09-30 and 2026-10-01 are in
 PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
 (§3.29).
@@ -839,11 +839,11 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   back (ID); and a block's preparation no longer launches the scene nested in
   it, which had played with no GO behind a header the horizon could take ahead
   (IE).
-- **Go Doh! D0 and D1, 2026-10-01 — taking back the last GO** (PRD §3.32,
+- **Doh! D0 and D1, 2026-10-01 — taking back the last GO** (PRD §3.32,
   namespace draft §24). D0 is the specification: PRD §3.32, §4.4's pointer to
   it, and §24's rule, inventory, decisions and limitations. D1 builds the
   command (`go.doh`), the show's window (Show settings > Playback, ten seconds),
-  the Doh! button left of PANIC and F9, its refusals in words, and the Go Doh!
+  the Doh! button left of PANIC and F9, its refusals in words, and the Doh!
   setting - every network device and MIDI port left to its operator unless set
   to take back, a cue overriding either way - with the MIDI port's "plays
   sound". A Doh puts the pointer, the list's end, the GO debounce and the
@@ -852,7 +852,12 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   it, brings back to life an act the GO ended, and never has a device left to
   its operator sent the same cue twice. Until D2 the corrected GO starts the
   cue from the top; D2 to D5 pause and carry on, put back, report, and drive it
-  end to end.
+  end to end. *(2026-10-02, K7, at the author's direction: named **Doh!** -
+  the command stays `go.doh`, and PRD §4.4 and `CLAUDE.md` say it so; a row's
+  width of air between the button and PANIC; the button in its own colour while
+  a GO can be taken back, fading as the window runs out, disabled once it is
+  over; the setting's words "Meh" and "Undo(h)"; three of the author's open
+  questions answered - namespace draft §24.8, §24.11.)*
 - **H4, 2026-10-02 — a double Esc drops what is still waiting to leave**
   (§23.10). A value a rate cap held back went out on its turn after the press,
   the MIDI queue sent everything it held, and no note-off existed anywhere. The
@@ -862,7 +867,7 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   note a cue started and nothing ended (the author's rule); nothing a kill has
   reached launches, fires or writes after it, nor a start cue's fire or a
   persistent pass decided before it - the next GO restores the section; and the
-  osc runs it kills in its own drain are stamped `sendDropped`, so Go Doh! does
+  osc runs it kills in its own drain are stamped `sendDropped`, so Doh! does
   not count them as sent.
   Found and named, not closed: a pre-send its scene walked past is out of the
   press's reach.

@@ -156,7 +156,7 @@ namespace wfg::audio
             during the outage, would otherwise never be heard to finish - and
             Apply itself (decision DI), which still refuses while anything
             plays: the way out when the interface is gone for good, which until
-            then was a relaunch. And Go Doh! (2026-10-01, PRD §3.32), which is
+            then was a relaunch. And Doh! (2026-10-01, PRD §3.32), which is
             recovery as Esc is: the pointer goes back at once, and what its
             fades and arms need waits for the clock. */
         engine.setAdmissionCheck ([&state] (const std::string& command)

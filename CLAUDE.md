@@ -24,7 +24,7 @@ is exact. Every `§` reference points into the PRD, which is where §3.3 and the
      internal processing including live effects. Scope is **everything Go.dot
      originates** — it does not mute the PA or shut down the projector. The world
      may be left in a state nobody declared; that is the price of an emergency.
-   - **Go Doh! — recovery.** Aimed at the failure that actually happens weekly:
+   - **Doh! — recovery.** Aimed at the failure that actually happens weekly:
      a trigger fired ahead of time. Recovery-oriented, not destructive.
      Specified in §3.32 *(added in 0.8, at the author's direction, 2026-09-30)*.
 5. **Undo of a GO is *revert*, not undo.** Restores standby, releases bindings,

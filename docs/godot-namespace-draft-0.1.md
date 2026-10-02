@@ -234,7 +234,7 @@ nothing in a parallel parent, because nothing is waiting to be told.
 | `/godot/mount/<id>/name` | `s` | rw | what the show calls this device (2026-09-22) |
 | `/godot/mount/<id>/rx` | `T`/`F` | rw | whether what it sends is accepted (2026-09-22) |
 | `/godot/mount/<id>/tx` | `T`/`F` | rw | whether cues aimed at it reach the wire (2026-09-22) |
-| `/godot/mount/<id>/doh` | `s` | rw | what Go Doh! does with what a cue sent here: `leave` (the default, every device) or `takeBack` (2026-10-01, D1 - §24.5) |
+| `/godot/mount/<id>/doh` | `s` | rw | what Doh! does with what a cue sent here: `leave` (the default, every device) or `takeBack` (2026-10-01, D1 - §24.5) |
 | `/godot/mount/<id>/problem` | `s` | ro | why it cannot be used as declared (2026-09-22) |
 
 **Every row above but the last four readouts became `rw` on 2026-09-22**, when the show settings
@@ -308,7 +308,7 @@ to the node invokes the command; the same names are what the CLI and the event l
 | `standby.next` | `/godot/cmd/standby/next` | — | |
 | `standby.previous` | `/godot/cmd/standby/previous` | — | |
 | `mount.load` | `/godot/cmd/mount/load` | `s` mount id | (re)reads the namespace file |
-| `go.doh` | `/godot/cmd/go/doh` | `[s run…]` | *(2026-10-01, D1)* Go Doh!: takes back the last GO, inside `list/dohWindow` of it; refused `too-soon`, `nothing-to-take-back`, `trigger-after-go` or `too-late` - §24.4 |
+| `go.doh` | `/godot/cmd/go/doh` | `[s run…]` | *(2026-10-01, D1)* Doh!: takes back the last GO, inside `list/dohWindow` of it; refused `too-soon`, `nothing-to-take-back`, `trigger-after-go` or `too-late` - §24.4 |
 | `go.dohRelaunch` | `/godot/cmd/go/dohRelaunch` | `s` run `[s made…]` | *(specified 2026-10-01 for D3; not built)* a scene the GO stopped, relaunched once it has ended - §24.4 |
 | `list.dohReport` | `/godot/cmd/list/dohReport` | `s` list `s` text | *(specified 2026-10-01 for D3; not built)* the Doh's report, from a hook - §24.4 |
 
@@ -1352,7 +1352,7 @@ under `/godot/cue/<id>/`, `rw`, `persist = show`:
 | `fade` | `target` cue id; `level` double dB; `duration` double s; `curve` enum `linear \| sCurve`; `stopWhenDone` bool (false) *(2026-09-18: arriving is stopping, the stop cue's own fade path)* |
 | `stop` | `target` cue id; `verb` enum `hard \| fade`; `duration`; `curve` |
 | `start` | `target` cue id *(2026-09-19)*: a memo that presses a button - fired, its run is done the next tick and the target is fired BY NAME as `cue.fire` fires it, standby untouched, through a `cue.fire` record the next tick's hook submits (a replay takes the record). What the live recorder writes into a take. *(2026-10-01, D1: the record carries the GO the start cue fired under as `cue.fire`'s third argument, so a Doh of that GO takes the target with it - §24.4)* |
-| `osc` | `address` string, a mounted node; `value` string, one typed atom as the log writes it (`f:0.5`, `s:"…"`, `T`); `wait` enum `none \| sent \| verified`; `timeout` double s; *(2026-10-01, D1)* `doh` enum `device \| takeBack \| leave` (`device`): what Go Doh! does with what it sent - §24.5 |
+| `osc` | `address` string, a mounted node; `value` string, one typed atom as the log writes it (`f:0.5`, `s:"…"`, `T`); `wait` enum `none \| sent \| verified`; `timeout` double s; *(2026-10-01, D1)* `doh` enum `device \| takeBack \| leave` (`device`): what Doh! does with what it sent - §24.5 |
 
 **Built in two steps: `none \| sent` in PR 2.5, `verified` and its `timeout` in PR 2.6.** The
 enum grew only when the engine could honour the new word, because a grammar that accepted one
@@ -1419,7 +1419,7 @@ Operator commands, write-only method nodes as in §2.6:
 | Command | Node | Params | Notes |
 |---|---|---|---|
 | `go` | `/godot/cmd/go` | — | acts on the focused list's standby and **advances it** (§3.5); the run ID it created is the record's last argument |
-| `cue.fire` | `/godot/cmd/cue/fire` | `s` cue id | fires a named cue and **does not touch standby** — only GO moves it. *(2026-10-01, D1: `[s run]` `[h cause]` - the cause, read only from the engine's own fires, is the GO whose start cue fired it; a cause Go Doh! took back fires nothing - §24.4)* |
+| `cue.fire` | `/godot/cmd/cue/fire` | `s` cue id | fires a named cue and **does not touch standby** — only GO moves it. *(2026-10-01, D1: `[s run]` `[h cause]` - the cause, read only from the engine's own fires, is the GO whose start cue fired it; a cause Doh! took back fires nothing - §24.4)* |
 | `run.kill` | `/godot/cmd/run/kill` | `s` run id | hard stop; the primitive Phase 10's stop levels will use |
 | `audio.arm` | `/godot/cmd/audio/arm` | `s` cue id | explicit arm; standby arms implicitly |
 
@@ -2168,10 +2168,10 @@ fact about this machine, like `--device=`. An unbound port is reported at start 
 | `/godot/cue/<id>/data` | `i`, 0 (0..16383) | velocity, value, or the 14-bit bend |
 | `/godot/cue/<id>/sysex` | `s` | hex bytes, `F0 … F7` |
 | `/godot/cue/<id>/wait` | `s` — `none \| sent` | as osc, minus `verified`: MIDI has no read-back, and `verified` on a MIDI cue is refused at load |
-| `/godot/cue/<id>/doh` | `s` — `device \| takeBack \| leave`, `device` | *(2026-10-01, D1)* what Go Doh! does with what it sent: its port's setting, or its own - §24.5 |
+| `/godot/cue/<id>/doh` | `s` — `device \| takeBack \| leave`, `device` | *(2026-10-01, D1)* what Doh! does with what it sent: its port's setting, or its own - §24.5 |
 
-*(2026-10-01: a port carries `audible` - "plays sound", which makes a MIDI cue's scene heard for Go
-Doh! - and `doh`, its Go Doh! setting, §24.3; and since J3 a port's `tx` off sends nothing, the cue
+*(2026-10-01: a port carries `audible` - "plays sound", which makes a MIDI cue's scene heard for
+Doh! - and `doh`, its Doh! setting, §24.3; and since J3 a port's `tx` off sends nothing, the cue
 ending `not-sent`, §23.7.)*
 
 `kind` and `run/kind` grow `midi`.
@@ -13064,8 +13064,8 @@ the stretcher.
 
 Written from 2026-09-30, one subsection per stage of the hardening plan as it lands. Devplan
 Phase 10 is "timecode, panic, hardening", and most of it waits on something: timecode on the tick
-derivation, Go Doh! and the revert of a GO on the list of everything a GO leaves in flight *(that list
-is §24.2 since 2026-10-01, and Go Doh! has §24)*, Esc as a
+derivation, Doh! and the revert of a GO on the list of everything a GO leaves in flight *(that list
+is §24.2 since 2026-10-01, and Doh! has §24)*, Esc as a
 pause on its own ruling. What waits on nothing is the two stop levels Go.dot already ships. Read
 against PRD §4.4 they fell short in several places, and this section records each gap, its fix and
 the decisions taken on the way. Nothing here changes the law - PRD §4 and `CLAUDE.md` are untouched -
@@ -14093,7 +14093,7 @@ device's tx does"*); the engine did not keep the promise.
 **The gap.** `Runner::fireMidi` handed the message to the sender without reading the port's `tx`, and
 the sender checks only whether the port is bound to a device. The only code that read a MIDI port's
 `tx` was the surface bridge (§16). So a cue on a bound port that the show had switched off went out
-on the cable. Go Doh! (§24) asks two questions this answered wrongly: whether a MIDI cue reached a
+on the cable. Doh! (§24) asks two questions this answered wrongly: whether a MIDI cue reached a
 synth - a port that plays sound with its `Tx` off sounded all the same - and whether what a cue sent
 had reached a device left to its operator.
 
@@ -14114,7 +14114,7 @@ the message - and on the warning.
 
 | | Decision | Whose |
 |---|---|---|
-| GG | **A MIDI port switched off sends nothing**: `fireMidi` reads the port's `tx` from the document after the message is built; off, the cue runs and ends `not-sent`, as a network device's `tx` off has always made it | implementer's call keeping a written promise (the row's own words), on the precedent of the author's "fix it, own commit" of 2026-10-01 for the two faults Go Doh! stands on; a show that relied on a switched-off port still sending changes |
+| GG | **A MIDI port switched off sends nothing**: `fireMidi` reads the port's `tx` from the document after the message is built; off, the cue runs and ends `not-sent`, as a network device's `tx` off has always made it | implementer's call keeping a written promise (the row's own words), on the precedent of the author's "fix it, own commit" of 2026-10-01 for the two faults Doh! stands on; a show that relied on a switched-off port still sending changes |
 
 ### 23.8 A jump lands in the round it is in (J1)
 
@@ -14125,8 +14125,8 @@ pointer past the group, as it does after a run through it from the top; it no lo
 pointer back to the group's first member. A scene scrubbed in the running pane plays the rest of its
 round from the second the hand chose and ends, where it used to play the whole scene again after it;
 and a scene the engine cannot place a second in - one that loops, a timeline with a header, a manual
-group - is left playing where it was, where a scrub used to end it or start it over. Go Doh! builds
-on it (§24, HM): a scene it carries on, from D2, is seated the same way. One of the two faults the Go
+group - is left playing where it was, where a scrub used to end it or start it over. Doh! builds
+on it (§24, HM): a scene it carries on, from D2, is seated the same way. One of the two faults the
 Doh! design found, fixed in its own commit at the author's word (2026-10-01: *"fix it, own
 commit"*), after D1 rather than before it.
 
@@ -14291,9 +14291,9 @@ the copy entered cold - its sounds armed again with the operator's hand already 
 late, its header sent to the desk a second time - while the scene made ready kept its voices and its
 desk values for as long as the act ran, and after. And the pointer walking away from a scene made
 ready inside a running act now gives it back - its voices, its slots and the values it pre-sent - as
-it has always given back a scene at the top of a list. The second of the two faults the Go Doh! design
+it has always given back a scene at the top of a list. The second of the two faults the Doh! design
 found, fixed in its own commit at the author's word (2026-10-01: *"fix it, own commit"*), after D1
-rather than before it; Go Doh! builds on it (§24, HM): such a GO is an adoption like the others, so a
+rather than before it; Doh! builds on it (§24, HM): such a GO is an adoption like the others, so a
 Doh finds the block stamped with it.
 
 The same holds when that GO also enters the scene's parent on the scene's row - an act nobody had
@@ -14601,7 +14601,7 @@ completion entered early, and what it finds queued goes.
 - **`sendDropped` is stamped** (IW): every unfinished osc run a kill has reached whose launch tick is
   the press's tick - launched earlier in the press's own drain, its message queued there and gone
   with the queue. From handler state alone - kind, launch tick, kill marks - and never from whether a
-  sender is there, so a replay stamps the same runs; Go Doh! does not count it as sent, and the
+  sender is there, so a replay stamps the same runs; Doh! does not count it as sent, and the
   corrected GO sends the device what it never had (§24, HQ, L31).
 - **Nothing a kill has reached starts anything** (IV, `Runner::beingKilled`): a run whose own kill
   still stands - `skipFooter` with the stop it asked, which a seek withdraws when it brings a killed
@@ -14634,7 +14634,7 @@ completion entered early, and what it finds queued goes.
 - **And what it marks wrongly during an audio outage** (the review, 2026-10-02; L31). With the clock
   down, every drain runs at the tick the clock froze on, and no hook runs. An osc run launched on that
   last live tick has left - the flush still runs - yet a double Esc during the outage finds its launch
-  tick equal to its own, and marks it `sendDropped`: Go Doh! then counts it as never sent, and a
+  tick equal to its own, and marks it `sendDropped`: Doh! then counts it as never sent, and a
   corrected GO sends a device left to its operator the cue a second time. Not mended: it needs the
   outage itself in handler state.
 - **A spared pre-send loses its place to a killed cue's later write** (the review, 2026-10-02). The
@@ -14732,7 +14732,7 @@ are the author's to overrule.
 | IG | **The note-offs a double Esc owes**: one for each note a cue started and nothing has ended - per port, channel and key - and nothing else: no all-notes-off, nothing to a synth Go.dot never played | the author's, 2026-09-30 |
 | IH | **The drop is the press's handler's**, after the run table's half has marked the roots: never a hook, which neither the press's own flush nor a clock that is down waits for; it submits nothing and its applied record is the plain one | the orchestrator's ruling; "after the run table's half" the implementer's, so the kill marks are there to read |
 | IJ | **A dropped ticket ends its run `done`, never failed**: the press is the account, and a run the press killed is ended by its kill first; no new `run/error` word | the orchestrator's ruling, against the brief's `dropped` error |
-| IK | **The note record is a set per port, channel and key**, the runs that pressed it kept beside it for Go Doh! (L26); one note-off a key however many note-ons, spelled `0x8n key 0`; a note-on at velocity nought ends a key, as a synth reads it | the orchestrator's rulings; the velocity-nought reading the brief's |
+| IK | **The note record is a set per port, channel and key**, the runs that pressed it kept beside it for Doh! (L26); one note-off a key however many note-ons, spelled `0x8n key 0`; a note-on at velocity nought ends a key, as a synth reads it | the orchestrator's rulings; the velocity-nought reading the brief's |
 | IL | **A cue's All Sound Off (CC 120) or All Notes Off (CC 123) that leaves ends that port and channel's keys**: the cue has ended them itself | the orchestrator's ruling |
 | IM | **A port unbound, or put on another device, forgets its keys**: a later note-off would reach a synth that never heard the note-on | the orchestrator's ruling |
 | IQ | **Only a cue's messages are dropped or recorded**: `sendForRun` marks them; the surface bridge's traffic is never dropped, and its note-ons - LED colours - are no note of the show's; the note-offs go to the front of the queue as no cue's | the orchestrator's ruling; the front of the queue the brief's |
@@ -14740,7 +14740,7 @@ are the author's to overrule.
 | IU | **What the press leaves ready keeps its pre-sends on their way**: the network sender keeps a message whose run hangs from a root the press spares, in its place, and drops the rest; messages are queued in their run's name | implementer's call, departing from the brief's "drop everything": the GO after the press adopts the standby's scene with its pre-sends counted as done, and a dropped one left the desk without a value the scene believes it holds - as FY spared the standby's voice from H3's sweep |
 | IV | **Nothing a kill has reached starts anything**: `fireNow`, `launchRun`, `launchIfDue` and a network cue's job pass over a run whose own kill still stands (`skipFooter` with the stop it asked) or that is under one; a start cue's fire still to be submitted is dropped, and one the press's own tick's hook submitted, draining behind the press, is applied and does nothing (an engine `cue.fire` after `run.killAll` in one tick; a fire by name still fires) | the orchestrator's ruling, adopting the brief's optional guards and H5's `launchIfDue` guard; reading the run's own kill through its stop is the implementer's, so a seek that brings a killed cue back still launches it; the fire behind the press the review's (2026-10-02) |
 | IW | **`sendDropped` is stamped by the press's handler**: every unfinished osc run a kill has reached that was launched in the press's own drain; never from whether a sender is there | the orchestrator's ruling, the design's GX (§24, HQ) |
-| IX | **Two things named and not built**: the pane's kill of one run drops nothing of its queued output (per-run drops are Go Doh!'s), and a show closing sends no note-off for a note still down | the orchestrator's rulings |
+| IX | **Two things named and not built**: the pane's kill of one run drops nothing of its queued output (per-run drops are Doh!'s), and a show closing sends no note-off for a note still down | the orchestrator's rulings |
 | IY | **A double Esc takes back the persistent pass still owed**: the step a GO before the press took is counted as asserted and the pass's wait cleared, and a `run.assert` the pass submitted in the press's own tick, draining behind the press, is applied and does nothing; the next GO restores the section | the review's (2026-10-02), PRD §3.29's "the next GO restoring the declared world"; the `run.assert` behind the press the implementer's, found writing the review's case |
 
 **What it changes for a replay.** The drop, the note-offs and the stamp change no record: a
@@ -15064,7 +15064,7 @@ H5, but with the mount's policy rather than the bad word) and says so.
 | A stop cue's `advance` on a cue with no range, `afterMember` or `afterIteration` on something that is not a group (`fireStop`: a hard stop) | no | kept |
 | `afterMember` / `afterIteration` on a group | nothing is stopped: the group ends at a boundary | the member's and the group's kept |
 | A cue or a scene completing on its own | - | kept |
-| Go Doh! | no (`takenBack` already owes none) | none |
+| Doh! | no (`takenBack` already owes none) | none |
 
 **What callers of `stopEveryRoot` see.**
 
@@ -15199,20 +15199,24 @@ post-wait - the footer at the end of the panic fade, not after the wait - and th
 left to ring out rather than cut; and a stop cue fading an ambience bed inside an automatic
 sequence - the next cue after the bed's post-wait, counted from the fade's end.
 
-## 24. Go Doh! — taking back the last GO
+## 24. Doh! — taking back the last GO
 
-Written from 2026-10-01. PRD §3.32 is the law for Go Doh!: the third of §4.4's stops, for the GO
+*(2026-10-02, K7: **Doh!** is its name, at the author's direction - "Doh! is officially its name";
+it was Go Doh! until then, and a record that quotes the law's old words keeps them. The command is
+still `go.doh` and no address, attribute or stored value changed, §24.11.)*
+
+Written from 2026-10-01. PRD §3.32 is the law for Doh!: the third of §4.4's stops, for the GO
 pressed before its moment - a line misheard, a standby taken for a go. This section is how it is
 built: the rule every handler keeps (§24.1), what a GO leaves in flight and what a Doh does with each
-(§24.2), the rows (§24.3), the commands, refusals and words (§24.4), the Go Doh! setting (§24.5), the
+(§24.2), the rows (§24.3), the commands, refusals and words (§24.4), the Doh! setting (§24.5), the
 decisions with their reasons (§24.6), the limitations, each against the decision it leaves intact
 (§24.7), what the author answered and what is still his (§24.8), and, stage by stage, what was built
-and how it was tested (§24.9, §24.10).
+and how it was tested (§24.9, §24.10, and K7's §24.11).
 
 **The design came first, whole.** It was settled over five versions and four rounds of the author's
 answers (2026-09-30 and 2026-10-01), each version read by critics who tried to break it, and it is
 built in five stages: **D1** takes the GO down - the pointer, the history and what the GO started -
-and carries the Go Doh! setting, so the author's default is kept from the first commit; **D2** pauses
+and carries the Doh! setting, so the author's default is kept from the first commit; **D2** pauses
 what was heard and carries it on at the corrected GO, and hands back exactly what was not; **D3** puts
 back what the GO changed elsewhere - the desk, levels, stops, takes - and composes the report; **D4**
 names, once, what could not be put back; **D5** drives it end to end. Until D2 the corrected GO -
@@ -15233,7 +15237,7 @@ Every decision a Doh makes must come out the same there, so every handler from h
   report - is stashed by the handler and submitted by a hook.
 - **A handler decides from handler state only**, whenever the decision changes a run, the shape of
   the run table, the identifiers drawn, the applied arguments, the document or the history. It may
-  read the document - the Go Doh! settings, "plays sound", the ports' `tx`, and the device an OSC
+  read the document - the Doh! settings, "plays sound", the ports' `tx`, and the device an OSC
   address belongs to, found from the document's `Mount` prefixes by the one resolver of §24.5, never
   from the mount table, which a replay may not have; the run fields only handlers or logged records
   write (the parent links, `goSerial`, `causedBy`, `preparedAfterGo`, `takenBack`, `unadoptedAt`,
@@ -15263,12 +15267,12 @@ Every decision a Doh makes must come out the same there, so every handler from h
   log.
 - **Identifiers are drawn in vector order**, and the run table is walked in creation order.
 
-### 24.2 What a GO leaves in flight, and what Go Doh! does with each
+### 24.2 What a GO leaves in flight, and what Doh! does with each
 
-The inventory §4.4 deferred Go Doh! until. **Stage** says which stage builds the row; where D1 does
+The inventory §4.4 deferred Doh! until. **Stage** says which stage builds the row; where D1 does
 less than the row, the column says what D1 does.
 
-| What a GO starts or changes | What Go Doh! does with it | Stage |
+| What a GO starts or changes | What Doh! does with it | Stage |
 |---|---|---|
 | The list's standby | Back to the cue the GO fired, through the standby's own door - a cue gone, or no longer one the pointer may stand on, refuses the Doh before anything moves | D1 |
 | The list's `finished` flag | Back to what it was before the GO | D1 |
@@ -15301,23 +15305,23 @@ less than the row, the column says what D1 does.
 | The persistent section | Checked again at the restored pointer: a bed the GO's stop suspended comes back, and the persistent sends of devices that take back are asserted again. Persistent OSC and MIDI cues of a device left to its operator are not, on the Doh's own pass | D1 |
 | A lane ride recorded on a cue it started | Dropped, as for a kill | D1 |
 | Everything, after an Esc between the GO and the Doh | Left to Esc, whose footers have run: only the pointer (and from D3 the desk) goes back, and what reached a device left to its operator is still not sent again | D1 |
-| A device's Go Doh! setting, a cue's, a port's "plays sound" | The document's: never changed by a Doh; read once, at the Doh, fail-safe | D1 |
+| A device's Doh! setting, a cue's, a port's "plays sound" | The document's: never changed by a Doh; read once, at the Doh, fail-safe | D1 |
 | The Doh's report | One readout for the runner, whatever list has the focus | D3, D4 |
 
 ### 24.3 Rows
 
 | Row | Node | Type, default | Meaning | Stage |
 |---|---|---|---|---|
-| `lists,dohWindow` | `/godot/list/dohWindow` | `d` seconds, 10 (0..60) | how long after a GO Go Doh! may still take it back; nought turns it off. A show setting on Show settings > Playback, right after the GO debounce, saved with the show - so the lock refuses an edit of it | D1 |
-| `lists,doh` | `/godot/list/doh` | `s`, ro | what Go Doh! would take back now: `<list> <cue> <tick>` of the last GO, empty when there is nothing. What the Doh! button reads to name the cue | D1 |
-| `mount,doh` | `/godot/mount/<id>/doh` | `s`, `leave` - `takeBack \| leave` | what Go Doh! does with what a cue sent to this network device (§24.5) | D1 |
+| `lists,dohWindow` | `/godot/list/dohWindow` | `d` seconds, 10 (0..60) | how long after a GO, Doh! may still take it back; nought turns it off. A show setting on Show settings > Playback, right after the GO debounce, saved with the show - so the lock refuses an edit of it | D1 |
+| `lists,doh` | `/godot/list/doh` | `s`, ro | what Doh! would take back now: `<list> <cue> <tick>` of the last GO, empty when there is nothing. What the Doh! button reads to name the cue | D1 |
+| `mount,doh` | `/godot/mount/<id>/doh` | `s`, `leave` - `takeBack \| leave` | what Doh! does with what a cue sent to this network device (§24.5) | D1 |
 | `port,doh` | `/godot/port/<id>/doh` | `s`, `leave` - `takeBack \| leave` | the same for a MIDI port | D1 |
 | `port,audible` | `/godot/port/<id>/audible` | `T`, false | "plays sound": a MIDI cue fired to this port, its `tx` on, makes its scene heard | D1 |
 | `osc,doh`, `midi,doh` | `/godot/cue/<id>/doh` | `s`, `device` - `device \| takeBack \| leave` | the cue's own answer, or its device's | D1 |
 | `list,resume` | `/godot/list/<id>/resume` | `s`, ro | the cue the next GO carries on, and from which second | D2 |
 | `lists,dohReport` | `/godot/list/dohReport` | `s`, ro | the last Doh's report, whichever list it was on | D3 |
 
-**Edits** (D1): `list,history` names the `p` and `d` letters; `document,locked` adds Go Doh! to what
+**Edits** (D1): `list,history` names the `p` and `d` letters; `document,locked` adds Doh! to what
 the lock does not stop; `lists,goDebounce` says it also spaces two Doh! presses; `run,warning` gains
 `left-to-operator`. `docs/schema/show.rng` gains the optional `dohWindow` on `Lists`, `doh` on
 `Mount`, `Port`, `Osc` and `Midi`, and `audible` on `Port`.
@@ -15356,16 +15360,18 @@ corrected GO ran and sent nothing for, because the GO a Doh took back had alread
 device left to its operator. It ends at once whatever its wait: a `verified` cue asks nothing of a
 device it did not write.
 
-**On the desktop** (PRD §3.32). The **Doh!** button sits directly to the left of PANIC on GO's row,
-the same height, in the standby's amber with black letters, and reads "Doh! 12" while the last GO
-can still be taken back - on the engine's tick, so it goes plain on the tick a press would start
-being refused - and "Doh!" otherwise. **F9** is its key, once per key-down: JUCE repeats a held key,
+**On the desktop** (PRD §3.32). The **Doh!** button sits to the left of PANIC on GO's row, the
+same height, and reads "Doh! 12" while the last GO can still be taken back - on the engine's tick,
+so it goes plain on the tick a press would start being refused - and "Doh!" otherwise. *(D1 drew it
+directly beside PANIC, four pixels between them, in the standby's amber with black letters;
+2026-10-02, K7: a row's width of air between the two, and its own colour while it can act, fading
+as the window runs out and disabled once it is over, §24.11.)* **F9** is its key, once per key-down: JUCE repeats a held key,
 so a latch shut by the press is opened again only once F9 is up (the Shell forwards key releases to
-the transport, where the latch is). The Show menu carries "Go Doh! - take back the last GO", F9
+the transport, where the latch is). The Show menu carries "Doh! - take back the last GO", F9
 printed beside it, offered under the lock. A press sends `go.doh` and nothing else - no notice,
 which would stand in front of the engine's refusal on the transport line.
 
-### 24.5 The Go Doh! setting, and "plays sound"
+### 24.5 The Doh! setting, and "plays sound"
 
 **The author's case, in his words** (2026-10-01): *"on a show I had OSC cues sent to the light board
 that triggered the lights, sometimes sequences, not just a simple change of levels. This could mean
@@ -15374,7 +15380,7 @@ sequence. In this case fixing with Doh would really do more damage than the ligh
 the damage."* Asked, he answered *"I would have a default per device that can be overriden at cue
 level"*, and when nobody chose, *"Always leave to its operator"*.
 
-- **Every network device and every MIDI port** has a Go Doh! setting, `Mount/@doh` and `Port/@doh`:
+- **Every network device and every MIDI port** has a Doh! setting, `Mount/@doh` and `Port/@doh`:
   `leave` - the default for every device, whatever its kind - or `takeBack`. **Every OSC and MIDI
   cue** has `Osc/@doh` and `Midi/@doh`: `device` - the default - `takeBack` or `leave`.
 - **The effective setting** is the cue's own unless it says `device`; then its device's - an OSC
@@ -15395,14 +15401,16 @@ level"*, and when nobody chose, *"Always leave to its operator"*.
 - **"Plays sound"**, `Port/@audible`, off unless set (the author, 2026-10-01: *"Should we have a
   toggle for this rather than assume?"*): a MIDI cue fired to a port marked so, its `tx` on, makes
   its scene heard - paused and carried on rather than taken back and started over. It has nothing to
-  do with the Go Doh! setting: whether a scene was heard and whether what it sent is left to an
+  do with the Doh! setting: whether a scene was heard and whether what it sent is left to an
   operator are two questions.
-- **Where it is set**: the Network tab's **Doh!** cell after `Tx` ("Leave" or "Take back"), the
+- **Where it is set**: the Network tab's **Doh!** cell after `Tx` ("Meh" or "Undo(h)"), the
   MIDI tab's **Sound** ("ON"/"OFF") and **Doh!** cells after `Tx` - each a click that sends a
   `node.set`, refused under the lock as every setting is, with the row's tooltip saying what the
   cells mean - and the inspector's **on Doh!** row on an OSC or a MIDI cue, after its last row: "as
-  the device (leave)" or "as the device (take back)", naming what the device says now, "take back",
-  "leave to its operator". The words are the implementer's; the author rewords at first look.
+  the device (Meh)" or "as the device (Undo(h))", naming what the device says now, "Undo(h)",
+  "Meh". The words are the author's (2026-10-02): *"Undo(h)"* for take back and *"Meh"* for leave -
+  D1's were "Leave", "Take back", "as the device (leave)", "take back" and "leave to its operator".
+  Only the words: `leave`, `takeBack` and `device` are stored as they were.
 - **Read once**, at the Doh: a setting changed afterwards changes the next Doh, not this one.
 
 ### 24.6 The decisions
@@ -15439,11 +15447,11 @@ built.
 | HF | GL | **A sound inside a running act is a sound root** (D2): in place inside the Doh fade, warm after it | the design's call |
 | HG | GM | **A resumed scene's own fades on its own members are not fired again** (D2) | the design's call |
 | HH | GN | **In place only if nothing but the Doh asked the stop** (D2) | the design's call |
-| HI | GP | **The Go Doh! setting** (§24.5): per network device and MIDI port, `leave` (the default, whatever the kind) or `takeBack`; per OSC and MIDI cue, `device` (the default), `takeBack` or `leave`; one resolver; read fail-safe. One setting with two consequences - put back, and sent again | the author's, 2026-10-01; one setting with two consequences is the design's reading, his to split |
+| HI | GP | **The Doh! setting** (§24.5): per network device and MIDI port, `leave` (the default, whatever the kind) or `takeBack`; per OSC and MIDI cue, `device` (the default), `takeBack` or `leave`; one resolver; read fail-safe. One setting with two consequences - put back, and sent again | the author's, 2026-10-01; one setting with two consequences is the design's reading, his to split *(2026-10-02: he keeps it one - only a default switch, §24.8)* |
 | HJ | GQ | **Where the setting acts**: decided once, at the Doh; only what had already left for the device; and the Doh itself never sends such a device anything - not its persistent pass (HN), not a committed pre-send's restore nor a second pre-send (HO), not a late send of a cue the GO stopped (HR) | the design's call |
 | HK | GR | **What was left rides the list's mark** to the corrected GO: kept per marked cue - the cue whose GO was taken back - filed under the serial of the GO that reaches it, and the first run that GO makes or adopts of each left cue sends nothing (`sendsLeft`): it keeps a first GO's timing and ends `left-to-operator`, once per cue. A second Doh keeps it; a Doh of the corrected GO keeps what the first Doh left; Esc leaves it | the design's call, for the author's outcome of 2026-10-01 |
-| HL | GS | **MIDI is heard on a port marked "plays sound"**, its `tx` on - from launch evidence and the document, whatever the Go Doh! setting | the author's, 2026-10-01; off by default, on the MIDI tab, is the design's proposal |
-| HM | GT | **Go Doh! builds on J1 and J2** - the jump's round, and a scene row inside a running act adopted - each in its own commit | the author's, 2026-10-01 ("fix it, own commit"); built in another order, §24.9 |
+| HL | GS | **MIDI is heard on a port marked "plays sound"**, its `tx` on - from launch evidence and the document, whatever the Doh! setting | the author's, 2026-10-01; off by default, on the MIDI tab, is the design's proposal |
+| HM | GT | **Doh! builds on J1 and J2** - the jump's round, and a scene row inside a running act adopted - each in its own commit | the author's, 2026-10-01 ("fix it, own commit"); built in another order, §24.9 |
 | HN | GU | **The Doh's own persistent pass sends nothing to a device left to its operator**: the persistent OSC and MIDI cues whose effective setting is `leave`, on every list, are named against the Doh's `d` step and skipped on the pass that step opens; media, mic and the devices that take back are asserted as ever. After an Esc between the GO and the Doh that pass asserts nothing at all - Esc brought the beds down, and a Doh never undoes an Esc - and the next step asserts the section *(the review, 2026-10-01)* | the design's call |
 | HO | GV | **A pre-send the GO committed is the GO's**: on a device left to its operator it joins the left set once its write is known (done, or failed `disagreed`); the give-back of an unheard block puts back only the pre-sends that take back - the Doh clears the restore of the GO's own pre-sends that leave, and a next scene the horizon prepared under the GO's act keeps its own (L34) *(the review, 2026-10-01: the first build cleared that one too, and the desk kept the next scene's value)*; the horizon leaves out every cue a mark names | the design's call |
 | HP | GW | **What was left lives by its marked cue**: a GO that reaches the cue consumes it - undone when that GO made no run of the cue it stood on, which is decision N's ignore; a start cue's fire of it caused by a GO files it under that GO; a GO before the cue keeps it and one past it drops it; a fire by name, a trigger and a jump drop it; a second Doh, Esc, a double Esc and a pointer move keep it | the design's call, after the author's own case: GO 12 fired when 11.5 was due, Doh!, GO 11.5, GO 12 - the desk gets 12's cue once in all |
@@ -15484,17 +15492,17 @@ until that stage lands.
 | L23 | After an Esc between the GO and the Doh only the pointer (and the desk) goes back, and what reached a device left to its operator stays unsent; a root another hand was already stopping is left to that stop | Esc's own guarantee; the other hand's decision |
 | L24 | A stop a hook withdrew with no record still reads as asked in `stopAsked` until a seek clears it: the Doh may leave such a cue to "another hand". Replay-exact either way | deciding from handler state |
 | L25 | *Withdrawn*: J1 seats the round a plan is in for every seat | - |
-| L26 | MIDI makes a cue heard only on a port marked "plays sound", its `tx` on: a synth on an unmarked port is taken for lighting, its scene handed back and started over; a port marked and unbound on this machine still counts. The pause cannot bring a synth down: a note a paused scene holds rings until its note-off, the corrected GO or a double Esc's note-offs | the author's toggle, 2026-10-01 |
+| L26 | MIDI makes a cue heard only on a port marked "plays sound", its `tx` on: a synth on an unmarked port is taken for lighting, its scene handed back and started over; a port marked and unbound on this machine still counts. The pause cannot bring a synth down: a note a paused scene holds rings until its note-off, the corrected GO or a double Esc's note-offs *(2026-10-02: and the author wants it so - no note-offs at a Doh, §24.8)* | the author's toggle, 2026-10-01 |
 | L27 | What an older act does because of the GO is followed through manual groups that play once only: an act that loops, sits under an automatic sequence or a timeline, or that another hand stopped, is left ended and said - the next GO enters it again from its header, whose sends go out again; what its footer sent since the GO to a device left to its operator is not sent again | "put back as it was", where the reaction can be undone whole |
 | L28 | *Withdrawn*: J2 makes a GO on a scene row inside a running act adopt the block the horizon prepared there | - |
-| L29 | **Every device is left to its operator until somebody says otherwise** - Go.dot's own processors reached over OSC included: a WFS-DIY's values are not put back and its cues not sent again by a Doh until its row says take back | the author's "always leave to its operator" |
+| L29 | **Every device is left to its operator until somebody says otherwise** - Go.dot's own processors reached over OSC included: a WFS-DIY's values are not put back and its cues not sent again by a Doh until its row says take back | the author's "always leave to its operator", confirmed 2026-10-02 for every kind, Go.dot's own processors included |
 | L30 | The setting governs what had already left. What the early GO had not sent yet is taken down with its runs and sent by the corrected GO at its own time, whatever the setting - a lighting scene caught part-way leaves its first cues to the light operator and sends the rest on the corrected GO's clock | "not sent again", for what had left |
 | L31 | A left cue run again keeps its pre-wait and post-wait and sends nothing, ending `left-to-operator` whatever its wait. A send that failed writing nothing did not leave, and the corrected GO sends it. A pre-send whose read-back had not come back by the Doh is not counted. Until H4 a double Esc drops nothing from the sender's queue, so every message it finds there still leaves and counts as sent; from H4, what it drops of its own drain is stamped and does not count, and a message a rate cap held since an earlier tick, or a MIDI message launched in the double Esc's drain, still counts though it may not have left *(the review, 2026-10-01: D1 had stamped its own drain ahead of H4, and the corrected GO sent a message that had left a second time)* *(2026-10-02: H4 is built - the queue is dropped and the press's own drain stamped, §23.10; during an audio outage, where every drain runs at the frozen tick, a double Esc also stamps an osc run launched on the last live tick, which had left - counted as unsent, a corrected GO sends it to a device left to its operator a second time)* | "not sent again", with a first GO's timing |
 | L32 | **Once per cue**: the first run the corrected GO makes, adopts or causes for a left cue sends nothing; a scene that starts from the top and loops sends it in its later rounds. A GO that reaches the marked cue through automatic sequences consumes the entry for the run it will spawn; a sequence stopped before it gets there leaves that run unmade, and a later GO on the cue sends it | "the corrected GO does not send it again" |
 | L33 | An address two of the GO's cues wrote, one left and one taken back, follows the last writer | one decision per address |
 | L34 | The horizon's preparation of the next scene, made after the GO, follows §23.3's rule whatever the setting: given back, its pre-sends put back, pre-sent again. A pre-send the GO itself committed is the GO's (HO). Only a device declared anticipatable is ever pre-sent to, so a lighting desk sees none | the setting is about what a GO sent or committed |
 | L35 | The setting is read once, at the Doh | "a default per device ... overriden at cue level" |
-| L36 | The setting is Go Doh!'s alone: a jump, a fire by name, a trigger, Esc and a double Esc send and stop as they always have; a fire by name or a trigger of a marked cue drops what was left and sends everything, a deliberate send; a start cue's fire caused by a GO is that GO's and sends the left cues nothing | not a Doh decision |
+| L36 | The setting is Doh!'s alone: a jump, a fire by name, a trigger, Esc and a double Esc send and stop as they always have; a fire by name or a trigger of a marked cue drops what was left and sends everything, a deliberate send; a start cue's fire caused by a GO is that GO's and sends the left cues nothing | not a Doh decision |
 | L37 | A second Doh! forgets the resume, not what was left: the next GO starts the sound from the top and still sends nothing a device's operator was left with | the author's second press, for the sound; his device setting, for the device |
 | L38 | Between the Doh and the corrected GO the show runs as it always does: a GO on another cue may itself write what a left cue had written - a persistent level asserted again - and the corrected GO still sends the left cue nothing. An address is not a kind, and a trigger sent twice is the damage the author named | "the corrected GO does not send it again" |
 | L39 | The Doh's own persistent pass skips every persistent OSC and MIDI cue of a device left to its operator, including ones the Doh did not bring back into the plan; the next step asserts them as ever | §4.5's "re-asserts pre-GO state", for Go.dot's own processing and the devices that take back |
@@ -15517,26 +15525,37 @@ triggers is a later version's (GI).
 rather than assume?"* - a "plays sound" toggle per port (HL). The jump's round, and the scene row
 inside a running act: *"fix it, own commit"* - J1 and J2 (HM).
 
-**The fourth round** (2026-10-01): the lighting case (§24.5), built as one Go Doh! setting per
+**The fourth round** (2026-10-01): the lighting case (§24.5), built as one Doh! setting per
 device, overridable per cue, `leave` by default (HI-HK).
+
+**The fifth round** (2026-10-02, K7). The name: *"Doh! is officially its name"* - Godot's GO and
+Homer Simpson's (KA). More air between the button and PANIC, *"to avoid a total disaster"* (KB).
+The setting's words: *"Undo(h)"* instead of "Take back", *"Meh"* instead of "Leave" (KC). The button:
+*"I would display the button in a distinctive colour and fade out when the Doh! timer is over"*
+(KD-KG). And three of the four questions below, answered (KH, KI).
 
 **Still his, not blocking the build.**
 
 1. **One setting, or two?** Read as one setting with two consequences: `leave` puts nothing back
    and sends nothing again; `takeBack` puts back and sends again. He may want them apart - a desk's
    levels put back but a trigger never sent again - which would be two attributes per device and per
-   cue. Splitting it later adds rows and moves no log.
+   cue. Splitting it later adds rows and moves no log. *Answered 2026-10-02: one setting stays - it
+   is only a default switch, and as much as possible is left to the operator (KH).*
 2. **Every device leaves by default, Go.dot's own processors included** (L29). Confirm, or name the
-   kinds of device that should default the other way.
-3. **A second Doh! keeps what was left** (L37). Confirm.
-4. **A synth note through the pause** (L26): should Go Doh! send note-offs for the notes a paused
-   scene holds on a port that plays sound? Not built.
+   kinds of device that should default the other way. *Answered 2026-10-02: confirmed - `leave`
+   everywhere, Go.dot's own processors included (KH).*
+3. **A second Doh! keeps what was left** (L37). Confirm. *Still open.*
+4. **A synth note through the pause** (L26): should Doh! send note-offs for the notes a paused
+   scene holds on a port that plays sound? Not built. *Answered 2026-10-02: no - "a Go should only
+   act on an unpaused system" (KI).*
 
 **At first look, not questions**: the key (F9 - no text editing reaches it, and it is far from
 Space; on a keyboard whose F-keys play media, most laptops and every Apple one, it needs fn, and
 the key is his to move), the button's look and caption, the sentences on the transport line and in the report, the
 words of the new controls ("Leave", "Take back", "Sound", "on Doh!", "as the device (leave)", "take
-back", "leave to its operator") and the warning `left-to-operator`. And readings he may overrule: a
+back", "leave to its operator") and the warning `left-to-operator`. *(2026-10-02: he looked - the
+button's look and the setting's words are his now, KB-KD; F9, the caption, the sentences, "Sound",
+"on Doh!" and the warning are still waiting for his look.)* And readings he may overrule: a
 pad counts as a trigger (GI); a resumed scene's past sends that take back go out as a burst (L7); an
 act the GO ended is brought back to life (HE); what was left outlives a GO on an earlier cue (HP) -
 the other reading sent his `/lx/go 12` twice in his own case; the Doh sends a device left to its
@@ -15576,7 +15595,7 @@ HT), and the standby's arm (`waitingForVoice`: the cue armed again once its old 
 `run.prepare` for a standby inside a scene). `askStop` replaces every handler's own write of
 `stopping`.
 
-**The Go Doh! setting** (`cue/DohSetting.h`, read only from the document), `sentTo` stamped in
+**The Doh! setting** (`cue/DohSetting.h`, read only from the document), `sentTo` stamped in
 `fireKind`, `sendDropped` read but not yet stamped (H4 stamps it - *2026-10-02: it does, §23.10*),
 `countsAsSent`, the left set taken before anything moves, `sendsLeft` making `writeOscNow` and `fireMidi` send nothing and `advanceSends` end the
 run `left-to-operator`, the marks with `reaches` and `isPast` read from the list's own order, and the
@@ -15741,7 +15760,7 @@ The new engine and client cases ran in both locales, the window cases under both
 - **`DocumentTests`** (2): every device and port leaves unless told, a cue follows its device, the
   one resolver's order and tie - the client's rows read off a published tree, the review's; the setting and "plays sound" survive a save and a load, and the show
   still validates.
-- **`UndoTests`**, **`AudioTests`**, **`OscQueryTests`** (1 each): Undo never touches a GO; Go Doh! is
+- **`UndoTests`**, **`AudioTests`**, **`OscQueryTests`** (1 each): Undo never touches a GO; Doh! is
   let through an audio outage and a GO still is not; `go.doh` is `/godot/cmd/go/doh`, and
   `/godot/cmd/go` is still GO, with contents.
 - **`ClientTests`** (2, and the gesture list): the refusals as sentences, the button's caption, the
@@ -15749,7 +15768,8 @@ The new engine and client cases ran in both locales, the window cases under both
   in the first, through a network device and through a port, and the rows read off the tree. *The
   review's*: the button's caption read end to end off a published tree, and cleared by a Doh, a fire
   by name and a jump.
-- **`RunPaneUiTests`** (2): Doh! directly left of PANIC on GO's row, nothing between them, a click a
+- **`RunPaneUiTests`** (2): Doh! directly left of PANIC on GO's row, nothing between them *(2026-10-02,
+  K7: a row's width of air between them now, pinned at two widths, §24.11)*, a click a
   Doh! and nothing else; F9 held sends one Doh!, through the Shell as the window delivers keys - and
   after a focus change that took the release, the review's.
 - **`ShowSettingsUiTests`** (2, and the Playback case): the Network tab's Doh! cell both ways and
@@ -15758,6 +15778,91 @@ The new engine and client cases ran in both locales, the window cases under both
   order, the window's comma a decimal point.
 
 What the tests cannot see is on the bench's list above.
+
+### 24.11 The name, the words, the air and the fading button (K7, 2026-10-02)
+
+**What the author asked**, on 2026-10-02, after looking at D1: *"Doh! is officially its name"* (a
+play on Godot and on Homer Simpson); more padding between the Panic and Doh! buttons *"to avoid a
+total disaster"*; the setting's words *"Undo(h)"* instead of "Take back" and *"Meh"* instead of
+"Leave"; and *"I would display the button in a distinctive colour and fade out when the Doh! timer
+is over"*. He also answered three of §24.8's four questions.
+
+**The name.** "Go Doh!" became "Doh!" wherever a person reads it: the desktop's button tooltip, the
+Show menu item ("Doh! - take back the last GO"), the Playback tab's field ("Doh! window (F9)") and
+its page line, the device rows' tooltips, the parameter table's descriptions
+(`docs/parameters/godot-parameters.csv`, so `SchemaTable.generated.h` and `docs/schema/show.rng`
+regenerated), `go.doh`'s description in `wfg commands`, the code's comments, the test names, the
+console's one comment, this document, the devplan and the PRD - §3.32 and every other mention, and
+§4.4's third level, "**Doh! — recovery.**", with `CLAUDE.md`'s §4 copied again byte for byte from
+it. The command stays `go.doh`; `/godot/cmd/go/doh`, `/godot/list/doh`, `dohWindow`, the `doh`
+attributes, the `d` step and every stored value are untouched, so no show, log or client changes.
+Kept as history: this document's sentences that quote §4.4 when it deferred "Go Doh!" (§12's PANIC
+note, §13's inventory, §14's inventory and its Phase 10 line) and the phase closeouts, which are
+dated records.
+
+**The air.** D1 laid Doh! directly beside PANIC: each button keeps two pixels inside its slot, so
+four pixels stood between them. Now the transport takes a row's width out of GO's row before it
+places Doh! - `row` is the theme's row times its type, 32 pixels at the default - so 36 pixels
+stand between the two, nine times D1's and twice the air beside GO (18). At the main window's
+narrowest (640) every button keeps its size; the standby's notes give way first (48 pixels to 16).
+
+**The words.** The device rows' Doh! cell reads "Meh" (`leave`, the default) or "Undo(h)"
+(`takeBack`) on the Network and MIDI tabs, and the rows' tooltips say what each means; the
+inspector's "on Doh!" menu reads "as the device (Meh)" or "as the device (Undo(h))", then "Undo(h)",
+then "Meh". The console has no such control, and its history word "a Doh!" was already right.
+
+**The button.** While the last GO can still be taken back, Doh! wears a colour of its own - the
+theme's new `doh`, a doughnut's pink, black letters on it - and names the cue ("Doh! 12"). Over the
+window's last two seconds (its second half when it is shorter than four) the colour fades, one step
+a reading, to the idle look - `go-idle`'s grey, `ink-dim` letters - and on the tick a press would
+start being refused the button is idle and disabled. Nothing new is published: the engine already
+publishes the three things the time left is made of - its tick, the GO's tick in `/godot/list/doh`,
+and `/godot/list/dohWindow` - and the reading computes the phase from them exactly as the caption
+already did, with the engine's own test (inside while fewer ticks have passed than the window
+holds). No clock of the client's, no timer: a reading that is a pass old is a pass behind, never
+ahead. Whatever else makes the engine refuse (a trigger after the GO, a Doh already pressed, a jump)
+already clears `/godot/list/doh`, so the button goes idle then too. Colour is never alone (§4.8):
+the caption names the cue, the tooltip says the seconds left ("The GO on 12: 8 s left"), and over is
+a disabled button. In the model: `DohPhase` (`open`, `fading`, `over`) and `DohLook` (the phase, how
+much of the colour is left, the seconds left), `TransportReading::dohLook` and `dohTip`; in the
+window, `TransportComponent::dressDoh`, run on every reading.
+
+| | Decision | Whose |
+|---|---|---|
+| KA | **The name is Doh!** in every word a person reads; the command `go.doh`, every address, attribute, stored value and log letter unchanged; a record that quotes the old law, or a dated closeout, keeps "Go Doh!" | the author's, 2026-10-02 ("Doh! is officially its name"); what counts as history, the implementer's |
+| KB | **A row's width of air between Doh! and PANIC** - 36 pixels at the default theme where D1 had 4, twice GO's own air; nothing is ever laid in it; at the narrowest window the notes give way, not the buttons | the author's, 2026-10-02 (more padding, "to avoid a total disaster"); the amount, the implementer's |
+| KC | **The setting's words: "Meh" for `leave`, "Undo(h)" for `takeBack`**, and "as the device (Meh)" / "as the device (Undo(h))" for a cue that follows its device; the stored words unchanged | the author's, 2026-10-02; the inspector's wording of the device choice, the implementer's |
+| KD | **Doh!'s own colour is the theme's `doh`, #FF6EB4** - a doughnut's pink, for the name's joke - with black letters: no state wears it, and `kind-mic`'s softer pink is only ever an icon's. Its idle look is a GO without audio's: `go-idle` and `ink-dim`. The standby's amber it wore in D1 is the standby's alone again | the author's, 2026-10-02 (a distinctive colour); the hue, the implementer's, his to change in `theme.json` |
+| KE | **The fade: the window's last two seconds, or its second half when shorter than four**, linear on the engine's ticks, ending one step from the idle look on the last tick inside; **over** - idle and disabled - from the tick a press is refused. Drawn from what the engine already publishes (its tick, the GO's tick, the window); no readout added, no client timer | the author's, 2026-10-02 ("fade out when the Doh! timer is over"); the length and the shape, the implementer's |
+| KF | **The button is disabled once over; F9 and the Show menu still send.** The reading is up to a pass old: a GO pressed since the last snapshot would leave the button idle while the engine would take a Doh, and the key is what is pressed without looking. The engine stays the judge, and its refusal is the sentence on the transport line. The transport's rule that an accelerator follows its button is set aside for this key alone | implementer's call, his to overrule |
+| KG | **The seconds left are in the tooltip, not the caption**: the button is two rows wide and already names the cue | implementer's call |
+| KH | **One Doh! setting, `leave` by default everywhere** - every network device and MIDI port, Go.dot's own processors included; it is only a default switch, and as much as possible is left to the operator (§24.8, 1 and 2) | the author's, 2026-10-02 |
+| KI | **No note-offs at a Doh**: a note a paused scene holds on a port that plays sound rings through the pause (L26) - *"a Go should only act on an unpaused system"* (§24.8, 4) | the author's, 2026-10-02 |
+
+**Tests**, each written first and run against the code before its change, then after it, under C and
+`fr-FR`:
+
+- **`ClientTests`** "the Doh! button is open, fades as its window runs out, and is over on the
+  engine's tick" (new): nothing to take back is over; the GO's tick open, ten seconds; two seconds
+  before the end still open, one tick later fading at 0.99; half way 0.5; the last tick inside 0.01
+  and still "Doh! 12"; the next tick over, "Doh!", no seconds; a one-second window fading over its
+  second half; a window of nought always over; a reading older than the GO over; and `doh` a token
+  of the theme, unlike GO's, PANIC's, the standby's and the idle grey. Before: 20 failures (no
+  phase, no seconds, no token).
+- **`ClientTests`** "Doh!'s choice on an OSC or a MIDI cue..." (changed): the inspector's words and
+  the device's and the port's `dohWord`. Before: 9 failures, every word the old one.
+- **`RunPaneUiTests`** "Doh! sits left of PANIC on GO's row with a row of air between them..."
+  (rewritten from D1's): at 1200 and at 640 pixels, the same row and height, both wider than a row,
+  inside the strip, the gap at least a row and wider than GO's air, nothing in it, a click one Doh!.
+  Before: 4 failures, the gap 4 at both widths. And "Doh! wears its own colour while the window is
+  open, fades, and is disabled once it is over" (new), through `show`: idle and disabled with nothing
+  to take back, `doh` and enabled at tick 1100 with "8 s left" in the tooltip, half way to the grey
+  at 1450, idle, disabled and plain at 1500. Before: 7 failures - amber whatever the window said,
+  never disabled.
+- **`ShowSettingsUiTests`** (the Network and MIDI cases, changed): the rows read "Meh" and
+  "Undo(h)". Before: 3 failures.
+- The whole client suite (110 cases) and the window binary (48) under both locales; the `schema.`,
+  `wfg.schema`, `claude` and `console` checks; `check-comments.py` and `check-claude-md.py`.
 
 ## 25. A Show and its Performances
 

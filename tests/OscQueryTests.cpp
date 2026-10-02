@@ -1705,7 +1705,7 @@ TEST_CASE ("subscriptions: the table on its own")
 }
 
 //==============================================================================
-/*  GO DOH! AT ITS ADDRESS (PRD §3.32, D1, 2026-10-01): `go.doh` is published as
+/*  DOH! AT ITS ADDRESS (PRD §3.32, D1, 2026-10-01): `go.doh` is published as
     `/godot/cmd/go/doh`, which makes `/godot/cmd/go` the first command that also
     has contents - and it must stay GO, a write-only method node that a
     datagram to it still fires, with `doh` inside it. Failed before D1: there

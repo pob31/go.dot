@@ -31,7 +31,9 @@
 
     COLOUR IS NEVER THE SOLE CARRIER (PRD §4.8). The dirty dot comes with the
     words "unsaved changes", the standby's yellow with "standby in <list>", a
-    refusal's red with "error:", the lock's state with the word "locked" - and
+    refusal's red with "error:", the lock's state with the word "locked", Doh!'s
+    fading pink with the cue it names, the seconds in its tooltip and a button
+    that is disabled once its window is over - and
     every disabled button has a sentence beside it saying which thing is
     unavailable, because a greyed control reports only THAT something is.
 
@@ -67,8 +69,9 @@ namespace wfg::client::ui
                 happened. */
             std::function<void()> panic;
 
-            /*  GO DOH! (PRD §3.32): the last GO taken back. Its own button,
-                directly left of PANIC, and F9 - once per key-down. */
+            /*  DOH! (PRD §3.32): the last GO taken back. Its own button,
+                left of PANIC with a row of air between them, and F9 - once
+                per key-down. */
             std::function<void()> doh;
             std::function<void()> undo;
             std::function<void()> redo;
@@ -105,7 +108,7 @@ namespace wfg::client::ui
         void resized() override;
         bool keyPressed (const juce::KeyPress& key) override;
 
-        /*  F9 LET GO OPENS GO DOH!'S LATCH AGAIN (PRD §3.32): JUCE repeats
+        /*  F9 LET GO OPENS DOH!'S LATCH AGAIN (PRD §3.32): JUCE repeats
             `keyPressed` while a key is held, so a held F9 is one Doh!. The
             Shell forwards this as it forwards the presses. */
         bool keyStateChanged (bool isKeyDown) override;
@@ -135,10 +138,12 @@ namespace wfg::client::ui
         juce::TextButton goButton { "GO" }, panicButton { "PANIC" },
                         recoverButton { "recover" }, discardButton { "discard" };
 
-        /*  GO DOH! (PRD §3.32; the author, 2026-09-30): directly to the left
-            of PANIC on GO's row - the third level beside the other two, and as
-            far from GO as PANIC is. It names the GO it would take back while
-            the show's window is open. */
+        /*  DOH! (PRD §3.32; the author, 2026-09-30): to the left of PANIC on
+            GO's row - the third level beside the other two, and as far from GO
+            as PANIC is - with a row of air between the two since 2026-10-02 (the
+            author: "to avoid a total disaster"). It names the GO it would take
+            back while the show's window is open, in its own colour, fading as
+            the window runs out, and is disabled once it is over (`dressDoh`). */
         juce::TextButton dohButton { "Doh!" };
 
         /*  F9's latch: shut by the press that sent the Doh!, open again once
@@ -153,6 +158,9 @@ namespace wfg::client::ui
 
         /** GO in the audio's colours, and its caption when there is no audio. */
         void dressGo();
+
+        /** Doh! in its own colour while the window is open, fading, then idle and disabled. */
+        void dressDoh();
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransportComponent)
     };

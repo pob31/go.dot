@@ -362,7 +362,7 @@ namespace wfg::cue
             one where GO does nothing at all. A cue in its PRE-WAIT is the same
             case one step earlier, and is left alone for the same reason: it is
             already on its way. */
-        /*  NOT A RUN GO DOH! TOOK BACK (2026-10-01, namespace draft §24): its
+        /*  NOT A RUN DOH! TOOK BACK (2026-10-01, namespace draft §24): its
             voice is on its way out over the Doh fade, and a GO on the cue
             inside that fade is a GO on a cue that is not sounding - it starts
             the cue again, which is what the corrected GO is. */
@@ -1265,7 +1265,7 @@ namespace wfg::cue
 
         assertDue = -1;
 
-        /*  THE PASS GO DOH!'S OWN STEP OPENED (2026-10-01, namespace draft §24,
+        /*  THE PASS DOH!'S OWN STEP OPENED (2026-10-01, namespace draft §24,
             HN) re-asserts nothing on a device left to its operator: the Doh
             itself never sends such a device anything. Its OSC and MIDI cues
             were named by the handler; the next step's pass asserts as ever.
@@ -1827,7 +1827,7 @@ namespace wfg::cue
         if (run == nullptr || run->isFinished() || run->kind != "media")
             return false;
 
-        /*  NOT ONE GO DOH! TOOK BACK (2026-10-01): it is coming down over the
+        /*  NOT ONE DOH! TOOK BACK (2026-10-01): it is coming down over the
             Doh fade, and a seek would launch it again under that fade. */
         if (run->takenBack)
             return false;
@@ -2204,7 +2204,7 @@ namespace wfg::cue
         /*  WHAT THE HORIZON MAKES IS NOBODY'S GO (2026-10-01, namespace draft
             §24, GY), whatever its parent carries - the next scene's block is
             made under a live act - and it says when it was made: after which
-            GO. Go Doh! gives such a run back rather than taking it down. */
+            GO. Doh! gives such a run back rather than taking it down. */
         struct Horizon
         {
             explicit Horizon (bool& flagToSet) : flag (flagToSet) { flag = true; }
@@ -2356,7 +2356,7 @@ namespace wfg::cue
 
         for (const auto& id : armablesFor (cue))
         {
-            /*  A CHILD GO DOH! TOOK BACK IS NOT ONE (2026-10-01, namespace draft
+            /*  A CHILD DOH! TOOK BACK IS NOT ONE (2026-10-01, namespace draft
                 §24): finished or fading, it is the GO that was taken back, and
                 the cue is armed again under the block for the corrected one. */
             const auto children = runs.childrenOf (parentRun);
@@ -2656,7 +2656,7 @@ namespace wfg::cue
 
         /*  Decision N, 2026-09-06: a media cue that is already sounding is
             ignored - the GO is applied and logged, the pointer has advanced, and
-            the playing instance carries on. Not one Go Doh! took back, which is
+            the playing instance carries on. Not one Doh! took back, which is
             on its way out and is no longer the cue playing. */
         if (liveUntakenRunOf (cueId) != nullptr && kindOfCue (cue) == "media")
             return used;
@@ -2680,7 +2680,7 @@ namespace wfg::cue
     {
         auto* run = runs.find (runId);
 
-        /*  NOR ONE GO DOH! TOOK BACK (2026-10-01): it fires nothing more. */
+        /*  NOR ONE DOH! TOOK BACK (2026-10-01): it fires nothing more. */
         /*  NOR ONE A KILL HAS REACHED (2026-10-02, H4, namespace draft §23.10).
             A killed scene ends its members a tick after the press, from its own
             job, and a member's fire can drain after the press in between: its
@@ -4971,7 +4971,7 @@ namespace wfg::cue
             draft §24, the review of 2026-10-01). Esc's caller has already left
             out what a sooner stop holds, and takes over everything else - a
             voice back to `playing` under a fade-and-stop that a seek left on
-            it included, as Esc always did. Go Doh!'s leaves out what a sooner
+            it included, as Esc always did. Doh!'s leaves out what a sooner
             stop holds itself. A filter here, as the first build had, let such
             a sooner stop stand under Esc still held by the stop cue's own run,
             which Esc then stops - and a fade whose run is stopped hands its
@@ -5060,7 +5060,7 @@ namespace wfg::cue
         /*  WHAT THE PRESS'S OWN DRAIN QUEUED NEVER LEFT (namespace draft §24,
             HQ, L31): the sender flushes once a tick, after the drain, so an osc
             run launched earlier in this drain - and killed by this press - had
-            its message in the queue emptied below. It is marked so that Go
+            its message in the queue emptied below. It is marked so that
             Doh! does not count it as sent. Decided from handler state - the
             kind, the launch tick, the kill marks the run table's half has just
             written - and never from whether there is a sender, so a replay,
@@ -5128,7 +5128,7 @@ namespace wfg::cue
     }
 
     //==============================================================================
-    /*  GO DOH! - TAKING BACK THE LAST GO (PRD §3.32, namespace draft §24; D1,
+    /*  DOH! - TAKING BACK THE LAST GO (PRD §3.32, namespace draft §24; D1,
         2026-10-01).
 
         THE REPLAY RULE, which every function below keeps: a decision that
@@ -5309,7 +5309,7 @@ namespace wfg::cue
     {
         /*  §24's ONE PREDICATE, read from logged records and the document: a
             media or mic run with `run.started`, or a MIDI run launched to a port
-            that plays sound, its tx on (the author, 2026-10-01). The Go Doh!
+            that plays sound, its tx on (the author, 2026-10-01). The Doh!
             setting has no say in it. Only the GO's own runs are asked - the
             horizon's work under the root is not the GO's. */
         const auto heard = [this] (const Run& run)
@@ -6440,7 +6440,7 @@ namespace wfg::cue
     {
         /*  A HAND ON A PAD OF THE BANK THE LAST GO ARMED (2026-10-01, namespace
             draft §24, GI): that GO is being played, and taking it back would cut
-            the performer's clip - so Go Doh! refuses it with its sentence. Only
+            the performer's clip - so Doh! refuses it with its sentence. Only
             where the press does something; a press on a bank the GO did not arm
             is not counted. */
         if (goRecord.serial != 0 && member.goSerial == goRecord.serial)
@@ -6591,7 +6591,7 @@ namespace wfg::cue
         job.wait = oscWaitFrom (textOf (cue, "wait"));
 
         /*  WHAT IT SENDS HAD ALREADY REACHED A DEVICE LEFT TO ITS OPERATOR, under
-            a GO Go Doh! took back (2026-10-01, namespace draft §24): nothing is
+            a GO that Doh! took back (2026-10-01, namespace draft §24): nothing is
             written and nothing is queued - the device holds what the early GO
             sent, or what its operator has made of it since - and the run ends
             `left-to-operator` on its next tick, with a first GO's timing. */
@@ -7226,7 +7226,7 @@ namespace wfg::cue
                     stop had been issued: the running pane killing the stop cue
                     and its target in one drain handed the killed target back to
                     `playing`, and the kill was lost - the cue played on. */
-                /*  AND NOT A VOICE GO DOH! TOOK BACK (2026-10-01, namespace
+                /*  AND NOT A VOICE DOH! TOOK BACK (2026-10-01, namespace
                     draft §24): it is on its way out whatever becomes of the run
                     that set this stop going. The Doh gave it no fade of its own
                     because this stop lands sooner, and its scene then stopped
@@ -7622,7 +7622,7 @@ namespace wfg::cue
         run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
         run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
 
-        /*  SPAWNED INTO A GROUP GO DOH! TOOK BACK - or, by a `run.spawn` record,
+        /*  SPAWNED INTO A GROUP DOH! TOOK BACK - or, by a `run.spawn` record,
             into one brought back to life in this very tick, whose job decided
             the spawn on the state the Doh has undone (2026-10-01, namespace
             draft §24, GZ) - it is over before it began: made, so the record
@@ -7686,7 +7686,7 @@ namespace wfg::cue
     {
         auto* run = runs.find (runId);
 
-        /*  NOR ONE GO DOH! TOOK BACK (2026-10-01): its job's launch, decided
+        /*  NOR ONE DOH! TOOK BACK (2026-10-01): its job's launch, decided
             before the Doh, launches nothing. Nor one a kill has reached, which
             `fireNow` says why (H4): its pre-wait is not begun either. */
         if (run == nullptr || run->isFinished() || run->takenBack || beingKilled (*run))
@@ -7954,7 +7954,7 @@ namespace wfg::cue
             {
                 const auto graceful = ! run->skipFooter && ! underAKill (*run);
 
-                /*  A SCENE GO DOH! TOOK BACK, NONE OF IT HEARD (2026-10-01,
+                /*  A SCENE DOH! TOOK BACK, NONE OF IT HEARD (2026-10-01,
                     namespace draft §24), wherever its job had got to - its
                     footer included: a Doh runs no footer, so it does not leave
                     one running either. Left to finish there, as a graceful stop
@@ -7999,7 +7999,7 @@ namespace wfg::cue
                         continue;
                     }
 
-                    /*  A SCENE GO DOH! TOOK BACK, NONE OF IT HEARD: a lighting
+                    /*  A SCENE DOH! TOOK BACK, NONE OF IT HEARD: a lighting
                         scene, a scene still in its header, a cue in its
                         pre-wait - nothing of it reached the room, so it is given
                         back the way a preparation is, H2's road: what it
@@ -8052,7 +8052,7 @@ namespace wfg::cue
                     if (! runs.allChildrenFinished (job.run))
                         continue;
 
-                    /*  AND A SCENE GO DOH! TOOK BACK RUNS NO FOOTER (§24): a
+                    /*  AND A SCENE DOH! TOOK BACK RUNS NO FOOTER (§24): a
                         Doh is a pause, not an end. Never `skipFooter`, which
                         since H1 means cut: its members came down the Esc way. */
                     if (! graceful || run->takenBack || ! beginPhase (engine, job, group, groupPhase::footer))
@@ -8772,7 +8772,7 @@ namespace wfg::cue
             blocksToGiveBack = std::move (stillPlaying);
         }
 
-        /*  A VOICE GO DOH! IS FADING OUT, WAITED FOR (2026-10-01, namespace
+        /*  A VOICE DOH! IS FADING OUT, WAITED FOR (2026-10-01, namespace
             draft §24): the standby's arm of the cue was put off while the old
             run still held it, and once that run has gone it is asked for again
             - `run.prepare` for a standby inside a scene, which rebuilds only
@@ -8996,7 +8996,7 @@ namespace wfg::cue
                                { osc::Value::string (run->restoreAddress), *value });
 
             /*  ONCE (2026-10-01, namespace draft §24): a block given back inside
-                one being given back - the next scene's, under an act Go Doh! is
+                one being given back - the next scene's, under an act Doh! is
                 taking back - reaches this restore twice, from its own job and
                 from the act's. The hook's own field, so a replay - which takes
                 the restore from the log - is untouched. */
@@ -10251,7 +10251,7 @@ namespace wfg::cue
             double Esc, which drops every action (§4.4) - drops it. */
         const auto handAsked = lanes->stopping;
         const auto gone = run == nullptr || run->isFinished();
-        /*  AND A CUE GO DOH! TOOK BACK DROPS ITS RIDE as a kill does (§24): the
+        /*  AND A CUE DOH! TOOK BACK DROPS ITS RIDE as a kill does (§24): the
             pass belongs to a GO that did not happen. */
         const auto killed = run != nullptr && (run->skipFooter || run->takenBack);
         const auto stopped = run != nullptr && run->state == runState::stopping;
@@ -11002,7 +11002,7 @@ namespace wfg::cue
                                           " gets its note-off.";
 
             /*  AND THE LAST GO HEARS IT (2026-10-01, namespace draft §24): after
-                an Esc, Go Doh! moves the pointer back and leaves the runs to Esc,
+                an Esc, Doh! moves the pointer back and leaves the runs to Esc,
                 whose footers have run.
 
                 AND A DOUBLE ESC DROPS WHAT IS STILL WAITING TO LEAVE (2026-10-02,
@@ -11216,7 +11216,7 @@ namespace wfg::cue
 
                             /*  A JUMP REWRITES THE HISTORY THE LAST GO LIVED IN
                                 (2026-10-01, namespace draft §24): that GO is no
-                                longer one Go Doh! can take back, and what a Doh
+                                longer one Doh! can take back, and what a Doh
                                 left with devices' operators on this list is
                                 forgotten - the jump puts the show somewhere
                                 else, and what is due there goes out. */
@@ -11554,7 +11554,7 @@ namespace wfg::cue
                                 return Outcome::rejected (reason::tooSoon);
 
                             /*  THE GO RECORD, OPENED BEFORE THE FIRE (2026-10-01,
-                                namespace draft §24): what Go Doh! would take back
+                                namespace draft §24): what Doh! would take back
                                 - the list, the cue, where the pointer and the
                                 debounce stood, whether the list had run out -
                                 read before anything below writes over it. It
@@ -11620,7 +11620,7 @@ namespace wfg::cue
                                 go back to, and it is model state a replay
                                 reproduces precisely because the handler writes
                                 it and no hook has to notice it. It carries its
-                                GO, which is how Go Doh! finds it again wherever a
+                                GO, which is how Doh! finds it again wherever a
                                 seek has moved it (§24). */
                             runner.listState().stepped (listId,
                                                         { context.tick, standby, 'g', serial });
@@ -11634,7 +11634,7 @@ namespace wfg::cue
                         } });
 
         //----------------------------------------------------------------------
-        /*  GO DOH! (PRD §3.32, namespace draft §24; the author, 2026-09-30): the
+        /*  DOH! (PRD §3.32, namespace draft §24; the author, 2026-09-30): the
             third level of stop, and the recovery one - the last GO taken back,
             inside the show's `list/dohWindow`. Its own command, its own button
             and its own key: Undo never touches a GO.
@@ -11652,7 +11652,7 @@ namespace wfg::cue
             carries them. In D1 it draws none, and a replay re-runs the handler
             on the same state to the same answer. */
         registry.add ({ "go.doh",
-                        "Go Doh!: takes back the last GO, within list/dohWindow of it - the pointer, the"
+                        "Doh!: takes back the last GO, within list/dohWindow of it - the pointer, the"
                         " list's finished flag, the GO debounce and the history go back, what it started"
                         " comes down with no footer, and what it sent to a device left to its operator"
                         " is not sent again. Undo never touches a GO.",
@@ -11693,7 +11693,7 @@ namespace wfg::cue
                                                  ? static_cast<std::uint64_t> (std::max<std::int64_t> (0, args[2].getInt64()))
                                                  : std::uint64_t { 0 };
 
-                            /*  A START CUE'S TARGET, FIRED UNDER A GO GO DOH! HAS
+                            /*  A START CUE'S TARGET, FIRED UNDER A GO THAT DOH! HAS
                                 TAKEN BACK (§24): the fire was queued for the next
                                 tick before the Doh, and fires nothing - no run,
                                 no step, no press. First of all, before any other
@@ -11748,7 +11748,7 @@ namespace wfg::cue
                             }
 
                             /*  A FIRE ON THE LAST GO'S LIST, BY NAME OR BY A START
-                                CUE, AFTER IT (the author, 2026-09-30): Go Doh! then
+                                CUE, AFTER IT (the author, 2026-09-30): Doh! then
                                 refuses with a sentence rather than undo a GO the
                                 show has moved on from - unless the cause is that
                                 GO itself, whose start cue this is. And what a Doh
@@ -11837,7 +11837,7 @@ namespace wfg::cue
                                                        : Outcome::rejected (refusal);
                             }
 
-                            /*  A TRIGGER ON THE LAST GO'S LIST, AFTER IT, makes Go
+                            /*  A TRIGGER ON THE LAST GO'S LIST, AFTER IT, makes
                                 Doh! refuse (the author, 2026-09-30), and fires
                                 whatever a Doh left with a device's operator: a
                                 trigger is a deliberate send (§24). */

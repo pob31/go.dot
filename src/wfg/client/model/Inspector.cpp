@@ -91,7 +91,7 @@ namespace wfg::client::model
                                "stopWhenDone" } },
                 { "transport", { "target", "verb", "range", "curve" } },
                 { "start",   { "target" } },
-                /*  WHAT GO DOH! DOES WITH WHAT IT SENT last on both (PRD §3.32,
+                /*  WHAT DOH! DOES WITH WHAT IT SENT last on both (PRD §3.32,
                     2026-10-01): a question about after the send, so it comes
                     after everything the send itself is. */
                 { "osc",     { "device", "address", "value", "wait", "timeout", "doh" } },
@@ -399,7 +399,7 @@ namespace wfg::client::model
             }
         }
 
-        /*  WHAT GO DOH! DOES WITH WHAT THIS CUE SENT (PRD §3.32; the author,
+        /*  WHAT DOH! DOES WITH WHAT THIS CUE SENT (PRD §3.32; the author,
             2026-10-01: "a default per device that can be overriden at cue
             level"), in words. The row stays the enum the node declares -
             `device`, `takeBack`, `leave`, written as they are - and the menu
@@ -408,7 +408,8 @@ namespace wfg::client::model
             own resolver, longest prefix and the smallest identifier on a tie -
             and a MIDI cue's by its port. Read as the engine reads it: only the
             exact word takes back, and no device leaves. The words are the
-            implementer's; the author rewords at first look. */
+            author's (2026-10-02): "Undo(h)" for `takeBack` and "Meh" for
+            `leave` - the stored words do not change. */
         void wordTheDoh (const tree::TreeSnapshot& snapshot, const std::string& kind,
                          std::vector<Field>& decided)
         {
@@ -446,10 +447,10 @@ namespace wfg::client::model
                             deviceTakesBack = row.doh == "takeBack";
                 }
 
-                field.choices = { { "device", deviceTakesBack ? "as the device (take back)"
-                                                               : "as the device (leave)" },
-                                  { "takeBack", "take back" },
-                                  { "leave", "leave to its operator" } };
+                field.choices = { { "device", deviceTakesBack ? "as the device (Undo(h))"
+                                                               : "as the device (Meh)" },
+                                  { "takeBack", "Undo(h)" },
+                                  { "leave", "Meh" } };
                 return;
             }
         }

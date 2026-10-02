@@ -60,7 +60,7 @@ namespace wfg::client::model
 
     std::string PortRow::dohWord() const
     {
-        return doh == "takeBack" ? "Take back" : "Leave";
+        return doh == "takeBack" ? "Undo(h)" : "Meh";
     }
 
     std::string PortRow::label() const

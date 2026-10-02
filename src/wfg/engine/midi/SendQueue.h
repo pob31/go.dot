@@ -69,7 +69,7 @@ namespace wfg::midi
         sending the same note-on to one synth still need one note-off: a synth
         that stacks voices on a repeated key is answered by the key, not by how
         many times it was pressed. The runs that pressed it are kept beside it,
-        oldest first - what Go Doh! will ask for when it takes back one GO's
+        oldest first - what Doh! will ask for when it takes back one GO's
         notes and not another's (§24, L26). */
     class NoteLedger
     {

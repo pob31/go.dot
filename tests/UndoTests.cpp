@@ -628,9 +628,9 @@ TEST_CASE ("undo: where the operator is standing is not an edit")
     CHECK (rig.drainUndoSteps() == 3);
 }
 
-TEST_CASE ("undo: Go Doh! is not an edit either, and Undo never touches a GO")
+TEST_CASE ("undo: Doh! is not an edit either, and Undo never touches a GO")
 {
-    /*  PRD §3.32 (the author, 2026-09-30): Go Doh! has its own key and command
+    /*  PRD §3.32 (the author, 2026-09-30): Doh! has its own key and command
         BECAUSE Undo never touches a GO. It writes the pointer and the list's
         `finished` flag - both state rows - and the history, which is no row at
         all, so the stack is what it was before the GO. Failed before D1, where

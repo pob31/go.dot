@@ -148,6 +148,18 @@ namespace wfg::client::model
                 { "go-ink",        0xFF000000 },
                 { "go-idle",       0xFF4A4A52 },
 
+                /*  DOH! WEARS ITS OWN COLOUR WHILE IT CAN ACT (the author,
+                    2026-10-02: "I would display the button in a distinctive
+                    colour and fade out when the Doh! timer is over"), fading to
+                    `go-idle` as the window runs out. A doughnut's pink, for the
+                    name's own joke: no state wears it - not GO's yellow, not
+                    PANIC's red, not the standby's amber it wore until then -
+                    and `kind-mic`'s softer pink is an icon's, never a button's.
+                    Black letters on it, as on GO; the button is disabled once
+                    the window is over, and its tooltip says the seconds left
+                    (§4.8). */
+                { "doh",           0xFFFF6EB4 },
+
                 /*  AN EQ HANDLE EACH (author, 2026-09-25: "Having different
                     colours on each handle like on the EQ of the spatcore
                     library really helps"): spatcore's own first six, red to

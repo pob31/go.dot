@@ -118,7 +118,7 @@ namespace wfg::cue
         bool notSent = false;
 
         /*  NOTHING LEFT THE MACHINE, because what this cue sends had already
-            reached a device left to its operator under a GO that Go Doh! took
+            reached a device left to its operator under a GO that Doh! took
             back (2026-10-01, namespace draft §24): the run is `sendsLeft`.
             Nothing is written to the tree and nothing is queued - the device
             holds what the early GO sent, or what its operator has made of it -

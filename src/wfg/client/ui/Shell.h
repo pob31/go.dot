@@ -72,7 +72,7 @@ namespace wfg::client::ui
         bool keyPressed (const juce::KeyPress& key) override;
 
         /*  Forwarded to the transport as the presses are, so a key let go
-            reaches the one latch there is: Go Doh!'s on F9 (PRD §3.32). */
+            reaches the one latch there is: Doh!'s on F9 (PRD §3.32). */
         bool keyStateChanged (bool isKeyDown) override;
 
         /*  AND LOOKED AT AGAIN WHEN THE FOCUS MOVES: F9 let go while another

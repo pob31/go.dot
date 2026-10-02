@@ -1390,7 +1390,7 @@ namespace wfg::tree
                     const doc::Attribute attribute { "Lists", row };
                     const auto name = std::string (row->name);
 
-                    /*  WHAT GO DOH! WOULD TAKE BACK (2026-10-01) is what the
+                    /*  WHAT DOH! WOULD TAKE BACK (2026-10-01) is what the
                         machine is doing, not the show: the runtime half
                         publishes it, every tick. */
                     if (name == "doh")
@@ -3016,7 +3016,7 @@ namespace wfg::tree
             }
         }
 
-        /*  WHAT GO DOH! WOULD TAKE BACK (PRD §3.32, 2026-10-01): the list the
+        /*  WHAT DOH! WOULD TAKE BACK (PRD §3.32, 2026-10-01): the list the
             last GO moved, the cue it fired and its tick, or nothing - one node
             for the engine, beside `/godot/list/focus`, because the Doh acts on
             the list of the last GO whichever list has the focus. */

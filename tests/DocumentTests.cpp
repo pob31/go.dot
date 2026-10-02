@@ -54,7 +54,7 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
-/*  AND THE CLIENT'S OWN READING OF THE DEVICES, for one case: the Go Doh!
+/*  AND THE CLIENT'S OWN READING OF THE DEVICES, for one case: the Doh!
     setting's one resolver is asked of the engine, the mount table and the
     desktop's model together, and the model's rows are read off a published
     tree as the inspector reads them. */
@@ -2501,12 +2501,12 @@ TEST_CASE ("edit lock: the locked fixture bundle opens locked, refuses an edit, 
 }
 
 //==============================================================================
-/*  THE GO DOH! SETTING (PRD §3.32, namespace draft §24; the author, 2026-10-01):
+/*  THE DOH! SETTING (PRD §3.32, namespace draft §24; the author, 2026-10-01):
     one per network device and MIDI port - `leave` unless somebody says
     `takeBack` - and one per OSC or MIDI cue, which follows its device unless it
     says otherwise; and "plays sound" on a port. Read from the document, fail-
     safe, through one resolver. Failed before D1: none of the rows existed. */
-TEST_CASE ("the Go Doh! setting: every device and port leaves unless told, a cue follows its device, and the show keeps what was chosen")
+TEST_CASE ("the Doh! setting: every device and port leaves unless told, a cue follows its device, and the show keeps what was chosen")
 {
     ShowDocument document;
     const auto listId = document.createList ("Show").id;
@@ -2650,7 +2650,7 @@ TEST_CASE ("the Go Doh! setting: every device and port leaves unless told, a cue
     }
 }
 
-TEST_CASE ("the Go Doh! setting and plays sound survive a save and a load, and the show still validates")
+TEST_CASE ("the Doh! setting and plays sound survive a save and a load, and the show still validates")
 {
     ShowDocument document;
     const auto listId = document.createList ("Show").id;

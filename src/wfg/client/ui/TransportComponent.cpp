@@ -134,15 +134,6 @@ namespace wfg::client::ui
         panicButton.setTooltip ("Esc: every cue stops and the footers run. "
                                 "Esc again within a second: everything is dropped, no footers.");
 
-        /*  GO DOH! IN THE STANDBY'S AMBER, black letters on it: what it gives
-            back first is the standby. The tooltip says what a press does, the
-            key, and where its window is set. */
-        dohButton.setColour (juce::TextButton::buttonColourId, Look::colour (theme, "standby"));
-        dohButton.setColour (juce::TextButton::textColourOffId, Look::colour (theme, "go-ink"));
-        dohButton.setTooltip ("F9: Go Doh! - takes back the last GO: the standby goes back, and "
-                              "what it started comes down, no footers. Only within the show's "
-                              "Doh! window after that GO (Show settings > Playback).");
-
         statusLabel.setFont (Look::font (theme, 13.0f));
         statusLabel.setColour (juce::Label::textColourId, dim);
 
@@ -160,6 +151,7 @@ namespace wfg::client::ui
         noticeLabel.setColour (juce::Label::textColourId, Look::colour (theme, "waiting"));
 
         dressGo();
+        dressDoh();
         resized();
         repaint();
     }
@@ -184,12 +176,6 @@ namespace wfg::client::ui
         notesLabel.setText (text (reading.standbyNotes), juce::dontSendNotification);
 
         statusLabel.setText (text (reading.lockLine()), juce::dontSendNotification);
-
-        /*  THE GO DOH! WOULD TAKE BACK, while the window is open: "Doh! 12".
-            Read off the engine's tick, so it goes plain on the tick a press
-            would start being refused. */
-        if (const auto caption = text (reading.dohCaption()); dohButton.getButtonText() != caption)
-            dohButton.setButtonText (caption);
 
         /*  WHAT THE MASTER DIAL TURNS (2026-09-26), said wherever that number
             is on screen or not: it stays on its cue when the pick moves. */
@@ -226,6 +212,9 @@ namespace wfg::client::ui
 
         if (audioMoved)
             dressGo();
+
+        /*  EVERY READING: the tick moves on each one, and the fade with it. */
+        dressDoh();
 
         if (bannerShowing != wasShowing)
         {
@@ -288,6 +277,45 @@ namespace wfg::client::ui
                                      : "Space: fires the standby cue. The audio is not running, "
                                        "so a media cue will not be heard - Show settings, Audio.");
         goButton.repaint();
+    }
+
+    void TransportComponent::dressDoh()
+    {
+        /*  THE GO THAT DOH! WOULD TAKE BACK, while the window is open: "Doh! 12",
+            IN ITS OWN COLOUR (the author, 2026-10-02: "I would display the
+            button in a distinctive colour and fade out when the Doh! timer is
+            over"), fading to the idle grey over the window's last seconds and
+            disabled once it is over. All of it read off the engine's tick in
+            the reading, so the fade moves one step a reading and the button
+            goes idle on the tick a press would start being refused - never on
+            a clock of this window's own.
+
+            COLOUR IS NEVER THE SOLE CARRIER (§4.8): the caption names the cue
+            while it can be taken back, the tooltip says the seconds left, and
+            over is a disabled button. F9 and the Show menu still send a press
+            whatever the button says - the engine is the judge, and its refusal
+            is a sentence on the transport line. */
+        const auto look = last.dohLook();
+        const auto open = look.phase != model::DohPhase::over;
+        const auto mix = static_cast<float> (1.0 - look.strength);
+
+        const auto ground = Look::colour (theme, "doh").interpolatedWith (Look::colour (theme, "go-idle"), mix);
+        const auto letters = Look::colour (theme, "go-ink").interpolatedWith (Look::colour (theme, "ink-dim"), mix);
+
+        if (dohButton.findColour (juce::TextButton::buttonColourId) != ground)
+            dohButton.setColour (juce::TextButton::buttonColourId, ground);
+
+        if (dohButton.findColour (juce::TextButton::textColourOffId) != letters)
+            dohButton.setColour (juce::TextButton::textColourOffId, letters);
+
+        if (const auto caption = text (last.dohCaption()); dohButton.getButtonText() != caption)
+            dohButton.setButtonText (caption);
+
+        if (const auto tip = text (last.dohTip()); dohButton.getTooltip() != tip)
+            dohButton.setTooltip (tip);
+
+        if (dohButton.isEnabled() != open)
+            dohButton.setEnabled (open);
     }
 
     int TransportComponent::preferredHeight() const noexcept
@@ -418,9 +446,14 @@ namespace wfg::client::ui
             by a hand reaching for the other. */
         panicButton.setBounds (middle.removeFromRight (row * 3).reduced (2));
 
-        /*  AND GO DOH! DIRECTLY TO ITS LEFT (PRD §3.32), the same height:
-            the three levels of §4.4 side by side, at the end of the row away
-            from GO. */
+        /*  AND DOH! TO ITS LEFT (PRD §3.32), the same height: the three
+            levels of §4.4 side by side, at the end of the row away from GO -
+            BUT A ROW'S WIDTH OF AIR BETWEEN THE TWO (the author, 2026-10-02:
+            more padding "to avoid a total disaster"). D1 left four pixels, and
+            a hand reaching for one of a recovery and an emergency in a hurry
+            must not find the other. The air is twice what GO has beside it,
+            and nothing is ever laid in it. */
+        middle.removeFromRight (row);
         dohButton.setBounds (middle.removeFromRight (row * 2).reduced (2));
         middle.removeFromRight (pad);
 
@@ -496,7 +529,7 @@ namespace wfg::client::ui
             return true;
         }
 
-        /*  F9 IS GO DOH! (PRD §3.32), ONCE PER KEY-DOWN. JUCE repeats a held
+        /*  F9 IS DOH! (PRD §3.32), ONCE PER KEY-DOWN. JUCE repeats a held
             key's `keyPressed`, and nothing here filtered that - Space, F5 and
             Esc still do not - so a held F9 would have been a string of Dohs.
             The latch lets the first through and is opened again by

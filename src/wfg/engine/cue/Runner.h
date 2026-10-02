@@ -805,7 +805,7 @@ namespace wfg::cue
             reports done. Returns the child's run identifier.
 
             `fromItsRecord` is `run.spawn`'s own call (namespace draft §24, GZ):
-            a spawn a group's job decided before a Go Doh! that brought the group
+            a spawn a group's job decided before a Doh! that brought the group
             back to life in that same tick is born done. Every other road - a GO,
             the horizon - is decided after the Doh, and spawns as ever. */
         std::string spawnChild (Engine& engine, const std::string& parentRun,
@@ -906,7 +906,7 @@ namespace wfg::cue
         /*  ONE VOICE BROUGHT DOWN THE WAY ESC BRINGS IT DOWN: from where its
             level is to silence over `ticks`, then stopped - a mic cue's input
             shut instead, its tail left to ring. Esc's per-voice job, shared with
-            Go Doh!'s own fade (§24). Nothing is pushed when a stop due sooner
+            Doh!'s own fade (§24). Nothing is pushed when a stop due sooner
             already holds the voice; the caller asks the stop. */
         void panicShapedFade (const std::string& runId, std::int64_t tick, int ticks, double seconds);
 
@@ -969,7 +969,7 @@ namespace wfg::cue
         bool goTooSoon (std::int64_t tick) const;
 
         //======================================================================
-        /*  GO DOH! - TAKING BACK THE LAST GO (PRD §3.32, namespace draft §24;
+        /*  DOH! - TAKING BACK THE LAST GO (PRD §3.32, namespace draft §24;
             D1, 2026-10-01).
 
             THE GO RECORD. Every GO that fires something - past the empty
@@ -1492,7 +1492,7 @@ namespace wfg::cue
         void submitRevocation (Engine& engine, const std::string& runId);
 
         /*  ITS FIRST HALF ON ITS OWN: the values put back and the network jobs
-            settled, and no `run.revoke` yet - for a scene Go Doh! gives back
+            settled, and no `run.revoke` yet - for a scene Doh! gives back
             while something it set going still moves under it (namespace draft
             §24). Each restore is submitted once, so asking again is safe. */
         void submitRestores (Engine& engine, const std::string& runId);
@@ -1830,7 +1830,7 @@ namespace wfg::cue
         std::vector<std::string> supersededRuns;
 
         //======================================================================
-        /*  GO DOH!'S BOOKS (namespace draft §24). Handler state, every field -
+        /*  DOH!'S BOOKS (namespace draft §24). Handler state, every field -
             written by the `go`, `go.doh`, `cue.fire`, `trigger.fire`,
             `list.loadToTime` and Esc handlers - except where it says hook. */
 

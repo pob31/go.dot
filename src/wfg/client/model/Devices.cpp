@@ -65,7 +65,7 @@ namespace wfg::client::model
 
     std::string DeviceRow::dohWord() const
     {
-        return doh == "takeBack" ? "Take back" : "Leave";
+        return doh == "takeBack" ? "Undo(h)" : "Meh";
     }
 
     std::string DeviceRow::label() const

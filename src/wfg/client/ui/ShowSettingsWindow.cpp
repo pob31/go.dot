@@ -1358,7 +1358,7 @@ namespace wfg::client::ui
 
             /*  One carve for the painter and the hit test, so a click cannot
                 land somewhere the eye says is another column. */
-            /*  AND, AFTER TX, WHAT GO DOH! ASKS OF THE PORT (PRD §3.32; the
+            /*  AND, AFTER TX, WHAT DOH! ASKS OF THE PORT (PRD §3.32; the
                 author, 2026-10-01): whether it plays sound - a synth, not a
                 desk, so a MIDI cue sent here makes its scene heard - and what a
                 Doh! does with what was sent here. Taken from the name. */
@@ -1394,13 +1394,13 @@ namespace wfg::client::ui
                 return Cell::state;
             }
 
-            /*  WHAT THE TWO GO DOH! CELLS MEAN, on the row: the list has no
+            /*  WHAT THE TWO DOH! CELLS MEAN, on the row: the list has no
                 tooltip per cell, and these are the two a person cannot guess. */
             juce::String getTooltipForRow (int) override
             {
-                return "Sound: a MIDI cue sent here makes its scene heard for Go Doh! - a synth, not a desk. "
-                       "Doh!: what Go Doh! does with what a cue sent here. Leave (the default): it is the "
-                       "device's operator's - nothing put back, nothing sent again. Take back: sent again "
+                return "Sound: a MIDI cue sent here makes its scene heard for Doh! - a synth, not a desk. "
+                       "Doh!: what Doh! does with what a cue sent here. Meh (the default): it is the "
+                       "device's operator's - nothing put back, nothing sent again. Undo(h): sent again "
                        "by the corrected GO.";
             }
 
@@ -1446,8 +1446,8 @@ namespace wfg::client::ui
                                 juce::Justification::centredLeft);
                 }
 
-                /*  GO DOH!'S SETTING IN WORDS (4.8): Leave, the default, or
-                    Take back. */
+                /*  DOH!'S SETTING IN WORDS (4.8): Meh, the default, or
+                    Undo(h) - the author's words, 2026-10-02. */
                 g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-dim"));
                 g.drawText (juce::String (entry.dohWord()), cells[6], juce::Justification::centredLeft, true);
 
@@ -1838,7 +1838,7 @@ namespace wfg::client::ui
                 cannot land somewhere the eye says is another column. The cue
                 list learned this the hard way and says so in its own header.
 
-                Order from the right: the cross, then the readouts, then Go
+                Order from the right: the cross, then the readouts, then
                 Doh!'s setting (PRD §3.32), then the two switches, then the
                 numbers; the name takes what is left, because it is the one
                 that wants room. */
@@ -1886,8 +1886,8 @@ namespace wfg::client::ui
                 per cell, and this is the one a person cannot guess. */
             juce::String getTooltipForRow (int) override
             {
-                return "Doh!: what Go Doh! does with what a cue sent here. Leave (the default): it is the "
-                       "device's operator's - nothing put back, nothing sent again. Take back: put back "
+                return "Doh!: what Doh! does with what a cue sent here. Meh (the default): it is the "
+                       "device's operator's - nothing put back, nothing sent again. Undo(h): put back "
                        "where it can be read back, and sent again by the corrected GO.";
             }
 
@@ -1933,8 +1933,8 @@ namespace wfg::client::ui
                                 juce::Justification::centredLeft);
                 }
 
-                /*  GO DOH!'S SETTING IN WORDS (4.8): Leave, the default, or
-                    Take back. */
+                /*  DOH!'S SETTING IN WORDS (4.8): Meh, the default, or
+                    Undo(h) - the author's words, 2026-10-02. */
                 g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-dim"));
                 g.drawText (juce::String (entry.dohWord()), cells[6], juce::Justification::centredLeft, true);
 
@@ -4639,7 +4639,7 @@ namespace wfg::client::ui
             saved with it, and nothing on this tab waits for Apply. Each says in
             a sentence what it does and what nought means, because a box that
             only reads "0.3" is one nobody dares touch in the middle of a tech.
-            GO DOH!'S WINDOW SITS BETWEEN THE OTHER TWO (the author, 2026-09-30;
+            DOH!'S WINDOW SITS BETWEEN THE OTHER TWO (the author, 2026-09-30;
             PRD §3.32): how long after a GO it can still be taken back, the
             third level beside the other two. */
         class PlaybackPage final : public juce::Component
@@ -4657,11 +4657,11 @@ namespace wfg::client::ui
                                               juce::dontSendNotification);
 
                 dohWindow.address = "/godot/list/dohWindow";
-                dohWindow.label.setText ("Go Doh! window (F9)", juce::dontSendNotification);
-                dohWindow.explanation.setText ("How long after a GO Go Doh! can still take it back: the standby goes"
+                dohWindow.label.setText ("Doh! window (F9)", juce::dontSendNotification);
+                dohWindow.explanation.setText ("How long after a GO, Doh! can still take it back: the standby goes"
                                                " back, and what that GO started comes down - over the panic fade if it"
                                                " was heard, at once if not - with no footers. Only the last GO, and not"
-                                               " once a trigger has fired after it. 0 turns Go Doh! off.",
+                                               " once a trigger has fired after it. 0 turns Doh! off.",
                                                juce::dontSendNotification);
 
                 panicFade.address = "/godot/audio/panicFade";
@@ -4798,7 +4798,7 @@ namespace wfg::client::ui
                     { "Plugins",      "Scanning this machine for plugins, and the set a cue's FX can switch in." },
                     { "Rack",         "Rack channels: chains of plugins that mic cues play through, and the"
                                       " ones that sample." },
-                    { "Playback",     "How GO, Go Doh! and Esc behave: the least time between two GOs, how"
+                    { "Playback",     "How GO, Doh! and Esc behave: the least time between two GOs, how"
                                       " long after a GO it can be taken back, and how long the panic fade"
                                       " takes." },
                 };

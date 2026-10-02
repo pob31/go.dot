@@ -77,14 +77,14 @@ namespace wfg::cue
                             if (run->isFinished())
                                 return Outcome::ok (args);
 
-                            /*  WHEN IT WAS FIRST HEARD (2026-10-01, PRD §3.32): Go
+                            /*  WHEN IT WAS FIRST HEARD (2026-10-01, PRD §3.32):
                                 Doh! asks whether anything a GO started has
                                 reached the room, and this record is the answer -
                                 logged, so a replay answers the same. Kept on every
                                 launch, a seek's included. */
                             run->startedAtTick = context.tick;
 
-                            /*  AND A RUN GO DOH! TOOK BACK STAYS ON ITS WAY OUT:
+                            /*  AND A RUN DOH! TOOK BACK STAYS ON ITS WAY OUT:
                                 a launch placed in the very tick of the Doh is
                                 reported after it, and must not hand the run back
                                 to `playing` under the fade taking it down. */
@@ -113,7 +113,7 @@ namespace wfg::cue
                             if (run->state == runState::failed)
                                 return Outcome::ok (args);
 
-                            /*  A GROUP GO DOH! BROUGHT BACK TO LIFE IN THIS VERY
+                            /*  A GROUP DOH! BROUGHT BACK TO LIFE IN THIS VERY
                                 TICK (2026-10-01, namespace draft §24): its job
                                 decided its end before the Doh, on the state the
                                 Doh has just undone, and the record drains after
@@ -147,7 +147,7 @@ namespace wfg::cue
                                 slots and its scene for a whole post-wait more,
                                 and began one for a cue killed before it had
                                 even fired. */
-                            /*  AND NOT FOR A RUN GO DOH! TOOK BACK: a Doh is a
+                            /*  AND NOT FOR A RUN DOH! TOOK BACK: a Doh is a
                                 pause, not an end, and a taken-back cue owes no
                                 post-wait to anything waiting on it. */
                             /*  NOR FOR AN ABORT (2026-10-02, K2, namespace
@@ -365,7 +365,7 @@ namespace wfg::cue
                             if (run->isFinished())
                                 return Outcome::ok (args);
 
-                            /*  Or on a group Go Doh! brought back to life in this
+                            /*  Or on a group Doh! brought back to life in this
                                 very tick (`run.ended`'s reason). */
                             if (run->isGroup() && run->unadoptedAt >= 0 && run->unadoptedAt == context.tick)
                                 return Outcome::ok (args);
@@ -709,7 +709,7 @@ namespace wfg::cue
 
             AN EMPTY TABLE IS APPLIED AND DOES NOTHING. Esc on a silent show is
             not a mistake, and the hand that pressed it needs no error to read.
-            The third level, Go Doh!, is `go.doh` (PRD §3.32, 2026-10-01): it
+            The third level, Doh!, is `go.doh` (PRD §3.32, 2026-10-01): it
             takes back the last GO and stops nothing else.
 
             THE RUNNER SPECIALISES BOTH (2026-09-28, `registerGoCommands`): Esc

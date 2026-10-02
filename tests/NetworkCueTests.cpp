@@ -1187,7 +1187,7 @@ TEST_CASE ("Esc: a value the rate cap is holding still leaves on its turn")
 }
 
 //==============================================================================
-/*  GO DOH! AND A DEVICE LEFT TO ITS OPERATOR (PRD §3.32, namespace draft §24;
+/*  DOH! AND A DEVICE LEFT TO ITS OPERATOR (PRD §3.32, namespace draft §24;
     the author, 2026-10-01).
 
     His case: OSC cues to a light board that started sequences, moving heads
@@ -1203,7 +1203,7 @@ namespace
 
     /*  The network rig, plus the author's lighting desk: OPAQUE - no namespace,
         nothing to read back, never anticipatable - and declared in the show as
-        well as mounted, because Go Doh!'s setting is read from the document. The
+        well as mounted, because Doh!'s setting is read from the document. The
         rig's own described console is declared in the show too, at its id. */
     struct DohRig : NetworkRig
     {

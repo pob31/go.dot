@@ -99,12 +99,13 @@ namespace wfg::client::model
             them to be wrong. */
         std::string problem;
 
-        /*  WHAT GO DOH! DOES WITH WHAT A CUE SENT HERE (PRD §3.32, the author,
+        /*  WHAT DOH! DOES WITH WHAT A CUE SENT HERE (PRD §3.32, the author,
             2026-10-01): "leave" - to its operator, the default for every
             device - or "takeBack". */
         std::string doh { "leave" };
 
-        /** "Leave" or "Take back", in words: what the row's Doh! cell says. */
+        /*  "Meh" or "Undo(h)", in words: what the row's Doh! cell says - the
+            author's words of 2026-10-02 for `leave` and `takeBack`. */
         std::string dohWord() const;
 
         /** A device with no description file. See the header. */

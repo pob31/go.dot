@@ -3035,11 +3035,17 @@ TEST_CASE ("network monitor: opening listens, shutting stops, and the filters ch
 }
 
 //==============================================================================
-/*  GO DOH! ON THE TRANSPORT (PRD §3.32; the author, 2026-09-30, D1): its own
-    button, directly to the left of PANIC on GO's row, and its own key, F9 -
-    one press however long it is held. Both failed before D1: there was no such
-    button, and nothing answered F9. */
-TEST_CASE ("transport: Doh! sits directly left of PANIC on GO's row, and a click is a Doh! and nothing else")
+/*  DOH! ON THE TRANSPORT (PRD §3.32; the author, 2026-09-30, D1): its own
+    button, to the left of PANIC on GO's row, and its own key, F9 - one press
+    however long it is held. Both failed before D1: there was no such button,
+    and nothing answered F9.
+
+    AND APART FROM PANIC (the author, 2026-10-02, K7: more padding between the
+    two "to avoid a total disaster"): a row's height of air between them, where
+    D1 left four pixels - wider than GO's own air, at the widest window and at
+    the narrowest one the main window allows (640). Failed before K7: the gap
+    was 4. */
+TEST_CASE ("transport: Doh! sits left of PANIC on GO's row with a row of air between them, and a click is a Doh! and nothing else")
 {
     auto goes = 0, panics = 0, dohs = 0;
 
@@ -3048,8 +3054,10 @@ TEST_CASE ("transport: Doh! sits directly left of PANIC on GO's row, and a click
     actions.panic = [&panics] { ++panics; };
     actions.doh = [&dohs] { ++dohs; };
 
-    ui::TransportComponent transport (model::Theme {}, actions);
-    transport.setSize (1200, transport.preferredHeight());
+    const model::Theme theme;
+    const auto row = juce::roundToInt (theme.row * theme.type);
+
+    ui::TransportComponent transport (theme, actions);
 
     juce::TextButton* go = nullptr;
     juce::TextButton* panic = nullptr;
@@ -3067,26 +3075,109 @@ TEST_CASE ("transport: Doh! sits directly left of PANIC on GO's row, and a click
     REQUIRE (panic != nullptr);
     REQUIRE (doh != nullptr);
 
-    const auto d = doh->getBounds();
-    const auto p = panic->getBounds();
+    for (const auto width : { 1200, 640 })
+    {
+        INFO ("width " << width);
+        transport.setSize (width, transport.preferredHeight());
 
-    CHECK (d.getY() == p.getY());
-    CHECK (d.getHeight() == p.getHeight());
-    CHECK (d.getRight() <= p.getX());
-    CHECK (p.getX() - d.getRight() <= 4);
-    CHECK (d.getX() > go->getBounds().getRight());
+        const auto g = go->getBounds();
+        const auto d = doh->getBounds();
+        const auto p = panic->getBounds();
 
-    //  Nothing in the gap between them.
-    const juce::Rectangle<int> gap { d.getRight(), d.getY(), p.getX() - d.getRight(), d.getHeight() };
+        CHECK (d.getY() == p.getY());
+        CHECK (d.getHeight() == p.getHeight());
+        CHECK (d.getWidth() > row);
+        CHECK (p.getWidth() > row);
+        CHECK (d.getRight() <= p.getX());
+        CHECK (d.getX() > g.getRight());
+        CHECK (p.getRight() <= width);
 
-    for (auto* child : transport.getChildren())
-        if (child != doh && child != panic && child->isVisible() && ! gap.isEmpty())
-            CHECK_FALSE (child->getBounds().intersects (gap));
+        /*  THE GAP: at least a row, and wider than the air between GO and what
+            stands beside it, the widest any other button on the row is given. */
+        const auto gapPixels = p.getX() - d.getRight();
+        CHECK (gapPixels >= row);
+        CHECK (gapPixels > row / 2 + 4);
+
+        //  Nothing in the gap between them.
+        const juce::Rectangle<int> gap { d.getRight(), d.getY(), gapPixels, d.getHeight() };
+
+        for (auto* child : transport.getChildren())
+            if (child != doh && child != panic && child->isVisible() && ! gap.isEmpty())
+                CHECK_FALSE (child->getBounds().intersects (gap));
+    }
 
     doh->onClick();
     CHECK (dohs == 1);
     CHECK (goes == 0);
     CHECK (panics == 0);
+}
+
+/*  DOH! IN ITS OWN COLOUR WHILE IT CAN ACT, FADING AS ITS WINDOW RUNS OUT
+    (the author, 2026-10-02: "I would display the button in a distinctive colour
+    and fade out when the Doh! timer is over"; K7). The theme's `doh` while the
+    window is open, part way to the idle grey while it fades, the idle grey and
+    no click once it is over - and the state said by more than the colour
+    (§4.8): disabled when over, the cue named and the seconds left in the
+    tooltip while open. Read off a reading, so off the engine's tick. Failed
+    before K7: the button wore the standby's amber whatever the window said, and
+    was never disabled. */
+TEST_CASE ("transport: Doh! wears its own colour while the window is open, fades, and is disabled once it is over")
+{
+    auto dohs = 0;
+
+    ui::TransportComponent::Actions actions;
+    actions.doh = [&dohs] { ++dohs; };
+
+    const model::Theme theme;
+    ui::TransportComponent transport (theme, actions);
+    transport.setSize (1200, transport.preferredHeight());
+
+    juce::TextButton* doh = nullptr;
+
+    for (auto* child : transport.getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*> (child))
+            if (button->getButtonText().startsWith ("Doh!"))
+                doh = button;
+
+    REQUIRE (doh != nullptr);
+
+    const auto own = juce::Colour (theme.colour ("doh"));
+    const auto idle = juce::Colour (theme.colour ("go-idle"));
+    const auto colour = [doh] { return doh->findColour (juce::TextButton::buttonColourId); };
+
+    //  Nothing to take back yet: idle, and no click.
+    model::TransportReading reading;
+    reading.tick = "900";
+    reading.dohWindow = "10";
+    transport.show (reading);
+    CHECK_FALSE (doh->isEnabled());
+    CHECK (colour() == idle);
+
+    //  A GO on cue 12 at tick 1000: open, in its own colour, the seconds said.
+    reading.doh = "7K2QM9X4 B3N8R5TW 1000";
+    reading.dohCue = "12";
+    reading.tick = "1100";
+    transport.show (reading);
+    CHECK (doh->isEnabled());
+    CHECK (doh->getButtonText() == "Doh! 12");
+    CHECK (colour() == own);
+    CHECK (doh->getTooltip().contains ("8 s left"));
+
+    //  Half way through the fade: still a Doh!, its colour half way to the grey.
+    reading.tick = "1450";
+    transport.show (reading);
+    CHECK (doh->isEnabled());
+    CHECK (colour() == own.interpolatedWith (idle, 0.5f));
+    CHECK (colour() != own);
+    CHECK (colour() != idle);
+
+    //  Over: the idle grey, no click, the cue no longer named.
+    reading.tick = "1500";
+    transport.show (reading);
+    CHECK_FALSE (doh->isEnabled());
+    CHECK (colour() == idle);
+    CHECK (doh->getButtonText() == "Doh!");
+    CHECK_FALSE (doh->getTooltip().contains ("s left"));
 }
 
 TEST_CASE ("transport: F9 held sends one Doh!, through the Shell as the window delivers keys")

@@ -555,7 +555,7 @@ TEST_CASE ("show settings UI: the Playback tab sets the least time between GOs a
     };
     collect (*page);
 
-    /*  GO DOH!'S WINDOW RIGHT AFTER THE GO DEBOUNCE (the author, 2026-09-30;
+    /*  DOH!'S WINDOW RIGHT AFTER THE GO DEBOUNCE (the author, 2026-09-30;
         D1): three numbers, in that order. */
     REQUIRE (boxes.size() == 3u);
 
@@ -1109,9 +1109,10 @@ TEST_CASE ("audio settings UI: opening and rescanning cannot stop the ASIO callb
 }
 
 //==============================================================================
-/*  GO DOH!'S SETTING ON THE DEVICE ROWS (PRD §3.32; the author, 2026-10-01, D1):
-    a Doh! cell on every network device and every MIDI port - Leave, the
-    default, or Take back, in words - and on a port the "plays sound" switch.
+/*  DOH!'S SETTING ON THE DEVICE ROWS (PRD §3.32; the author, 2026-10-01, D1):
+    a Doh! cell on every network device and every MIDI port - Meh, the
+    default, or Undo(h), in words (the author's, 2026-10-02; Leave and Take
+    back until then) - and on a port the "plays sound" switch.
     Each a `node.set` that lands at once; locked, nothing is sent. Failed before
     D1: there were no such cells.
 
@@ -1189,8 +1190,8 @@ TEST_CASE ("show settings UI: a network device's Doh! cell switches between leav
     REQUIRE (list != nullptr);
     REQUIRE (list->getListBoxModel()->getNumRows() == 1);
 
-    //  Absent is Leave, in words: one click on the cell asks to take back.
-    CHECK (client::model::readDevices (*first).front().dohWord() == "Leave");
+    //  Absent is Meh (`leave`), in words: one click on the cell asks to take back.
+    CHECK (client::model::readDevices (*first).front().dohWord() == "Meh");
 
     clickAt (*list, networkDohAt (*list));
     CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/mount/QX7DESK0/doh", "takeBack" });
@@ -1199,7 +1200,7 @@ TEST_CASE ("show settings UI: a network device's Doh! cell switches between leav
     REQUIRE (rig.document.setAttribute ("/godot/mount/QX7DESK0/doh", "takeBack").ok);
     const auto taking = rig.publish();
     panel.refresh (*taking);
-    CHECK (client::model::readDevices (*taking).front().dohWord() == "Take back");
+    CHECK (client::model::readDevices (*taking).front().dohWord() == "Undo(h)");
 
     rig.sent.clear();
     clickAt (*list, networkDohAt (*list));
@@ -1213,7 +1214,7 @@ TEST_CASE ("show settings UI: a network device's Doh! cell switches between leav
     CHECK (rig.sent.empty());
 }
 
-TEST_CASE ("show settings UI: a MIDI port says whether it plays sound and what Go Doh! does with it")
+TEST_CASE ("show settings UI: a MIDI port says whether it plays sound and what Doh! does with it")
 {
     Rig rig;
     const auto made = rig.document.createPort ("Keys");
@@ -1232,11 +1233,11 @@ TEST_CASE ("show settings UI: a MIDI port says whether it plays sound and what G
     REQUIRE (list != nullptr);
     REQUIRE (list->getListBoxModel()->getNumRows() == 1);
 
-    //  Sound reads OFF and Doh! reads Leave until somebody says otherwise.
+    //  Sound reads OFF and Doh! reads Meh until somebody says otherwise.
     const auto ports = client::model::readPorts (*first);
     REQUIRE (ports.size() == 1u);
     CHECK_FALSE (ports.front().audible);
-    CHECK (ports.front().dohWord() == "Leave");
+    CHECK (ports.front().dohWord() == "Meh");
 
     clickAt (*list, midiDohAt (*list));
     CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/port/" + made.id + "/doh", "takeBack" });

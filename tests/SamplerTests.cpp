@@ -1328,7 +1328,7 @@ TEST_CASE ("sampler: the strip menu says what each strip carries - this group, t
 }
 
 //==============================================================================
-/*  GO DOH! AND THE PADS (PRD §3.32; the author, 2026-09-30, with the red team's
+/*  DOH! AND THE PADS (PRD §3.32; the author, 2026-09-30, with the red team's
     reading of his words, D1): a pad fired by name or by a trigger is a trigger
     on the GO's list, and a hand on a pad of the bank the GO armed is that GO
     being played - either way Doh! is refused with its sentence, and the clip

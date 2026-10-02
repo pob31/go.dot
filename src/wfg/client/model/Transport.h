@@ -53,6 +53,25 @@ namespace wfg::tree { class TreeSnapshot; }
 
 namespace wfg::client::model
 {
+    /*  WHERE THE DOH! WINDOW STANDS (the author, 2026-10-02: "I would display
+        the button in a distinctive colour and fade out when the Doh! timer is
+        over"). `open` while the last GO can still be taken back and more than
+        the fade is left, `fading` over the window's last ticks, `over` once a
+        press would be refused - or when there is nothing to take back at all. */
+    enum class DohPhase { over, open, fading };
+
+    struct DohLook
+    {
+        DohPhase phase = DohPhase::over;
+
+        /*  How much of the button's own colour is left: 1 the colour whole,
+            0 the idle look, and in between while it fades. */
+        double strength = 0.0;
+
+        /** Whole seconds left in the window, rounded up; 0 once it is over. */
+        int secondsLeft = 0;
+    };
+
     struct TransportReading
     {
         std::string show;             ///< `/godot/document/name`
@@ -109,7 +128,7 @@ namespace wfg::client::model
         /** `/godot/document/revision`: 0 before the first publish, never 0 after it. */
         std::uint64_t revision = 0;
 
-        /*  GO DOH! (PRD §3.32, 2026-10-01): `/godot/list/doh` as the engine
+        /*  DOH! (PRD §3.32, 2026-10-01): `/godot/list/doh` as the engine
             spells it - "<list> <cue> <tick>" of the GO it would take back, or
             empty - the number (or the name) of that cue, and the show's
             `/godot/list/dohWindow` in seconds. */
@@ -121,6 +140,19 @@ namespace wfg::client::model
             inside the window - read off the engine's own tick - and "Doh!"
             otherwise, so the operator sees which GO a press would take back. */
         std::string dohCaption() const;
+
+        /*  THE BUTTON'S LOOK, from the same three things the caption reads -
+            the engine's tick, the GO's and the show's window - and never from a
+            clock of this window's own: open in its colour, fading over the
+            window's last two seconds (half the window when it is shorter than
+            four), over - the idle look, and no click - from the tick a press
+            would start being refused. */
+        DohLook dohLook() const;
+
+        /*  THE BUTTON'S TOOLTIP: what a press does and the key, and while the
+            window is open, which cue and how many seconds are left - the time
+            said in words as well as in the fading colour (§4.8). */
+        std::string dohTip() const;
 
         /*  The window, in seconds: the snapshot's, the schema's ten when it has
             not said, never below nought - which is Doh! switched off. */

@@ -12403,7 +12403,7 @@ TEST_CASE ("speed fade: a stretched cue's speed fade is held to the stretcher's 
 }
 
 //==============================================================================
-/*  GO DOH! - TAKING BACK THE LAST GO (PRD §3.32, namespace draft §24; D1,
+/*  DOH! - TAKING BACK THE LAST GO (PRD §3.32, namespace draft §24; D1,
     2026-10-01).
 
     A GO pressed before its moment, taken back: the pointer, the list's
@@ -12416,7 +12416,7 @@ TEST_CASE ("speed fade: a stretched cue's speed fade is held to the stretcher's 
     the code before this stage, where `go.doh` was an unknown command. */
 namespace
 {
-    /*  Go Doh!, pressed as a client presses it: one named command. */
+    /*  Doh!, pressed as a client presses it: one named command. */
     Engine::TickResult doh (Rig& rig)
     {
         return rig.submitAndTick ("go.doh");
@@ -13807,7 +13807,7 @@ TEST_CASE ("go.doh: what the horizon made after the GO on another list is not gi
 }
 
 //==============================================================================
-/*  GO DOH!, AFTER ITS REVIEW (2026-10-01, D1). Each case pins a road the first
+/*  DOH!, AFTER ITS REVIEW (2026-10-01, D1). Each case pins a road the first
     build of D1 left open and failed on that build - or, where it says it is a
     net, pins a road that was already right and that no case reached, so that it
     stays right. */
@@ -14049,7 +14049,7 @@ TEST_CASE ("esc: a cue sought during its fade-and-stop still comes down")
 {
     /*  ESC'S OWN FADE TAKES OVER WHATEVER A SOUNDING VOICE CARRIES (§23): a
         seek puts a fading cue back to `playing` with its fade-and-stop still
-        holding it. Go Doh!'s first build of the per-voice fade Esc shares let
+        holding it. Doh!'s first build of the per-voice fade Esc shares let
         that sooner stop stand, still held by the stop cue's own run - which Esc
         then stops, handing the voice back to `playing`: the cue played on after
         Esc. Esc's fade is Esc's again. */

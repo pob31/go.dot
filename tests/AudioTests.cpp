@@ -4685,9 +4685,9 @@ TEST_CASE ("audio recovery: connection state is logged and failed validation can
     CHECK (state.settingsError.empty());
 }
 
-TEST_CASE ("audio recovery: Go Doh! is let through an outage, as Esc is, and a GO still is not")
+TEST_CASE ("audio recovery: Doh! is let through an outage, as Esc is, and a GO still is not")
 {
-    /*  PRD §3.32 (D1, 2026-10-01): Go Doh! is recovery, so it passes the outage
+    /*  PRD §3.32 (D1, 2026-10-01): Doh! is recovery, so it passes the outage
         the way Esc does (namespace draft §11.1) - the pointer goes back at once,
         the rest waits for the clock. A GO is still dropped, never queued (PRD
         §6.2). Failed before D1: `go.doh` was an unknown command. */

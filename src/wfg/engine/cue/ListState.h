@@ -74,14 +74,14 @@ namespace wfg::cue
         `origin` is a letter because the node spells sixty-four of these in one
         string and a word each would be a paragraph: `g` for a GO, `f` for a cue
         fired by name, `t` for a trigger, `p` for a press on a sampler strip
-        (Phase 6), and `d` for a Go Doh! (2026-10-01, PRD §3.32) - the GO it
+        (Phase 6), and `d` for a Doh! (2026-10-01, PRD §3.32) - the GO it
         took back is gone from the history, and this says it was taken back.
         A `d` is not a firing: every reader that places what fired skips it.
 
         `serial` IS THE GO THAT CAUSED THE STEP (namespace draft §24): the `go`
         handler's own `g`, and the `f` a start cue's target writes under the GO
         that fired the start cue. Nought for every other step. Not spelled in
-        the node: it is how Go Doh! finds the steps of the GO it takes back,
+        the node: it is how Doh! finds the steps of the GO it takes back,
         wherever a seek has moved them. */
     struct Step
     {
@@ -91,7 +91,7 @@ namespace wfg::cue
         std::uint64_t serial = 0;
     };
 
-    /*  WHAT GO DOH! WOULD TAKE BACK, NOW (PRD §3.32): the list the last GO
+    /*  WHAT DOH! WOULD TAKE BACK, NOW (PRD §3.32): the list the last GO
         moved, the cue it fired and its tick; empty when there is nothing to
         take back. One for the whole runner and not one per list, because the
         Doh acts on the list of the last GO whichever list has the focus.
@@ -179,7 +179,7 @@ namespace wfg::cue
                 }
         }
 
-        /*  THE STEPS OF A GO THAT GO DOH! TAKES BACK, gone (2026-10-01, PRD
+        /*  THE STEPS OF A GO THAT DOH! TAKES BACK, gone (2026-10-01, PRD
             §3.32): every step carrying that GO's serial, from every list's
             history and from the live recorder's take - the GO's own `g`, and
             the `f` its start cues' targets wrote - wherever a `run.seek` moved
@@ -210,7 +210,7 @@ namespace wfg::cue
             return erased;
         }
 
-        /*  WHAT GO DOH! WOULD TAKE BACK (PRD §3.32), set by the `go` handler
+        /*  WHAT DOH! WOULD TAKE BACK (PRD §3.32), set by the `go` handler
             and cleared by the Doh, a jump on that list, or a GO that fires
             nothing to take back. */
         void setDohOffer (const DohOffer& offer) { doh = offer; }

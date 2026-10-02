@@ -623,7 +623,7 @@ TEST_CASE ("midi cue: a port switched off sends nothing, and its run ends saying
         draft §23.7): "Off, the cue still runs and finishes carrying the warning
         not-sent, exactly as a network device's tx does". A network device kept
         it; a MIDI port did not, and a cue on a bound port switched off went out
-        on the cable. Go Doh! asks whether a MIDI cue reached a synth, and a port
+        on the cable. Doh! asks whether a MIDI cue reached a synth, and a port
         that sends whatever its switch says would answer that wrongly. */
     Engine engine;
     doc::ShowDocument document;
@@ -944,11 +944,11 @@ TEST_CASE ("midi: a port changed while the show runs is put on its device then, 
 }
 
 //==============================================================================
-/*  GO DOH! AND MIDI (PRD §3.32, namespace draft §24; the author, 2026-10-01).
+/*  DOH! AND MIDI (PRD §3.32, namespace draft §24; the author, 2026-10-01).
 
     Two things the show says about a port, read from the document: whether it
     PLAYS SOUND - a synth, not a desk - which makes a scene that sent to it
-    heard, and so paused rather than handed back; and its Go Doh! setting, which
+    heard, and so paused rather than handed back; and its Doh! setting, which
     leaves what reached it to its operator unless it says take back. Each case
     failed before D1: `go.doh` was an unknown command, and neither row existed. */
 namespace
@@ -1048,7 +1048,7 @@ TEST_CASE ("go.doh: a MIDI cue to a port that plays sound makes its scene heard;
         REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/audible", "true").ok);
     }
 
-    SUBCASE ("plays sound, and the port's own Go Doh! setting says take back: still heard")
+    SUBCASE ("plays sound, and the port's own Doh! setting says take back: still heard")
     {
         heard = true;
         REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/audible", "true").ok);
@@ -1447,7 +1447,7 @@ TEST_CASE ("midi cue: double Esc sends exactly one note-off for a note a cue sta
     REQUIRE (rig.sink.wire.size() == 1u);
     CHECK (rig.sink.wire[0].bytes == midi::Bytes { 0x91, 60, 100 });
 
-    /*  THE RUN RIDES WITH IT: what Go Doh! will ask the note record for. */
+    /*  THE RUN RIDES WITH IT: what Doh! will ask the note record for. */
     REQUIRE (rig.runOf (note) != nullptr);
     CHECK (rig.sink.wire[0].run == rig.runOf (note)->id);
     CHECK (rig.sink.wire[0].cue);

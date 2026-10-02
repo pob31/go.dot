@@ -172,7 +172,7 @@ namespace wfg::cue
         inline constexpr const char* notSent = "not-sent";
 
         /*  THE CUE RAN AND SENT NOTHING, because what it sends had already
-            reached a device left to its operator under a GO that Go Doh! took
+            reached a device left to its operator under a GO that Doh! took
             back (2026-10-01, PRD §3.32, namespace draft §24): the corrected GO
             runs it with a first GO's timing - its waits, its place in the
             scene - and sends nothing, so the device acts once in all. Ended
@@ -978,7 +978,7 @@ namespace wfg::cue
         bool killIssued = false;
 
         //======================================================================
-        /*  GO DOH! (2026-10-01, PRD §3.32, namespace draft §24): what a GO
+        /*  DOH! (2026-10-01, PRD §3.32, namespace draft §24): what a GO
             made, what it caused, and what taking it back did. Every field here
             is written by a HANDLER or by a logged record and nowhere else, so
             a replay - which runs no hook - reaches the same answers: the Doh's
@@ -995,7 +995,7 @@ namespace wfg::cue
 
         /*  WHICH GO SET THIS RUN OFF WITHOUT MAKING IT: the footer of an older
             manual group whose last member that GO fired, made while the GO is
-            still the one Go Doh! would take back. Read first - `goOfRun` - so
+            still the one Doh! would take back. Read first - `goOfRun` - so
             what the release did is taken back with the GO that caused it. */
         std::uint64_t causedBy = 0;
 
@@ -1005,7 +1005,7 @@ namespace wfg::cue
             Doh gives the horizon's work back instead of taking it down. */
         std::int64_t preparedAfterGo = -1;
 
-        /*  TAKEN BACK BY GO DOH!: brought down with no footer and no post-wait,
+        /*  TAKEN BACK BY DOH!: brought down with no footer and no post-wait,
             never killed - a mic's tail rings, as under Esc - and passed over by
             every reader that would otherwise launch, wait on or re-arm it.
             Not `skipFooter`, which since 2026-09-30 means CUT. */

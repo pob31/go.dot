@@ -130,7 +130,7 @@ namespace wfg::client
                 actions.go              = [this] { send (gesture::go()); leaveLoadToTime(); };
                 actions.panic           = [this] { panic(); };
 
-                /*  GO DOH! (PRD §3.32): the command and nothing else - no
+                /*  DOH! (PRD §3.32): the command and nothing else - no
                     notice, which would stand in front of the engine's refusal
                     when there is one, and the refusal is the news. */
                 actions.doh             = [this] { send (gesture::doh()); };
@@ -675,7 +675,7 @@ namespace wfg::client
                     case menuUndoHistory: return { 'u', mod | shift, 0 };
                     case menuRecord:     return { 'r', mod | shift, 0 };
 
-                    /*  F9 FOR GO DOH! (PRD §3.32), printed here and answered by
+                    /*  F9 FOR DOH! (PRD §3.32), printed here and answered by
                         the transport, which Shell::keyPressed asks first: it
                         holds the latch that makes a held F9 one Doh!. */
                     case menuGoDoh:      return { juce::KeyPress::F9Key, 0, 0 };
@@ -838,9 +838,9 @@ namespace wfg::client
                     addMenuItem (menu, menuLock, model::isYes (last.locked) ? "Unlock the show"
                                                                             : "Lock the show");
 
-                    /*  GO DOH! BESIDE THE LOCK, the two things here an operator
+                    /*  DOH! BESIDE THE LOCK, the two things here an operator
                         reaches for during a show rather than before it. */
-                    addMenuItem (menu, menuGoDoh, "Go Doh! - take back the last GO");
+                    addMenuItem (menu, menuGoDoh, "Doh! - take back the last GO");
                     menu.addSeparator();
                     addMenuItem (menu, menuLoadToTime, loadingToTime ? "Stop loading to time"
                                                                      : "Load to time...");

@@ -164,7 +164,7 @@ namespace wfg::client::model
         if (fields[4] == "go" && fields[3] == "too-soon")
             return "GO ignored: too soon after the last one (Show settings > Playback)";
 
-        /*  GO DOH!'S REFUSALS IN WORDS (PRD §3.32, 2026-10-01), each naming
+        /*  DOH!'S REFUSALS IN WORDS (PRD §3.32, 2026-10-01), each naming
             what to do about it: the window and the debounce are Playback
             settings, and "trigger-after-go" is the author's own sentence. A
             window of nought is Doh! switched off, which is not "too late". */
@@ -194,13 +194,14 @@ namespace wfg::client::model
         return std::max (0.0, osc::parseDouble (dohWindow).value_or (10.0));
     }
 
-    std::string TransportReading::dohCaption() const
+    DohLook TransportReading::dohLook() const
     {
-        /*  "<list> <cue> <tick>", or nothing to take back. */
+        /*  "<list> <cue> <tick>", or nothing to take back - and a cue the list
+            can name, or the engine would refuse it at the pointer's door. */
         const auto parts = words (doh);
 
         if (parts.size() != 3 || dohCue.empty())
-            return "Doh!";
+            return {};
 
         const auto tickOf = [] (std::string_view digits) -> std::int64_t
         {
@@ -214,14 +215,48 @@ namespace wfg::client::model
 
         /*  ON THE ENGINE'S CLOCK, fifty ticks a second, never this window's:
             the engine's own test - inside while fewer ticks have passed than
-            the window holds - so the button stops naming the cue on the tick a
-            press would start being refused. */
-        const auto window = static_cast<std::int64_t> (std::llround (dohWindowSeconds() * 50.0));
+            the window holds - so the button goes idle on the tick a press
+            would start being refused. */
+        constexpr std::int64_t ticksPerSecond = 50;
+        const auto window = static_cast<std::int64_t> (std::llround (dohWindowSeconds() * static_cast<double> (ticksPerSecond)));
 
         if (now < 0 || at < 0 || now < at || now - at >= window)
-            return "Doh!";
+            return {};
 
-        return "Doh! " + dohCue;
+        const auto left = window - (now - at);
+
+        /*  THE FADE: the window's last two seconds, or its second half when it
+            is shorter than four, so a short window is not all fade. It ends on
+            the window's last tick inside, one step from the idle look, and the
+            next tick is over: an animation at the window's own pace - one step
+            a reading - and never a jump. */
+        const auto fade = std::max<std::int64_t> (1, std::min<std::int64_t> (2 * ticksPerSecond, window / 2));
+
+        DohLook look;
+        look.phase = left < fade ? DohPhase::fading : DohPhase::open;
+        look.strength = left < fade ? static_cast<double> (left) / static_cast<double> (fade) : 1.0;
+        look.secondsLeft = static_cast<int> ((left + ticksPerSecond - 1) / ticksPerSecond);
+        return look;
+    }
+
+    std::string TransportReading::dohCaption() const
+    {
+        return dohLook().phase == DohPhase::over ? std::string ("Doh!") : "Doh! " + dohCue;
+    }
+
+    std::string TransportReading::dohTip() const
+    {
+        const std::string what = "F9: Doh! - takes back the last GO: the standby goes back, and what it "
+                                 "started comes down, no footers.";
+
+        const auto look = dohLook();
+
+        if (look.phase == DohPhase::over)
+            return what + " Nothing to take back now: no GO inside the show's Doh! window "
+                          "(Show settings > Playback).";
+
+        return what + " The GO on " + dohCue + ": " + std::to_string (look.secondsLeft)
+                    + " s left (Show settings > Playback).";
     }
 
     std::string TransportReading::lockLine() const
@@ -321,7 +356,7 @@ namespace wfg::client::model
             if (const auto sole = node->soleValue(); sole.has_value() && sole->isInt64())
                 reading.revision = static_cast<std::uint64_t> (sole->getInt64());
 
-        /*  WHAT GO DOH! WOULD TAKE BACK (PRD §3.32), and the cue it names in
+        /*  WHAT DOH! WOULD TAKE BACK (PRD §3.32), and the cue it names in
             the words the list shows it by: its number, or its name when it has
             none. */
         reading.doh = text (snapshot, "/godot/list/doh");

@@ -17,7 +17,7 @@
 #pragma once
 
 /*
-    WHAT GO DOH! DOES WITH WHAT LEFT GO.DOT FOR A DEVICE (PRD §3.32, namespace
+    WHAT DOH! DOES WITH WHAT LEFT GO.DOT FOR A DEVICE (PRD §3.32, namespace
     draft §24; the author, 2026-10-01).
 
     His case: OSC cues to a light board that started sequences, moving heads

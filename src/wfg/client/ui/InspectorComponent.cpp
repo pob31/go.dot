@@ -563,7 +563,7 @@ namespace wfg::client::ui
 
                 case model::Control::choice:
                     /*  A WORDED CHOICE CAN CHANGE ITS WORDS while the cue stays
-                        picked - Go Doh!'s first item says what the device says
+                        picked - Doh!'s first item says what the device says
                         now - so its menu is compared and refilled as the
                         show's menus below are, and selected by key. */
                     if (! field.choices.empty())
@@ -890,7 +890,7 @@ namespace wfg::client::ui
             }
             else if (! field.options.empty() && field.writable && ! field.choices.empty())
             {
-                /*  A CLOSED SET THE MODEL PUTS IN WORDS (Go Doh!'s row, PRD
+                /*  A CLOSED SET THE MODEL PUTS IN WORDS (Doh!'s row, PRD
                     §3.32, 2026-10-01): the menu reads the words and writes their
                     keys, which are still exactly the values the tree declares -
                     the device menus' way of committing, by position. */

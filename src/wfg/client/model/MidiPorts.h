@@ -67,14 +67,15 @@ namespace wfg::client::model
         bool bound = false;
 
         /*  "PLAYS SOUND" (the author, 2026-10-01): a MIDI cue sent here makes
-            its scene heard for Go Doh! - a synth, not a desk. Off unless set. */
+            its scene heard for Doh! - a synth, not a desk. Off unless set. */
         bool audible = false;
 
-        /*  What Go Doh! does with what a cue sent here: "leave" - to its
+        /*  What Doh! does with what a cue sent here: "leave" - to its
             operator, the default - or "takeBack" (PRD §3.32). */
         std::string doh { "leave" };
 
-        /** "Leave" or "Take back", in words: what the row's Doh! cell says. */
+        /*  "Meh" or "Undo(h)", in words: what the row's Doh! cell says - the
+            author's words of 2026-10-02 for `leave` and `takeBack`. */
         std::string dohWord() const;
 
         /*  Why not, in the engine's own sentence, and empty when it is. Never

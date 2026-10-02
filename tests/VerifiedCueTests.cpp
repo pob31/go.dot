@@ -1692,7 +1692,7 @@ TEST_CASE ("jump: a value the desk was seen to hold is what the diff is against"
 }
 
 //==============================================================================
-/*  GO DOH! AND THE HORIZON'S PRE-SENDS (PRD §3.32, namespace draft §24; D1,
+/*  DOH! AND THE HORIZON'S PRE-SENDS (PRD §3.32, namespace draft §24; D1,
     2026-10-01). A pre-send the GO committed - a block it adopted - is the GO's:
     on a device left to its operator it is neither put back by the Doh nor sent
     again by the horizon or the corrected GO. And the horizon's preparation of
@@ -1731,7 +1731,7 @@ TEST_CASE ("go.doh: what the GO committed to a device left to its operator is ne
     rig.device.target.says ({ osc::Value::float32 (0.2f) });
     REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
 
-    /*  The console, declared in the show as well as mounted: Go Doh!'s setting
+    /*  The console, declared in the show as well as mounted: Doh!'s setting
         is the document's. Said nothing about, so left to its operator. */
     REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
 

@@ -1102,7 +1102,7 @@ TEST_CASE ("mic: the DCA a mic cue is marked with trims it")
 
 TEST_CASE ("go.doh: a scene taken back runs no footer, and its mic member's tail rings")
 {
-    /*  PRD §3.32 (D1, 2026-10-01): Go Doh! brings what the GO started down the
+    /*  PRD §3.32 (D1, 2026-10-01): Doh! brings what the GO started down the
         way Esc would - a mic's input shut, its reverb left to ring - and runs no
         footer, because a Doh is a pause and not an end. Never a kill: a naive
         Doh that marked the scene `skipFooter` would have cut the tail dead.
