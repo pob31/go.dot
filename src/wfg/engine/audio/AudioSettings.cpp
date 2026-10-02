@@ -191,6 +191,14 @@ namespace wfg::audio
                 for (const auto& run : runner.runTable().all())
                     if (! run.isFinished()) prepared.push_back (run.id);
                 for (const auto& id : prepared) runner.revokePrepared (engine, context.tick, id);
+
+                /*  AND WHAT THEY PRE-SENT IS PUT BACK, by a hook, once the
+                    rebuild is over and a write is let in again (2026-10-02,
+                    K5's extension, namespace draft §23.16, LD) - the clock
+                    move's road. Only preparations are ever revoked here: the
+                    door refuses `audio-busy` while anything else is
+                    unfinished, so this is setup, and the desk goes back. */
+                runner.putBackWhenWritable (prepared);
                 state.settingsStatus = "applying";
                 stopOutputTest (state);
                 state.settingsError.clear();
@@ -276,7 +284,9 @@ namespace wfg::audio
             and a replay re-applies what it did.
 
             What it does is §6.2's answer - a stop, then an adaptation. The
-            prepared runs are revoked, as for any settings operation. Anything
+            prepared runs are revoked, as for any settings operation, with no
+            footer - and since K5 what they pre-sent is put back, by a hook,
+            once the clock runs again (below, §23.16). Anything
             still playing is stopped THE ESC WAY (decision DG): members come
             down in order and every footer runs, because nobody declared an
             emergency and the rest of the rig should be left as the show says;
@@ -320,6 +330,15 @@ namespace wfg::audio
 
                 for (const auto& id : prepared)
                     runner.revokePrepared (engine, context.tick, id);
+
+                /*  AND WHAT THEY PRE-SENT IS PUT BACK, by a hook (2026-10-02,
+                    K5, namespace draft §23.16; the author's ruling 6d). Not
+                    from here: a handler that submitted the `node.set`s would
+                    put them in a replay twice. Handed over instead, and
+                    `armStandby` writes them once the outage that refuses every
+                    write is over - then makes the standby ready again after
+                    them. Hook state only, so a replay is untouched. */
+                runner.putBackWhenWritable (prepared);
 
                 if (sounding)
                     cue::stopEveryRoot (runs, false);

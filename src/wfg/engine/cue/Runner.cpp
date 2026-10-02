@@ -8807,6 +8807,50 @@ namespace wfg::cue
                                ? list[juce::Identifier ("standby")].toString().toStdString()
                                : std::string {};
 
+        /*  WHAT A CLOCK MOVE GAVE BACK, PUT BACK, AND THEN THE STANDBY MADE
+            READY AGAIN (2026-10-02, K5, namespace draft §23.16; the author's
+            ruling 6d: "They can be sent back").
+
+            `audio.clockMoved` revoked the prepared runs in its handler and
+            handed them here (`putBackWhenWritable`). Their values go back as at
+            every give-back - the ordinary `node.set`, once each - but not while
+            the outage stands: the engine refuses every write until the show
+            runs on the interface's clock again, and a restore refused is a
+            restore lost. So they wait for the engine to take a write.
+
+            THEN THE STANDBY IS MADE READY AGAIN, from this same pass below and
+            so AFTER the restores: they are submitted first and applied first in
+            the drain, ahead of the `run.prepare`, and the fresh pre-send asks
+            the desk what it holds a tick later at the earliest - so it reads
+            the value put back, which is what it will restore to in its turn.
+            Read before the put-back, it would have kept the scene's own value
+            as the desk's, and the next give-back would have left it there.
+            `audio.settingsReady` asks for the preparation again too
+            (`resetAudioPreparation`); asking here as well covers an outage the
+            follow ended without one, which resumes on the graph it had.
+
+            AND NOT AT ONCE WHEN SOMETHING WENT BACK (K5's extension, LE): the
+            preparation waits `putBackSettleTicks` after the restores, below,
+            so the desk has had the put-back's datagram for a tenth of a second
+            before the fresh pre-send asks it what it holds - a device slow to
+            apply a write would otherwise answer with the scene's value. The
+            same since 2026-10-02 for a settings operation (`audio.apply`,
+            `audio.setup`, `plugin.load`), which revokes in its handler and
+            hands over the same way. */
+        if (! owedPutBacks.empty() && engine.admits ("node.set"))
+        {
+            auto anything = false;
+
+            for (const auto& id : owedPutBacks)
+                anything = submitRestores (engine, id) || anything;
+
+            owedPutBacks.clear();
+            armedStandby.clear();
+
+            if (anything)
+                prepareAfterPutBack = currentTick + putBackSettleTicks;
+        }
+
         /*  A BLOCK THE POINTER LEFT WITH SOMETHING PLAYING IN IT, given back
             once that has gone (2026-09-30, namespace draft §23.3) - asked every
             tick, above the gate below, because what it waits for is the end of
@@ -8957,6 +9001,11 @@ namespace wfg::cue
             }
         }
 
+        /*  THE PUT-BACK SETTLING (above, LE): the pointer's arm and block are
+            asked for once it has, the latch left open until then. */
+        if (currentTick < prepareAfterPutBack)
+            return;
+
         if (standby == armedStandby)
             return;
 
@@ -9099,14 +9148,23 @@ namespace wfg::cue
         }
     }
 
+    void Runner::putBackWhenWritable (const std::vector<std::string>& revokedRuns)
+    {
+        for (const auto& id : revokedRuns)
+            if (std::find (owedPutBacks.begin(), owedPutBacks.end(), id) == owedPutBacks.end())
+                owedPutBacks.push_back (id);
+    }
+
     void Runner::submitRevocation (Engine& engine, const std::string& runId)
     {
         submitRestores (engine, runId);
         engine.submit (origin::engine, "run.revoke", one (runId));
     }
 
-    void Runner::submitRestores (Engine& engine, const std::string& runId)
+    bool Runner::submitRestores (Engine& engine, const std::string& runId)
     {
+        auto putBack = false;
+
         /*  WHAT WAS PRE-SENT GOES BACK FIRST, and it goes back as an ORDINARY
             WRITE.
 
@@ -9134,8 +9192,11 @@ namespace wfg::cue
                 continue;
 
             if (const auto value = osc::Value::fromAtom (run->restoreAtom))
+            {
                 engine.submit (origin::engine, "node.set",
                                { osc::Value::string (run->restoreAddress), *value });
+                putBack = true;
+            }
 
             /*  ONCE (2026-10-01, namespace draft §24): a block given back inside
                 one being given back - the next scene's, under an act Doh! is
@@ -9162,6 +9223,8 @@ namespace wfg::cue
         for (auto& job : sending)
             if (inAncestryOf (runId, job.self))
                 job.finished = true;
+
+        return putBack;
     }
 
     bool Runner::drivenByAJob (const Run& run) const

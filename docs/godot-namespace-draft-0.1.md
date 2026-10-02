@@ -1292,7 +1292,7 @@ One that does not comes back moved a second time, and only then is the engine to
 
 | Command | Arguments | Effect | Refused |
 |---|---|---|---|
-| `audio.clockMoved` | `i` sampleRate `i` bufferSize | the engine's own, from its watchdog, logged like `audio.connection`. Revokes prepared runs; stops every live root the Esc way (`run.stopAll`'s walk, now `cue::stopEveryRoot`; *2026-09-30, H2: `run.stopAll` now leaves the standby's preparation ready, and this does not ask it to - it has revoked every preparation already, §23.3*); writes `rateMoved` and `rateMovedTick`; asks the Console to follow. The stop is made in the handler, because the scheduler runs before the commands on each tick: a `run.stopAll` sent from here would reach a group one tick after it had seen its member fall silent on the new graph and started the next one | `audio-not-reconnecting` outside an outage; `bad-value` for a rate or block of nought |
+| `audio.clockMoved` | `i` sampleRate `i` bufferSize | the engine's own, from its watchdog, logged like `audio.connection`. Revokes prepared runs (*2026-10-02, K5: and hands them to a hook that puts back what they pre-sent once the outage is over, §23.16*); stops every live root the Esc way (`run.stopAll`'s walk, now `cue::stopEveryRoot`; *2026-09-30, H2: `run.stopAll` now leaves the standby's preparation ready, and this does not ask it to - it has revoked every preparation already, §23.3*); writes `rateMoved` and `rateMovedTick`; asks the Console to follow. The stop is made in the handler, because the scheduler runs before the commands on each tick: a `run.stopAll` sent from here would reach a group one tick after it had seen its member fall silent on the new graph and started the next one | `audio-not-reconnecting` outside an outage; `bad-value` for a rate or block of nought |
 
 The Console's follow (`DeviceAudioDriver::followClock`) takes the callback out, stops the
 AudioHost and brings it up again on the device as it runs — the rate, block and channels it
@@ -10070,7 +10070,8 @@ order is the slots, as a replay has. An entry the graph was built without reads 
 *"added since the audio graph was built; Load now rebuilds it"*, and a new row `plugins,changed`
 (`/godot/plugin/changed`, T, r) says whether the set differs from the graph. **`plugin.load`** rebuilds
 the graph with the set as it stands, through `audio.apply`'s door — refused `locked`, `audio-busy`
-while anything sounds, prepared runs revoked, the clock gapped until `audio.settingsReady` — on
+while anything sounds, prepared runs revoked (*2026-10-02, K5: and what they pre-sent put back by a
+hook once the rebuild is over, §23.16*), the clock gapped until `audio.settingsReady` — on
 exactly what plays now: the same interface, rate, block and patches (a failed rebuild puts the graph
 it had back), or the same hosted driver opened again the same way (whose render starts again). Found
 while building it and put right in the same place: the graph a show asks for was assembled twice and
@@ -13337,6 +13338,13 @@ back, as it always did. The plan's line that this stage covers the clock move ho
 and not for "put back"; the second would need that handler to hand its prepared groups to their jobs
 instead, and is left for a ruling. A block somebody reached into is revoked there as well, what was
 asked for in it with it; the clock's move rebuilds the whole graph, so no voice outlives it.
+*(2026-10-02, K5: no longer unchanged for "put back". The author ruled (6d) that the values a
+prepared block pre-sent are sent back on a clock move - "This should only happen when setting up.
+They can be sent back." The handler still revokes, with no footer; it now hands what it revoked to
+the Runner (`putBackWhenWritable`), and a hook, `armStandby`, submits the restores once the outage
+that refuses every write is over, then makes the standby ready again after them - §23.16. The
+settings operations, `audio.apply`, `audio.setup` and `plugin.load`, which revoke the same way, hand
+over the same way since K5's extension, LD.)*
 
 **What changed that a test could see.** `phase9c_take.py`: after Esc, the channel no longer goes
 empty - it passes to the run the standby armed ahead for Scene 5, which was queued for it and which
@@ -15711,6 +15719,159 @@ real synth, then the show closed - exactly one note-off, the note stops; a note 
 ended - nothing; the D700 with a fader taken for a lane, then a double Esc - the fader goes back to
 what it rode, with no move to the lane's start; Esc - the fader stays on the lane; and Rec pressed
 again on a cue with a reverb insert - its tail rings out.
+
+### 23.16 A clock move, or a settings operation, puts back what the standby's scene pre-sent (K5)
+
+**The ruling.** The author, 2026-10-02 (6d), on what §23.3 left for him: when the interface comes
+back on another clock and the show follows it (`audio.clockMoved`, PRD §6.2, decisions DF-DJ), the
+values the standby had pre-sent to a desk for a prepared block are sent back, as any give-back sends
+them back - *"This should only happen when setting up. They can be sent back."* The orchestrator, the
+same day, on K5's first version: the settings operations - `audio.apply`, `audio.setup`,
+`plugin.load` - are setup-time revocations of the same kind, and get the same (LD).
+
+**The gap.** `audio.clockMoved` revokes every prepared run in its handler (`revokePrepared`) - it
+must, before the show is rebuilt on the new graph - and a handler cannot submit the `node.set`s that
+put a desk back: they would reach a replay twice, once from the log and once from the handler. So
+the block went with no footer, as it should, and its pre-sent values stayed on the desk. Worse than
+left: once the show ran again the horizon made the standby's scene ready afresh (`audio.settingsReady`
+clears the arm's latch, `resetAudioPreparation`), and the fresh pre-send asked the desk what it held
+- the scene's own value - and kept that as what to restore to. The next give-back, the pointer
+moving away, then "restored" the desk to the scene's value: the value from before the show got there
+was lost for good. And when the outage ended without a follow - the Console found nothing left to
+follow and the interface resumed on the clock it had (`audio.connection`) - the latch was never
+cleared, and the standby, its block revoked, was not made ready again at all: the next GO paid the
+disk and the pre-sends with the hand already down. The settings operations share the door
+(`apply` in `AudioSettings.cpp`) and had the same gap, the outage aside: an Apply, a Load now or the
+settings window's edit-and-apply with the pointer on a scene that pre-sent left the desk on the
+scene's value, and the block made again after `audio.settingsReady` kept it as the desk's own.
+
+**The fix: the handler hands over, a hook puts back.** §23.3 named the way, and it is the one taken.
+
+- **The handler gives what it revoked to the Runner** (`Runner::putBackWhenWritable`), every run it
+  revoked, beside the revocation it has always made - `audio.clockMoved`'s, and the settings door's
+  for `audio.apply`, `audio.setup` and `plugin.load` (LD). Hook state: a replay applies the handler
+  and never reads the list. The revocations themselves, the clock move's stop the Esc way (DG), and
+  everything the handlers write are unchanged.
+- **A hook puts the values back once the desk may be written** (LA). `armStandby`, at its head,
+  submits the restores of every run handed over - `submitRestores`, H2's helper, the same `node.set`
+  with the value read before the pre-send, once each - as soon as the engine would let a `node.set`
+  in (`Engine::admits`, new: the admission check asked without a command). Not before: an outage
+  refuses every write with `audio-reconnecting` until the show runs on the interface's clock again,
+  and a settings operation refuses them with `audio-restarting` until its rebuild ends; a restore
+  refused is a restore lost. So the desk goes back on the tick after `audio.settingsReady` - or after
+  `audio.connection` on a clock move's resumed road.
+- **Then the standby is made ready again, after the restores and a tenth of a second** (LB, LC, LE).
+  The same pass clears the arm's latch, and when anything was put back the pointer's preparation is
+  held for `putBackSettleTicks` - five ticks - before `armStandby` submits the `run.prepare` (or the
+  arm of a lone media cue) for the pointer as it stands. The fresh pre-send then asks the desk what it
+  holds a hundred milliseconds after the restore's datagram left: it reads the value put back, which
+  is what it will restore to in its turn. With nothing put back the latch is cleared and nothing
+  waits. On the followed road and after a settings operation `audio.settingsReady` cleared the latch
+  already; on the resumed road this is what makes the scene ready again.
+
+**Can a settings operation happen mid-show, where putting the desk back would be wrong?** No. The
+door refuses `audio-busy` while any run is unfinished that is not a preparation - a cue playing, a
+member fired by name out of a prepared block (ET), a run Doh! is still taking down - so what it
+revokes is only ever what the horizon made ready ahead, with nothing heard: setup, in the author's
+word. The clock move is the one that can come mid-show; what it stops then runs its footers (DG),
+and what it revokes is, again, only preparation.
+
+**Does the show make the standby's block ready again after a clock move?** Yes, and it did before
+K5: `audio.settingsReady` calls `resetAudioPreparation`, and the next `armStandby` asks for the
+pointer's block on the new graph, so the next GO is instant again. The put-back is ordered ahead of
+it rather than skipped when the value would be pre-sent again the same: "put back, then pre-sent
+again" is two datagrams more at a moment the author called setting up, and it keeps the one rule
+every give-back has. Carrying the old restore value over to the fresh block instead would have
+needed the hook to match the new block's pre-sends to the old one's, address by address, and to
+know that the document had not changed between - a second copy of the preparation's bookkeeping for
+a saving of one datagram.
+
+**The settle, and why not the put-back's own answer** (LE). The race K5 first named - the restore's
+datagram leaving at the end of one tick, the fresh pre-send's OSCQuery question as soon as the next -
+is widened to five ticks. Waiting for the desk to confirm the put-back instead would mean a read of
+the restored address through the probe, beside the fresh pre-send's own read of the same address
+(which forgets the address's read-back before it asks, so the two would have to be kept apart), and
+a timeout for a desk that never answers - a second verify path for one write at setup. The fixed
+settle is a hook's timing of a logged record, so it is replay-exact by construction, and costs the
+next GO nothing it did not already pay: a GO inside those five ticks enters the scene cold, as any GO
+does with no block made.
+
+**Before and after.**
+
+| What happens | Before K5 | Since K5 |
+|---|---|---|
+| The prepared block at the clock move, or at an Apply, Load now or audio setup | revoked in the handler, no footer | the same |
+| Its pre-sent values on the desk | left there | put back, once each, on the tick after the outage or the rebuild ends |
+| The standby, after `audio.settingsReady` | made ready again at once; its fresh pre-send read the scene's own value as the desk's | made ready again five ticks after the put-back; its fresh pre-send reads the desk's own value |
+| The pointer moving away later | "restored" the desk to the scene's value | restores the desk's own value |
+| A clock move's outage ending with no follow (`audio.connection`) | the standby never made ready again | the desk put back, the standby made ready again |
+| A clock move or a settings operation with nothing pre-sent | the standby made ready again at once | the same: nothing put back, nothing waits |
+
+**Order in the log.** The restore lands after the record that revoked its block, where every other
+give-back puts the desk back first and revokes after (§23.3). It cannot be otherwise: the revocation
+has to be in the handler, and the outage or the rebuild refuses the write until it is over. A client
+watching sees the scene go at the clock move or the Apply, and the desk go back when the show runs
+again.
+
+**What it means for a replay.** No handler changes what it applies: `audio.clockMoved` and the
+settings door revoke, stop and write the same state from the same record, and the hand-over is hook
+state that a replay never reads. The restores are hook-submitted `node.set` records, and the fresh
+preparation a `run.prepare` record five ticks on, both re-injected from the log at their ticks. A log
+recorded before K5 replays as it played - no `node.set` there to inject, its `run.prepare` at the
+tick it was logged. No fixture holds an `audio.clockMoved`; none of the 58 `wfg.replay.*` changed.
+The new case replays its own session on each of its five roads and reaches the same state for every
+run.
+
+**Tests.** `VerifiedCueTests` "prepare: a clock move or a settings operation puts back what the
+standby's scene pre-sent, runs no footer, and the scene is made ready again after it", against the
+scripted OSCQuery device, the desk made to hold what it is sent; a scene whose header pre-sends 0.8
+over the desk's 0.2, with a footer. Five roads: the interface lost and `audio.clockMoved` to 96 kHz,
+ended by the Console's `audio.settingsReady` ("followed") or by `audio.connection` with nothing
+followed ("resumed"); and `audio.apply`, `plugin.load` and `audio.setup`, each ended by
+`audio.settingsReady`. Each checks the block revoked with no footer; nothing sent while the clock is
+away or the graph rebuilt; one `node.set` of 0.2, ahead of the fresh `run.prepare` and at least five
+ticks before it; two datagrams in all since (the put-back, the pre-send again); the fresh pre-send's
+restore value 0.2; the desk at 0.8; still no footer; GO adopting the fresh block; and the session
+replayed record for record with every run's state and warning the same.
+
+Run first on the code before each change. K5's first version, the hand-over taken out of
+`audio.clockMoved`: "followed" failed three - no put-back (0 of 1), two datagrams where three were
+due, the fresh restore value 0.8 - and "resumed" failed on the standby never made ready again. The
+extension, with the settings door's hand-over and the settle taken out: `audio.apply`, `plugin.load`
+and `audio.setup` failed the same three each, and "followed" and "resumed" failed only the five-tick
+gap. The replay check is a net: it passed before. Under C and `fr-FR`, 281 assertions each.
+
+The whole of `DeviceTests`, `VerifiedCueTests`, `NetworkCueTests` and `GoTests` under C: 395 cases,
+7803 assertions, green; `AudioTests` under C (87 cases, its audio-timing flakes M7, `ranges:` and
+`anchor:` left out), among them "a moved clock stops what plays the Esc way", unchanged; and
+`ui.show-settings` (2, both locales), which drives Apply. `ctest -R
+"wfg\.replay|blackbox\.(device|rate|phase9a-fx)"`: 65 of 65 - the 58 `wfg.replay.*` fixtures under
+both locales, `blackbox.devices` (both), `blackbox.device.C`, `blackbox.rate-speed` (both) and
+`blackbox.phase9a-fx` (both), which loads a plugin set with Load now.
+
+**The decisions.**
+
+| | Decision | Whose |
+|---|---|---|
+| LA | **A clock move's pre-sent values are put back, by a hook, once the desk may be written**: the handler revokes as before and hands what it revoked to the Runner; `armStandby` submits the restores when the engine would admit a `node.set` - the outage over | the author's, 2026-10-02 (6d), that they are sent back; the road (handler hands over, hook submits, gated on admission) the implementer's, as §23.3 named it |
+| LB | **Put back, then pre-sent again, in that order**: the standby's fresh preparation comes after the restores, so its pre-send reads the desk as it was put back; never skipped when the value would be the same again | implementer's call; the author's to overrule if the desk's moving at setup matters |
+| LC | **Putting back makes the standby ready again**: the hook clears the arm's latch, so an outage that ends with no follow - the interface resumed on the clock it had - leaves the standby prepared as `audio.settingsReady` does | implementer's call |
+| LD | **The settings operations hand over the same way**: `audio.apply`, `audio.setup` and `plugin.load` put back what the blocks they revoke had pre-sent, once their rebuild ends. Safe because their door refuses while anything but a preparation is unfinished: they are only ever setup | the orchestrator's, 2026-10-02, extending the author's 6d ("this should only happen when setting up"); K5's first version had left them out |
+| LE | **The standby's fresh preparation waits five ticks after a put-back**, a tenth of a second for the desk to apply it before the fresh pre-send asks; not until the desk confirms it, which would be a second read path and a timeout | implementer's call, at the orchestrator's asking; the length the author's to change |
+
+**Named limits.**
+
+- **An outage that never ends** - the show closed while the interface is gone - puts nothing back:
+  nothing can be written until the clock returns or an Apply runs.
+- **The settle is a time, not an answer.** A device that takes longer than a tenth of a second to
+  apply a datagram could still answer the fresh pre-send's question with the scene's value. Read
+  from the code; the scripted device here answers at once.
+
+**Owed to the bench:** on the MADIface (or any interface whose rate can be moved from its own
+panel) with an OSCQuery desk, the pointer on a scene whose header pre-sends a fader: move the
+interface's rate while the show is set up - the desk's fader goes back to where it was when the show
+follows, then to the scene's value again; move the pointer away - it goes back to where it was, not
+to the scene's value. The same with Load now and with Apply in the show settings window.
 
 ## 24. Doh! — taking back the last GO
 

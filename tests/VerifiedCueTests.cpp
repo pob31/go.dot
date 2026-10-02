@@ -35,6 +35,8 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/audio/AudioCommands.h>
+#include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/OscJob.h>
@@ -42,10 +44,12 @@
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/Bundle.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/log/Replay.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/oscquery/OscQueryClient.h>
 #include <wfg/engine/oscquery/OscQueryServer.h>
@@ -2412,4 +2416,274 @@ TEST_CASE ("prepare: a GO entering an act on its first scene's row plays the sce
 
     REQUIRE (rig.runOf (line) != nullptr);
     CHECK (rig.runOf (line)->parent == block);
+}
+
+//==============================================================================
+/*  THE INTERFACE'S CLOCK MOVING UNDER A PREPARED SCENE (2026-10-02, K5,
+    namespace draft §23.16; the author's ruling 6d). The interface comes back
+    from an outage on another rate and will not give it up, so the show stops
+    and follows it (`audio.clockMoved`, PRD §6.2). The scene the standby had
+    made ready is given back in the handler, with no footer - and until K5
+    without its pre-sent values put back, since a handler cannot submit the
+    `node.set`s. The author: "This should only happen when setting up. They can
+    be sent back." So a hook puts them back once the clock runs again and the
+    desk can be written, and only then is the standby's scene made ready afresh
+    on the new graph - its pre-send reading the desk as it was given back. */
+namespace
+{
+    /*  The audio side of the rig: the commands an outage and a clock move are
+        told through, wired as `wfg serve` wires them. No device - the follow is
+        the Console's, and the case says what it came to with
+        `audio.settingsReady`, as the Console would. */
+    void wireTheClock (VerifiedRig& rig, audio::AudioState& state)
+    {
+        audio::registerAudioCommands (rig.engine.commands(), state);
+        audio::registerAudioSettingsCommands (rig.engine, rig.document, rig.runner, rig.runs, state);
+        state.status = "running";
+        state.sampleRate = 48000;
+    }
+
+    /*  A DESK THAT HOLDS WHAT IT IS SENT: before each tick the scripted
+        device is told to answer with what the mounted node was last written,
+        so a read after a write - a pre-send made again - sees what a real desk
+        would. */
+    void deskTicks (VerifiedRig& rig, int count)
+    {
+        for (int n = 0; n < count; ++n)
+        {
+            if (const auto* now = rig.mounts.valueOf ("/desk/fader"))
+                rig.device.target.says ({ *now });
+
+            rig.tickOnce();
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+        }
+    }
+
+    /*  The `node.set` records on the desk's fader carrying `value`, in log
+        order: where each stands. */
+    std::vector<std::size_t> deskWrites (VerifiedRig& rig, const osc::Value& value)
+    {
+        const auto records = LogFile::parse (rig.engine.log().contents()).records;
+        std::vector<std::size_t> out;
+
+        for (std::size_t n = 0; n < records.size(); ++n)
+            if (records[n].command == "node.set" && records[n].args.size() == 2u
+                  && records[n].args[0].isString() && records[n].args[0].getString() == "/desk/fader"
+                  && records[n].args[1] == value)
+                out.push_back (n);
+
+        return out;
+    }
+
+    /*  Where the last applied `run.prepare` of `cueId` stands in the log. */
+    std::size_t lastPrepareOf (VerifiedRig& rig, const std::string& cueId)
+    {
+        const auto records = LogFile::parse (rig.engine.log().contents()).records;
+        auto found = records.size();
+
+        for (std::size_t n = 0; n < records.size(); ++n)
+            if (records[n].command == "run.prepare" && records[n].kind == LogRecord::Kind::applied
+                  && ! records[n].args.empty() && records[n].args[0].isString()
+                  && records[n].args[0].getString() == cueId)
+                found = n;
+
+        return found;
+    }
+}
+
+TEST_CASE ("prepare: a clock move or a settings operation puts back what the standby's scene pre-sent, runs no footer, and the scene is made ready again after it")
+{
+    /*  Two ways out of a clock move's outage: the Console followed the new
+        clock and says so (`audio.settingsReady`), or it found nothing left to
+        follow and the interface resumed on the clock it had
+        (`audio.connection`). And the three settings operations, which revoke
+        the same way at setup (K5's extension, LD): Apply, Load now and the
+        settings window's edit-and-apply, each ended by `audio.settingsReady`. */
+    for (const auto* road : { "followed", "resumed", "audio.apply", "plugin.load", "audio.setup" })
+    {
+        const auto clockMove = std::string (road) == "followed" || std::string (road) == "resumed";
+
+        INFO (std::string (road));
+        VerifiedRig rig;
+        rig.anticipate();
+        rig.device.target.says ({ osc::Value::float32 (0.2f) });
+        REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+        audio::AudioState state;
+        wireTheClock (rig, state);
+
+        auto follows = 0;
+        state.followClock = [&follows] { ++follows; };
+
+        const PreparedScene scene { rig, "f:0.8", "none" };
+
+        const auto footer = rig.document.createRole (scene.group, "footer");
+        REQUIRE (footer.ok);
+        const auto release = rig.document.createCue (footer.id, 0, "memo", "Release").id;
+
+        //  Setting up: the pointer on the scene, its header pre-sent over what the desk held.
+        //  The show as the replay below starts from: everything after this is in the log.
+        rig.setStandby (scene.group);
+        const auto show = doc::CanonicalXml::write (rig.document);
+        tickUntilDeskHolds (rig, 0.8f);
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+        REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
+        const auto block = rig.runs.preparedRunOf (scene.group)->id;
+        const auto sentBefore = rig.sender.sentFor ("K3PV7WRB");
+        REQUIRE (sentBefore == 1u);
+
+        if (clockMove)
+        {
+            //  The interface goes, and comes back on another clock it will not give up.
+            rig.engine.submit ("engine", "audio.connection", { osc::Value::boolean (false) });
+            deskTicks (rig, 1);
+            REQUIRE (state.status == "noClock");
+
+            rig.engine.submit ("engine", "audio.clockMoved", { osc::Value::int32 (96000), osc::Value::int32 (256) });
+            deskTicks (rig, 1);
+            REQUIRE (follows == 1);
+        }
+        else
+        {
+            //  Setting up: the operator applies, and the graph is rebuilt.
+            std::vector<osc::Value> args;
+
+            if (std::string (road) == "audio.setup")
+                args = { osc::Value::boolean (true), osc::Value::string ("Dummy"), osc::Value::string ("Out"),
+                         osc::Value::string (std::string {}), osc::Value::int32 (256),
+                         osc::Value::string (std::string {}), osc::Value::string (std::string {}) };
+
+            rig.engine.submit ("cli", road, std::move (args));
+            deskTicks (rig, 1);
+            REQUIRE (state.settingsStatus == "applying");
+        }
+
+        //  Given back with no footer, as it always was.
+        CHECK (rig.runs.find (block)->isFinished());
+        CHECK (rig.runs.find (block)->warning == cue::runWarning::revoked);
+        CHECK (rig.runOf (release) == nullptr);
+
+        //  Nothing reaches the desk while the clock is away or the graph is rebuilt: writes refused.
+        deskTicks (rig, 5);
+        CHECK (rig.sender.sentFor ("K3PV7WRB") == sentBefore);
+
+        //  The outage over: the show runs on the interface's clock, the new one or the old.
+        if (std::string (road) != "resumed")
+        {
+            rig.engine.submit ("engine", "audio.settingsReady",
+                               { osc::Value::string (std::string {}), osc::Value::int32 (96000), osc::Value::int32 (256),
+                                 osc::Value::int32 (0), osc::Value::int32 (2), osc::Value::string (std::string {}) });
+        }
+        else
+        {
+            state.resumePlayback = [] { return true; };
+            rig.engine.submit ("engine", "audio.connection", { osc::Value::boolean (true) });
+        }
+
+        deskTicks (rig, 1);
+        REQUIRE (state.status == "running");
+
+        if (std::string (road) != "resumed")
+            REQUIRE (state.settingsStatus == "ready");
+
+        //  The scene made ready again on the new graph, and its pre-send written again.
+        const auto remade = [&rig, &scene, &block]
+        {
+            const auto* ready = rig.runs.preparedRunOf (scene.group);
+
+            if (ready == nullptr || ready->id == block)
+                return false;
+
+            for (const auto* child : rig.runs.childrenOf (ready->id))
+                if (child->cue == scene.cue && child->isFinished() && ! child->restoreAtom.empty())
+                    return true;
+
+            return false;
+        };
+
+        for (int n = 0; n < 600 && ! remade(); ++n)
+            deskTicks (rig, 1);
+
+        REQUIRE (remade());
+        deskTicks (rig, 5);
+
+        //  THE DESK GIVEN BACK ITS OLD VALUE, ONCE, before the scene was made ready again.
+        const auto putBack = deskWrites (rig, osc::Value::float32 (0.2f));
+        CHECK (putBack.size() == 1u);
+
+        if (! putBack.empty())
+        {
+            CHECK (putBack.front() < lastPrepareOf (rig, scene.group));
+
+            //  AND THE DESK GIVEN A TENTH OF A SECOND WITH IT (LE) before the scene is made again.
+            const auto records = LogFile::parse (rig.engine.log().contents()).records;
+            REQUIRE (lastPrepareOf (rig, scene.group) < records.size());
+            CHECK (records[lastPrepareOf (rig, scene.group)].tick >= records[putBack.front()].tick + 5);
+        }
+
+        //  Two datagrams since the clock moved: the value put back, then pre-sent again.
+        CHECK (rig.sender.sentFor ("K3PV7WRB") == sentBefore + 2u);
+
+        //  The fresh pre-send read the desk as it was put back - what it would restore to.
+        const auto* fresh = rig.runs.preparedRunOf (scene.group);
+        REQUIRE (fresh != nullptr);
+        const auto freshId = fresh->id;
+
+        for (const auto* child : rig.runs.childrenOf (freshId))
+        {
+            if (child->cue != scene.cue)
+                continue;
+
+            const auto held = osc::Value::fromAtom (child->restoreAtom);
+            REQUIRE (held.has_value());
+            CHECK (*held == osc::Value::float32 (0.2f));
+        }
+
+        REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        CHECK (rig.runOf (release) == nullptr);
+
+        //  And the next GO is instant again: it adopts that block.
+        rig.engine.submit ("cli", "go", {});
+        deskTicks (rig, 1);
+
+        const auto* live = rig.runs.liveRunOf (scene.group);
+        REQUIRE (live != nullptr);
+        CHECK (live->id == freshId);
+
+        //  REPLAY-EXACT: the put-back is a logged `node.set` a replay re-injects, and
+        //  the handler that revoked puts nothing in the log of its own.
+        const auto original = LogFile::parse (rig.engine.log().contents());
+        REQUIRE (original.errors.empty());
+
+        VerifiedRig again;
+        again.anticipate();
+        audio::AudioState againState;
+        wireTheClock (again, againState);
+
+        const auto read = doc::CanonicalXml::read (show, again.document);
+        REQUIRE (read.ok);
+
+        //  Where the pointer stood: the machine's, never saved (§4.10), and set by
+        //  hand above rather than by a record, so set by hand here too.
+        REQUIRE (again.document.setAttribute (cue::standbyAddressOf (rig.listId), scene.group).ok);
+
+        const auto result = replay (again.engine, original);
+
+        for (const auto& mismatch : result.mismatches)
+            MESSAGE (mismatch);
+
+        CHECK (result.ok);
+
+        for (const auto& run : rig.runs.all())
+        {
+            INFO ("run " << run.id << " of " << run.cue);
+            const auto* replayed = again.runs.find (run.id);
+            REQUIRE (replayed != nullptr);
+            CHECK (replayed->state == run.state);
+            CHECK (replayed->warning == run.warning);
+        }
+    }
 }

@@ -171,6 +171,16 @@ namespace wfg
         void setAdmissionCheck (std::function<std::string (const std::string&)> check)
         { admissionCheck = std::move (check); }
 
+        /*  WHETHER THAT CHECK WOULD LET A COMMAND IN NOW (2026-10-02, K5,
+            namespace draft §23.16): for a hook holding back a record it owes
+            until the outage that would refuse it is over - the values a clock
+            move gave back, put back once the desk may be written again. Tick
+            thread only, as the check itself is. */
+        bool admits (const std::string& command) const
+        {
+            return ! admissionCheck || admissionCheck (command).empty();
+        }
+
     private:
         LogRecord applyEvent (std::int64_t tickIndex, const Event& event);
         void record (const LogRecord& r);

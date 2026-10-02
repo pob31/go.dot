@@ -486,6 +486,20 @@ namespace wfg::cue
         void setLanes (LaneTable* table) noexcept { lanes = table; }
         void resetAudioPreparation() { armedStandby.clear(); }
 
+        /*  WHAT A CLOCK MOVE GAVE BACK, handed to the hooks to put back
+            (2026-10-02, K5, namespace draft §23.16; the author's ruling 6d).
+            `audio.clockMoved` revokes the prepared runs in its handler - it
+            must, before the show is rebuilt on the new graph - and a handler
+            cannot put back what they pre-sent: the `node.set`s would reach a
+            replay twice, once from the log and once from itself. So it hands
+            the runs it revoked here, and `armStandby` writes their values back
+            once the engine would take a write again - the outage over - and
+            then makes the standby ready afresh, after them. Hook state: a
+            replay takes the `node.set`s from the log and never reads this.
+            The settings operations (`audio.apply`, `audio.setup`,
+            `plugin.load`) hand theirs over the same way since K5's extension. */
+        void putBackWhenWritable (const std::vector<std::string>& revokedRuns);
+
         /*  The runs, for the one caller outside the Runner that has to ask
             about them: `go`, whose cursor has to know whether a manual group
             still has rounds to play before it lets the pointer out of it.
@@ -1495,7 +1509,9 @@ namespace wfg::cue
             HOOKS ONLY. It submits, and a handler that submitted would put the
             records in a replay twice - once from the log and once from itself.
             The handlers that revoke (`audio.apply`, `audio.clockMoved`) call
-            `revokePrepared` and put nothing back.
+            `revokePrepared` and put nothing back themselves; since K5
+            (2026-10-02) `audio.clockMoved` hands what it revoked to
+            `putBackWhenWritable`, whose hook puts it back.
 
             AND THE BLOCK'S NETWORK JOBS ARE SETTLED HERE, so that a pre-send
             whose answer is read later in this same tick writes nothing. */
@@ -1504,8 +1520,9 @@ namespace wfg::cue
         /*  ITS FIRST HALF ON ITS OWN: the values put back and the network jobs
             settled, and no `run.revoke` yet - for a scene Doh! gives back
             while something it set going still moves under it (namespace draft
-            §24). Each restore is submitted once, so asking again is safe. */
-        void submitRestores (Engine& engine, const std::string& runId);
+            §24). Each restore is submitted once, so asking again is safe.
+            True when it put anything back (2026-10-02, K5). */
+        bool submitRestores (Engine& engine, const std::string& runId);
 
         /*  WHETHER A JOB OF THE RUNNER'S STILL DRIVES A RUN: a fade's, a
             network cue's, a group's own, or the end a memo is owed. What no job
@@ -1696,6 +1713,19 @@ namespace wfg::cue
             (`armStandby`, namespace draft §23.3). Hook state: the revocation
             it leads to is a record in the log. */
         std::vector<std::string> blocksToGiveBack;
+
+        /*  RUNS A CLOCK MOVE REVOKED, whose pre-sent values are still to be
+            put back (`putBackWhenWritable`, namespace draft §23.16). Hook
+            state, as the one above. */
+        std::vector<std::string> owedPutBacks;
+
+        /*  THE TICK THE STANDBY MAY BE MADE READY AGAIN after those values went
+            back (2026-10-02, K5's extension, §23.16, LE): five ticks, a tenth
+            of a second, for the desk to apply the put-back before a fresh
+            pre-send asks it what it holds. Hook state: the `run.prepare` it
+            delays is a logged record either way. */
+        static constexpr std::int64_t putBackSettleTicks = 5;
+        std::int64_t prepareAfterPutBack = -1;
 
         /*  The tick being processed, so a stop fired inside a command
             handler can be scheduled against the same clock the tick hook
