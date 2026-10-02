@@ -157,4 +157,21 @@ namespace wfg::midi
         out.swap (items);
         return out;
     }
+
+    std::deque<Outgoing> SendQueue::takeAllForClose (const std::function<bool (const std::string&)>& reaches)
+    {
+        auto out = takeAll();
+
+        /*  AFTER WHAT IS WAITING, not ahead of it as the double Esc puts them:
+            nothing is dropped here, so a note-on still queued leaves at the
+            close, and its note-off has to follow it. */
+        for (const auto& message : out)
+            if (message.cue && reaches (message.port))
+                ledger.observe (message);
+
+        for (auto& release : ledger.releaseAll())
+            out.push_back (std::move (release));
+
+        return out;
+    }
 }

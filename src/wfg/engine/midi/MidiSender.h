@@ -96,9 +96,11 @@ namespace wfg::midi
         /** Starts the sending thread. Nothing leaves before this. */
         void start();
 
-        /*  Stops it, after whatever is queued has gone. Notes a cue left
-            sounding are not ended here: the author's rule is for a double Esc
-            (namespace draft §23.10 names this as a gap). */
+        /*  Stops it, after whatever is queued has gone - and then ends every
+            note a cue left sounding, one note-off a key, as a double Esc does
+            (2026-10-02, K4, namespace draft §23.15; §23.10 had named it a gap).
+            The one road out: the destructor calls it, and the show closing -
+            quitting, or the window going as another show opens - ends here. */
         void stop();
 
         /*  Queues one message. Tick thread; takes a mutex for a push_back and

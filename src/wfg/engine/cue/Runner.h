@@ -950,6 +950,16 @@ namespace wfg::cue
             and the press's record is not changed. */
         void dropOutputs (std::int64_t tick);
 
+        /*  A DOUBLE ESC LETS THE LANE'S FADER GO (2026-10-02, K4, namespace
+            draft §23.15, the author: "double Esc would throw away the fader
+            association"). What `lane.free` does, from the press's handler: the
+            taken strip rides what it rode before, the lane is forgotten, and a
+            pass under way is dropped with its ride (DM) - nothing is written,
+            and no `lane.stop` follows, there being no pass left to end. Esc
+            keeps the fader. Handler state only, so a replay frees it in the
+            same record. */
+        void freeLane() noexcept;
+
         /*  WHETHER A DOUBLE ESC WAS APPLIED EARLIER IN THIS DRAIN (the review
             of H4, 2026-10-02, namespace draft §23.10). The engine's own fires
             that a hook decided before the press - a start cue's target, the

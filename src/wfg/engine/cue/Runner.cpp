@@ -10282,6 +10282,15 @@ namespace wfg::cue
         }
     }
 
+    void Runner::freeLane() noexcept
+    {
+        if (lanes == nullptr)
+            return;
+
+        lanes->free();
+        ride.clear();
+    }
+
     void Runner::recordLane (Engine& engine)
     {
         if (lanes == nullptr || ! lanes->taken())
@@ -10331,7 +10340,9 @@ namespace wfg::cue
         /*  HOW THE PASS ENDS (DM). A hand asking - Rec again, the window's stop
             - keeps the ride and stops the cue; the cue ending on its own, a stop
             cue or Esc keeps it and leaves the stop to what started it; a KILL -
-            double Esc, which drops every action (§4.4) - drops it. */
+            the pane's, or Doh!'s taking back - drops it. A double Esc never
+            reaches here since K4: its handler lets the fader go and the pass
+            with it (`freeLane`). */
         const auto handAsked = lanes->stopping;
         const auto gone = run == nullptr || run->isFinished();
         /*  AND A CUE DOH! TOOK BACK DROPS ITS RIDE as a kill does (§24): the
@@ -10365,8 +10376,13 @@ namespace wfg::cue
 
             ride.clear();
 
+            /*  A STOP, NOT A KILL (2026-10-02, K4, namespace draft §23.15, the
+                author's "graceful stop", overruling GB of §23.6): the pane's
+                stop - an abort, which owes no post-wait (§23.13, JX) - so the
+                cue's EQ and insert tail rings out as any stopped cue's does,
+                and the run is not marked killed. */
             if (handAsked && run != nullptr && ! gone && ! stopped)
-                engine.submit (origin::engine, "run.kill", one (run->id));
+                engine.submit (origin::engine, "run.stop", one (run->id));
 
             engine.submit (origin::engine, "lane.stop", one ("kept"));
             return;
@@ -11102,7 +11118,13 @@ namespace wfg::cue
                 Nothing is submitted and the applied record is the plain one, so
                 a replay - no sender, no sink - writes the same log and marks the
                 same runs. Esc drops nothing: it is normal completion entered
-                early, and what was queued goes. */
+                early, and what was queued goes.
+
+                AND IT LETS THE LANE'S FADER GO (2026-10-02, K4, namespace draft
+                §23.15): the author's "double Esc would throw away the fader
+                association", where Esc keeps it. In the handler too, so the
+                fader is the strip's own again from the press's own drain, and a
+                replay frees it in the same record. */
             specialised.handler = [&runner, graceful, before = plain->handler]
                                   (CommandContext& context, const std::vector<osc::Value>& args)
             {
@@ -11120,7 +11142,10 @@ namespace wfg::cue
                 auto outcome = before (context, args);
 
                 if (outcome.applied)
+                {
                     runner.dropOutputs (context.tick);
+                    runner.freeLane();
+                }
 
                 return outcome;
             };

@@ -19,6 +19,9 @@
 #include <wfg/engine/monitor/TrafficTap.h>
 
 #include <algorithm>
+#include <chrono>
+#include <string>
+#include <vector>
 
 namespace wfg::midi
 {
@@ -286,22 +289,51 @@ namespace wfg::midi
         /*  WHATEVER IS STILL QUEUED GOES, because a show that is closing has
             usually just sent the blackout. Bounded by what is in hand rather
             than by the queue, so a producer that never stopped cannot hold the
-            shutdown open. */
+            shutdown open.
+
+            AND THEN A NOTE-OFF FOR EVERY NOTE A CUE LEFT DOWN (2026-10-02, K4,
+            namespace draft §23.15): one `0x8n key 0` a port, channel and key
+            the record holds - the double Esc's rule, nothing to a synth Go.dot
+            never played - after the queue, so a note-on still in it is ended
+            too. Taken in the same hand under the queue lock, the devices looked
+            up inside it in the header's order (`queueMutex`, then
+            `boundMutex`).
+
+            BOUNDED, SO A DEAD PORT CANNOT HOLD THE QUIT: one pass over what is
+            in hand, nothing retried here - and a port that keeps the thread
+            more than `givingUp` over a message of three bytes or fewer is not
+            taking messages, and is sent nothing more in this pass. A device
+            that has gone answers its send with an error at once; a driver that
+            says it is not ready is retried by JUCE itself, fifty times a
+            millisecond's sleep apart on Windows (juce_Midi_windows.cpp), which
+            is what this caps at one message a port. A SysEx's own wait is
+            JUCE's, as it was before. */
         std::deque<Outgoing> remaining;
 
         {
             const std::lock_guard<std::mutex> lock { queueMutex };
-            remaining = outbox.takeAll();
+            remaining = outbox.takeAllForClose ([this] (const std::string& portId)
+                                                { return deviceFor (portId) != nullptr; });
         }
+
+        constexpr auto givingUp = std::chrono::milliseconds (40);
+        std::vector<std::string> notTaking;
 
         for (const auto& item : remaining)
         {
+            if (std::find (notTaking.begin(), notTaking.end(), item.port) != notTaking.end())
+                continue;
+
             const auto device = deviceFor (item.port);
 
             if (device == nullptr)
                 continue;
 
+            const auto began = std::chrono::steady_clock::now();
             deliver (*device, item.bytes);
+
+            if (item.bytes.size() <= 3 && std::chrono::steady_clock::now() - began > givingUp)
+                notTaking.push_back (item.port);
         }
     }
 

@@ -1328,6 +1328,97 @@ TEST_CASE ("midi send queue: a double Esc drops the cues' messages and ends ever
 }
 
 //==============================================================================
+/*  A NOTE STILL DOWN WHEN THE SHOW CLOSES (2026-10-02, K4, namespace draft
+    §23.15, closing H4's named limit IX). The sending thread's last delivery is
+    what is still queued, then one note-off - `0x8n key 0`, as the double Esc's
+    - for every key a cue started and nothing ended, the queued messages that
+    will leave counted first; nothing to a synth Go.dot never played. With the
+    call declared and doing what the close did before - the queue, and nothing
+    after it - every subcase with a note left to end failed; those with none
+    are guards. */
+TEST_CASE ("midi send queue: the show closing ends every note a cue started, once, and nothing else")
+{
+    midi::SendQueue queue;
+    const std::string port = "PRT00001";
+    const std::string unbound = "PRT00002";
+    const auto everyPort = [] (const std::string&) { return true; };
+
+    SUBCASE ("a held note gets exactly one note-off")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+
+        const auto last = queue.takeAllForClose (everyPort);
+
+        REQUIRE (last.size() == 1u);
+        CHECK (same (last.front(), noteOffFor (port, 0x81, 60)));
+        CHECK (queue.empty());
+        CHECK (queue.notes().sounding() == 0u);
+    }
+
+    SUBCASE ("a note a cue ended gets nothing")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+        leaves (queue, cueMessage (port, { 0x81, 60, 0 }));
+
+        CHECK (queue.takeAllForClose (everyPort).empty());
+    }
+
+    SUBCASE ("a surface's note-on is no note of the show's")
+    {
+        leaves (queue, { port, { 0x90, 0x5D, 0x7F }, {}, false });
+
+        CHECK (queue.takeAllForClose (everyPort).empty());
+    }
+
+    SUBCASE ("a note-on still waiting leaves, and its note-off follows it")
+    {
+        queue.push (cueMessage (port, { 0x91, 62, 100 }));
+
+        const auto last = queue.takeAllForClose (everyPort);
+
+        REQUIRE (last.size() == 2u);
+        CHECK (same (last[0], cueMessage (port, { 0x91, 62, 100 })));
+        CHECK (same (last[1], noteOffFor (port, 0x81, 62)));
+    }
+
+    SUBCASE ("a cue's own note-off still waiting ends its note: nothing more")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }));
+        queue.push (cueMessage (port, { 0x81, 60, 0 }));
+
+        const auto last = queue.takeAllForClose (everyPort);
+
+        REQUIRE (last.size() == 1u);
+        CHECK (same (last[0], cueMessage (port, { 0x81, 60, 0 })));
+    }
+
+    SUBCASE ("a note-on waiting for a port with no device goes nowhere, and is owed nothing")
+    {
+        queue.push (cueMessage (unbound, { 0x91, 60, 100 }));
+
+        const auto last = queue.takeAllForClose ([&unbound] (const std::string& p) { return p != unbound; });
+
+        REQUIRE (last.size() == 1u);                        // the sender passes it over
+        CHECK (last.front().bytes == midi::Bytes { 0x91, 60, 100 });
+    }
+
+    SUBCASE ("one note-off a key, after what is still waiting")
+    {
+        leaves (queue, cueMessage (port, { 0x91, 60, 100 }, "RUN00001"));
+        leaves (queue, cueMessage (port, { 0x91, 60, 80 }, "RUN00002"));
+        leaves (queue, cueMessage (port, { 0x92, 64, 100 }));
+        queue.push ({ port, { 0xF0, 0x7E, 0x7F, 0xF7 }, {}, false });   // a surface's SysEx
+
+        const auto last = queue.takeAllForClose (everyPort);
+
+        REQUIRE (last.size() == 3u);
+        CHECK (last[0].bytes == midi::Bytes { 0xF0, 0x7E, 0x7F, 0xF7 });
+        CHECK (same (last[1], noteOffFor (port, 0x81, 60)));
+        CHECK (same (last[2], noteOffFor (port, 0x82, 64)));
+    }
+}
+
+//==============================================================================
 namespace
 {
     /*  A sink built on the real queue, with the sending thread done by hand
@@ -1363,6 +1454,14 @@ namespace
                 outbox.markLeaving (next);
                 wire.push_back (next);
             }
+        }
+
+        /*  The sending thread's last delivery, when the sender stops: what is
+            still queued, then the note-offs the show closing owes. */
+        void close()
+        {
+            for (auto& message : outbox.takeAllForClose ([] (const std::string&) { return true; }))
+                wire.push_back (std::move (message));
         }
 
         midi::SendQueue outbox;
@@ -1538,6 +1637,50 @@ TEST_CASE ("midi cue: a member a killed scene was about to launch sends nothing 
     CHECK (rig.sink.outbox.notes().sounding() == 0u);
     CHECK (rig.runs.find (noteRun)->isFinished());
     CHECK (rig.runs.find (noteRun)->launchRequestedAtTick == 0);
+}
+
+TEST_CASE ("midi cue: closing the show sends exactly one note-off for a note a cue started, and none for one it ended")
+{
+    /*  K4 (2026-10-02, namespace draft §23.15): through the Runner, the
+        sending thread's last delivery done by hand as `MidiSender::run` does
+        it when the sender stops. */
+    MidiStopRig rig;
+    const auto note = rig.midiCue (rig.listId, 0, "noteOn", 60, 100);
+
+    rig.fire (note);
+    rig.sink.drain();
+    REQUIRE (rig.sink.wire.size() == 1u);
+
+    SUBCASE ("held")
+    {
+        rig.sink.close();
+
+        REQUIRE (rig.sink.wire.size() == 2u);
+        CHECK (rig.sink.wire.back().port == rig.port);
+        CHECK (rig.sink.wire.back().bytes == midi::Bytes { 0x81, 60, 0 });
+    }
+
+    SUBCASE ("ended by its own note-off")
+    {
+        rig.fire (rig.midiCue (rig.listId, 1, "noteOff", 60, 0));
+        rig.sink.drain();
+        REQUIRE (rig.sink.wire.size() == 2u);
+
+        rig.sink.close();
+
+        CHECK (rig.sink.wire.size() == 2u);
+    }
+
+    SUBCASE ("ended by a double Esc's note-off: the close owes nothing more")
+    {
+        rig.press ("run.killAll");
+        rig.sink.drain();
+        REQUIRE (rig.sink.wire.size() == 2u);
+
+        rig.sink.close();
+
+        CHECK (rig.sink.wire.size() == 2u);
+    }
 }
 
 TEST_CASE ("midi: a double Esc on a sender with nothing bound is harmless")

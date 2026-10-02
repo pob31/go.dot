@@ -2890,7 +2890,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "cue",
-          "The media cue whose level lane a fader records, by identifier, or empty: set by lane.arm and kept while its fader is taken, until lane.free or a lane.arm with nothing. Tonight-s, never the show-s (namespace draft 20.9)." },
+          "The media cue whose level lane a fader records, by identifier, or empty: set by lane.arm and kept while its fader is taken, until lane.free, a lane.arm with nothing, or a double Esc. Tonight-s, never the show-s (namespace draft 20.9)." },
         { "surfaces", "laneFader",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

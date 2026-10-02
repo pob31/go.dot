@@ -12248,7 +12248,7 @@ Asked with a recommendation each; three of the four answered otherwise.
 | DK | **One pass is one write**: at its end the ridden stretch replaces that stretch of the lane in one engine `node.set …/levelLane` - logged, replayed exactly, one step of undo | implementer's call |
 | DL | **The ride is thinned** to straight lines within a tenth of a decibel (Ramer-Douglas-Peucker), and joined to the curve it replaces with 50 ms at each end | implementer's call |
 | DM | **How a pass ends**: Rec again, the waveform's stop, the run ending, or Esc - all keep the ride; double Esc drops it, as it drops every action (§4.4) | implementer's call |
-| DN | **The fader stays taken for the session**, until the window's ✕ frees it or the show is locked; a pad cannot be taken; a strip's sampler clip or DCA comes back to it when it is freed | implementer's call |
+| DN | **The fader stays taken for the session**, until the window's ✕ frees it or the show is locked; a pad cannot be taken; a strip's sampler clip or DCA comes back to it when it is freed | implementer's call. *Since 2026-10-02 (K4, the author's): a double Esc frees it too, and Esc keeps it - §23.15, KO* |
 
 **DF and DG together.** Taking a fader by touching it means the program cannot fly it anywhere
 before somebody has put a hand on it, and a motor does not move under a hand. So the fader flies to
@@ -12297,7 +12297,9 @@ to the in-point, and a later segment overwrites what an earlier one wrote over t
 **At the end** the segments are thinned, spliced into the lane with a 50 ms join at each end (DL),
 judged by `doc::readLevelLane`, and written in one engine `node.set` (DK); then the run is stopped if
 it still sounds, and the engine's `lane.stop` clears the pass. A run killed - double Esc - writes
-nothing, and `lane.stop dropped` says so.
+nothing, and `lane.stop dropped` says so. *(2026-10-02, K4: the stop is `run.stop`, not the kill it
+was, so the cue's tail rings (KP, overruling GB); and a double Esc frees the fader and the pass in its own handler,
+so no `lane.stop` follows it - the pane's kill and Doh! still end in `lane.stop dropped`. §23.15.)*
 
 #### The hands
 
@@ -13977,7 +13979,9 @@ stop has landed (ER), and four hooks of the Runner's own:
   comes after the ride is written, so it drops nothing. Left a kill, as the stage ruled for a
   deliberate one: a pass ended by hand now cuts its cue's EQ and insert tail, which rang on until H3.
   `run.stop` there would let it ring, and would stop marking the run `killed`, which suspends a
-  persistent cue (S). The author's to rule on.
+  persistent cue (S). The author's to rule on. *(2026-10-02, K4: ruled - "graceful stop" - and
+  built: the hand's end of a pass sends `run.stop`, the pane's stop, so the tail rings and the run is
+  not killed, §23.15, KP.)*
 
 **Honest limits.**
 
@@ -14078,7 +14082,7 @@ review; all are the author's to overrule.
 | FY | **The sweep touches nothing the press leaves ready**: the tracks of every run only made ready | implementer's call, departing from the stage's "every voice to silence": the standby H2 keeps armed is launched by the next GO with no arm, and played at silence |
 | FZ | **A voice that is cut keeps its silence**: no level written for a run whose kill has gone out, a killed run still stopping, or a run under a kill | implementer's call; the stage listed it as an optional guard, and a lane or a DCA undid the kill's silence without it |
 | GA | **AU and LV2 inserts are silenced by the voice's level, not emptied**; the child is unchanged | implementer's call, as the stage ruled |
-| GB | **The lane recorder's end of a pass by hand stays a kill**, and now cuts its cue's tail | implementer's call, as the stage ruled for a deliberate kill; its own words say "stopped", so it is the author's to rule on |
+| GB | **The lane recorder's end of a pass by hand stays a kill**, and now cuts its cue's tail | implementer's call, as the stage ruled for a deliberate kill; its own words say "stopped", so it is the author's to rule on. *Overruled by the author, 2026-10-02: a graceful stop, `run.stop` (KP, §23.15)* |
 | GC | **A kill is not held back by a stop cue's fade**: a run that is cut - its own kill or one above it - goes through the hold in `enforceStops` and is killed on the next tick; the fade runs on to its end with nothing to stop | the fixer's call, after review: held, a killed cue hung at the level the kill found it at (FZ) until the fade's end, then took a plain stop there; a kill asks nothing of the cue (CN: "silence at once") |
 | GD | **A kill that ends a member's post-wait kills its voice as well**, from the group's job, beside `run.done` | the fixer's call, after review: the clip was over and the chain was not, and nothing reached it but a double Esc's sweep |
 | GE | **No burst of insert resets**: the sweep resets no voice's inserts, and a kill resets them only on a voice still heard - not one a double Esc's sweep or a fade has already taken to silence; rack channels' are still reset | the fixer's call, after review: one child resets a plugin's lanes on every voice one after another, and a burst of VST3 resets fails the plugin for the whole show after two presses inside a minute; under silence they bought nothing heard |
@@ -14635,7 +14639,9 @@ completion entered early, and what it finds queued goes.
 **Honest limits.**
 
 - **A note still down when the show closes gets no note-off** (IX): `MidiSender::stop` delivers
-  what is queued and nothing more. The author's rule is the double Esc's.
+  what is queued and nothing more. The author's rule is the double Esc's. *(2026-10-02, K4: ruled -
+  "note off on quit" - and closed: the sending thread's last delivery sends one note-off a key the
+  record holds, after what is queued, §23.15, KQ.)*
 - **What `sendDropped` cannot see** (L31): a message a rate cap held from an earlier tick, a
   pre-send this tick's hook wrote, and a MIDI message launched in the press's drain - which goes to
   the sending thread at once and may already have left - are dropped where no handler sees them, and
@@ -14749,7 +14755,7 @@ are the author's to overrule.
 | IU | **What the press leaves ready keeps its pre-sends on their way**: the network sender keeps a message whose run hangs from a root the press spares, in its place, and drops the rest; messages are queued in their run's name | implementer's call, departing from the brief's "drop everything": the GO after the press adopts the standby's scene with its pre-sends counted as done, and a dropped one left the desk without a value the scene believes it holds - as FY spared the standby's voice from H3's sweep |
 | IV | **Nothing a kill has reached starts anything**: `fireNow`, `launchRun`, `launchIfDue` and a network cue's job pass over a run whose own kill still stands (`skipFooter` with the stop it asked) or that is under one; a start cue's fire still to be submitted is dropped, and one the press's own tick's hook submitted, draining behind the press, is applied and does nothing (an engine `cue.fire` after `run.killAll` in one tick; a fire by name still fires) | the orchestrator's ruling, adopting the brief's optional guards and H5's `launchIfDue` guard; reading the run's own kill through its stop is the implementer's, so a seek that brings a killed cue back still launches it; the fire behind the press the review's (2026-10-02) |
 | IW | **`sendDropped` is stamped by the press's handler**: every unfinished osc run a kill has reached that was launched in the press's own drain; never from whether a sender is there | the orchestrator's ruling, the design's GX (§24, HQ) |
-| IX | **Two things named and not built**: the pane's kill of one run drops nothing of its queued output (per-run drops are Doh!'s), and a show closing sends no note-off for a note still down | the orchestrator's rulings |
+| IX | **Two things named and not built**: the pane's kill of one run drops nothing of its queued output (per-run drops are Doh!'s), and a show closing sends no note-off for a note still down | the orchestrator's rulings. *The second built at the author's word, 2026-10-02 (KQ, §23.15)* |
 | IY | **A double Esc takes back the persistent pass still owed**: the step a GO before the press took is counted as asserted and the pass's wait cleared, and a `run.assert` the pass submitted in the press's own tick, draining behind the press, is applied and does nothing; the next GO restores the section | the review's (2026-10-02), PRD §3.29's "the next GO restoring the declared world"; the `run.assert` behind the press the implementer's, found writing the review's case |
 
 **What it changes for a replay.** The drop, the note-offs and the stamp change no record: a
@@ -14825,6 +14831,11 @@ motorised strip follows it. It is a surface's readout of the show, not an action
 that took the fader is the one that lets it go - so it is kept, by the orchestrator's ruling, against
 the plan's line that the case "checks that a fader taken for recording is let go". The case pins
 today's behaviour; it is the one to change if the author rules that a double Esc frees the fader.
+*(2026-10-02, K4: he did - "double Esc would throw away the fader association", Esc keeping it. The
+double Esc's handler now frees the fader as `lane.free` would: the strip rides what it rode before,
+the ride node leaves the tree, and nothing moves to the lane's start - so the invariant accepts no
+move at all. The case was turned round to match and renamed "a double Esc lets the taken fader go",
+§23.15, KO.)*
 
 **The panic column, checked** (IZ, JA, JD). `scripts/generate-schema.py` copied the column without
 looking at it. It now refuses a row whose `panic` is empty, or is neither a policy nor one literal
@@ -14919,7 +14930,7 @@ namespace fixture is `console.json`'s `"snap"`.
 - `GoTests` "double Esc: nothing Go.dot started keeps writing, for fifty ticks after" - a net, as
   above, shown to be one by taking the press out.
 - `LaneRecordTests` "after a double Esc the taken fader keeps its strip..." - pins JE; passed before
-  and after.
+  and after. *(2026-10-02, K4: replaced by "a double Esc lets the taken fader go", §23.15.)*
 - Not added: the brief's `NetworkCueTests` case for the held value is H4's "double Esc: a value the
   rate cap is holding never leaves, and the cue waiting on it ends", and its disk case is H4's too.
 
@@ -14933,7 +14944,7 @@ questions and on the stage's review, 2026-10-02; all are the author's to overrul
 | JB | **A device's PANIC array is the node's safe value**: one element per type tag, coerced as a write would be and held to more - a whole number for `i`/`h` checked before the coercion that would truncate it, the first inside the node's RANGE and VALS, no number for `T`; held as the word `value` beside `panicValues`, and published back as the array | the orchestrator's ruling (the representation); the rest the brief's |
 | JC | **On a state node, a PANIC it could never hold refuses the namespace**, as a FULL_PATH that lies does; **on a container or an event, anything but a policy is ignored** and the mount's policy stays | the orchestrator's ruling, and the review's: an event is often only inferred, and a description that loaded before must still load; ignoring an unknown word there too, not only an array, the implementer's, for the same reason. *The state-node half overruled by the author, 2026-10-02: a warning, and the device loads (JT, §23.12)* |
 | JD | **The checker is tested on every `--check`**: its own table of good and bad literals, so `schema.generated` goes red the day the rule loosens, with no new ctest entry | implementer's call (the brief's optional `--self-test`, kept out of `tests/CMakeLists.txt` in a shared checkout) |
-| JE | **After a double Esc a fader taken for lane recording stays taken**, and shows the lane's start once, two ticks after the press - the one move the invariant accepts | the orchestrator's ruling (DN and DG kept), against the plan's "let go"; the author's to rule on |
+| JE | **After a double Esc a fader taken for lane recording stays taken**, and shows the lane's start once, two ticks after the press - the one move the invariant accepts | the orchestrator's ruling (DN and DG kept), against the plan's "let go"; the author's to rule on. *Overruled by the author, 2026-10-02: a double Esc frees the fader, Esc keeps it (KO, §23.15)* |
 | JF | **The invariant allows the clock and nothing else**: the engine's tick may change; a node may leave the tree, and none may appear or change | implementer's call |
 | JG | **The teardown is bounded**: every run over within four ticks of the press (three measured), and at most one level a voice after it | the review's |
 
@@ -15335,6 +15346,161 @@ takes" pass as they were, Esc now letting go of the hold rather than finding the
 over ten seconds - the sequence still advancing during the fade, the fade smooth, nothing heard
 when the members stop under silence at its end - and a footer that sends a value to the desk, sent
 once, at the end of the fade.
+
+### 23.15 A double Esc lets the lane's fader go, a pass ended by hand is a stop, and the show closing ends its notes (K4)
+
+**The rulings.** Three of the author's, 2026-10-02, each a part of this stage:
+
+- on the fader taken for lane recording (§20.9, DF-DN): *"a single Esc would keep the association
+  and double Esc would throw away the fader association"* - overruling JE (§23.11);
+- on the lane recorder's end of a pass by hand: a *"graceful stop"* - overruling GB (§23.6), which
+  had left it a kill "for the author to rule on";
+- on H4's named limit IX (§23.10): *"note off on quit"* - a note a cue left down when Go.dot quits
+  or the show closes gets its note-off.
+
+**A. The lane's fader.**
+
+*Before.* A double Esc killed the pass's run; on the next tick the recorder dropped the ride (DM) and
+said `lane.stop dropped`; the fader stayed taken (DN), and two ticks after the press
+`/godot/surface/laneRide` went from the hand's level to the lane's start (DG) - a motorised strip
+moved once, after the press that drops every action. JE kept that as "a surface's readout".
+
+*Since K4.* The double Esc's handler - the `run.killAll` wrapper in `registerGoCommands`, after the
+run table's half and H4's `dropOutputs` (IH) - calls `Runner::freeLane`, which does what `lane.free`
+does: the lane is forgotten, the strip is no longer taken, and a pass under way goes with it (its
+ride dropped, DM, nothing written). In the press's own drain, so from the next snapshot the strip
+rides what it rode before it was taken - its DCA's trim, or the sampler clip under it, whose claim
+the take never touched (DN) - the `laneRide` node leaves the tree, `lane` and `laneFader` read empty,
+and nothing is sent to the lane's start. No `lane.stop` follows: there is no pass left for the
+recorder to end. `lane.free` itself still refuses while a pass runs (`busy`): only the double Esc
+frees under a pass, as it drops every other action. Esc is unchanged: it ends the pass as the cue
+ending would - the ride written (DM) - and the fader stays taken, on the lane's node, ready for the
+next pass.
+
+**B. The hand's end of a pass.**
+
+*Before.* Rec pressed again, or the window's stop: `recordLane` wrote the ride, then ended the cue
+with `run.kill` - its voice's EQ and inserts emptied (since H3), the run marked `killed` and
+`skipFooter`.
+
+*Since K4.* It ends the cue with `run.stop`, no verb (`hard`) - what the pane's stop sends, and what
+a stopping scene's job sends each member. The voice is stopped, not cut: its EQ and insert tail
+rings out, as any stopped cue's does (§23.6, "Esc"). The run is not marked `killed`, so its ending
+is the normal one, and a persistent media cue is no longer suspended for the session by a pass
+ended by hand (decision S reads `killed`): the next GO's pass treats it as it treats any cue the
+pane stopped.
+
+*Which stop, under K2's rule (§23.13).* An abort, not an authored ending: the pass is the operator
+ending the cue by hand, exactly as the pane's stop is, and `run.stop` sets `stopEndsWait` - the cue
+owes no post-wait. An authored ending is a stop the show wrote (a stop cue, a fade that ends in a
+stop); nothing in the show asked for this one. The ride is written before the stop, as before, so
+nothing about the lane changes.
+
+**C. The show closing.**
+
+*Before.* `MidiSender::stop` - the only road out, through its destructor when `serve` returns:
+quitting, or the window going as another show opens in a process of its own - delivered what was
+still queued, and nothing more. A note a cue had started and nothing had ended rang on in the
+synth after Go.dot had gone (IX).
+
+*Since K4.* The sending thread's last delivery takes the queue with `SendQueue::takeAllForClose`:
+everything still waiting, in order, and after it one `0x8n key 0` - the double Esc's spelling - for
+every port, channel and key the note record (`NoteLedger`, IK) holds. A waiting cue message is
+counted into the record first, as it is about to leave, but only when its port has a device; so a
+note-on still queued is followed by its note-off, a cue's own note-off still queued ends its key
+and owes nothing more, and a message for a port with no device starts nothing. Nothing to a synth
+Go.dot never played: a surface's note-ons (LED colours) are never recorded (IQ), a port unbound or
+rebound forgot its keys (IM), and a note a double Esc already ended is out of the record. Taken under
+the queue lock with the devices looked up inside it, in the header's order (`queueMutex`, then
+`boundMutex`).
+
+*Bounded.* One pass over what is in hand, nothing retried by Go.dot. A device that has gone answers
+its send with an error at once. A driver that says it is not ready is retried by JUCE itself, fifty
+times with a millisecond's sleep between (`juce_Midi_windows.cpp`) - up to three quarters of a
+second at Windows' default timer - so a port that holds the thread more than 40 ms over a message of
+three bytes or fewer is taken as not taking messages, and is sent nothing more in that pass: the
+cost of a dead port is one message, not one per note. A SysEx's own wait is JUCE's, as it was
+before K4.
+
+**What does not change.** Esc drops nothing and ends no note; the pane's kill drops nothing of its
+run's output (IX's first half stands); a port switched off after its note-on still gets the note-off
+(§23.10); the surface bridge's traffic is never dropped and owes no note-off.
+
+**What it changes for a replay.**
+
+- **A** changes a handler's answer: `run.killAll` now frees the lane table. A replay re-runs the
+  handler and frees it in the same record, so a new log replays record for record. An older log
+  with a double Esc while a fader was taken would diverge after it - its engine `lane.stop dropped`
+  re-injected into a pass the replay has already freed, refused `not-running`, and a later
+  `lane.record` refused `no-fader`. No fixture holds the shape: the only fixture with a lane
+  (`lane-record`) has no double Esc, and the three with one (`mic`, `persistent`, `take`) take no
+  fader.
+- **B** is a hook's decision: the recorder submits `run.stop` where it submitted `run.kill`, and a
+  replay re-injects whichever the log holds. `lane-record.wfglog` holds the older `engine run.kill`
+  and replays as it played; not re-recorded.
+- **C** writes no record: the close is the sending thread's, after the last tick.
+
+Every `wfg.replay.*` fixture under C and fr_FR, with the black-box drivers `lane-record`,
+`lane-level` and `phase6-surfaces` under both: 64 of 64.
+
+**Tests**, each written first and run against the code before its change:
+
+- `LaneRecordTests` "a double Esc lets the taken fader go - its strip rides what it rode before, and
+  nothing moves it again" - replacing H5's "after a double Esc the taken fader keeps its strip and
+  rests where the lane starts" (§23.11), which pinned JE. The strip rides a DCA's trim before it is
+  taken; two subcases, in a pass with the hand at -9 and taken with no pass. After the press, in its
+  own drain, the lane not taken and forgotten; three ticks on, the strip's target the DCA's trim
+  again, `lane` and `laneFader` empty, the ride node gone (not at -20); after fifty more ticks
+  nothing moved, the drawn lane unchanged, and `lane.record` refused for want of a fader. Before:
+  both subcases failed - eleven checks and ten, the strip still on `/godot/surface/laneRide`.
+- `LaneRecordTests` "Esc keeps the taken fader, and the pass it ended keeps its ride" - after Esc
+  and its panic fade, the fader still taken on the lane's node, the ride written at -9, and the
+  next pass started with nothing taken again. A guard: passed before and after.
+- `LaneRecordTests` "the hand ending a pass stops its cue gracefully, and its tail rings" - the fake
+  audio side counts stops and kills apart: after `lane.stop` the voice stopped, never killed, the
+  run neither `killed` nor `skipFooter`, `stopEndsWait` set, the ride written. Before: failed on four
+  - one kill, no stop, `killed` and `skipFooter` set.
+- `MidiTests` "midi send queue: the show closing ends every note a cue started, once, and nothing
+  else" - the queue alone, seven subcases: a held note, exactly one note-off; a note-on still
+  waiting, then its note-off; one note-off a key, after a surface's SysEx still waiting. Built first
+  with the call declared and doing what the close did before (the queue, nothing after it), those
+  three failed. The four with nothing to end - a note a cue ended, a surface's note-on, a cue's
+  own note-off still waiting, a port with no device - are guards.
+- `MidiTests` "midi cue: closing the show sends exactly one note-off for a note a cue started, and
+  none for one it ended" - through the Runner, the sending thread's last delivery done by hand:
+  `0x81 60 0` once for a held note. Before: failed (nothing after the note-on). Its two guards - a
+  note ended by its own note-off, and by a double Esc's - passed before and after.
+- `GoTests` "double Esc: nothing Go.dot started keeps writing, for fifty ticks after" (H5): no
+  fader is taken in it, so nothing changed but its comment, which named JE as the one move
+  accepted.
+
+The new cases under C and `fr-FR`: 5 cases, 179 assertions each. Whole files under C:
+`LaneRecordTests` 11 cases, 290 assertions; `MidiTests` 30, 540; `GoTests` 306, 5414 - all green.
+
+**The decisions.** Letters follow §23.14's.
+
+| | Decision | Whose |
+|---|---|---|
+| KO | **A double Esc lets the lane's fader go, as `lane.free` would; Esc keeps it**: the lane forgotten, the strip back on what it rode, a pass under way dropped with its ride (DM) and no `lane.stop` after it; nothing sent to the lane's start. In the press's handler, beside `dropOutputs` (IH) | the author's, 2026-10-02, overruling JE; the handler, and freeing under a pass that `lane.free` would refuse, the implementer's |
+| KP | **The hand's end of a pass is `run.stop`** - the pane's stop: the voice stopped and its tail ringing, the run not `killed` (so decision S no longer suspends a persistent cue for it), and an abort under K2's rule (`stopEndsWait`, no post-wait), not an authored ending | the author's, 2026-10-02 ("graceful stop"), overruling GB; abort rather than authored ending the implementer's, the author's to overrule |
+| KQ | **The show closing ends every note a cue left down**: after what is still queued, one `0x8n key 0` a port, channel and key the note record holds, the queued cue messages for ports with a device counted first; nothing to a synth Go.dot never played | the author's, 2026-10-02 ("note off on quit"), closing IX's second half; after the queue, not ahead of it as the double Esc's, the implementer's |
+| KR | **The close is bounded per port**: one pass, nothing retried by Go.dot; a port that holds the thread more than 40 ms over a message of three bytes or fewer is sent nothing more in that pass | implementer's call |
+
+**Named limits.**
+
+- **A note held on a port taken out of the show while it runs** gets no note-off: the port's
+  release unbinds it, and its keys are forgotten with its device (IM). The close only reaches the
+  ports still bound when it comes.
+- **A process killed rather than closed** - a crash, Task Manager, the black-box harness's
+  `terminate()` - runs no destructor and sends nothing.
+- **A SysEx still queued at the close** can hold the thread as long as JUCE waits for it, as it
+  could before K4: the 40 ms cap is for short messages only.
+
+**Owed to the bench**, in `docs/handoffs/2026-09-06-audio-hardware-checklist.md` (items 17-19): a note held on a
+real synth, then the show closed - exactly one note-off, the note stops; a note a cue already
+ended - nothing; the D700 with a fader taken for a lane, then a double Esc - the fader goes back to
+what it rode, with no move to the lane's start; Esc - the fader stays on the lane; and Rec pressed
+again on a cue with a reverb insert - its tail rings out.
 
 ## 24. Doh! — taking back the last GO
 

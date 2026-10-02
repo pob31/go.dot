@@ -44,6 +44,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <string>
 #include <tuple>
@@ -134,6 +135,17 @@ namespace wfg::midi
 
         /** Everything still waiting, for the shutdown's last delivery. */
         std::deque<Outgoing> takeAll();
+
+        /*  THE SHOW CLOSING (2026-10-02, K4, namespace draft §23.15): everything
+            still waiting, in order, and after it one note-off for every key a
+            cue started and nothing ended - the double Esc's `0x8n key 0`, as no
+            cue's - so a synth Go.dot played is not left holding a note when the
+            port closes, and a synth it never played is sent nothing. A waiting
+            cue message is counted into the record first, as it will leave, but
+            only when `reaches` says its port has a device: one that has none
+            goes nowhere, and neither starts nor ends a note. The record is
+            emptied. */
+        std::deque<Outgoing> takeAllForClose (const std::function<bool (const std::string&)>& reaches);
 
         bool empty() const noexcept { return items.empty(); }
         std::size_t size() const noexcept { return items.size(); }

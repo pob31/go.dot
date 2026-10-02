@@ -14764,10 +14764,12 @@ TEST_CASE ("go.doh: the GO's cue deleted before the Doh - refused at the pointer
     prove nothing about one being stopped. MIDI is not here at all: H4's
     `MidiTests` cases are what cover a double Esc on it (§23.10).
 
-    THE ONE MOVE IT ACCEPTS is not here but in `LaneRecordTests`: a fader taken
-    for lane recording stays taken and shows the lane's start two ticks after
-    the press (decisions DN and DG, kept by JE). It is a surface's readout, not
-    an action on the show; the case there pins it for the author to rule on. */
+    THE ONE MOVE IT ACCEPTED is gone (2026-10-02, K4, namespace draft §23.15):
+    a fader taken for lane recording stayed taken and showed the lane's start
+    two ticks after the press (JE). The author ruled that a double Esc lets the
+    fader go, so its strip rides what it rode before and nothing is sent to the
+    lane's start - `LaneRecordTests`, "a double Esc lets the taken fader go".
+    No fader is taken here, so nothing in this case changed. */
 namespace
 {
     /*  A desk with a writable float fader, a writable integer scene and a

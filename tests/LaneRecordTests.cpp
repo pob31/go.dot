@@ -77,6 +77,16 @@ namespace
 
         bool stop (int track) override
         {
+            ++stops;
+            playing.erase (track);
+            return true;
+        }
+
+        /*  A kill empties the voice's EQ and inserts, where a stop lets them
+            ring (namespace draft §23.6): counted apart. */
+        bool kill (int track) override
+        {
+            ++kills;
             playing.erase (track);
             return true;
         }
@@ -101,6 +111,8 @@ namespace
 
         std::int64_t samples = 0;
         double lastLevel = 0.0;
+        int stops = 0;
+        int kills = 0;
         std::vector<cue::ArmRequest> arms;
         std::set<int> playing;
         std::set<int> ready;
@@ -477,21 +489,83 @@ TEST_CASE ("lane record: a pass nobody touched writes nothing, and a killed one 
     }
 }
 
-TEST_CASE ("lane record: after a double Esc the taken fader keeps its strip and rests where the lane starts, and nothing moves it again")
+TEST_CASE ("lane record: a double Esc lets the taken fader go - its strip rides what it rode before, and nothing moves it again")
 {
-    /*  THE ONE MOVE AFTER A DOUBLE ESC (2026-10-02, H5, namespace draft
-        §23.11). After the press nothing Go.dot started writes again
-        (`GoTests`, "nothing Go.dot started keeps writing") - but a fader taken
-        for lane recording stays taken (DN: only `lane.free`, or arming no cue,
-        lets it go), and once the killed pass is dropped (DM) the fader sits where
-        the lane starts again (DG), two ticks after the press. A motorised strip
-        follows that node, so the fader moves once, from the hand's -9 to the
-        lane's -20, and then never again.
+    /*  THE ASSOCIATION IS DROPPED WITH EVERYTHING ELSE (2026-10-02, K4, the
+        author: "double Esc would throw away the fader association"; namespace
+        draft §23.15, overruling JE of §23.11). A double Esc lets the fader go
+        as `lane.free` would: the strip goes back to what it rode before it was
+        taken, the lane is forgotten, the ride node leaves the tree - and the
+        fader is not sent to the lane's start first, as it was under JE. The
+        killed pass's ride is dropped as before (DM). From the press's own
+        handler, so a replay frees it in the same record. */
+    Rig rig;
+    rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -20");
 
-        Kept (decision JE): it is a surface's readout of the show, not an
-        action on it, and the hand that took the fader is the one that lets it
-        go. Pinned so that the day the author rules that a double Esc frees the
-        fader, this is the case that changes. */
+    /*  The strip rides a DCA's trim before it is taken: what it goes back to. */
+    const auto band = rig.document.createDca ("Band");
+    REQUIRE (band.ok);
+    rig.set ("/godot/slot/" + rig.strips[0] + "/role", "dca");
+    rig.set ("/godot/slot/" + rig.strips[0] + "/dca", band.id);
+
+    const auto target = "/godot/slot/" + rig.strips[0] + "/target";
+    const auto before = rig.published (target);
+    REQUIRE (before == "/godot/dca/" + band.id + "/trim");
+
+    SUBCASE ("in a pass")
+    {
+        rig.startPass();
+
+        rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+        rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
+        rig.play (30);
+
+        REQUIRE (rig.published (ride) == "-9");
+        REQUIRE (rig.published (target) == ride);
+    }
+
+    SUBCASE ("taken, no pass")
+    {
+        REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied >= 1);
+        REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window").applied >= 1);
+        rig.tickOnce();
+
+        REQUIRE (rig.published (target) == ride);
+        REQUIRE (rig.published (ride) == "-20");
+    }
+
+    REQUIRE (rig.send ("run.killAll", {}, "window").rejected == 0);
+
+    //  Let go in the press's own drain: nothing waits for a hook.
+    CHECK_FALSE (rig.lanes.taken());
+    CHECK_FALSE (rig.lanes.recording);
+    CHECK (rig.lanes.cue().empty());
+
+    rig.play (3);
+
+    CHECK (rig.published (target) == before);
+    CHECK (rig.published ("/godot/surface/laneFader").empty());
+    CHECK (rig.published ("/godot/surface/lane").empty());
+    CHECK (rig.published ("/godot/surface/laneRecording") == "false");
+    CHECK (rig.published (ride).empty());                  // the ride node is gone, not at -20
+
+    rig.play (50);
+
+    CHECK (rig.published (target) == before);
+    CHECK (rig.published (ride).empty());
+    CHECK_FALSE (rig.lanes.taken());
+    CHECK (rig.laneOfCue().size() == 1u);       // the drawn lane, any ride dropped (DM)
+
+    //  And a pass needs a fader again.
+    CHECK (rig.send ("lane.record").rejected == 1);
+}
+
+TEST_CASE ("lane record: Esc keeps the taken fader, and the pass it ended keeps its ride")
+{
+    /*  THE OTHER HALF OF THE AUTHOR'S RULING (2026-10-02, K4): "a single Esc
+        would keep the association". Esc ends the pass as the cue ending would -
+        the ride written (DM) - and the fader stays taken, on the lane's node,
+        ready for the next pass. A guard: Esc never freed it. */
     Rig rig;
     rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -20");
     rig.startPass();
@@ -500,22 +574,61 @@ TEST_CASE ("lane record: after a double Esc the taken fader keeps its strip and 
     rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
     rig.play (30);
 
-    REQUIRE (rig.published (ride) == "-9");
+    REQUIRE (rig.send ("run.stopAll", {}, "window").rejected == 0);
+    rig.play (60);                              // past the panic fade (1 s)
 
-    rig.send ("run.killAll", {}, "window");
+    CHECK_FALSE (rig.lanes.recording);
+    CHECK (rig.lanes.taken());
+    CHECK (rig.lanes.cue() == rig.mediaId);
+    CHECK (rig.lanes.strip() == rig.strips[0]);
+    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/target") == ride);
+    CHECK (rig.published ("/godot/surface/laneFader") == rig.strips[0]);
+
+    REQUIRE_FALSE (rig.laneOfCue().empty());
+    CHECK (doc::laneLevelDb (rig.laneOfCue(), 0.3) == doctest::Approx (-9.0));
+
+    //  The next pass needs nothing taken again.
+    CHECK (rig.send ("lane.record").rejected == 0);
+    CHECK (rig.lanes.recording);
+}
+
+TEST_CASE ("lane record: the hand ending a pass stops its cue gracefully, and its tail rings")
+{
+    /*  A STOP, NOT A KILL (2026-10-02, K4, the author's "graceful stop";
+        namespace draft §23.15, overruling GB of §23.6). Rec pressed again, or
+        the window's stop, writes the ride and then ends the cue as the pane's
+        stop does - `run.stop`, an abort that owes no post-wait (§23.13) - so
+        the voice is stopped and its EQ and inserts ring out, where a kill
+        emptied them; and the run is not marked killed. */
+    Rig rig;
+    rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -3");
+
+    const auto runId = rig.startPass();
+
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
+    rig.play (30);
+
+    const auto stopsBefore = rig.audio.stops;
+    REQUIRE (rig.audio.kills == 0);
+
+    rig.send ("lane.stop", {}, "window");
     rig.play (3);
 
     CHECK_FALSE (rig.lanes.recording);
     CHECK (rig.lanes.taken());
-    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/target") == ride);
-    CHECK (rig.published (ride) == "-20");
 
-    const auto settled = rig.published (ride);
-    rig.play (50);
+    const auto* run = rig.runs.find (runId);
+    REQUIRE (run != nullptr);
+    CHECK (rig.audio.kills == 0);                       // the tail is not cut
+    CHECK (rig.audio.stops > stopsBefore);              // the voice is stopped
+    CHECK_FALSE (run->killed);
+    CHECK_FALSE (run->skipFooter);
+    CHECK (run->stopEndsWait);                          // the pane's stop: an abort (§23.13)
 
-    CHECK (rig.published (ride) == settled);
-    CHECK (rig.lanes.taken());
-    CHECK (rig.laneOfCue().size() == 1u);       // the drawn lane, the ride dropped (DM)
+    //  And the ride is written, as before.
+    REQUIRE_FALSE (rig.laneOfCue().empty());
+    CHECK (doc::laneLevelDb (rig.laneOfCue(), 0.3) == doctest::Approx (-9.0));
 }
 
 TEST_CASE ("lane record: a touch with no move latches where the fader was, not at a level left over")

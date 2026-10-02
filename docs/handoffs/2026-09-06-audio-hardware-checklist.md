@@ -205,3 +205,22 @@ cable, and the sending thread's own timing.
 16. A lighting desk on a mount whose `rateCap` is low (two hertz): a cue writes, then another
     within half a second, then a double Esc - the second value never arrives at the desk, on the
     monitor or on the desk itself.
+
+## The show closing, the lane's fader, and a pass ended by hand — added by K4 (2026-10-02)
+
+Three of the author's rulings (namespace draft §23.15). Go.dot quitting, or its window going as
+another show opens, now sends a note-off for each note a cue left down, as a double Esc does; a
+double Esc lets a fader taken for lane recording go, where Esc keeps it; and Rec pressed again
+stops the pass's cue rather than killing it. The unit suite checks the queue at the close and the
+lane table; what it cannot check is a synth on a cable and a motor fader.
+
+17. A MIDI cue holds a note on a real synth. **Quit Go.dot** (or open another show so this window
+    goes): the note stops - exactly one `8n key 00` for it. The same with the note already ended by
+    a cue's own note-off: nothing more goes out at the quit.
+18. On the D700, a fader taken for a lane (Rec in the waveform, then touch the fader), a pass
+    running with the hand on it. **Double Esc**: the fader goes back to what it rode before it was
+    taken (its DCA, or the sampler clip on it) - no move to the lane's start first - and the strip's
+    screen no longer reads `lane`. **Esc** instead: the fader stays on the lane, and Rec starts the
+    next pass with nothing taken again.
+19. A media cue with a reverb insert, its lane recorded: **Rec pressed again** ends the pass and the
+    reverb's tail rings out - it is not cut, as it was before K4.
