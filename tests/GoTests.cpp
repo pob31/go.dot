@@ -8767,7 +8767,7 @@ namespace
     std::string goIntoRound (JumpRig& rig, std::map<std::string, std::int64_t>& since,
                              std::size_t roundToReach)
     {
-        rig.setStandby (rig.scene);
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
         REQUIRE (rig.submitAndTick ("go").rejected == 0);
 
         const auto* scene = rig.liveRunOf (rig.scene);
@@ -8868,6 +8868,9 @@ TEST_CASE ("seek: a scene that loops, shuffles or plays some of its members is s
         INFO ("member " << member);
         CHECK (runsOfCue (rig, member) == count);
     }
+
+    //  And the session replays record for record (K9's review).
+    CHECK (replayedStandby (rig) == rig.standby());
 }
 
 TEST_CASE ("seek: an automatic sequence that loops, sought in its second round, plays each member of it once")
@@ -8912,6 +8915,8 @@ TEST_CASE ("seek: an automatic sequence that loops, sought in its second round, 
     CHECK (runsOfCue (rig, rig.early) == 3u);
     CHECK (runsOfCue (rig, rig.middle) == 2u);
     CHECK (runsOfCue (rig, rig.late) == 2u);
+
+    CHECK (replayedStandby (rig) == rig.standby());
 }
 
 TEST_CASE ("seek: an automatic sequence sought between two of its members waits for the one due, and plays it once")
@@ -8941,6 +8946,8 @@ TEST_CASE ("seek: an automatic sequence sought between two of its members waits 
     CHECK (roundsDrawn (rig, sceneRun) == 2u);
     CHECK (runsOfCue (rig, rig.middle) == 2u);
     CHECK (runsOfCue (rig, rig.late) == 2u);
+
+    CHECK (replayedStandby (rig) == rig.standby());
 }
 
 TEST_CASE ("seek: a timeline with a header is sought once the header is over, and never into it")
@@ -8957,7 +8964,7 @@ TEST_CASE ("seek: a timeline with a header is sought once the header is over, an
 
     std::map<std::string, std::int64_t> since;
 
-    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
     REQUIRE (rig.submitAndTick ("go").rejected == 0);
 
     const auto* scene = rig.liveRunOf (rig.scene);
@@ -8999,6 +9006,8 @@ TEST_CASE ("seek: a timeline with a header is sought once the header is over, an
             INFO ("member " << member);
             CHECK (runsOfCue (rig, member) == 2u);    // the round's, and the seek's
         }
+
+        CHECK (replayedStandby (rig) == rig.standby());
     }
 
     SUBCASE ("while the header plays, or to a second inside it once it is over: nothing")
@@ -9039,6 +9048,8 @@ TEST_CASE ("seek: a timeline with a header is sought once the header is over, an
             INFO ("member " << member);
             CHECK (runsOfCue (rig, member) == 1u);
         }
+
+        CHECK (replayedStandby (rig) == rig.standby());
     }
 }
 
@@ -9070,6 +9081,8 @@ TEST_CASE ("seek: a looping scene a fade-and-stop is fading, sought within its r
     //  Down at the fade's end, a second and a half on - never a second round.
     CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since, 90));
     CHECK (roundsDrawn (rig, sceneRun) == 1u);
+
+    CHECK (replayedStandby (rig) == rig.standby());
 }
 
 TEST_CASE ("jump: into a timeline that loops plays round one from the second asked, and does not wait for ever")
@@ -9122,6 +9135,8 @@ TEST_CASE ("jump: into a timeline that loops plays round one from the second ask
         INFO ("member " << member);
         CHECK (runsOfCue (rig, member) == 2u);
     }
+
+    CHECK (replayedStandby (rig) == rig.standby());
 }
 
 TEST_CASE ("seek: the engine publishes which runs a seek would move, and a manual group is never one")
@@ -9135,7 +9150,7 @@ TEST_CASE ("seek: the engine publishes which runs a seek would move, and a manua
 
     SUBCASE ("a timeline that plays once, and the file it is playing")
     {
-        rig.setStandby (rig.scene);
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
         REQUIRE (rig.submitAndTick ("go").rejected == 0);
         playOn (rig, [] { return false; }, since, 25);
 
@@ -9160,7 +9175,7 @@ TEST_CASE ("seek: the engine publishes which runs a seek would move, and a manua
         const auto intro = rig.document.createCue (header.id, 0, "media", "Intro").id;
         REQUIRE (rig.document.setAttribute ("/godot/cue/" + intro + "/file", "thunder.wav").ok);
 
-        rig.setStandby (rig.scene);
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
         REQUIRE (rig.submitAndTick ("go").rejected == 0);
         REQUIRE (rig.liveRunOf (rig.scene) != nullptr);
         const auto sceneRun = rig.liveRunOf (rig.scene)->id;
@@ -9186,6 +9201,362 @@ TEST_CASE ("seek: the engine publishes which runs a seek would move, and a manua
         CHECK (seekableSaid (rig, rig.liveRunOf (rig.scene)->id) == "false");
         CHECK (seekableSaid (rig, rig.liveRunOf (rig.early)->id) == "true");
     }
+}
+
+//==============================================================================
+/*  K9'S REVIEW (2026-10-03, namespace draft §23.18): the shapes the round seek
+    and the round jump met and did not finish - a sequence sought to its round's
+    end, a looping scene long over read back from the history, a looping scene
+    inside another, a footer running, a seek at a round's boundary - and the
+    replays of each. */
+namespace
+{
+    /** Every member of a scene's newest round has a run, and every one is over. */
+    bool roundOver (JumpRig& rig, const std::string& groupRun)
+    {
+        const auto* scene = rig.runs.find (groupRun);
+
+        if (scene == nullptr || scene->round.empty())
+            return false;
+
+        for (const auto& cueId : scene->round)
+        {
+            const cue::Run* newest = nullptr;
+
+            for (const auto* child : rig.runs.childrenOf (groupRun))
+                if (child->cue == cueId)
+                    newest = child;
+
+            if (newest == nullptr || ! newest->isFinished())
+                return false;
+        }
+
+        return true;
+    }
+
+    std::string makeSequence (JumpRig& rig)
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/advance", "auto").ok);
+        return rig.scene;
+    }
+}
+
+TEST_CASE ("seek: a looping sequence sought past its round's end goes on to its next round")
+{
+    /*  Every member seated over, nothing awaited and nothing due: the sequence
+        looked for an armed member to launch, found none, and held for ever - no
+        next round, no footer, and the act around it never ended. */
+    JumpRig rig;
+    loopTwiceAtNought (rig);
+    makeSequence (rig);
+
+    std::map<std::string, std::int64_t> since;
+    const auto sceneRun = goIntoRound (rig, since, 1);
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (sceneSecondFor (rig, sceneRun, 30.0))
+                                            }).rejected == 0);
+
+    CHECK (rig.runs.find (sceneRun)->iteration == 1);
+    CHECK (playOn (rig, [&] { return roundsDrawn (rig, sceneRun) == 2u; }, since, 10));
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (roundsDrawn (rig, sceneRun) == 2u);
+
+    CHECK (replayedStandby (rig) == rig.standby());
+}
+
+TEST_CASE ("seek: a looping sequence sought into its last member's post-wait begins its next round when the post-wait ends")
+{
+    /*  The last member waits two seconds after it ends: the round is fourteen
+        seconds, not twelve. Sought thirteen seconds in, the member is in its
+        post-wait, and the next round begins a second later - not at once. */
+    JumpRig rig;
+    loopTwiceAtNought (rig);
+    makeSequence (rig);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.late + "/postWait", "2").ok);
+
+    std::map<std::string, std::int64_t> since;
+    const auto sceneRun = goIntoRound (rig, since, 1);
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (sceneSecondFor (rig, sceneRun, 13.0))
+                                            }).rejected == 0);
+    const auto seekTick = rig.tick - 1;
+
+    REQUIRE (playOn (rig, [&] { return roundsDrawn (rig, sceneRun) == 2u; }, since, 200));
+
+    const auto drawnAt = roundTicks (rig, sceneRun).back();
+    CHECK (drawnAt - seekTick >= 45);
+    CHECK (drawnAt - seekTick <= 60);
+
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (replayedStandby (rig) == rig.standby());
+}
+
+TEST_CASE ("seek: a sequence that plays once, sought past its end, runs its footer and ends")
+{
+    /*  The same hold, older than K9: the walk's seat of a sequence that plays
+        once, every member over, waited for an armed member for ever. */
+    JumpRig rig;
+    makeSequence (rig);
+
+    const auto footer = rig.document.createRole (rig.scene, "footer");
+    REQUIRE (footer.ok);
+    const auto lights = rig.document.createCue (footer.id, 0, "memo", "Lights").id;
+
+    std::map<std::string, std::int64_t> since;
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto sceneRun = rig.liveRunOf (rig.scene)->id;
+    playOn (rig, [] { return false; }, since, 25);
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (100.0) }).rejected == 0);
+
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since, 100));
+    CHECK (runsOfCue (rig, lights) == 1u);
+    CHECK (replayedStandby (rig) == rig.standby());
+}
+
+TEST_CASE ("jump: a load-to-time read from the history leaves out a looping scene that is over")
+{
+    /*  Two rounds of four seconds, GO'd, over, and a GO on the cue after it: a
+        jump to that cue read from the history placed the scene ten seconds in,
+        seated its round one at its end, and the scene drew its second round -
+        heard in a moment the show had silent. A scene the walk can size - its
+        rounds' count and length known - is over once that length has passed,
+        and is left out as a timed scene is. */
+    JumpRig rig;
+    loopTwiceAtNought (rig);
+
+    std::map<std::string, std::int64_t> since;
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto sceneRun = rig.liveRunOf (rig.scene)->id;
+
+    REQUIRE (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    playOn (rig, [] { return false; }, since, 50);
+
+    REQUIRE (rig.standby() == rig.after);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    playOn (rig, [] { return false; }, since, 25);
+
+    const auto before = runsOfCue (rig, rig.early);
+
+    REQUIRE (rig.jumpTo (rig.after, 0.5).rejected == 0);
+
+    CHECK (rig.liveRunOf (rig.scene) == nullptr);
+
+    playOn (rig, [] { return false; }, since, 300);
+    CHECK (rig.liveRunOf (rig.scene) == nullptr);
+    CHECK (runsOfCue (rig, rig.early) == before);
+}
+
+TEST_CASE ("jump: into a looping scene past its first round lands in the round it is in")
+{
+    /*  Two rounds of four seconds, every member at nought, jumped to five
+        seconds in: round two, a second in. The jump's round one was clamped to
+        its end, and the scene drew round two from its top. */
+    JumpRig rig;
+    loopTwiceAtNought (rig);
+
+    std::map<std::string, std::int64_t> since;
+
+    auto at = 5.0;
+
+    SUBCASE ("a timeline, five seconds in") {}
+    SUBCASE ("an automatic sequence, thirteen seconds in")
+    {
+        makeSequence (rig);
+        at = 13.0;              // its rounds are twelve seconds
+    }
+
+    REQUIRE (rig.jumpTo (rig.scene, at).rejected == 0);
+
+    const auto* scene = rig.liveRunOf (rig.scene);
+    REQUIRE (scene != nullptr);
+    const auto sceneRun = scene->id;
+    CHECK (scene->iteration == 2);
+
+    //  Its first member a second into round two.
+    const auto* first = liveUnder (rig, sceneRun, rig.early);
+    REQUIRE (first != nullptr);
+    CHECK (first->startOffset == doctest::Approx (1.0));
+
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (roundsDrawn (rig, sceneRun) == 0u);
+    CHECK (replayedStandby (rig) == rig.standby());
+}
+
+TEST_CASE ("jump: into a looping scene's pre-wait seats its members due, the pre-wait's rest still to run")
+{
+    JumpRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/loops", "2").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/preWait", "2").ok);
+
+    REQUIRE (rig.jumpTo (rig.scene, 1.0).rejected == 0);
+    const auto jumpTick = rig.tick - 1;
+
+    const auto* scene = rig.liveRunOf (rig.scene);
+    REQUIRE (scene != nullptr);
+
+    const auto* first = liveUnder (rig, scene->id, rig.early);
+    REQUIRE (first != nullptr);
+    CHECK (first->state == cue::runState::waiting);
+    CHECK (first->dueTick - jumpTick == 50);
+
+    std::map<std::string, std::int64_t> since;
+    const auto sceneRun = scene->id;
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (replayedStandby (rig) == rig.standby());
+}
+
+TEST_CASE ("seek: a looping scene inside a looping scene plays the inner one from its own point")
+{
+    /*  A fourth member of the scene: a timeline of its own that loops twice, one
+        four-second file - eight seconds in all. Five seconds into the outer
+        round it is in its second round, a second in. Seated with an offset and
+        nothing under it, its job had nothing to wait for and nothing to spawn,
+        and it - and the scene around it - waited for ever. */
+    JumpRig rig;
+    loopTwiceAtNought (rig);
+
+    const auto inner = rig.document.createCue (rig.scene, 3, "group", "Rain").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + inner + "/mode", "timeline").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + inner + "/loops", "2").ok);
+    const auto drop = rig.document.createCue (inner, 0, "media", "Drop").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + drop + "/file", "thunder.wav").ok);
+
+    std::map<std::string, std::int64_t> since;
+    std::string sceneRun;
+
+    SUBCASE ("scrubbed")
+    {
+        sceneRun = goIntoRound (rig, since, 1);
+        REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                                  osc::Value::float64 (sceneSecondFor (rig, sceneRun, 5.0))
+                                                }).rejected == 0);
+    }
+
+    SUBCASE ("jumped into, onto the inner scene's file a second in")
+    {
+        REQUIRE (rig.jumpTo (drop, 1.0).rejected == 0);
+        REQUIRE (rig.liveRunOf (rig.scene) != nullptr);
+        sceneRun = rig.liveRunOf (rig.scene)->id;
+    }
+
+    const auto* innerRun = liveUnder (rig, sceneRun, inner);
+    REQUIRE (innerRun != nullptr);
+
+    const auto innerId = innerRun->id;
+    const auto* dropRun = liveUnder (rig, innerId, drop);
+    REQUIRE (dropRun != nullptr);
+    CHECK (dropRun->startOffset == doctest::Approx (1.0));
+
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (replayedStandby (rig) == rig.standby());
+}
+
+TEST_CASE ("seek: a scene running its footer is not offered, and a seek then leaves the footer alone")
+{
+    JumpRig rig;
+
+    const auto footer = rig.document.createRole (rig.scene, "footer");
+    REQUIRE (footer.ok);
+    const auto outro = rig.document.createCue (footer.id, 0, "media", "Outro").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + outro + "/file", "thunder.wav").ok);
+
+    std::map<std::string, std::int64_t> since;
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto sceneRun = rig.liveRunOf (rig.scene)->id;
+
+    REQUIRE (playOn (rig, [&] { return rig.liveRunOf (outro) != nullptr; }, since));
+    playOn (rig, [] { return false; }, since, 5);
+
+    CHECK (seekableSaid (rig, sceneRun) == "false");
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (1.0) }).rejected == 0);
+
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+    CHECK (runsOfCue (rig, outro) == 1u);
+    CHECK (runsOfCue (rig, rig.early) == 1u);
+}
+
+TEST_CASE ("seek: one landing in the drain where a round ends and the next is drawn stays in the round it was in")
+{
+    /*  The old job's end of round - `run.round` and the next round's spawns - is
+        on its way in the very drain the seek lands in, behind it. Counted, the
+        scene read round two over round one's seated members, adopted round two's
+        spawns beside them and played both. */
+    JumpRig rig;
+    loopTwiceAtNought (rig);
+
+    std::map<std::string, std::int64_t> since;
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    const auto sceneRun = rig.liveRunOf (rig.scene)->id;
+
+    REQUIRE (playOn (rig, [&] { return roundsDrawn (rig, sceneRun) == 1u && roundOver (rig, sceneRun); }, since));
+
+    REQUIRE (rig.engine.submit ("cli", "run.seek", { osc::Value::string (sceneRun),
+                                                     osc::Value::float64 (sceneSecondFor (rig, sceneRun, 1.0)) }));
+    rig.tickOnce();
+
+    //  The race, really run: the seek, then round two's record, in one drain.
+    const auto seekRecord = firstApplied (rig, "run.seek", sceneRun);
+    REQUIRE (seekRecord.has_value());
+    const auto ticks = roundTicks (rig, sceneRun);
+    REQUIRE (ticks.size() == 2u);
+    REQUIRE (ticks.back() == seekRecord->tick);
+
+    CHECK (rig.runs.find (sceneRun)->iteration == 1);
+
+    CHECK (playOn (rig, [&] { return rig.runs.find (sceneRun)->isFinished(); }, since));
+
+    //  Round one's, the seek's, round two's: three heard each, and no fourth.
+    //  (The spawns the old job decided in that drain are made, as their
+    //  records name them, and over at once - never heard.)
+    for (const auto& member : { rig.early, rig.middle, rig.late })
+    {
+        INFO ("member " << member);
+        std::size_t heard = 0;
+
+        for (const auto& run : rig.runs.all())
+            if (run.cue == member && run.startedAtTick >= 0)
+                ++heard;
+
+        CHECK (heard == 3u);
+    }
+
+    CHECK (replayedStandby (rig) == rig.standby());
+}
+
+TEST_CASE ("seek: a running scene whose loops are edited is sought by the rounds it was fired with")
+{
+    /*  Fired to loop twice and edited to once while in its second round: the
+        run still plays two rounds, so the seek is within the round - not the
+        walk's reading of the edited show, which counted the second from the
+        top and put it past the scene's end. */
+    JumpRig rig;
+    loopTwiceAtNought (rig);
+
+    std::map<std::string, std::int64_t> since;
+    const auto sceneRun = goIntoRound (rig, since, 2);
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/loops", "1").ok);
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (sceneSecondFor (rig, sceneRun, 1.5))
+                                            }).rejected == 0);
+
+    CHECK (rig.runs.find (sceneRun)->iteration == 2);
+
+    const auto* first = liveUnder (rig, sceneRun, rig.early);
+    REQUIRE (first != nullptr);
+    CHECK (first->startOffset == doctest::Approx (1.5));
 }
 
 TEST_CASE ("seek: one landing in the drain where a looping scene draws its first round changes nothing either")

@@ -35,7 +35,7 @@ installDocument();
 
 const { tree } = await import("../../clients/console/plumbing/tree.js");
 const { timeCell, listRows } = await import("../../clients/console/views/didi.js");
-const { stateMark, offersSeek } = await import("../../clients/console/views/gogo.js");
+const { stateMark, offersSeek, sceneClock } = await import("../../clients/console/views/gogo.js");
 const { selection } = await import("../../clients/console/model/selection.js");
 const { folded } = await import("../../clients/console/model/remember.js");
 
@@ -163,6 +163,28 @@ test("a run offers the seek box where the engine says a seek would move it, and 
   assert.equal(offersSeek("ACT"), false);
   assert.equal(offersSeek("FILE"), true);
   assert.equal(offersSeek("WAIT"), false);      // no head to move before it plays
+});
+
+test("a running scene's row has a clock, the second its seek box means", () => {
+  /*  K9's review (2026-10-03, namespace draft §23.18). The box takes the
+      scene's own second - since it started, across its rounds - and the row
+      said "round 2 of 3" and no second at all, so the number typed had nothing
+      on screen to be read against. The clock is the run's `position`, which is
+      what the desktop's head is drawn at. */
+  const node = (path, type, value) => ({ FULL_PATH: path, TYPE: type, ACCESS: 1, VALUE: [value] });
+
+  serve([
+    node("/godot/run/S/kind", "s", "group"), node("/godot/run/S/state", "s", "playing"),
+    node("/godot/run/S/position", "d", 12.34),
+    node("/godot/run/W/kind", "s", "group"), node("/godot/run/W/state", "s", "waiting"),
+    node("/godot/run/W/position", "d", 0),
+    node("/godot/run/F/kind", "s", "media"), node("/godot/run/F/state", "s", "playing"),
+    node("/godot/run/F/position", "d", 3),
+  ]);
+
+  assert.equal(sceneClock("S"), "at 12.3s");
+  assert.equal(sceneClock("W"), "");      // not started: no clock to read
+  assert.equal(sceneClock("F"), "");      // a file's row says its own, against its length
 });
 
 test("the inspector keeps decisions and folds away what the engine says back", async () => {

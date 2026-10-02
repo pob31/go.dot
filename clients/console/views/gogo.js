@@ -81,6 +81,22 @@ function stateMark(state) {
          '" role="img" aria-label="' + esc(state) + '">' + mark + "</span>";
 }
 
+/*  A RUNNING SCENE'S CLOCK (K9's review, 2026-10-03, namespace draft §23.18):
+    the second its seek box means - the scene's own, since it started, across
+    its rounds - read off the run's `position`, which is where the desktop
+    draws its head. The row said "round 2 of 3" and no second at all, so a
+    number typed into the box had nothing on screen to be read against. Empty
+    for a scene not playing, and for every other kind: a file's row says its
+    own position, against its length. */
+function sceneClock(id) {
+  if (tree.run(id, "kind", "") !== "group") return "";
+  const state = tree.run(id, "state", "armed");
+  if (state !== "playing" && state !== "stopping") return "";
+
+  const position = Number(tree.run(id, "position", NaN));
+  return Number.isFinite(position) ? "at " + position.toFixed(1) + "s" : "";
+}
+
 /*  WHETHER A RUN'S ROW OFFERS THE SEEK BOX: playing, and the engine says a
     seek would move it (`run/seekable`, K9, namespace draft §23.18) - a sound,
     or a scene it can place a second in. */
@@ -146,6 +162,9 @@ function runRow(id, depth, out) {
     bits.push("at " + position.toFixed(1) + "s"
                 + (timed ? " of " + length.toFixed(1) + "s" : ""));
   }
+
+  const clock = sceneClock(id);
+  if (clock) bits.push(clock);
 
   /*  AND THE SPEED IT PLAYS AT, when that is not one (namespace draft §22.7):
       the run's own readout, which a fade moves. The position above counts the
@@ -223,7 +242,10 @@ function runRow(id, depth, out) {
       which the desktop never offered - and the engine moved none that loops,
       shuffles or has a header. One rule, the engine's, read the same way by
       both clients. The desktop scrubs by dragging; here a second is typed
-      (gestures/fields.js), the scene's own second as its row's clock reads. */
+      (gestures/fields.js): for a scene, the scene's own second since it
+      started, across its rounds - which the row's clock (`sceneClock`, K9's
+      review) shows - and the engine takes it within the round the scene is in.
+      Before the review the row had no such clock. */
   const seekable = offersSeek(id);
 
   out.push({ key: "run:" + id, html:
@@ -275,4 +297,4 @@ function renderRuns() {
   reconcile(pane, out);
 }
 
-export { renderRuns, stateMark, offersSeek };
+export { renderRuns, stateMark, offersSeek, sceneClock };

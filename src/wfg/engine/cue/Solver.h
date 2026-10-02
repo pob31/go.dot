@@ -114,6 +114,13 @@ namespace wfg::cue
 
         /** Not started yet: `startsIn` seconds from the jump. */
         inline constexpr const char* due = "due";
+
+        /*  OVER, AND IN ITS POST-WAIT for `startsIn` seconds more (K9's
+            review, 2026-10-03, namespace draft §23.18): a member of a round
+            sought between its end and the end of the wait written after it.
+            Its sequence goes on - or its round ends - when the wait has run,
+            not at once. */
+        inline constexpr const char* postWait = "postWait";
     }
 
     /** One cue in the plan, and where it should have got to. */
@@ -137,6 +144,14 @@ namespace wfg::cue
 
         /** Seconds from the jump until it starts. Only for `due`. */
         double startsIn = 0.0;
+
+        /*  FOR A SCENE THAT PLAYS ROUNDS (K9's review, 2026-10-03, §23.18):
+            which round the plan is in, counting from one, and the second of
+            `offset` at which that round began, or -1 for "when its own pre-wait
+            ended" - what the seat writes as its round and dates its round from.
+            A scene placed past every round it has is `finished`. */
+        int round = 1;
+        double roundFrom = -1.0;
     };
 
     /*  One value the desk should be holding, and who put it there.
@@ -296,9 +311,16 @@ namespace wfg::cue
         std::vector<Confusion> confused;
 
         /*  The second into the round it was solved at: the one asked for,
-            clamped to the round - nought at its start, its length at its end,
-            where every member is over. */
+            clamped to the round's end, where every member is over. Below
+            nought - a jump into the scene's own pre-wait - its members are due. */
         double at = 0.0;
+
+        /*  WHICH ROUND, when the caller asked for the second to be wrapped
+            into the scene's rounds (a jump, or a scene inside another): the
+            round's length is known, so a second past it is in a later round.
+            `over` when it is past every round the scene has. */
+        int round = 1;
+        bool over = false;
     };
 
     RoundPlan solveRound (const doc::ShowDocument& document,

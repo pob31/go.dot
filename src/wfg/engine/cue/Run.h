@@ -1132,7 +1132,10 @@ namespace wfg::cue
 
         /*  THE TICK THE DOH HANDED THIS RUN BACK ON - a group it brought back
             to life - or -1. Records its own hooks submitted in that tick, on
-            the state the Doh has just undone, are applied and ignored. */
+            the state the Doh has just undone, are applied and ignored. A seek
+            that re-seats a scene marks it the same way (K9's review,
+            2026-10-03, namespace draft §23.18, MS): its old job's decisions in
+            that tick are on a round the seek has just seated again. */
         std::int64_t unadoptedAt = -1;
 
         /*  WHAT IT WOULD SEND HAD ALREADY REACHED A DEVICE LEFT TO ITS OPERATOR

@@ -231,18 +231,36 @@ namespace wfg::cue
                          const std::map<std::string, double>* durations,
                          const juce::ValueTree& group, const std::vector<std::string>& round,
                          double seconds, const std::string& countedFrom,
-                         const std::vector<std::string>& stopped);
+                         const std::vector<std::string>& stopped, bool wrap = false);
+
+    void expandInnerRounds (const Reader& read, const doc::ShowDocument& document,
+                            const std::map<std::string, double>* durations,
+                            std::vector<PlannedRun>& runs, std::size_t from,
+                            const std::vector<std::string>& stopped,
+                            std::vector<Confusion>& confused);
+
+    std::optional<double> secondInScene (const Reader& read, const doc::ShowDocument& document,
+                                         const std::map<std::string, double>* durations,
+                                         const std::vector<std::string>& path, std::size_t at,
+                                         double offset);
+
+    void planTarget (const Reader& read, const doc::ShowDocument& document,
+                     const std::map<std::string, double>* durations,
+                     const Walk& walk, const Placed& target, double offset,
+                     const std::vector<std::string>& stopped, Plan& plan);
 
         /*  THE TARGET'S OWN PART OF A PLAN: its groups, outermost first, the
             members sounding beside it in its chain, and itself at the offset.
             One function for the two readings - the order's target and every
             step of the history's - so a scene is built the same way whichever
             clock placed it. `offset` is seconds into the target; the caller
-            has decided it has fired. */
-        void planTarget (const Reader& read, const doc::ShowDocument& document,
-                         const std::map<std::string, double>* durations,
-                         const Walk& walk, const Placed& target, double offset,
-                         const std::vector<std::string>& stopped, Plan& plan)
+            has decided it has fired. `planTarget`, below, is this and then
+            every looping scene it placed with nothing under it given its round
+            (K9's review). */
+        void planTargetOnce (const Reader& read, const doc::ShowDocument& document,
+                             const std::map<std::string, double>* durations,
+                             const Walk& walk, const Placed& target, double offset,
+                             const std::vector<std::string>& stopped, Plan& plan)
         {
             const auto wasStopped = [&stopped] (const std::string& cueId)
             {
@@ -419,28 +437,42 @@ namespace wfg::cue
                     which is what the seat writes as the round - at the second
                     the jump asks for: the aimed member's start in it plus the
                     offset, or the scene's own offset less its pre-wait when the
-                    scene itself is aimed at. Past the round's end it is clamped
-                    there: the round is over, and the scene goes on to its next
-                    round, or its end. Only the scene the target is, or is a
-                    member of: a looping scene further up stays as it was. */
-                std::string roundOf;
-                auto roundNode = juce::ValueTree {};
+                    scene itself is aimed at. (Past the round's end it was
+                    clamped there, and only the scene the target is, or is a
+                    member of, was seated; the review changed both, below.) */
+                /*  (K9's review, 2026-10-03:) ANY LOOPING SCENE ON THE TARGET'S
+                    PATH, and the scene seated is the outermost the machine
+                    paces above it - a timeline holding a looping scene the
+                    target is in is seated whole too, or it waited for its other
+                    members for ever. The second is the target's in that scene's
+                    round one, counted down the path (`secondInScene`), and
+                    WRAPPED into its rounds when their length is known: past
+                    round one is round two at its second (MN), and past every
+                    round the scene is over, seated done - never round one
+                    clamped to its end, which then drew the next round (MM).
+                    Below nought - aimed into its own pre-wait - its members are
+                    due, the rest of the pre-wait still to run (MR). */
+                std::vector<std::string> path (target.ancestors.begin(), target.ancestors.end());
+                path.push_back (target.id);
 
-                if (target.element == "Group" && roundSolvable (target.node) && ! walkTimes (target.node))
+                const auto nodeAt = [&document, &path, &target] (std::size_t index)
                 {
-                    roundOf = target.id;
-                    roundNode = target.node;
-                }
-                else if (! target.ancestors.empty())
-                {
-                    const auto parent = document.findById (target.ancestors.back());
+                    return index + 1 == path.size() ? target.node : document.findById (path[index]);
+                };
 
-                    if (parent.isValid() && roundSolvable (parent) && ! walkTimes (parent))
+                const auto looping = [] (const juce::ValueTree& node)
+                {
+                    return node.isValid() && roundSolvable (node) && ! walkTimes (node);
+                };
+
+                auto loopingAt = path.size();
+
+                for (auto index = path.size(); index-- > 0;)
+                    if (looping (nodeAt (index)))
                     {
-                        roundOf = target.ancestors.back();
-                        roundNode = parent;
+                        loopingAt = index;
+                        break;
                     }
-                }
 
                 const auto ownGroupOf = [&walk] (const std::string& groupId) -> const Placed*
                 {
@@ -462,42 +494,85 @@ namespace wfg::cue
                                                               : read.number (node, "cue", "preWait");
                 };
 
-                if (! roundOf.empty())
+                if (loopingAt < path.size())
                 {
+                    auto outer = loopingAt;
+
+                    while (outer > 0 && roundSolvable (nodeAt (outer - 1)))
+                        --outer;
+
+                    const auto roundOf = path[outer];
+                    const auto roundNode = nodeAt (outer);
                     const auto members = enabledMembers (read, roundNode);
                     const auto lead = ownPreWait (roundOf, roundNode);
-                    const auto aimedAtScene = roundOf == target.id;
+                    const auto aimedAtScene = outer + 1 == path.size();
+
+                    /*  A group aimed at counts its offset from its entry, its
+                        pre-wait among it; inside a round its start is where its
+                        pre-wait ended. */
+                    const auto ownOffset = target.element == "Group" && ! aimedAtScene
+                                             ? offset - read.number (target.node, "cue", "preWait")
+                                             : offset;
+
+                    const auto second = aimedAtScene
+                                          ? offset - lead
+                                          : secondInScene (read, document, durations, path, outer,
+                                                           ownOffset).value_or (0.0);
 
                     const auto round = planRound (read, document, durations, roundNode, members,
-                                                  aimedAtScene ? std::max (0.0, offset - lead) : offset,
-                                                  aimedAtScene ? std::string {} : target.id, stopped);
+                                                  second, {}, stopped, true);
 
-                    /*  The scene's own planned run says how far into it the
-                        round is, so its run reads that many seconds in - the
-                        convention a walked scene's offset has. */
-                    const auto sceneSeconds = lead + round.at;
+                    /*  WHAT THE ANCESTORS LOOP PUT BELOW THE SCENE goes: the
+                        round places those groups itself, under it. */
+                    const auto below = [&path, outer] (const PlannedRun& run)
+                    {
+                        return std::find (path.begin() + static_cast<std::ptrdiff_t> (outer) + 1,
+                                          path.end(), run.cue) != path.end();
+                    };
+
+                    plan.runs.erase (std::remove_if (plan.runs.begin(), plan.runs.end(), below),
+                                     plan.runs.end());
 
                     if (aimedAtScene)
                     {
                         PlannedRun run;
                         run.cue = target.id;
                         run.ancestors = target.ancestors;
-                        run.offset = sceneSeconds;
                         plan.runs.push_back (run);
                     }
-                    else
+
+                    PlannedRun* sceneRun = nullptr;
+
+                    for (auto& candidate : plan.runs)
+                        if (candidate.cue == roundOf)
+                            sceneRun = &candidate;
+
+                    if (sceneRun == nullptr)
+                        return;
+
+                    if (round.over)
                     {
-                        for (auto& sceneRun : plan.runs)
-                            if (sceneRun.cue == roundOf)
-                                sceneRun.offset = sceneSeconds;
+                        sceneRun->when = planned::finished;
+                        return;
                     }
+
+                    /*  The scene's own planned run says how far into it the
+                        round is, so its run reads that many seconds in - the
+                        convention a walked scene's offset has - and which round
+                        that is, and where it began. */
+                    const auto before = round.length.has_value() && round.round > 1
+                                          ? *round.length * static_cast<double> (round.round - 1)
+                                          : 0.0;
+
+                    sceneRun->offset = lead + before + round.at;
+                    sceneRun->round = round.round;
+                    sceneRun->roundFrom = lead + before;
 
                     /*  Its members under it, with the scene's own groups above
                         them: the round's runs count their ancestors from the
                         scene down. */
-                    std::vector<std::string> above (target.ancestors.begin(),
-                                                    std::find (target.ancestors.begin(),
-                                                               target.ancestors.end(), roundOf));
+                    const std::vector<std::string> above (path.begin(),
+                                                          path.begin() + static_cast<std::ptrdiff_t> (outer));
 
                     for (auto member : round.runs)
                     {
@@ -571,7 +646,7 @@ namespace wfg::cue
                          const std::map<std::string, double>* durations,
                          const juce::ValueTree& group, const std::vector<std::string>& round,
                          double seconds, const std::string& countedFrom,
-                         const std::vector<std::string>& stopped)
+                         const std::vector<std::string>& stopped, bool wrap)
     {
         RoundPlan out;
 
@@ -653,7 +728,7 @@ namespace wfg::cue
                     startKnown = false;
             }
             else
-                furthest = std::max (furthest, entry.to);
+                furthest = std::max (furthest, entry.to + read.number (entry.node, "cue", "postWait"));
         }
 
         if (everyLength)
@@ -662,8 +737,41 @@ namespace wfg::cue
         if (const auto from = out.starts.find (countedFrom); from != out.starts.end())
             seconds += from->second;
 
-        seconds = std::max (0.0, seconds);
+        /*  WRAPPED INTO THE SCENE'S ROUNDS, when the caller asks and the
+            arithmetic allows (K9's review, 2026-10-03, MM/MN): every member
+            plays every round (`play` nought, or as many as there are), so the
+            rounds are all as long as this one, whatever order a shuffle draws
+            - a sum or a furthest end does not depend on it. A second past the
+            first round is in a later one, at that second of it; past every
+            round the scene has, it is over. A scene that loops for ever only
+            wraps. */
+        if (wrap && seconds > 0.0 && out.length.has_value() && *out.length > 0.0)
+        {
+            const auto play = read.integer (group, "group", "play");
+            const auto everyMember = play <= 0 || static_cast<std::size_t> (play) >= round.size();
 
+            if (everyMember)
+            {
+                const auto whole = std::floor (seconds / *out.length);
+                const auto loops = read.integer (group, "group", "loops");
+
+                if (loops > 0 && whole >= static_cast<double> (loops))
+                {
+                    out.over = true;
+                    out.round = loops;
+                    out.at = *out.length;
+                    return out;
+                }
+
+                out.round = static_cast<int> (whole) + 1;
+                seconds -= whole * *out.length;
+            }
+        }
+
+        /*  Clamped to the round's end and never to its start (K9's review,
+            MR): below nought is a jump into the scene's own pre-wait, and its
+            members are due by the rest of it. A seek clamps its own second at
+            the round's start before it asks. */
         if (out.length.has_value())
             seconds = std::min (seconds, *out.length);
 
@@ -676,6 +784,29 @@ namespace wfg::cue
             if (made.cue != groupId)
                 out.runs.push_back (made);
 
+        /*  A MEMBER IN THE WAIT WRITTEN AFTER IT (K9's review, MO): over, and
+            the round not to go on until the wait has run. Placed over, the
+            sequence moved to its next member - or the round ended and the
+            next began - the moment the seek landed, the wait lost. */
+        for (const auto& entry : walk.placed)
+        {
+            if (entry.ancestors.size() != 1 || ! entry.timed)
+                continue;
+
+            const auto waits = read.number (entry.node, "cue", "postWait");
+
+            if (! (waits > 0.0) || seconds < entry.to || seconds >= entry.to + waits)
+                continue;
+
+            for (auto& made : out.runs)
+                if (made.cue == entry.id && made.when == planned::finished
+                     && made.ancestors.size() == 1)
+                {
+                    made.when = planned::postWait;
+                    made.startsIn = entry.to + waits - seconds;
+                }
+        }
+
         /*  A MEMBER WHOSE LENGTH IS NOT KNOWN is placed by its start alone, and
             says so: sounding from as far in as the round has gone if it has
             begun, due if not. In a sequence the members after it have no start
@@ -683,6 +814,7 @@ namespace wfg::cue
             as it would have. Without this a timeline with a file this build
             cannot read waited for that member's run for ever. */
         startKnown = true;
+        const auto before = out.runs.size();
 
         for (const auto& entry : walk.placed)
         {
@@ -719,8 +851,130 @@ namespace wfg::cue
                 startKnown = false;
         }
 
+        /*  And a looping scene among them placed by its start gets its round. */
+        expandInnerRounds (read, document, durations, out.runs, before, stopped, plan.confused);
+
         out.confused = plan.confused;
         return out;
+    }
+
+    //==============================================================================
+    void expandInnerRounds (const Reader& read, const doc::ShowDocument& document,
+                            const std::map<std::string, double>* durations,
+                            std::vector<PlannedRun>& runs, std::size_t from,
+                            const std::vector<std::string>& stopped,
+                            std::vector<Confusion>& confused)
+    {
+        /*  A LOOPING SCENE PLACED SOUNDING WITH NOTHING UNDER IT (K9's review,
+            2026-10-03, MP). The walk gives a scene that loops, shuffles or has
+            a header no seconds inside it, so a plan that placed one - inside a
+            round a seek solved, inside a walked scene, beside a jump's target -
+            placed the scene and nothing in it, and the seat made its job over
+            no members: a timeline spawns only when a round begins, a sequence
+            waits for an armed member, and it - and the scene around it - waited
+            for ever. So it gets its round, as a jump onto it does: round one
+            as written, solved at its own second (since its pre-wait ended, as a
+            chain counts a member's), wrapped into its rounds; over past every
+            round. Its own looping scenes come after it in the list and are
+            reached by the same loop. */
+        for (auto index = from; index < runs.size(); ++index)
+        {
+            const auto scene = runs[index];
+
+            if (scene.when != planned::sounding)
+                continue;
+
+            const auto node = document.findById (scene.cue);
+
+            if (! node.isValid() || node.getType().toString() != "Group"
+                 || ! roundSolvable (node) || walkTimes (node))
+                continue;
+
+            const auto underIt = std::any_of (runs.begin(), runs.end(),
+                                              [&scene] (const PlannedRun& other)
+                                              {
+                                                  return ! other.ancestors.empty()
+                                                           && other.ancestors.back() == scene.cue;
+                                              });
+
+            if (underIt)
+                continue;
+
+            const auto inner = planRound (read, document, durations, node, enabledMembers (read, node),
+                                          scene.offset, {}, stopped, true);
+
+            if (inner.over)
+            {
+                runs[index].when = planned::finished;
+                continue;
+            }
+
+            const auto began = inner.length.has_value() && inner.round > 1
+                                 ? *inner.length * static_cast<double> (inner.round - 1)
+                                 : 0.0;
+
+            runs[index].round = inner.round;
+            runs[index].roundFrom = began;
+
+            for (auto member : inner.runs)
+            {
+                member.ancestors.insert (member.ancestors.begin(), scene.ancestors.begin(),
+                                         scene.ancestors.end());
+                runs.push_back (member);
+            }
+
+            confused.insert (confused.end(), inner.confused.begin(), inner.confused.end());
+        }
+    }
+
+    std::optional<double> secondInScene (const Reader& read, const doc::ShowDocument& document,
+                                         const std::map<std::string, double>* durations,
+                                         const std::vector<std::string>& path, std::size_t at,
+                                         double offset)
+    {
+        /*  WHERE THE TARGET IS IN ROUND ONE OF THE SCENE `path[at]`, counted
+            down the path (K9's review): the walk of that round times the
+            target when every scene between is walked; otherwise the scene on
+            the path below this one has a start here, and the target's second
+            in it is asked of it the same way. Nothing when a start on the way
+            is not known. */
+        const auto node = document.findById (path[at]);
+
+        if (! node.isValid())
+            return std::nullopt;
+
+        const auto probe = planRound (read, document, durations, node, enabledMembers (read, node),
+                                      0.0, {}, {});
+
+        const auto& target = path.back();
+
+        if (const auto found = probe.starts.find (target); found != probe.starts.end())
+            return found->second + offset;
+
+        if (at + 1 >= path.size() || path[at + 1] == target)
+            return std::nullopt;
+
+        const auto child = probe.starts.find (path[at + 1]);
+
+        if (child == probe.starts.end())
+            return std::nullopt;
+
+        const auto inner = secondInScene (read, document, durations, path, at + 1, offset);
+
+        if (! inner.has_value())
+            return std::nullopt;
+
+        return child->second + *inner;
+    }
+
+    void planTarget (const Reader& read, const doc::ShowDocument& document,
+                     const std::map<std::string, double>* durations,
+                     const Walk& walk, const Placed& target, double offset,
+                     const std::vector<std::string>& stopped, Plan& plan)
+    {
+        const auto from = plan.runs.size();
+        planTargetOnce (read, document, durations, walk, target, offset, stopped, plan);
+        expandInnerRounds (read, document, durations, plan.runs, from, stopped, plan.confused);
     }
 
     RoundPlan solveRound (const doc::ShowDocument& document,
@@ -1194,6 +1448,36 @@ namespace wfg::cue
                 {
                     unplan (entry->id);
                     continue;
+                }
+
+                /*  AND ONE THAT LOOPS, OR SHUFFLES, ONCE EVERY ROUND IT HAS IS
+                    OVER (K9's review, 2026-10-03, MM). Its members have no
+                    seconds, but its rounds have a length when every member
+                    plays every round and none of their lengths is unknown, and
+                    no header is in the way: its pre-wait and that many rounds.
+                    Planned at the offset, a scene GO'd ten minutes before the
+                    instant was seated at the end of its first round, and drew
+                    its second - heard in a moment the show had silent. */
+                if (! timed && roundSolvable (entry->node) && ! walkTimes (entry->node)
+                      && ! endless (entry->id) && ! hasCuesIn (entry->node, "Header"))
+                {
+                    const auto members = enabledMembers (read, entry->node);
+                    const auto play = read.integer (entry->node, "group", "play");
+                    const auto loops = read.integer (entry->node, "group", "loops");
+
+                    if (loops > 0 && (play <= 0 || static_cast<std::size_t> (play) >= members.size()))
+                    {
+                        const auto probe = planRound (read, document, durations, entry->node, members,
+                                                      0.0, {}, {});
+
+                        if (probe.length.has_value()
+                              && seconds >= read.number (entry->node, "cue", "preWait")
+                                              + *probe.length * static_cast<double> (loops))
+                        {
+                            unplan (entry->id);
+                            continue;
+                        }
+                    }
                 }
             }
 

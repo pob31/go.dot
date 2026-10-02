@@ -2056,6 +2056,16 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  OVER, AND IN THE WAIT WRITTEN AFTER IT (K9's review, MO): its
+                round's sequence goes on when the wait has run. */
+            if (wants.when == planned::postWait)
+            {
+                run->state = runState::postWait;
+                run->dueTick = tick + ticksFor (wants.startsIn);
+                run->postWaitBegan = tick;
+                continue;
+            }
+
             /*  A STANDING SCENE ON ITS WAY OUT STAYS ON ITS WAY OUT (2026-10-02,
                 K3's review, namespace draft §23.14, KT). A seek re-seats where
                 the scene is, not whether it is ending: written `playing` over a
@@ -2125,19 +2135,28 @@ namespace wfg::cue
                 behind the seek counts one more: it reads round two of one, and,
                 playing once, still ends after this round. Its members spawned
                 in that same drain are the older fault beside it - they are made
-                a second time under the scene the seek has just seated. */
+                a second time under the scene the seek has just seated.
+                (K9's review, 2026-10-03, MS: no longer - `seekGroup` marks the
+                scene re-seated in this tick, and the `run.round` and the
+                spawns its old job decided are applied and ignored.) */
             if (madeHere || run->iteration < 1)
             {
                 run->iterations = static_cast<int> (numberOf (cue, "loops"));
                 run->seed = static_cast<std::int32_t> (numberOf (cue, "seed"));
                 run->round = membersOf (cue);
-                run->iteration = 1;
+
+                /*  THE ROUND THE PLAN SAYS (K9's review, MN): one, unless the
+                    plan wrapped a scene's second into a later round of it. */
+                run->iteration = std::max (1, wants.round);
 
                 /*  Its round began when its pre-wait ended, as the seat dates
                     it (K9): the seconds a seated scene's offset counts include
-                    its own pre-wait, the walk's convention. */
-                run->roundStartedAtTick = run->launchRequestedAtTick + run->preWaitTicks;
-                run->firstRoundAtTick = run->roundStartedAtTick;
+                    its own pre-wait, the walk's convention - or where the plan
+                    says a later round began. */
+                run->firstRoundAtTick = run->launchRequestedAtTick + run->preWaitTicks;
+                run->roundStartedAtTick = wants.roundFrom >= 0.0
+                                            ? run->launchRequestedAtTick + ticksFor (wants.roundFrom)
+                                            : run->firstRoundAtTick;
             }
 
             /*  A SCENE DOH! CARRIES ON is seated at the level it had at the
@@ -2203,6 +2222,17 @@ namespace wfg::cue
             {
                 run->state = runState::waiting;
                 run->dueTick = tick + ticksFor (wants.startsIn);
+                continue;
+            }
+
+            /*  OVER, AND IN THE WAIT WRITTEN AFTER IT (K9's review, MO): its
+                sequence moves on, or its round ends, when the wait has run -
+                `run.done` at the deadline, as for any post-wait. */
+            if (wants.when == planned::postWait)
+            {
+                run->state = runState::postWait;
+                run->dueTick = tick + ticksFor (wants.startsIn);
+                run->postWaitBegan = tick;
                 continue;
             }
 
@@ -2360,6 +2390,31 @@ namespace wfg::cue
 
             job.launched = job.phaseRuns.size();
 
+            /*  A SCENE THE MACHINE PACES SEATED WITH NONE OF ITS MEMBERS (K9's
+                review, 2026-10-03, MP): nothing in the plan placed them - their
+                lengths unknown, a scene the walk could not reach - and a job in
+                its members phase over no members waited for ever, a timeline
+                spawning only when a round begins and a sequence only after a
+                member it awaits. So it begins its round from the top: entered,
+                its header passed over as already run, its round drawn as a GO
+                draws one. Counted from nought, so the round drawn is its
+                first. Handler state; the job is the scheduler's. Not for a
+                scene Doh! carries on, which seats what it had as D2 says. */
+            if (job.phaseRuns.empty() && roundSolvable (cue) && resume == nullptr)
+            {
+                if (auto* bare = runs.find (job.run))
+                {
+                    bare->iteration = 0;
+                    bare->round.clear();
+                }
+
+                job.phase = groupPhase::entering;
+                job.phaseCues.clear();
+                job.prepared = membersOf (cue.getChildWithName ("Header"));
+                scheduled.push_back (job);
+                continue;
+            }
+
             /*  A SEQUENCE ADVANCES ON THE MEMBER IT IS WAITING FOR, so
                 `nextMember` is where the plan left off rather than the end of
                 the list - otherwise the chain would stop at the jump.
@@ -2418,7 +2473,9 @@ namespace wfg::cue
         if (run.kind == "media")
             return ! run.takenBack && document.findById (run.cue).isValid();
 
-        if (run.kind != "group")
+        /*  NOR A SCENE DOH! TOOK BACK (K9's review, MV), coming down under
+            the Doh's fade as a sound it took back is. */
+        if (run.kind != "group" || run.takenBack)
             return false;
 
         const auto group = document.findById (run.cue);
@@ -2429,21 +2486,65 @@ namespace wfg::cue
             at any second, in its own pre-wait too (HV); any other the machine
             paces, once it has begun a round - which its header, if it has
             one, has finished by then (K9, the author's ruling). */
-        if (! roundSolvable (group) || listOfCue (run.cue).empty())
+        if (! roundSolvable (group))
             return false;
 
-        return walkTimes (group) || (run.iteration >= 1 && ! run.round.empty());
+        /*  IN A LIST, climbed from the node in hand rather than asked of the
+            show again (K9's review, MW: this is asked every tick). */
+        auto inList = false;
+
+        for (auto up = group.getParent(); up.isValid(); up = up.getParent())
+            if (up.getType().toString() == "List")
+            {
+                inList = true;
+                break;
+            }
+
+        if (! inList)
+            return false;
+
+        /*  NOR WHILE ITS FOOTER RUNS (K9's review, MU): its members are over
+            and its release has begun. A seek ended the footer's cues and
+            seated the round again, and the footer ran twice. A footer cue's
+            run is the scene's child from the spawn that made it, so the run
+            table says so. */
+        for (const auto& child : run.children)
+            if (const auto* below = runs.find (child); below != nullptr && isFooterCueOf (run, below->cue))
+                return false;
+
+        return seeksAsWritten (run, group) || (run.iteration >= 1 && ! run.round.empty());
+    }
+
+    bool Runner::seeksAsWritten (const Run& run, const juce::ValueTree& group) const
+    {
+        /*  WHAT THE RUN WAS FIRED WITH, not what the show says now (K9's
+            review, MX): one round, and - once it has drawn it - that round the
+            members as written, in order. A scene fired to loop twice and edited
+            to once while it plays still plays two rounds, and a seek on it
+            counts across them from the top only if this says so; asked of the
+            document alone, its second was read as the walk's, past the end of
+            the one round the edited show has. The shape the walk needs (no
+            header, every member, in order) is still the document's. */
+        if (! walkTimes (group) || run.iterations != 1)
+            return false;
+
+        return run.iteration < 1 || run.round == membersOf (group);
     }
 
     void Runner::mirrorSeekable()
     {
-        /*  Written only where it changes: a finished run answers at once and
-            keeps its nought, so the table is not searched for every run it
-            has ever held, every tick. */
+        /*  Written only where it changes, and asked only of a run that is
+            playing - the only state a client offers the scrub in (K9's
+            review, MW): a finished run, or one waiting or armed, reads false
+            without a walk of the show, every tick. */
         for (const auto& snapshot : runs.all())
-            if (const auto now = seekableNow (snapshot); now != snapshot.seekable)
+        {
+            const auto now = snapshot.state == runState::playing && seekableNow (snapshot);
+
+            if (now != snapshot.seekable)
                 if (auto* run = runs.find (snapshot.id))
                     run->seekable = now;
+        }
     }
 
     bool Runner::seekMedia (Engine& engine, std::int64_t tick, const std::string& runId,
@@ -2585,6 +2686,12 @@ namespace wfg::cue
             and no step moved. */
         const auto sceneCue = run->cue;
 
+        /*  WHAT THE PANES ARE TOLD (`run/seekable`) IS WHAT IS DONE (K9's
+            review): a scene running its footer, or one Doh! took back, is left
+            as it is whichever road it would take. */
+        if (! seekableNow (*run))
+            return used;
+
         const auto group = document.findById (sceneCue);
 
         std::vector<PlannedRun> wanted;
@@ -2593,8 +2700,9 @@ namespace wfg::cue
         /*  A SCENE THE WALK TIMES AS WRITTEN - a timeline or an automatic
             sequence that plays its members once, in order, with no header - is
             asked of the solver at that second, exactly as a jump asks it, in
-            its own pre-wait too (HV). */
-        if (walkTimes (group))
+            its own pre-wait too (HV). As written by the RUN (K9's review, MX):
+            fired to play once, and playing the members in order. */
+        if (seeksAsWritten (*run, group))
         {
             /*  Only the part under the scene is taken: what the solver found
                 for the rest of the list is the jump's business, and a scrub on
@@ -2780,6 +2888,18 @@ namespace wfg::cue
         }
 
         seatPlan (engine, tick, wanted, runFor, nextId);
+
+        /*  AND WHAT ITS OLD JOB DECIDED IN THIS TICK IS NOBODY'S (K9's review,
+            2026-10-03, MS). A seek drained in the tick a round ends finds the
+            job's `run.round` and the next round's spawns on their way behind
+            it, decided on the round the seek has just seated again: counted,
+            the scene read the next round over this one's members and played
+            both. They are applied and ignored, as the records a Doh hands back
+            are (D2's `unadoptedAt`, the same mark and the same reading: the
+            run was re-seated in this tick, and its hooks' decisions in it are
+            on a state that is gone). */
+        if (auto* seated = runs.find (runId))
+            seated->unadoptedAt = tick;
 
         /*  The scene's step follows it: fired, as far as the history is now
             concerned, `seconds` ago. */

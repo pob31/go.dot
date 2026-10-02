@@ -781,6 +781,11 @@ namespace wfg::cue
             scrub where this says yes and nowhere else. */
         bool seekableNow (const Run& run) const;
 
+        /*  Whether a seek on this scene takes the walk's road - fired to play
+            once, its round the members as written - rather than its round's
+            (K9's review, MX): the run's own record, and the walk's shape. */
+        bool seeksAsWritten (const Run& run, const juce::ValueTree& group) const;
+
         /*  Where the media lengths live, for the solve behind a jump.
 
             Held by pointer and not owned, exactly as the parameter tree holds

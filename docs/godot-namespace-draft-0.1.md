@@ -16333,13 +16333,21 @@ comes, as it would have (MA).
 **The second (LW).** What a client sends is the scene's own second, as `run/<id>/position` reads it
 - it counts from `started` and spans the rounds - so the scrub bar needs no new arithmetic: the
 desktop's head is still `position`, its extent still the longest member, and the console's box
-still a second of the scene. The engine takes off where the round began: `run.round`'s handler now
+still a second of the scene *(K9's review, 2026-10-03, MQ: the console's row had no clock to read
+that second against - only "round 2 of 3" - and now says the scene's `position`, "at 41.3s")*.
+The engine takes off where the round began: `run.round`'s handler now
 stamps `roundStartedAtTick` (and `firstRoundAtTick`, the first round's) from its own tick, and the
 seat that puts a run in a round without drawing one dates them from its pre-wait's end and moves
 them with the scene's `launchRequestedAtTick` whenever it re-dates the scene. Before the round's
 start the second is the round's start; **past the round's end it is the end** - the round is over
 there and then, and the scene goes on as it would at that moment, to its next round or to its
-footer and its end. A seek never reaches into a round not yet drawn. A scene with a header - cues
+footer and its end. *(K9's review, 2026-10-03: an automatic sequence placed there - every member
+over, nothing awaited, nothing due - held for ever, and a sequence that plays once sought past its
+end did too, older than K9; D2's wait on the newest member over, §24.12, which landed between,
+lets both go on, and K9's cases now hold it (MT). And a round's end counts the wait written after
+its last member: sought into that wait, the member is seated in it and the round goes on when the
+wait has run, not at once (MO).)* A seek never reaches into a round not yet drawn.
+A scene with a header - cues
 in it that are enabled - whose second falls before its first round began is in its header (or its
 pre-wait), and nothing happens. The scene's run is re-dated so its `position` reads the round's
 start plus the second placed, and its step in the history moves with it.
@@ -16357,6 +16365,10 @@ start plus the second placed, and its step in the history moves with it.
   second - and one counted from the sounding member spawned the next again beside the run seated
   due. And a seat with nothing sounding - between two members, in a post-wait or the next one's
   pre-wait - waits on the member due first; it waited for an armed member nothing would arm.
+  *(K9's review, 2026-10-03:)* a member seated due fires on the walk's tick, not on its sounding
+  neighbour's end: a member ending earlier than its file says - stopped by hand - leaves a gap
+  before the next, where a sequence the scheduler runs would close it. A small change from J1's
+  seat, which played the next member twice to avoid it.
 - **A scene a fade-and-stop is bringing down stays `stopping`** (KT, §23.14): the round seek goes
   through the same seat, and a case holds it for a looping scene.
 
@@ -16366,7 +16378,11 @@ member in the order written, which is what the seat writes as the round (HU) - s
 at the aimed member's start in it plus the offset, or, aimed at the scene itself, at its offset
 less its own pre-wait; clamped as a seek is. The scene's planned offset is its pre-wait plus that
 second, the convention a walked scene's has. `unknown-round` still says "round one". A looping scene
-further up than the target's own is as it was.
+further up than the target's own is as it was. *(K9's review, 2026-10-03: the scene seated is now
+the outermost one the machine paces above any looping scene on the target's path, the second
+counted down the path; it is wrapped into the scene's rounds when their length is known - round
+two at its second, or over past every round (MN, MM) - and a jump into the scene's own pre-wait
+seats its members due (MR).)*
 
 **The readout (LX).** `/godot/run/<id>/seekable`, `T`, read-only, `persist = none`: whether a
 `run.seek` sent now would move the run. `Runner::seekableNow` answers it - the gate `seekGroup` asks
@@ -16379,6 +16395,9 @@ reads it into `RunRow::seekable` (it was `timedGroup`, worked out from the cue's
 `RunPaneComponent::scrubbable` offers the drag on a playing run that says yes - a media run also
 needing a head and a length, as before; the console's `offersSeek` (`views/gogo.js`) offers the box
 on the same. The console's rule had no sampler exclusion; the readout has it for both.
+*(K9's review, 2026-10-03: it is also no while the scene's footer runs (MU) and for a scene Doh!
+took back (MV), and the seek's handler asks it on both roads; it is mirrored only for a run that
+is playing, the list it is in found by climbing from the node in hand (MW).)*
 
 **Not changed, and worth knowing:**
 
@@ -16387,7 +16406,11 @@ on the same. The console's rule had no sampler exclusion; the readout has it for
 - **A looping scene nested further down a scene, or further up than a jump's target**: the round
   seek places the round's own nested scenes as the walk does, and one the walk cannot time inside it
   is seated by its offset with nothing under it, as before; a jump seats only the round of the
-  scene its target is, or is a member of.
+  scene its target is, or is a member of. *(Changed by K9's review, 2026-10-03, MP: seated so, it
+  and the scene around it waited for ever. A looping scene placed sounding with nothing under it
+  now gets its round at its own second, wrapped into its rounds; a jump seats the outermost scene
+  the machine paces above a looping one on its path; and a scene seated with none of its members
+  placed begins its round from the top.)*
 - **A seek or a jump into a play-N or shuffled scene's first round, made by a jump**: the seat's
   round is the members as written (HU), so it plays all of them, in order - as it did on J1.
 - **A member of unknown length**, placed by its start (MA), is relaunched at the second it would be
@@ -16461,17 +16484,125 @@ clang-tidy with the GCC warnings finds nothing in `Solver.cpp`, `Runner.cpp`, `R
 | | Decision | Whose |
 |---|---|---|
 | LV | **A running scene the machine paces is sought within the round it is in**: a timeline or an automatic sequence that loops, shuffles or plays some of its members, once a round has begun, its round solved as if it played once (`solveRound`) with the run's own round - order and subset - and its count and seed kept; one with a header once the header is over; a manual group and a sampler bank never | the author's, 2026-10-02 |
-| LW | **The seek's second is the scene's own, as `position` reads it**, and the round's is that less where the round began (`roundStartedAtTick`, stamped by `run.round`'s handler); before the round's start it is the start, past its end the end - the round over and the scene going on to its next round or its footer; a second before the first round of a scene with a header is in the header, and changes nothing | the author asked for it decided and recorded; the scene's own second (so the scrub bar and the console box change nothing) and the clamp at the start, the implementer's; the clamp past the end, the author's |
+| LW | **The seek's second is the scene's own, as `position` reads it**, and the round's is that less where the round began (`roundStartedAtTick`, stamped by `run.round`'s handler); before the round's start it is the start, past its end the end - the round over and the scene going on to its next round or its footer; a second before the first round of a scene with a header is in the header, and changes nothing | the author asked for it decided and recorded; the scene's own second (so the scrub bar and the console box change nothing) and the clamp at the start, the implementer's; the clamp past the end, the author's. *Corrected by K9's review (2026-10-03): the end is the end of the wait after the last member (MO), and a sequence placed there goes on as a timeline does (MT); the console shows the second (MQ)* |
 | LX | **The engine publishes `run/<id>/seekable`**, from the function the seek's handler asks (`seekableNow`), and both clients offer the scrub where it says yes and nowhere else; the console gains the sampler exclusion with it | the author asked for one place and it decided and recorded; the readout's shape, the implementer's |
-| LY | **A jump onto a scene the walk cannot time, or onto one of its members, seats round one whole**: every enabled member in the order written, solved as a round is, at the aimed member's start plus the offset, or the scene's offset less its pre-wait | the author's, 2026-10-02 ("seat it at round one's members from the right point"); the scene the target is or is a direct member of only, the implementer's |
+| LY | **A jump onto a scene the walk cannot time, or onto one of its members, seats round one whole**: every enabled member in the order written, solved as a round is, at the aimed member's start plus the offset, or the scene's offset less its pre-wait | the author's, 2026-10-02 ("seat it at round one's members from the right point"); the scene the target is or is a direct member of only, the implementer's *(widened by K9's review: MM, MN, MP, MR)* |
 | LZ | **A seated sequence counts on from its last member seated, and with nothing sounding waits on the member due first**: no member played twice, no seat between two members held for ever | implementer's call: both faults of J1's seat, which LV's sequences would have met at once |
 | MA | **A member of unknown length in a round is placed by its start**: sounding from as far as the round has gone, or due; in a sequence the members after it are left to the job to spawn | implementer's call: placed by nothing, a timeline with an unreadable file waited for it for ever |
 
 **Owed to the bench:** on the desktop, a looping rain scene in its third round: the head drags
 inside the round and the sound follows; dragged left past the round's start it plays the round from
-its top; dragged right past its end the next round begins. A scene with a header: no drag offered
-while the header plays, then offered. A manual act: no drag, no seek box in the console. A jump onto
+its top; dragged right past its end the next round begins - an automatic sequence's too, and one
+whose last member waits after it once the wait has run (K9's review). A scene with a header: no drag
+offered while the header plays, then offered, and gone again while its footer runs.
+A manual act: no drag, no seek box in the console. A jump onto
 the second member of a looping timeline: it plays, from that member's second, and goes on looping.
+
+**K9's review (2026-10-03).** Three hangs or audible faults first, then the rest. Built on D2
+(§24.12), which had landed meanwhile and touches the same seat.
+
+1. **A sequence sought to its round's end, or past it, stopped for ever** - every member seated
+   over, nothing awaited, nothing due; the sequence looked for an armed member, never drew its next
+   round, never ran its footer, and the act around it never ended. The same through a sequence that
+   plays once sought past its end (older, J1). D2's seat already waits on the newest member over
+   (§24.12), which lets both go on; K9 adds nothing for it, and its cases hold it (MT) - built with
+   D2's line taken out, both hang. **And the wait after a round's last member** is the round's: the
+   round's length counts each member's post-wait, and a member sought inside its post-wait is
+   seated in it (`planned::postWait`, state `postWait`, `run.done` at the deadline), so the
+   sequence goes on - or the next round begins - when the wait has run (MO).
+2. **A load-to-time played again a looping scene that had ended long ago.** Read from the history,
+   a scene GO'd ten minutes before the instant was planned at its offset, seated at round one's
+   end, and drew round two - heard in a moment the show had silent. The history now leaves out a
+   scene the walk cannot time once its pre-wait and every round have passed, when its rounds have a
+   length - every member plays every round, none of unknown length, no header (MM). And the jump's
+   seat wraps its second into the scene's rounds: round two at its second (the run's `iteration`,
+   its round dated from where it began), done past every round (MN, MM).
+3. **A looping scene nested inside a sought round, a walked scene or a jump's path waited for
+   ever** - seated sounding with an offset and nothing under it, its job had nothing to spawn or
+   await. A plan now gives any such scene its round (`expandInnerRounds`, after every `planTarget`
+   and every round): round one as written, solved at its own second, wrapped into its rounds. A
+   jump seats the outermost scene the machine paces above a looping one on its path, the target's
+   second counted down the path (`secondInScene`). And a scene the machine paces seated with none
+   of its members placed - lengths unknown - begins its round from the top, its header passed over
+   (never for a seat Doh! makes) (MP).
+4. **`seekable` said yes while a scene ran its footer**, and a seek ended the footer's cues and
+   seated the round again: the footer ran twice. No while any child run's cue is a footer cue (MU).
+5. **The console's box had no clock**: the row said "round 2 of 3", the box took the scene's second
+   across rounds. The row now says the scene's `position` - "at 41.3s" - which is what the desktop's
+   head is drawn at (`sceneClock`, MQ).
+6. **Replays.** Every K9 case and every case below replays its session record for record (the
+   pointer parked through `standby.set`, so the replay has it).
+7. **A seek at a round's boundary played members twice**: the old job's `run.round` and the next
+   round's spawns, decided in the tick the seek lands, applied behind it - round two counted over
+   round one's seated members, and its spawns adopted beside them. The seek marks the scene
+   re-seated in its tick - D2's `unadoptedAt`, the same mark with the same reading - and those
+   records are applied and ignored, the spawns born done and never heard (MS). It also closes the
+   race §23.8 left, where the first `run.round` behind a seek counted "round two of one".
+8. **A scene Doh! took back could be sought**: not any more (MV).
+9. **Cost**: `seekable` is mirrored only for a playing run, and the list a scene is in is found by
+   climbing from its node (MW).
+10. **The road from the run's own record**: the walk's road only for a run fired to play once whose
+    round is its members as written; a scene fired to loop twice and edited to once keeps its
+    round's road (`seeksAsWritten`, MX).
+11. **A jump into a looping scene's pre-wait** skipped the rest of it: its members are seated due,
+    the walk's convention (MR).
+
+**Tests**, each run first on the tree before these fixes (K9 and D2), in `GoTests` unless said:
+
+- "seek: a looping sequence sought past its round's end goes on to its next round" and "seek: a
+  sequence that plays once, sought past its end, runs its footer and ends" - pass on the tree
+  (D2's wait); built with D2's line taken out, the first draws no next round and never ends, the
+  second never ends and runs no footer.
+- "seek: a looping sequence sought into its last member's post-wait begins its next round when the
+  post-wait ends" - before: the next round a tick after the seek (`1 >= 45`).
+- "jump: a load-to-time read from the history leaves out a looping scene that is over" - before:
+  the scene seated live and its members played again (`4 == 2`).
+- "jump: into a looping scene past its first round lands in the round it is in" (a timeline five
+  seconds in, an automatic sequence thirteen) - before: round one (`1 == 2`), nothing sounding.
+- "jump: into a looping scene's pre-wait seats its members due, the pre-wait's rest still to run" -
+  before: the first member armed at once (`-1 == 50`).
+- "seek: a looping scene inside a looping scene plays the inner one from its own point" (scrubbed;
+  jumped onto the inner scene's file) - before: no run under the inner scene, and the scene never
+  ended.
+- "seek: a scene running its footer is not offered, and a seek then leaves the footer alone" -
+  before: `true == false`, the footer and the members twice.
+- "seek: one landing in the drain where a round ends and the next is drawn stays in the round it
+  was in" - the race really run (the seek and round two's record in one drain, the seek first);
+  before: round two (`2 == 1`).
+- "seek: a running scene whose loops are edited is sought by the rounds it was fired with" -
+  before: nothing under the scene (the walk read its second past the edited show's end).
+- `tests/console/views.test.mjs` "a running scene's row has a clock, the second its seek box means"
+  - before: no `sceneClock`.
+- And `replayedStandby` added to every K9 case. MV has no case of its own (a scene Doh! took back,
+  sought): the gate is one condition, read where `seekMedia`'s is.
+
+**Counts.** The seek and jump cases (36, the client's among them) under C and `fr-FR`: 940
+assertions each, green. `GoTests` whole under C: 363 cases, 7577 assertions; `ClientTests`: 111,
+4706; `SolverTests`, `SequenceTests`, `RunTests`, `AnalysisTests`, `TreeTests`, `SamplerTests`,
+`UndoTests`: 144, 5762. `ctest -R "wfg\.replay|console|client|schema"`: 66 of 66; `node --test
+tests/console/*.test.mjs`: 119 of 119. `scripts/check-comments.py` and the schema check pass;
+clang-tidy with the GCC warnings finds nothing in `Solver.cpp` and `Runner.cpp`.
+
+**What it changes for a replay.** `list.loadToTime`'s plans change for a scene that loops - left
+out when over, wrapped into its rounds, nested ones given theirs - and `run.seek`'s for a sequence's
+post-wait and a nested scene; a log holding one replays differently. The re-seated mark makes a
+`run.round` or `run.spawn` of the old job, in the seek's own tick, applied and ignored, where it was
+applied: a log holding that race replays differently. No fixture holds either.
+
+| | Decision | Whose |
+|---|---|---|
+| MM | **A looping scene that is over is over**: read from the history it is left out once its pre-wait and every round have passed, when the rounds have a length; a jump's seat past every round seats it done | the review's |
+| MN | **A jump's second is wrapped into the scene's rounds**: round n at its second, the run's `iteration` and its round's start written by the seat; only when every member plays every round, and otherwise round one as before | the review's; the condition, the implementer's |
+| MO | **A round ends when the wait after its last member has run**: the round's length counts post-waits, and a member sought inside its own post-wait is seated in it | the implementer's, on the review's case |
+| MP | **A looping scene placed with nothing under it gets its round**, at its own second; a jump seats the outermost scene the machine paces above a looping one on its path; a scene seated with none of its members begins its round from the top | the review's (both of its fixes, the recursion first) |
+| MQ | **The console's scene row has a clock**: its `position`, the second its seek box means | the review's |
+| MR | **A jump into a looping scene's pre-wait seats its members due** | the review's |
+| MS | **A seek marks the scene re-seated in its tick** (D2's `unadoptedAt`), so what its old job decided in that tick is applied and ignored | the review's; the mark reused rather than a second field, the implementer's |
+| MT | **A sequence placed with every member over goes on**: D2's wait on the newest member over, which K9 relies on and its cases hold | D2's, recorded here |
+| MU | **No seek while a scene's footer runs** | the review's |
+| MV | **No seek on a scene Doh! took back** | the review's |
+| MW | **`seekable` is mirrored only for a playing run** | the review's |
+| MX | **The seek's road is the run's record**: the walk's only for a run fired to play once whose round is its members as written | the review's |
 
 ## 24. Doh! — taking back the last GO
 
