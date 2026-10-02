@@ -439,6 +439,11 @@ namespace wfg::client::ui
                 continue;
 
             list.scrollToEnsureRowIsOnscreen (row);
+
+            //  The pick follows the box, so the inspector is about the cue being written.
+            if (actions.pick)
+                actions.pick (entry.id, false, false);
+
             beginEdit (row, cell);
             return;
         }
@@ -448,11 +453,21 @@ namespace wfg::client::ui
     {
         /*  THE ARROWS MOVE BETWEEN CELLS, committing as they go (author,
             2026-09-18: "arrows allow to navigate in neighbouring fields while
-            validating any edits"); Tab and shift-Tab go along the row too. */
+            validating any edits"); Tab and shift-Tab go along the row too.
+
+            LEFT AND RIGHT MOVE THE CARET FIRST (author, 2026-10-02: "could
+            the jump only occur when the cursor reaches the start or end of
+            the line?"): they leave the box only from a caret already at that
+            end with nothing highlighted. The box opens with its text
+            highlighted, so the first press collapses it, as anywhere else. */
+        const auto caretOnly = getHighlightedRegion().isEmpty();
+        const auto atStart = caretOnly && getCaretPosition() <= 0;
+        const auto atEnd   = caretOnly && getCaretPosition() >= getTotalNumChars();
+
         if (key == juce::KeyPress (juce::KeyPress::upKey))    { owner.moveEdit (-1, 0); return true; }
         if (key == juce::KeyPress (juce::KeyPress::downKey))  { owner.moveEdit (+1, 0); return true; }
-        if (key == juce::KeyPress (juce::KeyPress::leftKey))  { owner.moveEdit (0, -1); return true; }
-        if (key == juce::KeyPress (juce::KeyPress::rightKey)) { owner.moveEdit (0, +1); return true; }
+        if (key == juce::KeyPress (juce::KeyPress::leftKey)  && atStart) { owner.moveEdit (0, -1); return true; }
+        if (key == juce::KeyPress (juce::KeyPress::rightKey) && atEnd)   { owner.moveEdit (0, +1); return true; }
         if (key == juce::KeyPress (juce::KeyPress::tabKey))   { owner.moveEdit (0, +1); return true; }
         if (key == juce::KeyPress (juce::KeyPress::tabKey, juce::ModifierKeys::shiftModifier, 0))
                                                               { owner.moveEdit (0, -1); return true; }

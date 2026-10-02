@@ -213,14 +213,22 @@ namespace wfg::client
                                                       the panel opens only if no second click follows in
                                                       the system's double-click time - so the list is not
                                                       relaid out under the second click, which was what
-                                                      moved the cells from under the pointer. */
+                                                      moved the cells from under the pointer.
+
+                                                      AN INSPECTOR ALREADY OPEN STAYS OPEN (author,
+                                                      2026-10-02): the list keeps its width, so there
+                                                      is nothing to wait out, and closing it for the
+                                                      wait only to open it again was a blink on every
+                                                      change of pick. */
+                                                  const auto open = shell->panel() == ui::Shell::Panel::inspector;
                                                   inspectorHeld = false;
                                                   inspectorDueAt = juce::Time::getMillisecondCounter()
-                                                                   + (extend || toggle || id.empty()
+                                                                   + (open || extend || toggle || id.empty()
                                                                         ? 0u
                                                                         : static_cast<juce::uint32> (juce::MouseEvent::getDoubleClickTimeout()));
                                               };
-                listActions.editingBegan    = [this] { inspectorHeld = true; };
+                //  A box opened in the list holds a closed inspector shut; an open one stays.
+                listActions.editingBegan    = [this] { inspectorHeld = shell->panel() != ui::Shell::Panel::inspector; };
                 listActions.pickAll         = [this] { selection.all (show.rows()); inspectNow(); };
                 listActions.removeChosen    = [this] { removeChosen(); };
 
