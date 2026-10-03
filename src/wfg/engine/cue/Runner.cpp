@@ -245,7 +245,8 @@ namespace wfg::cue
         return out;
     }
 
-    audio::EqSettings Runner::eqOf (const juce::ValueTree& cue) const
+    audio::EqSettings Runner::eqOf (const juce::ValueTree& cue,
+                                   const std::map<std::string, double>* moved) const
     {
         /*  THROUGH THE SCHEMA, for the reason resolveRouting gives: the
             canonical writer omits every attribute at its default, so a cue
@@ -273,6 +274,12 @@ namespace wfg::cue
         };
         const auto number = [&] (const char* name)
         {
+            /*  WHAT A FADE MOVED THE RUN'S TO (namespace draft §26), newer
+                than the lock's ride. Numbers only: a fade moves no switch. */
+            if (moved != nullptr)
+                if (const auto faded = moved->find (std::string ("eq/") + name); faded != moved->end())
+                    return static_cast<float> (faded->second);
+
             if (const auto* held = riding (name))
                 if (const auto value = osc::parseDouble (*held))
                     return static_cast<float> (*value);
@@ -4309,7 +4316,8 @@ namespace wfg::cue
     std::vector<Coefficient> Runner::resolveRouting (const juce::ValueTree& cue,
                                                      int trackChannels,
                                                      std::string& problem,
-                                                     int chainChannels) const
+                                                     int chainChannels,
+                                                     const std::map<std::string, double>* moved) const
     {
         std::vector<Coefficient> out;
         problem.clear();
@@ -4582,6 +4590,10 @@ namespace wfg::cue
                 return {};
         }
 
+        /*  The mixes this cue sends into, so a fade's send into one it does not
+            is told apart (namespace draft §26). */
+        std::vector<std::string> sentTo;
+
         for (const auto& destination : cue)
         {
             const auto element = destination.getType().toString();
@@ -4645,6 +4657,17 @@ namespace wfg::cue
 
                 if (riding != nullptr && riding->on.has_value())
                     on = *riding->on == "true";
+
+                /*  AND WHAT A FADE MOVED IT TO TONIGHT (namespace draft §26,
+                    OZ): newer than the lock's ride, and the run's alone. Its
+                    switch is the cue's still - a fade moves numbers (PB). */
+                const auto busId = destination[juce::Identifier ("bus")].toString().toStdString();
+
+                if (moved != nullptr)
+                    if (const auto held = moved->find ("send/" + busId); held != moved->end())
+                        level = held->second;
+
+                sentTo.push_back (busId);
 
                 if (! sendInto (bus, level, on))
                     return {};
@@ -4715,13 +4738,40 @@ namespace wfg::cue
                 if (! bus.isValid())
                     continue;
 
-                const auto level = osc::parseDouble (send->level.value_or ("0")).value_or (0.0);
+                auto level = osc::parseDouble (send->level.value_or ("0")).value_or (0.0);
                 const auto on = send->on.value_or ("true") == "true";
+
+                if (moved != nullptr)
+                    if (const auto held = moved->find ("send/" + send->bus); held != moved->end())
+                        level = held->second;
+
+                sentTo.push_back (send->bus);
 
                 if (! sendInto (bus, level, on))
                     return {};
             }
         }
+
+        /*  AND THE MIXES A FADE BROUGHT IN FROM SILENCE (namespace draft §26,
+            PB): a bus the cue has no send into, faded up tonight - a send of
+            the run alone, which the cue never holds. A bus that has gone is
+            not there, as a live send's is not. */
+        if (moved != nullptr)
+            for (const auto& [entry, level] : *moved)
+            {
+                if (entry.rfind ("send/", 0) != 0)
+                    continue;
+
+                const auto busId = entry.substr (5);
+
+                if (std::find (sentTo.begin(), sentTo.end(), busId) != sentTo.end())
+                    continue;
+
+                const auto bus = busNamed (busId);
+
+                if (bus.isValid() && ! sendInto (bus, level, true))
+                    return {};
+            }
 
         return out;
     }
@@ -4752,7 +4802,14 @@ namespace wfg::cue
         const auto levelOn = textOf (cue, "levelOn") != "false";
         const auto rateOn = textOf (cue, "rateOn") == "true";
 
-        if (! levelOn && (! rateOn || ! textOf (cue, "dca").empty()))
+        /*  AND WHAT ELSE OF THE TARGET'S IT MOVES (namespace draft §26): its
+            sends, EQ numbers and plugin values, each a job of its own under
+            this fade's one report (PC). A DCA has none of them. */
+        const auto moves = textOf (cue, "dca").empty()
+                             ? readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx"))
+                             : std::vector<FadeMove> {};
+
+        if (! levelOn && ((! rateOn && moves.empty()) || ! textOf (cue, "dca").empty()))
         {
             if (auto* selfRun = runs.find (runId))
                 selfRun->state = runState::playing;
@@ -4795,7 +4852,16 @@ namespace wfg::cue
                                                     numberOf (cue, "duration"),
                                                     fadeCurveFrom (textOf (cue, "curve")),
                                                     stopWhenDone && ! levelOn,
-                                                    ! levelOn);
+                                                    ! levelOn && moves.empty());
+
+        /*  THE TARGET'S OWN NUMBERS (§26), carrying the stop only when
+            neither the level nor the speed does; and saying "nothing to move"
+            only when nothing else here moves either. */
+        if (! moves.empty())
+            beginMoveFades (tick, textOf (cue, "target"), runId, moves,
+                            numberOf (cue, "duration"), fadeCurveFrom (textOf (cue, "curve")),
+                            stopWhenDone && ! levelOn && ! speedMoves,
+                            ! levelOn && ! speedMoves);
 
         if (levelOn)
             beginFade (tick, cue[idProperty].toString().toStdString(),
@@ -5440,6 +5506,7 @@ namespace wfg::cue
         job.dca = dcaId;
         job.self = selfRunId;
         job.fromDb = dcas != nullptr ? dcas->trimOf (dcaId) : 0.0;
+        job.handSerial = dcas != nullptr ? dcas->handSerialOf (dcaId) : 0;
         job.toDb = toDb;
         job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
         job.curve = curve;
@@ -5449,6 +5516,252 @@ namespace wfg::cue
             noteLevelTouch (key, {}, dcaId, false, job.fromDb, job.toDb, tick, movingBefore);
 
         running.push_back (job);
+    }
+
+    bool Runner::beginMoveFades (std::int64_t tick,
+                                 const std::string& targetCueId, const std::string& selfRunId,
+                                 const std::vector<FadeMove>& moves, double seconds, FadeCurve curve,
+                                 bool stopWhenDone, bool alone)
+    {
+        auto* selfRun = runs.find (selfRunId);
+
+        if (selfRun == nullptr)
+            return false;
+
+        selfRun->state = runState::playing;
+
+        //  Nothing to move, said once - by this when nothing else here moves.
+        const auto nothing = [&] (std::string failure)
+        {
+            if (! alone)
+                return false;
+
+            FadeJob orphan;
+            orphan.self = selfRunId;
+            orphan.failure = std::move (failure);
+            running.push_back (orphan);
+            return false;
+        };
+
+        if (! targetCueId.empty() && ! document.findById (targetCueId).isValid())
+            return nothing (runError::badTarget);
+
+        /*  A MEDIA OR A MIC RUN, sounding (§3.8's silent no-op otherwise): a
+            group has no sends, EQ or inserts of its own (§4.12), and a memo
+            has no sound. */
+        const auto* live = runs.liveRunOf (targetCueId);
+
+        if (live == nullptr || (live->kind != "media" && live->kind != "mic"))
+            return nothing ({});
+
+        const auto targetId = live->id;
+        const auto touched = ofTheOpenGo (selfRunId) && goOfRun (targetId) != goRecord.serial;
+        const auto ticks = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
+        auto first = true;
+
+        for (const auto& move : moves)
+        {
+            const auto key = "move:" + targetId + ":" + move.entry;
+            std::optional<FadeJob> movingBefore;
+
+            if (touched)
+                for (const auto& before : running)
+                    if (before.target == key && ! before.retired && goOfRun (before.self) != goRecord.serial)
+                        movingBefore = before;
+
+            /*  FROM WHERE IT HAS GOT TO, read before the takeover lets the job
+                moving it go - the value it holds is the run's either way. */
+            auto* target = runs.find (targetId);
+
+            if (target == nullptr)
+                return ! first;
+
+            const auto from = movedValueNow (*target, move.entry);
+            const auto takeover = resolveTakeover (key);
+
+            target = runs.find (targetId);
+
+            if (target == nullptr)
+                return ! first;
+
+            FadeJob job;
+            job.target = key;
+            job.self = selfRunId;
+            job.move = move.entry;
+            job.moveRun = targetId;
+            job.moveDomain = move.domain;
+            job.fromValue = std::isfinite (from) ? from : move.value;
+            job.toValue = move.value;
+            job.ticksTotal = ticks;
+            job.curve = curve;
+
+            /*  THE STOP, on the first job only, and one a takeover inherited
+                keeps its tick (KS), as a level's does. */
+            const auto stopsHere = stopWhenDone && first;
+
+            if (takeover.keepStopping)
+            {
+                job.stopWhenDone = true;
+                job.stopsAtTick = stopsHere ? std::min (takeover.stopsAtTick, tick + ticks)
+                                            : takeover.stopsAtTick;
+            }
+            else if (stopsHere)
+            {
+                job.stopWhenDone = true;
+                job.stopsAtTick = tick + ticks;
+            }
+
+            if (job.stopWhenDone)
+                target->askStop (goOfRun (selfRunId));
+
+            /*  A VALUE THE GO MOVED (Doh! D3, namespace draft §26 PE), as a
+                level is noted in `beginFade`: put back with it. */
+            if (touched)
+            {
+                noteLevelTouch (key, targetId, {}, false, job.fromValue, job.toValue, tick, movingBefore);
+
+                for (auto& note : goChanges.levels)
+                    if (note.key == key)
+                    {
+                        note.move = move.entry;
+                        note.moveDomain = move.domain;
+                    }
+            }
+
+            running.push_back (job);
+            first = false;
+        }
+
+        return ! first;
+    }
+
+    double Runner::movedValueNow (const Run& run, const std::string& entry) const
+    {
+        if (const auto held = run.moved.find (entry); held != run.moved.end())
+            return held->second;
+
+        static const Reader schema;
+        const auto cue = document.findById (run.cue);
+        const auto cueId = run.cue;
+
+        std::string kind, name;
+        int index = -1;
+
+        if (! cue.isValid() || ! splitMoveEntry (entry, kind, name, index))
+            return std::numeric_limits<double>::quiet_NaN();
+
+        if (kind == "send")
+        {
+            for (const auto& child : cue)
+            {
+                if (! child.hasType ("Send") || child.getProperty ("bus").toString().toStdString() != name)
+                    continue;
+
+                const auto sendId = child.getProperty ("id").toString().toStdString();
+
+                if (liveLayer != nullptr)
+                    if (const auto* riding = liveLayer->sendOf (sendId); riding != nullptr && riding->level.has_value())
+                        if (const auto level = osc::parseDouble (*riding->level))
+                            return *level;
+
+                return schema.number (child, "send", "level");
+            }
+
+            if (liveLayer != nullptr)
+                for (const auto& sendId : liveLayer->createdSendsOf (cueId))
+                    if (const auto* send = liveLayer->sendOf (sendId); send != nullptr && send->bus == name)
+                        return osc::parseDouble (send->level.value_or ("0")).value_or (0.0);
+
+            //  A mix the cue does not send into is silence, and fades up from it (PB).
+            return -120.0;
+        }
+
+        if (kind == "eq")
+        {
+            if (liveLayer != nullptr)
+                if (const auto* riding = liveLayer->rowOf (cueId, name))
+                    if (const auto value = osc::parseDouble (*riding))
+                        return *value;
+
+            return schema.number (cue, "sound", name.c_str());
+        }
+
+        //  A plugin value: the cue's insert of that entry, then what it rides.
+        for (const auto& child : cue)
+        {
+            if (! child.hasType ("Fx") || child.getProperty ("plugin").toString().toStdString() != name)
+                continue;
+
+            const auto fxId = child.getProperty ("id").toString().toStdString();
+
+            if (liveLayer != nullptr)
+                if (const auto* riding = liveLayer->fxValuesOf (fxId))
+                    if (const auto value = riding->find (index); value != riding->end())
+                        return value->second;
+
+            const auto values = parseFxValues (schema.text (child, "fx", "values"));
+
+            if (const auto value = values.find (index); value != values.end())
+                return value->second;
+
+            break;
+        }
+
+        /*  A PARAMETER THE CUE NEVER SET rests at the entry's preset, which
+            only the plugin knows; the catalogue's default is the nearest this
+            side can say. With no catalogue it is not known at all, and the
+            fade starts where it ends. */
+        if (catalogues != nullptr)
+        {
+            const auto setEntry = document.findById (name);
+
+            if (setEntry.isValid() && setEntry.hasType ("Plugin"))
+                if (const auto catalogue = catalogues->find (setEntry.getProperty ("identifier").toString().toStdString()))
+                    if (index >= 0 && index < static_cast<int> (catalogue->params.size()))
+                        return static_cast<double> (catalogue->params[static_cast<std::size_t> (index)].defaultValue);
+        }
+
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    void Runner::releaseMovesOf (const std::string& runId)
+    {
+        std::vector<std::string> keys;
+        const auto head = "move:" + runId + ":";
+
+        for (const auto& job : running)
+            if (job.target.rfind (head, 0) == 0
+                  && std::find (keys.begin(), keys.end(), job.target) == keys.end())
+                keys.push_back (job.target);
+
+        for (const auto& key : keys)
+            resolveTakeover (key);
+    }
+
+    std::string Runner::moveWords (const std::string& entry) const
+    {
+        std::string kind, name;
+        int index = -1;
+
+        if (! splitMoveEntry (entry, kind, name, index))
+            return entry;
+
+        if (kind == "send")
+            return "send to " + deviceLabel ("bus", name);
+
+        if (kind == "fx")
+            return deviceLabel ("plugin", name) + " parameter " + std::to_string (index + 1);
+
+        //  eqB2Gain -> "EQ band 2 gain", eqHpfFreq -> "EQ high-pass frequency".
+        if (name == "eqHpfFreq")
+            return "EQ high-pass frequency";
+
+        if (name == "eqLpfFreq")
+            return "EQ low-pass frequency";
+
+        const auto suffix = name.substr (4);
+        return std::string ("EQ band ") + name[3] + " "
+                 + (suffix == "Gain" ? "gain" : suffix == "Q" ? "width" : "frequency");
     }
 
     const std::vector<std::string>& Runner::dcaChainOf (const std::string& cueId)
@@ -6009,6 +6322,11 @@ namespace wfg::cue
             (EB), and a speed fade's stop, due later, goes with it. */
         resolveTakeover (runId);
         resolveTakeover ("rate:" + runId);
+
+        /*  AND WHAT A FADE WAS MOVING OF ITS OWN (namespace draft §26, PD):
+            its sends, EQ and plugin values stay where they have got to, as its
+            speed does - Esc's fade is the level's. */
+        releaseMovesOf (runId);
 
         target = runs.find (runId);
 
@@ -9720,16 +10038,24 @@ namespace wfg::cue
             const auto otherHolds = std::any_of (running.begin(), running.end(), [&] (const FadeJob& job)
                                                  { return job.target == touch.key && writtenBy (job, false); });
 
+            const auto moved = ! touch.move.empty();
             const auto now = ! touch.dca.empty() ? (dcas != nullptr ? dcas->trimOf (touch.dca) : touch.goTo)
-                                                 : touch.movesRate ? held->ownRate : held->ownLevel;
-            const auto tolerance = touch.movesRate ? 0.001 : 0.05;
+                           : moved ? movedValueNow (*held, touch.move)
+                           : touch.movesRate ? held->ownRate : held->ownLevel;
+
+            /*  A plugin value is a 0..1 and a frequency is hertz: a tolerance
+                in each one's own scale (namespace draft §26, PE). */
+            const auto tolerance = moved ? (touch.moveDomain == MoveDomain::logarithm ? std::abs (touch.goTo) * 0.001
+                                            : touch.moveDomain == MoveDomain::linear ? 0.001 : 0.05)
+                                 : touch.movesRate ? 0.001 : 0.05;
 
             if (otherHolds || (! goHolds && std::abs (now - touch.goTo) > tolerance))
             {
                 const auto what = ! touch.dca.empty() ? deviceLabel ("dca", touch.dca)
                                                       : cueLabel (held->cue);
 
-                back.items.push_back (what + (touch.movesRate ? ": its speed" : ": its level")
+                back.items.push_back (what + (moved ? ": its " + moveWords (touch.move)
+                                                    : std::string (touch.movesRate ? ": its speed" : ": its level"))
                                         + " moved by another hand since the GO - left where it is");
                 continue;
             }
@@ -9742,11 +10068,19 @@ namespace wfg::cue
             FadeJob job;
             job.target = touch.key;
             job.dca = touch.dca;
+            job.handSerial = dcas != nullptr && ! touch.dca.empty() ? dcas->handSerialOf (touch.dca) : 0;
             job.reportsSelf = false;
             job.movesRate = touch.movesRate;
             job.curve = FadeCurve::linear;
 
-            if (touch.movesRate)
+            if (moved)
+            {
+                job.move = touch.move;
+                job.moveRun = touch.heldRun;
+                job.moveDomain = touch.moveDomain;
+                job.fromValue = now;
+            }
+            else if (touch.movesRate)
                 job.fromRate = now;
             else
                 job.fromDb = now;
@@ -9762,7 +10096,9 @@ namespace wfg::cue
                 job.stopWhenDone = before.stopWhenDone;
                 job.stopsAtTick = before.stopsAtTick;
 
-                if (touch.movesRate)
+                if (moved)
+                    job.toValue = before.toValue;
+                else if (touch.movesRate)
                     job.toRate = before.toRate;
                 else
                     job.toDb = before.toDb;
@@ -9771,7 +10107,9 @@ namespace wfg::cue
             {
                 job.ticksTotal = back.fadeTicks;
 
-                if (touch.movesRate)
+                if (moved)
+                    job.toValue = touch.from;
+                else if (touch.movesRate)
                     job.toRate = touch.from;
                 else
                     job.toDb = touch.from;
@@ -11622,7 +11960,7 @@ namespace wfg::cue
                     held != nullptr && ! held->isFinished()
                       && (held->launchedAtSample <= 0 || audio->samplesElapsed() < held->launchedAtSample))
                 {
-                    if (! job.movesRate)
+                    if (! job.movesRate && job.move.empty())
                         held->ownLevel = job.currentDb();
 
                     continue;
@@ -11640,6 +11978,19 @@ namespace wfg::cue
                 arrives. It is over when its level is. */
             if (! job.dca.empty())
             {
+                /*  A HAND ON THE DCA'S FADER TAKES OVER (namespace draft §26,
+                    PI): it had been written under the hand fifty times a
+                    second. The fade ends where the hand put the trim, and its
+                    run reports done, as one a later fade takes over from. */
+                if (dcas != nullptr && dcas->handSerialOf (job.dca) != job.handSerial)
+                {
+                    if (job.reportsSelf)
+                        engine.submit (origin::engine, "run.ended", one (job.self));
+
+                    job.retired = true;
+                    continue;
+                }
+
                 if (dcas != nullptr)
                     dcas->set (job.dca, job.currentDb());
 
@@ -11678,6 +12029,22 @@ namespace wfg::cue
             if (job.movesRate)
                 target->ownRate = job.currentRate();
 
+            /*  ONE OF THE RUN'S OWN NUMBERS (namespace draft §26): held on the
+                run, and the three apply passes told by the revision - only when
+                the value moved, so an arrived job holding a stop costs nothing. */
+            if (! job.move.empty())
+            {
+                const auto value = job.currentValue();
+                const auto was = target->moved.find (job.move);
+
+                if (was == target->moved.end()
+                      || std::bit_cast<std::uint64_t> (was->second) != std::bit_cast<std::uint64_t> (value))
+                {
+                    target->moved[job.move] = value;
+                    ++movedRevision;
+                }
+            }
+
             /*  THE RUN'S OWN LEVEL, and only that.
 
                 What reaches the voice is `applyLevels` below, because what this
@@ -11690,7 +12057,7 @@ namespace wfg::cue
                 NEITHER IS LOGGED - §3.15 keeps continuous readouts out of the
                 log, and a replay recomputes them from the GO that started the
                 fade and the document it read. */
-            if (! job.movesRate)
+            if (! job.movesRate && job.move.empty())
                 target->ownLevel = job.currentDb();
 
             /*  WHAT THIS JOB IS WAITING FOR. A plain fade is done when its
@@ -15336,12 +15703,14 @@ namespace wfg::cue
             takes, which can make a sounding cue wider - its routing follows. */
         const auto plugins = pluginTable != nullptr ? pluginTable->revision() : 0;
 
-        if (revision == routingRevision && layer == routingLiveRevision && plugins == routingPluginRevision)
+        if (revision == routingRevision && layer == routingLiveRevision && plugins == routingPluginRevision
+              && movedRevision == routingMovedRevision)
             return;
 
         routingRevision = revision;
         routingLiveRevision = layer;
         routingPluginRevision = plugins;
+        routingMovedRevision = movedRevision;
 
         for (const auto& snapshot : runs.all())
         {
@@ -15356,14 +15725,16 @@ namespace wfg::cue
                 continue;
 
             std::string problem;
-            const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem, chainChannelsOf (cue));
+            const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem, chainChannelsOf (cue),
+                                                 &run->moved);
 
             if (problem.empty())
                 audio->setRouting (run->track, routing);
         }
     }
 
-    std::vector<FxSetting> Runner::fxOf (const juce::ValueTree& cue) const
+    std::vector<FxSetting> Runner::fxOf (const juce::ValueTree& cue,
+                                         const std::map<std::string, double>* moved) const
     {
         static const Reader schema;
         std::vector<FxSetting> out;
@@ -15431,6 +15802,22 @@ namespace wfg::cue
                         for (const auto& [index, value] : *riding)
                             values[index] = value;
 
+                /*  And what a fade moved the run's to (namespace draft §26),
+                    newer than the ride: keyed by the set entry, `fx/<entry>/<n>`. */
+                if (moved != nullptr)
+                {
+                    const auto head = "fx/" + entryId + "/";
+
+                    for (auto it = moved->lower_bound (head); it != moved->end() && it->first.rfind (head, 0) == 0; ++it)
+                    {
+                        const auto digits = it->first.substr (head.size());
+
+                        if (! digits.empty() && std::all_of (digits.begin(), digits.end(),
+                                                             [] (char c) { return c >= '0' && c <= '9'; }))
+                            values[std::atoi (digits.c_str())] = it->second;
+                    }
+                }
+
                 for (const auto& [index, value] : values)
                     setting.values.emplace_back (index, static_cast<float> (value));
 
@@ -15474,12 +15861,14 @@ namespace wfg::cue
         const auto plugins = pluginTable != nullptr ? pluginTable->revision() : 0;
         const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
 
-        if (revision == fxRevision && plugins == fxPluginRevision && layer == fxLiveRevision)
+        if (revision == fxRevision && plugins == fxPluginRevision && layer == fxLiveRevision
+              && movedRevision == fxMovedRevision)
             return;
 
         fxRevision = revision;
         fxPluginRevision = plugins;
         fxLiveRevision = layer;
+        fxMovedRevision = movedRevision;
 
         for (const auto& snapshot : runs.all())
         {
@@ -15493,7 +15882,7 @@ namespace wfg::cue
             if (! cue.isValid() || (! cue.hasType ("Media") && ! cue.hasType ("Mic")))
                 continue;
 
-            auto wanted = fxOf (cue);
+            auto wanted = fxOf (cue, &run->moved);
             const auto slots = std::min (wanted.size(), run->fx.size());
 
             for (std::size_t k = 0; k < slots; ++k)
@@ -15577,11 +15966,12 @@ namespace wfg::cue
         const auto revision = document.showRevision();
         const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
 
-        if (revision == eqRevision && layer == eqLiveRevision)
+        if (revision == eqRevision && layer == eqLiveRevision && movedRevision == eqMovedRevision)
             return;
 
         eqRevision = revision;
         eqLiveRevision = layer;
+        eqMovedRevision = movedRevision;
 
         for (const auto& snapshot : runs.all())
         {
@@ -15595,7 +15985,7 @@ namespace wfg::cue
             if (! cue.isValid() || (! cue.hasType ("Media") && ! cue.hasType ("Mic")))
                 continue;
 
-            const auto wanted = eqOf (cue);
+            const auto wanted = eqOf (cue, &run->moved);
 
             if (wanted.sameAs (run->eq))
                 continue;

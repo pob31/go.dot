@@ -33,6 +33,7 @@
 
 #include <wfg/engine/audio/EqSettings.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -54,10 +55,21 @@ namespace wfg::client::model
             heard, and not saved until somebody keeps them. `settings` already
             reads what is heard. */
         std::string live;
+
+        /*  ON A FADE (namespace draft §26, PH): the fade the panel writes
+            for, and the rows it moves with where to. `settings` is then the
+            target's EQ with those rows laid over it, so the curve drawn is the
+            one the fade arrives at. Empty `fadeId` is the cue's own EQ. */
+        std::string fadeId;
+        std::map<std::string, double> fadeMoves;
     };
 
     /** The cue's twenty-three rows, by exact address, as one value. */
     EqReading readEq (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /*  A FADE'S EQ (namespace draft §26, PH): its target's, with the rows
+        the fade moves laid over it and named in `fadeMoves`. */
+    EqReading readFadeEq (const tree::TreeSnapshot&, const std::string& fadeId);
 
     /** One point of the drawn response. */
     struct EqPoint

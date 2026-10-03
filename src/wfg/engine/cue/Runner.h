@@ -63,6 +63,7 @@
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/plugin/PluginTable.h>
+#include <wfg/engine/plugin/Catalogue.h>
 
 #include <cstdint>
 #include <functional>
@@ -575,6 +576,9 @@ namespace wfg::cue
             is what a replay and a test rig have. */
         void setPlugins (const plugin::PluginTable* table) noexcept { pluginTable = table; }
 
+        /** The catalogues a fade on a plugin value reads a default from (§26). */
+        void setCatalogues (const plugin::CatalogueStore* store) noexcept { catalogues = store; }
+
         /*  WHO IS HOLDING WHICH NODE, for the fader edges (PRD §3.9a): a
             fader-start counts only from a fader released at the bottom, and a
             fader-stop only when the hand lets go there, and the touch table is
@@ -981,10 +985,14 @@ namespace wfg::cue
             (cue/InsertChain.h): what its routing reads (2026-09-26). */
         int chainChannelsOf (const juce::ValueTree& cue) const;
 
+        /*  `moved` is a run's values a fade moved (namespace draft §26): a
+            send it holds is heard at that level, and a bus the cue has no
+            send into is a send of the run alone. Null at an arm. */
         std::vector<Coefficient> resolveRouting (const juce::ValueTree& cue,
                                                  int trackChannels,
                                                  std::string& problem,
-                                                 int chainChannels = 0) const;
+                                                 int chainChannels = 0,
+                                                 const std::map<std::string, double>* moved = nullptr) const;
 
         /** Every fade in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<FadeJob>& fades() const noexcept { return running; }
@@ -1347,12 +1355,14 @@ namespace wfg::cue
 
         /** The cue's twenty-three EQ rows, read through the schema so a saved
             flat EQ - which the writer omits - reads as flat. */
-        audio::EqSettings eqOf (const juce::ValueTree& cue) const;
+        audio::EqSettings eqOf (const juce::ValueTree& cue,
+                                const std::map<std::string, double>* moved = nullptr) const;
 
         /*  The cue's inserts against the show's set, in chain order: one
             FxSetting per entry, disabled and empty where the cue has no Fx
             for it (PR 9a.8). Through the schema for eqOf's reason. */
-        std::vector<FxSetting> fxOf (const juce::ValueTree& cue) const;
+        std::vector<FxSetting> fxOf (const juce::ValueTree& cue,
+                                     const std::map<std::string, double>* moved = nullptr) const;
 
         /*  Counts the pass a ranged run is on and places the boundary out of
             it, once, when it comes into the placement horizon.
@@ -1730,6 +1740,28 @@ namespace wfg::cue
                             const std::string& targetCueId, const std::string& selfRunId,
                             double toRate, double seconds, FadeCurve, bool stopWhenDone,
                             bool alone);
+
+        /*  A FADE ON WHAT THE TARGET OWNS (namespace draft §26): one job per
+            entry - a send, an EQ number, a plugin value - each from where the
+            run's value is to where the fade says, in its own domain, keyed
+            `move:`, the run and the entry. A media or a mic run only; anything
+            else is §3.8's silent no-op, said once when `alone`. The first job
+            carries the stop when asked. Answers whether any job began. */
+        bool beginMoveFades (std::int64_t tick,
+                             const std::string& targetCueId, const std::string& selfRunId,
+                             const std::vector<FadeMove>& moves, double seconds, FadeCurve,
+                             bool stopWhenDone, bool alone);
+
+        /*  Where a run's entry stands now: what a fade moved it to, else what
+            the lock rides, else the cue's own - a send it has not got at
+            silence, a plugin value it has not set at the catalogue's default. */
+        double movedValueNow (const Run& run, const std::string& entry) const;
+
+        /** Every move job on a run let go - Esc's, for what it leaves where it is (PD). */
+        void releaseMovesOf (const std::string& runId);
+
+        /** A moved entry in words, for Doh!'s list: "send to Reverb", "EQ band 2 gain". */
+        std::string moveWords (const std::string& entry) const;
 
         /*  A FADE AIMED AT A DCA (`fade/dca`, Phase 6): the DCA's trim moves
             from wherever it stands to `toDb`. No run to find and nothing to
@@ -2117,6 +2149,21 @@ namespace wfg::cue
         std::uint64_t fxPluginRevision = 0;
         std::uint64_t fxLiveRevision = 0;
 
+        /*  AND WHAT FADES MOVED (namespace draft §26): bumped on every tick a
+            fade writes a run's send, EQ number or plugin value, so a voice
+            follows its fade at the tick rate and nothing is read while no such
+            fade is under way. One counter for the three, with one seen-value
+            each. */
+        std::uint64_t movedRevision = 0;
+        std::uint64_t routingMovedRevision = 0;
+        std::uint64_t eqMovedRevision = 0;
+        std::uint64_t fxMovedRevision = 0;
+
+        /*  THE MACHINE'S PLUGIN CATALOGUES, for where a fade on a parameter
+            the cue never set begins: the parameter's default. Null when none
+            is given; such a fade then starts where it ends. */
+        const plugin::CatalogueStore* catalogues = nullptr;
+
         /*  THE PERSISTENT ASSERTION (§3.29, §13.11): after every applied
             trigger, what the section declares is checked against what is
             actually happening, and `run.assert` puts back what is not.
@@ -2477,6 +2524,11 @@ namespace wfg::cue
         {
             std::string key, heldRun, dca;
             bool movesRate = false;
+
+            /*  Or one of the run's own numbers a fade moved (namespace draft
+                §26, PE): its entry, and the domain it travels in. */
+            std::string move;
+            MoveDomain moveDomain = MoveDomain::linear;
             double from = 0.0, goTo = 0.0;
             std::int64_t atTick = 0;
             std::optional<FadeJob> superseded;

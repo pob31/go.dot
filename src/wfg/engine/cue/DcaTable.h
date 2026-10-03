@@ -38,6 +38,7 @@
     table.
 */
 
+#include <cstdint>
 #include <map>
 #include <string>
 
@@ -55,10 +56,31 @@ namespace wfg::cue
 
         void set (const std::string& dcaId, double decibels) { trims[dcaId] = decibels; }
 
+        /*  A HAND'S WRITE, which a fade on the DCA gives way to (namespace
+            draft §26, PI): the trim, and a count the fade compares with the
+            one it began under. */
+        void setByHand (const std::string& dcaId, double decibels)
+        {
+            trims[dcaId] = decibels;
+            ++hands[dcaId];
+        }
+
+        /** How many times a hand has written this DCA's trim tonight. */
+        std::uint64_t handSerialOf (const std::string& dcaId) const
+        {
+            const auto found = hands.find (dcaId);
+            return found != hands.end() ? found->second : 0;
+        }
+
         /** Every DCA back to nought - a show closed, or another opened. */
-        void clear() { trims.clear(); }
+        void clear()
+        {
+            trims.clear();
+            hands.clear();
+        }
 
     private:
         std::map<std::string, double> trims;
+        std::map<std::string, std::uint64_t> hands;
     };
 }

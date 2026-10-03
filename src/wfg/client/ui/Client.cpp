@@ -407,7 +407,8 @@ namespace wfg::client
                         remembered against the cue it was showing, so picking
                         the same fade again leaves it closed and picking a
                         different one opens it. */
-                    if (shell->footSubject().kind == model::Subject::Kind::curve)
+                    if (shell->footSubject().kind == model::Subject::Kind::curve
+                          || shell->footSubject().kind == model::Subject::Kind::fade)
                         shutCurveFor = shell->footSubject().objectId;
 
                     shell->setFoot ({});
@@ -451,6 +452,17 @@ namespace wfg::client
                 {
                     if (shell != nullptr && ! cueId.empty())
                         shell->setFoot ({ model::Subject::Kind::eq, cueId });
+                };
+
+                /*  A FADE'S MIXER OPENS ITS EQ AND ITS CURVE (namespace draft
+                    §26): another subject on the same fade. */
+                footActions.openSubject = [this] (const model::Subject& subject)
+                {
+                    if (shell != nullptr && subject.isOpen() && ! subject.objectId.empty())
+                    {
+                        shell->setFoot (subject);
+                        menuItemsChanged();
+                    }
                 };
 
                 footActions.openTakeOn = [this] (const std::string& cueId)
@@ -1384,12 +1396,19 @@ namespace wfg::client
                     closing it while a fade is picked is remembered against THAT
                     cue and cleared the moment the pick moves. The row in the
                     inspector is the way back. */
+                /*  AND SINCE 2026-10-03 IT OPENS ITS MIXER (namespace draft
+                    §26, PG): what the fade moves and where to, as sliders, is
+                    what a fade is now - the curve is a door from there. A fade
+                    whose own EQ or curve is already open keeps it. */
                 if (! selection.anchor().empty()
                       && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "fade"
                       && shutCurveFor != selection.anchor()
-                      && shell->footSubject().kind != model::Subject::Kind::curve)
+                      && shell->footSubject().kind != model::Subject::Kind::fade
+                      && shell->footSubject().kind != model::Subject::Kind::curve
+                      && ! (shell->footSubject().kind == model::Subject::Kind::eq
+                              && shell->footSubject().objectId == selection.anchor()))
                 {
-                    shell->setFoot ({ model::Subject::Kind::curve, selection.anchor() });
+                    shell->setFoot ({ model::Subject::Kind::fade, selection.anchor() });
                     menuItemsChanged();
                 }
 
@@ -1478,7 +1497,7 @@ namespace wfg::client
                             arrived because a fade was picked, so it leaves
                             when one is not, and picking a fade again brings it
                             straight back at no cost. */
-                        if (subject.kind == model::Subject::Kind::curve
+                        if ((subject.kind == model::Subject::Kind::curve || subject.kind == model::Subject::Kind::fade)
                               && model::text (*snapshot, "/godot/cue/" + picked + "/kind") != "fade")
                             wanted.clear();
 

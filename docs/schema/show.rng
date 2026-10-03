@@ -1406,6 +1406,18 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="eq">
+          <a:documentation>The target&apos;s EQ numbers this fade moves, as row:value pairs space-separated - eqHpfFreq, eqLpfFreq and each band&apos;s Freq, Gain and Q, in the rows&apos; own units and ranges (namespace draft §26, OY). A gain moves straight in dB, a frequency and a Q straight in their logarithm (PA). Switches and shapes are not listed: a fade is a move between two numbers, and a switch has no middle. Empty moves nothing.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fx">
+          <a:documentation>The target&apos;s plugin values this fade moves, as plugin/index:value pairs space-separated, the plugin named by its set entry and each value normalised 0..1 as the plugin takes it (namespace draft §26, OY). Moved straight in the 0..1. A plugin the target has not switched in has its value moved and not heard. Never a whole state: a fade holds values (PH).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="level">
           <a:documentation>Where the fade ends, in dB. -120 is silence rather than a very small number, and it is the default because a fade to silence is what most fades are - a fresh fade cue is a slow cut to nothing, which is a real thing to want and can only ever make the show quieter. Not read while points holds a curve, whose last level is where that fade ends.</a:documentation>
           <data type="double">
@@ -1489,6 +1501,12 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="sends">
+          <a:documentation>The target&apos;s sends this fade moves, as bus:dB pairs space-separated, sorted by bus (namespace draft §26, OY). A bus listed is moved to its level over the duration and along the curve, straight in dB; a bus not listed is left alone, which is what unticking it in the fade&apos;s mixer does. Keyed by the bus rather than by the target&apos;s Send, so a retargeted fade moves the same mix: one the target has no send into is faded in from silence as a send of the run alone, and one it has switched off stays off (PB). The run&apos;s, never the cue&apos;s: the cue&apos;s own send is untouched (OZ).</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>

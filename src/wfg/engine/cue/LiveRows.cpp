@@ -193,7 +193,7 @@ namespace wfg::cue
                 if (! declared.isValid() || declared.getType().toString() != "Dca")
                     return Outcome::rejected (reason::unknownId);
 
-                dcas.set (live->id, *decibels);
+                dcas.setByHand (live->id, *decibels);
                 return Outcome::ok (args);
             }
 

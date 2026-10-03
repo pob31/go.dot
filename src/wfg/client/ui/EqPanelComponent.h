@@ -197,6 +197,12 @@ namespace wfg::client::ui
         const audio::EqSettings& shown() const noexcept;
 
         void write (const std::string& row, const std::string& text);
+
+        /*  WHETHER THE PANEL IS DRAWING A FADE'S EQ (namespace draft §26,
+            PH): what it writes then goes through the fade's door, and each
+            number has a tick box saying whether the fade moves it. */
+        bool onFade() const noexcept;
+        void placeBox (Box&, juce::Rectangle<int>);
         void writeNumber (const std::string& row, double value, int decimals);
         void writeFlag (const std::string& row, bool on);
 

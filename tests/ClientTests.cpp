@@ -68,6 +68,7 @@
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Eq.h>
+#include <wfg/client/model/FadeMix.h>
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/FxEditor.h>
 #include <wfg/client/model/Rack.h>
@@ -1289,7 +1290,8 @@ TEST_CASE ("client: every kind wears an icon and an accent the theme declares")
     //  Every panel at the foot, both ways between a subject and its word.
     for (const auto kind : { model::Subject::Kind::waveform, model::Subject::Kind::sends,
                              model::Subject::Kind::timeline, model::Subject::Kind::curve,
-                             model::Subject::Kind::eq, model::Subject::Kind::fx, model::Subject::Kind::take })
+                             model::Subject::Kind::eq, model::Subject::Kind::fx, model::Subject::Kind::take,
+                             model::Subject::Kind::fade })
     {
         const auto word = model::wordFor (kind);
         INFO ("panel " << word);
@@ -3294,9 +3296,13 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
         else would be a trap. */
     const auto onFade = model::openersFor ("fade", "B3N8R5TW");
 
-    REQUIRE (onFade.size() == 1);
-    CHECK (onFade[0].value == "curve");
-    CHECK_FALSE (onFade[0].writable);
+    /*  AND SINCE 2026-10-03 ITS MIXER FIRST (namespace draft §26, PG): what
+        the fade moves, then the target's EQ on the fade, then the curve. */
+    REQUIRE (onFade.size() == 3);
+    CHECK (onFade[0].value == "fade");
+    CHECK (onFade[1].value == "eq");
+    CHECK (onFade[2].value == "curve");
+    CHECK_FALSE (onFade[2].writable);
 
     //  And the kinds with nothing longer to look at still offer nothing.
     for (const auto* kind : { "wait", "message", "osc" })
@@ -7729,4 +7735,84 @@ TEST_CASE ("client: the Doh notice is shown whatever list has the focus, opening
     press ("list.dohReport", { osc::Value::string ("7K2QM9X4"), osc::Value::string ("") });
     CHECK (reading().dohNotice().empty());
     CHECK (reading().dohReport.empty());
+}
+
+TEST_CASE ("client: a fade's mixer has a strip per slider, lit where the fade moves it, and its EQ is the target's with the fade's rows over it")
+{
+    /*  Namespace draft §26, PG and PH: the level, the speed of a file, and a
+        send into every mix; a strip the fade moves carries where it goes, one
+        it leaves alone what the target holds now. */
+    Rig rig;
+
+    const auto media = rig.document.createCue ("7K2QM9X4", 0, "media", "Rain");
+    REQUIRE (media.ok);
+    const auto bus = rig.document.createBus ("mix", 2);
+    REQUIRE (bus.ok);
+    REQUIRE (rig.document.createSend (media.id, bus.id, {}, "-10").ok);
+
+    const auto fade = rig.document.createCue ("7K2QM9X4", 1, "fade", "Rain away");
+    REQUIRE (fade.ok);
+
+    const auto set = [&rig, &fade] (const char* row, const std::string& value)
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/" + row, value).ok);
+    };
+
+    set ("target", media.id);
+    set ("sends", bus.id + ":-30");
+    set ("eq", "eqB2Gain:-6");
+
+    auto mix = model::readFadeMix (*rig.publish (1), fade.id);
+    REQUIRE (mix.present);
+    REQUIRE (mix.strips.size() >= 3u);
+
+    CHECK (mix.strips[0].kind == "level");
+    CHECK (mix.strips[0].moved);
+    CHECK (mix.strips[0].switchAddress == "/godot/cue/" + fade.id + "/levelOn");
+
+    CHECK (mix.strips[1].kind == "speed");
+    CHECK_FALSE (mix.strips[1].moved);
+    CHECK (mix.strips[1].value == doctest::Approx (1.0));
+
+    const auto& send = mix.strips.back();
+    CHECK (send.kind == "send");
+    CHECK (send.busId == bus.id);
+    CHECK (send.moved);
+    CHECK (send.value == doctest::Approx (-30.0));
+    CHECK (send.address == "/godot/cue/" + fade.id + "/moves/send/" + bus.id);
+
+    REQUIRE (mix.moves.size() == 1u);
+    CHECK (mix.moves[0].entry == "eq/eqB2Gain");
+    CHECK (mix.moves[0].label == "EQ Band 2 gain");
+    CHECK (mix.moves[0].valueText == "-6.0 dB");
+
+    //  The send cleared from the list: the strip stays, unlit, at the cue's own -10.
+    set ("sends", "");
+    rig.parameters.markStale();
+    mix = model::readFadeMix (*rig.publish (2), fade.id);
+    CHECK_FALSE (mix.strips.back().moved);
+    CHECK (mix.strips.back().value == doctest::Approx (-10.0));
+
+    //  The EQ the panel draws on the fade: the target's, with band two at the fade's -6.
+    const auto eq = model::readFadeEq (*rig.publish (3), fade.id);
+    REQUIRE (eq.present);
+    CHECK (eq.fadeId == fade.id);
+    CHECK (eq.fadeMoves.count ("eqB2Gain") == 1u);
+    CHECK (eq.settings.band[1].gain == doctest::Approx (-6.0f));
+
+    //  And the lists are the mixer's, not the inspector's.
+    const auto panel = model::inspect (*rig.publish (4), fade.id);
+    CHECK (rowIn (panel, "sends") == nullptr);
+    CHECK (rowIn (panel, "eq") == nullptr);
+    CHECK (rowIn (panel, "fx") == nullptr);
+
+    //  A plugin window on a fade is routed by an identifier no Fx can have.
+    CHECK (model::fadeOfEditorId (model::fadeEditorId (fade.id)) == fade.id);
+    CHECK (model::fadeOfEditorId ("FX000001").empty());
+
+    //  The speed's throw: nought at the bottom, one in the middle, twenty at the top.
+    CHECK (model::fractionForSpeed (0.0) <= 0.0);
+    CHECK (model::fractionForSpeed (1.0) == doctest::Approx (0.5).epsilon (0.01));
+    CHECK (model::speedForFraction (1.0) == doctest::Approx (20.0));
+    CHECK (model::speedForFraction (model::fractionForSpeed (0.5)) == doctest::Approx (0.5));
 }

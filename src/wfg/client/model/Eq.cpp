@@ -16,6 +16,8 @@
 
 #include <wfg/client/model/Eq.h>
 
+#include <wfg/engine/cue/FadeMoves.h>
+
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/audio/EqMath.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -114,6 +116,62 @@ namespace wfg::client::model
         s.band[3].shape = eqShapeFor (text (snapshot, eqAddress (cueId, "eqB4Shape")));
 
         out.live = text (snapshot, eqAddress (cueId, "live"));
+
+        return out;
+    }
+
+    EqReading readFadeEq (const tree::TreeSnapshot& snapshot, const std::string& fadeId)
+    {
+        /*  THE TARGET'S EQ WITH THE FADE'S ROWS OVER IT (namespace draft §26,
+            PH): what the fade arrives at, drawn as the curve it is. */
+        const auto targetId = text (snapshot, "/godot/cue/" + fadeId + "/target");
+
+        if (! text (snapshot, "/godot/cue/" + fadeId + "/dca").empty())
+        {
+            EqReading out;
+            out.notice = "This fade moves a DCA, which has no EQ.";
+            return out;
+        }
+
+        if (targetId.empty())
+        {
+            EqReading out;
+            out.notice = "This fade is aimed at nothing yet - pick its target in the inspector.";
+            return out;
+        }
+
+        auto out = readEq (snapshot, targetId);
+
+        if (! out.present)
+        {
+            out.notice = "This fade's target has no EQ: only a media or a mic cue has one.";
+            return out;
+        }
+
+        out.fadeId = fadeId;
+        out.live.clear();
+
+        for (const auto& [row, value] : cue::parseMoveList (text (snapshot, "/godot/cue/" + fadeId + "/eq")))
+        {
+            if (! cue::isMovableEqRow (row))
+                continue;
+
+            out.fadeMoves[row] = value;
+            auto& s = out.settings;
+            const auto v = static_cast<float> (value);
+
+            if (row == "eqHpfFreq")
+                s.hpfFreq = v;
+            else if (row == "eqLpfFreq")
+                s.lpfFreq = v;
+            else
+                for (int band = 0; band < audio::EqSettings::numBands; ++band)
+                {
+                    if (row == eqBandRow (band, "Freq")) s.band[band].freq = v;
+                    if (row == eqBandRow (band, "Gain")) s.band[band].gain = v;
+                    if (row == eqBandRow (band, "Q"))    s.band[band].q = v;
+                }
+        }
 
         return out;
     }

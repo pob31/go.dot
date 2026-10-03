@@ -748,6 +748,29 @@ had a short gap and a click at every pass - since mended, the loop moved below t
 (namespace draft §22.12); and above one Lagrange aliased what the speed lifts past Nyquist at full
 level - since filtered, the author's way (namespace draft §22.11).
 
+### Fades on what a cue owns, and a fade's mixer · S
+
+*Added on 2026-10-03*, at the author's direction: *"Fades can act on DCA, these fades will make the
+DCA fader move. Otherwise fades will act on several possible parameters: global cue level, send
+levels, speed, eventually EQ and effect parameters. What is already represented as a slider should be
+a slider in the foot panel when editing a fade. EQ and inserted effects should open the EQ interface
+or inserted effect UI."* The design is in namespace draft §26. Its decisions OY-PJ are the
+implementer's, and the author may overrule any of them.
+
+- **Engine.** Three lists on the fade (`sends`, `eq`, `fx`). There is a move job per entry, keyed
+  per run and per entry. The run holds the moved values, which `resolveRouting`, `eqOf` and `fxOf`
+  read over the document. Each entry has a door, `/godot/cue/<fade>/moves/...`. Esc leaves moved
+  values where they are, and Doh! puts them back. A hand on a DCA's fader takes over the DCA's fade.
+- **Desktop.** Picking a fade opens a mixer in the foot: the level or DCA strip, the speed and the
+  sends, each with a tick box. Its doors open the EQ panel on the fade, with a tick box per number,
+  and the plugin's own window on the fade. The curve is a door from there.
+- **Console.** The three lists appear as text rows.
+
+**Needs from the author:** a look at the mixer, and a listen to an EQ sweep, whose coefficients
+change at the tick rate.
+
+**Built 2026-10-03** (namespace draft §26). Load-to-time does not yet place moved values (PJ).
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

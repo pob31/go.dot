@@ -37,6 +37,7 @@ namespace wfg::client::model
             case Subject::Kind::eq:        return "eq";
             case Subject::Kind::fx:        return "fx";
             case Subject::Kind::take:      return "take";
+            case Subject::Kind::fade:      return "fade";
             case Subject::Kind::none:      break;
         }
 
@@ -47,7 +48,7 @@ namespace wfg::client::model
     {
         for (const auto kind : { Subject::Kind::waveform, Subject::Kind::sends, Subject::Kind::timeline,
                                  Subject::Kind::curve, Subject::Kind::eq, Subject::Kind::fx,
-                                 Subject::Kind::take })
+                                 Subject::Kind::take, Subject::Kind::fade })
             if (wordFor (kind) == word)
                 return kind;
 
@@ -98,6 +99,10 @@ namespace wfg::client::model
                 a question about the cue in hand, and a later cue on the same
                 channel opens on the same take - which is the point. */
             case Subject::Kind::take:      return true;
+
+            /*  AND A FADE'S MIXER, for the curve's reason: it opens when a
+                fade is picked (namespace draft §26, PG). */
+            case Subject::Kind::fade:      return true;
             case Subject::Kind::none:      break;
         }
 
@@ -155,9 +160,18 @@ namespace wfg::client::model
         if (subject.kind == Subject::Kind::curve)
             out.curve = readCurve (snapshot, subject.objectId);
 
+        if (subject.kind == Subject::Kind::fade)
+        {
+            out.fadeMix = readFadeMix (snapshot, subject.objectId);
+
+            if (! out.fadeMix.present)
+                out.notice = out.fadeMix.notice;
+        }
+
         if (subject.kind == Subject::Kind::eq)
         {
-            out.eq = readEq (snapshot, subject.objectId);
+            out.eq = out.cueKind == "fade" ? readFadeEq (snapshot, subject.objectId)
+                                           : readEq (snapshot, subject.objectId);
 
             if (! out.eq.present)
                 out.notice = out.eq.notice;

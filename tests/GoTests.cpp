@@ -47,6 +47,7 @@
 #include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/cue/FadeJob.h>
+#include <wfg/engine/cue/FadeMoveRows.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -20075,4 +20076,322 @@ TEST_CASE ("go.doh: in an audio outage the second press says on the readout what
     CHECK (rig.runner.listState().dohReport().list == rig.listId);
     CHECK (says (reportOf (rig), ": the next GO starts it from its top"));
     CHECK_FALSE (says (reportOf (rig), "the pointer is back"));
+}
+
+//==============================================================================
+/*  A FADE MOVES WHAT THE CUE OWNS (namespace draft §26, 2026-10-03): its
+    target's sends, EQ numbers and plugin values, each a job keyed `move:`, the
+    run and the entry; held on the run, never written into the cue; taken over
+    per entry; left where they have got to by Esc. */
+namespace
+{
+    /** A mix channel two wide, and the rig's media cue sending into it at `level`. */
+    /*  A stereo file, as the analyser would have said: a send spreads the
+        cue's channels across the mix, and needs to know how many. */
+    void stereo (LaneRig& rig)
+    {
+        rig.document.findById (rig.mediaId).setProperty (juce::Identifier ("channels"), 2, nullptr);
+    }
+
+    std::string mixWithSend (LaneRig& rig, const char* level)
+    {
+        stereo (rig);
+
+        const auto bus = rig.document.createBus ("mix", 2);
+        REQUIRE (bus.ok);
+        REQUIRE (rig.document.createSend (rig.mediaId, bus.id, {}, level).ok);
+        return bus.id;
+    }
+
+    /** The rig's fade made one that moves only `list`'s entries, over a second. */
+    void aimAtTheList (LaneRig& rig, const char* list, const std::string& entries)
+    {
+        rig.setCue (rig.fadeId, "levelOn", "false");
+        rig.setCue (rig.fadeId, list, entries);
+        rig.setCue (rig.fadeId, "duration", "1");
+    }
+
+    /** The loudest coefficient pushed at `track` onto the channels from `first`, two wide. */
+    float gainOnto (const LaneRig& rig, int track, int first)
+    {
+        auto loudest = 0.0f;
+
+        if (const auto found = rig.audio.routings.find (track); found != rig.audio.routings.end())
+            for (const auto& one : found->second)
+                if (one.output >= first && one.output < first + 2)
+                    loudest = std::max (loudest, one.gain);
+
+        return loudest;
+    }
+
+    std::size_t moveJobs (const LaneRig& rig)
+    {
+        const auto& jobs = rig.runner.fades();
+        return static_cast<std::size_t> (std::count_if (jobs.begin(), jobs.end(),
+                                                        [] (const cue::FadeJob& job) { return ! job.move.empty(); }));
+    }
+}
+
+TEST_CASE ("fade moves: a send is taken from where it stands to the list's level, on the run and not in the cue")
+{
+    LaneRig rig;
+    const auto bus = mixWithSend (rig, "-10");
+    const auto first = rig.document.findById (bus).getProperty ("firstChannel").toString().getIntValue();
+
+    const auto id = rig.launch();
+    const auto track = rig.runs.find (id)->track;
+
+    //  What the arm carried into the mix: the cue's own send at -10.
+    auto before = 0.0f;
+
+    for (const auto& one : rig.armed.routing)
+        if (one.output >= first && one.output < first + 2)
+            before = std::max (before, one.gain);
+
+    REQUIRE (before > 0.0f);
+
+    aimAtTheList (rig, "sends", bus + ":-30");
+    rig.fire (rig.fadeId);
+
+    REQUIRE (moveJobs (rig) == 1u);
+    const auto job = rig.runner.fades().front();
+    CHECK (job.move == "send/" + bus);
+    CHECK (job.target == "move:" + id + ":send/" + bus);
+    CHECK (job.heldRun() == id);
+    CHECK (job.fromValue == doctest::Approx (-10.0));
+    CHECK (job.toValue == doctest::Approx (-30.0));
+
+    play (rig, 25);
+
+    const auto halfway = rig.runs.find (id)->moved.at ("send/" + bus);
+    INFO ("halfway, at " << halfway);
+    CHECK (halfway < -12.0);
+    CHECK (halfway > -28.0);
+
+    //  The voice follows at the tick rate: quieter into the mix than it began.
+    CHECK (gainOnto (rig, track, first) < before);
+    CHECK (gainOnto (rig, track, first) > 0.0f);
+
+    const auto fade = rig.runs.all().back().id;
+    CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 40));
+    CHECK (rig.runs.find (id)->moved.at ("send/" + bus) == doctest::Approx (-30.0));
+    CHECK (gainOnto (rig, track, first) == doctest::Approx (before * std::pow (10.0f, -20.0f / 20.0f)).epsilon (0.01));
+
+    //  The run's, never the cue's (OZ): the cue's own send still says -10, and its level never moved.
+    for (const auto& child : rig.document.findById (rig.mediaId))
+        if (child.hasType ("Send"))
+            CHECK (child.getProperty ("level").toString().getDoubleValue() == doctest::Approx (-10.0));
+
+    CHECK (rig.runs.find (id)->ownLevel == doctest::Approx (0.0));
+    CHECK (reportsOf (rig, "run.ended", fade) == 1);
+}
+
+TEST_CASE ("fade moves: a mix the cue does not send into is faded up from silence as a send of the run alone")
+{
+    LaneRig rig;
+    stereo (rig);
+    const auto bus = rig.document.createBus ("mix", 2);
+    REQUIRE (bus.ok);
+    const auto first = rig.document.findById (bus.id).getProperty ("firstChannel").toString().getIntValue();
+
+    const auto id = rig.launch();
+    const auto track = rig.runs.find (id)->track;
+    CHECK (gainOnto (rig, track, first) <= 0.0f);
+
+    aimAtTheList (rig, "sends", bus.id + ":0");
+    rig.fire (rig.fadeId);
+
+    REQUIRE (moveJobs (rig) == 1u);
+    CHECK (rig.runner.fades().front().fromValue == doctest::Approx (-120.0));
+
+    const auto fade = rig.runs.all().back().id;
+    CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 60));
+    CHECK (gainOnto (rig, track, first) > 0.1f);
+
+    //  And the cue holds no Send for it: tonight's, not the show's (PB).
+    for (const auto& child : rig.document.findById (rig.mediaId))
+        CHECK_FALSE (child.hasType ("Send"));
+}
+
+TEST_CASE ("fade moves: an EQ gain travels in dB and a frequency in its logarithm, and the voice is given both")
+{
+    LaneRig rig;
+    const auto id = rig.launch();
+    const auto track = rig.runs.find (id)->track;
+
+    //  Band two starts at 500 Hz and nought; to 2 kHz and -6 dB.
+    aimAtTheList (rig, "eq", "eqB2Freq:2000 eqB2Gain:-6 eqB2On:false");
+    rig.fire (rig.fadeId);
+
+    //  Two numbers move; a switch is no fade's to move (PB).
+    CHECK (moveJobs (rig) == 2u);
+
+    play (rig, 25);
+
+    const auto& moved = rig.runs.find (id)->moved;
+    CHECK (moved.at ("eq/eqB2Freq") == doctest::Approx (1000.0).epsilon (0.03));
+    CHECK (moved.at ("eq/eqB2Gain") == doctest::Approx (-3.0).epsilon (0.03));
+    CHECK (moved.count ("eq/eqB2On") == 0u);
+
+    const auto fade = rig.runs.all().back().id;
+    CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 40));
+
+    REQUIRE (rig.audio.eqs.count (track) == 1u);
+    CHECK (rig.audio.eqs[track].band[1].freq == doctest::Approx (2000.0f));
+    CHECK (rig.audio.eqs[track].band[1].gain == doctest::Approx (-6.0f));
+    CHECK (rig.audio.eqs[track].band[1].on);
+
+    //  The cue's own band is where it was.
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Freq").value_or ("500") == "500");
+}
+
+TEST_CASE ("fade moves: a plugin value moves in its 0..1 from the cue's own, keyed by the set entry")
+{
+    LaneRig rig;
+
+    //  An entry of the set, and the media cue's insert of it with parameter 0 at 0.2.
+    const auto verb = rig.runIds.generate();
+    const auto insert = rig.runIds.generate();
+
+    auto plugins = rig.document.root().getChildWithName ("Audio").getOrCreateChildWithName ("Plugins", nullptr);
+    juce::ValueTree entry { "Plugin" };
+    entry.setProperty ("id", juce::String (verb), nullptr);
+    entry.setProperty ("identifier", "godot:test-gain", nullptr);
+    plugins.appendChild (entry, nullptr);
+
+    juce::ValueTree fx { "Fx" };
+    fx.setProperty ("id", juce::String (insert), nullptr);
+    fx.setProperty ("plugin", juce::String (verb), nullptr);
+    fx.setProperty ("values", "0:0.2", nullptr);
+    rig.document.findById (rig.mediaId).appendChild (fx, nullptr);
+
+    const auto id = rig.launch();
+
+    aimAtTheList (rig, "fx", verb + "/0:0.8");
+    rig.fire (rig.fadeId);
+
+    REQUIRE (moveJobs (rig) == 1u);
+    CHECK (rig.runner.fades().front().fromValue == doctest::Approx (0.2));
+
+    play (rig, 25);
+    CHECK (rig.runs.find (id)->moved.at ("fx/" + verb + "/0") == doctest::Approx (0.5).epsilon (0.03));
+
+    const auto fade = rig.runs.all().back().id;
+    CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 40));
+    CHECK (rig.runs.find (id)->moved.at ("fx/" + verb + "/0") == doctest::Approx (0.8));
+    CHECK (rig.document.findById (insert).getProperty ("values").toString() == "0:0.2");
+}
+
+TEST_CASE ("fade moves: takeover is per entry - a second fade on one send starts where it has got to and leaves the other")
+{
+    LaneRig rig;
+    const auto a = mixWithSend (rig, "0");
+    const auto b = rig.document.createBus ("mix", 2);
+    REQUIRE (b.ok);
+    REQUIRE (rig.document.createSend (rig.mediaId, b.id, {}, "0").ok);
+
+    const auto id = rig.launch();
+
+    aimAtTheList (rig, "sends", a + ":-40 " + b.id + ":-40");
+    rig.fire (rig.fadeId);
+    CHECK (moveJobs (rig) == 2u);
+
+    play (rig, 25);
+    const auto halfway = rig.runs.find (id)->moved.at ("send/" + a);
+
+    const auto again = newFade (rig, 3);
+    rig.setCue (again, "levelOn", "false");
+    rig.setCue (again, "sends", a + ":0");
+    rig.setCue (again, "duration", "1");
+    rig.fire (again);
+
+    //  One job on `a`, the new one from where the first had got to; `b` still moving.
+    CHECK (moveJobs (rig) == 2u);
+
+    for (const auto& job : rig.runner.fades())
+    {
+        if (job.move == "send/" + a)
+        {
+            CHECK (job.self != rig.runs.all().front().id);
+            CHECK (job.fromValue == doctest::Approx (halfway).epsilon (0.05));
+        }
+    }
+
+    CHECK (std::any_of (rig.runner.fades().begin(), rig.runner.fades().end(),
+                        [&] (const cue::FadeJob& job) { return job.move == "send/" + b.id; }));
+}
+
+TEST_CASE ("fade moves: Esc leaves a moved send where it has got to and ends the job")
+{
+    LaneRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+    const auto bus = mixWithSend (rig, "0");
+    const auto id = rig.launch();
+
+    aimAtTheList (rig, "sends", bus + ":-60");
+    rig.setCue (rig.fadeId, "duration", "4");
+    rig.fire (rig.fadeId);
+
+    play (rig, 50);
+    REQUIRE (rig.submitAndTick ("run.stopAll").applied == 1);
+    CHECK (moveJobs (rig) == 0u);
+
+    //  Where the tick that carried the press had taken it - and there it stays.
+    const auto pressedAt = rig.runs.find (id)->moved.at ("send/" + bus);
+    REQUIRE (pressedAt < -5.0);
+
+    play (rig, 10);
+    CHECK (rig.runs.find (id)->moved.at ("send/" + bus) == doctest::Approx (pressedAt));
+}
+
+TEST_CASE ("fade moves: a fade with only lists, aimed at nothing running, ends at once and moves nothing")
+{
+    LaneRig rig;
+    const auto bus = mixWithSend (rig, "0");
+
+    aimAtTheList (rig, "sends", bus + ":-6");
+    rig.fire (rig.fadeId);
+
+    const auto fade = rig.runs.all().back().id;
+    CHECK (moveJobs (rig) == 0u);
+    CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 5));
+}
+
+TEST_CASE ("fade moves: the door sets one entry, an empty text takes it out, and it refuses what is not a fade's")
+{
+    FadeRig rig;
+    auto door = cue::fadeMoveWriteFor (rig.document, nullptr);
+
+    const auto bus = rig.document.createBus ("mix", 2);
+    REQUIRE (bus.ok);
+
+    const auto write = [&] (const std::string& address, const std::string& text)
+    {
+        return door (address, text, { osc::Value::string (address), osc::Value::string (text) });
+    };
+
+    const auto fade = "/godot/cue/" + rig.fadeId + "/moves/";
+
+    //  Not ours: answered by somebody else.
+    CHECK_FALSE (write ("/godot/cue/" + rig.fadeId + "/level", "-6").has_value());
+
+    auto done = write (fade + "send/" + bus.id, "-6");
+    REQUIRE (done.has_value());
+    CHECK (done->applied);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/sends").value_or ("") == bus.id + ":-6");
+
+    REQUIRE (write (fade + "eq/eqB1Gain", "-3")->applied);
+    REQUIRE (write (fade + "eq/eqHpfFreq", "120")->applied);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/eq").value_or ("") == "eqB1Gain:-3 eqHpfFreq:120");
+
+    //  The tick box cleared.
+    REQUIRE (write (fade + "eq/eqB1Gain", "")->applied);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/eq").value_or ("") == "eqHpfFreq:120");
+
+    //  Refused: a switch, a bus that is not there, a value out of range, a cue that is not a fade.
+    CHECK_FALSE (write (fade + "eq/eqB1On", "true")->applied);
+    CHECK_FALSE (write (fade + "send/nowhere", "-6")->applied);
+    CHECK_FALSE (write (fade + "eq/eqB1Gain", "40")->applied);
+    CHECK_FALSE (write ("/godot/cue/" + rig.mediaId + "/moves/send/" + bus.id, "-6")->applied);
+    CHECK_FALSE (write (fade + "fx/nothing/0", "0.5")->applied);
 }

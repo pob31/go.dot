@@ -18,11 +18,13 @@
 
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/FadeMoves.h>
 #include <wfg/engine/cue/FxValues.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace wfg::client::model
 {
@@ -74,6 +76,64 @@ namespace wfg::client::model
         const auto label = labelOf (snapshot, pickedCueId);
         out.title = name + dash + label;
 
+        /*  ON A FADE (namespace draft §26, PH): the window shows the TARGET'S
+            insert, its values with the fade's laid over them, and what a hand
+            turns is the fade's to move - routed by an identifier no Fx can
+            have, `fade:` and the fade. Never a whole state: a fade keeps
+            values. */
+        if (text (snapshot, "/godot/cue/" + pickedCueId + "/kind") == "fade")
+        {
+            const auto fade = "/godot/cue/" + pickedCueId + "/";
+            const auto targetId = text (snapshot, fade + "target");
+
+            if (! text (snapshot, fade + "dca").empty() || targetId.empty())
+            {
+                out.reason = label + " moves no cue's sound: aim it at a media or a mic cue to move its "
+                               + name + ".";
+                return out;
+            }
+
+            const auto targetLabel = labelOf (snapshot, targetId);
+            const auto inserts = insertsOf (snapshot, targetId);
+            const auto found = inserts.find (pluginId);
+            out.title = name + dash + label + " \xe2\x86\x92 " + targetLabel;
+
+            if (found == inserts.end())
+            {
+                out.reason = name + " is not on " + targetLabel + ": switch it in on that cue first.";
+                return out;
+            }
+
+            out.greyed = false;
+            out.fxId = fadeEditorId (pickedCueId);
+            out.reason = "what you turn here, the fade moves - untick it in the fade's mixer to leave it alone";
+
+            auto stored = cue::parseFxValues (text (snapshot, "/godot/fx/" + found->second.fxId + "/values"));
+
+            for (const auto& [key, value] : cue::parseMoveList (text (snapshot, fade + "fx")))
+                if (const auto slash = key.rfind ('/'); slash != std::string::npos && key.substr (0, slash) == pluginId)
+                    stored[std::atoi (key.c_str() + slash + 1)] = value;
+
+            auto count = integer (snapshot, base + "paramCount");
+
+            if (! stored.empty())
+                count = std::max (count, stored.rbegin()->first + 1);
+
+            out.values.assign (static_cast<std::size_t> (std::max (0, count)), -1.0f);
+
+            for (const auto& [index, value] : stored)
+                if (index >= 0 && index < count)
+                    out.values[static_cast<std::size_t> (index)] = static_cast<float> (value);
+
+            const auto stateFile = text (snapshot, "/godot/fx/" + found->second.fxId + "/stateFile");
+            const auto bundle = text (snapshot, "/godot/document/path");
+
+            if (! stateFile.empty() && ! bundle.empty())
+                out.statePath = bundle + "/plugins/" + stateFile;
+
+            return out;
+        }
+
         /*  A MEDIA CUE'S INSERTS, OR A MIC CUE'S (Phase 9b): the helper follows
             the pick onto a mic cue whose channel carries this plugin. */
         if (const auto kind = text (snapshot, "/godot/cue/" + pickedCueId + "/kind");
@@ -121,6 +181,16 @@ namespace wfg::client::model
             out.statePath = bundle + "/plugins/" + stateFile;
 
         return out;
+    }
+
+    std::string fadeEditorId (const std::string& fadeId)
+    {
+        return "fade:" + fadeId;
+    }
+
+    std::string fadeOfEditorId (const std::string& fxId)
+    {
+        return fxId.rfind ("fade:", 0) == 0 ? fxId.substr (5) : std::string();
     }
 
     EditorStart readEditorStart (const tree::TreeSnapshot& snapshot, const std::string& pluginId)

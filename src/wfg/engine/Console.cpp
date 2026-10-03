@@ -32,6 +32,7 @@
 #include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/FxRows.h>
+#include <wfg/engine/cue/FadeMoveRows.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -752,7 +753,8 @@ namespace
                     document that cannot hold it. */
                 wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
                                     wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
-                                                        wfg::cue::fxWriteFor (document, nullptr, &liveEdits))),
+                                                        wfg::cue::eitherOf (wfg::cue::fxWriteFor (document, nullptr, &liveEdits),
+                                                                            wfg::cue::fadeMoveWriteFor (document, nullptr)))),
                 wfg::cue::liveSendFor (liveEdits, document));
 
             wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
@@ -3000,7 +3002,8 @@ namespace
                 plugins' parameters, held by the FX door (2026-09-26). */
             wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document, &takes, &lanes),
                                 wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
-                                                    wfg::cue::fxWriteFor (document, &catalogues, &liveEdits))),
+                                                    wfg::cue::eitherOf (wfg::cue::fxWriteFor (document, &catalogues, &liveEdits),
+                                                                        wfg::cue::fadeMoveWriteFor (document, &catalogues)))),
             wfg::cue::liveSendFor (liveEdits, document));
 
         wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
@@ -3021,6 +3024,7 @@ namespace
         /*  And the runner sends a cue's inserts by the graph's slots, which
             the audio host writes into this table when it builds (2026-09-26). */
         runner.setPlugins (&pluginTable);
+        runner.setCatalogues (&catalogues);
 
         /*  THE APP'S PLUGIN SCAN (2026-09-26, the author's decision): the
             command line's own scan run as a child (plugin/ScanJob.h), on the

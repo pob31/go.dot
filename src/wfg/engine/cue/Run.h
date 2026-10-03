@@ -57,6 +57,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -540,6 +541,14 @@ namespace wfg::cue
             entry of the show's set in chain order, as the arm carried them and
             as `Runner::applyFx` last pushed them. Kept for `eq`'s reason. */
         std::vector<FxSetting> fx;
+
+        /*  WHAT A FADE MOVED TONIGHT (namespace draft §26, 2026-10-03): this
+            run's sends, EQ numbers and plugin values a fade has carried
+            somewhere, by entry - `send/<bus>`, `eq/<row>`, `fx/<plugin>/<n>` -
+            held until the run ends (OZ). Over the document and the lock's
+            ride, in `resolveRouting`, `eqOf` and `fxOf`. Never logged: the GO
+            that fired the fade is, and a replay moves them again. */
+        std::map<std::string, double> moved;
 
         /*  A SAMPLER MEMBER'S STRIP (PRD §3.27, Phase 6): the fader or pad this
             run holds - or waits for, while another group's clip finishes on

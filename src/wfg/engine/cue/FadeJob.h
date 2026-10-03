@@ -41,6 +41,7 @@
     show is a mistake nobody can explain afterwards.
 */
 
+#include <wfg/engine/cue/FadeMoves.h>
 #include <wfg/engine/document/FadePoints.h>
 
 #include <cstdint>
@@ -142,13 +143,33 @@ namespace wfg::cue
         double fromRate = 1.0;
         double toRate = 1.0;
 
+        /*  OR ONE OF WHAT THE TARGET OWNS (namespace draft §26, 2026-10-03):
+            a send, an EQ number or a plugin value, named by its entry -
+            `send/<bus>`, `eq/<row>`, `fx/<plugin>/<index>` - moved from
+            `fromValue` to `toValue` in its own domain (PA). The key is `move:`,
+            the run and the entry, so a takeover finds this entry on this run
+            and nothing else (PC); `moveRun` is the run, kept whole rather than
+            cut back out of the key. */
+        std::string move;
+        std::string moveRun;
+        MoveDomain moveDomain = MoveDomain::linear;
+        double fromValue = 0.0;
+        double toValue = 0.0;
+
+        /*  A DCA FADE A HAND TOOK OVER (PI): the hand serial of the DCA when
+            the job began, so a write of the trim by a hand since is seen. */
+        std::uint64_t handSerial = 0;
+
         /*  The run whose sound this job moves, whatever its key: the target
-            itself for a level, what follows `rate:` for a speed, nothing for a
-            DCA, which has no run. */
+            itself for a level, what follows `rate:` for a speed, the moved
+            entry's run, nothing for a DCA, which has no run. */
         std::string heldRun() const
         {
             if (! dca.empty())
                 return {};
+
+            if (! move.empty())
+                return moveRun;
 
             return movesRate && target.size() > 5 ? target.substr (5) : target;
         }
@@ -256,6 +277,18 @@ namespace wfg::cue
 
             const auto progress = static_cast<double> (ticksDone) / ticksTotal;
             return fadeLevelDb (fromRate, toRate, progress, curve);
+        }
+
+        /*  The moved value now, for a job that moves one of the target's own
+            numbers: the two-word curve in the entry's domain. Never the drawn
+            points, which are the level's (§26, PA). */
+        double currentValue() const noexcept
+        {
+            if (ticksTotal <= 0)
+                return toValue;
+
+            const auto progress = static_cast<double> (ticksDone) / ticksTotal;
+            return moveValueAt (fromValue, toValue, progress, curve == FadeCurve::sCurve, moveDomain);
         }
     };
 }

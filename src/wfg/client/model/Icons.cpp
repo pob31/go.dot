@@ -85,6 +85,7 @@ namespace wfg::client::model
         if (subject == "waveform") return Icon::waveform;
         if (subject == "sends")    return Icon::sends;
         if (subject == "curve")    return Icon::curve;
+        if (subject == "fade")     return Icon::fade;
         if (subject == "timeline") return Icon::timeline;
         if (subject == "take")     return Icon::take;
 

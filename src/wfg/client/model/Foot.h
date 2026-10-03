@@ -48,6 +48,7 @@
 
 #include <wfg/client/model/Curve.h>
 #include <wfg/client/model/Eq.h>
+#include <wfg/client/model/FadeMix.h>
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/Lane.h>
 #include <wfg/client/model/Ranges.h>
@@ -64,7 +65,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take };
+        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take, fade };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -133,6 +134,11 @@ namespace wfg::client::model
             It carries its own notice, as the timeline does: a cue that is not a
             fade and a fade nobody has drawn on are different sentences. */
         CurveReading curve;
+
+        /*  WHAT A FADE MOVES, filled only when its mixer is what is open
+            (namespace draft §26): a strip for each slider, a row for each EQ
+            number and plugin value, a door for each of the target's inserts. */
+        FadeMixReading fadeMix;
 
         /*  THE CUE'S EQ, filled only when the EQ is what is open (Phase 9a):
             the twenty-three rows as one value, the same value the voice is

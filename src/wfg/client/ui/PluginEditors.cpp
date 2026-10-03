@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/PluginEditors.h>
 
+#include <wfg/client/model/FadeMix.h>
+
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/FxEditor.h>
 #include <wfg/client/model/Text.h>
@@ -305,8 +307,19 @@ namespace wfg::client::ui
             }
 
             for (const auto& [where, value] : moved)
-                if (actions.set)
+            {
+                if (! actions.set)
+                    break;
+
+                /*  A WINDOW ON A FADE writes the fade's door (namespace draft
+                    §26, PF): the value becomes one the fade moves this plugin's
+                    parameter to, on its target. */
+                if (const auto fadeId = model::fadeOfEditorId (where.first); ! fadeId.empty())
+                    actions.set (model::fadeMoveAddress (fadeId, "fx/" + pluginId + "/" + std::to_string (where.second)),
+                                 valueText (value));
+                else
                     actions.set (model::fxParameterAddress (where.first, where.second), valueText (value));
+            }
 
             /*  THE WHOLE STATE, KEPT: after the values, so the turn goes out
                 first and the capture joins it. Taken whether or not the helper
@@ -318,7 +331,8 @@ namespace wfg::client::ui
                 for (std::size_t i = 0; i < kept->values.size(); ++i)
                     values[static_cast<int> (i)] = std::round (static_cast<double> (kept->values[i]) * 1.0e6) / 1.0e6;
 
-                if (actions.capture)
+                /*  NOT A FADE'S: a fade keeps values, never a whole state (PH). */
+                if (actions.capture && model::fadeOfEditorId (kept->fxId).empty())
                     actions.capture (kept->fxId, kept->stateFile, cue::formatFxValues (values));
             }
 

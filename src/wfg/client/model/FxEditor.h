@@ -73,6 +73,13 @@ namespace wfg::client::model
     EditorSubject readEditorSubject (const tree::TreeSnapshot&, const std::string& pickedCueId,
                                      const std::string& pluginId);
 
+    /*  THE IDENTIFIER A WINDOW ON A FADE IS HANDED in place of an Fx's
+        (namespace draft §26): `fade:` and the fade, which no Fx can be - so
+        what the window reports is routed to the fade's door and no state is
+        kept. `fadeOfEditorId` is the way back: the fade, or empty. */
+    std::string fadeEditorId (const std::string& fadeId);
+    std::string fadeOfEditorId (const std::string& fxId);
+
     struct EditorStart
     {
         std::string pluginId;

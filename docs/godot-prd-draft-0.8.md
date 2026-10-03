@@ -891,6 +891,17 @@ Curves that must follow a media transport live with that clip; transport-free
 fades are wall-clock interpolators in the control graph, hundreds concurrent,
 no audio engine involvement.
 
+*Added in 0.8, at the author's direction (2026-10-03).* **A fade moves what its
+target owns.** Besides the cue's level and its speed, a fade moves the target's
+send levels, its EQ numbers and its plugin values. The moved values belong to the
+run: they are not written into the cue, and they hold until the run ends. A fade
+aimed at a DCA moves its trim, and the motorised DCA fader follows. A hand on that
+fader takes over from the fade. The fade is edited in the foot panel. Whatever
+already has a slider (the level, the speed, each send) is a slider there. **EQ...**
+opens the EQ panel and each insert opens its plugin's own window, all on the fade.
+Changing a value marks it as moved, and clearing its tick box removes it. Switches
+are not faded, because a fade moves between two numbers. Namespace draft §26.
+
 *Added in 0.8, at the author's direction (2026-09-27).* **The first lane built
 is a media cue's level lane** — a volume curve drawn over its waveform
 (`media/levelLane`, `docs/godot-namespace-draft-0.1.md` §20). It lives on the

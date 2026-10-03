@@ -40,6 +40,9 @@ namespace wfg::client::ui
         if (eq != nullptr)
             eq->applyTheme (theme);
 
+        if (fadeMixer != nullptr)
+            fadeMixer->applyTheme (theme);
+
         if (fx != nullptr)
             fx->applyTheme (theme);
 
@@ -80,11 +83,41 @@ namespace wfg::client::ui
         timeline.reset();
         curve.reset();
         eq.reset();
+        fadeMixer.reset();
         fx.reset();
         takePanel.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::fade:
+            {
+                /*  WHAT A FADE MOVES (namespace draft §26, PG): its doors open
+                    the EQ and the curve in this same foot, on the fade, and a
+                    plugin's own window on the fade. */
+                FadeMixerComponent::Actions fading;
+                fading.set = actions.set;
+                fading.openEq = [this] (const std::string& fadeId)
+                {
+                    if (actions.openSubject)
+                        actions.openSubject ({ model::Subject::Kind::eq, fadeId });
+                };
+                fading.openCurve = [this] (const std::string& fadeId)
+                {
+                    if (actions.openSubject)
+                        actions.openSubject ({ model::Subject::Kind::curve, fadeId });
+                };
+                fading.editPlugin = actions.editPlugin;
+                fading.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                fadeMixer = std::make_unique<FadeMixerComponent> (theme, std::move (fading));
+                addAndMakeVisible (*fadeMixer);
+                break;
+            }
+
             case model::Subject::Kind::take:
             {
                 /*  THE TAKE (Phase 9c): its presses are the take verbs, a
@@ -316,6 +349,10 @@ namespace wfg::client::ui
                 wanted = "Take";
                 break;
 
+            case model::Subject::Kind::fade:
+                wanted = "Fade";
+                break;
+
             case model::Subject::Kind::none:
                 break;
         }
@@ -357,6 +394,9 @@ namespace wfg::client::ui
 
         if (eq != nullptr)
             eq->show (reading);
+
+        if (fadeMixer != nullptr)
+            fadeMixer->show (reading);
 
         if (fx != nullptr)
             fx->show (reading);
@@ -461,6 +501,9 @@ namespace wfg::client::ui
 
         if (eq != nullptr)
             eq->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (fadeMixer != nullptr)
+            fadeMixer->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
 
         if (fx != nullptr)
             fx->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));

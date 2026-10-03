@@ -31,6 +31,7 @@
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CurveEditorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
+#include <wfg/client/ui/FadeMixerComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/TakePanelComponent.h>
@@ -79,6 +80,9 @@ namespace wfg::client::ui
 
             /** Show a cue's EQ, from the chain's EQ box. */
             std::function<void (const std::string& cueId)> openEqOn;
+
+            /** Show another subject, from a fade's mixer: its EQ, its curve (§26). */
+            std::function<void (const model::Subject&)> openSubject;
 
             /** Show the take a mic cue's channel records, from the chain's recorder (Phase 9c). */
             std::function<void (const std::string& cueId)> openTakeOn;
@@ -174,6 +178,7 @@ namespace wfg::client::ui
         std::unique_ptr<TimelineComponent> timeline;
         std::unique_ptr<CurveEditorComponent> curve;
         std::unique_ptr<EqPanelComponent> eq;
+        std::unique_ptr<FadeMixerComponent> fadeMixer;
 
         std::string dialed;
         std::unique_ptr<FxPanelComponent> fx;

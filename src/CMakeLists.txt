@@ -136,6 +136,10 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/FxValues.cpp
     wfg/engine/cue/FxRows.h
     wfg/engine/cue/FxRows.cpp
+    wfg/engine/cue/FadeMoves.h
+    wfg/engine/cue/FadeMoves.cpp
+    wfg/engine/cue/FadeMoveRows.h
+    wfg/engine/cue/FadeMoveRows.cpp
     wfg/engine/midi/MidiInputs.h
     wfg/engine/midi/MidiInputs.cpp
     wfg/engine/midi/MidiSink.h
@@ -447,6 +451,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Lane.cpp
     wfg/client/model/Sends.h
     wfg/client/model/Sends.cpp
+    wfg/client/model/FadeMix.h
+    wfg/client/model/FadeMix.cpp
     wfg/client/model/Eq.h
     wfg/client/model/Eq.cpp
     wfg/client/model/Fx.h
@@ -540,6 +546,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/CurveEditorComponent.cpp
     wfg/client/ui/SendMixerComponent.h
     wfg/client/ui/SendMixerComponent.cpp
+    wfg/client/ui/FadeMixerComponent.h
+    wfg/client/ui/FadeMixerComponent.cpp
     wfg/client/ui/EqPanelComponent.h
     wfg/client/ui/EqPanelComponent.cpp
     wfg/client/ui/FxPanelComponent.h

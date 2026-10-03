@@ -10325,7 +10325,8 @@ rather than at close-out.
 **An EQ on a bus or an output** — a system EQ for the room. Every EQ here is a cue's.
 
 **A fade aimed at an EQ band or a plugin parameter.** A fade moves a level or a DCA; a curve on
-any other parameter is §3.10's binding, Phase 10's and later. `advanceFades` is untouched.
+any other parameter is §3.10's binding, Phase 10's and later. `advanceFades` is untouched. *(Lifted
+2026-10-03 for the target's own sends, EQ numbers and plugin values: §26.)*
 
 **Inline hosting** — §3.18's opt-in, a `te::ExternalPlugin` in the process with §3.4's
 message-thread handover. Not built and given no row, an option nothing reads being rot.
@@ -18403,3 +18404,125 @@ this should be a question when saving or closing." So:
    of change; field picks; the neighbour and the end; sounds copied only when asked; removals and
    settings only when picked; no template, then one made; a folder that is no show) and by hand with
    `wfg template` on the phase4 fixture. The window's dialogs are the author's to try.
+
+## 26. A fade moves what the cue owns
+
+Written 2026-10-03, at the author's direction: *"Fades can act on DCA, these fades will make the DCA
+fader move. Otherwise fades will act on several possible parameters: global cue level, send levels,
+speed, eventually EQ and effect parameters. What is already represented as a slider should be a
+slider in the foot panel when editing a fade. EQ and inserted effects should open the EQ interface
+or inserted effect UI. Changing a parameter highlights the parameter to show the fade will affect
+it. Removing a changed value (I guess we need a check box for the EQ and effects) will remove the
+changed value."*
+
+What there was before: a fade moved its target's level (§14.6), its speed (§22.6) or a DCA's trim
+(§16.4), and nothing else - §17.10 had ruled out "a fade aimed at an EQ band or a plugin parameter".
+It was edited in the inspector, as numbers and switches; the foot opened on its drawn curve. A DCA
+fade already moved the motorised fader: the trim is the DCA strip's `target` and the motor follows
+it (§16.4). This section lifts §17.10's exclusion for the target cue's own sends, EQ rows and plugin
+values, and gives a fade a foot panel of its own.
+
+### 26.1 Decisions
+
+The author's are the quotation above. The rest are the implementer's, open to his overruling.
+
+- **OY - Three lists on the fade, and being in one is being moved.** `fade/sends` (`bus:dB`),
+  `fade/eq` (`row:value`, the EQ's numeric rows only) and `fade/fx` (`plugin/index:value`, normalised
+  0..1, the plugin named by its set entry) sit beside `level` and `rate`. Each is space-separated
+  pairs, sorted, written through the canonical number formatter, as `fx/values` is (§17.4). An
+  entry that is absent is not moved. The tick box the author asked for is presence in the list:
+  ticked writes the entry, unticked takes it out. Level and speed keep their switches, `levelOn` and
+  `rateOn`, which are the same tick box in another spelling.
+- **OZ - What a fade moves is the run's, never the cue's.** As with the level: the fade carries the
+  sounding run's send, EQ value or plugin value from where it is to the destination, holds it there
+  until the run ends, and leaves the document alone. A next fade on the same thing takes over from
+  where it has got to. An edit of the cue's own value while it is held is not heard until the run
+  ends, because the run's value is a decision the GO made tonight and the edit is one for next time.
+- **PA - Each kind moves in its own domain.** A send and an EQ band's gain are straight in dB, as a
+  level is. A frequency and a Q are straight in their logarithm, so a sweep spends as long on each
+  octave. A plugin value is straight in its 0..1. `sCurve` shapes all of them. Drawn `points` stay
+  the level's (EA's rule, §22.6).
+- **PB - Keyed so a retarget keeps its meaning.** A send is named by its bus and a plugin value by
+  its set entry, not by the target's `Send` or `Fx` identifiers, so retargeting a fade onto another
+  cue moves the same mix and the same plugin there.
+  - A bus the target has **no send into** is faded in from silence as a send of the run alone: the
+    mix hears it tonight and the cue holds no `Send`.
+  - A send the target has **switched off** stays off. The fade moves its level, which is not heard.
+  - A plugin the target has **not switched in**, an EQ band switched off and an EQ that is off: the
+    fade moves the value, and nothing is heard until a switch is pressed.
+  - Switches (`eqOn`, a band's or a filter's on, a shelf's shape, a send's `on`, an insert's
+    `enabled`) are not faded. A fade is a move between two numbers, and a switch has no middle.
+- **PC - Takeover per run and per thing moved.** The job's key is `move:`, the run, and the entry,
+  so a fade on one send never takes over from a fade on another, nor from the level. A fade that
+  moves several things is several jobs under one report (§22.6's rule): it is done when the last
+  one arrives.
+- **PD - Esc ends these moves at the press** and leaves each where it has got to, as it does a speed
+  (EB). The Esc fade is the level's. Double Esc drops them with every other job. A run that ends
+  takes its moved values with it.
+- **PE - Doh! puts them back.** A GO that moved a send, an EQ value or a plugin value on a run it did
+  not start brings the value back with the level, over the Doh! fade (§24.13). A key another hand
+  holds is left where it is and said, as with the level (L22).
+- **PF - One door per entry.** A hand writes one entry through
+  `/godot/cue/<fade>/moves/send/<bus>`, `.../moves/eq/<row>` and `.../moves/fx/<plugin>/<n>`.
+  A number sets the entry and an empty text removes it. The door rewrites the list through the
+  ordinary `node.set` on the fade, so the lock, the undo step and the coalescing of a drag are the
+  document's: FxRows' shape (§17.4). Two entries moved in one pass cannot overwrite each other, which
+  a client merging lists from a snapshot a pass old could. The door refuses an unknown bus, a row
+  that is not a numeric EQ row, an index past the plugin's count when the catalogue knows it, a
+  value outside the row's range, and anything aimed at a cue that is not a fade.
+- **PG - The foot opens on the fade.** Picking a fade opens a mixer: the level strip (the DCA's, for
+  a fade on a DCA), the speed strip when the target plays a file, and a strip for every mix the show
+  declares, followed by **EQ...**, **FX...** and **Curve...**. Each strip has a tick box and a
+  number, and stands for its entry:
+  - **Moved**: the box is ticked, the cap is in the accent colour and the word under it is
+    **moves**.
+  - **Not moved**: the box is clear, the cap is dim, the number is what the target holds now, and
+    the word is **stays**.
+  - Moving a strip ticks its box, which is the highlight the author asked for. Unticking it takes
+    the entry out. The word carries the state, so colour is not the only carrier (§4.8).
+- **PH - EQ... and FX... open the cue's own editors on the fade.**
+  - **The EQ panel** draws the target's EQ with the fade's rows laid over it. What a hand moves goes
+    through the door. The panel lists the moved rows with a tick box each, and their boxes are
+    framed. The switches and shape menus are greyed, with a sentence that says a fade moves numbers
+    and not switches.
+  - **The FX panel** shows the target's chain. Edit... opens the plugin's own window on the target's
+    insert, its values overlaid with the fade's. A knob turned there goes through the door, and the
+    panel lists the moved parameters, by name, with a tick box each. A window on a fade keeps no
+    whole state: the fade holds values and never a plugin's state.
+- **PI - A hand on a DCA's fader takes over its fade.** The fade had gone on writing the trim under
+  the hand, fifty times a second. Now a hand's write of a DCA trim ends a DCA fade under way, and
+  its run reports done, as a stop's takeover ends the fade it takes over from. The motor already
+  stood still under a touch (§16.4).
+- **PJ - Load-to-time places the level and the speed only** (§22.6). A send, an EQ value or a
+  plugin value a fade moved before the place loaded from is not seated. Named in §26.4.
+
+### 26.2 Rows
+
+| row | type | default | meaning |
+|---|---|---|---|
+| `fade/sends` | s | empty | `bus:dB` pairs: the target's send into each bus, moved to that level |
+| `fade/eq` | s | empty | `row:value` pairs, numeric EQ rows: `eqHpfFreq`, `eqLpfFreq`, `eqB<n>Freq`, `eqB<n>Gain`, `eqB<n>Q` |
+| `fade/fx` | s | empty | `plugin/index:value` pairs, normalised 0..1: the target's insert of that set entry, that parameter |
+| `/godot/cue/<fade>/moves/...` | door | - | write-only, one entry. A number sets it and an empty text removes it (PF) |
+
+`wfg validate` warns on a fade whose lists name a bus, a row or a plugin the show has not got, and
+counts a fade with nothing switched on and every list empty as a fade that moves nothing (EC).
+
+### 26.3 The engine
+
+`FadeJob` gains a `move` (the entry, `send/<bus>`, `eq/<row>` or `fx/<plugin>/<n>`) and a value
+domain. A move job writes `Run::moved[entry]`, and `applyRouting`, `applyEq` and `applyFx` read the
+run's moved values over the document's, and over the live layer's: what a GO moved tonight is newer
+than what a lock is riding. The three are gated on a revision. Every tick that a move job writes
+bumps `movedRevision`, so a voice follows its fade at the tick rate and costs nothing while none is
+under way. EQ coefficients are rebuilt for each block the setting changes, which at fifty settings a
+second is the step a rotary's turn already makes.
+
+### 26.4 Named limits
+
+- **Load-to-time does not seat moved values** (PJ): a run placed after a fade on its send starts at
+  the cue's own send.
+- **Not on a group.** A group has no sends, EQ or inserts of its own (§4.12). A fade aimed at a group
+  moves only its level trim.
+- **No drawn curve for these.** The drawn `points` shape the level.
+- **The console client** shows the three lists as text rows. The mixer is the desktop's.

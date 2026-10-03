@@ -16,6 +16,9 @@
 
 #include <wfg/client/ui/EqPanelComponent.h>
 
+#include <wfg/client/model/FadeMix.h>
+#include <wfg/engine/cue/FadeMoves.h>
+
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -109,6 +112,20 @@ namespace wfg::client::ui
             value.setJustificationType (juce::Justification::centredRight);
             value.setTooltip (juce::String (row) + (unit.isNotEmpty() ? ", in " + unit : ""));
 
+            /*  ON A FADE, A TICK BOX BESIDE THE NUMBER (namespace draft §26,
+                PH): ticked, the fade moves this row to the number; cleared,
+                it leaves the row alone. Ticking one the fade did not move
+                starts it at what the target holds now. */
+            moves.setWantsKeyboardFocus (false);
+            moves.setTooltip ("Whether the fade moves " + juce::String (row) + " - clear it to leave the row alone");
+            moves.onClick = [this]
+            {
+                if (moves.getToggleState())
+                    owner.writeNumber (row, current(), decimals);
+                else
+                    owner.write (row, {});
+            };
+
             value.onTextChange = [this]
             {
                 /*  READ THE WAY A PERSON TYPES IT, which is spatcore's typed
@@ -157,6 +174,7 @@ namespace wfg::client::ui
         int decimals;
         juce::String unit;
         juce::Label value;
+        juce::ToggleButton moves;
     };
 
     //==============================================================================
@@ -298,7 +316,21 @@ namespace wfg::client::ui
         }
 
         for (auto& box : boxes)
+        {
             addAndMakeVisible (box->value);
+
+            if (onFade())
+                addAndMakeVisible (box->moves);
+        }
+
+        /*  A FADE MOVES NUMBERS, NOT SWITCHES (PB): on a fade the switches,
+            the shapes and Flat show the target's and take no hand. */
+        for (auto* control : std::initializer_list<juce::Component*> { &onToggle, &hpfToggle, &lpfToggle,
+                                                                       &lowShape, &highShape, &flat })
+            control->setEnabled (! onFade());
+
+        for (auto& toggle : bandToggles)
+            toggle.setEnabled (! onFade());
 
         markDial();
 
@@ -334,18 +366,59 @@ namespace wfg::client::ui
 
             box->value.setText (juce::String (numberText (box->current(), box->decimals)),
                                 juce::dontSendNotification);
+
+            /*  ON A FADE, WHAT IT MOVES IS LIT (the author: "Changing a
+                parameter highlights the parameter"): the number in the
+                accent, and its box ticked - the tick the carrier, the colour
+                the help (§4.8). What it leaves alone is the target's, dimmed. */
+            if (onFade())
+            {
+                const auto moved = reading.eq.fadeMoves.count (box->row) > 0;
+                box->moves.setToggleState (moved, juce::dontSendNotification);
+                box->value.setColour (juce::Label::textColourId,
+                                      Look::colour (theme, moved ? "accent" : "ink-off"));
+            }
         }
     }
 
     //==============================================================================
+    bool EqPanelComponent::onFade() const noexcept
+    {
+        return ! reading.eq.fadeId.empty();
+    }
+
     void EqPanelComponent::write (const std::string& row, const std::string& text)
     {
-        if (actions.set && ! reading.subject.objectId.empty())
-            actions.set (model::eqAddress (reading.subject.objectId, row), text);
+        if (! actions.set || reading.subject.objectId.empty())
+            return;
+
+        /*  ON A FADE, THROUGH THE FADE'S DOOR (PF): the row becomes one of
+            what the fade moves, and an empty text takes it out. A switch or a
+            shape is not a fade's to move, and says so. */
+        if (onFade())
+        {
+            if (! cue::isMovableEqRow (row))
+            {
+                if (actions.say)
+                    actions.say ("A fade moves numbers, not switches - set those on the cue itself.");
+
+                return;
+            }
+
+            actions.set (model::fadeMoveAddress (reading.eq.fadeId, "eq/" + row), text);
+            return;
+        }
+
+        actions.set (model::eqAddress (reading.subject.objectId, row), text);
     }
 
     void EqPanelComponent::dialRow (const std::string& row)
     {
+        /*  NOT A FADE'S: its rows are a list on the fade with no node of
+            their own for the dial to read and turn. */
+        if (onFade())
+            return;
+
         if (actions.dial && ! reading.subject.objectId.empty())
             actions.dial (model::eqAddress (reading.subject.objectId, row));
     }
@@ -775,6 +848,16 @@ namespace wfg::client::ui
     }
 
     //==============================================================================
+    void EqPanelComponent::placeBox (Box& box, juce::Rectangle<int> area)
+    {
+        /*  ON A FADE THE TICK TAKES THE LEFT OF THE BOX, so the number and
+            whether it moves are read as one thing. */
+        if (onFade())
+            box.moves.setBounds (area.removeFromLeft (area.getHeight()));
+
+        box.value.setBounds (area);
+    }
+
     void EqPanelComponent::resized()
     {
         if (! reading.eq.present)
@@ -800,13 +883,13 @@ namespace wfg::client::ui
         line = column.removeFromTop (row);
         line.removeFromLeft (mark);
         hpfToggle.setBounds (line.removeFromLeft (line.getWidth() - numberWidth));
-        if (boxes.size() > 0) boxes[0]->value.setBounds (line.reduced (gapPx, 1));
+        if (boxes.size() > 0) placeBox (*boxes[0], line.reduced (gapPx, 1));
         column.removeFromTop (gapPx);
 
         line = column.removeFromTop (row);
         line.removeFromLeft (mark);
         lpfToggle.setBounds (line.removeFromLeft (line.getWidth() - numberWidth));
-        if (boxes.size() > 1) boxes[1]->value.setBounds (line.reduced (gapPx, 1));
+        if (boxes.size() > 1) placeBox (*boxes[1], line.reduced (gapPx, 1));
         column.removeFromTop (gapPx);
 
         for (int band = 0; band < audio::EqSettings::numBands; ++band)
@@ -828,7 +911,7 @@ namespace wfg::client::ui
                 const auto at = static_cast<std::size_t> (2 + band * 3 + which);
 
                 if (at < boxes.size())
-                    boxes[at]->value.setBounds (line.removeFromLeft (numberWidth).reduced (gapPx, 1));
+                    placeBox (*boxes[at], line.removeFromLeft (numberWidth).reduced (gapPx, 1));
             }
 
             column.removeFromTop (gapPx);
