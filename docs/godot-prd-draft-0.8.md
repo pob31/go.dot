@@ -2895,6 +2895,27 @@ rules"*. So:
   message, an OSC event (§3.3), anything sent to an opaque device (§3.11) — is sent again by the
   corrected GO, which behaves exactly like a first GO for it, and Doh! names it
   *"could not be taken back"*.
+- **The rollback** (the author, 2026-10-03). What takes a desk back is not always what was sent
+  again in mirror: *"we might send a go back command or a different cue or scene number if for
+  instance the light board has autofollow cues after the last one sent. So we don't restart the
+  whole chain"*. So under Undo(h), a device and a cue can carry a **rollback** — a message of the
+  cue's own kind, written as its message is — that Doh! sends to the device in place of the put-back
+  and of *"could not be taken back"*. In his words: *"We could have a default for the device that is
+  in the editable Doh rollback field. If the device default is left blank then the previous message
+  is in the field and can be edited too. This way a general go back command overrides at the device
+  level, but can be edited. Otherwise the previous command is the cue's default and can be edited for
+  an intermediate cue number for instance."* So a device's rollback, blank unless set, is a desk's
+  general go-back command; a cue's rollback field shows its device's when there is one, otherwise the
+  **previous command** — what the last cue before it in the list sent to the same device
+  *(implementer's reading, the author's to confirm)* — and either can be edited there. It is written
+  ahead, in the cue and on the device's row, never at the moment of the Doh!; the corrected GO sends
+  the cue again, as under Undo(h) (the author, 2026-10-03: one slot, the rollback only). With it
+  *(implementer's calls)*: the field stores only what somebody typed (§4.10), the rest is shown as
+  what will be sent; the previous command is read from the document's list order, not from what this
+  session happened to send; a GO that sent one device several messages — a scene's cues 12 then
+  12.5 — gets one rollback per device, the first sent cue's, since it alone names where the desk was
+  before the GO; a cue with no rollback and nothing before it is *"could not be taken back"* as
+  today; a second Doh! sends nothing more; and the rollback each Doh! sent is in its report.
 - **Only what had already left is concerned** *(implementer's reading, the author's to confirm)*.
   What the early GO had not sent yet is no device's: it goes out on the corrected GO's clock,
   whatever the setting, so a lighting scene like the author's, caught part-way, leaves its first
