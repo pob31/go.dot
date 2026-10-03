@@ -19712,3 +19712,266 @@ TEST_CASE ("go.doh: an act the GO finished a round of, which loops, is not broug
     INFO (said);
     CHECK (says (said, "Scene went on to its next round when Three was fired; it was not brought back"));
 }
+
+//==============================================================================
+/*  D3'S REVIEW (2026-10-03, namespace draft §24.13): each case was written
+    first and run on bd25dd5 with D4 on top (204ac69), and failed there. */
+namespace
+{
+    /*  A scene a sequence of memos holds open on its second member's wait,
+        started by name, with a footer and a stop cue aimed at it - the shape
+        the review's cases share. */
+    struct HeldScene
+    {
+        explicit HeldScene (GroupRig& rig, const char* verb, const char* seconds, const char* hold = "10")
+        {
+            footer = rig.roleOf (rig.groupId, "footer");
+            closing = rig.document.createCue (footer, 0, "memo", "Release").id;
+            rig.setCue (rig.second, "preWait", hold);
+
+            stop = rig.document.createCue (rig.listId, 3, "transport", "Scene out").id;
+            rig.setCue (stop, "target", rig.groupId);
+            rig.setCue (stop, "verb", verb);
+            rig.setCue (stop, "duration", seconds);
+        }
+
+        /*  A three-second fade in the footer, on the rig's bed, so the scene
+            takes that long to end once its stop has landed. */
+        void slowFooter (GroupRig& rig)
+        {
+            const auto down = rig.document.createCue (footer, 1, "fade", "Bed down").id;
+            rig.setCue (down, "target", rig.mediaId);
+            rig.setCue (down, "level", "-10");
+            rig.setCue (down, "duration", "3");
+            REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) }).rejected == 0);
+            hear (rig, rig.mediaId);
+        }
+
+        std::string start (GroupRig& rig) const
+        {
+            REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.groupId) }).rejected == 0);
+            REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.second).empty(); }));
+            return rig.runOf (rig.groupId);
+        }
+
+        std::string footer, closing, stop;
+    };
+
+    std::size_t liveRunsOf (const Rig& rig, const std::string& cueId)
+    {
+        return static_cast<std::size_t> (std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                                                         [&cueId] (const cue::Run& run)
+                                                         { return run.cue == cueId && ! run.isFinished(); }));
+    }
+}
+
+TEST_CASE ("go.doh: a scene a fade-out of the GO's was bringing down comes back up - never cut, no footer, no relaunch")
+{
+    /*  The review's first finding. A fade-out of five seconds on a scene, the
+        Doh a second in: the stop is a held fade - its scene's job waits for it
+        before it touches a member (K3) - so it is called off as a sound's is.
+        On bd25dd5 only the GO's own drain called it off: the restore took the
+        fade's job, the scene then ended its members and ran its footer at once,
+        and the put-back relaunched it after. */
+    GroupRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.2").ok);
+    const HeldScene held { rig, "fade", "5" };
+    const auto scene = held.start (rig);
+
+    parkFor (rig, held.stop);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    for (int n = 0; n < 50; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.runs.find (scene)->stopAsked);
+    REQUIRE (doh (rig).rejected == 0);
+
+    CHECK (rig.runs.find (scene)->state == cue::runState::playing);
+    CHECK_FALSE (rig.runs.find (scene)->stopAsked);
+
+    for (int n = 0; n < 300; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (scene)->state == cue::runState::playing);
+    CHECK (rig.runOf (held.closing).empty());
+    CHECK (rig.runs.find (rig.runOf (rig.second))->state == cue::runState::waiting);
+    CHECK (newestRunOf (rig, rig.groupId) == scene);
+    CHECK (lastApplied (rig, "go.dohRelaunch").empty());
+    CHECK (rig.runs.find (scene)->ownLevel == doctest::Approx (0.0));
+
+    replaysTheSame (rig);
+}
+
+TEST_CASE ("go.doh: a scene fired by name while it waits to be put back is not made twice")
+{
+    /*  The review's third finding: the put-back of a scene still in its footer
+        is dropped when the operator fires the scene by name meanwhile, and a
+        relaunch never seats a second copy of a cue running again. On bd25dd5
+        two copies of the scene ran. */
+    GroupRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.2").ok);
+    std::map<std::string, double> lengths { { "thunder.wav", 60.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    HeldScene held { rig, "hard", "0" };
+    held.slowFooter (rig);
+    const auto scene = held.start (rig);
+
+    parkFor (rig, held.stop);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    REQUIRE_FALSE (rig.runs.find (scene)->isFinished());
+    REQUIRE (doh (rig).rejected == 0);
+
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.groupId) }).rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (scene)->isFinished(); }, 300));
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (liveRunsOf (rig, rig.groupId) == 1u);
+    CHECK (lastApplied (rig, "go.dohRelaunch").size() <= 1u);
+}
+
+TEST_CASE ("go.doh: a scene the GO stopped inside an automatic sequence that has moved on is said, not seated beside the next member")
+{
+    /*  The review's fourth finding: a relaunch is seated only under acts a
+        person runs, as a cue's is. The sequence a scene sits in went on to its
+        next member when the GO's stop ended it; seated again, the scene played
+        beside it. On bd25dd5 it was. */
+    Rig rig;
+    const auto outer = rig.document.createCue (rig.listId, 2, "group", "Sequence").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + outer + "/advance", "auto").ok);
+    const auto scene = rig.document.createCue (outer, 0, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+    const auto hold = rig.document.createCue (scene, 0, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "30").ok);
+    const auto next = rig.document.createCue (outer, 1, "memo", "Next").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + next + "/preWait", "30").ok);
+
+    const auto stop = rig.document.createCue (rig.listId, 3, "transport", "Scene out").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + stop + "/target", scene).ok);
+
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (outer) }).rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! newestRunOf (rig, scene).empty(); }));
+    const auto old = newestRunOf (rig, scene);
+
+    parkFor (rig, stop);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (old)->isFinished() && ! newestRunOf (rig, next).empty(); }));
+
+    REQUIRE (doh (rig).rejected == 0);
+    rig.tickOnce();
+
+    CHECK (newestRunOf (rig, scene) == old);
+    CHECK (says (reportOf (rig), "not started again"));
+}
+
+TEST_CASE ("go.doh: a stop called off on a sound in its post-wait leaves it in its post-wait, and its sequence goes on")
+{
+    /*  The review's fifth finding: a call-off put the run back to `playing`,
+        and a media cue whose sound was over had nothing left to end it - the
+        sequence waiting on it stalled. On bd25dd5 it did. */
+    Rig rig;
+    const auto scene = rig.document.createCue (rig.listId, 2, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    const auto bed = rig.document.createCue (scene, 0, "media", "Bed").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + bed + "/file", "thunder.wav").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + bed + "/postWait", "3").ok);
+    const auto next = rig.document.createCue (scene, 1, "memo", "Next").id;
+
+    const auto stop = rig.document.createCue (rig.listId, 3, "transport", "Bed out").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + stop + "/target", bed).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + stop + "/verb", "fade").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + stop + "/duration", "2").ok);
+
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (scene) }).rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! newestRunOf (rig, bed).empty(); }));
+    const auto bedRun = hear (rig, bed);
+
+    //  Its sound over: the run in its post-wait.
+    rig.audio.playing.erase (rig.runs.find (bedRun)->track);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (bedRun)->state == cue::runState::postWait; }, 20));
+
+    parkFor (rig, stop);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.runs.find (bedRun)->state == cue::runState::postWait);
+    CHECK (rig.tickUntil ([&] { return ! newestRunOf (rig, next).empty(); }, 250));
+}
+
+TEST_CASE ("go.doh: a scene dipped before the GO comes back at its dip, and a put-back that finds it over says so")
+{
+    /*  The review's nits 8 and 9. A scene a fade had brought to -10 before the
+        GO's stop comes back at -10, as D2's carried scene does (HG); and a
+        scene put back once it has ended, which would itself have ended by
+        then, is not made again - and the readout says so, replacing the
+        promise that it would come back. On bd25dd5 the level was nought, and
+        the promise stood. */
+    GroupRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0.2").ok);
+    std::map<std::string, double> lengths { { "thunder.wav", 60.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    SUBCASE ("dipped, and put back at once")
+    {
+        const HeldScene held { rig, "hard", "0" };
+        const auto dip = rig.document.createCue (rig.listId, 4, "fade", "Scene down").id;
+        rig.setCue (dip, "target", rig.groupId);
+        rig.setCue (dip, "level", "-10");
+        rig.setCue (dip, "duration", "0.2");
+
+        const auto scene = held.start (rig);
+        REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (dip) }).rejected == 0);
+
+        for (int n = 0; n < 20; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.runs.find (scene)->ownLevel == doctest::Approx (-10.0));
+
+        parkFor (rig, held.stop);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (scene)->isFinished(); }, 100));
+        REQUIRE (doh (rig).rejected == 0);
+
+        const auto again = newestRunOf (rig, rig.groupId);
+        REQUIRE (again != scene);
+        CHECK (rig.runs.find (again)->ownLevel == doctest::Approx (-10.0));
+    }
+
+    SUBCASE ("over by the time its footer has ended: said, the promise replaced")
+    {
+        HeldScene held { rig, "hard", "0", "1" };
+        held.slowFooter (rig);
+        const auto scene = held.start (rig);
+
+        parkFor (rig, held.stop);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        REQUIRE (doh (rig).rejected == 0);
+        rig.tickOnce();
+        REQUIRE (says (reportOf (rig), "comes back once it has ended"));
+
+        REQUIRE (rig.tickUntil ([&] { return rig.runs.find (scene)->isFinished(); }, 300));
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        REQUIRE_FALSE (lastApplied (rig, "go.dohRelaunch").empty());
+
+        CHECK (newestRunOf (rig, rig.groupId) == scene);
+        CHECK_FALSE (says (reportOf (rig), "comes back once it has ended"));
+        CHECK (says (reportOf (rig), "would have ended by now"));
+    }
+}

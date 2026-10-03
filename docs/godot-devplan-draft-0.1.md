@@ -891,6 +891,11 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   with a Doh made on D2 is not promised to replay on D3 (HD). D4 (the client's
   notice, the MIDI a takeBack port was sent) and D5 (end to end) remain
   *(2026-10-03: D4 built, below)*.
+  *(2026-10-03, D3's review, §24.13: a jump's values land before a member its
+  seat fires at once again - D3 had let the member be overwritten, in every
+  show; a scene's fade-out is called off; a relaunch never plays beside a copy
+  running again, nor under a sequence that moved on; a bank fired again skips
+  its header; what was left survives a GO cut short by Esc. NY-OH.)*
 - **Doh! D4, 2026-10-03 — what could not be taken back is named, and the
   operator is told** (namespace draft §24.14). The report now names the MIDI a
   GO sent to a port that takes back - "<cue>: MIDI to <port> could not be taken

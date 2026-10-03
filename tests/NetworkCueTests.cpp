@@ -2814,3 +2814,119 @@ TEST_CASE ("go.doh: an OSC event and a write to an opaque device that take back 
 
     replaysTheSame (rig);
 }
+
+//==============================================================================
+/*  D3'S REVIEW (2026-10-03, namespace draft §24.13): each case was written
+    first and run on bd25dd5 with D4 on top (204ac69), and failed there. */
+TEST_CASE ("jump: a value the jump puts on the desk lands before a member its seat fires on its first tick")
+{
+    /*  The review's second finding, and a regression for every jump, in a show
+        that never presses Doh!. A cue writes the fader 0.2; the scene after it
+        writes 0.8 a hundredth of a second in. A jump to the scene's start wants
+        0.2 on the desk now and seats the scene's member due a tick later. D3
+        moved the jump's values to a hook on the next tick, which runs after
+        the waits that fire that member - so the member wrote 0.8 and the jump's
+        0.2 landed on top of it, the desk left at the earlier cue's value. */
+    NetworkRig rig;
+
+    const auto first = rig.makeOsc ("/desk/fader", "f:0.2", "none");
+    juce::ignoreUnused (first);
+
+    const auto scene = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+    const auto member = rig.document.createCue (scene, 0, "osc", "Fader").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/address", "/desk/fader").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/value", "f:0.8").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/preWait", "0.01").ok);
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    REQUIRE (rig.engine.submit ("cli", "list.aim", { osc::Value::string (rig.listId), osc::Value::string (scene),
+                                                     osc::Value::float64 (0.0) }));
+    rig.tickOnce();
+    REQUIRE (rig.engine.submit ("cli", "list.loadToTime", { osc::Value::string (rig.listId) }));
+    rig.tickOnce();
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    INFO (rig.engine.log().contents());
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+}
+
+TEST_CASE ("go.doh: a jump in the Doh's own drain wins the desk over the Doh's put-back")
+{
+    /*  The review's seventh finding: the flush sent the values a jump wants
+        before the Doh's desk entries, so a Doh and a load-to-time in one drain
+        put the value from before the GO over the jump's. The desk entries go
+        first now, and none is sent for an address the jump sets. On bd25dd5
+        the desk ended at the value from before the GO. */
+    DohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+    REQUIRE (rig.mounts.write ("/desk/fader", osc::Value::float32 (0.25f)).ok);
+
+    const auto cue = rig.makeOsc ("/desk/fader", "f:0.75", "none");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    rig.park (cue);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (2);
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+
+    REQUIRE (rig.press ("list.aim", { osc::Value::string (rig.listId), osc::Value::string (cue),
+                                      osc::Value::float64 (0.0) }).rejected == 0);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.engine.submit ("cli", "list.loadToTime", { osc::Value::string (rig.listId) });
+    rig.tickOnce();
+    rig.ticks (3);
+
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+}
+
+TEST_CASE ("go.doh: what was left with a desk's operator survives a GO into its act cut short by Esc before the cue was spawned")
+{
+    /*  The review's eleventh point (NN's hole). The corrected GO enters an act
+        afresh inside an automatic sequence, which spawns the marked cue a tick
+        later; an Esc in the GO's own drain stops the act before it does. The
+        cue's entry was consumed by that GO all the same, and the next GO that
+        reached the cue sent it to the lighting desk a second time. It lives
+        now until a run of the cue claims it. On bd25dd5 the desk got it twice. */
+    DohRig rig;
+
+    const auto outer = rig.document.createCue (rig.listId, rig.index++, "group", "Sequence").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + outer + "/advance", "auto").ok);
+    const auto act = rig.document.createCue (outer, 0, "group", "Act").id;
+    const auto one = rig.document.createCue (act, 0, "memo", "One").id;
+    const auto lx = rig.document.createCue (act, 1, "osc", "Lights twelve").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + lx + "/address", "/lx/go").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + lx + "/value", "i:12").ok);
+    const auto hold = rig.document.createCue (outer, 1, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "30").ok);
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    REQUIRE (rig.press ("cue.fire", { osc::Value::string (outer) }).rejected == 0);
+    rig.ticks (5);
+
+    rig.park (one);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (8);
+    REQUIRE (rig.press ("go").rejected == 0);               // the lights, early
+    rig.ticks (8);
+    REQUIRE (rig.received ("/lx/go") == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    REQUIRE (rig.standby() == lx);
+
+    //  The corrected GO, and an Esc in its own drain, before the act spawns the cue.
+    rig.engine.submit ("cli", "go", {});
+    rig.engine.submit ("cli", "run.stopAll", {});
+    rig.tickOnce();
+    rig.ticks (60);
+
+    rig.park (lx);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (20);
+
+    CHECK (rig.received ("/lx/go") == 1u);
+}

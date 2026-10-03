@@ -1457,3 +1457,49 @@ TEST_CASE ("go.doh: a bank the GO closed opens again; one already finished is ar
         CHECK (std::find (made.begin(), made.end(), again->id) != made.end());
     }
 }
+
+TEST_CASE ("go.doh: a bank the GO closed, fired again, does not run its header again - nothing sent again to a device left to its operator")
+{
+    /*  D3's review, sixth finding (2026-10-03, namespace draft §24.13). A bank
+        Doh! fires again had already run its header before the GO; run again,
+        its header's network cue went out a second time to a lighting desk left
+        to its operator. The bank is armed again with its header passed over.
+        Written first and run on bd25dd5 with D4 on top: the header ran twice. */
+    Rig rig;
+    rig.set ("/godot/cue/" + rig.bankB + "/takeover", "group");
+
+    tree::MountDeclaration desk;
+    desk.id = "QX7DESK0";
+    desk.prefix = "/lx";
+    desk.host = "127.0.0.1";
+    desk.port = 9;
+    REQUIRE (rig.mounts.declare (desk).ok);
+    rig.runner.setMounts (&rig.mounts, nullptr);
+    REQUIRE (rig.document.createMount ("/lx", "", "QX7DESK0").ok);
+    rig.set ("/godot/mount/QX7DESK0/port", "9");
+
+    const auto header = rig.document.createRole (rig.bankA, "header");
+    REQUIRE (header.ok);
+    const auto lights = rig.document.createCue (header.id, 0, "osc", "Bank lights").id;
+    rig.set ("/godot/cue/" + lights + "/address", "/lx/bank");
+    rig.set ("/godot/cue/" + lights + "/value", "i:1");
+
+    rig.arm (rig.bankA);
+    REQUIRE (rig.runsOf (lights) == 1u);
+    const auto old = rig.liveRunOf (rig.bankA)->id;
+
+    rig.arm (rig.bankB);
+    REQUIRE (rig.tickUntil ([&rig, &old] { return rig.runs.find (old)->isFinished(); }));
+
+    REQUIRE (rig.send ("go.doh").rejected == 0);
+
+    const auto* again = rig.liveRunOf (rig.bankA);
+    REQUIRE (again != nullptr);
+    CHECK (again->id != old);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runsOf (lights) == 1u);
+    CHECK (rig.liveRunOf (rig.bankA) != nullptr);
+}

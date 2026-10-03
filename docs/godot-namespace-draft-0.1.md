@@ -16839,7 +16839,7 @@ level"*, and when nobody chose, *"Always leave to its operator"*.
 The design's labels in the second column; the letters continue §23's (GG was J3's), GO skipped as
 the command it reads as. A decision marked with a stage later than D1 is specified and not yet
 built. *(2026-10-02: D2's are built, and D2 adds MB-ML, §24.12.)* *(2026-10-03: D3's are built - GR to
-GU, GW's naming, GX and HR - and D3 adds ND-NT, §24.13.)* *(2026-10-03: D4 adds NU-NX, §24.14.)*
+GU, GW's naming, GX and HR - and D3 adds ND-NT, §24.13; its review NY-OH.)* *(2026-10-03: D4 adds NU-NX, §24.14.)*
 
 | | Design | Decision | Whose |
 |---|---|---|---|
@@ -17696,7 +17696,7 @@ undone. And one sentence on the tick after the press says what was put back and 
 |---|---|---|
 | L44 | A relaunched scene's MIDI cues placed before its second are planned over and not sent late, even to a port that takes back: only a network value can be diffed, and a MIDI message sent late is an event | "comes back where it would be now", for the values a desk holds |
 | L45 | A level put back is the level the GO's fade held when it last ran; one another fade or hand has moved by more than a twentieth of a decibel since is left, and said | one writer per level (L22) |
-| L46 | What a stop the GO issued did to a scene past the GO's own drain - members ended, footer run - cannot be called off; the scene is put back at its second once it has ended (L14) | "a stop not landed is called off", for a sound |
+| L46 | What a HARD stop the GO issued did to a scene past the GO's own drain - members ended, footer run - cannot be called off; the scene is put back at its second once it has ended (L14). *(Reworded 2026-10-03, D3's review: a fade-out still holding the scene is called off at any tick before it lands, NY)* | "a stop not landed is called off", for a sound and a scene still fading |
 
 **Retired:** L41 - the scene nobody heard no longer waits for a fade or a stop cue the GO fired on a
 cue outside it: the take-down ends that run and puts its work back in the same press.
@@ -17803,6 +17803,82 @@ Doh'd: the gate open again. A scene stopped with a long footer: back once its fo
 notice and names the MIDI a takeBack port was sent (`sentCues`), and what an outage made wait (L18).
 D5 drives it end to end: the fixture `doh`, the black-box driver. *(2026-10-03: built, §24.14 - the
 MIDI named from the Doh's own walk rather than captured at the send, NU.)*
+
+**D3's review (2026-10-03): what changed.** Each behaviour change has a case written first and run on
+bd25dd5 with D4 on top (204ac69) before it; every one failed there.
+
+- **A jump's value lands before a member its seat fires on its first tick** (OE) - a regression D3
+  had made for every jump, in a show that never presses Doh!. D3 moved a jump's values to the hook on
+  the next tick, which runs after the waits that fire a member the seat made due at once; the member
+  wrote its value and the jump's, from the cue before the scene, landed on top of it. The flush now
+  sends nothing for an address a run fired in its own tick writes - that write is the newer one - and
+  so for a relaunch's values and for the desk's put-back alike. And a value is compared with what
+  the desk will hold once that tick's give-backs land, not with what it holds now. Case: a cue writes
+  the fader 0.2, the scene after it 0.8 a hundredth of a second in; a jump to the scene's start leaves
+  0.8 (before: 0.2).
+- **The desk's put-back goes before what a jump or a relaunch wants** (OF), and none is sent for an
+  address they set: a Doh and a load-to-time in one drain left the value from before the GO over the
+  jump's. Case: a Doh and a jump in one drain - the jump's value stands (before: the Doh's).
+- **A scene a fade-out of the GO's was bringing down is called off** (NY): the stop is a held fade,
+  which the scene's job waits for before it touches a member (K3), so nothing of the scene has ended
+  yet, at any tick before it lands. Only a HARD stop is called off in the GO's own drain alone. Before,
+  the level's restore took the fade's job, the scene - still asked to stop - ended its members and ran
+  its footer on the next tick, and the put-back relaunched it after the footer. Case: a five-second
+  fade-out, Doh! a second in - the scene back up, never cut, no footer, no relaunch.
+- **A call-off puts a cue back in the wait it was in** (NZ): a sound in its post-wait, its file
+  over, put back to `playing` had nothing left to end it, and the sequence waiting on it stalled.
+  Case: a sequence goes on to its next member.
+- **A relaunch never plays beside a copy running again** (OB): fired by name or by a trigger since,
+  the cue is not made again, and says so; a scene waiting to be put back once it has ended is dropped
+  when it is fired. Case: a scene fired by name during its footer - one copy.
+- **A relaunched scene sits only under acts a person runs** (OC), as a relaunched cue does: one inside
+  a sequence that went on to its next member is said. Case (before: seated beside the next member).
+- **A bank fired again does not run its header again** (OD): it had run before the GO, and run again
+  it sent a device left to its operator its cues a second time. Armed again with its header passed
+  over, under the act it sat in while that runs. Case: a bank whose header sends to a lighting desk -
+  the header's run once in all.
+- **A scene comes back at the level it had** (OG) when the GO stopped it - dipped, dipped.
+- **A put-back always says what became of it** (OH): a sound that would have run out by now, a scene
+  that would have ended - or would only be in its footer, which the stop had already run - are said
+  ("would have ended by now - not put back"), and a `go.dohRelaunch` that puts nothing back still
+  replaces the Doh's promise that it would. A relaunch's values follow the setting read at the Doh
+  (L35), not the document's at the relaunch. Case: a footer longer than the scene - said, the
+  promise gone (before: the footer ran a second time).
+- **What was left survives a GO into its act cut short** (OA, NN's hole): a GO that made only the scene
+  that would spawn the marked cue leaves the mark's entry standing until the run of the cue claims it,
+  so an Esc before the spawn loses nothing. Case: the corrected GO and an Esc in one drain, then a GO
+  on the cue - the lighting desk gets it once in all (before: twice).
+
+**Deciding on the next tick (named, not changed).** The desk is decided by the flush on the tick
+after the press, against what the desk holds then; three things can come between the press's drain
+and that hook, each named: a client's or a surface's `node.set` drained after the Doh in its own
+tick is taken for the GO's write if equal to it, and for another writer if not; a write by anybody
+of the very value the GO wrote is taken for the GO's and put back; and a desk that quantises whose
+first answer has not come back by the flush is compared with the GO's exact value, so its echo, once
+it arrives, cannot help (L11 already names a hand before the echo).
+
+| | Decision | Whose |
+|---|---|---|
+| NY | **A scene's stop that is a fade still holding it is called off**, at any tick before it lands; a hard stop on a scene only in the GO's own drain | the review's |
+| NZ | **A call-off returns a run to the wait it was in** - a pre-wait or a post-wait - not to `playing` | the review's |
+| OA | **A filing the GO made by making only the scene that will spawn the cue stays on the mark** until the run of the cue claims it | the review's |
+| OB | **A relaunch never seats a cue or a scene running again**, and a pending one is dropped when its scene is fired | the review's |
+| OC | **A relaunched scene sits only under acts a person runs**; anything else is said | the review's |
+| OD | **A bank fired again by a Doh passes over its header**, under its act while that runs | the review's |
+| OE | **Nothing is sent by the flush for an address a run fired in its own tick writes**; values are compared with what the desk will hold after that tick's give-backs | the review's (the regression) |
+| OF | **The desk's put-back goes first, and not for an address a jump or a relaunch sets** | the review's |
+| OG | **A relaunched scene arrives at the level it had when the GO stopped it** | the review's |
+| OH | **Every put-back says what became of it**; a scene that would be in its footer by now is over; a relaunch reads the setting read at the Doh | the review's |
+
+OI and OL are not used, for MI's reason; OO is not reached.
+
+**L46** is reworded in place: a fade-out still holding a scene is called off (NY).
+
+**Counts (the review).** The nine new cases under C and `fr-FR`, green; on bd25dd5 with D4, all nine
+failed. Every `go.doh` case with D3's others, under C and `fr-FR`: 150 cases, 5748 assertions. The D3
+test files whole under C: 646 cases, 15811 assertions. `ctest -R
+"wfg\.replay|blackbox\.(phase3|phase4|triggers|phase6-sampler|phase9b-mic|phase9c-take|lane-level)|wfg\.commands|schema"`:
+78 of 78. `check-comments.py` passes; clang-tidy finds nothing on the lines the review changed.
 
 ### 24.14 What was built: D4 - what could not be taken back is named, and the operator is told (2026-10-03)
 

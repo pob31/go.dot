@@ -2486,6 +2486,13 @@ namespace wfg::cue
             bool wasStopping = false, wasWaiting = false;
             std::int64_t dueTick = 0;
             double levelBefore = 0.0;
+
+            /*  In its post-wait when the stop reached it, its sound over; and
+                whether the stop is a fade - a scene's job waits for one before
+                it touches a member (K3), so it can still be called off (D3's
+                review). Handler state, both. */
+            bool wasPostWait = false;
+            bool fades = false;
         };
 
         /*  An advance or a boundary stop the GO asked of a run, as it was. */
@@ -2628,7 +2635,11 @@ namespace wfg::cue
         bool relaunchStopped (Engine& engine, PutBack& back, const GoStop& stop,
                               const std::optional<FadeJob>& before);
         bool relaunchScene (Engine& engine, PutBack& back, const std::string& groupRun,
-                            const std::set<std::string>& left);
+                            const std::set<std::string>& left, double levelBefore);
+
+        /*  The newest live run of a cue other than `except`, as decision N
+            would see it: what a relaunch would play beside. */
+        const Run* liveOtherRunOf (const std::string& cueId, const std::string& except) const;
 
         /*  The OSC and MIDI cues under a scene whose setting is leave. */
         std::set<std::string> leftCuesUnder (const std::string& sceneCue) const;
