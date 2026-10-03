@@ -19147,6 +19147,11 @@ TEST_CASE ("go.doh: a stop the GO aimed at a scene is called off only in the GO'
         //  And its own report, on the readout from its tick.
         CHECK (rig.runner.listState().dohReport().tick > dohTick + 1);
 
+        /*  (2026-10-03, D4's review, OK: APPENDED to the Doh's report, never in
+            its place - the first department's news must not vanish before
+            anybody read it. It replaced it until then.) */
+        CHECK (says (reportOf (rig), "comes back once it has ended, unless a GO comes first; then: "));
+
         replaysTheSame (rig);
     }
 
@@ -19971,7 +19976,37 @@ TEST_CASE ("go.doh: a scene dipped before the GO comes back at its dip, and a pu
         REQUIRE_FALSE (lastApplied (rig, "go.dohRelaunch").empty());
 
         CHECK (newestRunOf (rig, rig.groupId) == scene);
-        CHECK_FALSE (says (reportOf (rig), "comes back once it has ended"));
+
+        /*  (2026-10-03, D4's review, OK: the relaunch's word is APPENDED to the
+            Doh's report rather than replacing it - the promise stays in view,
+            followed by what became of it.) */
+        CHECK (says (reportOf (rig), "comes back once it has ended, unless a GO comes first; then: "));
         CHECK (says (reportOf (rig), "would have ended by now"));
     }
+}
+
+TEST_CASE ("go.doh: in an audio outage the second press says on the readout what it forgot")
+{
+    /*  Doh! D4's review (2026-10-03, OJ): in an outage nothing the Doh puts
+        back moves until the clock returns, and the press says so on the
+        readout - a press that takes back a GO, the pending sentence; the second
+        press, which forgets a resume and moves no pointer, what it did. Said by
+        the handler, so only a press it accepted says anything. Failed before
+        the review: the readout said nothing of either. */
+    Rig rig;
+    rig.clockRuns = true;
+    auto out = false;
+    rig.runner.setOutage ([&out] { return out; });
+
+    goAndPlay (rig, rig.mediaId, 30);
+    REQUIRE (doh (rig).rejected == 0);
+    rig.tickOnce();
+    REQUIRE (resumeNames (rig, rig.mediaId));
+
+    out = true;
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK ((rig.runner.markOf (rig.listId) == nullptr || ! rig.runner.markOf (rig.listId)->root.has_value()));
+    CHECK (rig.runner.listState().dohReport().list == rig.listId);
+    CHECK (says (reportOf (rig), ": the next GO starts it from its top"));
+    CHECK_FALSE (says (reportOf (rig), "the pointer is back"));
 }

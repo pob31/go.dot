@@ -906,6 +906,12 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   it takes the line back; and a press in an audio outage says "Doh!: the pointer
   is back; what it puts back comes when the audio returns" (L18). Nothing new is
   logged: a log with a Doh made on D3 replays on D4. D5 (end to end) remains.
+  *(2026-10-03, D4's review, OJ-OQ: the outage sentence is the engine's, on
+  the readout, for a press it accepted; a relaunch's report is appended
+  ("...; then: ...", the orchestrator's ruling); the next GO retires the
+  report; what was left comes first in the engine's sentence; the MIDI item
+  says when and where it goes again; and the notice gives way to any newer
+  sentence of its line and follows a focus change.)*
 - **H4, 2026-10-02 — a double Esc drops what is still waiting to leave**
   (§23.10). A value a rate cap held back went out on its turn after the press,
   the MIDI queue sent everything it held, and no note-off existed anywhere. The

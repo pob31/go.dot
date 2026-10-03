@@ -187,9 +187,16 @@ namespace wfg::client::ui
             that failed belongs to a command that was APPLIED, so it is not
             `lastError` and the operator needs it more - the show they think is
             on disk is not. */
-        errorLabel.setText (! reading.writeError.empty() ? "write failed: " + text (reading.writeError)
-                                                        : text (reading.errorLine()),
-                            juce::dontSendNotification);
+        const auto errorNow = ! reading.writeError.empty() ? "write failed: " + text (reading.writeError)
+                                                           : text (reading.errorLine());
+
+        /*  ANY NEWER SENTENCE ON THE LINE TAKES IT BACK FROM THE DOH NOTICE
+            (D4's review, OP) - a write that failed, the audio gone, a moved
+            clock, as much as a refusal: standing in front of the line, the
+            notice hid them all for as long as it stood. Only what the report
+            put there gives way; a sentence set since is not this rule's. */
+        const auto lineMoved = shownOnce && errorNow != errorLabel.getText();
+        errorLabel.setText (errorNow, juce::dontSendNotification);
 
         /*  The whole record is still one hover away: what the strip drops is
             the tick and the sequence, which an operator who just pressed the
@@ -215,17 +222,24 @@ namespace wfg::client::ui
             on every pass. Whatever list has the focus: the reading opens with the
             report's list when it is another. And a refusal newer than the report
             takes the line back, which the reading answers by having no notice. */
+        /*  (D4's review, OP and OQ: and any newer sentence on the error line
+            takes it back too, above; and while it is shown it follows its own
+            words - a focus moved onto or off the report's list, the list
+            renamed - redrawn in place, never brought back once it gave way.) */
         const auto dohNow = text (reading.dohNotice());
+        const auto holdsDoh = dohShown.isNotEmpty() && noticeLabel.getText() == dohShown;
 
         if (reading.dohReport != last.dohReport || ! shownOnce)
         {
             if (dohNow.isNotEmpty())
                 showDohNotice (dohNow);
-            else if (dohShown.isNotEmpty() && noticeLabel.getText() == dohShown)
+            else if (holdsDoh)
                 showDohNotice ({});
         }
-        else if (dohNow.isEmpty() && dohShown.isNotEmpty() && noticeLabel.getText() == dohShown)
+        else if (holdsDoh && lineMoved)
             showDohNotice ({});
+        else if (holdsDoh && dohNow != text (last.dohNotice()))
+            showDohNotice (dohNow);
 
         const auto audioMoved = ! shownOnce || reading.status != last.status;
 

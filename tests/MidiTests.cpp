@@ -45,6 +45,7 @@
 #include <wfg/engine/midi/PortTable.h>
 
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -2101,6 +2102,10 @@ TEST_CASE ("go.doh: a MIDI cue the GO sent to a port that takes back is named as
 
     CHECK (rig.sink.sent.size() == 2u);
     CHECK (rig.newestRunOf (note)->warning.empty());
+
+    /*  (2026-10-03, D4's review, OM: and the next GO, on any list, retires the
+        report - it no longer stands on the readout for ever.) */
+    CHECK (rig.runner.listState().dohReport().text.empty());
 }
 
 TEST_CASE ("go.doh: a MIDI cue that put nothing on a cable is not named as sent")
@@ -2225,21 +2230,17 @@ TEST_CASE ("go.doh: the report is one engine record, and a replay rebuilds the s
     CHECK (reportSays (rig, "Note: MIDI to Keys could not be taken back - the next GO sends it again"));
     CHECK (reportSays (rig, "Lights: Q12 - left to its operator, not sent again"));
 
+    /*  (2026-10-03, D4's review, OL: what was left to an operator comes FIRST,
+        composed so by the engine - the client no longer reorders.) */
+    CHECK (report.text.rfind ("Lights: Q12 - left to its operator, not sent again", 0) == 0);
+
     const auto logged = LogFile::parse (rig.engine.log().contents());
     REQUIRE (logged.errors.empty());
     CHECK (std::count_if (logged.records.begin(), logged.records.end(),
                           [] (const auto& record) { return record.command == "list.dohReport"; }) == 1);
 
-    //  The corrected GO: Keys gets the note again, Lights nothing more.
-    REQUIRE (rig.press ("go").rejected == 0);
-
-    for (int n = 0; n < 5; ++n)
-        rig.tickOnce();
-
-    CHECK (sentOn (rig.sink, rig.port) == 2u);
-    CHECK (sentOn (rig.sink, lights) == 1u);
-
-    //  And the session again, from its log alone, with no sink: `wfg replay`'s shape.
+    /*  The session again, from its log alone, with no sink: `wfg replay`'s
+        shape - taken before the corrected GO, which retires the report (OM). */
     const auto show = doc::CanonicalXml::write (rig.document);
     const auto original = LogFile::parse (rig.engine.log().contents());
     REQUIRE (original.errors.empty());
@@ -2268,4 +2269,132 @@ TEST_CASE ("go.doh: the report is one engine record, and a replay rebuilds the s
     CHECK (fresh.runner.listState().dohReport().text == report.text);
     CHECK (fresh.runner.listState().dohReport().list == report.list);
     CHECK (fresh.runner.listState().dohReport().tick == report.tick);
+
+    //  The corrected GO: Keys gets the note again, Lights nothing more.
+    REQUIRE (rig.press ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (sentOn (rig.sink, rig.port) == 2u);
+    CHECK (sentOn (rig.sink, lights) == 1u);
+}
+
+TEST_CASE ("go.doh: the MIDI named is the port's at the Doh - a setting changed since, a port deleted, a cue sent elsewhere now")
+{
+    /*  Doh! D4's review (2026-10-03). The setting is read once, at the Doh
+        (L35): changed between the GO and the press, the report says what the
+        press decided. A port deleted since is left (a device gone reads leave)
+        and named by the identifier the run kept. And a cue whose port was
+        changed since the GO is sent again by the next GO to its port NOW -
+        which the item names. The first three are nets (the walk reads the
+        setting at the Doh); the last failed on 204ac69, which named only the
+        port the GO had sent to. */
+    MidiDohRig rig;
+    const auto note = rig.midiCue (rig.listId, 0);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    std::string expected;
+    std::function<void()> between;
+
+    SUBCASE ("left at the GO, take back at the Doh")
+    {
+        expected = "Note: MIDI to Keys could not be taken back - the next GO sends it again";
+        between = [&rig] { REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok); };
+    }
+
+    SUBCASE ("take back at the GO, left at the Doh")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+        expected = "Keys: Note - left to its operator, not sent again";
+        between = [&rig] { REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "leave").ok); };
+    }
+
+    SUBCASE ("the port deleted since")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+        expected = rig.port + ": Note - left to its operator, not sent again";
+        between = [&rig]
+        {
+            auto ports = rig.document.root().getChildWithName ("MidiPorts");
+            ports.removeChild (ports.getChildWithProperty (juce::Identifier ("id"), juce::String (rig.port)), nullptr);
+        };
+    }
+
+    SUBCASE ("the cue sent to another port now")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+        expected = "Note: MIDI to Keys could not be taken back - the next GO sends it again, to Lights";
+        between = [&rig, &note]
+        {
+            const auto lights = declarePort (rig.document, "Lights");
+            REQUIRE (rig.document.setAttribute ("/godot/port/" + lights + "/doh", "takeBack").ok);
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + note + "/port", lights).ok);
+        };
+    }
+
+    rig.park (note);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.sink.sent.size() == 1u);
+
+    between();
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    INFO (rig.runner.listState().dohReport().text);
+    CHECK (reportSays (rig, expected));
+}
+
+TEST_CASE ("go.doh: MIDI an act's footer sent, the act not brought back, is named as sent again when the act ends again")
+{
+    /*  Doh! D4's review (2026-10-03), nit 8. An act the GO ended inside an
+        automatic sequence cannot come back (L27): the next GO enters it again
+        from its header, and its footer - which sent its MIDI because the GO
+        ended the act - sends again only when the act ends again, not at that
+        GO. The item says so. Failed on 204ac69: "the next GO sends it again". */
+    MidiDohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+
+    const auto outer = rig.document.createCue (rig.listId, 0, "group", "Sequence").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + outer + "/advance", "auto").ok);
+    const auto act = rig.document.createCue (outer, 0, "group", "Act").id;
+    const auto one = rig.document.createCue (act, 0, "memo", "One").id;
+    rig.document.createCue (act, 1, "memo", "Two");
+    const auto hold = rig.document.createCue (outer, 1, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "30").ok);
+
+    const auto footer = rig.document.createRole (act, "footer").id;
+    const auto release = rig.midiCue (footer, 0);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + release + "/name", "Release").ok);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    REQUIRE (rig.engine.submit ("cli", "cue.fire", { osc::Value::string (outer) }));
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.newestRunOf (act) != nullptr);
+    rig.park (one);
+
+    for (int press = 0; press < 2; ++press)
+    {
+        REQUIRE (rig.press ("go").rejected == 0);
+
+        for (int n = 0; n < 8; ++n)
+            rig.tickOnce();
+    }
+
+    REQUIRE (rig.newestRunOf (act)->isFinished());
+    REQUIRE (rig.sink.sent.size() == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    INFO (rig.runner.listState().dohReport().text);
+    CHECK (reportSays (rig, "Release: MIDI to Keys could not be taken back - sent again when Act ends again"));
+    CHECK_FALSE (reportSays (rig, "Release: MIDI to Keys could not be taken back - the next GO sends it again"));
 }

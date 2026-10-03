@@ -130,8 +130,7 @@ namespace wfg::client
                 actions.go              = [this] { send (gesture::go()); leaveLoadToTime(); };
                 actions.panic           = [this] { panic(); };
 
-                /*  DOH! (PRD §3.32): the command, and a notice only in an
-                    audio outage (`doh`). */
+                /*  DOH! (PRD §3.32): the command and nothing else (`doh`). */
                 actions.doh             = [this] { doh(); };
                 actions.undo            = [this] { send (gesture::undo()); };
                 actions.redo            = [this] { send (gesture::redo()); };
@@ -1596,20 +1595,17 @@ namespace wfg::client
                 host.engine.submit (std::move (event));
             }
 
-            /*  DOH! (PRD §3.32): the command, and no notice of its own while
-                the audio runs - a notice would stand in front of the engine's
-                refusal when there is one, and the refusal is the news; what the
-                Doh did arrives as its report on the next tick (D4). IN AN AUDIO
-                OUTAGE (L18) that report waits for the clock with everything the
-                Doh puts back, while the pointer goes back at once - so the press
-                says so, from the reading (`dohPressLine`). The line already
-                says the audio is out there, so no refusal is hidden by it. */
+            /*  DOH! (PRD §3.32): the command and nothing else - the button,
+                F9 and the Show menu's one door. A notice of its own would stand
+                in front of the engine's refusal when there is one, and the
+                refusal is the news; what the Doh did arrives as its report
+                (D4). (2026-10-03, D4's review, OJ: in an audio outage too - the
+                engine says what waits for the clock, on that same readout and
+                only for a press it accepted; this said it for every press, a
+                refused one included.) */
             void doh()
             {
                 send (gesture::doh());
-
-                if (const auto line = last.dohPressLine(); ! line.empty())
-                    shell->transport.setNotice (juce::String (line));
             }
 
             /*  PANIC AND ESC (PRD §4.4). The first press is the graceful

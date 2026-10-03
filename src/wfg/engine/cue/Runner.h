@@ -546,6 +546,14 @@ namespace wfg::cue
             network cue's record reproducing with nothing on the wire. */
         void setMidiSink (midi::MidiSink* sink) noexcept { midiOut = sink; }
 
+        /*  WHETHER THE AUDIO IS OUT (PRD §6.2), asked by `go.doh`'s handler so
+            a press accepted in an outage can say at once what waits for the
+            clock (Doh! D4's review, OJ). Handler state: the answer is the audio
+            status the `audio.connection` records write, which a replay
+            re-applies - `registerAudioSettingsCommands` hands it in, for `serve`
+            and `replay` alike. Unset is never out. */
+        void setOutage (std::function<bool()> isOut) { outage = std::move (isOut); }
+
         /*  WHAT EACH DCA IS TRIMMING BY (PRD §3.28), added to the level of
             every run whose cue - or whose group's cue - is marked with it, and
             moved by a fade that names one. Null where nothing was handed in, in
@@ -2003,6 +2011,7 @@ namespace wfg::cue
         tree::MountTable* mounts = nullptr;
         tree::MountSender* sender_ = nullptr;
         midi::MidiSink* midiOut = nullptr;
+        std::function<bool()> outage;
         DcaTable* dcas = nullptr;
         const LiveEdits* liveLayer = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
@@ -2592,6 +2601,11 @@ namespace wfg::cue
             std::vector<std::pair<std::string, osc::Value>> values;
             std::vector<std::string> items;
             bool report = false;
+
+            /*  Filled by a Doh's own press, not only by a relaunch: its report
+                REPLACES the readout, an empty one clearing it; a relaunch's alone
+                is APPENDED to what the readout holds (D4's review, OJ, OK). */
+            bool fromDoh = false;
         };
 
         DohStash stash;

@@ -161,15 +161,12 @@ namespace wfg::client::model
 
         /*  THE DOH NOTICE: the report in front of the operator, whatever list
             has the focus - "Doh!: ..." on the focused list, "Doh! on Act 2: ..."
-            on another - what was left to an operator first, since that is what
-            the operator must tell the other department. Empty when there is no
-            report, or a refusal newer than it has taken the line. */
+            on another - the engine's sentence whole, in the engine's order (what
+            was left to an operator first, D4's review). Empty when there is no
+            report, or a refusal newer than it has taken the line. In an audio
+            outage the engine's own sentence for a press it accepted is read here
+            like any report (D4's review, OJ). */
         std::string dohNotice() const;
-
-        /*  WHAT A PRESS OF DOH! SAYS AT ONCE: nothing, unless the audio is out -
-            then the pointer goes back now and the rest waits for the clock
-            (L18), and the report with it. */
-        std::string dohPressLine() const;
 
         /*  Whether a click of the button would do something: take back the GO
             the caption names, or forget the resume `dohForget` names. */

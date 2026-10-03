@@ -7504,10 +7504,11 @@ TEST_CASE ("client: the standby says where the next GO carries a paused cue on, 
 /*  THE DOH NOTICE (2026-10-03, Doh! D4, namespace draft §24.14): what the last
     Doh put back and what it left, in front of the operator on the transport's
     line - the engine's one sentence, `/godot/list/dohReport`, opening with
-    "Doh!". A refusal newer than the report takes the line back; and in an audio
-    outage the press itself says what waits for the clock (L18), since the
-    report waits with it. Each failed before D4: the reading had no notice, and
-    the press said nothing. */
+    "Doh!". A refusal newer than the report takes the line back. Each failed
+    before D4: the reading had no notice. (2026-10-03, D4's review, OJ: what an
+    outage makes wait is the ENGINE's to say now, on the same readout, and only
+    for a press it accepted - the client's own sentence, shown for refused
+    presses too, is gone; the case keeps the sentence as the engine spells it.) */
 TEST_CASE ("client: the Doh notice says the last Doh's report, a newer refusal takes the line, and an outage says what waits")
 {
     model::TransportReading reading;
@@ -7533,19 +7534,19 @@ TEST_CASE ("client: the Doh notice says the last Doh's report, a newer refusal t
     reading.dohReport = "7K2QM9X4 1400 Scene: comes back once it has ended, unless a GO comes first";
     CHECK (reading.dohNotice() == "Doh!: Scene: comes back once it has ended, unless a GO comes first");
 
-    //  The press: nothing while the audio runs - the engine's answer is the news.
-    CHECK (reading.dohPressLine().empty());
-
+    //  An outage: the engine's pending sentence, read as any report.
     reading.status = "noClock";
-    CHECK (reading.dohPressLine() == "Doh!: the pointer is back; what it puts back comes when the audio returns");
+    reading.dohReport = "7K2QM9X4 1500 the pointer is back; what it puts back comes when the audio returns";
+    CHECK (reading.dohNotice() == "Doh!: the pointer is back; what it puts back comes when the audio returns");
 }
 
-TEST_CASE ("client: the Doh notice names the devices left to their operators, first")
+TEST_CASE ("client: the Doh notice names the devices left to their operators, whole, in the engine's order")
 {
     /*  The author, 2026-10-01: what reached the light board is the light
         operator's - so the notice says it whole, in words, the device and its
-        cues, and puts it before what Go.dot put back itself: it is what the
-        operator must go and tell the other department. */
+        cues. (2026-10-03, D4's review, OL: the left items FIRST is the engine's
+        order now, composed so - the client's split on "; " cut a cue name that
+        holds one, and is gone. The notice shows the sentence as it came.) */
     model::TransportReading reading;
     reading.listId = "7K2QM9X4";
     reading.listName = "Show";
@@ -7554,14 +7555,11 @@ TEST_CASE ("client: the Doh notice names the devices left to their operators, fi
     reading.dohReportList = "Show";
     CHECK (reading.dohNotice() == "Doh!: Lighting desk: Q12, Q13 - left to its operator, not sent again");
 
-    reading.dohReport = "7K2QM9X4 1200 Note: MIDI to Keys could not be taken back - the next GO sends it again; "
-                        "Lighting desk: Q12, Q13 - left to its operator, not sent again; "
-                        "/desk/fader: changed since the GO - left as it is; "
-                        "persistent Sub on Lights: not re-asserted - left to its operator";
-    CHECK (reading.dohNotice() == "Doh!: Lighting desk: Q12, Q13 - left to its operator, not sent again; "
-                                  "persistent Sub on Lights: not re-asserted - left to its operator; "
-                                  "Note: MIDI to Keys could not be taken back - the next GO sends it again; "
-                                  "/desk/fader: changed since the GO - left as it is");
+    //  A cue whose name holds "; " - and a "left to its operator" in another's.
+    reading.dohReport = "7K2QM9X4 1200 Lighting desk: Q12; the flash, Q13 - left to its operator, not sent again; "
+                        "Note: MIDI to Keys could not be taken back - the next GO sends it again";
+    CHECK (reading.dohNotice() == "Doh!: Lighting desk: Q12; the flash, Q13 - left to its operator, not sent again; "
+                                  "Note: MIDI to Keys could not be taken back - the next GO sends it again");
 }
 
 TEST_CASE ("client: the Doh notice is shown whatever list has the focus, opening with the list's name when it is another")
@@ -7624,10 +7622,20 @@ TEST_CASE ("client: the Doh notice is shown whatever list has the focus, opening
     press ("list.focus", { osc::Value::string ("7K2QM9X4") });
     CHECK (reading().dohNotice() == "Doh!: Lighting desk: Q12 - left to its operator, not sent again");
 
-    //  A later report - a relaunch's - is another reading: it replaces the first.
+    /*  A later report - a relaunch's - is another reading. (2026-10-03, D4's
+        review, OK: APPENDED to the Doh's, which it replaced until then - the
+        light department's news must not vanish before anybody read it.) */
     press ("list.dohReport", { osc::Value::string ("7K2QM9X4"),
-                               osc::Value::string ("Scene: put back at 0:12") });
+                               osc::Value::string ("Scene: put back at 0:12"), osc::Value::boolean (true) });
     const auto later = reading();
     CHECK (later.dohReport != first.dohReport);
-    CHECK (later.dohNotice() == "Doh!: Scene: put back at 0:12");
+    CHECK (later.dohNotice() == "Doh!: Lighting desk: Q12 - left to its operator, not sent again; then: Scene: put back at 0:12");
+
+    //  A report that is not a relaunch's replaces; an empty one clears (OJ).
+    press ("list.dohReport", { osc::Value::string ("7K2QM9X4"), osc::Value::string ("Sub: put back") });
+    CHECK (reading().dohNotice() == "Doh!: Sub: put back");
+
+    press ("list.dohReport", { osc::Value::string ("7K2QM9X4"), osc::Value::string ("") });
+    CHECK (reading().dohNotice().empty());
+    CHECK (reading().dohReport.empty());
 }

@@ -6649,6 +6649,12 @@ namespace wfg::cue
         goChanges = {};
         lists.setDohOffer ({ listId, standby, tick });
 
+        /*  AND THE LAST DOH'S REPORT IS RETIRED (D4's review, OM): the show has
+            moved on, and a sentence about a GO two GOs ago only misleads.
+            Handler state, as the readout is - a replay retires it at the same
+            GO. */
+        lists.setDohReport ({});
+
         /*  AND A SCENE A DOH PUT OFF UNTIL IT HAD ENDED is not brought back
             over this GO (D3, namespace draft §24.13): most often the corrected
             GO, whose own stop stops that scene again - a relaunch landing after
@@ -8349,8 +8355,17 @@ namespace wfg::cue
             if (const auto found = marks.find (lastDohList);
                 found != marks.end() && found->second.root.has_value())
             {
+                const auto forgotten = found->second.cue;
                 dropRoot (engine, tick, lastDohList);
                 lastDohTick = tick;
+
+                /*  IN AN AUDIO OUTAGE (D4's review, OJ) the press says what it
+                    did, on the readout - every client reads it there: the line
+                    already says the audio is out, and nothing else would say
+                    the press was taken. */
+                if (outage && outage())
+                    lists.setDohReport ({ lastDohList, tick, cueLabel (forgotten) + ": the next GO starts it from its top" });
+
                 return {};
             }
 
@@ -8380,11 +8395,19 @@ namespace wfg::cue
         if (const auto moved = editable.setAttribute (standbyAddressOf (record.list), record.cue); ! moved.ok)
             return moved.reason;
 
-        /*  THE LAST REPORT IS THIS PRESS'S TO REPLACE (D3): cleared now, by the
-            handler, and written again by the record the flush composes on the
-            next tick - so a press that has nothing to say leaves nothing stale
-            on the readout. */
-        lists.setDohReport ({});
+        /*  THE LAST REPORT IS THIS PRESS'S TO REPLACE (D3) - by the record the
+            flush composes on the next tick, an empty one included, so a press
+            that has nothing to say leaves nothing stale on the readout. Not
+            cleared here (D4's review, ON): cleared at the press and written a
+            tick later, the line blinked off between the two.
+
+            IN AN AUDIO OUTAGE (L18; D4's review, OJ) that tick waits for the
+            clock, with everything the Doh puts back, while the pointer has gone
+            back now: the readout says so at once, for this press the handler
+            accepted - never for one it refused - and the flush replaces it when
+            the audio returns. */
+        if (outage && outage())
+            lists.setDohReport ({ record.list, tick, "the pointer is back; what it puts back comes when the audio returns" });
 
         //  5. THE LIST'S FLAG, THE DEBOUNCE AND THE HISTORY: back to where the GO
         //     found them, the GO's own steps gone - by its serial, wherever a seek
@@ -8682,9 +8705,16 @@ namespace wfg::cue
             (a cue that found no port, or a port switched off, put nothing on a
             cable and is not named), the setting read here, once (L35). For the
             report only - the corrected GO needs no telling. */
-        std::vector<LeftSend> sentAgain;
+        struct SentAgain
+        {
+            std::string cue, device, footerOf;
+        };
 
-        const auto consider = [this, &leftCues, &leftSends, &sentAgain] (const Run& run)
+        std::vector<SentAgain> sentAgain;
+
+        /*  `footerOf`: the act whose footer sent it, for a footer the Doh does
+            not take down with the GO - it goes again when that act ends again. */
+        const auto consider = [this, &leftCues, &leftSends, &sentAgain] (const Run& run, const std::string& footerOf)
         {
             if ((run.kind != "osc" && run.kind != "midi") || ! countsAsSent (run))
                 return;
@@ -8693,8 +8723,8 @@ namespace wfg::cue
             {
                 if (run.kind == "midi"
                       && std::none_of (sentAgain.begin(), sentAgain.end(),
-                                       [&run] (const LeftSend& sent) { return sent.cue == run.cue && sent.device == run.sentTo; }))
-                    sentAgain.push_back ({ run.cue, run.kind, run.sentTo });
+                                       [&run] (const SentAgain& sent) { return sent.cue == run.cue && sent.device == run.sentTo; }))
+                    sentAgain.push_back ({ run.cue, run.sentTo, footerOf });
 
                 return;
             }
@@ -8714,7 +8744,7 @@ namespace wfg::cue
         for (const auto& run : runs.all())
             if ((ofTheGo.count (run.id) > 0 && handedBack.count (run.id) == 0) || run.causedBy == serial)
             {
-                consider (run);
+                consider (run, {});
                 consideredIds.insert (run.id);
             }
 
@@ -8734,10 +8764,10 @@ namespace wfg::cue
                 if (consideredIds.count (below->id) == 0 && below->launchRequestedAtTick >= record.tick
                       && isFooterCueOf (*group, below->cue))
                 {
-                    consider (*below);
+                    consider (*below, cueLabel (group->cue));
 
                     for (const auto* deeper : runs.descendantsOf (below->id))
-                        consider (*deeper);
+                        consider (*deeper, cueLabel (group->cue));
                 }
         }
 
@@ -9152,6 +9182,7 @@ namespace wfg::cue
         auto& out = stashFor (tick);
         out.list = record.list;
         out.report = true;
+        out.fromDoh = true;
 
         auto desk = changes.desk;
 
@@ -9191,6 +9222,10 @@ namespace wfg::cue
             out.desk.push_back (entry);
         }
 
+        /*  Where this press's items begin: what was left to an operator goes
+            first among them (below). */
+        const auto firstItem = static_cast<std::ptrdiff_t> (out.items.size());
+
         if (changes.deskOverflow)
             out.items.push_back ("the GO wrote more addresses than Doh! keeps - those after the "
                                    + std::to_string (changesKept) + "th were not put back");
@@ -9229,10 +9264,27 @@ namespace wfg::cue
                 items.push_back (cueLabel (cue) + ": could not be taken back - the next GO sends it again");
 
         /*  And the MIDI a port that takes back was sent (D4, NU), by the port's
-            name: the operator knows a synth by it. */
+            name: the operator knows a synth by it. WHEN it goes again (D4's
+            review, OO): a footer's - an act left ended, or every reached act's
+            after an Esc - when that act ends again, not at the next GO; and to
+            the port the cue names now, when that is another. */
         for (const auto& sent : sentAgain)
+        {
+            const auto portNow = textOf (document.findById (sent.cue), "port");
+            const auto elsewhere = ! portNow.empty() && portNow != sent.device
+                                     ? ", to " + deviceLabel ("port", portNow) : std::string {};
+
             items.push_back (cueLabel (sent.cue) + ": MIDI to " + deviceLabel ("port", sent.device)
-                               + " could not be taken back - the next GO sends it again");
+                               + " could not be taken back - "
+                               + (sent.footerOf.empty() ? std::string ("the next GO sends it again")
+                                                        : "sent again when " + sent.footerOf + " ends again")
+                               + elsewhere);
+        }
+
+        /*  WHAT WAS LEFT TO AN OPERATOR COMES FIRST (D4's review, OL): it is what
+            the operator must go and tell the other department. Composed here,
+            in that order, rather than sorted by a client out of the sentence. */
+        std::vector<std::string> leftFirst;
 
         /*  EVERY DEVICE AND CUE LEFT TO ITS OPERATOR, by device, in the order
             they were sent (the author, 2026-10-01). */
@@ -9262,7 +9314,7 @@ namespace wfg::cue
                 for (const auto& cue : cues)
                     list += (list.empty() ? "" : ", ") + cue;
 
-                items.push_back (device + ": " + list + " - left to its operator, not sent again");
+                leftFirst.push_back (device + ": " + list + " - left to its operator, not sent again");
             }
         }
 
@@ -9295,13 +9347,15 @@ namespace wfg::cue
                     const auto kind = node.hasType ("Midi") ? std::string ("midi") : std::string ("osc");
                     const auto device = sendTargetOf (document, kind, cue);
 
-                    items.push_back ("persistent " + cueLabel (cue) + " on "
-                                       + deviceLabel (kind == "midi" ? "port" : "mount",
-                                                      device.empty() ? textOf (node, kind == "midi" ? "port" : "address")
-                                                                     : device)
-                                       + ": not re-asserted - left to its operator");
+                    leftFirst.push_back ("persistent " + cueLabel (cue) + " on "
+                                           + deviceLabel (kind == "midi" ? "port" : "mount",
+                                                          device.empty() ? textOf (node, kind == "midi" ? "port" : "address")
+                                                                         : device)
+                                           + ": not re-asserted - left to its operator");
                 }
         }
+
+        items.insert (items.begin() + firstItem, leftFirst.begin(), leftFirst.end());
 
         for (const auto& item : back.items)
             items.push_back (item);
@@ -10468,7 +10522,12 @@ namespace wfg::cue
             engine.submit (origin::engine, "node.set", { osc::Value::string (address), value });
         }
 
-        if (! held.report || items.empty())
+        /*  THE REPORT, ONE RECORD. A Doh's replaces the readout - when it has
+            nothing to say, with nothing (D4's review, OJ): an outage's pending
+            sentence, or the report before it, must not stand for this press. A
+            relaunch's alone is appended to what stands (OK): the Doh's news is
+            still somebody's to read. */
+        if (! held.report || (items.empty() && ! held.fromDoh))
             return;
 
         std::string sentence;
@@ -10476,8 +10535,12 @@ namespace wfg::cue
         for (const auto& item : items)
             sentence += (sentence.empty() ? "" : "; ") + item;
 
-        engine.submit (origin::engine, "list.dohReport",
-                       { osc::Value::string (held.list), osc::Value::string (sentence) });
+        std::vector<osc::Value> args { osc::Value::string (held.list), osc::Value::string (sentence) };
+
+        if (! held.fromDoh)
+            args.push_back (osc::Value::boolean (true));
+
+        engine.submit (origin::engine, "list.dohReport", std::move (args));
     }
 
     std::string Runner::pressStrip (Engine& engine, std::int64_t tick, const std::string& stripId,
@@ -16538,14 +16601,33 @@ namespace wfg::cue
             after the relaunch of a scene that followed it - and set on the
             runner-wide readout `/godot/list/dohReport` by this handler. A
             record, so a replay rebuilds the same readout. */
+        /*  (2026-10-03, D4's review, OJ, OK: `append`, the relaunch's, adds its
+            sentence after what the readout holds - "...; then: ..." - where the
+            Doh's own replaces it; and an empty sentence that does not append
+            clears the readout: a Doh with nothing to say.) */
         registry.add ({ "list.dohReport",
                         "What the last Doh! put back and what it left alone, in one sentence - submitted by"
-                        " the engine on the tick after the press, and read on /godot/list/dohReport.",
-                        { { "list", 's', false }, { "text", 's', false } },
+                        " the engine on the tick after the press, and read on /godot/list/dohReport. With"
+                        " append, a relaunch's sentence follows the one that stands; an empty one clears it.",
+                        { { "list", 's', false }, { "text", 's', false }, { "append", 'T', true } },
                         false,
                         [&runner] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
-                            runner.listState().setDohReport ({ args[0].getString(), context.tick, args[1].getString() });
+                            const auto append = args.size() > 2 && args[2].getBool();
+                            const auto& standing = runner.listState().dohReport();
+                            const auto& text = args[1].getString();
+
+                            if (append && ! standing.text.empty())
+                            {
+                                if (! text.empty())
+                                    runner.listState().setDohReport ({ standing.list, context.tick,
+                                                                       standing.text + "; then: " + text });
+                            }
+                            else if (text.empty())
+                                runner.listState().setDohReport ({});
+                            else
+                                runner.listState().setDohReport ({ args[0].getString(), context.tick, text });
+
                             return Outcome::ok (args);
                         } });
 

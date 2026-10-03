@@ -38,6 +38,17 @@ namespace wfg::client::model
             is not a zero and not a no. */
         constexpr const char* unsaid = "—";
 
+        /*  A TICK AS THE ENGINE WRITES IT, digits and nothing else; -1 for
+            anything that is not one. One reading for the three sentences that
+            compare ticks - the refusal, the moved clock, Doh!'s window and its
+            report (D4's review hoisted it out of three copies). */
+        std::int64_t tickOf (std::string_view digits)
+        {
+            std::int64_t value = -1;
+            const auto* end = digits.data() + digits.size();
+            return std::from_chars (digits.data(), end, value).ptr == end ? value : -1;
+        }
+
         /*  `join`, which put a middle dot between two half-sentences, went with
             the last line that had two halves to put together: the transport
             lost its saved/unsaved line and its audio word on 2026-09-18, and
@@ -169,13 +180,6 @@ namespace wfg::client::model
             said until something is refused after it, because the cues it
             stopped are the first thing anybody at the desk will ask about -
             and a refusal from before it is older news. */
-        const auto tickOf = [] (std::string_view digits) -> std::int64_t
-        {
-            std::int64_t value = -1;
-            const auto* end = digits.data() + digits.size();
-            return std::from_chars (digits.data(), end, value).ptr == end ? value : -1;
-        };
-
         if (! rateMoved.empty()
               && (lastError.empty() || (fields.size() == 5 && tickOf (fields[0]) <= tickOf (rateMovedTick))))
             return rateMoved;
@@ -230,13 +234,6 @@ namespace wfg::client::model
 
         if (parts.size() != 3 || dohCue.empty())
             return {};
-
-        const auto tickOf = [] (std::string_view digits) -> std::int64_t
-        {
-            std::int64_t value = -1;
-            const auto* end = digits.data() + digits.size();
-            return std::from_chars (digits.data(), end, value).ptr == end ? value : -1;
-        };
 
         const auto now = tickOf (tick);
         const auto at = tickOf (parts[2]);
@@ -309,13 +306,6 @@ namespace wfg::client::model
         const auto list = dohReport.substr (0, first);
         const auto sentence = dohReport.substr (second + 1);
 
-        const auto tickOf = [] (std::string_view digits) -> std::int64_t
-        {
-            std::int64_t value = -1;
-            const auto* end = digits.data() + digits.size();
-            return std::from_chars (digits.data(), end, value).ptr == end ? value : -1;
-        };
-
         /*  A REFUSAL NEWER THAN THE REPORT TAKES THE LINE (the design's D4): the
             operator pressed something since, and what it said is the news now. */
         if (const auto fields = words (lastError); fields.size() == 5)
@@ -323,41 +313,17 @@ namespace wfg::client::model
                 reportedAt >= 0 && tickOf (fields[0]) > reportedAt)
                 return {};
 
-        /*  WHAT WAS LEFT TO AN OPERATOR FIRST (the author, 2026-10-01): it is
-            what the operator must go and tell the other department - the light
-            board's cues it did not send again - while the rest is what Go.dot
-            did, or could not do, itself. Each kind keeps the engine's order. */
-        std::string left, rest;
+        /*  THE SENTENCE AS THE ENGINE COMPOSED IT, whole: what was left to an
+            operator comes first there (D4's review, OL), and a cue's name may
+            hold the "; " its items are joined by, so it is never cut up here.
 
-        for (std::size_t at = 0; at < sentence.size();)
-        {
-            const auto end = std::min (sentence.find ("; ", at), sentence.size());
-            const auto item = sentence.substr (at, end - at);
-            auto& into = item.find ("left to its operator") != std::string::npos ? left : rest;
-            into += (into.empty() ? "" : "; ") + item;
-            at = end + 2;
-        }
-
-        const auto said = left.empty() ? rest : rest.empty() ? left : left + "; " + rest;
-
-        /*  WHATEVER LIST HAS THE FOCUS (red team C, minor 4): the Doh acts on
+            WHATEVER LIST HAS THE FOCUS (red team C, minor 4): the Doh acts on
             the list of the last GO, so a report on another list opens with that
             list's name. */
         if (list == listId)
-            return "Doh!: " + said;
+            return "Doh!: " + sentence;
 
-        return "Doh! on " + (dohReportList.empty() ? std::string ("another list") : dohReportList) + ": " + said;
-    }
-
-    std::string TransportReading::dohPressLine() const
-    {
-        /*  IN AN AUDIO OUTAGE (L18) the Doh applies at once - the pointer, the
-            history - while its fades, its arms, the desk and the report wait for
-            the clock: said at the press, since nothing else will be until then. */
-        if (status == "noClock")
-            return "Doh!: the pointer is back; what it puts back comes when the audio returns";
-
-        return {};
+        return "Doh! on " + (dohReportList.empty() ? std::string ("another list") : dohReportList) + ": " + sentence;
     }
 
     std::string TransportReading::lockLine() const

@@ -150,6 +150,12 @@ namespace wfg::audio
                                         cue::Runner& runner, cue::RunTable& runs, AudioState& state,
                                         SettingsRequest request)
     {
+        /*  WHETHER THE AUDIO IS OUT, for Doh!'s handler (D4's review, OJ): a
+            press it accepts in an outage says so at once on its readout. The
+            status `audio.connection` writes - a record, so a replay, which
+            registers the same commands, answers the same. */
+        runner.setOutage ([&state] { return state.status == "noClock"; });
+
         /*  WHAT AN OUTAGE LETS THROUGH (namespace draft §11.1). Since
             2026-09-28 also: the engine's own `audio.clockMoved`, and the two
             records a settings operation ends with - a follow, or an Apply made

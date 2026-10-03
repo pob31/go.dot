@@ -4805,6 +4805,87 @@ TEST_CASE ("audio recovery: Doh! is let through an outage, as Esc is, and a GO s
     CHECK (engine.lastError().find ("audio-reconnecting") != std::string::npos);
 }
 
+TEST_CASE ("audio recovery: a Doh! in an outage says on the readout what waits, a refused one says nothing, and the report replaces it when the audio returns")
+{
+    /*  Doh! D4's review (2026-10-03, OJ, L18). The outage sentence was the
+        desktop's guess, shown for every press - a refused one included. Now
+        the engine says it, from `go.doh`'s handler, only for a press it
+        accepted; and the hook's report, on the first tick the audio is back,
+        replaces it - an empty one too, clearing it, where a Doh with nothing to
+        report used to submit nothing and leave the old line standing. Failed
+        before the review: the readout was cleared at the press and nothing was
+        said. */
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (37);
+    cue::Runner runner { document, runs, runIds, focus };
+    audio::AudioState state;
+
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+    audio::registerAudioCommands (engine.commands(), state);
+    audio::registerAudioSettingsCommands (engine, document, runner, runs, state);
+
+    const auto listId = document.createList ("Show").id;
+    const auto first = document.createCue (listId, 0, "memo", "One").id;
+    document.createCue (listId, 1, "memo", "Two");
+    REQUIRE (document.setAttribute (cue::standbyAddressOf (listId), first).ok);
+
+    const auto& report = runner.listState().dohReport();
+    std::int64_t tick = 10;
+
+    //  A live tick: the hooks, then the drain - the tick thread's order.
+    const auto live = [&]
+    {
+        runner.beforeTick (engine, tick);
+        return engine.processTick (tick++);
+    };
+
+    state.status = "running";
+
+    //  Nothing to take back, in an outage: refused, and nothing is said.
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (false) });
+    REQUIRE (engine.processTick (tick).applied == 1);
+    engine.submit ("cli", "go.doh", {});
+    CHECK (engine.processTick (tick).rejected == 1);
+    CHECK (report.text.empty());
+
+    state.resumePlayback = [] { return true; };
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (true) });
+    REQUIRE (engine.processTick (tick).applied == 1);
+
+    engine.submit ("cli", "go", {});
+    REQUIRE (live().rejected == 0);
+    live();
+
+    //  The audio goes; the press is accepted at the frozen tick, and says what waits.
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (false) });
+    REQUIRE (engine.processTick (tick).applied == 1);
+
+    engine.submit ("cli", "go.doh", {});
+    REQUIRE (engine.processTick (tick).applied == 1);
+    CHECK (report.list == listId);
+    CHECK (report.text == "the pointer is back; what it puts back comes when the audio returns");
+
+    //  A second press, inside the debounce: refused, and the line is the first's.
+    engine.submit ("cli", "go.doh", {});
+    CHECK (engine.processTick (tick).rejected == 1);
+    CHECK (report.text == "the pointer is back; what it puts back comes when the audio returns");
+
+    //  The audio back: the hook's report replaces it - nothing to say, so nothing.
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (true) });
+    REQUIRE (engine.processTick (tick).applied == 1);
+
+    for (int n = 0; n < 3; ++n)
+        live();
+
+    CHECK (report.text.empty());
+}
+
 TEST_CASE ("audio recovery: a moved clock stops what plays the Esc way, says so, and asks to be followed")
 {
     /*  PRD §6.2's answer to the clock moving, as the engine applies it

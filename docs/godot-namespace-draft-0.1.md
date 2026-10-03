@@ -16736,7 +16736,7 @@ banks, takes and the report, §24.13; D4's naming of what a takeBack MIDI port w
 | `osc,doh`, `midi,doh` | `/godot/cue/<id>/doh` | `s`, `device` - `device \| takeBack \| leave` | the cue's own answer, or its device's | D1 |
 | `list,resume` | `/godot/list/<id>/resume` | `s`, ro | the cue the next GO carries on, and from which second | D2 |
 | `lists,dohForget` | `/godot/list/dohForget` | `s`, ro | what a press of Doh! would forget now: `<list> <cue>` of the resume the last Doh left, when no GO a press could take back stands before it; empty otherwise. What the button reads to offer the second press *(added 2026-10-03, D2's review, MY)* | D2 |
-| `lists,dohReport` | `/godot/list/dohReport` | `s`, ro | the last Doh's report, whichever list it was on | D3 |
+| `lists,dohReport` | `/godot/list/dohReport` | `s`, ro | the last Doh's report, whichever list it was on *(2026-10-03, D4's review: a relaunch's report appended to it, "...; then: ..." (OK); during an audio outage, at an accepted press, what waits for the clock (OJ); retired by the next GO on any list (OM))* | D3 |
 
 **Edits** (D1): `list,history` names the `p` and `d` letters; `document,locked` adds Doh! to what
 the lock does not stop; `lists,goDebounce` says it also spaces two Doh! presses; `run,warning` gains
@@ -16751,7 +16751,7 @@ the lock does not stop; `lists,goDebounce` says it also spaces two Doh! presses;
 | `cue.fire` | unchanged | `s` cue `[s run]` `[h cause]` | the third argument, read only from the engine's own fires, is the GO whose start cue fired this one: the next tick's hook writes it into the record, so a replay reads it. A cause a Doh took back: applied and nothing - no run, no step, no press | D1 |
 | `go.dohPlayhead` | `/godot/cmd/go/dohPlayhead` | `s` run `d` from `[i range]` | where a sound Doh! paused had got to at the press, read off its playhead by the engine on the next tick and written into the resume the next GO carries on (MB); `range` the slice it was in, `from` how far into it - or -1, `from` a second of its file. Submitted by a hook; applied and nothing when no resume names the run *(added 2026-10-02, D2)* | D2 |
 | `go.dohRelaunch` | `/godot/cmd/go/dohRelaunch` | `s` run `[s made…]` | a scene the GO stopped, relaunched once it has ended | D3 |
-| `list.dohReport` | `/godot/cmd/list/dohReport` | `s` list `s` text | the report, submitted by a hook | D3 |
+| `list.dohReport` | `/godot/cmd/list/dohReport` | `s` list `s` text `[T append]` | the report, submitted by a hook *(2026-10-03, D4's review: `append`, a relaunch's, follows the standing sentence with "; then: " (OK); without it, an empty text clears the readout - a Doh with nothing to say (OJ))* | D3 |
 
 **The refusals**, asked in this order, and nothing moves before the last of them:
 
@@ -16790,7 +16790,9 @@ printed beside it, offered under the lock. A press sends `go.doh` and nothing el
 which would stand in front of the engine's refusal on the transport line. *(2026-10-03, D4: but in
 an audio outage, where the line says the audio is out and the report waits for the clock, the press
 says "Doh!: the pointer is back; what it puts back comes when the audio returns" - and the report,
-when it comes, is a notice of its own, §24.14.)*
+when it comes, is a notice of its own, §24.14.)* *(2026-10-03, D4's review, OJ: the engine says it,
+on the report's own readout and only for a press it accepted; the desktop's press sends `go.doh` and
+nothing else again.)*
 
 ### 24.5 The Doh! setting, and "plays sound"
 
@@ -17895,9 +17897,9 @@ it again, as a first GO would (the author, 2026-09-30, (a)), and the operator is
 |---|---|---|
 | A Doh's report arrives - the tick after the press, or later a relaunch's | The transport's top line, the notice's row, in front of the last refusal; the whole sentence on hover when it is longer than the row | "Doh!: <report>" when the Doh was on the focused list; "Doh! on Act 2: <report>" when it was on another |
 | It names devices left to their operators | The same line, those items first, each kind in the engine's order | "Doh!: Lighting desk: Q12, Q13 - left to its operator, not sent again; Note: MIDI to Keys could not be taken back - the next GO sends it again" |
-| The GO sent MIDI to a port that takes back | An item of the report | "<cue>: MIDI to <port> could not be taken back - the next GO sends it again" |
-| A refusal newer than the report | The line goes back to the refusal ("standby.set refused: not-a-stop") | - |
-| Doh! pressed - the button, F9 or the Show menu - while the audio is out (L18) | The notice, at the press | "Doh!: the pointer is back; what it puts back comes when the audio returns" |
+| The GO sent MIDI to a port that takes back | An item of the report | "<cue>: MIDI to <port> could not be taken back - the next GO sends it again" *(D4's review, OO: "..., to <port>" when the cue names another port now; "- sent again when <act> ends again" for an act's footer the Doh does not take down)* |
+| A refusal newer than the report | The line goes back to the refusal ("standby.set refused: not-a-stop") *(D4's review, OP: and any newer sentence of that line - a write that failed, the audio gone, a moved clock)* | - |
+| Doh! pressed - the button, F9 or the Show menu - while the audio is out (L18) | The notice, at the press *(D4's review, OJ: the engine's readout, for a press it accepted; a second press that forgets a resume says "<cue>: the next GO starts it from its top")* | "Doh!: the pointer is back; what it puts back comes when the audio returns" |
 
 The notice is shown ONCE per report: a sentence put on the line since - an Esc's, an import's - is not
 pushed aside by the same report on the next pass, and a later report, a relaunch's with the same
@@ -17912,14 +17914,16 @@ words included, is shown again. The words are the implementer's (NK), the author
 - **The reading** (`model::TransportReading`): `dohReport`, the readout as the engine spells it -
   "<list> <tick> <sentence>" - and `dohReportList`, that list's name; `dohNotice()`, the sentence the
   line shows, or nothing when there is no report or a refusal newer than it (`lastError`'s tick past
-  the report's); `dohPressLine()`, the outage sentence while `/godot/audio/status` is `noClock`.
+  the report's); `dohPressLine()`, the outage sentence while `/godot/audio/status` is `noClock`
+  *(2026-10-03, D4's review: gone - the engine says it, OJ)*.
 - **The line** (`ui::TransportComponent`): `show` puts `dohNotice()` on the notice's row when the
   readout changes, and clears it when a newer refusal has taken the line and the row still holds
   what the report put there (`dohShown`) - never a sentence set since; `showDohNotice` cuts the row
   at 300 characters as `setNotice` does, the tooltip holding the whole (bounded at 4000); `settleFoot`
   shows the notice in front of the error, as it always has.
 - **The press** (`Client::doh`, the button's and the Show menu's one door): `go.doh`, then
-  `dohPressLine()` as a notice when there is one.
+  `dohPressLine()` as a notice when there is one. *(2026-10-03, D4's review: `go.doh` and nothing
+  else, OJ.)*
 
 **Where D4 departs from the design, and why.**
 
@@ -17931,7 +17935,10 @@ words included, is shown again. The words are the implementer's (NK), the author
   caused, and the footers of acts not brought back.
 - **Left first is the client's order** (NV): the engine's sentence keeps its order - the handler's
   items, then the desk's - and the desktop shows the left ones first. The readout is the record's,
-  and a replay compares it as logged.
+  and a replay compares it as logged. *(2026-10-03, D4's review, OL: wrong on both counts - the
+  client's split on "; " cut a cue name holding one, and the reason given is none: a replay re-injects
+  the logged text, so the order chosen at composition reaches only new logs. The engine composes the
+  left items first now, and the client shows the sentence whole.)*
 - **A refusal "newer" is by tick** (NV): `lastError`'s tick past the report's. A refusal in the
   report's own tick is not newer: the report is the news of that tick.
 - **The console is not given the notice** (NX): the design's notice is the desktop's
@@ -17943,8 +17950,8 @@ words included, is shown again. The words are the implementer's (NK), the author
 | | Decision | Whose |
 |---|---|---|
 | NU | **The MIDI a port that takes back was sent is named from the Doh's walk of the GO's runs** - what counted as having left, the setting read at the Doh - "<cue>: MIDI to <port> could not be taken back - the next GO sends it again"; no capture at the send | implementer's call, against the design's capture at `fireMidi` |
-| NV | **The Doh notice**: the report on the transport line, once per readout, "Doh!:" or "Doh! on <list>:", the left items first, whole on hover; a refusal of a later tick takes the line back | the design's place and rules; the words and the order's home, the implementer's |
-| NW | **In an audio outage the press says what waits**: "Doh!: the pointer is back; what it puts back comes when the audio returns", from the client, while the status is `noClock` - where the line already says the audio is out, so no refusal is hidden by it | the design's sentence (§6 D4) |
+| NV | **The Doh notice**: the report on the transport line, once per readout, "Doh!:" or "Doh! on <list>:", the left items first, whole on hover; a refusal of a later tick takes the line back *(2026-10-03, D4's review: the left items first is the engine's composition, OL; any newer sentence of the line takes it back, OP)* | the design's place and rules; the words and the order's home, the implementer's |
+| NW | **In an audio outage the press says what waits**: "Doh!: the pointer is back; what it puts back comes when the audio returns", from the client, while the status is `noClock` - where the line already says the audio is out, so no refusal is hidden by it *(2026-10-03, D4's review, OJ: it was a guess, said for a refused press too, and every refusal was hidden by the outage's own line anyway; the engine says it now, for a press it accepted)* | the design's sentence (§6 D4) |
 | NX | **The console is not given the notice in D4** | implementer's call |
 
 **What it changes for a replay.** Nothing new is logged. The MIDI item is composed in the handler
@@ -17990,6 +17997,89 @@ comes back.
 **What D5 inherits.** The notice and its readout: the black-box driver can read
 `/godot/list/dohReport` for the lighting desk's "left to its operator" (§6 D5) and the MIDI named
 here; the fixture `doh` replays them as records.
+
+**D4's review (2026-10-03): what changed.** No blocker. Built on D3's review (ee92964, NY-OH), whose
+relaunch always says something. Each behaviour change has a case written first and run on that tree
+before it.
+
+- **The outage sentence is the engine's** (OJ). The desktop said it for every press, a refused one
+  included - nothing to take back, too late, a trigger since, too soon - and an outage's line hides
+  every refusal anyway. Now `go.doh`'s handler, for a press it ACCEPTS while the audio is out, sets
+  the readout to "the pointer is back; what it puts back comes when the audio returns"; the second
+  press that forgets a resume says what it did, "<cue>: the next GO starts it from its top". The
+  handler asks the audio status the `audio.connection` records write (`Runner::setOutage`, handed in
+  by `registerAudioSettingsCommands` for `serve` and `replay` alike), so a replay says the same. And
+  the flush's report REPLACES it on the first tick the audio is back - an empty one too: a Doh with
+  nothing to say now submits `list.dohReport` with no text, which clears the readout, where it used
+  to submit nothing and leave the old line standing. `Client::doh` sends `go.doh` and nothing else.
+- **The press no longer clears the readout** (ON): cleared at the press and refilled a tick later,
+  the line blinked off between the two readings. The flush's record replaces it.
+- **A relaunch's report is appended** (OK, the orchestrator's ruling, the author's to overrule):
+  `list.dohReport` takes `append`, which follows the standing sentence with "; then: " - the first
+  department's news must not vanish before anybody read it. D3's review had the relaunch replace the
+  promise ("replacing the promise that it would come back"); its case now reads both. A Doh's own
+  report still replaces.
+- **The next GO retires the report** (OM): `beginGo`, on any list, clears the readout - a sentence
+  about a GO two GOs ago only misleads. A GO in the very drain of the Doh is before the report, which
+  arrives on the next tick (NT's case).
+- **What was left comes first in the engine** (OL): step 14 composes the by-device and persistent
+  left blocks before the press's other items. The client shows the sentence whole - its split on
+  "; " cut a cue named "Q12; the flash" in two.
+- **The MIDI item says when** (OO): a footer the Doh does not take down - an act left ended, every
+  reached act's after an Esc - "sent again when <act> ends again"; a cue whose port was changed since
+  the GO, "..., to <port>", the port the next GO sends to. A port deleted since reads leave and is
+  named by the identifier the run kept; a setting changed between the GO and the press is the
+  press's (L35) - both nets.
+- **The notice gives way to any newer sentence of its line** (OP): a write that failed, the audio
+  gone, a moved clock - not only a refusal. `show` compares the line's sentence with what it held, and
+  a change takes the line back from the notice while the row still holds what the report put there.
+- **The notice follows its own words while shown** (OQ): a focus moved onto or off the report's
+  list, or the list renamed, redraws it in place; once it has given way it does not come back.
+- **`tickOf`** is one function in `Transport.cpp`'s anonymous namespace, where three lambdas were.
+
+| | Decision | Whose |
+|---|---|---|
+| OJ | **What an outage makes wait is said by the engine**, on the report's readout, for a press `go.doh` accepted - the forget press saying what it forgot - and replaced by the flush's report when the audio returns, an empty report clearing it | the review's |
+| OK | **A relaunch's report is appended to the Doh's**, "...; then: ...", through `list.dohReport`'s `append` | the orchestrator's ruling, the author's to overrule |
+| OL | **The engine composes what was left to an operator first**; the client shows the sentence whole | the review's (NV corrected) |
+| OM | **The next GO, on any list, retires the report** | the review's |
+| ON | **The press does not clear the readout**; the flush's record replaces it | the review's |
+| OO | **The MIDI item says when it goes again** - an act's footer at that act's end - **and where**, the cue's port now when it is another | the review's |
+| OP | **Any newer sentence of the transport's line takes it back from the Doh notice** | the review's |
+| OQ | **The notice is redrawn in place while shown** when its words change | the review's |
+
+**What it changes for a replay.** `list.dohReport` gains an optional last argument, and a Doh with
+nothing to say now logs one with an empty text; both are records, re-injected. The outage sentence
+and the retirement at a GO are handler state, from records. A log with a Doh made on D4 is not
+promised to replay readout for readout here (HD) - its report replaced where this appends - but
+every run replays: the readout decides nothing.
+
+**Tests**, run on ee92964 (D4 and D3's review) first, then after:
+
+- **`AudioTests`** (1): in an outage, a refused press says nothing, an accepted one says what waits,
+  a second inside the debounce leaves it, and the audio back the empty report clears it [nothing
+  said, the readout empty at the press].
+- **`GoTests`** (1 new, 2 changed): the forget press in an outage says what it forgot [nothing
+  said]; the relaunch's report appended, in D3's relaunch case and in D3's review's "over by then"
+  case, each with a dated note [replaced].
+- **`MidiTests`** (2 new, 2 changed): the port at the Doh - a setting changed either way and a port
+  deleted since (nets), the cue sent to another port now [no "to Lights"]; an act's footer's MIDI
+  "sent again when Act ends again" [the next GO]; the corrected GO retires the report [it stood]; the
+  left item first in the record [last], the replay taken before the corrected GO.
+- **`ClientTests`** (3 changed): the outage sentence read off the readout like any report; a cue name
+  holding "; " shown whole [split and reordered]; the relaunch's report appended end to end, a Doh's
+  replacing, an empty one clearing [the `append` argument refused].
+- **`RunPaneUiTests`** (2): any newer sentence of the line takes it back - a write that failed, the
+  audio gone - and the notice follows a list renamed and a focus moved [stood, kept its opening]; a
+  long report with accented letters cut at a whole character, whole on hover (a net).
+
+**Counts (the review).** The new and changed cases under C and `fr-FR`: 15 in `wfg_tests`, 546
+assertions each, and 3 in `wfg_audio_ui_tests`, 26, green; on ee92964 nine of the `wfg_tests` cases
+and the first UI case failed, the nets passed. `GoTests`, `NetworkCueTests`, `MidiTests` and
+`ClientTests` whole under C: 601 cases, 15898 assertions; `VerifiedCueTests`, `MicTests`,
+`TakeTests`, `SamplerTests` and `AudioTests`: 216 cases, 31123 assertions - green. `ctest -R
+"wfg\.replay|wfg\.commands|schema|^ui\.|client|console"`: 72 of 72. `check-comments.py` passes;
+clang-tidy with the GCC warnings finds nothing on the lines the review changed.
 
 ## 25. A Show and its Performances
 

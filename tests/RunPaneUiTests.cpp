@@ -3271,3 +3271,105 @@ TEST_CASE ("transport: the Doh notice is shown once when the report arrives, who
     REQUIRE (shown() != nullptr);
     CHECK (shown()->getText() == "standby.set refused: not-a-stop");
 }
+
+/*  THE DOH NOTICE GIVES WAY, AND FOLLOWS THE FOCUS (2026-10-03, D4's review):
+    standing in front of the line, it hid every later sentence the line has
+    besides a refusal - a write that failed, the audio gone - for as long as it
+    stood; now any change of what the line says takes the line back from it.
+    And its opening - "Doh! on <list>" - follows a focus moved, or a list
+    renamed, while it is shown. Failed on 204ac69: the notice stood over both,
+    and kept its old opening. */
+TEST_CASE ("transport: the Doh notice gives way to any newer sentence on the line, and follows the focus while shown")
+{
+    const model::Theme theme;
+    ui::TransportComponent transport (theme, ui::TransportComponent::Actions {});
+    transport.setSize (1200, transport.preferredHeight());
+
+    const auto visibleText = [&transport] (const juce::String& start) -> juce::String
+    {
+        for (auto* child : transport.getChildren())
+            if (auto* label = dynamic_cast<juce::Label*> (child))
+                if (label->isVisible() && label->getText().startsWith (start))
+                    return label->getText();
+
+        return {};
+    };
+
+    model::TransportReading reading;
+    reading.tick = "1201";
+    reading.listId = "7K2QM9X4";
+    reading.listName = "Show";
+    reading.status = "running";
+    reading.dohReport = "LQ4X8MZT 1200 Lighting desk: Q12 - left to its operator, not sent again";
+    reading.dohReportList = "Act 2";
+    transport.show (reading);
+    CHECK (visibleText ("Doh!") == "Doh! on Act 2: Lighting desk: Q12 - left to its operator, not sent again");
+
+    //  Renamed while shown: the opening follows.
+    reading.dohReportList = "Second half";
+    transport.show (reading);
+    CHECK (visibleText ("Doh!") == "Doh! on Second half: Lighting desk: Q12 - left to its operator, not sent again");
+
+    //  The focus moved onto the report's list: no list's name.
+    reading.listId = "LQ4X8MZT";
+    reading.listName = "Second half";
+    transport.show (reading);
+    CHECK (visibleText ("Doh!") == "Doh!: Lighting desk: Q12 - left to its operator, not sent again");
+
+    SUBCASE ("a write that failed takes the line")
+    {
+        reading.writeError = "disk full";
+        transport.show (reading);
+        CHECK (visibleText ("Doh!").isEmpty());
+        CHECK (visibleText ("write failed") == "write failed: disk full");
+    }
+
+    SUBCASE ("the audio gone takes the line")
+    {
+        reading.status = "noClock";
+        transport.show (reading);
+        CHECK (visibleText ("Doh!").isEmpty());
+        CHECK (visibleText ("Audio disconnected").isNotEmpty());
+    }
+}
+
+TEST_CASE ("transport: a long Doh report is cut on the row at a whole character, and whole on hover")
+{
+    /*  Doh! D4's review: the row is one line high, so a long report is cut
+        there - by characters, never inside one, a lighting desk named "Éclairage"
+        included - and the whole of it is the tooltip. A net: juce::String
+        counts characters, and the cut was already safe on 204ac69. */
+    const model::Theme theme;
+    ui::TransportComponent transport (theme, ui::TransportComponent::Actions {});
+    transport.setSize (1200, transport.preferredHeight());
+
+    juce::String cues;
+
+    for (int n = 0; n < 90; ++n)
+        cues << (n == 0 ? "" : ", ") << "Q" << n;
+
+    const auto desk = juce::String (juce::CharPointer_UTF8 ("\xc3\x89" "clairage \xc3\xa9t\xc3\xa9"));
+    const auto sentence = desk + ": " + cues + " - left to its operator, not sent again";
+
+    model::TransportReading reading;
+    reading.tick = "1201";
+    reading.listId = "7K2QM9X4";
+    reading.listName = "Show";
+    reading.status = "running";
+    reading.dohReport = "7K2QM9X4 1200 " + sentence.toStdString();
+    reading.dohReportList = "Show";
+    transport.show (reading);
+
+    juce::Label* notice = nullptr;
+
+    for (auto* child : transport.getChildren())
+        if (auto* label = dynamic_cast<juce::Label*> (child))
+            if (label->isVisible() && label->getText().startsWith ("Doh!"))
+                notice = label;
+
+    REQUIRE (notice != nullptr);
+    CHECK (notice->getText().length() == 303);
+    CHECK (notice->getText().endsWith ("..."));
+    CHECK (notice->getText().startsWith ("Doh!: " + desk));
+    CHECK (notice->getTooltip() == "Doh!: " + sentence);
+}
