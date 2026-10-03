@@ -43,6 +43,12 @@ namespace wfg::client::model
             a dark blue of the same density to tell it apart from the cuelist
             and active cues".
 
+            THE BLUE WENT GREY AGAIN (author, 2026-10-03: "could the Inspector
+            background be dark grey rather than dark blue? I find the blue
+            standing out a bit in the colour palette of the UI"). The list and
+            the running pane are black now, so a neutral grey a step above
+            `panel` still tells the inspector apart without a hue.
+
             IT IS NOT A DISAGREEMENT ABOUT THE PALETTE. A browser and JUCE do
             not lay type down the same way - the page's greys are rendered with
             subpixel antialiasing over a stylesheet's own gamma, and the same
@@ -61,8 +67,14 @@ namespace wfg::client::model
                 { "ink-off",       0xFF8B867F },
                 { "ground",        0xFF16161A },
                 { "panel",         0xFF1D1D22 },
-                { "panel-inspect", 0xFF1C2433 },
+                { "panel-inspect", 0xFF222226 },
                 { "panel-high",    0xFF24242B },
+
+                /*  THE WINDOW'S TITLE BAR IS BLACK (author, 2026-10-03). It
+                    wore LookAndFeel_V4's dark-scheme blue-grey until now,
+                    because JUCE paints it from the colour scheme and not from
+                    the window's background. */
+                { "title-bar",     0xFF000000 },
                 { "panel-in",      0xFF191920 },
 
                 /*  A HEADER, A FOOTER AND A PERSISTENT SECTION ARE NOT MEMBERS

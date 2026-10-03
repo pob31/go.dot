@@ -1,5 +1,5 @@
 {
-  "about": "The desktop client's look, read by `wfg serve --window --theme=<this file>` at start and again on F5. The tokens are the ones clients/console/styles.css declares. Most carry the page's values; three greys are lighter here and the inspector's ground is blue rather than violet, because a browser and JUCE do not lay type down the same way and the author read both surfaces (2026-09-18). What the two share is the intention, not the hex. Colours are #rrggbb; `type` scales every font; `refreshHz` is how often the window reads the engine; `row` is a row's height in pixels before `type` scales it. A token left out keeps its default; one misspelled is refused by name; a file that does not parse changes nothing, and the window says why on its status line.",
+  "about": "The desktop client's look, read by `wfg serve --window --theme=<this file>` at start and again on F5. The tokens are the ones clients/console/styles.css declares. Most carry the page's values; three greys are lighter here and the inspector's ground is a neutral grey rather than violet (author, 2026-10-03), because a browser and JUCE do not lay type down the same way and the author read both surfaces (2026-09-18). What the two share is the intention, not the hex. Colours are #rrggbb; `type` scales every font; `refreshHz` is how often the window reads the engine; `row` is a row's height in pixels before `type` scales it. A token left out keeps its default; one misspelled is refused by name; a file that does not parse changes nothing, and the window says why on its status line.",
 
   "type": 1.25,
   "refreshHz": 25,
@@ -12,8 +12,9 @@
 
   "ground": "#16161a",
   "panel": "#1d1d22",
-  "panel-inspect": "#1c2433",
+  "panel-inspect": "#222226",
   "panel-high": "#24242b",
+  "title-bar": "#000000",
   "panel-in": "#191920",
   "panel-cue": "#000000",
   "panel-section": "#10141c",

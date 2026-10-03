@@ -27,8 +27,8 @@ namespace wfg::client::ui
     {
         /*  THE FRAME IS THE THEME'S, NOT THE SYSTEM'S (author, 2026-09-18:
             "remove the white window frame for a colour themed one"). JUCE
-            draws the title bar in the window's background colour, which is
-            the theme's `ground`, and the look-and-feel draws its buttons - so
+            draws the title bar and its buttons in the look-and-feel's colour
+            scheme, which `Look` sets to the theme's `title-bar` - so
             the one light rectangle on a dark booth screen goes. The price is
             the system's own frame gestures, so the resize corner is drawn
             and the window keeps a minimum it can still be read at. */

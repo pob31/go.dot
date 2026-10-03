@@ -272,6 +272,12 @@ namespace wfg::client::ui
         setColour (juce::ResizableWindow::backgroundColourId, ground);
         setColour (juce::DocumentWindow::textColourId, ink);
 
+        /*  THE TITLE BAR AND ITS BUTTONS are filled from the scheme's widget
+            background, read live when they paint - nothing else in
+            LookAndFeel_V4 reads that entry after construction, so this moves
+            the bar and nothing more. */
+        getCurrentColourScheme().setUIColour (ColourScheme::widgetBackground, colour (theme, "title-bar"));
+
         setColour (juce::Label::textColourId, ink);
         setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
 
