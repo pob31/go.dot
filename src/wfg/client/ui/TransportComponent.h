@@ -156,6 +156,13 @@ namespace wfg::client::ui
         /** Which of the foot's labels shows: the notice in front of the error while there is one. */
         void settleFoot();
 
+        /*  THE DOH NOTICE (D4): the last Doh's report on the notice's row, cut
+            to the row and whole in its tooltip; empty clears it. `dohShown` is
+            what it put there, so a newer refusal clears only the report and
+            never a sentence set since. */
+        void showDohNotice (const juce::String& notice);
+        juce::String dohShown;
+
         /** GO in the audio's colours, and its caption when there is no audio. */
         void dressGo();
 

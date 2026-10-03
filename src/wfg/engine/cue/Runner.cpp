@@ -8603,13 +8603,30 @@ namespace wfg::cue
 
         std::vector<LeftSend> leftSends;
 
-        const auto consider = [this, &leftCues, &leftSends] (const Run& run)
+        /*  AND WHAT LEFT FOR A PORT THAT TAKES BACK (D4, NU): a MIDI message is
+            an event - nothing reads it back and nothing can call it off the
+            cable - so the report names it, and the next GO sends it again as a
+            first GO would (the author, 2026-09-30, (a)). Decided by the same
+            walk and the same test as what was left: what counts as having left
+            (a cue that found no port, or a port switched off, put nothing on a
+            cable and is not named), the setting read here, once (L35). For the
+            report only - the corrected GO needs no telling. */
+        std::vector<LeftSend> sentAgain;
+
+        const auto consider = [this, &leftCues, &leftSends, &sentAgain] (const Run& run)
         {
             if ((run.kind != "osc" && run.kind != "midi") || ! countsAsSent (run))
                 return;
 
             if (dohOfDevice (document, run.kind, run.sentTo, run.cue) != dohSetting::leave)
+            {
+                if (run.kind == "midi"
+                      && std::none_of (sentAgain.begin(), sentAgain.end(),
+                                       [&run] (const LeftSend& sent) { return sent.cue == run.cue && sent.device == run.sentTo; }))
+                    sentAgain.push_back ({ run.cue, run.kind, run.sentTo });
+
                 return;
+            }
 
             if (std::find (leftCues.begin(), leftCues.end(), run.cue) == leftCues.end())
                 leftCues.push_back (run.cue);
@@ -9139,6 +9156,12 @@ namespace wfg::cue
         for (const auto& [cue, device] : changes.unputtable)
             if (dohOfDevice (document, "osc", device, cue) == dohSetting::takeBack)
                 items.push_back (cueLabel (cue) + ": could not be taken back - the next GO sends it again");
+
+        /*  And the MIDI a port that takes back was sent (D4, NU), by the port's
+            name: the operator knows a synth by it. */
+        for (const auto& sent : sentAgain)
+            items.push_back (cueLabel (sent.cue) + ": MIDI to " + deviceLabel ("port", sent.device)
+                               + " could not be taken back - the next GO sends it again");
 
         /*  EVERY DEVICE AND CUE LEFT TO ITS OPERATOR, by device, in the order
             they were sent (the author, 2026-10-01). */

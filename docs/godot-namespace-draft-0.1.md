@@ -16631,7 +16631,8 @@ names, once, what could not be put back; **D5** drives it end to end. Until D2 t
 the one the operator meant - starts the cue from the top. *(2026-10-02: D2 is built - what was heard
 is carried on by the next GO from where it was, what nobody heard is handed back exactly, §24.12.)*
 *(2026-10-03: D3 is built - what the GO changed elsewhere is put back, and one report says what was
-and what was left, §24.13.)*
+and what was left, §24.13.)* *(2026-10-03: D4 is built - the report names the MIDI a port that takes
+back was sent, and the desktop puts the report in front of the operator, §24.14.)*
 The design's own labels for its decisions
 (FO to GY) are kept in a column of §24.6's table; the letters here continue §23's.
 
@@ -16685,6 +16686,7 @@ The inventory §4.4 deferred Doh! until. **Stage** says which stage builds the r
 less than the row, the column says what D1 does. *(2026-10-02: D2's rows are built - the pause and
 the carry-on, the exact hand-back, §24.12.)* *(2026-10-03: and D3's - the desk, levels, stops, flags,
 banks, takes and the report, §24.13; D4's naming of what a takeBack MIDI port was sent waits.)*
+*(2026-10-03: and D4's - that MIDI named, and the report on the desktop's transport line, §24.14.)*
 
 | What a GO starts or changes | What Doh! does with it | Stage |
 |---|---|---|
@@ -16720,7 +16722,7 @@ banks, takes and the report, §24.13; D4's naming of what a takeBack MIDI port w
 | A lane ride recorded on a cue it started | Dropped, as for a kill | D1 |
 | Everything, after an Esc between the GO and the Doh | Left to Esc, whose footers have run: only the pointer (and from D3 the desk) goes back, and what reached a device left to its operator is still not sent again | D1 |
 | A device's Doh! setting, a cue's, a port's "plays sound" | The document's: never changed by a Doh; read once, at the Doh, fail-safe | D1 |
-| The Doh's report | One readout for the runner, whatever list has the focus | D3, D4 |
+| The Doh's report | One readout for the runner, whatever list has the focus; on the desktop, a notice on the transport line, opening with the report's list when it is not the focused one (D4) | D3, D4 |
 
 ### 24.3 Rows
 
@@ -16785,7 +16787,10 @@ as the window runs out and disabled once it is over, §24.11.)* **F9** is its ke
 so a latch shut by the press is opened again only once F9 is up (the Shell forwards key releases to
 the transport, where the latch is). The Show menu carries "Doh! - take back the last GO", F9
 printed beside it, offered under the lock. A press sends `go.doh` and nothing else - no notice,
-which would stand in front of the engine's refusal on the transport line.
+which would stand in front of the engine's refusal on the transport line. *(2026-10-03, D4: but in
+an audio outage, where the line says the audio is out and the report waits for the clock, the press
+says "Doh!: the pointer is back; what it puts back comes when the audio returns" - and the report,
+when it comes, is a notice of its own, §24.14.)*
 
 ### 24.5 The Doh! setting, and "plays sound"
 
@@ -16834,7 +16839,7 @@ level"*, and when nobody chose, *"Always leave to its operator"*.
 The design's labels in the second column; the letters continue §23's (GG was J3's), GO skipped as
 the command it reads as. A decision marked with a stage later than D1 is specified and not yet
 built. *(2026-10-02: D2's are built, and D2 adds MB-ML, §24.12.)* *(2026-10-03: D3's are built - GR to
-GU, GW's naming, GX and HR - and D3 adds ND-NT, §24.13.)*
+GU, GW's naming, GX and HR - and D3 adds ND-NT, §24.13.)* *(2026-10-03: D4 adds NU-NX, §24.14.)*
 
 | | Design | Decision | Whose |
 |---|---|---|---|
@@ -16901,7 +16906,7 @@ until that stage lands.
 | L15 | A scene the GO stopped is relaunched at its elapsed second; what its footer did elsewhere stands, and is said. An act the GO ended is different: its footer is the GO's, taken back whole (HE) | "comes back" |
 | L16 | A relaunch in the tick or two between a sound's stop landing and its end being reported needs a second voice | "comes back" |
 | L17 | A take press that closed a first pass or a layer, and a clear, cannot be undone | "put back", for exact inverses |
-| L18 | In an audio outage the Doh applies at once; fades, arms, the desk and a pending relaunch wait for the clock | the author's "Esc always accepted" shape (§6.2) |
+| L18 | In an audio outage the Doh applies at once; fades, arms, the desk and a pending relaunch wait for the clock *(2026-10-03, D4: and the report with them; the desktop says so at the press, §24.14)* | the author's "Esc always accepted" shape (§6.2) |
 | L19 | A sound whose length the log does not know resumes at its press position even near its end | the guard where the length is known |
 | L20 | The live recorder records a resumed cue at its back-dated start | the history's placement |
 | L21 | Only a GO is taken back; a fire by name or a trigger on the list after it - a pad's included - and a hand on a pad of the bank it armed make the Doh refuse; a press on a bank it did not arm is not counted | "the LAST GO only" |
@@ -17112,7 +17117,7 @@ case written first that failed on the first build (the nets below say so where t
 **What waits.** D2: the pause and the resume, the exact hand-back of what nobody heard, the second
 Doh! forgetting the resume, `list/resume` *(2026-10-02: built, §24.12)*. D3: the desk, levels, stops, takes, flags, sampler banks,
 the report, `go.dohRelaunch` and `list.dohReport` *(2026-10-03: built, §24.13)*. D4: the report's words for every device and cue
-left to an operator, and the client's notice. D5: the end-to-end drive. H4: the double Esc's own drain dropped from the sender's queue, and
+left to an operator, and the client's notice *(2026-10-03: the words built by D3, the notice by D4, §24.14)*. D5: the end-to-end drive. H4: the double Esc's own drain dropped from the sender's queue, and
 `sendDropped` stamped with it *(2026-10-02: built, §23.10)*. **Owed to the bench and to
 the author's eye**: the button and F9 on screen, the inspector's words, and a lighting desk left to
 its operator through a Doh and a corrected GO.
@@ -17796,7 +17801,119 @@ Doh'd: the gate open again. A scene stopped with a long footer: back once its fo
 
 **What D4 inherits.** The report's items in the stash, and its readout - D4 gives the client its
 notice and names the MIDI a takeBack port was sent (`sentCues`), and what an outage made wait (L18).
-D5 drives it end to end: the fixture `doh`, the black-box driver.
+D5 drives it end to end: the fixture `doh`, the black-box driver. *(2026-10-03: built, §24.14 - the
+MIDI named from the Doh's own walk rather than captured at the send, NU.)*
+
+### 24.14 What was built: D4 - what could not be taken back is named, and the operator is told (2026-10-03)
+
+**What it does.** D3 composed one sentence on the tick after the press and published it at
+`/godot/list/dohReport`; nobody saw it but a client that went looking. D4 puts it in front of the
+operator, and finishes what it says. The desktop shows the report on the transport's top line, in
+front of the last refusal, the moment it arrives - whatever list has the focus, opening with the
+report's list when it is another - and what was left to an operator comes first, because that is
+what the operator must go and tell the other department. And the report now names the MIDI a GO
+sent to a port that takes back: a message cannot be called back off the cable, so the next GO sends
+it again, as a first GO would (the author, 2026-09-30, (a)), and the operator is told so.
+
+| When | Where | The words |
+|---|---|---|
+| A Doh's report arrives - the tick after the press, or later a relaunch's | The transport's top line, the notice's row, in front of the last refusal; the whole sentence on hover when it is longer than the row | "Doh!: <report>" when the Doh was on the focused list; "Doh! on Act 2: <report>" when it was on another |
+| It names devices left to their operators | The same line, those items first, each kind in the engine's order | "Doh!: Lighting desk: Q12, Q13 - left to its operator, not sent again; Note: MIDI to Keys could not be taken back - the next GO sends it again" |
+| The GO sent MIDI to a port that takes back | An item of the report | "<cue>: MIDI to <port> could not be taken back - the next GO sends it again" |
+| A refusal newer than the report | The line goes back to the refusal ("standby.set refused: not-a-stop") | - |
+| Doh! pressed - the button, F9 or the Show menu - while the audio is out (L18) | The notice, at the press | "Doh!: the pointer is back; what it puts back comes when the audio returns" |
+
+The notice is shown ONCE per report: a sentence put on the line since - an Esc's, an import's - is not
+pushed aside by the same report on the next pass, and a later report, a relaunch's with the same
+words included, is shown again. The words are the implementer's (NK), the author's at first look.
+
+**The pieces.**
+
+- **The engine** (`go.doh`'s handler, the left set's walk, `sentAgain`): every MIDI run of the GO's -
+  its fire, what it adopted, what it caused - that counts as having left (`countsAsSent`, HQ) for a
+  port whose effective setting is take back, read once, here (L35); named at step 14 beside the OSC
+  events and opaque writes D3 names, by the port's name.
+- **The reading** (`model::TransportReading`): `dohReport`, the readout as the engine spells it -
+  "<list> <tick> <sentence>" - and `dohReportList`, that list's name; `dohNotice()`, the sentence the
+  line shows, or nothing when there is no report or a refusal newer than it (`lastError`'s tick past
+  the report's); `dohPressLine()`, the outage sentence while `/godot/audio/status` is `noClock`.
+- **The line** (`ui::TransportComponent`): `show` puts `dohNotice()` on the notice's row when the
+  readout changes, and clears it when a newer refusal has taken the line and the row still holds
+  what the report put there (`dohShown`) - never a sentence set since; `showDohNotice` cuts the row
+  at 300 characters as `setNotice` does, the tooltip holding the whole (bounded at 4000); `settleFoot`
+  shows the notice in front of the error, as it always has.
+- **The press** (`Client::doh`, the button's and the Show menu's one door): `go.doh`, then
+  `dohPressLine()` as a notice when there is one.
+
+**Where D4 departs from the design, and why.**
+
+- **No `sentCues`: the MIDI is named from the Doh's own walk** (NU). The design captured it at
+  `fireMidi`, "sink or not", for a cue whose setting takes back. A capture there knows neither how the
+  send ended - a cue that found no port, or whose sender failed, put nothing on a cable and the
+  corrected GO is a first GO for it - nor the setting at the Doh, which is the one the report must
+  answer to (L35). The left set's walk knows both, over the same runs: the GO's, what it adopted and
+  caused, and the footers of acts not brought back.
+- **Left first is the client's order** (NV): the engine's sentence keeps its order - the handler's
+  items, then the desk's - and the desktop shows the left ones first. The readout is the record's,
+  and a replay compares it as logged.
+- **A refusal "newer" is by tick** (NV): `lastError`'s tick past the report's. A refusal in the
+  report's own tick is not newer: the report is the news of that tick.
+- **The console is not given the notice** (NX): the design's notice is the desktop's
+  (`TransportComponent`), and the console reads no report yet; it can read the same readout the day
+  it wants it.
+
+**The decisions.**
+
+| | Decision | Whose |
+|---|---|---|
+| NU | **The MIDI a port that takes back was sent is named from the Doh's walk of the GO's runs** - what counted as having left, the setting read at the Doh - "<cue>: MIDI to <port> could not be taken back - the next GO sends it again"; no capture at the send | implementer's call, against the design's capture at `fireMidi` |
+| NV | **The Doh notice**: the report on the transport line, once per readout, "Doh!:" or "Doh! on <list>:", the left items first, whole on hover; a refusal of a later tick takes the line back | the design's place and rules; the words and the order's home, the implementer's |
+| NW | **In an audio outage the press says what waits**: "Doh!: the pointer is back; what it puts back comes when the audio returns", from the client, while the status is `noClock` - where the line already says the audio is out, so no refusal is hidden by it | the design's sentence (§6 D4) |
+| NX | **The console is not given the notice in D4** | implementer's call |
+
+**What it changes for a replay.** Nothing new is logged. The MIDI item is composed in the handler
+into the stash, which a replay never flushes; the sentence reaches the log as the engine's one
+`list.dohReport` record, re-injected by a replay as before. A log with a Doh made on D3 replays on
+D4: its report is the logged record, whatever this build would have composed. The notice is the
+client's, read off the published tree. Every `wfg.replay` fixture replays.
+
+**Tests**, written first and run on D3's engine (bd25dd5) with the client's new answers declared and
+returning nothing - so each failed on an assertion, not on a build - then on D4, under C and `fr-FR`:
+
+- **`MidiTests`** (4): a MIDI cue to a port that takes back named, and sent again by the next GO,
+  its run warning nothing [not named]; a heard scene's MIDI member named, and sent again at the
+  resume (the design's test 3) [not named]; the report one engine record, a replay rebuilding the
+  same readout - list, tick and sentence - with the MIDI sent again and the MIDI left, from a session
+  parked by a record (the design's test 4) [not named]; and a net: a cue that found no port, or a port
+  switched off, is not named as sent [passed - D3 named no MIDI].
+- **`NetworkCueTests`** (1, a net): an OSC event and a write to an opaque device that take back,
+  named and sent again by the next GO, replayed (the design's test 2). D3 names both already, from
+  the desk's capture; this pins the opaque half, which no case drove. Its first run on D3 failed only
+  on its own replay - parked by hand, not by a record - which the case now does by `standby.set`.
+- **`ClientTests`** (3): the notice says the report, a newer refusal takes the line, an outage says
+  what waits (the design's test 5) [no notice, no press line]; the devices left to their operators
+  named whole, and first (test 6) [no notice]; the notice whatever list has the focus, opening with
+  the report's list's name, end to end off a published tree, a later report replacing it (test 7)
+  [no notice; the reading had no readout].
+- **`RunPaneUiTests`** (1): the transport shows the notice once when the report arrives, whole on
+  hover, keeps a sentence set since, shows a later report, and gives the line back to a newer
+  refusal. Run with the line's notice code taken out [nothing shown], then with it.
+
+**Counts.** The new cases under C and `fr-FR`: 8 in `wfg_tests`, 221 assertions each, and 1 in
+`wfg_audio_ui_tests`, 11, green; on D3's engine 7 of the 8 failed and the MIDI net passed, and the UI
+case failed. `GoTests`, `NetworkCueTests`, `MidiTests` and `ClientTests` whole under C: 590 cases,
+15633 assertions, green. `ctest -R "wfg\.replay|wfg\.commands|schema|^ui\.|client|console"`: 72 of
+72. `check-comments.py` passes; clang-tidy with the GCC warnings
+finds nothing on the files D4 changed.
+
+**Owed to the bench and to the author's eye**: the notice on screen - its words, its colour, how
+much of a long report the row holds; a lighting desk at its default through a Doh, the notice naming
+it while the focus sits on another list; F9 with the interface unplugged, then the report when it
+comes back.
+
+**What D5 inherits.** The notice and its readout: the black-box driver can read
+`/godot/list/dohReport` for the lighting desk's "left to its operator" (§6 D5) and the MIDI named
+here; the fixture `doh` replays them as records.
 
 ## 25. A Show and its Performances
 

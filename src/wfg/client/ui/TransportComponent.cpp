@@ -202,7 +202,30 @@ namespace wfg::client::ui
             next reading changes them, which is the same rule the page's strip
             follows for its own hint. */
         if (reading.warningLine() != last.warningLine() || ! shownOnce)
+        {
             noticeLabel.setText (text (reading.warningLine()), juce::dontSendNotification);
+            noticeLabel.setTooltip ({});
+            dohShown.clear();
+        }
+
+        /*  THE DOH NOTICE (D4, namespace draft §24.14): what the last Doh put
+            back and what it left, in front of the line ONCE - when the engine's
+            readout changes, a relaunch's later report included - so a sentence
+            put there since, an Esc's say, is not pushed aside by the same report
+            on every pass. Whatever list has the focus: the reading opens with the
+            report's list when it is another. And a refusal newer than the report
+            takes the line back, which the reading answers by having no notice. */
+        const auto dohNow = text (reading.dohNotice());
+
+        if (reading.dohReport != last.dohReport || ! shownOnce)
+        {
+            if (dohNow.isNotEmpty())
+                showDohNotice (dohNow);
+            else if (dohShown.isNotEmpty() && noticeLabel.getText() == dohShown)
+                showDohNotice ({});
+        }
+        else if (dohNow.isEmpty() && dohShown.isNotEmpty() && noticeLabel.getText() == dohShown)
+            showDohNotice ({});
 
         const auto audioMoved = ! shownOnce || reading.status != last.status;
 
@@ -248,6 +271,23 @@ namespace wfg::client::ui
                                ? notice.substring (0, longest) + "..."
                                : notice,
                              juce::dontSendNotification);
+        noticeLabel.setTooltip ({});
+        dohShown.clear();
+        settleFoot();
+    }
+
+    void TransportComponent::showDohNotice (const juce::String& notice)
+    {
+        /*  ONE ROW, AND THE REPORT CAN BE LONGER: a lighting desk and its cues,
+            the cues Go.dot put back, what it could not. The row shows what fits
+            - cut, as `setNotice` cuts - and the whole sentence is the tooltip,
+            bounded too, for the same reason. Empty clears it, the error behind
+            it then in view. */
+        constexpr int longest = 300, longestTip = 4000;
+
+        dohShown = notice.length() > longest ? notice.substring (0, longest) + "..." : notice;
+        noticeLabel.setText (dohShown, juce::dontSendNotification);
+        noticeLabel.setTooltip (notice.length() > longestTip ? notice.substring (0, longestTip) + "..." : notice);
         settleFoot();
     }
 

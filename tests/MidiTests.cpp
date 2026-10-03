@@ -2047,3 +2047,225 @@ TEST_CASE ("go.doh: a MIDI member of a running act the GO stopped in its pre-wai
 
     CHECK (rig.sink.sent.size() == 1u);
 }
+
+//==============================================================================
+/*  DOH! D4 AND MIDI (2026-10-03, PRD §3.32, namespace draft §24.14): what a
+    GO sent to a port that TAKES BACK cannot be called back off the cable - a
+    message is an event - so the report names it, and the next GO sends it
+    again, as a first GO would (the author, 2026-09-30, (a)). What went to a
+    port left to its operator is D3's item, by the port's name. Each case was
+    run on the engine of bd25dd5 (D3) first. */
+#include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/log/Replay.h>
+
+namespace
+{
+    std::size_t sentOn (const RecordingSink& sink, const std::string& port)
+    {
+        return static_cast<std::size_t> (std::count_if (sink.sent.begin(), sink.sent.end(),
+                                                        [&port] (const auto& message) { return message.port == port; }));
+    }
+
+    bool reportSays (const MidiDohRig& rig, const std::string& part)
+    {
+        return rig.runner.listState().dohReport().text.find (part) != std::string::npos;
+    }
+}
+
+TEST_CASE ("go.doh: a MIDI cue the GO sent to a port that takes back is named as not taken back, and the next GO sends it again")
+{
+    /*  The design's test 1. The corrected GO is a first GO for it: it sends,
+        and its run carries no warning. */
+    MidiDohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+
+    const auto note = rig.midiCue (rig.listId, 0);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    rig.park (note);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.sink.sent.size() == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    INFO (rig.runner.listState().dohReport().text);
+    CHECK (reportSays (rig, "Note: MIDI to Keys could not be taken back - the next GO sends it again"));
+    CHECK_FALSE (reportSays (rig, "left to its operator"));
+
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (rig.sink.sent.size() == 2u);
+    CHECK (rig.newestRunOf (note)->warning.empty());
+}
+
+TEST_CASE ("go.doh: a MIDI cue that put nothing on a cable is not named as sent")
+{
+    /*  What counts as sent is what left (HQ): a cue that found no port, or a
+        port switched off, put nothing on a cable, so the report has nothing to
+        say of it - the next GO sends it as the first GO it is. A net: D3 said
+        nothing of MIDI at all. */
+    MidiDohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+
+    const auto note = rig.midiCue (rig.listId, 0);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    SUBCASE ("no port bound")
+    {
+        rig.sink.bound = "SOMEWHERE";
+    }
+
+    SUBCASE ("the port switched off")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/tx", "false").ok);
+    }
+
+    rig.park (note);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+    REQUIRE (rig.sink.sent.empty());
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    INFO (rig.runner.listState().dohReport().text);
+    CHECK_FALSE (reportSays (rig, "Note: MIDI"));
+}
+
+TEST_CASE ("go.doh: a heard scene's MIDI member to a port that takes back is named, and sent again at the resume")
+{
+    /*  The design's test 3: the resume half is D2's (the scene carried on, the
+        note sent again where its port takes back); this adds the naming. */
+    MidiDohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/audible", "true").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+
+    const auto scene = rig.document.createCue (rig.listId, 0, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    rig.midiCue (scene, 0);
+    const auto hold = rig.document.createCue (scene, 1, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "10").ok);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    rig.park (scene);
+    REQUIRE (rig.press ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.sink.sent.size() == 1u);
+    const auto sceneRun = rig.newestRunOf (scene)->id;
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    INFO (rig.runner.listState().dohReport().text);
+    CHECK (reportSays (rig, "Note: MIDI to Keys could not be taken back - the next GO sends it again"));
+
+    REQUIRE (rig.press ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    //  Carried on - a new run of the scene, seated - and the note sent again.
+    CHECK (rig.newestRunOf (scene)->id != sceneRun);
+    CHECK (rig.sink.sent.size() == 2u);
+}
+
+TEST_CASE ("go.doh: the report is one engine record, and a replay rebuilds the same readout - MIDI sent again and MIDI left")
+{
+    /*  The design's test 4. One scene, two ports: Keys takes back, Lights is
+        left to its operator (the default). The report names both - the left
+        one by its port - and reaches the readout as ONE engine record,
+        `list.dohReport`, which a replay re-injects: the same sentence on the
+        same list at the same tick, with no sink and no hook. */
+    MidiDohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+    const auto lights = declarePort (rig.document, "Lights");
+
+    const auto scene = rig.document.createCue (rig.listId, 0, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    rig.midiCue (scene, 0);
+    const auto cueToLights = rig.midiCue (scene, 1);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + cueToLights + "/port", lights).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + cueToLights + "/name", "Q12").ok);
+    const auto hold = rig.document.createCue (scene, 2, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "10").ok);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    //  Parked by a record, so the replay below stands where the session stood.
+    REQUIRE (rig.engine.submit ("cli", "standby.set", { osc::Value::string (scene) }));
+    rig.tickOnce();
+    rig.tickOnce();
+    REQUIRE (rig.press ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    REQUIRE (sentOn (rig.sink, rig.port) == 1u);
+    REQUIRE (sentOn (rig.sink, lights) == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    const auto report = rig.runner.listState().dohReport();
+    INFO (report.text);
+    CHECK (report.list == rig.listId);
+    CHECK (reportSays (rig, "Note: MIDI to Keys could not be taken back - the next GO sends it again"));
+    CHECK (reportSays (rig, "Lights: Q12 - left to its operator, not sent again"));
+
+    const auto logged = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (logged.errors.empty());
+    CHECK (std::count_if (logged.records.begin(), logged.records.end(),
+                          [] (const auto& record) { return record.command == "list.dohReport"; }) == 1);
+
+    //  The corrected GO: Keys gets the note again, Lights nothing more.
+    REQUIRE (rig.press ("go").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (sentOn (rig.sink, rig.port) == 2u);
+    CHECK (sentOn (rig.sink, lights) == 1u);
+
+    //  And the session again, from its log alone, with no sink: `wfg replay`'s shape.
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    MidiDohRig fresh;
+    fresh.runner.setMidiSink (nullptr);
+    REQUIRE (doc::CanonicalXml::read (show, fresh.document).ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+
+    for (const auto& run : rig.runs.all())
+    {
+        INFO ("run " << run.id << " of " << run.cue);
+        const auto* again = fresh.runs.find (run.id);
+        REQUIRE (again != nullptr);
+        CHECK (again->state == run.state);
+        CHECK (again->takenBack == run.takenBack);
+        CHECK (again->sendsLeft == run.sendsLeft);
+    }
+
+    CHECK (fresh.runner.listState().dohReport().text == report.text);
+    CHECK (fresh.runner.listState().dohReport().list == report.list);
+    CHECK (fresh.runner.listState().dohReport().tick == report.tick);
+}

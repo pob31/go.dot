@@ -889,7 +889,18 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   leave from the same hook, so a replay writes each once; `serve`'s device write
   honours `tx`. New: `go.dohRelaunch`, `list.dohReport`, `lists,dohReport`. A log
   with a Doh made on D2 is not promised to replay on D3 (HD). D4 (the client's
-  notice, the MIDI a takeBack port was sent) and D5 (end to end) remain.
+  notice, the MIDI a takeBack port was sent) and D5 (end to end) remain
+  *(2026-10-03: D4 built, below)*.
+- **Doh! D4, 2026-10-03 — what could not be taken back is named, and the
+  operator is told** (namespace draft §24.14). The report now names the MIDI a
+  GO sent to a port that takes back - "<cue>: MIDI to <port> could not be taken
+  back - the next GO sends it again" - decided from the Doh's own walk of what
+  left (NU). The desktop puts the report on the transport line the moment it
+  arrives, once, whatever list has the focus ("Doh! on Act 2: ..."), what was
+  left to an operator first, the whole sentence on hover; a refusal newer than
+  it takes the line back; and a press in an audio outage says "Doh!: the pointer
+  is back; what it puts back comes when the audio returns" (L18). Nothing new is
+  logged: a log with a Doh made on D3 replays on D4. D5 (end to end) remains.
 - **H4, 2026-10-02 — a double Esc drops what is still waiting to leave**
   (§23.10). A value a rate cap held back went out on its turn after the press,
   the MIDI queue sent everything it held, and no note-off existed anywhere. The

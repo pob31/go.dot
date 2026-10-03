@@ -2759,3 +2759,58 @@ TEST_CASE ("go.doh: the report names what the setting left alone, whatever list 
     if (device == "Lights")
         CHECK (says (report.text, "persistent Sub one up on Lights: not re-asserted - left to its operator"));
 }
+
+TEST_CASE ("go.doh: an OSC event and a write to an opaque device that take back are named, and sent again by the next GO")
+{
+    /*  Doh! D4 (2026-10-03, namespace draft §24.14; the design's test 2). Nothing
+        to read back means nothing to put back: an event has no value, and an
+        opaque device - the author's lighting desk - describes nothing. Where
+        the device takes back, the report names the cue and the next GO sends it
+        again, as a first GO would (the author, 2026-09-30, (a)); its run carries
+        no warning. A net: D3 already named both, from the desk's capture (GW,
+        §24.13), and this pins the opaque half, which no case drove. */
+    DohRig rig;
+
+    std::string address = "/lx/go";
+    std::string atom = "i:12";
+
+    SUBCASE ("a write to an opaque device")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+    }
+
+    SUBCASE ("an event on a described console")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+        address = "/desk/go";
+        atom = "i:3";
+    }
+
+    const auto cue = rig.makeOsc (address, atom, "none");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    //  Parked by a record, so the replay below stands where the session stood.
+    REQUIRE (rig.press ("standby.set", { osc::Value::string (cue) }).rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (2);
+    REQUIRE (rig.received (address) == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (2);
+
+    const auto said = reportOf (rig);
+    INFO (said);
+    CHECK (says (said, "Desk: could not be taken back - the next GO sends it again"));
+    CHECK_FALSE (says (said, "left to its operator"));
+    CHECK (engineSetsOn (rig, address) == 0u);
+
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (2);
+
+    CHECK (rig.received (address) == 2u);
+    REQUIRE (rig.newestRunOf (cue) != nullptr);
+    CHECK (rig.newestRunOf (cue)->warning.empty());
+
+    replaysTheSame (rig);
+}

@@ -295,6 +295,71 @@ namespace wfg::client::model
                     + " s left (Show settings > Playback).";
     }
 
+    std::string TransportReading::dohNotice() const
+    {
+        /*  "<list> <tick> <sentence>", the sentence the rest of the line: the
+            engine joins its items with "; " (NK), and a cue's name may hold a
+            space, so it is not split into words. */
+        const auto first = dohReport.find (' ');
+        const auto second = first == std::string::npos ? std::string::npos : dohReport.find (' ', first + 1);
+
+        if (second == std::string::npos || second + 1 >= dohReport.size())
+            return {};
+
+        const auto list = dohReport.substr (0, first);
+        const auto sentence = dohReport.substr (second + 1);
+
+        const auto tickOf = [] (std::string_view digits) -> std::int64_t
+        {
+            std::int64_t value = -1;
+            const auto* end = digits.data() + digits.size();
+            return std::from_chars (digits.data(), end, value).ptr == end ? value : -1;
+        };
+
+        /*  A REFUSAL NEWER THAN THE REPORT TAKES THE LINE (the design's D4): the
+            operator pressed something since, and what it said is the news now. */
+        if (const auto fields = words (lastError); fields.size() == 5)
+            if (const auto reportedAt = tickOf (std::string_view (dohReport).substr (first + 1, second - first - 1));
+                reportedAt >= 0 && tickOf (fields[0]) > reportedAt)
+                return {};
+
+        /*  WHAT WAS LEFT TO AN OPERATOR FIRST (the author, 2026-10-01): it is
+            what the operator must go and tell the other department - the light
+            board's cues it did not send again - while the rest is what Go.dot
+            did, or could not do, itself. Each kind keeps the engine's order. */
+        std::string left, rest;
+
+        for (std::size_t at = 0; at < sentence.size();)
+        {
+            const auto end = std::min (sentence.find ("; ", at), sentence.size());
+            const auto item = sentence.substr (at, end - at);
+            auto& into = item.find ("left to its operator") != std::string::npos ? left : rest;
+            into += (into.empty() ? "" : "; ") + item;
+            at = end + 2;
+        }
+
+        const auto said = left.empty() ? rest : rest.empty() ? left : left + "; " + rest;
+
+        /*  WHATEVER LIST HAS THE FOCUS (red team C, minor 4): the Doh acts on
+            the list of the last GO, so a report on another list opens with that
+            list's name. */
+        if (list == listId)
+            return "Doh!: " + said;
+
+        return "Doh! on " + (dohReportList.empty() ? std::string ("another list") : dohReportList) + ": " + said;
+    }
+
+    std::string TransportReading::dohPressLine() const
+    {
+        /*  IN AN AUDIO OUTAGE (L18) the Doh applies at once - the pointer, the
+            history - while its fades, its arms, the desk and the report wait for
+            the clock: said at the press, since nothing else will be until then. */
+        if (status == "noClock")
+            return "Doh!: the pointer is back; what it puts back comes when the audio returns";
+
+        return {};
+    }
+
     std::string TransportReading::lockLine() const
     {
         /*  `unsaid` gets no word at all, because "the engine has not told us
@@ -325,7 +390,8 @@ namespace wfg::client::model
                              r.canUndo, r.canRedo, r.undoName, r.redoName,
                              r.status, r.lastError, r.rateMoved, r.rateMovedTick, r.dial, r.writeError,
                              r.warningCount, r.warningFirst, r.revision,
-                             r.doh, r.dohCue, r.dohWindow, r.resume, r.dohForget, r.dohForgetCue);
+                             r.doh, r.dohCue, r.dohWindow, r.resume, r.dohForget, r.dohForgetCue,
+                             r.dohReport, r.dohReportList);
         };
 
         return tie (*this) == tie (other);
@@ -416,6 +482,13 @@ namespace wfg::client::model
             if (reading.dohForgetCue.empty())
                 reading.dohForgetCue = text (snapshot, "/godot/cue/" + parts[1] + "/name");
         }
+
+        /*  WHAT THE LAST DOH! SAID (D4): the runner's readout, and the name of
+            the list it was on, which need not be the focused one. */
+        reading.dohReport = text (snapshot, "/godot/list/dohReport");
+
+        if (const auto space = reading.dohReport.find (' '); space != std::string::npos && space > 0)
+            reading.dohReportList = text (snapshot, "/godot/list/" + reading.dohReport.substr (0, space) + "/name");
 
         return reading;
     }

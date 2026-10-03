@@ -7500,3 +7500,134 @@ TEST_CASE ("client: the standby says where the next GO carries a paused cue on, 
     reading.dohForgetCue.clear();
     CHECK_FALSE (reading.dohClickable());
 }
+
+/*  THE DOH NOTICE (2026-10-03, Doh! D4, namespace draft §24.14): what the last
+    Doh put back and what it left, in front of the operator on the transport's
+    line - the engine's one sentence, `/godot/list/dohReport`, opening with
+    "Doh!". A refusal newer than the report takes the line back; and in an audio
+    outage the press itself says what waits for the clock (L18), since the
+    report waits with it. Each failed before D4: the reading had no notice, and
+    the press said nothing. */
+TEST_CASE ("client: the Doh notice says the last Doh's report, a newer refusal takes the line, and an outage says what waits")
+{
+    model::TransportReading reading;
+    reading.listId = "7K2QM9X4";
+    reading.listName = "Show";
+    reading.status = "running";
+
+    CHECK (reading.dohNotice().empty());                     // no Doh yet
+
+    reading.dohReport = "7K2QM9X4 1200 Note: MIDI to Keys could not be taken back - the next GO sends it again";
+    reading.dohReportList = "Show";
+    CHECK (reading.dohNotice() == "Doh!: Note: MIDI to Keys could not be taken back - the next GO sends it again");
+
+    //  A refusal from before the report is older news; one after it takes the line.
+    reading.lastError = "1150 27 window too-soon go";
+    CHECK (reading.dohNotice() == "Doh!: Note: MIDI to Keys could not be taken back - the next GO sends it again");
+
+    reading.lastError = "1300 31 window not-a-stop standby.set";
+    CHECK (reading.dohNotice().empty());
+    CHECK (reading.errorLine() == "standby.set refused: not-a-stop");
+
+    //  A report after that refusal - a relaunch's, later - is the news again.
+    reading.dohReport = "7K2QM9X4 1400 Scene: comes back once it has ended, unless a GO comes first";
+    CHECK (reading.dohNotice() == "Doh!: Scene: comes back once it has ended, unless a GO comes first");
+
+    //  The press: nothing while the audio runs - the engine's answer is the news.
+    CHECK (reading.dohPressLine().empty());
+
+    reading.status = "noClock";
+    CHECK (reading.dohPressLine() == "Doh!: the pointer is back; what it puts back comes when the audio returns");
+}
+
+TEST_CASE ("client: the Doh notice names the devices left to their operators, first")
+{
+    /*  The author, 2026-10-01: what reached the light board is the light
+        operator's - so the notice says it whole, in words, the device and its
+        cues, and puts it before what Go.dot put back itself: it is what the
+        operator must go and tell the other department. */
+    model::TransportReading reading;
+    reading.listId = "7K2QM9X4";
+    reading.listName = "Show";
+
+    reading.dohReport = "7K2QM9X4 1200 Lighting desk: Q12, Q13 - left to its operator, not sent again";
+    reading.dohReportList = "Show";
+    CHECK (reading.dohNotice() == "Doh!: Lighting desk: Q12, Q13 - left to its operator, not sent again");
+
+    reading.dohReport = "7K2QM9X4 1200 Note: MIDI to Keys could not be taken back - the next GO sends it again; "
+                        "Lighting desk: Q12, Q13 - left to its operator, not sent again; "
+                        "/desk/fader: changed since the GO - left as it is; "
+                        "persistent Sub on Lights: not re-asserted - left to its operator";
+    CHECK (reading.dohNotice() == "Doh!: Lighting desk: Q12, Q13 - left to its operator, not sent again; "
+                                  "persistent Sub on Lights: not re-asserted - left to its operator; "
+                                  "Note: MIDI to Keys could not be taken back - the next GO sends it again; "
+                                  "/desk/fader: changed since the GO - left as it is");
+}
+
+TEST_CASE ("client: the Doh notice is shown whatever list has the focus, opening with the list's name when it is another")
+{
+    /*  Red team C, minor 4: the Doh acts on the list of the last GO, not on the
+        focused one, and a report shown only for the focused list told the light
+        department nothing when the focus sat elsewhere. End to end: the engine's
+        readout, read off a published tree, with the focus moved between the
+        two lists. */
+    Engine engine;
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (fixtureBundle(), document).ok);
+
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (7);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    MountTable mounts;
+    ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.setListState (&runner.listState());
+
+    const auto other = document.createList ("Act 2").id;
+    std::int64_t tick = 0;
+
+    const auto press = [&] (const std::string& command, std::vector<osc::Value> args)
+    {
+        REQUIRE (engine.submit ("cli", command, std::move (args)));
+        runner.beforeTick (engine, tick);
+        REQUIRE (engine.processTick (tick++).rejected == 0);
+    };
+
+    const auto reading = [&]
+    {
+        parameters.markStale();
+        EngineState state;
+        state.tick = tick;
+        return model::readTransport (*parameters.publish (tick, state));
+    };
+
+    const auto fixtureList = model::text (*parameters.publish (tick, EngineState {}), "/godot/list/7K2QM9X4/name");
+    REQUIRE_FALSE (fixtureList.empty());
+
+    press ("list.focus", { osc::Value::string (other) });
+    REQUIRE (reading().listId == other);
+    CHECK (reading().dohNotice().empty());
+
+    //  The report is on the fixture's list; the focus on Act 2.
+    press ("list.dohReport", { osc::Value::string ("7K2QM9X4"),
+                               osc::Value::string ("Lighting desk: Q12 - left to its operator, not sent again") });
+    const auto first = reading();
+    CHECK (first.dohNotice() == "Doh! on " + fixtureList + ": Lighting desk: Q12 - left to its operator, not sent again");
+
+    //  The focus on the report's own list: no list's name.
+    press ("list.focus", { osc::Value::string ("7K2QM9X4") });
+    CHECK (reading().dohNotice() == "Doh!: Lighting desk: Q12 - left to its operator, not sent again");
+
+    //  A later report - a relaunch's - is another reading: it replaces the first.
+    press ("list.dohReport", { osc::Value::string ("7K2QM9X4"),
+                               osc::Value::string ("Scene: put back at 0:12") });
+    const auto later = reading();
+    CHECK (later.dohReport != first.dohReport);
+    CHECK (later.dohNotice() == "Doh!: Scene: put back at 0:12");
+}

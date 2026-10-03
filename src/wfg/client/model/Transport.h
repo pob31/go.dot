@@ -151,6 +151,26 @@ namespace wfg::client::model
         std::string dohForget;
         std::string dohForgetCue;
 
+        /*  WHAT THE LAST DOH! PUT BACK AND WHAT IT LEFT (D4, namespace draft
+            §24.14): `/godot/list/dohReport` as the engine spells it - "<list>
+            <tick> <sentence>", the runner's, whichever list the Doh was on - or
+            empty; and the name of that list, which the notice opens with when
+            it is not the focused one. */
+        std::string dohReport;
+        std::string dohReportList;
+
+        /*  THE DOH NOTICE: the report in front of the operator, whatever list
+            has the focus - "Doh!: ..." on the focused list, "Doh! on Act 2: ..."
+            on another - what was left to an operator first, since that is what
+            the operator must tell the other department. Empty when there is no
+            report, or a refusal newer than it has taken the line. */
+        std::string dohNotice() const;
+
+        /*  WHAT A PRESS OF DOH! SAYS AT ONCE: nothing, unless the audio is out -
+            then the pointer goes back now and the rest waits for the clock
+            (L18), and the report with it. */
+        std::string dohPressLine() const;
+
         /*  Whether a click of the button would do something: take back the GO
             the caption names, or forget the resume `dohForget` names. */
         bool dohClickable() const;

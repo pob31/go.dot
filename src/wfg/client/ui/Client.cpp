@@ -130,10 +130,9 @@ namespace wfg::client
                 actions.go              = [this] { send (gesture::go()); leaveLoadToTime(); };
                 actions.panic           = [this] { panic(); };
 
-                /*  DOH! (PRD §3.32): the command and nothing else - no
-                    notice, which would stand in front of the engine's refusal
-                    when there is one, and the refusal is the news. */
-                actions.doh             = [this] { send (gesture::doh()); };
+                /*  DOH! (PRD §3.32): the command, and a notice only in an
+                    audio outage (`doh`). */
+                actions.doh             = [this] { doh(); };
                 actions.undo            = [this] { send (gesture::undo()); };
                 actions.redo            = [this] { send (gesture::redo()); };
                 actions.save            = [this] { save(); };
@@ -899,7 +898,7 @@ namespace wfg::client
                     case menuSelectAll: selection.all (show.rows()); inspectNow(); break;
                     case menuDeleteCue: removeChosen(); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
-                    case menuGoDoh:     send (gesture::doh()); break;
+                    case menuGoDoh:     doh(); break;
                     case menuLoadToTime: toggleLoadToTime(); break;
                     case menuUndoHistory: toggleUndoHistory(); break;
                     case menuWaveform:  toggleWaveform(); break;
@@ -1595,6 +1594,22 @@ namespace wfg::client
             void send (Event event)
             {
                 host.engine.submit (std::move (event));
+            }
+
+            /*  DOH! (PRD §3.32): the command, and no notice of its own while
+                the audio runs - a notice would stand in front of the engine's
+                refusal when there is one, and the refusal is the news; what the
+                Doh did arrives as its report on the next tick (D4). IN AN AUDIO
+                OUTAGE (L18) that report waits for the clock with everything the
+                Doh puts back, while the pointer goes back at once - so the press
+                says so, from the reading (`dohPressLine`). The line already
+                says the audio is out there, so no refusal is hidden by it. */
+            void doh()
+            {
+                send (gesture::doh());
+
+                if (const auto line = last.dohPressLine(); ! line.empty())
+                    shell->transport.setNotice (juce::String (line));
             }
 
             /*  PANIC AND ESC (PRD §4.4). The first press is the graceful

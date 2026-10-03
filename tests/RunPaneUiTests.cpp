@@ -3208,3 +3208,66 @@ TEST_CASE ("transport: F9 held sends one Doh!, through the Shell as the window d
     CHECK (shell.keyPressed (juce::KeyPress (juce::KeyPress::F9Key)));
     CHECK (dohs == 3);
 }
+
+/*  THE DOH NOTICE ON THE TRANSPORT'S LINE (2026-10-03, Doh! D4, namespace draft
+    §24.14): the last Doh's report, shown in front of the line ONCE, when it
+    arrives - another sentence put there since keeps it, until the next report
+    - its whole text one hover away, and a refusal newer than the report takes
+    the line back. Failed before D4: nothing showed the report. */
+TEST_CASE ("transport: the Doh notice is shown once when the report arrives, whole on hover, and a newer refusal takes the line")
+{
+    const model::Theme theme;
+    ui::TransportComponent transport (theme, ui::TransportComponent::Actions {});
+    transport.setSize (1200, transport.preferredHeight());
+
+    //  The visible sentence on the top line - the notice, or the error behind it.
+    const auto shown = [&transport] () -> juce::Label*
+    {
+        juce::Label* found = nullptr;
+
+        for (auto* child : transport.getChildren())
+            if (auto* label = dynamic_cast<juce::Label*> (child))
+                if (label->isVisible() && (label->getText().startsWith ("Doh!") || label->getText().contains ("refused")
+                                             || label->getText() == "Esc now"))
+                    found = label;
+
+        return found;
+    };
+
+    model::TransportReading reading;
+    reading.tick = "1100";
+    reading.listId = "7K2QM9X4";
+    reading.listName = "Show";
+    reading.status = "running";
+    transport.show (reading);
+    CHECK (shown() == nullptr);
+
+    //  The report arrives: in front of the line, in words, whole on hover.
+    reading.tick = "1201";
+    reading.dohReport = "7K2QM9X4 1200 Lighting desk: Q12, Q13 - left to its operator, not sent again";
+    reading.dohReportList = "Show";
+    transport.show (reading);
+    REQUIRE (shown() != nullptr);
+    CHECK (shown()->getText() == "Doh!: Lighting desk: Q12, Q13 - left to its operator, not sent again");
+    CHECK (shown()->getTooltip() == shown()->getText());
+
+    //  Once: another sentence put there since is not pushed aside by the same report.
+    transport.setNotice ("Esc now");
+    reading.tick = "1250";
+    transport.show (reading);
+    REQUIRE (shown() != nullptr);
+    CHECK (shown()->getText() == "Esc now");
+    CHECK (shown()->getTooltip().isEmpty());
+
+    //  A later report - a relaunch's - is shown again.
+    reading.dohReport = "7K2QM9X4 1300 Scene: put back at 0:12";
+    transport.show (reading);
+    REQUIRE (shown() != nullptr);
+    CHECK (shown()->getText() == "Doh!: Scene: put back at 0:12");
+
+    //  A refusal newer than it: the error has the line.
+    reading.lastError = "1350 31 window not-a-stop standby.set";
+    transport.show (reading);
+    REQUIRE (shown() != nullptr);
+    CHECK (shown()->getText() == "standby.set refused: not-a-stop");
+}
