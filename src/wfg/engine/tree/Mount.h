@@ -428,9 +428,26 @@ namespace wfg::tree
             question it answers exact: an observation that survives is one taken
             since our last write, so a caller that finds one is holding the
             target's own account of a node nobody here has touched since. Where
-            there is none, what Go.dot wrote is the best it knows. */
+            there is none, what Go.dot wrote is the best it knows.
+
+            AND NOT AN ANSWER TO A QUESTION ASKED BEFORE THAT WRITE (2026-10-03,
+            namespace draft §24.13, OU). Forgetting at the write is not enough
+            on its own: a sweep asked a tick before a write, of a desk slower
+            than that to answer, comes back after it saying what the desk held
+            before the write reached it - and was kept as the desk's first
+            account since. `writesWhenAsked` is `writesOf` read when the
+            question was put, carried in the record; an answer whose count
+            no longer matches is dropped, the written value standing as the
+            best account until the next sweep. -1, a caller that does not say,
+            is kept as before. */
         void noteObservation (const std::string& address, const osc::Value& value,
-                              std::int64_t tick = 0);
+                              std::int64_t tick = 0, std::int64_t writesWhenAsked = -1);
+
+        /*  HOW MANY TIMES GO.DOT HAS WRITTEN THE ADDRESS since the table was
+            made: what an observation's question carries, so that its answer
+            can be told from one that crossed a write. Never reset - a count
+            that went back could match a question from before. */
+        std::int64_t writesOf (const std::string& address) const;
         const osc::Value* observedOf (const std::string& address) const;
         void forgetObservation (const std::string& address);
 
@@ -485,6 +502,9 @@ namespace wfg::tree
 
         /** The first observation since the last write, by address. See `firstObservedOf`. */
         std::map<std::string, osc::Value> firstObservations;
+
+        /** The writes made to each address. See `writesOf`. */
+        std::map<std::string, std::int64_t> writeCounts;
 
         /*  By mount id, and kept for mounts that are not in `mounts` at all -
             a device refused for having no port never became an entry, and the

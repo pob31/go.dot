@@ -1793,6 +1793,41 @@ TEST_CASE ("go.doh: what the GO committed to a device left to its operator is ne
         tickUntilDeskHolds (rig, 0.8f);
     }
 
+    SUBCASE ("entered cold, on a console that takes back, the step's sweep answering after the GO's write")
+    {
+        /*  THE ANSWER IN FLIGHT ACROSS THE WRITE (2026-10-03, namespace draft
+            §24.13, OU). The GO's step is swept on the tick after it, and the
+            header's write lands a tick later still: a desk slower than a tick
+            to answer - a busy console, a network - says what it held before
+            the write reached it, and that answer arrives after the write. It
+            once did here by accident, under a loaded suite; it is made to here
+            on purpose, the desk holding its answer until the write is in the
+            tree and then answering with the value from before it. Taken as the
+            desk's first answer since the write, it read as the desk already
+            back where it was before the GO, and the Doh put nothing back. */
+        takeBack = true;
+        REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+        rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.2f));
+
+        rig.device.target.holding = true;
+
+        rig.engine.submit ("cli", "standby.set", { osc::Value::string (scene.group) });
+        rig.engine.submit ("cli", "go", {});
+        rig.tickOnce();
+        tickUntilDeskHolds (rig, 0.8f);
+        REQUIRE (recordsOf (rig, "mount.readback", "K3PV7WRB") == 0u);
+
+        rig.device.target.holding = false;
+
+        for (int n = 0; n < 600 && recordsOf (rig, "mount.readback", "K3PV7WRB") == 0u; ++n)
+        {
+            rig.tickOnce();
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+        }
+
+        REQUIRE (recordsOf (rig, "mount.readback", "K3PV7WRB") == 1u);
+    }
+
     /*  (2026-10-03, D3: and the desk says what it holds from here, the GO's
         0.8 - a scripted answer of 0.2 after the write would read as the desk
         already back where it was before the GO, and nothing would go back.) */

@@ -165,7 +165,15 @@ namespace wfg::tree
                                            *value };
 
             if (question.observation)
+            {
                 args.push_back (osc::Value::boolean (true));
+
+                /*  AND THE WRITES IT WAS ASKED AFTER (OU), so the handler can
+                    tell an answer from before Go.dot's last write here - asked
+                    a tick before it, answered a tick after - from one since. */
+                if (question.writesWhenAsked >= 0)
+                    args.push_back (osc::Value::int64 (question.writesWhenAsked));
+            }
 
             engine->submit ("mount:" + question.mountId, "mount.readback", std::move (args));
         }

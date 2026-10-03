@@ -1267,8 +1267,16 @@ namespace wfg::cue
                 if (const auto* node = mounts->nodeAt (address))
                     typeTag = node->typeTags;
 
+                /*  WITH THE WRITES IT IS ASKED AFTER (2026-10-03, namespace
+                    draft §24.13, OU). The step's own cues write in a later
+                    drain than this - a header's run is spawned and launched by
+                    records submitted on the ticks after the GO - so an answer
+                    slower than that crosses their write, saying what the desk
+                    held before it. Without the count it was kept as the desk's
+                    first account since the write: a Doh read the desk as
+                    already back, and put nothing back. */
                 if (asker->ask ({ mountId, declaration->host, declaration->queryPort,
-                                  address, typeTag, true }))
+                                  address, typeTag, true, mounts->writesOf (address) }))
                     ++asked;
             }
         }

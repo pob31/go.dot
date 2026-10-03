@@ -50,6 +50,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <mutex>
 #include <set>
@@ -97,6 +98,13 @@ namespace wfg::tree
                 set is keyed by it as well as by the address, and the record the
                 answer becomes says which it was. */
             bool observation = false;
+
+            /*  FOR AN OBSERVATION, how many times Go.dot had written the
+                address when it was asked (`MountTable::writesOf`), carried
+                into the record so that an answer that crossed a write is
+                known for one (2026-10-03, namespace draft §24.13, OU). -1
+                says nothing, and the record then carries nothing. */
+            std::int64_t writesWhenAsked = -1;
         };
 
         /*  Starts the thread. Idempotent; false if it was already running. */

@@ -3426,6 +3426,11 @@ is the third, and a write to the address ends it — so an observation that surv
 the last write, and "no observation" means the written value is the best account there is. That
 ordering is what the jump now diffs against: a fader moved by hand between two GOs is corrected,
 and one that agrees is left alone.
+*(2026-10-03, OU, §24.13: not quite, until then. A write ended the observation the table held, but
+not one still on its way: a sweep asked a tick before a write and answered a tick after it said what
+the desk held before the write, and was kept as taken since. The question now carries how many times
+Go.dot had written the address (`MountTable::writesOf`), the record a trailing `h` after the `T`,
+and an answer whose count no longer matches is dropped.)*
 
 **What is deliberately not here.** No sweep on a `run.assert` yet — PR 4.10's assertion reads the
 same store, which is the point of having one. No observation of nodes the show never writes: the
@@ -17885,6 +17890,46 @@ failed. Every `go.doh` case with D3's others, under C and `fr-FR`: 150 cases, 57
 test files whole under C: 646 cases, 15811 assertions. `ctest -R
 "wfg\.replay|blackbox\.(phase3|phase4|triggers|phase6-sampler|phase9b-mic|phase9c-take|lane-level)|wfg\.commands|schema"`:
 78 of 78. `check-comments.py` passes; clang-tidy finds nothing on the lines the review changed.
+
+**An answer that crossed the GO's write (2026-10-03, OU).** The take-back case "entered cold, on a
+console that takes back" failed once in a 43-minute full run under C, the console's put-back not made
+(`node.set` 0 of 1, the console sent 2 datagrams of 3); alone 20 of 20, under six parallel runners
+30 of 30. The race was the engine's, not the test's. The GO's step is swept on the tick after it
+(`observeAfterStep`, in that tick's hooks), and the header's write lands in a later drain - its run
+is spawned and launched by records the hooks submit on the ticks after the GO (spawned on the first,
+launched and written on the second) - so the sweep's question goes out BEFORE the write. A desk slower than a
+tick to answer says what it held before the write reached it, and that answer is applied AFTER the
+write, which had already forgotten the observations: `MountTable::noteObservation` kept it as the
+desk's first account since the write. The flush then read the GO's write's echo as 0.2 and the desk
+as holding 0.2 - the value from before the GO - took it for "already there", and put nothing back,
+saying nothing. On a show that is a busy console or a network, not a loaded test machine; and a jump
+or a persistent section diffing against that stale account would skip a value the desk does not hold.
+
+The fix is in the table, where the rule it broke is written: an observation that survives is one
+taken since Go.dot's last write. Each write of an address counts (`MountTable::writesOf`, never
+reset); the sweep's question carries the count it was asked at (`MountProbe::Question::
+writesWhenAsked`), the `mount.readback` record a trailing `h` after its `T`, and the handler drops an
+answer whose count no longer matches - the written value stands as the best account until the next
+sweep. The record is applied as it came either way, and only hooks read the observation store, which
+a replay never runs; a log from before has no count and is kept as it was. A late answer that is not
+stale was never the fault: with no observation the flush compares the GO's own written value, and
+puts back. What the drop costs: a true echo that also happened to be asked before the write is lost
+with the stale ones, so a desk that quantises is compared with the GO's exact value - the case the
+paragraph above already names - and a persistent section's pass waiting on such an answer waits its
+twenty-five ticks and compares with what was written.
+
+Case, written first: the same take-back case, the desk holding its answer to the step's sweep until
+the GO's write is in the tree, then answering with the value from before it - on the unfixed engine
+the put-back was not made (0 of 1, 2 datagrams of 3, the failure seen in the full run), now made.
+Counts: every `go.doh` case under C and `fr-FR`, 155 cases, 6099 assertions each; VerifiedCueTests,
+NetworkCueTests and GoTests whole under C, 498 cases, 12156 assertions; the case under six parallel
+runners five times each, 30 of 30. `ctest -R "wfg\.replay|blackbox\.doh"`: every replay and every
+other check of the driver pass - its de-click reading (38-46 ms, wanted 50-250) misses in most runs on
+this laptop with and without OU, the sources of 276d81e rebuilt and run alike (OR's tick-placed reading).
+
+| | Decision | Whose |
+|---|---|---|
+| OU | **An observation asked before Go.dot's last write of the address is dropped when it lands**: the question carries the address's write count, the record a trailing `h`, and the table keeps only an answer whose count still matches | implementer's call |
 
 ### 24.14 What was built: D4 - what could not be taken back is named, and the operator is told (2026-10-03)
 

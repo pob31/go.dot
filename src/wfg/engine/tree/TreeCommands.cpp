@@ -300,7 +300,8 @@ namespace wfg::tree
         registry.add ({ "mount.readback",
                         "What a mounted target said one of its nodes currently holds.",
                         { { "mount", 's', false }, { "address", 's', false },
-                          { "value", '*', false }, { "observed", 'T', true } },
+                          { "value", '*', false }, { "observed", 'T', true },
+                          { "writes", 'h', true } },
                         true,
                         [&mounts] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
@@ -313,10 +314,20 @@ namespace wfg::tree
 
                                 The flag is trailing and optional, so every log
                                 written before observations existed replays as
-                                what it was: a verify. */
+                                what it was: a verify.
+
+                                AND AN OBSERVATION SAYS HOW MANY WRITES IT WAS
+                                ASKED AFTER (2026-10-03, namespace draft §24.13,
+                                OU): the table drops one asked before its last
+                                write of the address. Only hooks read the store,
+                                and a replay runs none, so what this keeps
+                                changes nothing a replay reproduces; the record
+                                is applied as it came either way. */
                             if (args.size() > 3 && args[3].getBool())
                                 mounts.noteObservation (args[1].getString(), args[2],
-                                                        context.tick);
+                                                        context.tick,
+                                                        args.size() > 4 && args[4].isInt64()
+                                                          ? args[4].getInt64() : -1);
                             else
                                 mounts.noteReadback (args[1].getString(), args[2]);
 

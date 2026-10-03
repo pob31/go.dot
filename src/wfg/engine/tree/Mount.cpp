@@ -828,8 +828,14 @@ namespace wfg::tree
     }
 
     void MountTable::noteObservation (const std::string& address, const osc::Value& value,
-                                      std::int64_t tick)
+                                      std::int64_t tick, std::int64_t writesWhenAsked)
     {
+        /*  ASKED BEFORE GO.DOT'S LAST WRITE HERE (2026-10-03, §24.13, OU): an
+            account of the desk from before that write, however late it came
+            back - dropped, as the write itself would have forgotten it. */
+        if (writesWhenAsked >= 0 && writesWhenAsked != writesOf (address))
+            return;
+
         observations.insert_or_assign (address, value);
         observedTicks.insert_or_assign (address, tick);
 
@@ -838,6 +844,12 @@ namespace wfg::tree
             motor fader's step, a dB-mapped float - rather than what a hand did
             to it after. Set only while unset; the write below forgets it. */
         firstObservations.emplace (address, value);
+    }
+
+    std::int64_t MountTable::writesOf (const std::string& address) const
+    {
+        const auto found = writeCounts.find (address);
+        return found == writeCounts.end() ? 0 : found->second;
     }
 
     std::int64_t MountTable::observedAtTick (const std::string& address) const
@@ -998,6 +1010,10 @@ namespace wfg::tree
         observations.erase (address);
         observedTicks.erase (address);
         firstObservations.erase (address);
+
+        /*  AND AN ANSWER STILL ON ITS WAY is history too (OU): counted, so a
+            sweep asked before this write is known for one when it lands. */
+        ++writeCounts[address];
 
         /*  IT LANDS HERE AND STOPS HERE, still. What goes on the wire is a
             MountSender's business and the caller's to arrange - this class
