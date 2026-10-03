@@ -770,7 +770,11 @@ def heard(report: Report, render: Path, facts: dict) -> None:
             middle = begin + int(0.25 * RATE)
             line = ramp[begin] + RAMP_SLOPE * (middle - begin) / RATE
             share = abs(ramp[middle]) / line if line > 0 else 0.0
-            judged(report, 0.05 < share < 0.95, "a quarter of a second into the fade it is part-way down",
+            #  Part-way down means neither at the line nor silent: ticks run back
+            #  to back to catch up compress the fade, and a loaded Debug run on
+            #  this laptop read 0.03 here with the tick 40 ms late (2026-10-03).
+            #  The cut it guards against reads 0; a full level reads 1.
+            judged(report, 0.005 < share < 0.95, "a quarter of a second into the fade it is part-way down",
                    f"{share:.2f} of the line", fade_lag)
 
             press = facts.get("ramp press", -1.0)
