@@ -1155,12 +1155,13 @@ namespace
         right: the row's 8 px of padding, then each cell's width. Written out
         here so a column that moves fails a case rather than a show.
 
-        The Network tab: the cross 24, the problem 150, the sent count 54, then
-        Doh! 80. The MIDI tab: the cross 24, the state 190, then Doh! 80 and
-        Sound 56. */
-    int networkDohAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 54 - 80 / 2; }
-    int midiDohAt (const juce::ListBox& list)    { return list.getWidth() - 8 - 24 - 190 - 80 / 2; }
-    int midiSoundAt (const juce::ListBox& list)  { return list.getWidth() - 8 - 24 - 190 - 80 - 56 / 2; }
+        The Network tab: the cross 24, the problem 150, the sent count 54, the
+        rollback 150, then Doh! 80. The MIDI tab: the cross 24, the state 190,
+        the rollback 150, then Doh! 80 and Sound 56 (2026-10-03: the rollback
+        column, OV-OX, moved both). */
+    int networkDohAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 54 - 150 - 80 / 2; }
+    int midiDohAt (const juce::ListBox& list)    { return list.getWidth() - 8 - 24 - 190 - 150 - 80 / 2; }
+    int midiSoundAt (const juce::ListBox& list)  { return list.getWidth() - 8 - 24 - 190 - 150 - 80 - 56 / 2; }
 
     /*  The one `node.set` a click sent, as address and value. */
     std::pair<std::string, std::string> theOneSet (const std::vector<Event>& sent)
