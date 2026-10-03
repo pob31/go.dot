@@ -2899,8 +2899,9 @@ rules"*. So:
   again in mirror: *"we might send a go back command or a different cue or scene number if for
   instance the light board has autofollow cues after the last one sent. So we don't restart the
   whole chain"*. So under Undo(h), a device and a cue can carry a **rollback** — a message of the
-  cue's own kind, written as its message is — that Doh! sends to the device in place of the put-back
-  and of *"could not be taken back"*. In his words: *"We could have a default for the device that is
+  cue's own kind, written as its message is — that Doh! sends to the device in place of *"could not
+  be taken back"*, for what nothing can read back (a value the device reads back is still put back
+  exactly, *implementer's call*). In his words: *"We could have a default for the device that is
   in the editable Doh rollback field. If the device default is left blank then the previous message
   is in the field and can be edited too. This way a general go back command overrides at the device
   level, but can be edited. Otherwise the previous command is the cue's default and can be edited for
@@ -2914,7 +2915,8 @@ rules"*. So:
   what will be sent; the previous command is read from the document's list order, not from what this
   session happened to send; a GO that sent one device several messages — a scene's cues 12 then
   12.5 — gets one rollback per device, the first sent cue's, since it alone names where the desk was
-  before the GO; a cue with no rollback and nothing before it is *"could not be taken back"* as
+  before the GO, and when that cue has none nothing is sent, since a later cue's previous command is
+  a state the GO itself made; a cue with no rollback and nothing before it is *"could not be taken back"* as
   today; a second Doh! sends nothing more; and the rollback each Doh! sent is in its report.
 - **Only what had already left is concerned** *(implementer's reading, the author's to confirm)*.
   What the early GO had not sent yet is no device's: it goes out on the corrected GO's clock,

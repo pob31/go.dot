@@ -40,6 +40,9 @@
     reads as the author's default, `leave` for a device and `device` for a cue.
 */
 
+#include <wfg/engine/midi/MidiSink.h>
+#include <wfg/engine/osc/OscValue.h>
+
 #include <string>
 
 namespace wfg::doc
@@ -101,4 +104,55 @@ namespace wfg::cue
         bound on this machine still counts - binding is the building's fact,
         not the show's. */
     bool playsSound (const doc::ShowDocument& document, const std::string& midiCueId);
+
+    /*  THE ROLLBACK (PRD §3.32, namespace draft §24.5; the author, 2026-10-03:
+        "we might send a go back command or a different cue or scene number if
+        for instance the light board has autofollow cues after the last one
+        sent. So we don't restart the whole chain").
+
+        Under `takeBack`, what a cue sent that nothing can read back - an OSC
+        event, a write to an opaque device, a MIDI message - is taken back by a
+        message somebody wrote AHEAD: the cue's own `@dohRollback`, else its
+        device's - a desk's general go-back command - else the PREVIOUS COMMAND,
+        the message of the nearest cue before it in its list that sends to the
+        same device. Only what somebody typed is stored; the rest is read here,
+        from the document, at the Doh - so a replay reads the same.
+
+        ONE LINE OF TEXT, in either kind, so one field holds it and a client
+        shows the previous command in the very words it would type:
+        an OSC rollback is the address, a space, then the value as the cue's
+        value row spells it (`/lx/go i:11`); a MIDI one is the type, the
+        channel, then the numbers its rows name (`programChange 1 11`,
+        `noteOn 1 60 0`), or `sysex` then the hex. */
+
+    /*  A CUE'S OWN MESSAGE in that grammar, or empty for a cue that is neither
+        an OSC nor a MIDI cue. */
+    std::string spellMessageOf (const doc::ShowDocument& document, const std::string& cueId);
+
+    /*  THE PREVIOUS COMMAND: the nearest OSC or MIDI cue before this one in its
+        list, in the document's order - a persistent section's cues are not the
+        list's sequence and are passed over - routed to `deviceId`, spelled; or
+        empty. `kind` is "osc" or "midi". */
+    std::string previousCommandOf (const doc::ShowDocument& document, const std::string& kind,
+                                   const std::string& deviceId, const std::string& cueId);
+
+    /*  THE EFFECTIVE ROLLBACK of a cue whose send went to `deviceId`: its own,
+        else that device's, else the previous command - or empty. */
+    std::string rollbackOfDevice (const doc::ShowDocument& document, const std::string& kind,
+                                  const std::string& deviceId, const std::string& cueId);
+
+    /*  The same, the device found as the engine routes the cue now. */
+    std::string rollbackOf (const doc::ShowDocument& document, const std::string& cueId);
+
+    /*  A ROLLBACK READ BACK INTO WHAT LEAVES: an OSC one's address and value,
+        a MIDI one's bytes - or `ok` false when the text is not a message. */
+    struct RollbackMessage
+    {
+        bool ok = false;
+        std::string address;
+        osc::Value value;
+        midi::Bytes bytes;
+    };
+
+    RollbackMessage parseRollback (const std::string& kind, const std::string& text);
 }

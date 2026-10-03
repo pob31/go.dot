@@ -16842,15 +16842,21 @@ level"*, and when nobody chose, *"Always leave to its operator"*.
   D1's were "Leave", "Take back", "as the device (leave)", "take back" and "leave to its operator".
   Only the words: `leave`, `takeBack` and `device` are stored as they were.
 - **Read once**, at the Doh: a setting changed afterwards changes the next Doh, not this one.
-- **The rollback** (OV-OX, the author's of 2026-10-03; *specified, not built*): `Mount/@dohRollback`
+- **The rollback** (OV-OX, the author's of 2026-10-03; engine built, see below): `Mount/@dohRollback`
   and `Port/@dohRollback`, absent unless set - a desk's general go-back command - and
   `Osc/@dohRollback` and `Midi/@dohRollback` on a cue, absent unless somebody typed one. Each is a
   message of the cue's own kind, written as the cue's message is. The **effective rollback** of a
   cue is its own, else its device's, else the **previous command** - the message of the nearest cue
   before it in the document's list order that routes to the same device (`deviceOf`) - else none.
-  Under `takeBack`, at the Doh, for each device the GO's sends had reached: the effective rollback of
-  the first of the GO's cues that sent there is sent once, in place of the put-back and of "could
-  not be taken back"; with none, today's road. The corrected GO sends the cue again, as `takeBack`
+  Under `takeBack`, at the Doh, for each device the GO sent what nothing reads back (D3's
+  `unputtable`, D4's MIDI): the effective rollback of the first of the GO's cues that sent there is
+  sent once, in place of "could not be taken back" - a value the device reads back is still put back
+  exactly. The first cue decides for its device even with nothing to send: a later cue's previous
+  command is an earlier cue of the same GO, a state the GO made (found by the heard-scene test, whose
+  second send would have rolled the desk back onto the first). With none, or a line that is not a
+  message (said), today's road. Sent by `flushDohWrites`, before the desk's put-back: an OSC one as
+  an engine `node.set`, a MIDI one straight onto the port when its `tx` is on; the report says
+  "<device>: rolled back with <line> (<cue>) - the next GO sends it again". The corrected GO sends the cue again, as `takeBack`
   always did. `leave` never reads it. The inspector's **rollback** row shows under "Undo(h)" only,
   the effective rollback greyed as its placeholder, an edit storing the text and a cleared field
   removing it; the device rows gain a **Rollback** cell. Resolved from the document at the Doh,
@@ -16861,7 +16867,7 @@ level"*, and when nobody chose, *"Always leave to its operator"*.
 The design's labels in the second column; the letters continue §23's (GG was J3's), GO skipped as
 the command it reads as. A decision marked with a stage later than D1 is specified and not yet
 built. *(2026-10-02: D2's are built, and D2 adds MB-ML, §24.12.)* *(2026-10-03: D3's are built - GR to
-GU, GW's naming, GX and HR - and D3 adds ND-NT, §24.13; its review NY-OH.)* *(2026-10-03: D4 adds NU-NX, §24.14.)* *(2026-10-03: D5 adds OR-OT, §24.15.)* *(2026-10-03: the author's rollback adds OV-OX, §24.5 - specified, not built.)*
+GU, GW's naming, GX and HR - and D3 adds ND-NT, §24.13; its review NY-OH.)* *(2026-10-03: D4 adds NU-NX, §24.14.)* *(2026-10-03: D5 adds OR-OT, §24.15.)* *(2026-10-03: the author's rollback adds OV-OX, §24.5 - built in the engine the same day.)*
 
 | | Design | Decision | Whose |
 |---|---|---|---|
@@ -16903,9 +16909,9 @@ GU, GW's naming, GX and HR - and D3 adds ND-NT, §24.13; its review NY-OH.)* *(2
 | HR | GY | **The Doh never sends a device left to its operator anything late** (D3): a cue the GO stopped whose time has passed, and a relaunched scene's leave cues placed before its relaunch second, are named rather than sent | the design's call |
 | HS | - | **A scene nobody heard is given back from wherever its job had got to, its footer included**: what it pre-sent goes back on its first stopping tick, before the horizon prepares it again; what a job still drives under it - a fade or a stop cue the GO fired on a cue outside it - is let finish, and the scene is revoked then; what nothing drives - a member spawned and never launched, a fade whose job Esc or a double Esc let go of - is asked to stop the way the scene is stopping, everything under a kill; a scene inside it gives itself back, and it waits for that one, innermost first | the implementer's, the review of 2026-10-01: the design said H2's road; the first build held the restores back behind every fade and waited on runs nothing would end |
 | HT | - | **A sooner stop keeps winning**: the Doh pushes no fade on a heard voice that a stop due sooner already holds, and when the run that set that stop going is stopped first - its scene ending its members - the job lets go of that run and lands the stop itself, decided from `takenBack`; Esc's own per-voice fade, which the Doh shares, takes over whatever a sounding voice carries, as it always did | the implementer's, the review of 2026-10-01 |
-| OV | - | **The rollback**: under `takeBack`, a device's or a cue's `@dohRollback` is sent at the Doh in place of the put-back and of "could not be taken back"; written ahead only, never at the Doh; the corrected GO sends the cue again; `leave` never reads it | the author's, 2026-10-03 ("ahead only", "rollback only") |
+| OV | - | **The rollback**: under `takeBack`, a device's or a cue's `@dohRollback` is sent at the Doh in place of "could not be taken back" (a value read back is still put back exactly - the design's call); written ahead only, never at the Doh; the corrected GO sends the cue again; `leave` never reads it | the author's, 2026-10-03 ("ahead only", "rollback only") |
 | OW | - | **The field's default**: the cue's own, else its device's, else the previous command - the nearest earlier cue in the document's list order routing to the same device; only typed text is stored | the author's (device default, else the previous command, editable); the list order rather than the session's sends is the design's reading, his to confirm |
-| OX | - | **One rollback per device per Doh**: the first of the GO's cues that sent there; a second Doh sends none; the report carries what was sent | the design's call |
+| OX | - | **One rollback per device per Doh**: the first of the GO's cues that sent there decides, even when it has none to send; a second Doh sends none; the report carries what was sent | the design's call |
 
 ### 24.7 Named limitations
 

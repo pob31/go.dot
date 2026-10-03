@@ -2650,6 +2650,107 @@ TEST_CASE ("the Doh! setting: every device and port leaves unless told, a cue fo
     }
 }
 
+TEST_CASE ("the Doh! rollback: the cue's own, else its device's, else the previous command to that device")
+{
+    /*  The author, 2026-10-03 (PRD §3.32, namespace draft §24.5, OV-OX): "We
+        could have a default for the device that is in the editable Doh
+        rollback field. If the device default is left blank then the previous
+        message is in the field and can be edited too." */
+    ShowDocument document;
+    const auto listId = document.createList ("Show").id;
+    int index = 0;
+
+    REQUIRE (document.createMount ("/lx", "", "K1GHT000").ok);
+    REQUIRE (document.createMount ("/snd", "", "S0VND000").ok);
+    const auto port = document.createPort ("Desk MIDI").id;
+    REQUIRE_FALSE (port.empty());
+
+    const auto oscCue = [&] (const std::string& address, const std::string& atom)
+    {
+        const auto id = document.createCue (listId, index++, "osc", "Light").id;
+        REQUIRE (document.setAttribute ("/godot/cue/" + id + "/address", address).ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + id + "/value", atom).ok);
+        return id;
+    };
+
+    const auto midiCue = [&] (const std::string& type, int data1)
+    {
+        const auto id = document.createCue (listId, index++, "midi", "Note").id;
+        REQUIRE (document.setAttribute ("/godot/cue/" + id + "/port", port).ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + id + "/type", type).ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + id + "/data1", std::to_string (data1)).ok);
+        return id;
+    };
+
+    const auto first = oscCue ("/lx/go", "i:11");
+    const auto program = midiCue ("programChange", 4);
+    const auto elsewhere = oscCue ("/snd/go", "i:99");     // another device: never the previous command
+    const auto second = oscCue ("/lx/go", "i:12");
+    const auto note = midiCue ("noteOn", 60);
+
+    SUBCASE ("the previous command, in the very words a hand would type")
+    {
+        CHECK (cue::rollbackOf (document, second) == "/lx/go i:11");
+        CHECK (cue::rollbackOf (document, note) == "programChange 1 4");
+        CHECK (cue::spellMessageOf (document, note) == "noteOn 1 60 0");
+
+        //  Nothing before it on its device: nothing to roll back with.
+        CHECK (cue::rollbackOf (document, first).empty());
+        CHECK (cue::rollbackOf (document, program).empty());
+        CHECK (cue::rollbackOf (document, elsewhere).empty());
+    }
+
+    SUBCASE ("the device's general go-back command stands in for it")
+    {
+        REQUIRE (document.setAttribute ("/godot/mount/K1GHT000/dohRollback", "/lx/key/go_back I").ok);
+        CHECK (cue::rollbackOf (document, first) == "/lx/key/go_back I");
+        CHECK (cue::rollbackOf (document, second) == "/lx/key/go_back I");
+
+        REQUIRE (document.setAttribute ("/godot/port/" + port + "/dohRollback", "controlChange 16 1 0").ok);
+        CHECK (cue::rollbackOf (document, note) == "controlChange 16 1 0");
+    }
+
+    SUBCASE ("and the cue's own, typed, over both")
+    {
+        REQUIRE (document.setAttribute ("/godot/mount/K1GHT000/dohRollback", "/lx/key/go_back I").ok);
+        REQUIRE (document.setAttribute ("/godot/cue/" + second + "/dohRollback", "/lx/go f:11.5").ok);
+        CHECK (cue::rollbackOf (document, second) == "/lx/go f:11.5");
+
+        //  Cleared, the field follows again: only what somebody typed is stored.
+        REQUIRE (document.setAttribute ("/godot/cue/" + second + "/dohRollback", "").ok);
+        CHECK (cue::rollbackOf (document, second) == "/lx/key/go_back I");
+    }
+
+    SUBCASE ("read back into what leaves - or refused as not a message")
+    {
+        const auto osc = cue::parseRollback ("osc", "/lx/go i:11");
+        REQUIRE (osc.ok);
+        CHECK (osc.address == "/lx/go");
+        CHECK (osc.value == osc::Value::int32 (11));
+
+        const auto spaced = cue::parseRollback ("osc", "/lx/cmd s:\"Go To Cue 11\"");
+        REQUIRE (spaced.ok);
+        CHECK (spaced.value == osc::Value::string ("Go To Cue 11"));
+
+        CHECK (cue::parseRollback ("midi", "programChange 1 4").bytes == midi::Bytes { 0xc0, 0x04 });
+        CHECK (cue::parseRollback ("midi", "noteOn 2 60 0").bytes == midi::Bytes { 0x91, 60, 0 });
+        CHECK (cue::parseRollback ("midi", "sysex F0 7F 01 02 01 01 31 31 F7").bytes
+                 == midi::Bytes { 0xf0, 0x7f, 0x01, 0x02, 0x01, 0x01, 0x31, 0x31, 0xf7 });
+
+        for (const auto* bad : { "", "lx/go i:11", "/lx/go", "/lx/go 11" })
+        {
+            INFO ("osc: [" << bad << "]");
+            CHECK_FALSE (cue::parseRollback ("osc", bad).ok);
+        }
+
+        for (const auto* bad : { "programChange 1", "noteOn 17 60 0", "noteOn 1 60", "chord 1 2 3", "sysex F0 7" })
+        {
+            INFO ("midi: [" << bad << "]");
+            CHECK_FALSE (cue::parseRollback ("midi", bad).ok);
+        }
+    }
+}
+
 TEST_CASE ("the Doh! setting and plays sound survive a save and a load, and the show still validates")
 {
     ShowDocument document;

@@ -1741,6 +1741,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dohRollback">
+          <a:documentation>What Doh! sends to take back what this cue sent, when it takes back (PRD 3.32; the author, 2026-10-03: we might send a go back command or a different cue or scene number if for instance the light board has autofollow cues after the last one sent). Written ahead, never at the Doh. The address, a space, then the value spelled as the value row spells it - /lx/go i:11. Empty - the default - follows its device-s rollback, else the previous command: the message of the nearest cue before it in its list that sends to the same device; with none, nothing is sent and the cue is named as could not be taken back. Only what somebody typed is stored. Sent once per device per Doh, the first sent cue-s, in place of could not be taken back; a value the device reads back is still put back exactly; the corrected GO sends the cue again.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="enabled">
           <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>
@@ -1874,6 +1880,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dohRollback">
+          <a:documentation>What Doh! sends to take back what this cue sent, when it takes back (PRD 3.32; the author, 2026-10-03: we might send a go back command or a different cue or scene number if for instance the light board has autofollow cues after the last one sent). Written ahead, never at the Doh. The type, the channel, then the numbers - programChange 1 11, noteOn 1 60 0, controlChange 1 7 0 - or sysex then its hex bytes, F0 to F7. Empty - the default - follows its device-s rollback, else the previous command: the message of the nearest cue before it in its list that sends to the same device; with none, nothing is sent and the cue is named as could not be taken back. Only what somebody typed is stored. Sent once per device per Doh, the first sent cue-s, in place of could not be taken back; a value the device reads back is still put back exactly; the corrected GO sends the cue again.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="enabled">
           <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>
@@ -2002,6 +2014,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dohRollback">
+          <a:documentation>A general go-back command for Doh! (PRD 3.32; the author, 2026-10-03: a general go back command overrides at the device level, but can be edited). What a cue sent here that cannot be put back is taken back with this message, under Undo(h), unless the cue has its own; empty - the default - leaves each cue to the previous command. The type, the channel, then the numbers - programChange 1 11 - or sysex then its hex bytes.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="inputDevice">
           <a:documentation>The MIDI input this port listens on. Events arriving there are matched as THIS port, so a trigger names the port and never the cable - which is what makes moving an interface one edit instead of one per trigger. Empty listens to nothing; --midi-in overrides.</a:documentation>
           <data type="string"/>
@@ -2069,6 +2087,12 @@
             <value>takeBack</value>
             <value>leave</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dohRollback">
+          <a:documentation>A general go-back command for Doh! (PRD 3.32; the author, 2026-10-03: a general go back command overrides at the device level, but can be edited). What a cue sent here that cannot be put back is taken back with this message, under Undo(h), unless the cue has its own; empty - the default - leaves each cue to the previous command. The address, a space, then the value spelled as a cue-s value row spells it - /lx/key/go_back I.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>

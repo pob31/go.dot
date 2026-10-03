@@ -2117,6 +2117,13 @@ TEST_CASE ("go.doh: a resumed scene sends again what it had sent, one tick apart
 
     REQUIRE (rig.press ("go.doh").rejected == 0);
     rig.ticks (2);
+    /*  (2026-10-03, the rollback: the scene's first send decides for the
+        desk, and with nothing before it there is nothing to roll back with -
+        never the scene's own first send, which the GO made.) */
+    const auto said = rig.runner.listState().dohReport().text;
+    INFO (said);
+    CHECK (said.find ("rolled back") == std::string::npos);
+
     REQUIRE (rig.press ("go").rejected == 0);
     rig.ticks (5);
 
@@ -2846,6 +2853,189 @@ TEST_CASE ("go.doh: an OSC event and a write to an opaque device that take back 
     CHECK (rig.newestRunOf (cue)->warning.empty());
 
     replaysTheSame (rig);
+}
+
+TEST_CASE ("go.doh: what could not be taken back is rolled back - the previous command, the device's, or the cue's own")
+{
+    /*  The rollback (2026-10-03, PRD §3.32, namespace draft §24.5, OV-OX). The
+        author's case: "we might send a go back command or a different cue or
+        scene number if for instance the light board has autofollow cues after
+        the last one sent". On a desk that takes back, what nothing can read
+        back is taken back at the Doh by a message written ahead, sent once,
+        on the tick after the press, as an engine `node.set`; the corrected
+        GO still sends the cue again. Before it, the report said "could not be
+        taken back" and nothing was sent. */
+    DohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/name", "Lights").ok);
+
+    const auto before = rig.makeOsc ("/lx/go", "i:11", "none");
+    const auto cue = rig.makeOsc ("/lx/go", "i:12", "none");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+    juce::ignoreUnused (before);
+
+    std::string address = "/lx/go";
+    auto expected = osc::Value::int32 (11);
+    std::string words = "rolled back with /lx/go i:11";
+
+    SUBCASE ("the previous command") {}
+
+    SUBCASE ("the device's general go-back command")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/dohRollback",
+                                            "/lx/key/go_back I").ok);
+        address = "/lx/key/go_back";
+        expected = osc::Value::impulse();
+        words = "rolled back with /lx/key/go_back I";
+    }
+
+    SUBCASE ("the cue's own: an intermediate cue number")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/dohRollback",
+                                            "/lx/key/go_back I").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + cue + "/dohRollback", "/lx/go f:11.5").ok);
+        expected = osc::Value::float32 (11.5f);
+        words = "rolled back with /lx/go f:11.5";
+    }
+
+    const auto valuesOn = [&rig] (const std::string& at)
+    {
+        rig.received (at);
+        std::vector<osc::Value> values;
+
+        for (const auto& datagram : rig.listener.all())
+        {
+            const auto decoded = osc::decode (datagram.bytes.data(), datagram.bytes.size());
+
+            if (decoded.ok && decoded.packet.address == at && ! decoded.packet.args.empty())
+                values.push_back (decoded.packet.args.front());
+        }
+
+        return values;
+    };
+
+    REQUIRE (rig.press ("standby.set", { osc::Value::string (cue) }).rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (2);
+    REQUIRE (valuesOn ("/lx/go") == std::vector<osc::Value> { osc::Value::int32 (12) });
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (2);
+
+    const auto said = reportOf (rig);
+    INFO (said);
+    CHECK (says (said, "Lights: " + words + " (Desk) - the next GO sends it again"));
+    CHECK_FALSE (says (said, "could not be taken back"));
+    CHECK (engineSetsOn (rig, address) == 1u);
+    REQUIRE_FALSE (valuesOn (address).empty());
+    CHECK (valuesOn (address).back() == expected);
+
+    //  A second press sends nothing more - here refused, nothing heard was
+    //  left to resume; and a press that forgets a resume returns before it.
+    const auto sentBefore = rig.sender.sentFor (lightingDesk);
+    rig.ticks (30);
+    rig.press ("go.doh");
+    rig.ticks (2);
+    CHECK (rig.sender.sentFor (lightingDesk) == sentBefore);
+
+    //  The corrected GO sends the cue again, as Undo(h) always did.
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (2);
+    CHECK (valuesOn ("/lx/go").back() == osc::Value::int32 (12));
+
+    replaysTheSame (rig);
+}
+
+TEST_CASE ("go.doh: no rollback to send leaves 'could not be taken back'; one that is not a message is said, and nothing goes")
+{
+    DohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+
+    const auto cue = rig.makeOsc ("/lx/go", "i:12", "none");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    auto bad = false;
+
+    SUBCASE ("nothing before it on the desk, and no general command") {}
+
+    SUBCASE ("a rollback typed wrong")
+    {
+        bad = true;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + cue + "/dohRollback", "/lx/go 11").ok);
+    }
+
+    REQUIRE (rig.press ("standby.set", { osc::Value::string (cue) }).rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (2);
+    const auto sent = rig.sender.sentFor (lightingDesk);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (2);
+
+    const auto said = reportOf (rig);
+    INFO (said);
+    CHECK (says (said, "Desk: could not be taken back - the next GO sends it again"));
+    CHECK (says (said, "is not a message") == bad);
+    CHECK (rig.sender.sentFor (lightingDesk) == sent);
+}
+
+TEST_CASE ("go.doh: a rollback is sent once per device - the first sent cue's - and never to a device left to its operator")
+{
+    /*  A scene sent the desk its cue 12, then an effect: rolled back in turn,
+        the effect's previous command - cue 12 itself - would leave the desk
+        at 12, so only the first cue's - where the desk stood before the GO -
+        goes. And Meh never reads the field. */
+    DohRig rig;
+
+    const auto previous = rig.makeOsc ("/lx/go", "i:11", "none");
+    juce::ignoreUnused (previous);
+
+    const auto scene = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+
+    int at = 0;
+
+    for (const auto& [address, atom] : std::vector<std::pair<std::string, std::string>> {
+             { "/lx/go", "i:12" }, { "/lx/fx", "i:3" } })
+    {
+        const auto member = rig.document.createCue (scene, at++, "osc", "Member").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/address", address).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + member + "/value", atom).ok);
+    }
+
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    auto takesBack = true;
+
+    SUBCASE ("Undo(h)")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+    }
+
+    SUBCASE ("Meh")
+    {
+        takesBack = false;
+    }
+
+    REQUIRE (rig.press ("standby.set", { osc::Value::string (scene) }).rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.ticks (3);
+    REQUIRE (rig.received ("/lx/go") == 1u);
+    REQUIRE (rig.received ("/lx/fx") == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.ticks (5);
+
+    const auto said = reportOf (rig);
+    INFO (said);
+    CHECK (engineSetsOn (rig, "/lx/go") == (takesBack ? 1u : 0u));
+    CHECK (rig.received ("/lx/go") == (takesBack ? 2u : 1u));
+    CHECK (rig.received ("/lx/fx") == 1u);
+    CHECK (says (said, "rolled back with /lx/go i:11") == takesBack);
+    CHECK_FALSE (says (said, "rolled back with /lx/go i:12"));
 }
 
 //==============================================================================

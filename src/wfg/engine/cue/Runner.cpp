@@ -9265,11 +9265,55 @@ namespace wfg::cue
                                    : cueLabel (act->cue) + " went on to its next round when " + cueLabel (record.cue)
                                        + " was fired; it was not brought back");
 
-        /*  WHAT COULD NOT BE TAKEN BACK, where the cue takes back: sent again
-            by the next GO. What leaves is named below, with its device. */
+        /*  THE ROLLBACK (2026-10-03, OV-OX, namespace draft §24.5): what could
+            not be taken back on a device that takes back is taken back by a
+            message written ahead - the cue's own, its device's, or the
+            previous command - ONE PER DEVICE, the first of the GO's cues that
+            sent there, since it alone says where the device stood before the
+            GO. Read here, once, from the document; sent by the flush. The
+            corrected GO still sends every cue again, as `takeBack` always did.
+            THE FIRST CUE DECIDES FOR ITS DEVICE even when it has nothing to
+            send: a later cue's previous command is an earlier cue of the same
+            GO - a state the GO made, never the one before it. */
+        std::map<std::string, bool> rolledBack;
+
+        const auto rollBack = [this, &out, &items, &rolledBack] (const std::string& kind, const std::string& cue,
+                                                                 const std::string& device)
+        {
+            const auto key = kind + ":" + device;
+
+            if (const auto decided = rolledBack.find (key); decided != rolledBack.end())
+                return decided->second;
+
+            rolledBack[key] = false;
+            const auto text = rollbackOfDevice (document, kind, device, cue);
+
+            if (text.empty())
+                return false;
+
+            const auto name = deviceLabel (kind == "midi" ? "port" : "mount", device);
+
+            if (! parseRollback (kind, text).ok)
+            {
+                items.push_back (cueLabel (cue) + ": the rollback \"" + text + "\" is not a message - nothing sent to "
+                                   + name);
+                return false;
+            }
+
+            rolledBack[key] = true;
+            out.rollbacks.push_back ({ kind, device, text });
+            items.push_back (name + ": rolled back with " + text + " (" + cueLabel (cue)
+                               + ") - the next GO sends it again");
+            return true;
+        };
+
+        /*  WHAT COULD NOT BE TAKEN BACK, where the cue takes back and has no
+            rollback: sent again by the next GO. What leaves is named below,
+            with its device. */
         for (const auto& [cue, device] : changes.unputtable)
             if (dohOfDevice (document, "osc", device, cue) == dohSetting::takeBack)
-                items.push_back (cueLabel (cue) + ": could not be taken back - the next GO sends it again");
+                if (! rollBack ("osc", cue, device))
+                    items.push_back (cueLabel (cue) + ": could not be taken back - the next GO sends it again");
 
         /*  And the MIDI a port that takes back was sent (D4, NU), by the port's
             name: the operator knows a synth by it. WHEN it goes again (D4's
@@ -9278,6 +9322,9 @@ namespace wfg::cue
             the port the cue names now, when that is another. */
         for (const auto& sent : sentAgain)
         {
+            if (rollBack ("midi", sent.cue, sent.device))
+                continue;
+
             const auto portNow = textOf (document.findById (sent.cue), "port");
             const auto elsewhere = ! portNow.empty() && portNow != sent.device
                                      ? ", to " + deviceLabel ("port", portNow) : std::string {};
@@ -10478,6 +10525,29 @@ namespace wfg::cue
             the handler named it with its device, and the write it holds is the
             GO's own. */
         auto items = held.items;
+
+        /*  THE ROLLBACKS (2026-10-03, OV-OX), FIRST: each takes its device back
+            to where it stood before the GO, and the desk's exact put-back of a
+            value it reads back goes on top. An OSC one as an engine `node.set`
+            - logged, so a replay's tree reaches the same value, and sent only
+            where the device's `tx` is on, by the door every engine write takes;
+            a MIDI one straight onto the port, as nothing in the tree holds a
+            MIDI message - a port switched off sends nothing, as a cue on it
+            would not. */
+        for (const auto& rollback : held.rollbacks)
+        {
+            const auto message = parseRollback (rollback.kind, rollback.text);
+
+            if (! message.ok)
+                continue;
+
+            if (rollback.kind == "osc")
+                engine.submit (origin::engine, "node.set", { osc::Value::string (message.address), message.value });
+            else if (midiOut != nullptr
+                       && document.getAttribute ("/godot/port/" + rollback.device + "/tx").value_or (std::string {}) != "false")
+                if (const auto problem = midiOut->send (rollback.device, message.bytes); ! problem.empty())
+                    items.push_back (deviceLabel ("port", rollback.device) + ": the rollback could not be sent - " + problem);
+        }
 
         if (mounts != nullptr)
             for (auto entry : held.desk)

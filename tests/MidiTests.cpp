@@ -2165,6 +2165,58 @@ TEST_CASE ("go.doh: a MIDI cue the GO sent to a port that takes back is named as
     CHECK (rig.runner.listState().dohReport().text.empty());
 }
 
+TEST_CASE ("go.doh: a MIDI cue on a port that takes back is rolled back on the port - the previous command, or the port's")
+{
+    /*  The rollback (2026-10-03, OV-OX, namespace draft §24.5): what a message
+        cannot do - be called back off the cable - a message written ahead can,
+        sent on the tick after the press, once; the corrected GO sends the cue
+        again. A port switched off sends nothing, as a cue on it would not. */
+    MidiDohRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+
+    const auto previous = rig.midiCue (rig.listId, 0);                  // programChange 1 5
+    const auto note = rig.midiCue (rig.listId, 1);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + note + "/data1", "6").ok);
+    rig.document.createCue (rig.listId, 2, "memo", "After");
+    juce::ignoreUnused (previous);
+
+    midi::Bytes expected { 0xc0, 0x05 };
+    std::string words = "Keys: rolled back with programChange 1 5 (Note)";
+
+    SUBCASE ("the previous command") {}
+
+    SUBCASE ("the port's general go-back command")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/dohRollback",
+                                            "sysex F0 7F 01 02 01 0B F7").ok);
+        expected = { 0xf0, 0x7f, 0x01, 0x02, 0x01, 0x0b, 0xf7 };
+        words = "Keys: rolled back with sysex F0 7F 01 02 01 0B F7 (Note)";
+    }
+
+    rig.park (note);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.sink.sent.size() == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    INFO (rig.runner.listState().dohReport().text);
+    CHECK (reportSays (rig, words));
+    CHECK_FALSE (reportSays (rig, "could not be taken back"));
+    REQUIRE (rig.sink.sent.size() == 2u);
+    CHECK (rig.sink.sent.back().port == rig.port);
+    CHECK (hexOf (rig.sink.sent.back().bytes) == hexOf (expected));
+
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.sink.sent.size() == 3u);
+    CHECK (hexOf (rig.sink.sent.back().bytes) == hexOf ({ 0xc0, 0x06 }));
+}
+
 TEST_CASE ("go.doh: a MIDI cue that put nothing on a cable is not named as sent")
 {
     /*  What counts as sent is what left (HQ): a cue that found no port, or a

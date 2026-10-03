@@ -2602,6 +2602,16 @@ namespace wfg::cue
             std::vector<std::string> items;
             bool report = false;
 
+            /*  THE ROLLBACKS A DOH DECIDED (2026-10-03, OV-OX): one per device,
+                its kind ("osc" or "midi"), the device and the line - sent by
+                the flush before the desk's put-back. */
+            struct Rollback
+            {
+                std::string kind, device, text;
+            };
+
+            std::vector<Rollback> rollbacks;
+
             /*  Filled by a Doh's own press, not only by a relaunch: its report
                 REPLACES the readout, an empty one clearing it; a relaunch's alone
                 is APPENDED to what the readout holds (D4's review, OJ, OK). */
