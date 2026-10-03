@@ -844,3 +844,115 @@ TEST_CASE ("take: Keep as cue makes a media cue after the one sounding there, lo
     CHECK (rig.at ("/godot/cue/" + made + "/kind").empty());
     CHECK (rig.take().kept == "takes/Looper take 1.wav");
 }
+
+//==============================================================================
+TEST_CASE ("go.doh: a take press the GO made is put back by its exact inverse, or said")
+{
+    /*  Doh! D3 (2026-10-03, PRD §3.32, namespace draft §24.13; the design's test
+        18, GU): a press a transport cue of the GO's made on a take is undone by
+        its inverse while the take is still where the press left it - Undo for
+        a start of recording or of a layer, Undo then Hold for a layer begun on
+        a held take, Hold for a held take looped; a first pass closed, and a
+        clear, cannot be undone, and are said (L17). Run on the engine sources
+        of 5fd0e76 with this case, it failed: every press stood. */
+    Rig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.fireAndLaunch ("TK000002") != nullptr);
+
+    const auto goOn = [&rig] (const std::string& cueId)
+    {
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("TK000001"), cueId).ok);
+        rig.tickOnce();
+        REQUIRE (rig.applied ("go"));
+    };
+
+    const auto looping = [&rig]
+    {
+        REQUIRE (rig.applied ("take.record", { text (looper) }));
+        REQUIRE (rig.applied ("take.record", { text (looper) }));
+        rig.audio.reports.push_back ({ looper, "pressed", 3.0 });
+        rig.tickOnce();
+        rig.tickOnce();
+        REQUIRE (rig.take().state == "looping");
+    };
+
+    /*  HELD: the cue letting go holds the take (§19.6); the cue fired again
+        to sound through it, its own `onGo` waiting. */
+    const auto held = [&rig, &looping]
+    {
+        looping();
+        REQUIRE (rig.applied ("run.stop", { text (rig.runOf ("TK000002")->id) }));
+        REQUIRE (rig.tickUntil ([&rig] { return rig.runOf ("TK000002")->isFinished(); }));
+        REQUIRE (rig.take().state == "held");
+        REQUIRE (rig.fireAndLaunch ("TK000002") != nullptr);
+        REQUIRE (rig.take().state == "held");
+    };
+
+    std::string after, back;
+    auto said = false;
+
+    SUBCASE ("empty to recording: undone, the take empty again")
+    {
+        goOn ("TK000006");
+        after = "recording";
+        back = "empty";
+    }
+
+    SUBCASE ("looping to overdubbing: undone, looping again with no layer added")
+    {
+        looping();
+        goOn ("TK000006");
+        after = "overdubbing";
+        back = "looping";
+    }
+
+    SUBCASE ("held to overdubbing: undone, then held again")
+    {
+        held();
+        goOn ("TK000006");
+        after = "overdubbing";
+        back = "held";
+    }
+
+    SUBCASE ("held to looping: held again")
+    {
+        held();
+        goOn ("TK000007");
+        after = "looping";
+        back = "held";
+    }
+
+    SUBCASE ("recording to looping, a first pass closed: cannot be undone, and said")
+    {
+        REQUIRE (rig.applied ("take.record", { text (looper) }));
+        goOn ("TK000007");
+        after = "looping";
+        back = "looping";
+        said = true;
+    }
+
+    SUBCASE ("a clear: cannot be undone, and said")
+    {
+        REQUIRE (rig.document.createCue ("TK000001", 9, "transport", "Clear it", "TK000099").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/TK000099/target", "TK000002").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/TK000099/verb", "clear").ok);
+        looping();
+        goOn ("TK000099");
+        after = "empty";
+        back = "empty";
+        said = true;
+    }
+
+    REQUIRE (rig.take().state == after);
+    const auto layers = rig.take().layers;
+
+    REQUIRE (rig.applied ("go.doh"));
+    rig.tickOnce();
+
+    CHECK (rig.take().state == back);
+    CHECK (rig.take().layers == layers);
+
+    const auto& report = rig.runner.listState().dohReport().text;
+    INFO (report);
+    CHECK ((report.find ("cannot be undone") != std::string::npos) == said);
+}

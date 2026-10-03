@@ -264,6 +264,24 @@ namespace wfg::cue
         void setDohForget (const DohForget& forget) { dohForgetNow = forget; }
         const DohForget& dohForget() const noexcept { return dohForgetNow; }
 
+        /*  WHAT THE LAST DOH! PUT BACK, AND WHAT IT LEFT (2026-10-03, D3, PRD
+            §3.32): the list it acted on, the tick of its report and one
+            sentence - or of the relaunch that followed it, whichever came
+            last. ONE FOR THE WHOLE RUNNER, as the offer is: a Doh acts on the
+            list of the last GO, whichever list has the focus, and a report on
+            a list nobody is looking at would never reach the light operator it
+            names. Cleared by the press, and set by `list.dohReport`, the
+            record a hook composes; published as `/godot/list/dohReport`. */
+        struct DohReport
+        {
+            std::string list;
+            std::int64_t tick = -1;
+            std::string text;
+        };
+
+        void setDohReport (const DohReport& report) { dohReportNow = report; }
+        const DohReport& dohReport() const noexcept { return dohReportNow; }
+
         void setResume (const std::string& list, const std::string& text)
         {
             if (text.empty())
@@ -319,6 +337,7 @@ namespace wfg::cue
             doh = {};
             resumes.clear();
             dohForgetNow = {};
+            dohReportNow = {};
         }
 
         static constexpr std::size_t kept = 64;
@@ -339,5 +358,6 @@ namespace wfg::cue
         DohOffer doh;
         std::map<std::string, std::string> resumes;
         DohForget dohForgetNow;
+        DohReport dohReportNow;
     };
 }

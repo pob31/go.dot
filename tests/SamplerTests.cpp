@@ -45,6 +45,7 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -1403,5 +1404,56 @@ TEST_CASE ("go.doh: a pad of the bank the GO armed is that GO being played, and 
         REQUIRE (rig.send ("cue.fire", { osc::Value::string (rig.membersOf[rig.bankA][1]) }).rejected == 0);
         CHECK (rig.send ("go.doh").rejected == 1);
         CHECK (rig.engine.lastError().find ("trigger-after-go") != std::string::npos);
+    }
+}
+
+//==============================================================================
+TEST_CASE ("go.doh: a bank the GO closed opens again; one already finished is armed again")
+{
+    /*  Doh! D3 (2026-10-03, PRD §3.32, namespace draft §24.13; the design's test
+        17). The GO armed a bank that takes over the whole desk and closed the
+        one before it: a Doh opens that one again while it still plays a clip,
+        and fires it again - nobody's GO, its identifier on the Doh's record -
+        once it has finished. Run on the engine sources of 5fd0e76 with this
+        case, it failed: the closed bank stayed closed, or gone. */
+    Rig rig;
+    rig.set ("/godot/cue/" + rig.bankB + "/takeover", "group");
+    rig.arm (rig.bankA);
+
+    const auto old = rig.liveRunOf (rig.bankA)->id;
+
+    SUBCASE ("a clip still sounding: the bank opens again")
+    {
+        rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+        rig.sound (rig.membersOf[rig.bankA][0]);
+
+        rig.arm (rig.bankB);
+        REQUIRE (rig.runs.find (old)->closing);
+
+        REQUIRE (rig.send ("go.doh").rejected == 0);
+        CHECK_FALSE (rig.runs.find (old)->closing);
+        CHECK_FALSE (rig.runs.find (old)->isFinished());
+    }
+
+    SUBCASE ("nothing sounding: the bank had finished, and is armed again")
+    {
+        rig.arm (rig.bankB);
+        REQUIRE (rig.tickUntil ([&rig, &old] { return rig.runs.find (old)->isFinished(); }));
+
+        REQUIRE (rig.send ("go.doh").rejected == 0);
+
+        const auto* again = rig.liveRunOf (rig.bankA);
+        REQUIRE (again != nullptr);
+        CHECK (again->id != old);
+        CHECK (again->goSerial == 0u);
+
+        std::vector<std::string> made;
+
+        for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+            if (record.kind == LogRecord::Kind::applied && record.command == "go.doh")
+                for (const auto& arg : record.args)
+                    made.push_back (arg.getString());
+
+        CHECK (std::find (made.begin(), made.end(), again->id) != made.end());
     }
 }

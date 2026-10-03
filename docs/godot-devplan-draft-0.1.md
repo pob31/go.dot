@@ -873,6 +873,23 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   second press forgets the resume; the standby says "resumes at 0:08", and
   `/godot/list/<id>/resume` publishes it. New: `go.dohPlayhead`, `list,resume`.
   A log with a Doh made on D1 is not promised to replay on D2 (HD).
+- **Doh! D3, 2026-10-03 — what the GO changed elsewhere, put back** (namespace
+  draft §24.13). A desk value the GO wrote goes back to what the desk held
+  before it - on a device that takes back, unless another writer has touched it
+  since, decided by a hook on the next tick against the desk's echo; on a device
+  left to its operator nothing goes back and the report names it. A level, a
+  speed or a DCA trim a GO fade moved comes back over the panic fade, or the
+  fade moving it before the GO comes back with its stop on time; a stop that has
+  not landed is called off, a mic's gate opened again; a cue the GO stopped is
+  made again where it would be now, fading in - the rest of a pre-wait, a timed
+  scene at its second, at once or once its footer has ended (`go.dohRelaunch`),
+  never sending a device left to its operator anything late; an advance, a bank
+  it closed, a take press put back. One report, `/godot/list/dohReport`, says
+  what was put back and what was left (`list.dohReport`). A jump's values now
+  leave from the same hook, so a replay writes each once; `serve`'s device write
+  honours `tx`. New: `go.dohRelaunch`, `list.dohReport`, `lists,dohReport`. A log
+  with a Doh made on D2 is not promised to replay on D3 (HD). D4 (the client's
+  notice, the MIDI a takeBack port was sent) and D5 (end to end) remain.
 - **H4, 2026-10-02 — a double Esc drops what is still waiting to leave**
   (§23.10). A value a rate cap held back went out on its turn after the press,
   the MIDI queue sent everything it held, and no note-off existed anywhere. The

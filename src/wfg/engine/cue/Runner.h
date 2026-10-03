@@ -1103,7 +1103,21 @@ namespace wfg::cue
                     const std::string& carriedOn = {});
         std::uint64_t goInHand() const noexcept { return currentGo; }
 
-        std::string goDoh (Engine& engine, doc::ShowDocument& editable, std::int64_t tick);
+        /*  `supplied` and `drawn` (D3): the identifiers its put-back makes - a
+            cue the GO stopped, made again where it would be now; a scene, a
+            bank fired again - drawn in that order, and carried on the applied
+            record so a replay makes the same. */
+        std::string goDoh (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
+                           const std::vector<std::string>& supplied, std::vector<std::string>& drawn);
+
+        /*  A SCENE THE GO STOPPED, PUT BACK ONCE IT HAS ENDED (2026-10-03, D3,
+            namespace draft §24.13): `go.dohRelaunch`'s handler. The hook submits
+            it the tick it sees the scene's run finished; the handler relaunches
+            the scene at the second it would have reached now and draws the
+            identifiers the record carries - and does nothing when no pending
+            put-back names the run any more (a GO on its list came first). */
+        void dohRelaunch (Engine& engine, std::int64_t tick, const std::string& groupRun,
+                          const std::vector<std::string>& supplied, std::vector<std::string>& drawn);
 
         //======================================================================
         /*  CARRYING ON WHAT A DOH PAUSED (2026-10-02, D2, PRD §3.32, namespace
@@ -1137,6 +1151,12 @@ namespace wfg::cue
                 own once the mic is seated: the mic's arrival is its gate, not a
                 job, so there is nothing for it to ride. */
             std::map<std::string, FadeSegment> micFades;
+
+            /*  How many ticks each sounding cue takes to arrive, nought for the
+                de-click (2026-10-03, D3): a cue the GO had STOPPED, put back by
+                a Doh, fades back in over the panic fade (the author, 2026-09-30,
+                (d)) - a sound and a mic's gate alike. */
+            int arrivalTicks = 0;
         };
 
         struct DohRoot
@@ -1644,8 +1664,11 @@ namespace wfg::cue
             that reported would produce a record twice on replay - once from the
             log and once from itself. Not being able to reach the engine is how
             that stays true when somebody adds the next case. */
-        void fireFade (const juce::ValueTree& cue, const std::string& runId);
-        void fireStop (const juce::ValueTree& cue, const std::string& runId);
+        /*  `tick` is the command's own (2026-10-03, Doh! D3): what a stop's
+            arrival is counted from, the same number live, where the hooks have
+            just set `currentTick` to it, and in a replay, where they never do. */
+        void fireFade (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick);
+        void fireStop (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick);
 
         /** Which slice a transport cue's `range` names, as a playlist place, or -1. */
         int advanceTargetOf (const juce::ValueTree& cue, const Run& run) const;
@@ -1677,7 +1700,8 @@ namespace wfg::cue
             holds a stop of its own back that many ticks past the level's
             arrival: a fade that also moves the speed stops once the speed has
             been heard too (§22.6, ED). */
-        void beginFade (const std::string& selfCueId,
+        void beginFade (std::int64_t tick,
+                        const std::string& selfCueId,
                         const std::string& targetCueId,
                         const std::string& selfRunId, const std::string& kind,
                         double toDb, double seconds, FadeCurve, bool stopWhenDone,
@@ -1694,7 +1718,8 @@ namespace wfg::cue
             speed has reached the voice - a horizon and a tick after its last
             breakpoint (ED). With the level moving too, the level's job does
             both. Answers whether a job now moves the speed. */
-        bool beginRateFade (const std::string& targetCueId, const std::string& selfRunId,
+        bool beginRateFade (std::int64_t tick,
+                            const std::string& targetCueId, const std::string& selfRunId,
                             double toRate, double seconds, FadeCurve, bool stopWhenDone,
                             bool alone);
 
@@ -1702,7 +1727,8 @@ namespace wfg::cue
             from wherever it stands to `toDb`. No run to find and nothing to
             stop - a DCA has no sound of its own - and it takes over from a
             fade already moving the same DCA, from where that one had got to. */
-        void beginDcaFade (const std::string& dcaId, const std::string& selfRunId,
+        void beginDcaFade (std::int64_t tick,
+                           const std::string& dcaId, const std::string& selfRunId,
                            double toDb, double seconds, FadeCurve,
                            std::vector<doc::FadePoint> points);
 
@@ -1843,7 +1869,7 @@ namespace wfg::cue
         /*  The short fade to silence a hold clip's release and a play-out
             clip's `stop` second press both make, then the stop. A fade job
             with no cue of its own behind it. */
-        void beginReleaseFade (const std::string& runId, double seconds);
+        void beginReleaseFade (const std::string& runId, double seconds, std::int64_t tick);
 
         /*  Starts a group's header, members or footer, and answers whether
             there was anything to start. False lets the caller fall through to
@@ -2400,6 +2426,216 @@ namespace wfg::cue
         /*  Set for the length of `prepareStandby`: what is made then is the
             horizon's, nobody's GO. */
         bool makingForHorizon = false;
+
+        //======================================================================
+        /*  WHAT A GO CHANGED ELSEWHERE, AND HOW DOH! PUTS IT BACK (2026-10-03,
+            D3, PRD §3.32, namespace draft §24.13).
+
+            Captured while the GO's record is open, at the moment each change is
+            made, keyed on the GO a run answers to (`goOfRun`: what it caused
+            before what made it, so an act's footer the GO set off is captured
+            with the GO's own). Two kinds, and the replay rule keeps them apart:
+            what changes a run, an identifier or the history is HANDLER-EXACT -
+            the stops, the flags, the banks it closed, the takes - and what only
+            shapes a job, a level or a write a hook makes is HOOK-CONSUMED - the
+            desk's values, the levels. The desk is decided in a hook, on the tick
+            after the press (`flushDohWrites`); the rest in `go.doh`'s handler. */
+
+        /*  A DESK ADDRESS THE GO WROTE: what it held before the GO's first
+            write, what the last one put there as the tree took it, the desk's
+            first answer after that write (its echo, which a desk that quantises
+            makes different), the cue that wrote it last and its device - and,
+            once the Doh has read that cue's setting, whether it is left to its
+            operator. Hook-consumed: read by the flush, never by a handler's
+            decision. */
+        struct DeskBefore
+        {
+            std::string address, device;
+            std::optional<osc::Value> before;
+            osc::Value lastWritten;
+            std::optional<osc::Value> echo;
+            std::string lastWriter;
+            bool leftToOperator = false;
+        };
+
+        /*  A LEVEL, A SPEED OR A DCA TRIM A FADE OF THE GO MOVED on something
+            the GO did not start: the job's key, the run it holds (none for a
+            DCA), where it stood before the GO's first fade on it, where the
+            GO's last fade on it was actually going (a mic's stop leaves its
+            level where it is), the command tick, and the fade that was moving
+            it before the GO, if one was. Hook-consumed. */
+        struct LevelTouch
+        {
+            std::string key, heldRun, dca;
+            bool movesRate = false;
+            double from = 0.0, goTo = 0.0;
+            std::int64_t atTick = 0;
+            std::optional<FadeJob> superseded;
+        };
+
+        /*  A STOP THE GO ISSUED on a run not its own: when it lands, counted
+            from the command's tick without the launch latency a replay does not
+            have; whether a stop was asked of the target before it (by
+            `stopAsked`, never `state`); whether it was in its pre-wait and when
+            that would have run out; its level. Handler-exact - `jobStopsAt` and
+            `levelBefore` excepted, which only shape a job. */
+        struct GoStop
+        {
+            std::string target, source, targetKind;
+            std::int64_t goTick = 0, landsAt = 0, jobStopsAt = 0;
+            bool wasStopping = false, wasWaiting = false;
+            std::int64_t dueTick = 0;
+            double levelBefore = 0.0;
+        };
+
+        /*  An advance or a boundary stop the GO asked of a run, as it was. */
+        struct FlagBefore
+        {
+            std::string run;
+            bool advanceRequested = false;
+            int advanceTo = -1;
+            std::string stopAfter;
+        };
+
+        /*  A PRESS THE GO MADE ON A SAMPLING CHANNEL'S TAKE: the account before
+            and after it, which is all an inverse needs and all that says
+            whether the take is still where the GO left it. */
+        struct TakeBefore
+        {
+            std::string channel;
+            TakeVerb verb = TakeVerb::record;
+            std::string stateBefore, stateAfter;
+            int layersBefore = 0, layersAfter = 0;
+        };
+
+        /*  THE RECORD'S D3 HALF, with the record's lifetime: opened by
+            `beginGo`, spent by the Doh, forgotten by a jump on its list. */
+        struct GoChanges
+        {
+            std::vector<DeskBefore> desk;
+            bool deskOverflow = false;
+            std::vector<LevelTouch> levels;
+            std::vector<GoStop> stops;
+            std::vector<FlagBefore> flags;
+            std::vector<std::string> closedSamplers;
+            std::vector<std::pair<std::string, std::string>> lostStrips;
+            std::vector<TakeBefore> takes;
+
+            /*  What it sent that nothing can read back - an OSC event, a write
+                to an opaque device: (cue, device), once each. */
+            std::vector<std::pair<std::string, std::string>> unputtable;
+        };
+
+        GoChanges goChanges;
+
+        /*  Bounded, belt and braces: a scene that runs long after its GO keeps
+            capturing until the next GO, and a Doh that late is refused. */
+        static constexpr std::size_t changesKept = 256;
+
+        /*  Whether a run answers to the GO the record is open for. */
+        bool ofTheOpenGo (const std::string& runId) const;
+
+        /*  THE CAPTURES, each where its change is made: a level, a speed or a
+            trim a fade of the GO moved; a stop the GO issued, and the act its
+            target sits in reached; a hard stop a transport cue fell back to; an
+            advance or a boundary stop asked; a press on a take. */
+        void noteLevelTouch (const std::string& key, const std::string& heldRun, const std::string& dca,
+                             bool movesRate, double from, double goTo, std::int64_t tick,
+                             const std::optional<FadeJob>& superseded);
+        void noteGoStop (const GoStop& stop, const std::string& targetParent);
+        void noteHardStop (const Run& target, const std::string& source, std::int64_t tick);
+        void noteFlag (const Run& target, const std::string& source);
+        void noteTake (const std::string& source, const std::string& channel, TakeVerb verb, const Take& before);
+
+        /*  THE DESK'S HALF OF `writeOscNow`: before a write, the echo of the
+            GO's last write to the address kept (the write is about to forget
+            it) and, for a write of the GO's, what the address held; after it,
+            what the GO wrote. */
+        void deskBeforeWrite (const OscJob& job, std::optional<osc::Value>& held, bool& captured);
+        void deskAfterWrite (const OscJob& job, const std::optional<osc::Value>& held,
+                             const std::string& mountId, const osc::Value& value);
+
+        /*  A SCENE THE GO STOPPED THAT HAD NOT ENDED AT THE DOH, put back once
+            it has (§24.13): handler state - the hook only watches for the end,
+            and `go.dohRelaunch` carries the decision. `left` is its OSC and
+            MIDI cues left to their operators, read at the Doh. */
+        struct PendingRelaunch
+        {
+            std::string list, groupRun;
+            std::int64_t goTick = 0, dohTick = 0;
+            double levelBefore = 0.0;
+            std::set<std::string> left;
+        };
+
+        std::vector<PendingRelaunch> pendingRelaunches;
+
+        /*  HOOK MEMORY: the scenes whose `go.dohRelaunch` has been submitted. */
+        std::set<std::string> relaunchAsked;
+
+        /*  WHAT A HANDLER LEAVES FOR THE FLUSH TO SEND (§24.1: a handler never
+            submits): the Doh's desk entries, the values a jump or a relaunch
+            wants on the desk, and the report's sentences. Stamped with the tick
+            it was filled on - a fill finding an older stamp clears it first, so
+            a replay, which never flushes, does not grow it. Hook-consumed. */
+        struct DohStash
+        {
+            std::int64_t tick = -1;
+            std::string list;
+            std::vector<DeskBefore> desk;
+            std::vector<std::pair<std::string, osc::Value>> values;
+            std::vector<std::string> items;
+            bool report = false;
+        };
+
+        DohStash stash;
+        DohStash& stashFor (std::int64_t tick);
+
+        /*  HOOK MEMORY: what this tick's give-backs put back on the desk, by
+            address - filled by `submitRestores`, whichever hook called it, read
+            by the flush, which runs after them. */
+        std::map<std::string, osc::Value> restoredThisTick;
+
+        /*  THE HOOK THAT SENDS IT (§24.13), after `armStandby` in `beforeTick`. */
+        void flushDohWrites (Engine& engine);
+
+        /*  Set while a put-back makes runs: nobody's GO (GY's rule). */
+        bool makingForPutBack = false;
+
+        /*  WHAT ONE PUT-BACK HAS IN HAND: the press's tick, the GO's serial and
+            list, the panic fade it fades over, the identifiers it may draw, the
+            report's sentences so far, and the GO's runs. */
+        struct PutBack
+        {
+            std::int64_t tick = 0;
+            std::uint64_t serial = 0;
+            std::string list;
+            int fadeTicks = 0;
+            double fadeSeconds = 0.0;
+            std::function<std::string()> nextId;
+            std::vector<std::string> items;
+            std::set<std::string> goRuns;
+        };
+
+        void putBackLevels (PutBack& back, const GoChanges& changes);
+        void putBackStops (Engine& engine, PutBack& back, const GoChanges& changes);
+        void putBackFlagsBanksTakes (Engine& engine, PutBack& back, const GoChanges& changes);
+
+        /*  A CUE THE GO STOPPED, MADE AGAIN WHERE IT WOULD BE NOW: a sound at
+            the second it would have reached, fading in over the panic fade; a
+            cue it stopped in its pre-wait with the rest of that wait; a timed
+            scene at its second, its values re-sent where its cues take back.
+            Answers whether anything was made. */
+        bool relaunchStopped (Engine& engine, PutBack& back, const GoStop& stop,
+                              const std::optional<FadeJob>& before);
+        bool relaunchScene (Engine& engine, PutBack& back, const std::string& groupRun,
+                            const std::set<std::string>& left);
+
+        /*  The OSC and MIDI cues under a scene whose setting is leave. */
+        std::set<std::string> leftCuesUnder (const std::string& sceneCue) const;
+
+        /*  A cue's name as the operator reads it, and a device's. */
+        std::string cueLabel (const std::string& cueId) const;
+        std::string deviceLabel (const std::string& kind, const std::string& deviceId) const;
     };
 
     //==============================================================================

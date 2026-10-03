@@ -839,6 +839,14 @@ namespace wfg::cue
         std::optional<double> arrivalDb;
         std::optional<FadeSegment> arrivalThen;
 
+        /*  HOW LONG IT TAKES TO ARRIVE, in ticks - nought for the de-click
+            (2026-10-03, Doh! D3, namespace draft §24.13): a cue the GO had
+            STOPPED, made again by a Doh where it would be now, fades back in
+            over the panic fade (the author, 2026-09-30, (d)); a mic's gate
+            opens over the same. Written with `resumes`, by the handler that
+            makes the run. */
+        int arrivalTicks = 0;
+
         //======================================================================
         /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.
 

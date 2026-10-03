@@ -479,3 +479,41 @@ TEST_CASE ("dca: the trims are published beside what the show declares")
 
     CHECK (rig.published ("/godot/run/" + runId + "/trim") == "-7");
 }
+
+//==============================================================================
+TEST_CASE ("go.doh: a DCA the GO faded is trimmed back, and nothing logs a rejected run.ended")
+{
+    /*  Doh! D3 (2026-10-03, PRD §3.32, namespace draft §24.13; the design's test
+        16): the trim comes back over the panic fade on a job that is nobody's
+        run - and a DCA job reports its run's end only when it has one, so no
+        `run.ended` of nobody is refused into the log. Run on the engine
+        sources of 5fd0e76 with this case, it failed: the trim stayed at -20. */
+    Rig rig;
+    rig.set ("/godot/list/goDebounce", "0");
+
+    const auto band = rig.dca ("Band");
+    const auto down = rig.document.createCue (rig.listId, 0, "fade", "Band down").id;
+    rig.set ("/godot/cue/" + down + "/dca", band);
+    rig.set ("/godot/cue/" + down + "/level", "-20");
+    rig.set ("/godot/cue/" + down + "/duration", "1");
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    rig.set (cue::standbyAddressOf (rig.listId), down);
+    rig.tickOnce();
+    rig.apply ("go", {});
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.dcas.trimOf (band) < -5.0);
+    const auto errors = rig.engine.errorCount();
+
+    rig.apply ("go.doh", {});
+
+    for (int n = 0; n < 60; ++n)
+        rig.tickOnce();
+
+    CHECK (near (rig.dcas.trimOf (band), 0.0));
+    CHECK (rig.engine.errorCount() == errors);
+    CHECK (rig.runOf (down)->takenBack);
+}

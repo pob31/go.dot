@@ -1393,7 +1393,7 @@ namespace wfg::tree
                     /*  WHAT DOH! WOULD TAKE BACK (2026-10-01) is what the
                         machine is doing, not the show: the runtime half
                         publishes it, every tick. */
-                    if (name == "doh" || name == "dohForget")
+                    if (name == "doh" || name == "dohForget" || name == "dohReport")
                         continue;
 
                     const auto text = name == "order" ? orderOf (container)
@@ -3038,6 +3038,16 @@ namespace wfg::tree
             runtime.push_back (makeLeaf (std::string (godot) + "/list/dohForget", *row,
                                          lists != nullptr && ! lists->dohForget().list.empty()
                                            ? lists->dohForget().list + " " + lists->dohForget().cue
+                                           : std::string {}));
+
+        /*  AND WHAT THE LAST DOH! PUT BACK, AND LEFT (2026-10-03, D3): the list,
+            the tick of the report and its sentence, whichever list has the
+            focus - the Doh acts on the list of the last GO. */
+        if (const auto* row = rowNamed ("lists", "dohReport"))
+            runtime.push_back (makeLeaf (std::string (godot) + "/list/dohReport", *row,
+                                         lists != nullptr && ! lists->dohReport().list.empty()
+                                           ? lists->dohReport().list + " " + std::to_string (lists->dohReport().tick)
+                                               + " " + lists->dohReport().text
                                            : std::string {}));
 
         /*  HOW FAR AHEAD EACH CUE HAS BEEN GOT READY.

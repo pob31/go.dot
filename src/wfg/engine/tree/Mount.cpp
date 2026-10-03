@@ -832,6 +832,12 @@ namespace wfg::tree
     {
         observations.insert_or_assign (address, value);
         observedTicks.insert_or_assign (address, tick);
+
+        /*  THE FIRST SINCE GO.DOT LAST WROTE THE ADDRESS, kept apart (2026-10-03,
+            Doh! D3, namespace draft §24.13): what a desk made of that write - a
+            motor fader's step, a dB-mapped float - rather than what a hand did
+            to it after. Set only while unset; the write below forgets it. */
+        firstObservations.emplace (address, value);
     }
 
     std::int64_t MountTable::observedAtTick (const std::string& address) const
@@ -850,6 +856,13 @@ namespace wfg::tree
     {
         observations.erase (address);
         observedTicks.erase (address);
+        firstObservations.erase (address);
+    }
+
+    const osc::Value* MountTable::firstObservedOf (const std::string& address) const
+    {
+        const auto found = firstObservations.find (address);
+        return found == firstObservations.end() ? nullptr : &found->second;
     }
 
     void MountTable::forgetReadback (const std::string& address)
@@ -984,6 +997,7 @@ namespace wfg::tree
             held a minute ago. */
         observations.erase (address);
         observedTicks.erase (address);
+        firstObservations.erase (address);
 
         /*  IT LANDS HERE AND STOPS HERE, still. What goes on the wire is a
             MountSender's business and the caller's to arrange - this class

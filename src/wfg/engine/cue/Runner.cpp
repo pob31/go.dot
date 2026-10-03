@@ -1566,7 +1566,10 @@ namespace wfg::cue
             job.reportsSelf = false;
             job.fromDb = run->ownLevel;
             job.toDb = run->deClickTo;
-            job.ticksTotal = deClickTicks;
+
+            /*  OVER THE PANIC FADE, a cue the GO had stopped and a Doh made
+                again (2026-10-03, D3): what fades back in, not a de-click. */
+            job.ticksTotal = run->arrivalTicks > 0 ? run->arrivalTicks : deClickTicks;
             job.curve = FadeCurve::linear;
             job.stopWhenDone = false;
 
@@ -1946,22 +1949,16 @@ namespace wfg::cue
 
             Sent through the ordinary write, so a replay reproduces it exactly
             and, having no sender, does not move the rig. */
+        /*  STASHED, AND SENT BY THE HOOK (2026-10-03, Doh! D3, namespace draft
+            §24.13): a handler never submits, and this one did - so a replay,
+            which re-runs the handler AND re-injects the logged record, wrote
+            every jump value twice. The flush on the next tick compares and
+            sends, after that tick's give-backs - the old horizon's restores
+            could otherwise land over a value the jump had just sent. */
+        auto& values = stashFor (tick);
+
         for (const auto& value : plan.values)
-        {
-            if (mounts != nullptr)
-            {
-                const auto* now = mounts->observedOf (value.address);
-
-                if (now == nullptr)
-                    now = mounts->valueOf (value.address);
-
-                if (now != nullptr && *now == value.value)
-                    continue;
-            }
-
-            engine.submit (origin::engine, "node.set",
-                           { osc::Value::string (value.address), value.value });
-        }
+            values.values.emplace_back (value.address, value.value);
 
         /*  WHERE IT LANDED, which is §3.13's second pointer. After a jump this
             agrees with the aim; after the next GO it does not, and that
@@ -2252,6 +2249,9 @@ namespace wfg::cue
             if (resume != nullptr)
             {
                 run->resumes = true;
+
+                /*  AND OVER THE PANIC FADE, a cue the GO had stopped (D3). */
+                run->arrivalTicks = resume->arrivalTicks;
 
                 if (! cue.hasType ("Mic"))
                 {
@@ -3597,13 +3597,13 @@ namespace wfg::cue
 
         if (kind == "fade")
         {
-            fireFade (cue, runId);
+            fireFade (cue, runId, tick);
             return;
         }
 
         if (kind == "transport")
         {
-            fireStop (cue, runId);
+            fireStop (cue, runId, tick);
             return;
         }
 
@@ -4064,7 +4064,9 @@ namespace wfg::cue
 
         /*  A MIC CUE DOH! CARRIES ON opens over the de-click (D2, namespace draft §24.12): its
             gate is its arrival, and a tenth of a second is the author's. */
-        run->fadeIn = run->resumes ? static_cast<double> (deClickTicks) / static_cast<double> (TickClock::rateHz)
+        /*  AND OVER THE PANIC FADE, one the GO had stopped (D3). */
+        run->fadeIn = run->resumes ? static_cast<double> (run->arrivalTicks > 0 ? run->arrivalTicks : deClickTicks)
+                                       / static_cast<double> (TickClock::rateHz)
                                    : std::max (0.0, numberOf (cue, "fadeIn"));
 
         if (audio == nullptr)
@@ -4136,11 +4138,16 @@ namespace wfg::cue
             one (§19.6). */
         const auto word = textOf (document.findById (run->cue), "onGo");
         const auto channel = samplingChannelOf (document, channelId);
+        const auto before = takes->of (channelId);
 
         if (word == "loop")
             takes->press (channelId, TakeVerb::loop, channel.layers);
         else if (word == "clear")
             takes->press (channelId, TakeVerb::clear, channel.layers);
+
+        /*  A PRESS OF THE GO'S (Doh! D3): undone by its inverse, or said. */
+        if (word == "loop" || word == "clear")
+            noteTake (runId, channelId, word == "loop" ? TakeVerb::loop : TakeVerb::clear, before);
     }
 
     void Runner::applyTakeOnGo (const juce::ValueTree& cue, const std::string& runId)
@@ -4712,7 +4719,7 @@ namespace wfg::cue
     }
 
     //==============================================================================
-    void Runner::fireFade (const juce::ValueTree& cue, const std::string& runId)
+    void Runner::fireFade (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick)
     {
         /*  A DRAWN CURVE, when there is one, is the whole of the shape: its last
             breakpoint is where the fade ends, and `level` and `curve` are not
@@ -4755,7 +4762,7 @@ namespace wfg::cue
             speed, so `rateOn` there moves nothing (EC). */
         if (const auto dcaId = textOf (cue, "dca"); ! dcaId.empty())
         {
-            beginDcaFade (dcaId, runId, toDb, numberOf (cue, "duration"),
+            beginDcaFade (tick, dcaId, runId, toDb, numberOf (cue, "duration"),
                           fadeCurveFrom (textOf (cue, "curve")), std::move (drawn.points));
             return;
         }
@@ -4775,7 +4782,7 @@ namespace wfg::cue
             moves only the speed carries its own. Read with one as the
             fallback, never nought, for the reason the cue's own speed is. */
         const auto speedMoves = rateOn
-                                  && beginRateFade (textOf (cue, "target"), runId,
+                                  && beginRateFade (tick, textOf (cue, "target"), runId,
                                                     osc::parseDouble (textOf (cue, "rate")).value_or (1.0),
                                                     numberOf (cue, "duration"),
                                                     fadeCurveFrom (textOf (cue, "curve")),
@@ -4783,7 +4790,7 @@ namespace wfg::cue
                                                     ! levelOn);
 
         if (levelOn)
-            beginFade (cue[idProperty].toString().toStdString(),
+            beginFade (tick, cue[idProperty].toString().toStdString(),
                               textOf (cue, "target"),
                               runId, "fade",
                               toDb,
@@ -4839,7 +4846,7 @@ namespace wfg::cue
         return -1;                      // a slice of some other cue, or of none
     }
 
-    void Runner::fireStop (const juce::ValueTree& cue, const std::string& runId)
+    void Runner::fireStop (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick)
     {
         const auto verb = textOf (cue, "verb");
 
@@ -4864,6 +4871,10 @@ namespace wfg::cue
                 {
                     if (run->range >= 0)
                     {
+                        /*  AS IT WAS, for Doh! (D3): withdrawn while its
+                            boundary is still to be placed. */
+                        noteFlag (*run, runId);
+
                         run->advanceRequested = true;
                         run->advanceTo = advanceTargetOf (cue, *run);
                         finishing.push_back (runId);
@@ -4874,6 +4885,8 @@ namespace wfg::cue
                         `afterMember` is one against a cue that is not a group:
                         there is no boundary to wait for, and a request quietly
                         ignored is worse than one honoured plainly. */
+                    noteHardStop (*run, runId, tick);
+                    run = runs.find (target->id);
                     run->askStop (goOfRun (runId));
                 }
 
@@ -4900,7 +4913,13 @@ namespace wfg::cue
                                     && takes->of (channelId).layers >= channel.layers;
 
                 if (channel.samples() && ! full)
+                {
+                    const auto before = takes->of (channelId);
                     takes->press (channelId, press, channel.layers);
+
+                    /*  A PRESS OF THE GO'S, for Doh! to undo by its inverse (D3). */
+                    noteTake (runId, channelId, press, before);
+                }
             }
 
             finishing.push_back (runId);
@@ -4927,11 +4946,15 @@ namespace wfg::cue
                 {
                     if (run->kind == "group")
                     {
+                        noteFlag (*run, runId);
+
                         run->stopAfter = verb == "afterMember" ? "member" : "iteration";
                         finishing.push_back (runId);
                         return;
                     }
 
+                    noteHardStop (*run, runId, tick);
+                    run = runs.find (target->id);
                     run->askStop (goOfRun (runId));
                 }
 
@@ -4950,7 +4973,7 @@ namespace wfg::cue
                                ? numberOf (cue, "duration")
                                : 0.0;
 
-        beginFade (cue[idProperty].toString().toStdString(),
+        beginFade (tick, cue[idProperty].toString().toStdString(),
                           textOf (cue, "target"),
                           runId, "transport",
                           silenceDb, seconds,
@@ -5042,7 +5065,8 @@ namespace wfg::cue
         return out;
     }
 
-    void Runner::beginFade (const std::string& selfCueId,
+    void Runner::beginFade (std::int64_t tick,
+                            const std::string& selfCueId,
                             const std::string& targetCueId,
                             const std::string& selfRunId, const std::string& kind,
                             double toDb, double seconds, FadeCurve curve,
@@ -5121,6 +5145,25 @@ namespace wfg::cue
             left behind in the member when the group released it. */
         const auto fromDb = target->ownLevel;
 
+        /*  A FADE OF THE GO ON SOMETHING THE GO DID NOT START (2026-10-03, Doh!
+            D3, namespace draft §24.13): what Doh! brings the level back from -
+            where it stood, and the fade that was moving it, copied before the
+            takeover below erases it. Hook-consumed, the level and the job; the
+            stop's account below is the handler's. */
+        const auto touched = ofTheOpenGo (self) && goOfRun (targetId) != goRecord.serial;
+        std::optional<FadeJob> movingBefore;
+
+        if (touched)
+            for (const auto& before : running)
+                if (before.target == targetId && ! before.retired && goOfRun (before.self) != goRecord.serial)
+                    movingBefore = before;
+
+        const auto wasStopping = target->stopAsked;
+        const auto wasWaiting = target->state == runState::waiting;
+        const auto dueBefore = target->dueTick;
+        const auto targetKind = target->kind;
+        const auto targetParent = target->parent;
+
         /*  A FADE TAKES OVER FROM A FADE, from where the level HAS GOT TO and
             not from where the first one started. Anything else is a jump, and a
             jump on a PA is a click nobody can account for afterwards.
@@ -5170,7 +5213,7 @@ namespace wfg::cue
         {
             job.stopWhenDone = true;
             job.stopsAtTick = stopWhenDone
-                                ? std::min (takeover.stopsAtTick, currentTick + job.ticksTotal + stopLagTicks)
+                                ? std::min (takeover.stopsAtTick, tick + job.ticksTotal + stopLagTicks)
                                 : takeover.stopsAtTick;
         }
         else if (stopWhenDone)
@@ -5179,7 +5222,7 @@ namespace wfg::cue
                 are the same number here and diverge only when somebody fades
                 over the top of it - or when the same fade moves the speed,
                 which is heard later (ED). */
-            job.stopsAtTick = currentTick + job.ticksTotal + stopLagTicks;
+            job.stopsAtTick = tick + job.ticksTotal + stopLagTicks;
         }
 
         /*  A MIC CUE FADED OUT IS ITS INPUT FADED (Phase 9b, namespace draft
@@ -5211,10 +5254,21 @@ namespace wfg::cue
             if (auto* stopping = runs.find (targetId))
                 stopping->askStop (goOfRun (self));
 
+        if (touched)
+        {
+            noteLevelTouch (targetId, targetId, {}, false, fromDb, job.toDb, tick, movingBefore);
+
+            if (stopWhenDone)
+                noteGoStop ({ targetId, self, targetKind, tick, tick + std::max (job.ticksTotal, 1),
+                              job.stopsAtTick, wasStopping, wasWaiting, dueBefore, fromDb },
+                            targetParent);
+        }
+
         running.push_back (job);
     }
 
-    bool Runner::beginRateFade (const std::string& targetCueId, const std::string& selfRunId,
+    bool Runner::beginRateFade (std::int64_t tick,
+                                const std::string& targetCueId, const std::string& selfRunId,
                                 double toRate, double seconds, FadeCurve curve,
                                 bool stopWhenDone, bool alone)
     {
@@ -5250,6 +5304,23 @@ namespace wfg::cue
             return nothing ({});
 
         const auto targetId = live->id;
+
+        /*  A SPEED THE GO MOVED (Doh! D3), as a level is noted in `beginFade`. */
+        const auto touched = ofTheOpenGo (selfRunId) && goOfRun (targetId) != goRecord.serial;
+        std::optional<FadeJob> movingBefore;
+
+        if (touched)
+            for (const auto& before : running)
+                if (before.target == "rate:" + targetId && ! before.retired
+                      && goOfRun (before.self) != goRecord.serial)
+                    movingBefore = before;
+
+        const auto wasStopping = live->stopAsked;
+        const auto wasWaiting = live->state == runState::waiting;
+        const auto dueBefore = live->dueTick;
+        const auto levelBefore = live->ownLevel;
+        const auto targetParent = live->parent;
+
         const auto takeover = resolveTakeover ("rate:" + targetId);
         auto* target = runs.find (targetId);
 
@@ -5282,22 +5353,33 @@ namespace wfg::cue
         {
             job.stopWhenDone = true;
             job.stopsAtTick = stopWhenDone
-                                ? std::min (takeover.stopsAtTick, currentTick + job.ticksTotal + latencyTicks() + 1)
+                                ? std::min (takeover.stopsAtTick, tick + job.ticksTotal + latencyTicks() + 1)
                                 : takeover.stopsAtTick;
         }
         else if (stopWhenDone)
         {
-            job.stopsAtTick = currentTick + job.ticksTotal + latencyTicks() + 1;
+            job.stopsAtTick = tick + job.ticksTotal + latencyTicks() + 1;
         }
 
         if (job.stopWhenDone)
             target->askStop (goOfRun (selfRunId));
 
+        if (touched)
+        {
+            noteLevelTouch ("rate:" + targetId, targetId, {}, true, job.fromRate, job.toRate, tick, movingBefore);
+
+            if (stopWhenDone)
+                noteGoStop ({ targetId, selfRunId, "media", tick, tick + std::max (job.ticksTotal, 1),
+                              job.stopsAtTick, wasStopping, wasWaiting, dueBefore, levelBefore },
+                            targetParent);
+        }
+
         running.push_back (job);
         return true;
     }
 
-    void Runner::beginDcaFade (const std::string& dcaId, const std::string& selfRunId,
+    void Runner::beginDcaFade (std::int64_t tick,
+                               const std::string& dcaId, const std::string& selfRunId,
                                double toDb, double seconds, FadeCurve curve,
                                std::vector<doc::FadePoint> points)
     {
@@ -5328,6 +5410,17 @@ namespace wfg::cue
             it: a fade over a fade on one DCA begins from where the first had
             got to, exactly as a fade over a fade on one cue does. */
         const auto key = "dca:" + dcaId;
+
+        /*  A TRIM THE GO MOVED (Doh! D3), noted before the takeover erases the
+            fade that was moving it. */
+        const auto touched = ofTheOpenGo (selfRunId);
+        std::optional<FadeJob> movingBefore;
+
+        if (touched)
+            for (const auto& before : running)
+                if (before.target == key && ! before.retired && goOfRun (before.self) != goRecord.serial)
+                    movingBefore = before;
+
         resolveTakeover (key);
 
         FadeJob job;
@@ -5339,6 +5432,9 @@ namespace wfg::cue
         job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
         job.curve = curve;
         job.points = std::move (points);
+
+        if (touched)
+            noteLevelTouch (key, {}, dcaId, false, job.fromDb, job.toDb, tick, movingBefore);
 
         running.push_back (job);
     }
@@ -5509,7 +5605,14 @@ namespace wfg::cue
             holderGroup != nullptr && holderGroup->id != run.parent)
             if (std::find (holderGroup->lostStrips.begin(), holderGroup->lostStrips.end(), stripId)
                   == holderGroup->lostStrips.end())
+            {
                 holderGroup->lostStrips.push_back (stripId);
+
+                /*  TAKEN FROM ANOTHER BANK BY A MEMBER OF THE GO'S (Doh! D3):
+                    given back when the Doh takes the GO back. */
+                if (ofTheOpenGo (run.id) && goChanges.lostStrips.size() < changesKept)
+                    goChanges.lostStrips.emplace_back (holderGroup->id, stripId);
+            }
     }
 
     void Runner::takeOverFrom (const std::string& groupRunId, const juce::ValueTree& group)
@@ -5533,7 +5636,14 @@ namespace wfg::cue
                 continue;
 
             if (auto* closing = runs.find (other.id))
+            {
+                /*  CLOSED BY THE GO (Doh! D3): opened again by the Doh, or fired
+                    again when it has finished by then. */
+                if (! closing->closing && ofTheOpenGo (groupRunId) && goChanges.closedSamplers.size() < changesKept)
+                    goChanges.closedSamplers.push_back (other.id);
+
                 closing->closing = true;
+            }
         }
     }
 
@@ -5733,7 +5843,7 @@ namespace wfg::cue
         }
     }
 
-    void Runner::beginReleaseFade (const std::string& runId, double seconds)
+    void Runner::beginReleaseFade (const std::string& runId, double seconds, std::int64_t tick)
     {
         auto* target = runs.find (runId);
 
@@ -5752,7 +5862,7 @@ namespace wfg::cue
         job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
         job.curve = FadeCurve::linear;
         job.stopWhenDone = true;
-        job.stopsAtTick = currentTick + job.ticksTotal;
+        job.stopsAtTick = tick + job.ticksTotal;
 
         target->askStop (0);
         running.push_back (job);
@@ -6187,6 +6297,15 @@ namespace wfg::cue
             return;
         }
 
+        /*  AND NOR IS A DOH'S PUT-BACK (2026-10-03, D3): a cue the GO stopped,
+            made again; a bank it closed, fired again. Nobody's GO, whatever its
+            parent carries; what is made under it later inherits that. */
+        if (makingForPutBack)
+        {
+            run->goSerial = 0;
+            return;
+        }
+
         /*  THE GO IN HAND, or the parent's: a member a group spawns minutes
             later is still the GO that entered the group. */
         run->goSerial = currentGo != 0 ? currentGo : (parent != nullptr ? parent->goSerial : 0);
@@ -6488,7 +6607,16 @@ namespace wfg::cue
                 }
 
         goRecord = std::move (record);
+        goChanges = {};
         lists.setDohOffer ({ listId, standby, tick });
+
+        /*  AND A SCENE A DOH PUT OFF UNTIL IT HAD ENDED is not brought back
+            over this GO (D3, namespace draft §24.13): most often the corrected
+            GO, whose own stop stops that scene again - a relaunch landing after
+            it would undo the very GO the operator meant. */
+        pendingRelaunches.erase (std::remove_if (pendingRelaunches.begin(), pendingRelaunches.end(),
+                                                 [&listId] (const PendingRelaunch& pending) { return pending.list == listId; }),
+                                 pendingRelaunches.end());
 
         /*  BOUNDED, belt and braces: the oldest entries go first. */
         while (leftByGo.size() > 16)
@@ -6541,10 +6669,17 @@ namespace wfg::cue
                 if (const auto filed = goRecord.filed.find (marked); filed != goRecord.filed.end())
                 {
                     const auto stoodOn = goRecord.cue == marked || isInside (goRecord.cue, marked);
+
+                    /*  A RUN OF THE CUE, OR OF A SCENE THAT WILL SPAWN IT
+                        (2026-10-03, D3): a GO that enters an act afresh makes the
+                        act, and the act's job spawns the member after its header,
+                        a tick or more later - which is no ignore of decision N's.
+                        Undone there, the filing let the act's footer, left to a
+                        device's operator, go out again (D3's test 23). */
                     const auto madeOne = std::any_of (runs.all().begin(), runs.all().end(),
-                                                      [&marked, serial] (const Run& run)
+                                                      [this, &marked, serial] (const Run& run)
                                                       {
-                                                          return run.cue == marked
+                                                          return (run.cue == marked || isInside (marked, run.cue))
                                                                    && (run.goSerial == serial || run.causedBy == serial);
                                                       });
 
@@ -6600,6 +6735,10 @@ namespace wfg::cue
     {
         if (goRecord.serial != 0)
             goRecord.escapedAfter = true;
+
+        /*  AND NO SCENE A DOH PUT OFF comes back after an Esc (D3, GV): Esc
+            stopped everything, and a Doh never undoes an Esc. */
+        pendingRelaunches.clear();
     }
 
     void Runner::markFire (Engine& engine, std::int64_t tick, const std::string& cueId,
@@ -6656,8 +6795,15 @@ namespace wfg::cue
         if (goRecord.serial != 0 && goRecord.list == listId)
         {
             goRecord = {};
+            goChanges = {};
             lists.setDohOffer ({});
         }
+
+        /*  AND A SCENE PUT OFF UNTIL IT HAD ENDED (D3): the jump has placed
+            the world, that scene with it. */
+        pendingRelaunches.erase (std::remove_if (pendingRelaunches.begin(), pendingRelaunches.end(),
+                                                 [&listId] (const PendingRelaunch& pending) { return pending.list == listId; }),
+                                 pendingRelaunches.end());
 
         /*  THE WHOLE MARK, its resume revoked (D2): the jump re-solves the
             world, and nothing paused carries on into it. */
@@ -8094,8 +8240,26 @@ namespace wfg::cue
         return out;
     }
 
-    std::string Runner::goDoh (Engine& engine, doc::ShowDocument& editable, std::int64_t tick)
+    std::string Runner::goDoh (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
+                               const std::vector<std::string>& supplied, std::vector<std::string>& drawn)
     {
+        /*  THE IDENTIFIERS ITS PUT-BACK DRAWS (D3): supplied by the record on a
+            replay, drawn fresh live, in the order they are asked for - and every
+            one of them on the applied record, as a jump's are. */
+        std::size_t taken = 0;
+
+        const std::function<std::string()> nextId = [&]
+        {
+            auto id = taken < supplied.size() ? supplied[taken] : std::string {};
+            ++taken;
+
+            if (id.empty())
+                id = ids.generate();
+
+            drawn.push_back (id);
+            return id;
+        };
+
         //  0. TOO SOON AFTER THE LAST DOH - a bounce, a held key, two hands.
         if (dohTooSoon (tick))
             return reason::tooSoon;
@@ -8131,12 +8295,25 @@ namespace wfg::cue
             return reason::tooLate;
 
         const auto record = goRecord;
+        const auto changes = goChanges;
         const auto serial = record.serial;
+
+        /*  WHERE THE GO LEFT THE POINTER, for the report's persistent cues
+            (D3): what the restored pointer brings back into the plan, and this
+            did not have. Read before the door below moves it. */
+        const auto leftAt = document.getAttribute (standbyAddressOf (record.list)).value_or (std::string {});
+        const auto ranOutThere = document.getAttribute (finishedAddressOf (record.list)).value_or ("false") == "true";
 
         //  4. THE POINTER, THROUGH ITS OWN DOOR: a cue gone, or no longer one
         //     the pointer may stand on, refuses the Doh before anything moves.
         if (const auto moved = editable.setAttribute (standbyAddressOf (record.list), record.cue); ! moved.ok)
             return moved.reason;
+
+        /*  THE LAST REPORT IS THIS PRESS'S TO REPLACE (D3): cleared now, by the
+            handler, and written again by the record the flush composes on the
+            next tick - so a press that has nothing to say leaves nothing stale
+            on the readout. */
+        lists.setDohReport ({});
 
         //  5. THE LIST'S FLAG, THE DEBOUNCE AND THE HISTORY: back to where the GO
         //     found them, the GO's own steps gone - by its serial, wherever a seek
@@ -8313,6 +8490,10 @@ namespace wfg::cue
         std::map<std::string, Fate> fates;
         std::set<std::string> revived;
 
+        /*  For the report (D3): the acts the GO ended that cannot come back,
+            and those another hand is stopping. */
+        std::vector<std::string> endedNotRevived, otherHandsActs;
+
         for (const auto& id : reached)
         {
             const auto* group = runs.find (id);
@@ -8320,6 +8501,10 @@ namespace wfg::cue
             if (group == nullptr || (group->stopAsked && group->stopAskedBy != serial))
             {
                 fates[id] = Fate::leave;
+
+                if (group != nullptr)
+                    otherHandsActs.push_back (id);
+
                 continue;
             }
 
@@ -8370,7 +8555,10 @@ namespace wfg::cue
                 revived.insert (id);
             }
             else
+            {
                 fates[id] = Fate::leave;
+                endedNotRevived.push_back (id);
+            }
         }
 
         /*  WHAT A REVIVED ACT RAN BECAUSE OF THE GO - its footer - is taken down
@@ -8406,7 +8594,16 @@ namespace wfg::cue
             take-down rewrites a run's state. */
         std::vector<std::string> leftCues;
 
-        const auto consider = [this, &leftCues] (const Run& run)
+        /*  And for the report, each with the kind and the device it went to
+            (D3): a device gone since is named by the identifier the run kept. */
+        struct LeftSend
+        {
+            std::string cue, kind, device;
+        };
+
+        std::vector<LeftSend> leftSends;
+
+        const auto consider = [this, &leftCues, &leftSends] (const Run& run)
         {
             if ((run.kind != "osc" && run.kind != "midi") || ! countsAsSent (run))
                 return;
@@ -8416,6 +8613,10 @@ namespace wfg::cue
 
             if (std::find (leftCues.begin(), leftCues.end(), run.cue) == leftCues.end())
                 leftCues.push_back (run.cue);
+
+            if (std::none_of (leftSends.begin(), leftSends.end(),
+                              [&run] (const LeftSend& sent) { return sent.cue == run.cue && sent.device == run.sentTo; }))
+                leftSends.push_back ({ run.cue, run.kind, run.sentTo });
         };
 
         std::set<std::string> consideredIds;
@@ -8456,6 +8657,25 @@ namespace wfg::cue
                                                                 .value_or ("1")).value_or (1.0));
         const auto ticks = static_cast<int> (std::lround (seconds * TickClock::rateHz));
 
+        /*  THE PRE-SENDS THE GO COMMITTED (D3, HO): a run of the GO's the
+            horizon made, holding a restore - read now, before the un-adopt
+            hands a block back and before the take-down clears the restore of
+            those left to their operators. Each is its address's FIRST GO
+            writer: the value before the horizon is what goes back there.
+            Hook-consumed fields, shaping only the flush's entries. Not a block
+            handed back whole: its pre-sends are the horizon's again. */
+        struct Committed
+        {
+            std::string address, restore, written, cue, device;
+        };
+
+        std::vector<Committed> committed;
+
+        for (const auto& run : runs.all())
+            if (ofTheGo.count (run.id) > 0 && handedBack.count (run.id) == 0 && run.kind == "osc"
+                  && run.preparedAfterGo >= 0 && ! run.restoreAddress.empty())
+                committed.push_back ({ run.restoreAddress, run.restoreAtom, run.preSentAtom, run.cue, run.sentTo });
+
         /*  HEARD, AND CARRIED ON BY THE NEXT GO (D2, namespace draft §24.12): the root of the
             standby's own chain - the cue the GO fired, or the scene it entered
             to fire it - built before anything moves. At most one; a start
@@ -8478,6 +8698,8 @@ namespace wfg::cue
         //  9. THE UN-ADOPT: what nobody heard, handed back as it was.
         for (const auto* adoption : unadopting)
             unadopt (engine, tick, *adoption, serial);
+
+        PutBack back;
 
         //  7. AN ESC SINCE THE GO: Esc has stopped everything, footers and all,
         //     and a Doh never undoes an Esc. The pointer went back above; what
@@ -8738,6 +8960,52 @@ namespace wfg::cue
                 job.nextMember = job.phaseCues.size();
                 scheduled.push_back (job);
             }
+
+            //  13. PUT BACK WHAT THE GO CHANGED ELSEWHERE (D3, namespace draft
+            //      §24.13): b. levels, speeds and DCA trims; c. the stops it
+            //      issued; d-f. the flags, the banks and the takes; g. its fades
+            //      and stops ended, their work undone. Identifiers drawn in
+            //      capture order.
+            back.tick = tick;
+            back.serial = serial;
+            back.list = record.list;
+            back.fadeTicks = ticks;
+            back.fadeSeconds = seconds;
+            back.nextId = nextId;
+            back.goRuns = ofTheGo;
+
+            putBackLevels (back, changes);
+            putBackStops (engine, back, changes);
+            putBackFlagsBanksTakes (engine, back, changes);
+
+            /*  g. WHAT ITS FADES AND STOPS WERE DOING IS UNDONE ABOVE, so they
+                end here, taken back - those the take-down left to run, and
+                those the un-adopt did (MJ). Their jobs on what the GO did not
+                start were replaced in b and c; on what it did, by the pause. */
+            std::vector<std::string> movers;
+
+            for (const auto& run : runs.all())
+                if ((ofTheGo.count (run.id) > 0 || run.causedBy == serial) && otherHands.count (run.id) == 0
+                      && ! run.isFinished() && (run.kind == "fade" || run.kind == "transport"))
+                    movers.push_back (run.id);
+
+            for (const auto& id : movers)
+            {
+                /*  A STOP DUE SOONER THAN THE DOH FADE, on a voice the pause
+                    gave no fade of its own (HT), stays: it lets go of its run,
+                    which ends here, and lands that stop itself. */
+                for (auto& job : running)
+                    if (job.self == id && job.stopWhenDone && ofTheGo.count (job.heldRun()) > 0)
+                    {
+                        job.self.clear();
+                        job.reportsSelf = false;
+                    }
+
+                endHere (id, tick);
+
+                if (auto* run = runs.find (id))
+                    run->takenBack = true;
+            }
         }
 
         //  12. THE MARK: as the GO found it - its resume too, so a Doh of a
@@ -8787,15 +9055,1220 @@ namespace wfg::cue
 
         setMark (engine, tick, record.list, std::move (mark));
 
+        //  13a. THE DESK (D3, namespace draft §24.13): every address the GO
+        //       wrote, each pre-send it committed folded in as that address's
+        //       first writer, and each marked left to its operator when the cue
+        //       that wrote it LAST leaves - read here, once. Moved into the
+        //       stash for the flush, which decides on the next tick against
+        //       what the desk holds then. Hook-consumed, all of it.
+        auto& out = stashFor (tick);
+        out.list = record.list;
+        out.report = true;
+
+        auto desk = changes.desk;
+
+        for (const auto& presend : committed)
+        {
+            const auto restore = osc::Value::fromAtom (presend.restore);
+
+            if (! restore.has_value())
+                continue;
+
+            const auto entry = std::find_if (desk.begin(), desk.end(),
+                                             [&presend] (const DeskBefore& before) { return before.address == presend.address; });
+
+            if (entry != desk.end())
+            {
+                entry->before = *restore;
+                continue;
+            }
+
+            const auto written = osc::Value::fromAtom (presend.written);
+
+            if (! written.has_value())
+                continue;
+
+            DeskBefore folded;
+            folded.address = presend.address;
+            folded.device = presend.device;
+            folded.before = *restore;
+            folded.lastWritten = *written;
+            folded.lastWriter = presend.cue;
+            desk.push_back (folded);
+        }
+
+        for (auto& entry : desk)
+        {
+            entry.leftToOperator = dohOfDevice (document, "osc", entry.device, entry.lastWriter) == dohSetting::leave;
+            out.desk.push_back (entry);
+        }
+
+        if (changes.deskOverflow)
+            out.items.push_back ("the GO wrote more addresses than Doh! keeps - those after the "
+                                   + std::to_string (changesKept) + "th were not put back");
+
+        //  14. THE REPORT'S OWN WORDS (D3): what the handler knows - the flush
+        //      adds what the desks say on the next tick.
+        auto& items = out.items;
+
+        if (record.escapedAfter)
+            items.push_back ("Esc since the GO: only the pointer and the desk went back");
+
+        for (const auto& rootId : roots)
+            if (otherHands.count (rootId) > 0)
+                if (const auto* root = runs.find (rootId))
+                    items.push_back (cueLabel (root->cue) + ": already being stopped - left to that stop");
+
+        for (const auto& id : otherHandsActs)
+            if (const auto* act = runs.find (id))
+                items.push_back (cueLabel (act->cue) + ": being stopped by another hand - left to that stop");
+
+        /*  AN ACT THE GO ENDED THAT CANNOT COME BACK (L27) - it loops, or the
+            scene it sits in went on because it ended - and one the GO only
+            finished a round of, which went on into its next. */
+        for (const auto& id : endedNotRevived)
+            if (const auto* act = runs.find (id))
+                items.push_back (act->isFinished() || act->iterations == 1
+                                   ? cueLabel (act->cue) + " ended when " + cueLabel (record.cue)
+                                       + " was fired; it was not brought back - the next GO enters it again from its header"
+                                   : cueLabel (act->cue) + " went on to its next round when " + cueLabel (record.cue)
+                                       + " was fired; it was not brought back");
+
+        /*  WHAT COULD NOT BE TAKEN BACK, where the cue takes back: sent again
+            by the next GO. What leaves is named below, with its device. */
+        for (const auto& [cue, device] : changes.unputtable)
+            if (dohOfDevice (document, "osc", device, cue) == dohSetting::takeBack)
+                items.push_back (cueLabel (cue) + ": could not be taken back - the next GO sends it again");
+
+        /*  EVERY DEVICE AND CUE LEFT TO ITS OPERATOR, by device, in the order
+            they were sent (the author, 2026-10-01). */
+        {
+            std::vector<std::pair<std::string, std::vector<std::string>>> byDevice;
+
+            for (const auto& sent : leftSends)
+            {
+                const auto name = deviceLabel (sent.kind == "midi" ? "port" : "mount", sent.device);
+                auto at = std::find_if (byDevice.begin(), byDevice.end(),
+                                        [&name] (const auto& entry) { return entry.first == name; });
+
+                if (at == byDevice.end())
+                {
+                    byDevice.emplace_back (name, std::vector<std::string> {});
+                    at = std::prev (byDevice.end());
+                }
+
+                if (std::find (at->second.begin(), at->second.end(), cueLabel (sent.cue)) == at->second.end())
+                    at->second.push_back (cueLabel (sent.cue));
+            }
+
+            for (const auto& [device, cues] : byDevice)
+            {
+                std::string list;
+
+                for (const auto& cue : cues)
+                    list += (list.empty() ? "" : ", ") + cue;
+
+                items.push_back (device + ": " + list + " - left to its operator, not sent again");
+            }
+        }
+
+        /*  THE PERSISTENT CUES THE RESTORED POINTER BROUGHT BACK INTO THE PLAN,
+            which the Doh's own pass left alone (HN): in the section's plan at
+            the cue the GO fired and not at the one it left. The document only. */
+        if (! record.escapedAfter && ! persistentLeft.empty())
+        {
+            const auto planned = [this, &record] (const std::string& standby, bool ranOut)
+            {
+                std::set<std::string> cues;
+                const auto plan = solvePersistent (document, durations, mounts, record.list, standby, ranOut);
+
+                for (const auto& wants : plan.runs)
+                    cues.insert (wants.cue);
+
+                for (const auto& value : plan.values)
+                    cues.insert (value.writer);
+
+                return cues;
+            };
+
+            const auto before = planned (leftAt, ranOutThere);
+            const auto now = planned (record.cue, record.finishedBefore);
+
+            for (const auto& cue : now)
+                if (persistentLeft.count (cue) > 0 && before.count (cue) == 0)
+                {
+                    const auto node = document.findById (cue);
+                    const auto kind = node.hasType ("Midi") ? std::string ("midi") : std::string ("osc");
+                    const auto device = sendTargetOf (document, kind, cue);
+
+                    items.push_back ("persistent " + cueLabel (cue) + " on "
+                                       + deviceLabel (kind == "midi" ? "port" : "mount",
+                                                      device.empty() ? textOf (node, kind == "midi" ? "port" : "address")
+                                                                     : device)
+                                       + ": not re-asserted - left to its operator");
+                }
+        }
+
+        for (const auto& item : back.items)
+            items.push_back (item);
+
         //  15. AND THE RECORD IS SPENT: one press, one GO.
         lastDohTick = tick;
         lastDohList = record.list;
         takenBackSerials.insert (serial);
         leftByGo.erase (serial);
         goRecord = {};
+        goChanges = {};
         lists.setDohOffer ({});
 
         return {};
+    }
+
+    //==============================================================================
+    /*  WHAT A GO CHANGED ELSEWHERE, AND HOW DOH! PUTS IT BACK (2026-10-03, D3,
+        PRD §3.32, namespace draft §24.13). The captures below run where each
+        change is made, while the GO's record is open; the put-backs in
+        `go.doh`'s handler, from handler state; the desk, the values and the
+        report in one hook, on the tick after the press. */
+    bool Runner::ofTheOpenGo (const std::string& runId) const
+    {
+        return goRecord.serial != 0 && goOfRun (runId) == goRecord.serial;
+    }
+
+    void Runner::noteLevelTouch (const std::string& key, const std::string& heldRun, const std::string& dca,
+                                 bool movesRate, double from, double goTo, std::int64_t tick,
+                                 const std::optional<FadeJob>& superseded)
+    {
+        /*  ONE PER KEY, the first fade's `from` and the job it took over, the
+            last fade's destination: a GO whose scene fades a bed twice brings it
+            back to where it stood before the first. */
+        for (auto& touch : goChanges.levels)
+            if (touch.key == key)
+            {
+                touch.goTo = goTo;
+                return;
+            }
+
+        if (goChanges.levels.size() >= changesKept)
+            return;
+
+        LevelTouch touch;
+        touch.key = key;
+        touch.heldRun = heldRun;
+        touch.dca = dca;
+        touch.movesRate = movesRate;
+        touch.from = from;
+        touch.goTo = goTo;
+        touch.atTick = tick;
+        touch.superseded = superseded;
+        goChanges.levels.push_back (touch);
+    }
+
+    void Runner::noteGoStop (const GoStop& stop, const std::string& targetParent)
+    {
+        if (goChanges.stops.size() < changesKept)
+            goChanges.stops.push_back (stop);
+
+        /*  AND THE ACT IT SITS IN IS REACHED (HE): a stop that lands on an
+            older act's last sounding member ends the act, and the footer that
+            sets off is the GO's - taken down with it, and the act brought back
+            to life before the member is put back under it. */
+        if (const auto* act = runs.find (targetParent);
+            act != nullptr && act->isGroup() && ! act->isFinished() && goOfRun (act->id) != goRecord.serial
+              && isManualGroup (document.findById (act->cue))
+              && std::find (goRecord.touched.begin(), goRecord.touched.end(), act->id) == goRecord.touched.end())
+            goRecord.touched.push_back (act->id);
+    }
+
+    void Runner::noteHardStop (const Run& target, const std::string& source, std::int64_t tick)
+    {
+        if (! ofTheOpenGo (source) || goOfRun (target.id) == goRecord.serial)
+            return;
+
+        noteGoStop ({ target.id, source, target.kind, tick, tick + 1, 0, target.stopAsked,
+                      target.state == runState::waiting, target.dueTick, target.ownLevel },
+                    target.parent);
+    }
+
+    void Runner::noteFlag (const Run& target, const std::string& source)
+    {
+        if (! ofTheOpenGo (source) || goOfRun (target.id) == goRecord.serial
+              || goChanges.flags.size() >= changesKept)
+            return;
+
+        for (const auto& flag : goChanges.flags)
+            if (flag.run == target.id)
+                return;
+
+        goChanges.flags.push_back ({ target.id, target.advanceRequested, target.advanceTo, target.stopAfter });
+    }
+
+    void Runner::noteTake (const std::string& source, const std::string& channel, TakeVerb verb, const Take& before)
+    {
+        if (takes == nullptr || ! ofTheOpenGo (source) || goChanges.takes.size() >= changesKept)
+            return;
+
+        const auto& after = takes->of (channel);
+
+        /*  A PRESS THAT MOVED NOTHING asks nothing to be undone. */
+        if (after.state == before.state && after.layers == before.layers)
+            return;
+
+        goChanges.takes.push_back ({ channel, verb, before.state, after.state, before.layers, after.layers });
+    }
+
+    void Runner::deskBeforeWrite (const OscJob& job, std::optional<osc::Value>& held, bool& captured)
+    {
+        captured = false;
+
+        if (mounts == nullptr || goRecord.serial == 0)
+            return;
+
+        /*  THE DESK'S ECHO OF THE GO'S LAST WRITE HERE, kept before this write
+            forgets it (red team m9): a later cue, a pre-send of the next scene.
+            Only while the tree still holds the GO's write - an echo of anybody
+            else's is not the desk's answer to the GO. */
+        if (const auto* now = mounts->valueOf (job.address))
+            for (auto& entry : goChanges.desk)
+                if (entry.address == job.address && ! entry.echo.has_value() && *now == entry.lastWritten)
+                    if (const auto* first = mounts->firstObservedOf (job.address))
+                        entry.echo = *first;
+
+        /*  A WRITE OF THE GO'S, and never a pre-send (GY): the next scene's,
+            made after the GO, is nobody's GO and fails the test above; one the
+            GO committed, which asked the desk first and kept what it said, is
+            folded in by the Doh from that restore - so the entry's last write
+            stays the GO's own. A pre-send is known by having asked: its restore
+            is on it before it writes. A cue of a block the GO adopted that was
+            left for the entry - nothing pre-sent - writes when the GO fires it,
+            and that is a GO write like any other. */
+        if (! ofTheOpenGo (job.self))
+            return;
+
+        const auto* writer = runs.find (job.self);
+
+        if (writer == nullptr || ! writer->restoreAddress.empty() || ! writer->prepare.empty())
+            return;
+
+        captured = true;
+
+        if (const auto* seen = mounts->observedOf (job.address))
+            held = *seen;
+        else if (const auto* value = mounts->valueOf (job.address))
+            held = *value;
+    }
+
+    void Runner::deskAfterWrite (const OscJob& job, const std::optional<osc::Value>& held,
+                                 const std::string& mountId, const osc::Value& value)
+    {
+        const auto* writer = runs.find (job.self);
+
+        if (writer == nullptr || mounts == nullptr)
+            return;
+
+        const auto device = writer->sentTo.empty() ? mountId : writer->sentTo;
+        const auto* node = mounts->nodeAt (job.address);
+
+        /*  NOTHING TO READ BACK - an event, which has no value, or a device
+            that describes nothing: named, never put back (L13). */
+        if (node == nullptr || node->kind == tree::Kind::event)
+        {
+            const std::pair<std::string, std::string> sent { writer->cue, device };
+
+            if (goChanges.unputtable.size() < changesKept
+                  && std::find (goChanges.unputtable.begin(), goChanges.unputtable.end(), sent) == goChanges.unputtable.end())
+                goChanges.unputtable.push_back (sent);
+
+            return;
+        }
+
+        auto entry = std::find_if (goChanges.desk.begin(), goChanges.desk.end(),
+                                   [&job] (const DeskBefore& before) { return before.address == job.address; });
+
+        if (entry == goChanges.desk.end())
+        {
+            if (goChanges.desk.size() >= changesKept)
+            {
+                goChanges.deskOverflow = true;
+                return;
+            }
+
+            /*  THE FIRST GO WRITE HERE says what was there before the GO. */
+            DeskBefore made;
+            made.address = job.address;
+            made.before = held;
+            goChanges.desk.push_back (made);
+            entry = std::prev (goChanges.desk.end());
+        }
+
+        /*  EVERY ONE SAYS WHAT IS THERE NOW, and who put it there: the address
+            follows its last writer (L33). */
+        entry->lastWritten = value;
+        entry->echo.reset();
+        entry->lastWriter = writer->cue;
+        entry->device = device;
+    }
+
+    Runner::DohStash& Runner::stashFor (std::int64_t tick)
+    {
+        /*  A FILL FINDING AN OLDER STAMP CLEARS IT FIRST: never flushed in a
+            replay, it holds no more than one tick's worth there; two fills in
+            one tick - a Doh and a jump in one drain - add up. */
+        if (stash.tick != tick)
+        {
+            stash = {};
+            stash.tick = tick;
+        }
+
+        return stash;
+    }
+
+    std::string Runner::cueLabel (const std::string& cueId) const
+    {
+        const auto cue = document.findById (cueId);
+
+        if (! cue.isValid())
+            return cueId;
+
+        const auto number = cue[juce::Identifier ("number")].toString().toStdString();
+        const auto name = cue[juce::Identifier ("name")].toString().toStdString();
+
+        if (! number.empty() && ! name.empty())
+            return number + " " + name;
+
+        if (! number.empty())
+            return number;
+
+        return name.empty() ? cueId : name;
+    }
+
+    std::string Runner::deviceLabel (const std::string& kind, const std::string& deviceId) const
+    {
+        if (deviceId.empty())
+            return "a device";
+
+        /*  A DEVICE GONE SINCE is named by the identifier its runs kept. */
+        const auto name = document.getAttribute ("/godot/" + kind + "/" + deviceId + "/name").value_or (std::string {});
+        return name.empty() ? deviceId : name;
+    }
+
+    std::set<std::string> Runner::leftCuesUnder (const std::string& sceneCue) const
+    {
+        std::set<std::string> left;
+
+        std::function<void (const juce::ValueTree&)> walk = [&] (const juce::ValueTree& node)
+        {
+            for (const auto& child : node)
+            {
+                const auto id = child[idProperty].toString().toStdString();
+
+                if ((child.hasType ("Osc") || child.hasType ("Midi")) && ! id.empty()
+                      && dohOf (document, id) == dohSetting::leave)
+                    left.insert (id);
+
+                walk (child);
+            }
+        };
+
+        if (const auto scene = document.findById (sceneCue); scene.isValid())
+            walk (scene);
+
+        return left;
+    }
+
+    //------------------------------------------------------------------------------
+    void Runner::putBackLevels (PutBack& back, const GoChanges& changes)
+    {
+        /*  b. LEVELS, SPEEDS AND DCA TRIMS (GS): one job per key, from where it
+            is now - back to where it stood before the GO, over the panic fade,
+            or, when a fade was moving it before the GO, that fade made again
+            where it would be now, its stop still landing on its tick. Never
+            over another writer: a key a fade the GO did not fire holds, or one
+            a hand has moved off the GO's value, is left and said (L22). The
+            jobs and levels are a hook's; nothing here is a record. */
+        for (const auto& touch : changes.levels)
+        {
+            Run* held = nullptr;
+
+            if (! touch.heldRun.empty())
+            {
+                /*  The pause owns what the GO started; a cue its stop ended is
+                    the relaunch's, placed at the level it would have. */
+                if (back.goRuns.count (touch.heldRun) > 0)
+                    continue;
+
+                held = runs.find (touch.heldRun);
+
+                if (held == nullptr || held->isFinished())
+                    continue;
+            }
+
+            if (touch.dca.empty() && held == nullptr)
+                continue;
+
+            const auto writtenBy = [this, &back] (const FadeJob& job, bool ours)
+            {
+                return ! job.retired && ! job.self.empty() && (goOfRun (job.self) == back.serial) == ours;
+            };
+
+            const auto goHolds = std::any_of (running.begin(), running.end(), [&] (const FadeJob& job)
+                                              { return job.target == touch.key && writtenBy (job, true); });
+            const auto otherHolds = std::any_of (running.begin(), running.end(), [&] (const FadeJob& job)
+                                                 { return job.target == touch.key && writtenBy (job, false); });
+
+            const auto now = ! touch.dca.empty() ? (dcas != nullptr ? dcas->trimOf (touch.dca) : touch.goTo)
+                                                 : touch.movesRate ? held->ownRate : held->ownLevel;
+            const auto tolerance = touch.movesRate ? 0.001 : 0.05;
+
+            if (otherHolds || (! goHolds && std::abs (now - touch.goTo) > tolerance))
+            {
+                const auto what = ! touch.dca.empty() ? deviceLabel ("dca", touch.dca)
+                                                      : cueLabel (held->cue);
+
+                back.items.push_back (what + (touch.movesRate ? ": its speed" : ": its level")
+                                        + " moved by another hand since the GO - left where it is");
+                continue;
+            }
+
+            /*  THE GO'S OWN JOB GOES, and any stop it carried with it: a stop
+                of the GO's is called off or put back below, and a stop it had
+                taken over from before it comes back with that fade. */
+            resolveTakeover (touch.key);
+
+            FadeJob job;
+            job.target = touch.key;
+            job.dca = touch.dca;
+            job.reportsSelf = false;
+            job.movesRate = touch.movesRate;
+            job.curve = FadeCurve::linear;
+
+            if (touch.movesRate)
+                job.fromRate = now;
+            else
+                job.fromDb = now;
+
+            if (touch.superseded.has_value())
+            {
+                const auto& before = *touch.superseded;
+                const auto remaining = std::max<std::int64_t> (0, before.ticksTotal - before.ticksDone
+                                                                    - (back.tick - touch.atTick));
+
+                job.ticksTotal = static_cast<int> (std::max<std::int64_t> (remaining, back.fadeTicks));
+                job.curve = before.curve;
+                job.stopWhenDone = before.stopWhenDone;
+                job.stopsAtTick = before.stopsAtTick;
+
+                if (touch.movesRate)
+                    job.toRate = before.toRate;
+                else
+                    job.toDb = before.toDb;
+            }
+            else
+            {
+                job.ticksTotal = back.fadeTicks;
+
+                if (touch.movesRate)
+                    job.toRate = touch.from;
+                else
+                    job.toDb = touch.from;
+            }
+
+            running.push_back (job);
+        }
+    }
+
+    void Runner::putBackStops (Engine& engine, PutBack& back, const GoChanges& changes)
+    {
+        /*  c. THE STOPS IT ISSUED (GT), in the order it issued them, one answer
+            per run - from handler state alone: the command tick the stop was
+            counted from, whether one had been asked before it, the run's own
+            records. */
+        std::set<std::string> answered;
+
+        for (const auto& stop : changes.stops)
+        {
+            if (! answered.insert (stop.target).second || back.goRuns.count (stop.target) > 0)
+                continue;
+
+            auto* target = runs.find (stop.target);
+
+            /*  A STOP ALREADY COMING BEFORE THE GO lands as it was going to:
+                the fade that carried it was made again above. */
+            if (target == nullptr || stop.wasStopping)
+                continue;
+
+            const auto sound = target->kind == "media" || target->kind == "mic";
+
+            /*  1. CALLED OFF: it has not landed. A sound; a scene only in the
+                GO's own drain, before its job has seen the stop and ended its
+                members - past that, handed back, it would play its next member
+                or run its footer (EK). A mic's gate opens again, where the GO's
+                stop had shut it (live only, a Player call as the shut was). */
+            if (! target->isFinished() && back.tick < stop.landsAt
+                  && (sound || (target->isGroup() && back.tick == stop.goTick)))
+            {
+                target->state = stop.wasWaiting ? runState::waiting : runState::playing;
+                target->stopAsked = false;
+                target->stopAskedBy = 0;
+                target->askedAgain = false;
+
+                for (auto& job : running)
+                    if (job.heldRun() == stop.target && job.stopWhenDone && job.stopsAtTick == stop.jobStopsAt)
+                        job.stopWhenDone = false;
+
+                if (target->kind == "mic" && ! stop.wasWaiting && audio != nullptr && target->track >= 0
+                      && samplesPerTick > 0)
+                    audio->openLive (target->track,
+                                     audio->samplesElapsed() + static_cast<std::int64_t> (latencyTicks()) * samplesPerTick,
+                                     back.fadeSeconds);
+
+                continue;
+            }
+
+            if (target->killed)
+                continue;
+
+            /*  4. A SCENE STILL ENDING - its members down, its footer running or
+                about to: put back once it has ended, so its release does not
+                land over the relaunch. Unless a GO on its list comes first. */
+            if (target->isGroup())
+            {
+                if (! target->isFinished())
+                {
+                    PendingRelaunch pending;
+                    pending.list = back.list;
+                    pending.groupRun = target->id;
+                    pending.goTick = stop.goTick;
+                    pending.dohTick = back.tick;
+                    pending.levelBefore = stop.levelBefore;
+                    pending.left = leftCuesUnder (target->cue);
+                    pendingRelaunches.push_back (pending);
+
+                    back.items.push_back (cueLabel (target->cue) + " comes back once it has ended, unless a GO comes first");
+                    continue;
+                }
+
+                if (target->endedAtTick >= stop.goTick)
+                    relaunchScene (engine, back, target->id, leftCuesUnder (target->cue));
+
+                continue;
+            }
+
+            /*  2 AND 3. A CUE IT STOPPED, made again where it would be now - once
+                its stop has landed, ended or not (a second voice for a tick or
+                two, L16). A send it stopped after it fired is nothing to put
+                back: its message stood. */
+            const auto landed = target->isFinished() ? target->endedAtTick >= stop.goTick
+                                                     : sound && back.tick >= stop.landsAt;
+
+            if (! landed)
+                continue;
+
+            std::optional<FadeJob> before;
+
+            for (const auto& touch : changes.levels)
+                if (touch.key == stop.target)
+                    before = touch.superseded;
+
+            relaunchStopped (engine, back, stop, before);
+        }
+    }
+
+    bool Runner::relaunchStopped (Engine& engine, PutBack& back, const GoStop& stop,
+                                  const std::optional<FadeJob>& before)
+    {
+        const auto* target = runs.find (stop.target);
+
+        if (target == nullptr)
+            return false;
+
+        const auto cueId = target->cue;
+        const auto kind = target->kind;
+        const auto cue = document.findById (cueId);
+        const auto label = cueLabel (cueId);
+
+        if (! cue.isValid())
+            return false;
+
+        const auto sends = kind == "osc" || kind == "midi";
+        const auto sound = kind == "media" || kind == "mic";
+
+        if (! sends && ! sound)
+            return false;
+
+        /*  A SEND THE GO STOPPED AFTER IT HAD FIRED: its message stood (a stop
+            unsends nothing), and there is nothing to put back or to say. */
+        if (sends && ! stop.wasWaiting)
+            return false;
+
+        /*  WHERE IT SITS: at the top of its list, or under running manual acts
+            - one the Doh has just brought back to life included. A member of a
+            scene the machine paces is the scene's: an automatic sequence's next
+            member, which the stop set going, plays on (L14). */
+        std::vector<std::string> above;
+        std::map<std::string, std::string> runFor;
+        std::string act;
+
+        for (auto at = target->parent; ! at.empty();)
+        {
+            const auto* group = runs.find (at);
+
+            if (group == nullptr || group->isFinished() || group->stopAsked
+                  || ! isManualGroup (document.findById (group->cue)))
+            {
+                back.items.push_back (label + ": stopped by the GO inside a scene - not started again");
+                return false;
+            }
+
+            if (act.empty())
+                act = group->id;
+
+            runFor[group->cue] = group->id;
+            above.insert (above.begin(), group->cue);
+            at = group->parent;
+        }
+
+        PlannedRun wants;
+        wants.cue = cueId;
+        wants.ancestors = above;
+
+        SeatResume arrival;
+        arrival.arrivalTicks = std::max (back.fadeTicks, 1);
+        auto arrives = false;
+
+        if (stop.wasWaiting)
+        {
+            /*  STOPPED IN ITS PRE-WAIT (red team m7): nothing of it had happened.
+                Still to come, it waits out the rest of that wait and arrives
+                whole, at its own level - whatever a send's device says, since
+                nothing of it had left. Its time passed while it was stopped: a
+                sound placed as if it had started then, fading in; a send fired
+                now, late - only where its cue takes back. The Doh never sends a
+                device left to its operator anything late (HR). */
+            if (stop.dueTick > back.tick)
+            {
+                wants.when = planned::due;
+                wants.startsIn = static_cast<double> (stop.dueTick - back.tick) / static_cast<double> (TickClock::rateHz);
+            }
+            else if (sends)
+            {
+                if (dohOf (document, cueId) != dohSetting::takeBack)
+                {
+                    back.items.push_back (deviceLabel (kind == "midi" ? "port" : "mount", sendTargetOf (document, kind, cueId))
+                                            + ": " + label + " - left to its operator, not sent (the GO stopped it)");
+                    return false;
+                }
+
+                wants.when = planned::due;
+                wants.startsIn = 0.0;
+            }
+            else
+            {
+                const auto origin = target->armedOrigin > 0.0 ? target->armedOrigin : numberOf (cue, "startOffset");
+                wants.when = planned::sounding;
+                wants.offset = origin + static_cast<double> (back.tick - stop.dueTick)
+                                          / static_cast<double> (TickClock::rateHz) * documentSpeedOf (cue);
+                arrives = true;
+            }
+        }
+        else
+        {
+            /*  ASKED FOR AND NEVER STARTED: where it would be is the disk's to
+                say, and nobody can (L14). */
+            if (target->startedAtTick < 0)
+            {
+                back.items.push_back (label + ": stopped by the GO while it was still arming - not started again");
+                return false;
+            }
+
+            wants.when = planned::sounding;
+            arrives = true;
+
+            if (kind == "media")
+            {
+                /*  WHERE IT WOULD BE NOW, in its file: from its own start at
+                    its cue's speed, as K8 counts a paused bed; a slice at the
+                    in-point of the one it was in (L1). Not if it would have run
+                    out by now (ruling 16). */
+                const auto point = countedPoint (*target, back.tick);
+
+                if (! rangesOf (cue).empty())
+                {
+                    wants.range = point.range;
+                    wants.offset = 0.0;
+                }
+                else
+                {
+                    wants.offset = point.from;
+                }
+
+                if (! notOver (cue, wants.range, wants.offset))
+                    return false;
+            }
+        }
+
+        if (arrives && kind == "media")
+        {
+            /*  AT THE LEVEL IT WOULD HAVE NOW: where the fade moving it before
+                the GO would have it, carried on from there; else where it was. */
+            auto level = stop.levelBefore;
+
+            if (before.has_value() && ! before->movesRate && before->ticksTotal > 0)
+            {
+                const auto done = before->ticksDone + (back.tick - stop.goTick);
+                const auto progress = std::clamp (static_cast<double> (done) / before->ticksTotal, 0.0, 1.0);
+
+                level = before->points.empty() ? fadeLevelDb (before->fromDb, before->toDb, progress, before->curve)
+                                               : fadeLevelDb (before->fromDb, before->points, progress);
+
+                const auto rest = before->ticksTotal - done;
+
+                if (rest > 0)
+                    arrival.carryOn[cueId] = { before->toDb, static_cast<int> (rest), before->curve, {}, false };
+            }
+
+            if (! stop.wasWaiting)
+                arrival.levels[cueId] = level;
+        }
+
+        makingForPutBack = true;
+        seatPlan (engine, back.tick, std::vector<PlannedRun> { wants }, runFor, back.nextId,
+                  arrives ? &arrival : nullptr);
+        makingForPutBack = false;
+
+        const auto found = runFor.find (cueId);
+
+        if (found == runFor.end())
+            return false;
+
+        const auto made = found->second;
+
+        /*  STILL TO COME: armed now and kept waiting, as an entry arms it. */
+        if (wants.when == planned::due)
+        {
+            if (kind == "media")
+                armMedia (engine, cue, made);
+            else if (kind == "mic")
+                armMic (engine, cue, made);
+        }
+
+        /*  UNDER ITS ACT, as a member it has launched (§24.12). */
+        if (! act.empty())
+            adoptIntoParentJob (act, made);
+
+        back.items.push_back (label + ": put back where it would be now");
+        return true;
+    }
+
+    bool Runner::relaunchScene (Engine& engine, PutBack& back, const std::string& groupRun,
+                                const std::set<std::string>& left)
+    {
+        const auto* scene = runs.find (groupRun);
+
+        if (scene == nullptr)
+            return false;
+
+        const auto sceneCue = scene->cue;
+        const auto group = document.findById (sceneCue);
+        const auto label = cueLabel (sceneCue);
+
+        /*  ONLY A SCENE THE WALK TIMES AS WRITTEN - a timeline or an automatic
+            sequence that plays once, its members in order - has a second to be
+            put back at (L14). */
+        if (! group.isValid() || textOf (group, "mode") == "sampler" || ! seeksAsWritten (*scene, group))
+        {
+            back.items.push_back (label + ": stopped by the GO - not started again (only a scene that plays once"
+                                          " by itself can be put back where it would be)");
+            return false;
+        }
+
+        std::vector<std::string> above;
+        std::map<std::string, std::string> runFor;
+        std::string act;
+
+        for (auto at = scene->parent; ! at.empty();)
+        {
+            const auto* up = runs.find (at);
+
+            if (up == nullptr || up->isFinished() || up->stopAsked)
+            {
+                back.items.push_back (label + ": stopped by the GO inside a scene that has ended - not started again");
+                return false;
+            }
+
+            if (act.empty() && isManualGroup (document.findById (up->cue)))
+                act = up->id;
+
+            runFor[up->cue] = up->id;
+            above.insert (above.begin(), up->cue);
+            at = up->parent;
+        }
+
+        /*  THE SECOND IT WOULD HAVE REACHED NOW, had the GO not stopped it. */
+        const auto listId = listOfCue (sceneCue);
+        const auto elapsed = static_cast<double> (back.tick - scene->launchRequestedAtTick)
+                               / static_cast<double> (TickClock::rateHz);
+        const auto plan = solve (document, handlerDurations(), mounts, { listId, sceneCue, std::max (0.0, elapsed) });
+
+        if (! plan.ok || ! plan.confused.empty())
+        {
+            back.items.push_back (label + ": stopped by the GO - not started again (where it would be is not known)");
+            return false;
+        }
+
+        std::vector<PlannedRun> wanted;
+
+        for (const auto& wants : plan.runs)
+            if (wants.cue == sceneCue
+                  || std::find (wants.ancestors.begin(), wants.ancestors.end(), sceneCue) != wants.ancestors.end())
+                wanted.push_back (wants);
+
+        const auto own = std::find_if (wanted.begin(), wanted.end(),
+                                       [&sceneCue] (const PlannedRun& wants) { return wants.cue == sceneCue; });
+
+        /*  OVER BY NOW: it would have ended, and stays ended. */
+        if (own == wanted.end() || own->when == planned::finished)
+            return false;
+
+        /*  THE ONE RULE (HR): a cue left to its operator that the plan places
+            before this second - sent before the stop, or due while the scene
+            was stopped - is planned over and named, never sent late; one after
+            it is seated, and sends at its time. */
+        std::vector<std::pair<std::string, std::vector<std::string>>> heldBack;
+        std::vector<std::string> placedBefore;
+
+        for (const auto& wants : wanted)
+            if (wants.when == planned::finished && left.count (wants.cue) == 0
+                  && document.findById (wants.cue).hasType ("Osc"))
+                placedBefore.push_back (wants.cue);
+
+        for (auto& wants : wanted)
+        {
+            if (left.count (wants.cue) == 0 || wants.when == planned::due)
+                continue;
+
+            wants.when = planned::finished;
+
+            const auto node = document.findById (wants.cue);
+            const auto kind = node.hasType ("Midi") ? std::string ("midi") : std::string ("osc");
+            const auto device = deviceLabel (kind == "midi" ? "port" : "mount", sendTargetOf (document, kind, wants.cue));
+            auto at = std::find_if (heldBack.begin(), heldBack.end(),
+                                    [&device] (const auto& entry) { return entry.first == device; });
+
+            if (at == heldBack.end())
+            {
+                heldBack.emplace_back (device, std::vector<std::string> {});
+                at = std::prev (heldBack.end());
+            }
+
+            at->second.push_back (cueLabel (wants.cue));
+        }
+
+        /*  ITS RUNS ARE NOBODY'S GO, and its sounds fade in over the panic
+            fade (FW): the scene was stopped, not paused. */
+        SeatResume arrival;
+        arrival.arrivalTicks = std::max (back.fadeTicks, 1);
+
+        makingForPutBack = true;
+        seatPlan (engine, back.tick, wanted, runFor, back.nextId, &arrival);
+        makingForPutBack = false;
+
+        for (const auto& wants : wanted)
+        {
+            if (wants.when != planned::due)
+                continue;
+
+            const auto found = runFor.find (wants.cue);
+
+            if (found == runFor.end())
+                continue;
+
+            const auto node = document.findById (wants.cue);
+
+            if (node.hasType ("Media"))
+                armMedia (engine, node, found->second);
+            else if (node.hasType ("Mic"))
+                armMic (engine, node, found->second);
+        }
+
+        if (const auto seated = runFor.find (sceneCue); seated != runFor.end() && ! act.empty())
+            adoptIntoParentJob (act, seated->second);
+
+        /*  WHAT ITS CUES HOLD AT THIS SECOND, where they take back: the value
+            of each network cue the plan places before it, the last writer of
+            an address winning, diffed and sent by the flush after this tick's
+            give-backs - never an event, which has no value to hold. The walk's
+            own values stop at the scene's row, so they are read here from the
+            cues the plan placed. */
+        auto& out = stashFor (back.tick);
+
+        for (const auto& wants : placedBefore)
+        {
+            const auto node = document.findById (wants);
+            const auto address = textOf (node, "address");
+            const auto value = osc::Value::fromAtom (textOf (node, "value"));
+
+            if (address.empty() || ! value.has_value() || dohOf (document, wants) != dohSetting::takeBack)
+                continue;
+
+            if (mounts != nullptr)
+                if (const auto* target = mounts->nodeAt (address); target != nullptr && target->kind == tree::Kind::event)
+                    continue;
+
+            const auto earlier = std::find_if (out.values.begin(), out.values.end(),
+                                               [&address] (const auto& entry) { return entry.first == address; });
+
+            if (earlier != out.values.end())
+                earlier->second = *value;
+            else
+                out.values.emplace_back (address, *value);
+        }
+
+        for (const auto& [device, cues] : heldBack)
+        {
+            std::string list;
+
+            for (const auto& cue : cues)
+                list += (list.empty() ? "" : ", ") + cue;
+
+            back.items.push_back (device + ": " + list + " - left to its operator, not sent");
+        }
+
+        back.items.push_back (label + ": put back where it would be now");
+        return true;
+    }
+
+    void Runner::putBackFlagsBanksTakes (Engine& engine, PutBack& back, const GoChanges& changes)
+    {
+        /*  d. AN ADVANCE OR A BOUNDARY STOP the GO asked, as it was: withdrawn
+            while its boundary is still to be placed (once placed, the hook has
+            let it go already). */
+        for (const auto& flag : changes.flags)
+            if (auto* run = runs.find (flag.run); run != nullptr && ! run->isFinished())
+            {
+                run->advanceRequested = flag.advanceRequested;
+                run->advanceTo = flag.advanceTo;
+                run->stopAfter = flag.stopAfter;
+            }
+
+        /*  e. A BANK THE GO CLOSED opens again; one that has finished since is
+            fired again, nobody's GO - its identifier drawn here. A strip a
+            member of the GO's took from another bank is given back to it. */
+        for (const auto& bankRun : changes.closedSamplers)
+        {
+            auto* bank = runs.find (bankRun);
+
+            if (bank == nullptr)
+                continue;
+
+            if (! bank->isFinished())
+            {
+                bank->closing = false;
+                continue;
+            }
+
+            const auto bankCue = bank->cue;
+
+            makingForPutBack = true;
+            fire (engine, back.tick, bankCue, back.nextId());
+            makingForPutBack = false;
+
+            back.items.push_back (cueLabel (bankCue) + ": armed again");
+        }
+
+        for (const auto& [holder, strip] : changes.lostStrips)
+            if (auto* group = runs.find (holder))
+                group->lostStrips.erase (std::remove (group->lostStrips.begin(), group->lostStrips.end(), strip),
+                                         group->lostStrips.end());
+
+        /*  f. A TAKE PRESS, BY ITS EXACT INVERSE - newest first, and only while
+            the take is still where the press left it (GU). A pass or a layer it
+            closed, and a clear, cannot be undone (L17). */
+        if (takes == nullptr)
+            return;
+
+        for (auto press = changes.takes.rbegin(); press != changes.takes.rend(); ++press)
+        {
+            const auto& now = takes->of (press->channel);
+            const auto channel = samplingChannelOf (document, press->channel);
+            const auto name = document.findById (press->channel)[juce::Identifier ("name")].toString().toStdString();
+            const auto label = name.empty() ? press->channel : name;
+
+            if (now.state != press->stateAfter || now.layers != press->layersAfter)
+            {
+                back.items.push_back (label + ": the take has moved since the GO - left as it is");
+                continue;
+            }
+
+            const auto from = press->stateBefore;
+            const auto to = press->stateAfter;
+
+            if ((from == "empty" && to == "recording") || (from == "looping" && to == "overdubbing"))
+            {
+                takes->press (press->channel, TakeVerb::undo, channel.layers);
+            }
+            else if (from == "held" && to == "overdubbing")
+            {
+                takes->press (press->channel, TakeVerb::undo, channel.layers);
+                takes->press (press->channel, TakeVerb::hold, channel.layers);
+            }
+            else if (from == "held" && to == "looping" && press->layersBefore == press->layersAfter)
+            {
+                takes->press (press->channel, TakeVerb::hold, channel.layers);
+            }
+            else
+            {
+                back.items.push_back (label + ": what the GO did to the take cannot be undone");
+            }
+        }
+    }
+
+    void Runner::dohRelaunch (Engine& engine, std::int64_t tick, const std::string& groupRun,
+                              const std::vector<std::string>& supplied, std::vector<std::string>& drawn)
+    {
+        std::size_t taken = 0;
+
+        const std::function<std::string()> nextId = [&]
+        {
+            auto id = taken < supplied.size() ? supplied[taken] : std::string {};
+            ++taken;
+
+            if (id.empty())
+                id = ids.generate();
+
+            drawn.push_back (id);
+            return id;
+        };
+
+        /*  NO ENTRY NAMES IT ANY MORE - a GO on its list, a jump or Esc came
+            first, perhaps in the very tick the hook asked: applied, nothing. */
+        const auto found = std::find_if (pendingRelaunches.begin(), pendingRelaunches.end(),
+                                         [&groupRun] (const PendingRelaunch& pending) { return pending.groupRun == groupRun; });
+
+        if (found == pendingRelaunches.end())
+            return;
+
+        const auto pending = *found;
+        pendingRelaunches.erase (found);
+
+        const auto seconds = std::max (0.0, osc::parseDouble (document.getAttribute ("/godot/audio/panicFade")
+                                                                .value_or ("1")).value_or (1.0));
+
+        PutBack back;
+        back.tick = tick;
+        back.list = pending.list;
+        back.fadeTicks = static_cast<int> (std::lround (seconds * TickClock::rateHz));
+        back.fadeSeconds = seconds;
+        back.nextId = nextId;
+
+        relaunchScene (engine, back, groupRun, pending.left);
+
+        /*  AND ITS OWN REPORT (red team C minor 4): what it held back, by
+            device, said on the readout from this tick. */
+        auto& out = stashFor (tick);
+        out.list = pending.list;
+        out.report = true;
+
+        for (const auto& item : back.items)
+            out.items.push_back (item);
+    }
+
+    void Runner::flushDohWrites (Engine& engine)
+    {
+        /*  A SCENE THE GO STOPPED, ENDED NOW: asked for once, and the handler
+            relaunches it - the decision a record, so a replay makes the same. */
+        for (const auto& pending : pendingRelaunches)
+            if (const auto* scene = runs.find (pending.groupRun); scene == nullptr || scene->isFinished())
+                if (relaunchAsked.insert (pending.groupRun).second)
+                    engine.submit (origin::engine, "go.dohRelaunch", one (pending.groupRun));
+
+        if (stash.tick < 0)
+            return;
+
+        const auto held = std::move (stash);
+        stash = {};
+
+        /*  THE VALUES A JUMP OR A RELAUNCH WANTS ON THE DESK: a minimal
+            correction (§3.13), against the freshest thing known - what the desk
+            was seen to hold, what Go.dot last wrote where nothing was seen. */
+        for (const auto& [address, value] : held.values)
+        {
+            if (mounts != nullptr)
+            {
+                const auto* now = mounts->observedOf (address);
+
+                if (now == nullptr)
+                    now = mounts->valueOf (address);
+
+                if (now != nullptr && *now == value)
+                    continue;
+            }
+
+            engine.submit (origin::engine, "node.set", { osc::Value::string (address), value });
+        }
+
+        /*  THE DESK THE GO WROTE (FX), decided now, once this tick's give-backs
+            are known: what the desk will hold is what they restore, else what
+            it was seen to hold, else what Go.dot wrote. The GO's write - or the
+            desk's own echo of it - still standing goes back to what was there
+            before; anything else is another writer, left and said. An address
+            left to its operator is passed over in silence: the handler named it
+            with its device, and the write it holds is the GO's own. */
+        auto items = held.items;
+
+        if (mounts != nullptr)
+            for (auto entry : held.desk)
+            {
+                if (entry.leftToOperator)
+                    continue;
+
+                /*  A GO SINCE THE PRESS - in its own drain - has written the
+                    address already: its write is newer than anything the Doh
+                    remembers, and is not put back over. */
+                if (std::any_of (goChanges.desk.begin(), goChanges.desk.end(),
+                                 [&entry] (const DeskBefore& newer) { return newer.address == entry.address; }))
+                    continue;
+
+                const auto* holds = mounts->valueOf (entry.address);
+
+                if (! entry.echo.has_value() && holds != nullptr && *holds == entry.lastWritten)
+                    if (const auto* first = mounts->firstObservedOf (entry.address))
+                        entry.echo = *first;
+
+                std::optional<osc::Value> now;
+
+                if (const auto restored = restoredThisTick.find (entry.address); restored != restoredThisTick.end())
+                    now = restored->second;
+                else if (const auto* seen = mounts->observedOf (entry.address))
+                    now = *seen;
+                else if (holds != nullptr)
+                    now = *holds;
+
+                /*  ALREADY THERE - a give-back of this tick puts it there. */
+                if (entry.before.has_value() && now.has_value() && *now == *entry.before)
+                    continue;
+
+                const auto theGos = now.has_value()
+                                      && (*now == entry.lastWritten || (entry.echo.has_value() && *now == *entry.echo));
+
+                if (! theGos)
+                    items.push_back (entry.address + ": changed since the GO - left as it is");
+                else if (! entry.before.has_value())
+                    items.push_back (entry.address + ": what it held before the GO is not known - left as it is");
+                else
+                    engine.submit (origin::engine, "node.set", { osc::Value::string (entry.address), *entry.before });
+            }
+
+        if (! held.report || items.empty())
+            return;
+
+        std::string sentence;
+
+        for (const auto& item : items)
+            sentence += (sentence.empty() ? "" : "; ") + item;
+
+        engine.submit (origin::engine, "list.dohReport",
+                       { osc::Value::string (held.list), osc::Value::string (sentence) });
     }
 
     std::string Runner::pressStrip (Engine& engine, std::int64_t tick, const std::string& stripId,
@@ -8918,7 +10391,7 @@ namespace wfg::cue
         if (second == "stop")
         {
             notePlayed (*run);
-            beginReleaseFade (run->id, numberOf (cue, "releaseFade"));
+            beginReleaseFade (run->id, numberOf (cue, "releaseFade"), tick);
             return {};
         }
 
@@ -8968,7 +10441,7 @@ namespace wfg::cue
                     run->solo = false;
     }
 
-    std::string Runner::releaseStrip (Engine&, std::int64_t, const std::string& stripId,
+    std::string Runner::releaseStrip (Engine&, std::int64_t tick, const std::string& stripId,
                                       const std::string& origin)
     {
         const auto strip = document.findById (stripId);
@@ -9010,7 +10483,7 @@ namespace wfg::cue
         if (run->state == runState::armed)
             return {};
 
-        beginReleaseFade (run->id, numberOf (cue, "releaseFade"));
+        beginReleaseFade (run->id, numberOf (cue, "releaseFade"), tick);
         return {};
     }
 
@@ -9183,6 +10656,15 @@ namespace wfg::cue
             return;
         }
 
+        /*  WHAT DOH! WOULD PUT BACK (2026-10-03, D3, namespace draft §24.13):
+            the desk's echo of the GO's last write here, kept before this write
+            forgets it, and - for a write of the GO's own - what the address
+            held before it. Hook-consumed, both: they shape the flush's
+            put-back and nothing a handler decides. */
+        std::optional<osc::Value> held;
+        auto captured = false;
+        deskBeforeWrite (job, held, captured);
+
         const auto written = mounts->write (job.address, job.pending);
 
         if (! written.ok)
@@ -9190,6 +10672,9 @@ namespace wfg::cue
             job.failure = written.reason;
             return;
         }
+
+        if (captured)
+            deskAfterWrite (job, held, written.mountId, written.value);
 
         /*  IT REACHED THE TREE; NOW IT REACHES THE WIRE. The two are separate
             on purpose: the tree is what a client reads back and what a replay
@@ -9811,7 +11296,12 @@ namespace wfg::cue
                 if (! job.isFinished())
                     continue;
 
-                engine.submit (origin::engine, "run.ended", one (job.self));
+                /*  ONLY A JOB THAT HAS A RUN TO REPORT (2026-10-03, Doh! D3): a
+                    trim Doh! brings back is nobody's run, and a `run.ended` of
+                    nobody would be a refused record in the log. */
+                if (job.reportsSelf)
+                    engine.submit (origin::engine, "run.ended", one (job.self));
+
                 job.retired = true;
                 continue;
             }
@@ -11775,6 +13265,7 @@ namespace wfg::cue
                 {
                     engine.submit (origin::engine, "node.set",
                                    { osc::Value::string (run->restoreAddress), *restore });
+                    restoredThisTick.insert_or_assign (run->restoreAddress, *restore);
                     submitted = true;
                     forget();
                     continue;
@@ -11790,6 +13281,7 @@ namespace wfg::cue
                 {
                     engine.submit (origin::engine, "node.set",
                                    { osc::Value::string (run->restoreAddress), *restore });
+                    restoredThisTick.insert_or_assign (run->restoreAddress, *restore);
                     submitted = true;
                     owes = true;
                     continue;
@@ -11842,8 +13334,15 @@ namespace wfg::cue
                 continue;
 
             if (const auto value = osc::Value::fromAtom (run->restoreAtom))
+            {
                 engine.submit (origin::engine, "node.set",
                                { osc::Value::string (run->restoreAddress), *value });
+
+                /*  AND WHAT THE DESK WILL HOLD after this tick's give-backs
+                    (2026-10-03, Doh! D3): read by the flush, which runs after
+                    them and puts back what the GO wrote there from there. */
+                restoredThisTick.insert_or_assign (run->restoreAddress, *value);
+            }
 
             /*  ONCE (2026-10-01, namespace draft §24): a block given back inside
                 one being given back - the next scene's, under an act Doh! is
@@ -12201,6 +13700,9 @@ namespace wfg::cue
             same ticks, or it would not reproduce the session it is replaying. */
         currentTick = tick;
 
+        /*  WHAT THIS TICK'S GIVE-BACKS PUT BACK, from nothing (Doh! D3). */
+        restoredThisTick.clear();
+
         /*  THE LENGTHS FOR THIS TICK, held so nothing swaps them mid-solve. A
             file imported since the show opened has no length until the
             analyser reads it, and learning one swaps the map - so it is asked
@@ -12242,6 +13744,16 @@ namespace wfg::cue
         samplerEdges (engine);
         releaseSolos();
         armStandby (engine);
+
+        /*  WHAT A DOH PUTS BACK ON THE DESKS, what a jump sends there, a scene
+            put back once it has ended, and the report (2026-10-03, Doh! D3,
+            namespace draft §24.13): after every give-back of this tick - a
+            stopped block's own, in `advanceGroups`, and the standby's - whose
+            restores are already submitted, so what this sends lands after
+            theirs. Above the gate below: a `serve` with no audio side puts
+            values back too. */
+        flushDohWrites (engine);
+
         advanceFades (engine, tick);
         applyLanes();
         recordLane (engine);
@@ -14749,14 +16261,83 @@ namespace wfg::cue
                         { { "run", 's', true, true } },
                         true,
                         [&engine, &runner, &document]
-                        (CommandContext& context, const std::vector<osc::Value>&)
+                        (CommandContext& context, const std::vector<osc::Value>& args)
                         {
-                            const auto refusal = runner.goDoh (engine, document, context.tick);
+                            /*  THE IDENTIFIERS ITS PUT-BACK DRAWS (D3): supplied on a
+                                replay, drawn live, and carried on the applied record. */
+                            std::vector<std::string> supplied;
+
+                            for (const auto& value : args)
+                                supplied.push_back (value.getString());
+
+                            std::vector<std::string> drawn;
+                            const auto refusal = runner.goDoh (engine, document, context.tick, supplied, drawn);
 
                             if (! refusal.empty())
                                 return Outcome::rejected (refusal);
 
-                            return Outcome::ok ({});
+                            std::vector<osc::Value> applied;
+
+                            for (const auto& id : drawn)
+                                applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  A SCENE THE GO STOPPED, PUT BACK ONCE IT HAS ENDED (2026-10-03, Doh!
+            D3, namespace draft §24.13). Doh! found it still ending - its members
+            down, its footer running - and a relaunch then would have seated the
+            scene under the release of the old one. So the engine waits for the
+            scene's run to end and submits this; the handler relaunches it at
+            the second it would have reached now, and the record carries the
+            identifiers it drew, so a replay - which runs no hook, and re-injects
+            this record after the same `run.ended` - makes the same. Applied and
+            nothing when no put-back names the run any more: a GO on its list, a
+            jump or Esc came first. */
+        registry.add ({ "go.dohRelaunch",
+                        "A scene the GO a Doh! took back had stopped, put back where it would be now once"
+                        " it has ended - submitted by the engine, with the identifiers the relaunch drew.",
+                        { { "run", 's', false }, { "made", 's', true, true } },
+                        true,
+                        [&engine, &runner] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto runId = args[0].getString();
+
+                            if (! runner.knowsRun (runId))
+                                return Outcome::rejected (reason::unknownId);
+
+                            std::vector<std::string> supplied;
+
+                            for (std::size_t at = 1; at < args.size(); ++at)
+                                supplied.push_back (args[at].getString());
+
+                            std::vector<std::string> drawn;
+                            runner.dohRelaunch (engine, context.tick, runId, supplied, drawn);
+
+                            std::vector<osc::Value> applied { osc::Value::string (runId) };
+
+                            for (const auto& id : drawn)
+                                applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  WHAT THE LAST DOH! PUT BACK, AND WHAT IT LEFT (2026-10-03, D3): one
+            sentence, composed by the engine on the tick after the press - or
+            after the relaunch of a scene that followed it - and set on the
+            runner-wide readout `/godot/list/dohReport` by this handler. A
+            record, so a replay rebuilds the same readout. */
+        registry.add ({ "list.dohReport",
+                        "What the last Doh! put back and what it left alone, in one sentence - submitted by"
+                        " the engine on the tick after the press, and read on /godot/list/dohReport.",
+                        { { "list", 's', false }, { "text", 's', false } },
+                        false,
+                        [&runner] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            runner.listState().setDohReport ({ args[0].getString(), context.tick, args[1].getString() });
+                            return Outcome::ok (args);
                         } });
 
         //----------------------------------------------------------------------

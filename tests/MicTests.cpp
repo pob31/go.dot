@@ -1312,3 +1312,47 @@ TEST_CASE ("go.doh: a mic cue opens again at the next GO over a tenth of a secon
         CHECK (rig.runOf ("MC000002")->id != old);
     }
 }
+
+//==============================================================================
+TEST_CASE ("go.doh: a stop the GO's fade was carrying on a mic is called off and its gate opens again")
+{
+    /*  Doh! D3 (2026-10-03, PRD §3.32, namespace draft §24.13; the design's test
+        9, red team M3). A fade-and-stop on a mic shuts its input over the fade
+        at once and leaves its output level where it is; the Doh calls the stop
+        off, so the gate has to open again - `playing` with the gate shut would
+        leave the presenter silent - and the unmoved level is the GO's own, not
+        another writer's. Run on the engine sources of 5fd0e76 with this case,
+        it failed: the stop landed at two seconds. */
+    RunRig rig;
+    const auto* fired = rig.fireAndLaunch ("MC000002");
+    REQUIRE (fired != nullptr);
+    const auto mic = fired->id;
+
+    REQUIRE (rig.document.createCue ("MC000001", 2, "transport", "Out", "MC000060").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000060/target", "MC000002").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000060/verb", "fade").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000060/duration", "2").ok);
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("MC000001"), "MC000060").ok);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.audio.shuts.size() == 1u);
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    const auto opened = rig.audio.opens.size();
+    REQUIRE (rig.submitAndTick ("go.doh").rejected == 0);
+
+    REQUIRE (rig.audio.opens.size() == opened + 1);
+    CHECK (std::get<0> (rig.audio.opens.back()) == 2);
+    CHECK (rig.runs.find (mic)->state == cue::runState::playing);
+    CHECK_FALSE (rig.runs.find (mic)->stopAsked);
+
+    for (int n = 0; n < 150; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (mic)->state == cue::runState::playing);
+    CHECK (rig.audio.stops.empty());
+    CHECK (rig.runner.listState().dohReport().text.find ("another hand") == std::string::npos);
+}

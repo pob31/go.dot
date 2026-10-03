@@ -1969,3 +1969,81 @@ TEST_CASE ("midi sender: started and stopped with nothing to send, it always ret
     never.stop();                                   // never started: returns
     CHECK (never.sent() == 0u);
 }
+
+//==============================================================================
+/*  DOH! D3 AND MIDI (2026-10-03, PRD §3.32, namespace draft §24.13): the
+    report names a port left to its operator by the name the show gives it; a
+    MIDI member the GO stopped in its pre-wait is put back with the rest of
+    that wait, under the act the Doh brings back to life. Each case was run on
+    the engine sources of 5fd0e76 with it, and failed there. */
+TEST_CASE ("go.doh: a MIDI cue to a port left to its operator is named by the port's name")
+{
+    /*  The design's test 25, its MIDI SUBCASE. */
+    MidiDohRig rig;
+    const auto note = rig.midiCue (rig.listId, 0);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    rig.park (note);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.sink.sent.size() == 1u);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto& report = rig.runner.listState().dohReport().text;
+    INFO (report);
+    CHECK (report.find ("Keys: Note - left to its operator, not sent again") != std::string::npos);
+}
+
+TEST_CASE ("go.doh: a MIDI member of a running act the GO stopped in its pre-wait is put back under the act with the rest of its wait")
+{
+    /*  The design's test 29, its MIDI SUBCASE (red team C minor 3). The act's
+        line, then its MIDI member - four seconds of pre-wait - GO'd; the GO a
+        Doh! takes back is a stop cue after the act, aimed at the member while
+        it waits. The act, its last member ended, is brought back to life (HE),
+        and the member put back under it with what was left of its wait: it
+        sends at its time, whatever its port says, since nothing of it had left. */
+    MidiDohRig rig;
+    const auto act = rig.document.createCue (rig.listId, 0, "group", "Act").id;
+    const auto line = rig.document.createCue (act, 0, "memo", "Line").id;
+    const auto note = rig.midiCue (act, 1);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + note + "/preWait", "4").ok);
+
+    const auto stop = rig.document.createCue (rig.listId, 1, "transport", "Hold the note").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + stop + "/target", note).ok);
+    rig.document.createCue (rig.listId, 2, "memo", "After");
+
+    rig.park (line);
+    REQUIRE (rig.press ("go").rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.press ("go").rejected == 0);               // the note, waiting
+    rig.tickOnce();
+
+    const auto old = rig.newestRunOf (note)->id;
+    const auto due = rig.newestRunOf (note)->dueTick;
+    REQUIRE (rig.newestRunOf (note)->state == cue::runState::waiting);
+
+    for (int n = 0; n < 50; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.press ("go").rejected == 0);               // the stop, early
+    rig.tickOnce();
+    rig.tickOnce();
+    REQUIRE (rig.runs.find (old)->isFinished());
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+
+    const auto* again = rig.newestRunOf (note);
+    REQUIRE (again->id != old);
+    CHECK (again->state == cue::runState::waiting);
+    CHECK (again->dueTick == due);
+    CHECK (again->parent == rig.newestRunOf (act)->id);
+    CHECK (rig.newestRunOf (act)->state == cue::runState::playing);
+
+    while (rig.tick < due + 3)
+        rig.tickOnce();
+
+    CHECK (rig.sink.sent.size() == 1u);
+}

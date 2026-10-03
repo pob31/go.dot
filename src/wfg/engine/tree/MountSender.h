@@ -67,6 +67,7 @@
 */
 
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/tree/Mount.h>
 
 #include <cstdint>
 #include <deque>
@@ -241,4 +242,20 @@ namespace wfg::tree
 
         static constexpr std::size_t outcomesKept = 512;
     };
+
+    /*  THE DOOR A `node.set` ON A DEVICE'S ADDRESS GOES THROUGH in `wfg serve`
+        (PRD §4.11): the value lands in the mount table - what a client reads
+        back and what a replay reproduces - and is queued for the end of the
+        tick, which is what the other box hears. One function rather than a
+        lambda written at each assembly site, so the rigs that stand for
+        `serve` take the door `serve` has.
+
+        NOTHING IS QUEUED FOR A DEVICE SWITCHED OFF (2026-10-03, Doh! D3,
+        namespace draft §24.13), as a cue's own write was never queued for one
+        (`writeOscNow`): its `tx` says it is not in the room tonight. The tree
+        still takes the value. Before this a client's write, a scene's restore
+        and Doh!'s put-back all went out on the wire to a device the operator
+        had switched off. */
+    MountTable::WriteResult writeToDevice (MountTable& mounts, MountSender& sender,
+                                           const std::string& address, const osc::Value& value);
 }

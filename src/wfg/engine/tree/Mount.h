@@ -434,6 +434,15 @@ namespace wfg::tree
         const osc::Value* observedOf (const std::string& address) const;
         void forgetObservation (const std::string& address);
 
+        /*  THE DESK'S FIRST ANSWER AFTER GO.DOT'S LAST WRITE OF THE ADDRESS
+            (2026-10-03, Doh! D3, namespace draft §24.13): set by the first
+            observation since that write and by no later one, forgotten by the
+            next write. What a desk that quantises - a motor fader, a dB-mapped
+            float - made of the value it was sent, which is not bit-equal to it:
+            Doh! reads a later answer differing from both as a hand on the desk,
+            and this one as the desk's own echo. Nothing else reads it. */
+        const osc::Value* firstObservedOf (const std::string& address) const;
+
         /*  WHEN the observation was taken, or -1 when there is none - so that a
             reader waiting for the sweep it just asked for can tell a fresh
             answer from last second's. */
@@ -473,6 +482,9 @@ namespace wfg::tree
         /** Observations, by address, and the tick each was taken on. See `noteObservation`. */
         std::map<std::string, osc::Value> observations;
         std::map<std::string, std::int64_t> observedTicks;
+
+        /** The first observation since the last write, by address. See `firstObservedOf`. */
+        std::map<std::string, osc::Value> firstObservations;
 
         /*  By mount id, and kept for mounts that are not in `mounts` at all -
             a device refused for having no port never became an entry, and the

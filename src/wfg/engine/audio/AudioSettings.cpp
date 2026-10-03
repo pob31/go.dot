@@ -158,14 +158,17 @@ namespace wfg::audio
             plays: the way out when the interface is gone for good, which until
             then was a relaunch. And Doh! (2026-10-01, PRD §3.32), which is
             recovery as Esc is: the pointer goes back at once, and what its
-            fades and arms need waits for the clock. */
+            fades and arms need waits for the clock - with the two records its
+            hook submits (2026-10-03, D3): a scene put back once it has ended,
+            and the report, which a drain inside the outage must not refuse. */
         engine.setAdmissionCheck ([&state] (const std::string& command)
         {
             if (state.status == "noClock" && command != "audio.connection" && command != "audio.reconnect"
                 && command != "audio.clockMoved" && command != "audio.settingsReady"
                 && command != "audio.editBuilt" && command != "audio.apply" && command != "audio.setup"
                 && command != "run.killAll" && command != "run.kill" && command != "run.stopAll"
-                && command != "run.stop" && command != "go.doh" && command != "audio.testStop"
+                && command != "run.stop" && command != "go.doh" && command != "go.dohRelaunch"
+                && command != "list.dohReport" && command != "audio.testStop"
                 && command != "audio.armed" && command != "run.failed" && command != "take.closed"
                 && command != "take.kept"
                 && command != "document.save" && command != "document.autosave"

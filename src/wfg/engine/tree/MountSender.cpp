@@ -215,4 +215,21 @@ namespace wfg::tree
         const auto found = sent.find (mountId);
         return found == sent.end() ? 0u : found->second;
     }
+
+    //==============================================================================
+    MountTable::WriteResult writeToDevice (MountTable& mounts, MountSender& sender,
+                                           const std::string& address, const osc::Value& value)
+    {
+        const auto written = mounts.write (address, value);
+
+        if (! written.ok)
+            return written;
+
+        if (const auto* declaration = mounts.declarationOf (written.mountId); declaration != nullptr && declaration->tx)
+            sender.queue (written.mountId,
+                          { declaration->host, declaration->port, declaration->rateCap },
+                          address, written.value);
+
+        return written;
+    }
 }

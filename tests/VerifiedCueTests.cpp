@@ -108,11 +108,19 @@ namespace
             fader.kind = tree::Kind::state;
             fader.access = tree::Access::readWrite;
             fader.typeTags = "f";
-            fader.values = std::move (values);
+            fader.values = values;
             nodes->push_back (fader);
 
+            /*  A SECOND NODE, saying the same (2026-10-03, Doh! D3): two
+                addresses on one desk, so a case can have one cue take back and
+                another leave what it wrote to its operator. */
+            auto level = fader;
+            level.address = "/desk/level";
+            level.values = std::move (values);
+            nodes->push_back (level);
+
             /*  Sorted, because TreeSnapshot::find is a lower_bound and says so
-                as a precondition. Two entries here, but the rule does not have
+                as a precondition. Three entries here, but the rule does not have
                 a size below which it stops applying. */
             std::sort (nodes->begin(), nodes->end(),
                        [] (const tree::Node& a, const tree::Node& b)
@@ -294,7 +302,8 @@ namespace
     constexpr const char* deskJson = R"JSON({
       "FULL_PATH": "/desk",
       "CONTENTS": {
-        "fader": { "FULL_PATH": "/desk/fader", "TYPE": "f", "ACCESS": 3 }
+        "fader": { "FULL_PATH": "/desk/fader", "TYPE": "f", "ACCESS": 3 },
+        "level": { "FULL_PATH": "/desk/level", "TYPE": "f", "ACCESS": 3 }
       }
     })JSON";
 
@@ -1772,11 +1781,22 @@ TEST_CASE ("go.doh: what the GO committed to a device left to its operator is ne
         takeBack = true;
         REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
 
+        /*  (2026-10-03, D3: the desk is put back now on a console that takes
+            back, to what it was SEEN to hold before the GO's write - so the
+            case says what that was, rather than leaving it to whether the
+            step's sweep answers before the write or after.) */
+        rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.2f));
+
         rig.engine.submit ("cli", "standby.set", { osc::Value::string (scene.group) });
         rig.engine.submit ("cli", "go", {});
         rig.tickOnce();
         tickUntilDeskHolds (rig, 0.8f);
     }
+
+    /*  (2026-10-03, D3: and the desk says what it holds from here, the GO's
+        0.8 - a scripted answer of 0.2 after the write would read as the desk
+        already back where it was before the GO, and nothing would go back.) */
+    rig.device.target.says ({ osc::Value::float32 (0.8f) });
 
     ticksOf (rig, 25);                                     // half a second, the hold still waiting
     REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
@@ -1799,8 +1819,11 @@ TEST_CASE ("go.doh: what the GO committed to a device left to its operator is ne
 
     ticksOf (rig, 10);
 
-    //  Nothing put back on the console: the GO's own write stays.
-    CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
+    /*  Nothing put back on a console left to its operator: the GO's own write
+        stays. (2026-10-03, D3: on one that takes back, what the console held
+        before the GO goes back - once, from the flush - and the horizon then
+        pre-sends the scene again over it.) */
+    CHECK (recordsOf (rig, "node.set", "/desk/fader") == (takeBack ? 1u : 0u));
 
     /*  The horizon prepared the scene again; the cue left to the console's
         operator is not in it. (2026-10-02, D2: a block the GO adopted and
@@ -1814,7 +1837,9 @@ TEST_CASE ("go.doh: what the GO committed to a device left to its operator is ne
     rig.engine.submit ("cli", "go", {});
     ticksOf (rig, 10);
 
-    CHECK (rig.sender.sentFor ("K3PV7WRB") == (takeBack ? 2u : 1u));
+    /*  (2026-10-03, D3: and that put-back is one more datagram on a console
+        that takes back.) */
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == (takeBack ? 3u : 1u));
 }
 
 TEST_CASE ("go.doh: the next scene the horizon prepared inside the GO's own act is not the GO's - given back with its pre-send put back")
@@ -3256,4 +3281,507 @@ TEST_CASE ("go.doh: a scene started over from the top is prepared again without 
     REQUIRE (sent != nullptr);
     CHECK (sent->warning == std::string (cue::runWarning::leftToOperator));
     CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+}
+
+//==============================================================================
+/*  DOH! D3 - THE DESK PUT BACK, ON A DESK THAT ANSWERS (2026-10-03, PRD
+    §3.32, namespace draft §24.13). Each case was run on the engine sources of
+    5fd0e76 (D2's review), built with these cases, and failed there unless it
+    says it is a net. */
+namespace
+{
+    /*  The engine's `node.set` records on one address: a put-back, a restore,
+        a jump's value - never a client's. */
+    std::size_t engineSets (VerifiedRig& rig, const std::string& address)
+    {
+        const auto records = LogFile::parse (rig.engine.log().contents()).records;
+
+        return static_cast<std::size_t> (std::count_if (records.begin(), records.end(), [&] (const LogRecord& record)
+        {
+            return record.kind == LogRecord::Kind::applied && record.command == "node.set"
+                     && record.origin == origin::engine && ! record.args.empty() && record.args[0].isString()
+                     && record.args[0].getString() == address;
+        }));
+    }
+
+    /*  The last such record's value. */
+    std::optional<osc::Value> lastEngineSet (VerifiedRig& rig, const std::string& address)
+    {
+        std::optional<osc::Value> out;
+
+        for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+            if (record.kind == LogRecord::Kind::applied && record.command == "node.set"
+                  && record.origin == origin::engine && record.args.size() == 2u && record.args[0].isString()
+                  && record.args[0].getString() == address)
+                out = record.args[1];
+
+        return out;
+    }
+
+    std::string dohSaid (VerifiedRig& rig)
+    {
+        return rig.runner.listState().dohReport().text;
+    }
+
+    /*  A MIDI port that plays sound, declared in the show: a cue fired to it
+        makes its scene heard (§24.5), with no audio side in the rig. */
+    std::string audiblePort (VerifiedRig& rig)
+    {
+        auto ports = rig.document.root().getChildWithName ("MidiPorts");
+
+        if (! ports.isValid())
+        {
+            ports = juce::ValueTree { "MidiPorts" };
+            rig.document.root().appendChild (ports, nullptr);
+        }
+
+        const auto id = rig.document.ids().generate();
+        juce::ValueTree port { "Port" };
+        port.setProperty (juce::Identifier ("id"), juce::String (id), nullptr);
+        port.setProperty (juce::Identifier ("name"), juce::String ("Keys"), nullptr);
+        ports.appendChild (port, nullptr);
+
+        /*  And taking back, so what the synth was sent is no device's left
+            item in the report these cases read. */
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + id + "/audible", "true").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + id + "/doh", "takeBack").ok);
+        return id;
+    }
+
+    std::string heardBy (VerifiedRig& rig, const std::string& parent, int index, const std::string& port)
+    {
+        const auto id = rig.document.createCue (parent, index, "midi", "Pad").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/port", port).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/type", "programChange").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/data1", "5").ok);
+        return id;
+    }
+
+    std::string sendOf (VerifiedRig& rig, const std::string& parent, int index, const char* name,
+                        const char* address, const char* atom)
+    {
+        const auto id = rig.document.createCue (parent, index, "osc", name).id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/address", address).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/value", atom).ok);
+        return id;
+    }
+}
+
+TEST_CASE ("jump: a value a jump sends replays record for record")
+{
+    /*  The design's test 1 (GX): the jump's handler submitted its values, so a
+        replay - which re-runs the handler and re-injects the logged record -
+        wrote each twice, and did not reproduce the session. The values now
+        leave from the hook. Before D3 the replay diverged. */
+    ObservingRig rig;
+    const auto cueId = rig.makeSent ("f:0.75");
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+    rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.25f));
+
+    REQUIRE (rig.engine.submit ("cli", "list.aim", { osc::Value::string (rig.listId), osc::Value::string (cueId),
+                                                     osc::Value::float64 (0.0) }));
+    rig.tickOnce();
+    REQUIRE (rig.engine.submit ("cli", "list.loadToTime", { osc::Value::string (rig.listId) }));
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (engineSets (rig, "/desk/fader") == 1u);
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    VerifiedRig fresh;
+    REQUIRE (doc::CanonicalXml::read (show, fresh.document).ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+}
+
+TEST_CASE ("go.doh: a value the next scene pre-sent after the GO goes back to what it was before the GO")
+{
+    /*  The design's test 4 (the engine critic's H2 case, red teams B1 and B
+        major 3). The GO writes the console; the horizon then prepares the next
+        scene and pre-sends the same address. At D+1 the next scene is given
+        back - its restore puts the GO's value back - and the flush, after it,
+        puts back what was there before the GO. Never "changed since the GO":
+        the pre-send is the horizon's, not a GO write. Before D3 the GO's
+        value stayed. */
+    VerifiedRig rig;
+    rig.anticipate();
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+    rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.2f));       // before the GO
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+    std::string goCue;
+    auto cold = false;
+
+    SUBCASE ("the next scene at the top of the list")
+    {
+        goCue = sendOf (rig, rig.listId, rig.index++, "Fader", "/desk/fader", "f:0.5");
+        const PreparedScene next { rig, "f:0.8", "none" };
+        juce::ignoreUnused (next);
+        rig.setStandby (goCue);
+    }
+
+    SUBCASE ("the next scene inside the GO's own act")
+    {
+        const auto act = rig.document.createCue (rig.listId, rig.index++, "group", "Act").id;
+        const auto first = rig.document.createCue (act, 0, "group", "Scene one").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + first + "/mode", "timeline").ok);
+        sendOf (rig, first, 0, "Fader", "/desk/fader", "f:0.5");
+
+        const auto second = rig.document.createCue (act, 1, "group", "Scene two").id;
+        const auto header = rig.document.createRole (second, "header");
+        REQUIRE (header.ok);
+        sendOf (rig, header.id, 0, "Position", "/desk/fader", "f:0.8");
+        rig.document.createCue (second, 0, "memo", "Next line");
+        rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+        /*  ENTERED COLD - the pointer set and the GO in one tick - so the
+            scene's write is the GO's own, not a pre-send it committed. */
+        goCue = first;
+        cold = true;
+    }
+
+    SUBCASE ("the next scene under an older act the GO did not enter")
+    {
+        const auto act = rig.document.createCue (rig.listId, rig.index++, "group", "Act").id;
+        const auto first = rig.document.createCue (act, 0, "group", "Scene one").id;
+        const auto note = rig.document.createCue (first, 0, "memo", "Opening").id;
+        const auto line = sendOf (rig, first, 1, "Fader", "/desk/fader", "f:0.5");
+
+        const auto second = rig.document.createCue (act, 1, "group", "Scene two").id;
+        const auto header = rig.document.createRole (second, "header");
+        REQUIRE (header.ok);
+        sendOf (rig, header.id, 0, "Position", "/desk/fader", "f:0.8");
+        rig.document.createCue (second, 0, "memo", "Next line");
+        rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+        rig.setStandby (note);
+        rig.engine.submit ("cli", "go", {});                  // an earlier GO enters the act
+        rig.tickOnce();
+        REQUIRE (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)) == std::optional<std::string> (line));
+
+        goCue = line;
+        ticksOf (rig, 10);                                    // the step's sweep answered
+    }
+
+    if (cold)
+        rig.engine.submit ("cli", "standby.set", { osc::Value::string (goCue) });
+
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+
+    /*  The desk says what it holds, as a desk does: 0.2 until the GO's write
+        reaches it, then the GO's 0.5 - which the next scene's pre-send reads,
+        if it asks after. A sweep answering before the write would otherwise
+        say 0.5 for what was there before the GO. */
+    for (int n = 0; n < 600; ++n)
+    {
+        if (const auto* now = rig.mounts.valueOf ("/desk/fader"); now != nullptr)
+            break;
+
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    rig.device.target.says ({ osc::Value::float32 (0.5f) });
+
+    //  The next scene pre-sent over the GO's value.
+    tickUntilDeskHolds (rig, 0.8f);
+    ticksOf (rig, 3);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+    REQUIRE (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)) == std::optional<std::string> (goCue));
+
+    ticksOf (rig, 5);
+
+    REQUIRE (lastEngineSet (rig, "/desk/fader").has_value());
+    CHECK (*lastEngineSet (rig, "/desk/fader") == osc::Value::float32 (0.2f));
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+    CHECK (dohSaid (rig).find ("changed since the GO") == std::string::npos);
+}
+
+TEST_CASE ("go.doh: a desk that echoes a quantised value still gets its value back")
+{
+    /*  The design's test 21 (red team m9): the console reads back 0.7498 for
+        the 0.75 it was sent, and that first answer after the GO's write is its
+        echo, not a hand. A later answer differing from both is a hand, left and
+        said. The echo is kept through a pre-send's later write to the same
+        address, which would otherwise forget it. Before D3 nothing went back. */
+    ObservingRig rig;
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+
+    const auto cueId = rig.makeSent ("f:0.75");
+    const auto hold = rig.document.createCue (rig.listId, rig.index++, "memo", "Hold").id;
+
+    auto later = false;
+    auto presend = false;
+
+    SUBCASE ("the echo alone: the value goes back") {}
+
+    SUBCASE ("a later answer of 0.5: a hand - left, and said")
+    {
+        later = true;
+    }
+
+    SUBCASE ("the next scene pre-sends the address after the echo: the echo survives it")
+    {
+        presend = true;
+        rig.anticipate();
+        const PreparedScene next { rig, "f:0.8", "none" };
+        juce::ignoreUnused (next);
+    }
+
+    rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.25f));        // before the GO
+    rig.device.target.says ({ osc::Value::float32 (0.7498f) });
+
+    rig.setStandby (cueId);
+    REQUIRE (rig.engine.submit ("cli", "go", {}));
+    rig.tickOnce();
+    REQUIRE (rig.observed());
+    REQUIRE (*rig.mounts.observedOf ("/desk/fader") == osc::Value::float32 (0.7498f));
+
+    if (later)
+        rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.5f));
+
+    if (presend)
+    {
+        //  The pointer on to the scene by hand: the horizon pre-sends it.
+        REQUIRE (rig.engine.submit ("cli", "standby.next", {}));
+        rig.tickOnce();
+        tickUntilDeskHolds (rig, 0.8f);
+    }
+
+    juce::ignoreUnused (hold);
+    const auto before = engineSets (rig, "/desk/fader");
+
+    REQUIRE (rig.engine.submit ("cli", "go.doh", {}));
+    rig.tickOnce();
+    ticksOf (rig, 5);
+
+    if (later)
+    {
+        CHECK (engineSets (rig, "/desk/fader") == before);
+        CHECK (dohSaid (rig).find ("/desk/fader: changed since the GO") != std::string::npos);
+        return;
+    }
+
+    REQUIRE (lastEngineSet (rig, "/desk/fader").has_value());
+    CHECK (*lastEngineSet (rig, "/desk/fader") == osc::Value::float32 (0.25f));
+    CHECK (dohSaid (rig).find ("changed since the GO") == std::string::npos);
+}
+
+TEST_CASE ("go.doh: a pre-send the GO committed is its address's first writer - one decision per address")
+{
+    /*  The design's test 26, its fold SUBCASE (red team C minor 5, L33). A
+        scene's header pre-sent the fader 0.5 over a desk holding 0.25; the GO
+        adopted the scene, a synth made it heard, and a member then wrote 0.75.
+        The address follows its LAST GO writer, the pre-send folded in as the
+        first: what goes back is the value before the horizon, 0.25 - never the
+        pre-sent 0.5 - and a left write is named once, never "changed". Before
+        D3 nothing went back. */
+    VerifiedRig rig;
+    rig.anticipate();
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+    rig.device.target.says ({ osc::Value::float32 (0.25f) });
+
+    const auto port = audiblePort (rig);
+    const auto scene = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    const auto header = rig.document.createRole (scene, "header");
+    REQUIRE (header.ok);
+    const auto h = sendOf (rig, header.id, 0, "Header", "/desk/fader", "f:0.5");
+
+    heardBy (rig, scene, 0, port);
+    std::string m;
+    const auto hold = rig.document.createCue (scene, 2, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "10").ok);
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    auto back = true;
+    std::string named;
+
+    SUBCASE ("the header takes back, the member leaves: left, named once")
+    {
+        m = sendOf (rig, scene, 1, "Member", "/desk/fader", "f:0.75");
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + h + "/doh", "takeBack").ok);
+        back = false;
+        named = "Member";
+    }
+
+    SUBCASE ("the header leaves, the member takes back: the value before the horizon goes back")
+    {
+        m = sendOf (rig, scene, 1, "Member", "/desk/fader", "f:0.75");
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + m + "/doh", "takeBack").ok);
+        named = "Header";
+    }
+
+    SUBCASE ("both take back: it goes back once")
+    {
+        m = sendOf (rig, scene, 1, "Member", "/desk/fader", "f:0.75");
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + h + "/doh", "takeBack").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + m + "/doh", "takeBack").ok);
+    }
+
+    SUBCASE ("the header alone wrote it, and takes back")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + h + "/doh", "takeBack").ok);
+    }
+
+    rig.setStandby (scene);
+    tickUntilDeskHolds (rig, 0.5f);
+    rig.device.target.says ({ osc::Value::float32 (0.5f) });     // the desk holds what it was sent
+    ticksOf (rig, 3);
+
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+
+    if (! m.empty())
+    {
+        tickUntilDeskHolds (rig, 0.75f);
+        rig.device.target.says ({ osc::Value::float32 (0.75f) });
+    }
+
+    ticksOf (rig, 10);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+    ticksOf (rig, 5);
+
+    const auto said = dohSaid (rig);
+    INFO (said);
+    CHECK (said.find ("changed since the GO") == std::string::npos);
+
+    if (back)
+    {
+        CHECK (engineSets (rig, "/desk/fader") == 1u);
+        REQUIRE (lastEngineSet (rig, "/desk/fader").has_value());
+        CHECK (*lastEngineSet (rig, "/desk/fader") == osc::Value::float32 (0.25f));
+    }
+    else
+    {
+        CHECK (engineSets (rig, "/desk/fader") == 0u);
+    }
+
+    if (! named.empty())
+    {
+        const auto at = said.find (named + " - left to its operator, not sent again");
+        CHECK (at != std::string::npos);
+        CHECK (said.find (named + " - left", at + 1) == std::string::npos);
+    }
+    else
+    {
+        CHECK (said.find ("left to its operator") == std::string::npos);
+    }
+}
+
+TEST_CASE ("go.doh: a paused scene's pre-sends go back only for a cue that takes back")
+{
+    /*  The design's test 27 (GV): a scene whose header pre-sent two addresses
+        on one console - one cue taking back, one left at the default - GO'd,
+        heard through a synth, Doh'd. The cue that takes back has its value put
+        back by the flush, and is sent again by the corrected GO's resume; the
+        left one stays on the desk, is named, and is sent again by nothing. A
+        scene that cannot be carried on (it loops) is prepared again by the
+        horizon after the put-back - the cue that takes back pre-sent again, the
+        left one left out. Before D3 neither went back. */
+    VerifiedRig rig;
+    rig.anticipate();
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+    const auto port = audiblePort (rig);
+    const auto scene = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    const auto header = rig.document.createRole (scene, "header");
+    REQUIRE (header.ok);
+    const auto taken = sendOf (rig, header.id, 0, "Fader", "/desk/fader", "f:0.8");
+    const auto left = sendOf (rig, header.id, 1, "Level", "/desk/level", "f:0.8");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + taken + "/doh", "takeBack").ok);
+
+    heardBy (rig, scene, 0, port);
+    const auto hold = rig.document.createCue (scene, 1, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "10").ok);
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    auto loops = false;
+
+    SUBCASE ("carried on by the corrected GO") {}
+
+    SUBCASE ("a scene that loops, prepared again by the horizon")
+    {
+        loops = true;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/loops", "2").ok);
+    }
+
+    rig.setStandby (scene);
+
+    for (int n = 0; n < 600 && rig.sender.sentFor ("K3PV7WRB") < 2u; ++n)
+    {
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 2u);
+    rig.device.target.says ({ osc::Value::float32 (0.8f) });     // the desk holds what it was sent
+    ticksOf (rig, 3);
+
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+    ticksOf (rig, 10);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+    ticksOf (rig, 5);
+
+    CHECK (engineSets (rig, "/desk/fader") == 1u);
+    REQUIRE (lastEngineSet (rig, "/desk/fader").has_value());
+    CHECK (*lastEngineSet (rig, "/desk/fader") == osc::Value::float32 (0.2f));
+    CHECK (engineSets (rig, "/desk/level") == 0u);
+    REQUIRE (rig.mounts.valueOf ("/desk/level") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/level") == osc::Value::float32 (0.8f));
+    CHECK (dohSaid (rig).find ("Level - left to its operator, not sent again") != std::string::npos);
+
+    if (loops)
+    {
+        //  The horizon prepares the scene again: the fader pre-sent, the level not.
+        rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+        for (int n = 0; n < 600 && rig.sender.sentFor ("K3PV7WRB") < 4u; ++n)
+        {
+            rig.tickOnce();
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+        }
+
+        ticksOf (rig, 20);
+
+        const auto* again = rig.runs.preparedRunOf (scene);
+        REQUIRE (again != nullptr);
+        CHECK (rig.runs.hasChildFor (again->id, taken));
+        CHECK_FALSE (rig.runs.hasChildFor (again->id, left));
+        CHECK (rig.sender.sentFor ("K3PV7WRB") == 4u);           // two pre-sends, the put-back, the fader again
+        return;
+    }
+
+    rig.engine.submit ("cli", "go", {});
+    ticksOf (rig, 10);
+
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 4u);               // two pre-sends, the put-back, the fader again
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
 }

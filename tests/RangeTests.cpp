@@ -985,3 +985,35 @@ TEST_CASE ("range scheduler: a cue with no ranges is never in one")
     CHECK (rig.audio.stops.empty());
     CHECK (rig.audio.launches.size() == 1u);
 }
+
+TEST_CASE ("go.doh: an advance the GO asked for is withdrawn while its boundary is unplaced")
+{
+    /*  Doh! D3 (2026-10-03, PRD §3.32, namespace draft §24.13; the design's test
+        20): a transport cue's advance on a slice that loops for ever, GO'd and
+        Doh'd before the scheduler has placed its boundary - the request as it
+        was before the GO, so the slice goes on looping. Run on the engine
+        sources of 5fd0e76 with this case, it failed: the boundary was placed
+        and the next slice entered. */
+    SchedulerRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    rig.addRange (0.0, 1.0, 0);
+    rig.addRange (1.0, 2.0, 1);
+
+    const auto mover = rig.document.createCue (rig.listId, 1, "transport", "Move it on").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/target", rig.cueId).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/verb", "advance").ok);
+
+    const auto id = rig.goAndLaunch();
+    rig.ticks (150);
+    REQUIRE (rig.audio.stops.empty());
+
+    REQUIRE (rig.engine.submit (origin::cli, "go", {}));
+    REQUIRE (rig.engine.submit (origin::cli, "go.doh", {}));
+    CHECK (rig.tickOnce().rejected == 0);
+
+    CHECK_FALSE (rig.run (id)->advanceRequested);
+
+    rig.ticks (120);
+    CHECK (rig.audio.stops.empty());
+    CHECK (rig.run (id)->range == 0);
+}

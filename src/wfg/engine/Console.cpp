@@ -54,6 +54,7 @@
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/tree/MountProbe.h>
+#include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
@@ -2970,16 +2971,15 @@ namespace
                     value lands in the mount table, which is what a client reads
                     back and what a replay reproduces; and it is queued for the
                     end of this tick, which is what the other box hears. */
-                const auto written = mounts.write (address, value);
+                /*  AND NOTHING IS QUEUED FOR A DEVICE SWITCHED OFF (2026-10-03,
+                    Doh! D3, namespace draft §24.13): the tree takes the value,
+                    the wire does not - a cue's own write never went out to a
+                    device with its `tx` off, and a client's write, a scene's
+                    restore and Doh!'s put-back now keep the same promise. */
+                const auto written = wfg::tree::writeToDevice (mounts, sender, address, value);
 
                 if (! written.ok)
                     return wfg::Outcome::rejected (written.reason);
-
-                if (const auto* declaration = mounts.declarationOf (written.mountId))
-                    sender.queue (written.mountId,
-                                  { declaration->host, declaration->port,
-                                    declaration->rateCap },
-                                  address, written.value);
 
                 /*  Logged AS APPLIED, so the record carries the value that
                     actually landed rather than the one that was offered - an
