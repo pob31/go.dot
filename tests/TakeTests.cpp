@@ -956,3 +956,102 @@ TEST_CASE ("go.doh: a take press the GO made is put back by its exact inverse, o
     INFO (report);
     CHECK ((report.find ("cannot be undone") != std::string::npos) == said);
 }
+
+TEST_CASE ("go.doh: a mic cue whose GO looped the take - the loop undone at the Doh, and looped again by the corrected GO")
+{
+    /*  L43, the gap D2's review named in its tests (namespace draft §24.12;
+        D5, 2026-10-03): the design's test 14, its take. Scene 5's mic cue,
+        its `onGo` loop, GO'd too soon over a held take: the GO's own press on
+        the take is put back by its inverse at the Doh (NJ) - held again - and
+        the corrected GO, which carries the mic on (in place inside the Doh
+        fade, a run of its own after it), acts on the take as a first GO does:
+        looping, one loop asked for each time. Written after D3 was built: a
+        net. */
+    Rig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+    REQUIRE (rig.fireAndLaunch ("TK000002") != nullptr);
+
+    REQUIRE (rig.applied ("take.record", { text (looper) }));
+    REQUIRE (rig.applied ("take.record", { text (looper) }));
+    rig.audio.reports.push_back ({ looper, "pressed", 3.0 });
+    rig.tickOnce();
+    rig.tickOnce();
+    REQUIRE (rig.take().state == "looping");
+
+    REQUIRE (rig.applied ("run.stop", { text (rig.runOf ("TK000002")->id) }));
+    REQUIRE (rig.tickUntil ([&rig] { return rig.runOf ("TK000002")->isFinished(); }));
+    REQUIRE (rig.take().state == "held");
+
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("TK000001"), "TK000008").ok);
+    REQUIRE (rig.tickUntil ([&rig]
+    {
+        const auto* run = rig.runOf ("TK000008");
+        return run != nullptr && run->track >= 0;
+    }));
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    const auto loops = [&rig]
+    {
+        return std::count_if (rig.audio.posts.begin(), rig.audio.posts.end(),
+                              [] (const TakePlayer::Posted& posted)
+                              {
+                                  return posted.channel == looper && posted.verb == TakeVerb::loop;
+                              });
+    };
+
+    const auto loopsBefore = loops();
+
+    REQUIRE (rig.applied ("go"));                           // Scene 5, too soon: the take loops
+    const auto first = rig.runOf ("TK000008")->id;
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.take().state == "looping");
+    REQUIRE (loops() == loopsBefore + 1);
+    REQUIRE (rig.runs.find (first)->startedAtTick >= 0);
+
+    REQUIRE (rig.applied ("go.doh"));
+    rig.tickOnce();
+    CHECK (rig.take().state == "held");
+
+    SUBCASE ("the corrected GO inside the Doh fade: the same run, the take looped again")
+    {
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.applied ("go"));
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runOf ("TK000008")->id == first);
+        CHECK (rig.take().state == "looping");
+        CHECK (loops() == loopsBefore + 2);
+    }
+
+    SUBCASE ("the corrected GO after the fade: a run of its own, the take looped again")
+    {
+        REQUIRE (rig.tickUntil ([&rig, &first] { return rig.runs.find (first)->isFinished(); }, 120));
+        REQUIRE (rig.tickUntil ([&rig, &first]
+        {
+            rig.audio.completeArms (rig.engine);
+            const auto* run = rig.runOf ("TK000008");
+            return run != nullptr && run->id != first && run->track >= 0;
+        }, 60));
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+
+        CHECK (rig.take().state == "held");
+        REQUIRE (rig.applied ("go"));
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runOf ("TK000008")->id != first);
+        CHECK (rig.take().state == "looping");
+        CHECK (loops() == loopsBefore + 2);
+    }
+}

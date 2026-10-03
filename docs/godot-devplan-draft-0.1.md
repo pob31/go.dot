@@ -905,13 +905,35 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   left to an operator first, the whole sentence on hover; a refusal newer than
   it takes the line back; and a press in an audio outage says "Doh!: the pointer
   is back; what it puts back comes when the audio returns" (L18). Nothing new is
-  logged: a log with a Doh made on D3 replays on D4. D5 (end to end) remains.
+  logged: a log with a Doh made on D3 replays on D4. D5 (end to end) remains
+  *(2026-10-03: D5 built, below - Doh! is complete)*.
   *(2026-10-03, D4's review, OJ-OQ: the outage sentence is the engine's, on
   the readout, for a press it accepted; a relaunch's report is appended
   ("...; then: ...", the orchestrator's ruling); the next GO retires the
   report; what was left comes first in the engine's sentence; the MIDI item
   says when and where it goes again; and the notice gives way to any newer
   sentence of its line and follows a focus change.)*
+- **Doh! D5, 2026-10-03 — end to end; Doh! is complete** (namespace draft
+  §24.15). Nothing new in the engine: `blackbox.doh` drives the shipped binary
+  over a hosted render and two mock devices - a console that takes back, a
+  lighting desk at the default - through a ramp paused and carried on from the
+  press's second over the de-click, a scene paused part-way and re-seated (the
+  console put back and sent again, the lighting desk sent each cue once in all
+  and nothing at the Doh, the report naming it), a bed the GO stopped made
+  again fading in, a second press forgetting and a press past the window
+  refused, and replays the session; `wfg.replay.doh` keeps one such session as
+  a fixture. The tests D1-D4 named owed are written (test 47's bed and MIDI,
+  test 50's deleted device, the leave-out replayed, test 27's forget, L43's
+  mic member and take, the inspector's menu); test 49's decision-N case cannot
+  be built (§24.15). Found: on the Windows laptop a Debug build's tick thread
+  falls seconds behind its audio, so the driver judges what the tick places
+  where the tick keeps time (OR). **Owed to the bench**: items 20-33 of
+  `docs/handoffs/2026-09-06-audio-hardware-checklist.md` - the button, F9, the
+  inspector and the notice on screen; the pause, resume and de-click heard on a
+  bed, a scene and a mic; a quantising fader; a lighting desk at its default; a
+  long footer; F9 with the interface unplugged; the D700 binding; and the drive
+  run where the tick keeps time. **Still the author's**: whether a second
+  Doh! keeps what was left (L37), and his first look at the words.
 - **H4, 2026-10-02 — a double Esc drops what is still waiting to leave**
   (§23.10). A value a rate cap held back went out on its turn after the press,
   the MIDI queue sent everything it held, and no note-off existed anywhere. The

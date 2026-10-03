@@ -16516,6 +16516,72 @@ TEST_CASE ("go.doh: after an Esc the Doh's own step puts no persistent bed back"
     CHECK (asserts() > before);
 }
 
+TEST_CASE ("go.doh: a persistent bed the GO's stop brought down sounds again at the Doh, once")
+{
+    /*  The design's test 47, its media-bed SUBCASE (namespace draft §24.10's
+        tests still owed; D5, 2026-10-03). The Doh's own persistent pass skips
+        only the network and MIDI cues of a device left to its operator (HN):
+        what Go.dot plays itself is asserted as it always was, and a bed the
+        early GO's stop cue brought down plays again at the press. The same bed
+        is also a cue the GO stopped, which D3 makes again where it would be
+        now - so it must come back once, from one of the two roads, never as
+        two voices. Written after D3 and D4 were built: a net. */
+    PersistentRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "0").ok);
+
+    const auto out = rig.document.createCue (rig.listId, 2, "transport", "Rain out").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + out + "/target", rig.bed).ok);
+
+    const auto* live = rig.stepAndSound();
+    REQUIRE (live != nullptr);
+    const auto first = live->id;
+    rig.audio.playing.insert (live->track);
+    rig.tickOnce();
+    REQUIRE (rig.runs.find (first)->startedAtTick >= 0);
+
+    rig.step (out);                                         // the GO a Doh! takes back
+    rig.audio.playing.clear();
+    rig.waitOut (first);
+    rig.settle();
+    REQUIRE (rig.liveBed() == nullptr);
+
+    const auto asserts = [&rig]
+    {
+        const auto parsed = LogFile::parse (rig.engine.log().contents());
+        return std::count_if (parsed.records.begin(), parsed.records.end(),
+                              [] (const LogRecord& record) { return record.command == "run.assert"; });
+    };
+
+    const auto bedRuns = [&rig]
+    {
+        return std::count_if (rig.runs.all().begin(), rig.runs.all().end(), [&rig] (const cue::Run& run)
+        {
+            return run.cue == rig.bed && ! run.isFinished();
+        });
+    };
+
+    const auto assertsBefore = asserts();
+    const auto runsBefore = runsFor (rig, rig.bed);
+
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.standby() == out);
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    INFO ("asserted " << asserts() - assertsBefore << ", runs made " << runsFor (rig, rig.bed) - runsBefore);
+    REQUIRE (rig.liveBed() != nullptr);
+    CHECK (rig.liveBed()->id != first);
+    CHECK (bedRuns() == 1);
+    CHECK (runsFor (rig, rig.bed) == runsBefore + 1u);
+
+    //  And the corrected GO stops it again, as the stop cue always did.
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    rig.audio.playing.clear();
+    rig.settle (60);
+    CHECK (rig.liveBed() == nullptr);
+}
+
 TEST_CASE ("go.doh: a corrected GO in the Doh's own drain plays the act's member it fires")
 {
     /*  BORN DONE ONLY FROM A RECORD OF THE DOH'S OWN TICK (§24, GZ): a spawn the

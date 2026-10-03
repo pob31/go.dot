@@ -1314,6 +1314,110 @@ TEST_CASE ("go.doh: a mic cue opens again at the next GO over a tenth of a secon
 }
 
 //==============================================================================
+TEST_CASE ("go.doh: a mic member of a running act opens again under the act - in place inside the Doh fade, after it with its old tail cut")
+{
+    /*  L43, the gap D2's review named in its tests (namespace draft §24.12;
+        D5, 2026-10-03): the design's test 9, its mic SUBCASEs. A member of an
+        older running act is a sound root like a top-level cue (HF), and a mic
+        has no position (L10): inside the Doh fade the corrected GO opens the
+        same run again where the Doh shut it, back among the act's members;
+        after it, the old run's tail - still ringing - is cut first and a run
+        under the act opens over the de-click. The act runs on through both and
+        loses nothing. Written after D2 was built: a net. */
+    RunRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+
+    const auto act = rig.document.createCue ("MC000001", 0, "group", "Act").id;
+    const auto one = rig.document.createCue (act, 0, "memo", "One").id;
+    REQUIRE (rig.submitAndTick ("object.move", { osc::Value::string ("MC000002"), osc::Value::string (act),
+                                                 osc::Value::int32 (1) }).rejected == 0);
+
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("MC000001"), one).ok);
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // into the act: One
+    rig.tickOnce();
+
+    const auto* actRun = rig.runOf (act);
+    REQUIRE (actRun != nullptr);
+    const auto actId = actRun->id;
+    REQUIRE (rig.document.getAttribute (cue::standbyAddressOf ("MC000001")) == std::optional<std::string> ("MC000002"));
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);       // the mic, too soon
+    REQUIRE (rig.tickUntil ([&rig]
+    {
+        rig.audio.completeArms (rig.engine);
+        return ! rig.audio.opens.empty();
+    }));
+    rig.tickOnce();
+
+    const auto old = rig.runOf ("MC000002")->id;
+    REQUIRE (rig.runs.find (old)->parent == actId);
+    REQUIRE (rig.runs.find (old)->startedAtTick >= 0);
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    SUBCASE ("a GO inside the Doh fade: the same run under the act, its gate opened again")
+    {
+        REQUIRE (rig.submitAndTick ("go.doh").rejected == 0);
+        REQUIRE (rig.audio.shuts.size() == 1u);
+        CHECK_FALSE (rig.runs.find (actId)->isFinished());
+
+        for (int n = 0; n < 10; ++n)
+            rig.tickOnce();
+
+        const auto opened = rig.audio.opens.size();
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        CHECK (rig.runOf ("MC000002")->id == old);
+        CHECK (rig.runs.find (old)->state == cue::runState::playing);
+        CHECK (rig.runs.find (old)->parent == actId);
+        CHECK_FALSE (rig.runs.find (old)->takenBack);
+        REQUIRE (rig.audio.opens.size() == opened + 1);
+        CHECK (std::get<2> (rig.audio.opens.back()) == doctest::Approx (0.1));
+
+        for (int n = 0; n < 60; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runs.find (old)->state == cue::runState::playing);
+        CHECK_FALSE (rig.runs.find (actId)->isFinished());
+    }
+
+    SUBCASE ("a GO after the Doh fade, the tail still ringing: cut first, then a run under the act opened over the de-click")
+    {
+        rig.audio.ringsOnStop = true;
+        REQUIRE (rig.submitAndTick ("go.doh").rejected == 0);
+
+        for (int n = 0; n < 70; ++n)
+            rig.tickOnce();
+
+        REQUIRE_FALSE (rig.runs.find (old)->isFinished());
+        CHECK_FALSE (rig.runs.find (actId)->isFinished());
+
+        const auto opened = rig.audio.opens.size();
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        REQUIRE (rig.tickUntil ([&rig, opened]
+        {
+            rig.audio.completeArms (rig.engine);
+            return rig.audio.opens.size() > opened;
+        }, 40));
+
+        CHECK (rig.runs.find (old)->isFinished());
+        CHECK (std::find (rig.audio.kills.begin(), rig.audio.kills.end(), 2) != rig.audio.kills.end());
+        CHECK (std::get<2> (rig.audio.opens.back()) == doctest::Approx (0.1));
+
+        const auto* again = rig.runOf ("MC000002");
+        REQUIRE (again != nullptr);
+        CHECK (again->id != old);
+        CHECK (again->parent == actId);
+        CHECK_FALSE (rig.runs.find (actId)->isFinished());
+    }
+}
+
+//==============================================================================
 TEST_CASE ("go.doh: a stop the GO's fade was carrying on a mic is called off and its gate opens again")
 {
     /*  Doh! D3 (2026-10-03, PRD §3.32, namespace draft §24.13; the design's test

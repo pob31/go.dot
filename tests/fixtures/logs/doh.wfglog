@@ -1,0 +1,178 @@
+# wfg-log 1
+# fixture doh - Doh! taking back a GO pressed too soon, end to end (PRD 3.32;
+# namespace draft 24.15, D5, 2026-10-03).
+#
+# WHAT IT IS FOR: that every road of a Doh reproduces exactly under both locales
+# with no audio side, no device and no wire - a heard sound paused and carried on
+# by the next GO, a scene paused part-way and re-seated where it was, a desk value
+# on a console that takes back put back, a lighting desk left to its operator
+# named and sent nothing again, a cue the GO stopped made again, the report as the
+# engine's own record, a second press forgetting a resume, and a press past the
+# window refused. Recorded from a real `wfg serve --hosted` of a copy of
+# tests/fixtures/bundles/doh driven over OSC by tests/blackbox/go_doh.py
+# (`--keep-log`), with two mock_target.py devices behind its mounts and the
+# driver's generated media under the copy's media/ - so the header below is that
+# copy's, the media lines with it: the lengths a Doh reads (24.12, GM) come from
+# them, and the replay reads them too.
+#
+# Hand-checked record by record against the design (24.12-24.14): what each one
+# is, below, where it is not plain. Made to fail before it was committed, three
+# ways, each refused by the replay: the bed the Doh makes again given another
+# identifier on go.doh's record (its later records name a run nobody made); one
+# of the six identifiers the re-seating GO drew taken off its record (the replay
+# draws a sixth, and the stop fired again names a run that is not there); and
+# the corrected GO on the ramp naming another run than the arm at the point.
+# What it cannot catch, said so nobody assumes it: a Doh replaced by a command
+# that moves only the pointer still replays, because what a Doh does to the
+# audio side reaches a replay as the engine's own records, re-injected - the
+# unit cases (GoTests, NetworkCueTests) are what pin the decisions themselves.
+#
+# bundle doh sha256:67070f5a05338213d72dfc7a080f8793ad5e2bb304411b04424138f11bccc0da
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media bed.wav 7680044 40.000
+# media ramp.wav 1536044 8.000
+#
+# THE SHOW AT REST: the pointer on the bed (state.xml), armed.
+A 0 0 engine audio.editBuilt s:"hosted" i:6 i:8 i:152
+A 0 1 engine audio.arm s:"DHBED001" s:"Y0T6CR6K"
+A 1 2 engine audio.armed s:"Y0T6CR6K" i:0
+#
+# A HAND ON THE CONSOLE before any GO: 0.2, through the tree's one door to a
+# device (tree::writeToDevice). The mount's periodic read-back sees it; that is
+# what the console held before the GO, and what goes back.
+A 2 3 udp:127.0.0.1:50514 node.set s:"/desk/fader" f:0.2
+#
+# GO: the bed. The pointer walks on to the ramp, which the standby arms.
+A 3 4 udp:127.0.0.1:50515 go s:"Y0T6CR6K"
+A 4 5 engine audio.arm s:"DHRMP001" s:"X69TB98Y"
+A 4 6 engine run.started s:"Y0T6CR6K"
+A 4 7 engine node.set s:"/godot/audio/patchSettled" T
+A 5 8 mount:DHMNT001 mount.readback s:"DHMNT001" s:"/desk/fader" f:0.2 T
+A 5 9 engine audio.armed s:"X69TB98Y" i:1
+#
+# GO, TOO SOON: the ramp. It plays - heard (run.started, 24.6 GL). The horizon
+# prepares the scene for the pointer that moved on, after the GO (GY).
+A 37 10 udp:127.0.0.1:50516 go s:"X69TB98Y"
+A 38 11 engine run.prepare s:"DHSCN001" s:"CRVQN3MG" s:"J3P96A66"
+A 38 12 engine run.started s:"X69TB98Y"
+A 39 13 engine audio.armed s:"J3P96A66" i:2
+#
+# DOH! A second and a half in. The pointer goes back to the ramp; the
+# horizon's preparation of the scene, made after the GO, is given back - revoked
+# on the next tick (GY); the report has nothing to say (an empty record clears
+# the readout, OJ); and the ramp's own playhead at the press is written into the
+# resume by the hook's record, go.dohPlayhead (MB). The ramp comes down over the
+# panic fade, no footer, never killed, and its run ends a second later (165).
+A 114 14 udp:127.0.0.1:50517 go.doh
+A 115 15 engine run.revoke s:"CRVQN3MG"
+A 115 16 engine list.dohReport s:"DHSHW001" s:""
+A 115 17 engine go.dohPlayhead s:"X69TB98Y" d:1.496 i:-1
+A 116 18 mount:DHMNT001 mount.readback s:"DHMNT001" s:"/desk/fader" f:0.2 T
+A 165 19 engine run.ended s:"X69TB98Y"
+#
+# THE RESUME ARM: once the old voice has gone, the standby arms the ramp again
+# AT THE POINT - silent, the de-click waiting for its launch (24.12).
+A 166 20 engine audio.arm s:"DHRMP001" s:"S07SQ1XC"
+A 167 21 engine audio.armed s:"S07SQ1XC" i:1
+#
+# THE CORRECTED GO launches that arm: the ramp carries on from where it was,
+# warm, over the tenth of a second the author asked for (GQ). The pointer walks
+# on to the scene, prepared again by the horizon.
+A 222 22 udp:127.0.0.1:50519 go s:"S07SQ1XC"
+A 223 23 engine run.prepare s:"DHSCN001" s:"JB4JPH9E" s:"9KKFJ5A2"
+A 223 24 engine run.started s:"S07SQ1XC"
+A 224 25 mount:DHMNT001 mount.readback s:"DHMNT001" s:"/desk/fader" f:0.2 T
+A 224 26 engine audio.armed s:"9KKFJ5A2" i:2
+#
+# GO, TOO SOON: the scene, adopting the prepared block - its sound launched, the
+# console written 0.8 (a device that takes back, Mount/@doh), Q12 to the lighting
+# desk (left to its operator, the default), Q13 waiting its three seconds, and the
+# bed stopped by the scene's last cue (258).
+A 255 27 udp:127.0.0.1:50520 go s:"JB4JPH9E"
+A 256 28 engine run.round s:"JB4JPH9E" i:0 s:"DHSND001" s:"DHDSK001" s:"DHX12001" s:"DHX13001" s:"DHSTP001"
+A 256 29 engine run.spawn s:"JB4JPH9E" s:"DHDSK001" s:"6P2RJ0X1"
+A 256 30 engine run.spawn s:"JB4JPH9E" s:"DHX12001" s:"QHK1RTP4"
+A 256 31 engine run.spawn s:"JB4JPH9E" s:"DHX13001" s:"4GN809W3"
+A 256 32 engine run.spawn s:"JB4JPH9E" s:"DHSTP001" s:"CT9WRGKA"
+A 256 33 engine audio.arm s:"DHEND001" s:"CV14WNT7"
+A 257 34 engine audio.armed s:"CV14WNT7" i:3
+A 257 35 engine run.launch s:"9KKFJ5A2"
+A 257 36 engine run.launch s:"6P2RJ0X1"
+A 257 37 engine run.launch s:"QHK1RTP4"
+A 257 38 engine run.launch s:"4GN809W3"
+A 257 39 engine run.launch s:"CT9WRGKA"
+A 258 40 engine run.ended s:"CT9WRGKA"
+A 258 41 engine run.ended s:"6P2RJ0X1"
+A 258 42 engine run.ended s:"QHK1RTP4"
+A 258 43 engine run.started s:"9KKFJ5A2"
+A 258 44 engine run.ended s:"Y0T6CR6K"
+#
+# DOH! part-way, before Q13. Its record carries the identifier its put-back drew:
+# the bed the GO stopped, made again where it would be now, nobody's GO,
+# fading in (D3, GT). The last cue's arm, made after the GO, is revoked; the
+# console's 0.2 goes back as one engine node.set from the flush; the report
+# names the lighting desk - "left to its operator, not sent again" - and says
+# the bed came back, in one engine list.dohReport; and the scene's sound's
+# playhead is written into the scene's plan. Nothing goes to the lighting desk.
+# (The playhead reads further into the file than the ticks since the GO: the
+# laptop it was recorded on ran its tick thread behind its audio - the second
+# is the audio's own, MB.)
+A 333 45 udp:127.0.0.1:61858 go.doh s:"4A85JRZ7"
+A 334 46 engine audio.armed s:"4A85JRZ7" i:0
+A 334 47 engine run.revoke s:"CV14WNT7"
+A 334 48 engine node.set s:"/desk/fader" f:0.2
+A 334 49 engine list.dohReport s:"DHSHW001" s:"Lights: 3.3 Lights 12 - left to its operator, not sent again; 1 The bed: put back where it would be now"
+A 334 50 engine go.dohPlayhead s:"9KKFJ5A2" d:3.664 i:-1
+A 335 51 mount:DHMNT001 mount.readback s:"DHMNT001" s:"/desk/fader" f:0.2 T
+A 335 52 engine run.started s:"4A85JRZ7"
+A 335 53 engine run.late s:"4A85JRZ7" i:7
+A 357 54 engine run.ended s:"S07SQ1XC"
+A 383 55 engine run.ended s:"9KKFJ5A2"
+A 384 56 engine run.ended s:"JB4JPH9E"
+#
+# THE CORRECTED GO re-seats the scene where it was (24.12): its applied
+# arguments carry the six identifiers the seat drew - the scene, its sound at its
+# playhead, the console's cue and the bed's stop fired again from the scene's
+# start (L7: a cue that takes back is sent again; the stop ends the bed the Doh
+# made, 443), Q12 planned over (sent to a device left to its operator: never
+# sent again, HJ - no run.fire), and Q13 for what was left of its wait (515).
+A 441 57 udp:127.0.0.1:54435 go s:"GH3SXG59" s:"V051RVGP" s:"AA1P7413" s:"ES5CWYFE" s:"9WFJWS09" s:"SSARFSVQ"
+A 442 58 engine audio.armed s:"V051RVGP" i:1
+A 442 59 engine run.fire s:"AA1P7413"
+A 442 60 engine run.fire s:"SSARFSVQ"
+A 442 61 engine audio.arm s:"DHEND001" s:"GN2NJ743"
+A 443 62 mount:DHMNT001 mount.readback s:"DHMNT001" s:"/desk/fader" f:0.2 T
+A 443 63 engine audio.armed s:"GN2NJ743" i:2
+A 443 64 engine run.ended s:"SSARFSVQ"
+A 443 65 engine run.ended s:"AA1P7413"
+A 443 66 engine run.started s:"V051RVGP"
+A 443 67 engine run.late s:"V051RVGP" i:7
+A 443 68 engine run.ended s:"4A85JRZ7"
+A 509 69 engine run.ended s:"V051RVGP"
+A 515 70 engine run.fire s:"9WFJWS09"
+A 516 71 engine run.ended s:"9WFJWS09"
+A 517 72 engine run.ended s:"GH3SXG59"
+#
+# GO: the last ramp. Doh!: paused, its playhead kept. Doh! AGAIN - the second
+# press forgets the resume (the author's (b), 24.12): applied, nothing drawn; the
+# paused run ends, and the standby arms the cue again from its top (671).
+A 566 73 udp:127.0.0.1:59978 go s:"GN2NJ743"
+A 567 74 engine run.started s:"GN2NJ743"
+A 568 75 mount:DHMNT001 mount.readback s:"DHMNT001" s:"/desk/fader" f:0.8 T
+A 619 76 udp:127.0.0.1:59979 go.doh
+A 620 77 engine list.dohReport s:"DHSHW001" s:""
+A 620 78 engine go.dohPlayhead s:"GN2NJ743" d:2.048 i:-1
+A 621 79 mount:DHMNT001 mount.readback s:"DHMNT001" s:"/desk/fader" f:0.8 T
+A 622 80 udp:127.0.0.1:59980 go.doh
+A 670 81 engine run.ended s:"GN2NJ743"
+A 671 82 engine audio.arm s:"DHEND001" s:"HRJEQ6JV"
+A 672 83 engine audio.armed s:"HRJEQ6JV" i:0
+#
+# THE NEXT GO plays it from its top.
+A 702 84 udp:127.0.0.1:59982 go s:"HRJEQ6JV"
+A 703 85 engine run.started s:"HRJEQ6JV"
+A 704 86 mount:DHMNT001 mount.readback s:"DHMNT001" s:"/desk/fader" f:0.8 T
+#
+# AND PAST THE WINDOW (list/dohWindow, five seconds here), Doh! is refused
+# too-late: nothing moves.
+R 966 87 udp:127.0.0.1:59984 too-late go.doh

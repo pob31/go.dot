@@ -827,6 +827,87 @@ TEST_CASE ("inspector: an opener is a button that asks the window to open the pa
     CHECK_FALSE (eq->getToggleState());
 }
 
+TEST_CASE ("inspector: Doh!'s row on a cue is a menu of words that writes their keys")
+{
+    /*  The worded-choice commit path namespace draft §24.10 named owed (D5,
+        2026-10-03). D1 gave the inspector a closed set the model puts in
+        words - Doh!'s row on an OSC or a MIDI cue, "as the device (Meh)",
+        "Undo(h)", "Meh" (the author's words, K7) - and the menu writes the
+        KEYS the tree declares, `device`, `takeBack`, `leave`, by position,
+        never the words a person reads. ClientTests pins the words; this pins
+        the write. A net: written after D1 was built. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::InspectorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text)
+    { written.emplace_back (address, text); };
+
+    ui::InspectorComponent inspector (model::Theme {}, actions);
+    inspector.setSize (320, 300);
+
+    model::Field doh;
+    doh.address = "/godot/cue/CUE00001/doh";
+    doh.name = "doh";
+    doh.label = "on Doh!";
+    doh.typeTags = "s";
+    doh.value = "device";
+    doh.writable = true;
+    doh.control = model::Control::choice;                  // as the model reads a closed set
+    doh.options = { "device", "takeBack", "leave" };
+    doh.choices = { { "device", "as the device (Meh)" }, { "takeBack", "Undo(h)" }, { "leave", "Meh" } };
+
+    model::Inspection inspection;
+    inspection.cueId = "CUE00001";
+    inspection.cueName = "Lights 12";
+    inspection.kind = "osc";
+    inspection.count = 1;
+    inspection.blocks.push_back ({ "what it does", { doh } });
+    inspector.show (inspection);
+
+    juce::ComboBox* menu = nullptr;
+
+    std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+    {
+        for (auto* child : at.getChildren())
+        {
+            if (auto* box = dynamic_cast<juce::ComboBox*> (child); box != nullptr && menu == nullptr)
+                menu = box;
+
+            walk (*child);
+        }
+    };
+
+    walk (inspector);
+    REQUIRE (menu != nullptr);
+
+    //  The words, in the model's order, and the cue's own word chosen.
+    REQUIRE (menu->getNumItems() == 3);
+    CHECK (menu->getItemText (0) == "as the device (Meh)");
+    CHECK (menu->getItemText (1) == "Undo(h)");
+    CHECK (menu->getItemText (2) == "Meh");
+    CHECK (menu->getText() == "as the device (Meh)");
+    CHECK (written.empty());
+
+    //  "Meh" writes `leave`; "Undo(h)" writes `takeBack` - the keys, to the cue's row.
+    menu->setSelectedItemIndex (2, juce::sendNotificationSync);
+    REQUIRE (written.size() == 1u);
+    CHECK (written[0].first == "/godot/cue/CUE00001/doh");
+    CHECK (written[0].second == "leave");
+
+    menu->setSelectedItemIndex (1, juce::sendNotificationSync);
+    REQUIRE (written.size() == 2u);
+    CHECK (written[1].second == "takeBack");
+
+    //  And a reading that says `leave` shows "Meh" and writes nothing.
+    inspection.blocks[0].fields[0].value = "leave";
+    inspector.show (inspection);
+    menu = nullptr;
+    walk (inspector);
+    REQUIRE (menu != nullptr);
+    CHECK (menu->getText() == "Meh");
+    CHECK (written.size() == 2u);
+}
+
 TEST_CASE ("inspector: every block is a drawer, and a drawer of rows that mean nothing here starts shut")
 {
     /*  The author, 2026-09-30: "We can also make more drawers for things." */

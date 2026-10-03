@@ -1,0 +1,18 @@
+{
+  "FULL_PATH": "/desk",
+  "DESCRIPTION": "A console Doh! takes back: one fader it can be asked about. Hand-written for the doh fixture, as most are.",
+  "CONTENTS": {
+    "fader": {
+      "FULL_PATH": "/desk/fader",
+      "DESCRIPTION": "Grand master, 0 to 1.",
+      "TYPE": "f",
+      "ACCESS": 3,
+      "RANGE": [
+        {
+          "MIN": 0.0,
+          "MAX": 1.0
+        }
+      ]
+    }
+  }
+}

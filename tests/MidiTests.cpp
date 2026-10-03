@@ -1128,6 +1128,63 @@ TEST_CASE ("go.doh: a MIDI port that takes back gets the cue again from the corr
     CHECK (rig.newestRunOf (note)->warning.empty());
 }
 
+TEST_CASE ("go.doh: the Doh's own persistent pass sends a port left to its operator nothing; the next step asserts it as ever")
+{
+    /*  The design's test 47, its persistent-MIDI SUBCASE (namespace draft
+        §24.10's tests still owed; D5, 2026-10-03; HN, L39). A persistent MIDI
+        cue cannot be asked what it holds, so every step asserts it. The Doh's
+        `d` step opens a pass of its own, and that pass skips what a port left
+        to its operator would be sent - the operator of that synth or desk was
+        left the GO's world - while one that takes back is asserted as ever.
+        The corrected GO is a step like any other: it asserts the cue again. A
+        net: D1 built the skip. */
+    MidiDohRig rig;
+
+    const auto section = rig.document.createPersistent (rig.listId);
+    REQUIRE (section.ok);
+    rig.midiCue (section.id, 0);
+
+    const auto eleven = rig.document.createCue (rig.listId, 0, "memo", "Eleven").id;
+    const auto twelve = rig.document.createCue (rig.listId, 1, "memo", "Twelve").id;
+    rig.document.createCue (rig.listId, 2, "memo", "After");
+
+    auto takeBack = false;
+
+    SUBCASE ("left to its operator, the default: not asserted at the Doh") {}
+
+    SUBCASE ("a port that takes back: asserted at the Doh as on every step")
+    {
+        takeBack = true;
+        REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/doh", "takeBack").ok);
+    }
+
+    const auto settle = [&rig]
+    {
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+    };
+
+    rig.park (eleven);
+    REQUIRE (rig.press ("go").rejected == 0);               // eleven: a step, the cue asserted
+    settle();
+    const auto afterEleven = rig.sink.sent.size();
+    REQUIRE (afterEleven >= 1u);
+
+    REQUIRE (rig.press ("go").rejected == 0);               // twelve, too soon: asserted again
+    settle();
+    const auto afterTwelve = rig.sink.sent.size();
+    REQUIRE (afterTwelve == afterEleven + 1u);
+    REQUIRE (rig.newestRunOf (twelve) != nullptr);
+
+    REQUIRE (rig.press ("go.doh").rejected == 0);
+    settle();
+    CHECK (rig.sink.sent.size() == afterTwelve + (takeBack ? 1u : 0u));
+
+    REQUIRE (rig.press ("go").rejected == 0);               // twelve, the corrected GO: a step
+    settle();
+    CHECK (rig.sink.sent.size() == afterTwelve + (takeBack ? 2u : 1u));
+}
+
 TEST_CASE ("go.doh: a MIDI cue that found no port sent nothing, so the corrected GO sends it")
 {
     MidiDohRig rig;

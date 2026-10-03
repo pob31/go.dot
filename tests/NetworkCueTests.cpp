@@ -1853,6 +1853,39 @@ TEST_CASE ("go.doh: what left is decided at the send")
                  == std::string (takeBack ? "" : cue::runWarning::leftToOperator));
     }
 
+    /*  THE DEVICE DELETED SINCE THE SEND (the design's test 50, the SUBCASE
+        namespace draft §24.10 named owed; D5, 2026-10-03): a device gone reads
+        `leave` whatever it said while it was there - the setting is the
+        document's, and there is no row left to say take back - and the report
+        names it by the identifier its run kept (`sentTo`). A net: D1 reads it
+        so, and D3 names it. */
+    SUBCASE ("the device deleted before the Doh, though it took back: left to its operator, named by its identifier")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/mount/" + std::string (lightingDesk) + "/doh", "takeBack").ok);
+
+        rig.park (lx);
+        REQUIRE (rig.press ("go").rejected == 0);
+        REQUIRE (rig.received ("/lx/go") == 1u);
+        REQUIRE (rig.newestRunOf (lx)->sentTo == lightingDesk);
+
+        REQUIRE (rig.document.remove (lightingDesk).ok);
+
+        REQUIRE (rig.press ("go.doh").rejected == 0);
+        rig.ticks (2);
+
+        const auto said = rig.runner.listState().dohReport().text;
+        INFO (said);
+        CHECK (said.find (std::string (lightingDesk) + ": ") != std::string::npos);
+        CHECK (said.find ("left to its operator, not sent again") != std::string::npos);
+        CHECK (said.find ("could not be taken back") == std::string::npos);
+
+        REQUIRE (rig.press ("go").rejected == 0);
+        rig.ticks (2);
+
+        CHECK (rig.received ("/lx/go") == 1u);
+        CHECK (rig.newestRunOf (lx)->warning == std::string (cue::runWarning::leftToOperator));
+    }
+
     /*  A DOUBLE ESC IN THE GO'S OWN DRAIN DROPS WHAT THE GO QUEUED (2026-10-02,
         H4, namespace draft §23.10; §24, HQ, L31): the flush that ends the tick
         finds nothing, so the message never left - the run is stamped

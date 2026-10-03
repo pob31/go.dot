@@ -395,3 +395,31 @@ and a group holding on it would have held for ever.
 
 The OSCQuery reply for one cue, written by hand rather than generated, so it can disagree
 with the code.
+
+## `bundles/doh/` and `logs/doh.wfglog`
+
+Doh! taking back a GO pressed too soon, end to end (PRD §3.32, namespace draft §24.15). The show is
+a bed; a ramp on a bus of its own; a timeline scene whose sound is the same ramp on another bus,
+whose cues write a console that takes back (`Mount/@doh` `takeBack`) and fire a lighting desk left
+to its operator (no `doh`: the default) - Q12 at once, Q13 three seconds in - and whose last cue
+stops the bed; and a last ramp. `dohWindow` is five seconds, so a press past it is quick to reach;
+`goDebounce` is nought, as every scripted show's is.
+
+The log is not hand-written. It is one session of `blackbox/go_doh.py`, recorded with
+`--keep-log` from a real `wfg serve --hosted` with two `mock_target.py` devices behind the mounts
+and the driver's generated `bed.wav` and `ramp.wav` - so its header is that copy's, the media lines
+with it, which a Doh's decisions read for lengths. It was then annotated by hand, record by record,
+against the design: the ramp paused and carried on through the arm at the point, the scene paused
+part-way, the console put back by one engine `node.set`, the bed the GO stopped made again with its
+identifier on `go.doh`'s record, the report as the engine's `list.dohReport`, the re-seating GO's
+six identifiers, the second press forgetting, and the press past the window refused.
+
+Made to fail before it was kept, three ways, each refused by the replay: another identifier for the
+bed on `go.doh`'s record, one of the re-seating GO's identifiers taken away, the corrected GO
+naming another run than the arm at the point. And what it cannot catch, said so nobody assumes it:
+a Doh replaced by a command that only moves the pointer still replays, because what a Doh does to
+the audio side reaches a replay as the engine's own records. The unit cases pin the decisions.
+
+The mounts carry the placeholder ports the driver rewrites (`9000`/`5005` the console, `9001` the
+lights). A replay sends nothing and reads neither. No media under `media/`: with no audio side
+there is nothing to arm.

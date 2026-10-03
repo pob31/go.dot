@@ -3785,3 +3785,205 @@ TEST_CASE ("go.doh: a paused scene's pre-sends go back only for a cue that takes
     CHECK (rig.sender.sentFor ("K3PV7WRB") == 4u);               // two pre-sends, the put-back, the fader again
     CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
 }
+
+//==============================================================================
+/*  DOH! D5 - THE TESTS NAMESPACE DRAFT §24.10 AND §24.12 NAMED OWED (2026-10-03).
+    Written after D1-D4 were built: nets, each pinning a road the code already
+    takes and no case drove. */
+TEST_CASE ("go.doh: the horizon's fresh block leaves out the cue left to the console's operator - and a replay prepares the same block")
+{
+    /*  The replay that pins `beginPreparation`'s leave-out (§24.10): a scene
+        entered cold writes its header at entry - the GO's write, left to the
+        console's operator by default; Doh! puts the pointer back on it, and
+        the horizon prepares it again at D+1 without that cue (GV, HO). The
+        decision is a handler's, from the list's mark: replayed from the show
+        and the log alone, with no sender and no hook, the record the horizon
+        logged spawns the same block, the cue left out. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+
+    /*  Where it listens, as a saved show says it: a show that names a device
+        with no port cannot be read back, and the replay reads the show first. */
+    REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/port",
+                                        std::to_string (rig.mountDeclaration.port)).ok);
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+    const auto hold = rig.document.createCue (scene.group, 0, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "2").ok);
+
+    //  The show as the replay starts from: everything after this is in the log.
+    const auto show = doc::CanonicalXml::write (rig.document);
+
+    rig.engine.submit ("cli", "standby.set", { osc::Value::string (scene.group) });
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+    tickUntilDeskHolds (rig, 0.8f);
+    rig.device.target.says ({ osc::Value::float32 (0.8f) });
+    ticksOf (rig, 25);
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+
+    for (int n = 0; n < 600 && rig.runs.preparedRunOf (scene.group) == nullptr; ++n)
+    {
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    ticksOf (rig, 10);
+
+    const auto* again = rig.runs.preparedRunOf (scene.group);
+    REQUIRE (again != nullptr);
+    const auto block = again->id;
+    CHECK_FALSE (rig.runs.hasChildFor (block, scene.cue));
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
+
+    const auto original = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    VerifiedRig fresh;
+    fresh.anticipate();
+    const auto read = doc::CanonicalXml::read (show, fresh.document);
+
+    for (const auto& problem : read.problems)
+        MESSAGE (problem);
+
+    REQUIRE (read.ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+
+    const auto* replayed = fresh.runs.find (block);
+    REQUIRE (replayed != nullptr);
+    CHECK (replayed->state == rig.runs.find (block)->state);
+    CHECK_FALSE (fresh.runs.hasChildFor (block, scene.cue));
+}
+
+TEST_CASE ("go.doh: a scene forgotten by a second press, or over inside the window, is prepared again without what its devices' operators were left with")
+{
+    /*  The design's test 27, the SUBCASEs after its first (§24.12 named them
+        owed): a prepared scene heard - through a synth, a port that plays
+        sound - and Doh'd. Forgotten by a second press past the Doh fade, or
+        already over at the press, it is no resume: the horizon prepares it
+        afresh, and the pre-send the GO committed to a console left to its
+        operator is neither put back nor pre-sent again, and the corrected GO's
+        entry sends it nothing - once in all. On a console that takes back the
+        Doh puts the value back and the fresh block pre-sends it again (L4). */
+    VerifiedRig rig;
+    rig.anticipate();
+    REQUIRE (rig.document.setAttribute ("/godot/list/goDebounce", "0").ok);
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+    const auto port = audiblePort (rig);
+    const auto scene = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto").ok);
+    const auto header = rig.document.createRole (scene, "header");
+    REQUIRE (header.ok);
+    const auto left = sendOf (rig, header.id, 0, "Fader", "/desk/fader", "f:0.8");
+
+    heardBy (rig, scene, 0, port);
+    const auto hold = rig.document.createCue (scene, 1, "memo", "Hold").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "10").ok);
+    rig.document.createCue (rig.listId, rig.index++, "memo", "After");
+
+    auto takeBack = false;
+    auto over = false;
+
+    SUBCASE ("the second press forgets the paused scene") {}
+
+    SUBCASE ("the scene over inside the window")
+    {
+        over = true;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + hold + "/preWait", "0.2").ok);
+    }
+
+    SUBCASE ("forgotten, on a console that takes back: put back, then pre-sent again")
+    {
+        takeBack = true;
+        REQUIRE (rig.document.setAttribute ("/godot/mount/K3PV7WRB/doh", "takeBack").ok);
+    }
+
+    rig.setStandby (scene);
+
+    for (int n = 0; n < 600 && rig.sender.sentFor ("K3PV7WRB") < 1u; ++n)
+    {
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    REQUIRE (rig.sender.sentFor ("K3PV7WRB") == 1u);
+    rig.device.target.says ({ osc::Value::float32 (0.8f) });     // the desk holds what it was sent
+    ticksOf (rig, 3);
+
+    rig.engine.submit ("cli", "go", {});
+    rig.tickOnce();
+    ticksOf (rig, 10);
+
+    const auto* played = rig.runs.liveRunOf (scene);
+
+    if (over)
+    {
+        for (int n = 0; n < 100 && rig.runs.liveRunOf (scene) != nullptr; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.runs.liveRunOf (scene) == nullptr);
+    }
+    else
+    {
+        REQUIRE (played != nullptr);
+    }
+
+    rig.engine.submit ("cli", "go.doh", {});
+    rig.tickOnce();
+    ticksOf (rig, 5);
+
+    if (! over)
+    {
+        //  Past the Doh fade, the second press: the resume forgotten.
+        ticksOf (rig, 60);
+        rig.engine.submit ("cli", "go.doh", {});
+        rig.tickOnce();
+        CHECK (rig.engine.lastError().find ("go.doh") == std::string::npos);
+    }
+
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+    for (int n = 0; n < 600; ++n)
+    {
+        if (rig.runs.preparedRunOf (scene) != nullptr && (! takeBack || rig.sender.sentFor ("K3PV7WRB") >= 3u))
+            break;
+
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    ticksOf (rig, 20);
+
+    const auto* again = rig.runs.preparedRunOf (scene);
+    REQUIRE (again != nullptr);
+    CHECK (rig.runs.hasChildFor (again->id, left) == takeBack);
+    CHECK (engineSets (rig, "/desk/fader") == (takeBack ? 1u : 0u));
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == (takeBack ? 3u : 1u));
+
+    rig.engine.submit ("cli", "go", {});
+    ticksOf (rig, 10);
+
+    const cue::Run* entry = nullptr;
+
+    for (const auto& run : rig.runs.all())
+        if (run.cue == left)
+            entry = &run;
+
+    REQUIRE (entry != nullptr);
+    CHECK (entry->warning == std::string (takeBack ? "" : cue::runWarning::leftToOperator));
+    CHECK (rig.sender.sentFor ("K3PV7WRB") == (takeBack ? 3u : 1u));
+}

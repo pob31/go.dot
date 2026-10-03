@@ -1,0 +1,38 @@
+<Show>
+  <Lists dohWindow="5" goDebounce="0">
+    <List id="DHSHW001" name="The show">
+      <Media id="DHBED001" file="bed.wav" name="The bed" number="1">
+        <Route id="DHRTE001" bus="DHBSA001" gains="1 0"/>
+      </Media>
+      <Media id="DHRMP001" file="ramp.wav" name="The ramp" number="2">
+        <Route id="DHRTE002" bus="DHBSB001" gains="1 0"/>
+      </Media>
+      <Group id="DHSCN001" mode="timeline" name="The scene" number="3">
+        <Media id="DHSND001" file="ramp.wav" name="Its sound" number="3.1">
+          <Route id="DHRTE003" bus="DHBSC001" gains="1 0"/>
+        </Media>
+        <Osc id="DHDSK001" address="/desk/fader" name="Desk to 0.8" number="3.2" value="f:0.8" wait="sent"/>
+        <Osc id="DHX12001" address="/lx/go" name="Lights 12" number="3.3" value="i:12" wait="sent"/>
+        <Osc id="DHX13001" address="/lx/go" name="Lights 13" number="3.4" preWait="3" value="i:13" wait="sent"/>
+        <Transport id="DHSTP001" name="The bed out" number="3.5" target="DHBED001" verb="hard"/>
+      </Group>
+      <Media id="DHEND001" file="ramp.wav" name="The last" number="4">
+        <Route id="DHRTE004" bus="DHBSD001" gains="1 0"/>
+      </Media>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="DHMNT001" doh="takeBack" name="Desk" namespace="namespaces/desk.json" port="9000" prefix="/desk" queryPort="5005" readback="oscquery"/>
+    <Mount id="DHMNT002" host="127.0.0.1" name="Lights" port="9001" prefix="/lx"/>
+  </Mounts>
+  <Audio tracks="6">
+    <Bus id="DHBSA001" name="Bed" width="2"/>
+    <Bus id="DHBSB001" firstChannel="2" name="Ramp" width="2"/>
+    <Bus id="DHBSC001" firstChannel="4" name="Scene" width="2"/>
+    <Bus id="DHBSD001" firstChannel="6" name="Last" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

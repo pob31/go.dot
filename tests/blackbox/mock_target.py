@@ -111,10 +111,12 @@ class Device:
         self.lock = threading.Lock()
         self.values = {}
         self.received = 0
+        self.messages = []
 
     def note(self, address: str, args):
         with self.lock:
             self.received += 1
+            self.messages.append([address, list(args)])
 
             if not args:
                 return
@@ -134,6 +136,10 @@ class Device:
     def count(self) -> int:
         with self.lock:
             return self.received
+
+    def everything(self) -> list:
+        with self.lock:
+            return [list(message) for message in self.messages]
 
 
 # --------------------------------------------------------------------------- UDP
@@ -175,6 +181,15 @@ def make_handler(device: Device):
             #  correction is supposed to make.
             if path == "/_mock/received":
                 self.reply(200, {"VALUE": [device.count()]})
+                return
+
+            #  AND WHAT ARRIVED, IN ORDER (2026-10-03, Doh! D5): every message as
+            #  `[address, [args]]`. A count says how many; a device left to its
+            #  operator through a Doh! is asked WHICH - that it got Q12 once and
+            #  Q13 once, never Q12 twice and Q13 not at all, which is the same
+            #  count. Under the same reserved path as the count.
+            if path == "/_mock/messages":
+                self.reply(200, {"VALUE": device.everything()})
                 return
 
             # THE BARE KEY IS THE WHOLE POINT. OSCQuery asks `?VALUE`, not

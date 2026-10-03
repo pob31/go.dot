@@ -16633,6 +16633,8 @@ is carried on by the next GO from where it was, what nobody heard is handed back
 *(2026-10-03: D3 is built - what the GO changed elsewhere is put back, and one report says what was
 and what was left, §24.13.)* *(2026-10-03: D4 is built - the report names the MIDI a port that takes
 back was sent, and the desktop puts the report in front of the operator, §24.14.)*
+*(2026-10-03: D5 drives it end to end over the shipped binary, and keeps one session as a fixture -
+Doh! is complete, §24.15.)*
 The design's own labels for its decisions
 (FO to GY) are kept in a column of §24.6's table; the letters here continue §23's.
 
@@ -16841,7 +16843,7 @@ level"*, and when nobody chose, *"Always leave to its operator"*.
 The design's labels in the second column; the letters continue §23's (GG was J3's), GO skipped as
 the command it reads as. A decision marked with a stage later than D1 is specified and not yet
 built. *(2026-10-02: D2's are built, and D2 adds MB-ML, §24.12.)* *(2026-10-03: D3's are built - GR to
-GU, GW's naming, GX and HR - and D3 adds ND-NT, §24.13; its review NY-OH.)* *(2026-10-03: D4 adds NU-NX, §24.14.)*
+GU, GW's naming, GX and HR - and D3 adds ND-NT, §24.13; its review NY-OH.)* *(2026-10-03: D4 adds NU-NX, §24.14.)* *(2026-10-03: D5 adds OR-OT, §24.15.)*
 
 | | Design | Decision | Whose |
 |---|---|---|---|
@@ -17129,7 +17131,8 @@ decision N ignoring the corrected GO on a marked cue (the design's test 49, its 
 test 47's persistent-MIDI and media-bed SUBCASEs; test 50's deleted-device SUBCASE; the inspector's
 worded-choice commit path; and a replay that pins `beginPreparation`'s leave-out (the replayed
 lighting desk is not anticipatable, so nothing is prepared there - a VerifiedCueTests case with a
-replay at its end is the place). **A readout that changed**: a GO entering a prepared block now
+replay at its end is the place). *(2026-10-03, D5: written, §24.15 - all but the decision-N
+SUBCASE, whose precondition does not arise.)* **A readout that changed**: a GO entering a prepared block now
 stamps its launch tick (`adoptPrepared`), so `/godot/run/<id>/started` reads the GO's tick instead of
 0 and an adopted scene's position readout runs. *(2026-10-02, D2: a Doh of a GO nobody heard hands
 such a block back with the launch tick it had, nought.)*
@@ -17399,7 +17402,7 @@ top. A second press of Doh! forgets the resume (the author, (b)).
 | | Limitation | Leaves intact |
 |---|---|---|
 | L42 | ~~A GO pressed within a tick of the pointer landing on a scene enters it cold, and the horizon's arm made in that same drain, after the GO, is taken by the scene's job without the GO's serial (a hook's adoption, which cannot stamp): a Doh then reads the scene unheard and takes it down rather than pausing it.~~ *Retired 2026-10-03 by D2's review (MZ): it is PRD §4.5's double GO whenever the debounce is nought - a rig, a show that turns it off, a bouncing footswitch - and the arm is now stamped the GO's by the launch's own handler* | - |
-| L43 | *Reworded 2026-10-03 (D2's review): not a limitation of the build but a gap in its tests.* No case drives a sampling channel's take through a Doh - a mic's `onGo` acting at the resume - nor a mic member inside a running act brought back in place; the code takes both roads (`applyTakeOnGo` at every resume of a mic, `adoptIntoParentJob` for a member) | - |
+| L43 | *Reworded 2026-10-03 (D2's review): not a limitation of the build but a gap in its tests.* No case drives a sampling channel's take through a Doh - a mic's `onGo` acting at the resume - nor a mic member inside a running act brought back in place; the code takes both roads (`applyTakeOnGo` at every resume of a mic, `adoptIntoParentJob` for a member) *(2026-10-03, D5: both driven now - `MicTests` and `TakeTests`, §24.15)* | - |
 
 **Retired or narrowed:** L1 (MD), L2 and L3 (MB) - see the dated notes in §24.7. *(2026-10-03:
 and L42, by MZ; L43 reworded as the test gap it is.)*
@@ -17482,7 +17485,8 @@ fade outside it are handed back with their pre-sends on the desk.
 
 **What the design's list has that is not here:** test 9's mic SUBCASE (a member mic inside an act) and
 test 14's take - `onGo` acting at the resume - are not driven (L43); test 27 has its first SUBCASE
-only; test 15's orders are test 17's three stale-record cases, each replayed.
+only; test 15's orders are test 17's three stale-record cases, each replayed. *(2026-10-03, D5: test
+9's mic, test 14's take and test 27's other SUBCASEs are written, §24.15.)*
 
 **Counts.** The new cases under C and `fr-FR`: 30 cases, 1456 assertions each, green. Every
 `go.doh` case, D1's included, under `fr-FR`: 96 cases, 3508 assertions, green. `GoTests`,
@@ -18080,6 +18084,153 @@ and the first UI case failed, the nets passed. `GoTests`, `NetworkCueTests`, `Mi
 `TakeTests`, `SamplerTests` and `AudioTests`: 216 cases, 31123 assertions - green. `ctest -R
 "wfg\.replay|wfg\.commands|schema|^ui\.|client|console"`: 72 of 72. `check-comments.py` passes;
 clang-tidy with the GCC warnings finds nothing on the lines the review changed.
+
+### 24.15 What was built: D5 - end to end (2026-10-03)
+
+**What it does.** Nothing new in the engine. D1 to D4 built Doh! against fake audio sides and fake
+wires; D5 asks the shipped binary, from outside, the way an evening would, and keeps one such
+evening as a fixture. With it Doh! is complete: D1 takes the GO down, D2 pauses what was heard and
+hands back what was not, D3 puts back what the GO changed elsewhere, D4 names what could not be
+put back and tells the operator, and D5 drives all of it end to end.
+
+**The driver** (`tests/blackbox/go_doh.py`, registered `blackbox.doh.C` and `blackbox.doh.fr_FR`):
+`wfg serve --hosted` with a render, over `tests/fixtures/bundles/doh`, two `mock_target.py`
+devices behind its mounts - a console that takes back ("Undo(h)") and a lighting desk at the
+default ("Meh") - and nothing but named commands over OSC. The show: a bed; a ramp on a bus of its
+own; a timeline scene whose sound is the same ramp on another bus, whose cues write the console's
+fader 0.8, send the lighting desk Q12 at once and Q13 three seconds in, and stop the bed; and a last
+ramp. `ramp.wav` rises from 0.1 to 0.9 over eight seconds, so a sample is a second of the file and a
+launch is never a rise out of silence. The session, and what is asked of it:
+
+- **A hand sets the console to 0.2; GO: the bed; GO too soon: the ramp; Doh! a second and a half
+  in.** The pointer is back on the ramp, `/godot/list/doh` empty, `list/resume` names the ramp and
+  its second, `lists/dohForget` offers the second press, and the ramp's run ends over the panic
+  fade. The render: the ramp falls under its own line where the press found the file, over the
+  panic fade - part-way down a quarter of a second in, never in one block.
+- **The corrected GO carries it on**: a run of the ramp plays from the press's second - its
+  `position` near it, never its top - and the render reads the press's second where it arrives,
+  rising from silence to its line over the de-click, never at once; `list/resume` is spent.
+- **GO too soon: the scene; Doh! part-way, before Q13.** The lighting desk got Q12 and nothing
+  else; the console went to 0.8; the bed stopped. At the Doh the console is put back to 0.2 - its
+  own account says 0.2, 0.8, 0.2 - the bed the GO stopped is made again (fading in over the panic
+  fade, in the render), `list/resume` names the scene and its own second, and
+  `/godot/list/dohReport` is the list's and names the lighting desk, "left to its operator, not
+  sent again", and not the console. **The lighting desk receives nothing at the Doh** nor in the
+  two seconds after it - the author's case, read off the desk's own list of what arrived.
+- **The corrected GO re-seats the scene**: its sound at its second; the console sent 0.8 again (it
+  takes back: the corrected GO is a first GO for it); Q12 planned over, never sent again; Q13 on
+  the corrected GO's clock - three seconds into the scene less what had already played, read off
+  the log's own ticks (±10). **The lighting desk got each cue once in all**: `[12, 13]`. The scene's
+  stop fires again from the scene's start, and the bed the Doh made goes again.
+- **GO: the last ramp; Doh!; Doh! again**: the second press forgets the resume - `list/resume` and
+  `lists/dohForget` empty, the pointer still on the cue - and the next GO plays it from its top, at
+  full level, nothing armed silent at the old point (the render). **Past the window** (the show's
+  `dohWindow`, five seconds here) a press is refused `too-late`: `/godot/engine/lastError` says so,
+  and the log holds the refused record ("Doh! ignored: the last GO is too long ago to take back" is
+  the desktop's sentence for it, pinned by `ClientTests`).
+- **The log**: four `go.doh` applied, one refused `too-late`, a `go.dohPlayhead` per pause, the
+  report as the engine's own `list.dohReport`; `rtViolations` nought; and `wfg replay --bundle`
+  reproduces the session record for record.
+
+**The fixture** (`tests/fixtures/logs/doh.wfglog`, bundle `tests/fixtures/bundles/doh`, registered
+`wfg.replay.doh.C` and `wfg.replay.doh.fr_FR`): one session of that driver, recorded with
+`--keep-log` under C on 2026-10-03, 88 records, annotated by hand record by record - the hand on
+the console, the ramp paused and its resume arm, the scene's Doh drawing the bed it makes again on
+`go.doh`'s record, the report, the re-seating GO's six identifiers, the forget, the refusal. Made
+to fail before it was registered, three ways, each refused by the replay: the bed's identifier on
+`go.doh`'s record changed, one of the re-seating GO's identifiers taken off its record, and the
+corrected GO on the ramp naming another run than the arm at the point. What it cannot catch, said
+in its header: a Doh replaced by a command that moves only the pointer still replays, because what
+a Doh does reaches a replay as the engine's own records, re-injected - the unit cases are what pin
+the decisions.
+
+**The device's own account** (`mock_target.py`): `/_mock/messages`, every message it received as
+`[address, [args]]` in order, beside `/_mock/received`'s count (OS).
+
+**What the drive found: a tick thread far behind its audio, on this laptop.** No fault of Doh!'s.
+On the Core Ultra 7 255H this was built on, Windows moves the tick thread onto its slow cores about
+two seconds into a run, and in a Debug build every applied command then rebuilds the parameter tree
+(45-95 ms). The tick falls behind the audio it counts: `engine/lateness` read 0.6 s five seconds
+into the drive and past eight seconds twenty seconds in. What the tick places lands late on the
+audio's clock - the corrected GO's sound arrived 0.11 to 0.26 s further into its file than the
+press, where the engine's own readings (`go.dohPlayhead`, `list/resume`, the arm at the point) say
+the press's second; and a five-tick de-click run by ticks processed back to back to catch up was
+heard as twenty milliseconds. The driver judges those readings where the tick keeps time (OR):
+everything else it asks compares engine-side facts - the readouts, the log, what each device got,
+the render's own frames - and held in every run.
+
+| | Decision | Whose |
+|---|---|---|
+| OR | **A reading the tick places is judged where the tick keeps time**: where the corrected GO lands in its file, the Doh fade's length and middle, the de-click's rise and the bed's fade-in - off CI only (`lane_level.timed`, the author's rule of 2026-09-28), and, off CI, voided in words with the lateness when it misses by no more than the tick's own `engine/lateness` measured around it. A reading on time always counts; a miss the lateness cannot explain fails | implementer's call |
+| OS | **The mock device says what it received, message by message**: a count cannot tell Q12 twice from Q12 and Q13, which is the author's whole case | implementer's call |
+| OT | **The fixture is the driver's own session**, recorded with `--keep-log`, annotated by hand and made to fail before it was kept; the bundle's devices on the placeholder ports the driver rewrites, which a replay - sending nothing - never reads | implementer's call |
+
+**The design's list for D5 (§6), and where each case lives.** The design drew the end-to-end drive
+wider than one session can hold; what the driver does not drive over the wire is pinned by a unit
+case on a fake wire or a fake audio side, built by D1-D4:
+
+| The design's D5 case | Where |
+|---|---|
+| A ramp GO'd early, Doh'd, GO'd again: the render reads the press's position | `go_doh.py` (the ramp) |
+| The same, Doh! twice: from its top, at full level, no silent arm | `go_doh.py` (the last ramp) |
+| A prepared scene GO'd early, Doh'd before its member: no second pre-send, the member on time | `VerifiedCueTests` "a prepared scene fired early and caught before its first sound is prepared again as it was" |
+| An act of two scenes GO'd early into scene 1: scene 2's pre-send restored, then the value from before the GO | `VerifiedCueTests` "an act the GO entered, nobody heard, the next scene's block under it" and "a value the next scene pre-sent after the GO goes back" |
+| A desk value back to its value from before the GO | `go_doh.py` (the console); `NetworkCueTests` "a desk value the GO wrote goes back" |
+| An OSC event of the early GO received twice, where it takes back | `NetworkCueTests` "an OSC event and a write to an opaque device that take back are named, and sent again"; `go_doh.py` sends the console's value again |
+| A lighting desk at the default: once per cue, nothing at the Doh, the rest on the corrected GO's clock, the report naming it | `go_doh.py` (the lights) |
+| The same with a GO on the cue before it between the Doh and the corrected GO | `NetworkCueTests` "what was left outlives a GO on an earlier cue" |
+| The same with a persistent value the scene's stop cue ends | `NetworkCueTests` "the Doh's own persistent pass sends nothing to a device left to its operator" |
+| A bed stopped by the early GO heard again | `go_doh.py` (the bed, fading in); `GoTests` "a cue the GO stopped comes back where it would be now" |
+| An act's last cue GO'd early: the footer's value back, the corrected GO's footer once | `NetworkCueTests` "what an act's footer wrote because the GO ended it goes back" |
+| A ramp member of a running act, GO'd after the fade: at the press's position, warm | `GoTests` "a sound inside a running act resumes like a top-level one" |
+| The session replayed record for record | `go_doh.py`'s replay; the fixture |
+
+**The tests §24.10, §24.12 and L43 named owed** - written now, each run under C and `fr-FR`. All
+are nets: D1 to D4 built what they pin, so none could fail first on this tree; the ones marked
+were made to fail by taking their guard out of the engine for one build (the sources put back
+byte for byte after, `git status` clean):
+
+| Owed | Case | Shown to fail |
+|---|---|---|
+| Test 47, its media-bed SUBCASE | `GoTests` "a persistent bed the GO's stop brought down sounds again at the Doh, once" - a bed the GO's stop suspended is both a persistent cue and a cue the GO stopped: it comes back once, one voice | no |
+| Test 47, its persistent-MIDI SUBCASE | `MidiTests` "the Doh's own persistent pass sends a port left to its operator nothing; the next step asserts it as ever" - and asserted at the Doh on a port that takes back | the pass's skip (HN) taken out |
+| Test 50, its deleted-device SUBCASE | `NetworkCueTests` "what left is decided at the send", a SUBCASE: a device that took back, deleted before the Doh, reads leave - named by its identifier, not sent again | a gone device read as taking back |
+| A replay that pins `beginPreparation`'s leave-out | `VerifiedCueTests` "the horizon's fresh block leaves out the cue left to the console's operator - and a replay prepares the same block" | the leave-out taken out |
+| Test 27, the SUBCASEs after its first | `VerifiedCueTests` "a scene forgotten by a second press, or over inside the window, is prepared again without what its devices' operators were left with" - and, on a console that takes back, put back and pre-sent again | the leave-out taken out |
+| L43: a mic member of a running act (test 9's mic) | `MicTests` "a mic member of a running act opens again under the act" - in place inside the Doh fade, after it with its tail cut | no |
+| L43: a take through a Doh (test 14's take) | `TakeTests` "a mic cue whose GO looped the take" - the loop undone at the Doh (NJ), looped again by the corrected GO, in place and after the fade | the take's GO at the in-place resume taken out |
+| The inspector's worded-choice commit path | `RunPaneUiTests` "inspector: Doh!'s row on a cue is a menu of words that writes their keys" - "Meh" writes `leave`, "Undo(h)" `takeBack` | no |
+
+**What the design's list has that is not here.** Test 49's decision-N SUBCASE - the corrected GO on
+a media cue M ignored while M still sounds under Esc's fade, with what its GO left standing for the
+next GO - is not written: its precondition does not arise. The SUBCASE wants the footer the GO set
+off, by firing M as the act's last member, to have reached the lighting desk before the Doh while M
+still sounds; but a footer runs only once its act's members have gone (§4.4, the panic fade's own
+rule), so while M sounds nothing of it has left and nothing is filed for M. `endGo`'s undo of the
+filing stays without a case: reaching it would take a media or mic cue whose GO left something with
+a device while it still sounds, and no road found builds one. The Esc fixture §23.3 owes is not
+D5's (§6).
+
+**Counts.** The seven new and changed `wfg_tests` cases under C and `fr-FR`: 449
+assertions each, green; with their guards taken out (the mutation build above), five of them failed
+and the persistent bed and the mic member passed - nets only. The inspector case in
+`wfg_audio_ui_tests`, 15 assertions, both locales. Every `go.doh` case under C and `fr-FR`: 155
+cases, 6080 assertions each, green; the inspector cases, 4. `blackbox.doh` and `wfg.replay.doh`, five
+runs each under each locale (`ctest --repeat until-fail:5`): 20 of 20 - the driver 82 or 83 checks a
+run, with one or two of OR's readings voided on this laptop in nine of the ten runs and none in one.
+`ctest -R "wfg\.replay|blackbox\.(phase3|phase4|lane-record|first-sound|doh)|schema"`: 74 of 74.
+`check-comments.py` passes.
+
+**Owed to the bench**, every item of §24.9 to §24.14 gathered in one list,
+`docs/handoffs/2026-09-06-audio-hardware-checklist.md` items 20 to 33: the button, F9, the
+inspector's words and the notice on screen; the MADIface's pause, resume and de-click on a bed, a
+scene and a presenter's mic; a console that quantises; a lighting desk at its default through a Doh;
+a scene stopped with a long footer; F9 with the interface unplugged; and this drive run where the
+tick keeps time - a Release build, or the Mac mini - so OR's voided readings are judged.
+
+**Still the author's** (§24.8): whether a second Doh! keeps what was left (L37, question 3), and his
+first look at F9, the caption, the sentences, "Sound", "on Doh!", the warning and the report's
+words.
 
 ## 25. A Show and its Performances
 

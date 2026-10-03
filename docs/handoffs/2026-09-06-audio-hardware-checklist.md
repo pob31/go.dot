@@ -226,3 +226,68 @@ lane table; what it cannot check is a synth on a cable and a motor fader.
     again.
 19. A media cue with a reverb insert, its lane recorded: **Rec pressed again** ends the pass and the
     reverb's tail rings out - it is not cut, as it was before K4.
+
+## Doh! — taking back a GO pressed too soon — added by D5 (2026-10-03)
+
+Doh! (PRD §3.32, namespace draft §24) is built: a GO pressed before its moment is taken back - the
+pointer, the history and what the GO started; what was heard paused and carried on by the next GO,
+what nobody heard handed back exactly; a desk value put back on a device that takes back, nothing
+sent again to one left to its operator; a cue the GO stopped made again; one report of all of it on
+the transport line. The unit suite drives every road against a fake audio side and a fake wire, and
+`blackbox.doh` drives the shipped binary over a hosted render and two mock devices. What neither can
+do is listen through an interface, look at the window, or put a real desk, a motor fader and a
+lighting operator on the other end. Gathered here from every stage's list (§24.9 to §24.14).
+
+On the window, at first look:
+
+20. **The Doh! button and F9.** A GO, then the button reads "Doh! 12" in its own pink, fades over
+    the window's last two seconds and is disabled once it is over; F9 held sends one Doh!, and a
+    second press after the Doh fade forgets the resume (the button's tooltip says so first).
+21. **The inspector's "on Doh!" row** on an OSC and a MIDI cue - "as the device (Meh)" or "as the
+    device (Undo(h))", "Undo(h)", "Meh" - and the Network and MIDI tabs' Doh! and Sound cells.
+22. **The notice**: a Doh's report on the transport line - its words, its colour, how much of a long
+    report the row holds, the whole of it on hover - once, whatever list has the focus ("Doh! on
+    Act 2: ..."), what was left to an operator first, and a newer refusal taking the line back.
+
+On the MADIface (or any interface), listening:
+
+23. **A bed GO'd too soon and Doh'd five seconds in.** GO inside the Doh fade: it comes back up where
+    it was. GO after the fade: it comes back at the point within a launch latency, the faded second
+    heard again, no click. Doh! twice, then GO: from its top, at full level.
+24. **A double GO on a bed and on a scene** (the debounce set to nought, two presses a tick apart):
+    the second GO taken back, the first carrying on, nothing heard twice.
+25. **A scene of three sounds and a fade outside it, Doh'd and re-seated**: the sounds at their
+    seconds, the late one on its time, the fade fired again.
+26. **A presenter's mic in an act, Doh'd, the reverb ringing, then GO**: the tail cut, the gate open
+    over a tenth of a second. A mic scene Doh'd and GO'd inside the Doh fade: the scene seated
+    again (L6), its mic's gate opening over the de-click on its channel - nothing doubled, nothing
+    clicking. A mic a stop cue was fading, Doh'd: its gate open again.
+27. **A bed the GO stopped dead, Doh'd two seconds later**: back at its second, fading in over the
+    panic fade.
+28. **A scene stopped with a long footer**: put back once its footer has ended, and the report says
+    so, then again when it comes back.
+
+On a real desk:
+
+29. **A console that quantises (a motor fader).** A GO too soon moves it; Doh!: the fader back where
+    it was before the GO. Moved by a hand after the GO, then Doh!: left where the hand put it, and the
+    report says "changed since the GO".
+30. **A lighting desk at its default ("Meh").** A scene of OSC cues to it caught part-way by a Doh:
+    the desk keeps what it had, nothing is sent at the Doh, the corrected GO runs the rest on its
+    clock and sends nothing it already had; the report names the desk on the Doh! line, also while
+    the focus sits on another list. And a scene caught before anything sounded: the desk keeps what
+    it had, and the corrected GO runs the rest on its clock.
+31. **F9 with the interface unplugged**: the line says the pointer is back and what it puts back
+    comes when the audio returns; plugged back in, the report replaces it.
+32. **The D700's Doh! binding** waits for a bench session of its own - a button of its own, never a
+    double click of PLAY, which is the very fault Doh! mends (ruling 9, HA).
+
+On a machine where the tick keeps time:
+
+33. **`blackbox.doh` in a Release build, or on the Mac mini.** On the Windows laptop (Core Ultra 7
+    255H) a Debug build's tick thread falls seconds behind its audio once Windows moves it to the
+    slow cores, and the driver voids, in words, the readings the tick places: where the corrected
+    GO's sound lands in its file, the Doh fade's shape, the de-click's rise, the bed's fade-in
+    (namespace draft §24.15, OR). Run where the tick keeps time, none should say `void`: the
+    corrected GO lands within a tenth of a second of the press's second, and the de-click rises over
+    about a tenth of a second.

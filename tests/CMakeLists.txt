@@ -657,6 +657,24 @@ add_test(NAME wfg.replay.persistent.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/persistent
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# DOH! TAKING BACK A GO PRESSED TOO SOON (PRD 3.32, namespace draft 24.15): a heard
+# ramp paused and carried on by the next GO, a scene paused part-way and re-seated,
+# a console that takes back given its value back, a lighting desk left to its
+# operator named and sent nothing again, a cue the GO stopped made again, the report
+# as the engine's own record, a second press forgetting and a press past the window
+# refused - recorded by blackbox/go_doh.py from a hosted session and replayed here
+# with no audio side, no device and no wire, under both locales.
+add_test(NAME wfg.replay.doh.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/doh.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/doh
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/doh-C
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.doh.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/doh.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/doh
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/doh-fr_FR
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # A cue's insert made, turned, switched off and a turn undone (Phase 9a, PR 9a.8):
 # the FX door's records replay on a machine with no child and no plugin.
 add_test(NAME wfg.replay.fx.C
@@ -1286,6 +1304,25 @@ add_test(NAME blackbox.lane-record.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_record.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.lane-record.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# DOH! END TO END (namespace draft 24.15): the GO pressed too soon and taken back,
+# over a real Tracktion graph and two mock devices on real sockets - a console that
+# takes back and a lighting desk left to its operator. What each device received,
+# message by message, what the render heard (the Doh fade, the carry-on over the
+# de-click, the bed made again fading in, a forgotten resume from its top), the
+# report, a press past the window refused, and the session replayed. A reading the
+# tick places is judged off CI only, and voided where the tick ran behind its audio
+# by more than the reading missed.
+add_test(NAME blackbox.doh.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/go_doh.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.doh.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.doh.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/go_doh.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.doh.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # A cue's insert, heard (Phase 9a, PR 9a.8): the test-gain child on a voice through
