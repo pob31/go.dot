@@ -74,6 +74,10 @@ namespace wfg::client::model
             operator, the default - or "takeBack" (PRD §3.32). */
         std::string doh { "leave" };
 
+        /*  Its general go-back command for Doh! (2026-10-03, OV-OX): a MIDI
+            line - `programChange 1 11`, or `sysex` then the hex - or empty. */
+        std::string dohRollback;
+
         /*  "Meh" or "Undo(h)", in words: what the row's Doh! cell says - the
             author's words of 2026-10-02 for `leave` and `takeBack`. */
         std::string dohWord() const;

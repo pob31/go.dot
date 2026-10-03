@@ -484,7 +484,7 @@ namespace wfg::client::ui
 
             line->box.setFont (Look::font (theme, 12.0f));
             line->box.setColour (juce::Label::textColourId,
-                                 Look::colour (theme, line->isDetail ? "ink-off" : "ink"));
+                                 Look::colour (theme, line->isDetail || standsIn (line->field) ? "ink-off" : "ink"));
             line->box.setColour (juce::Label::backgroundColourId,
                                  line->field.writable ? Look::colour (theme, "panel-in")
                                                       : juce::Colours::transparentBlack);
@@ -664,6 +664,8 @@ namespace wfg::client::ui
                 case model::Control::text:
                 default:
                     line.box.setText (shown (field), juce::dontSendNotification);
+                    line.box.setColour (juce::Label::textColourId,
+                                        Look::colour (theme, line.isDetail || standsIn (field) ? "ink-off" : "ink"));
                     break;
             }
 
@@ -753,7 +755,14 @@ namespace wfg::client::ui
         /*  "(mixed)" IN THE BOX rather than an empty one: an empty box says
             "nothing", and what is true is that the cues say different things.
             Typing over it writes the one value to all of them. */
-        return field.mixed ? juce::String ("(mixed)") : juce::String (field.value);
+        if (field.mixed)
+            return "(mixed)";
+
+        /*  AN EMPTY BOX THAT STANDS FOR SOMETHING says what (Doh!'s rollback,
+            2026-10-03): the line the Doh would send, greyed - and editable as
+            it stands, the author's "the previous message is in the field and
+            can be edited too". */
+        return juce::String (field.value.empty() ? field.placeholder : field.value);
     }
 
     int InspectorComponent::idForChoice (const model::Field& field)
@@ -1140,6 +1149,10 @@ namespace wfg::client::ui
 
                         //  Leaving "(mixed)" as it was is not a decision, and writes nothing.
                         if (raw->field.mixed && text == "(mixed)")
+                            return;
+
+                        //  Nor is leaving the greyed line as it stood.
+                        if (standsIn (raw->field) && text == raw->field.placeholder)
                             return;
 
                         if (namesACue)

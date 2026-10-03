@@ -273,36 +273,51 @@ namespace wfg::cue
 
         const auto wanted = kind == "midi" ? std::string ("Midi") : std::string ("Osc");
 
-        /*  IN THE DOCUMENT'S ORDER, depth first - a scene's members are where
-            the list plays them - and the last match before the cue wins. */
+        /*  IN PLAY ORDER, depth first - a group's header, its members, its
+            footer, wherever the file happens to keep the two sections among
+            its children - and the last match before the cue wins. The client
+            walks the published `headerOrder`, `order` and `footerOrder` the
+            same way (`model::previousCommand`), so the inspector's greyed line
+            is what the Doh sends. */
         std::string found;
         auto reached = false;
 
-        std::function<void (const juce::ValueTree&)> walk = [&] (const juce::ValueTree& parent)
+        std::function<void (const juce::ValueTree&)> walk;
+
+        const auto visit = [&] (const juce::ValueTree& cue)
         {
-            for (const auto& child : parent)
+            if (reached)
+                return;
+
+            const auto id = cue[juce::Identifier ("id")].toString().toStdString();
+
+            if (id == cueId)
             {
-                if (reached)
-                    return;
-
-                const auto type = child.getType().toString().toStdString();
-
-                if (type == "Persistent")
-                    continue;
-
-                const auto id = child[juce::Identifier ("id")].toString().toStdString();
-
-                if (id == cueId)
-                {
-                    reached = true;
-                    return;
-                }
-
-                if (type == wanted && routeOf (document, wanted, id) == deviceId)
-                    found = spellMessageOf (document, id);
-
-                walk (child);
+                reached = true;
+                return;
             }
+
+            if (cue.getType().toString().toStdString() == wanted && routeOf (document, wanted, id) == deviceId)
+                found = spellMessageOf (document, id);
+
+            walk (cue);
+        };
+
+        walk = [&] (const juce::ValueTree& container)
+        {
+            for (const auto& child : container.getChildWithName ("Header"))
+                visit (child);
+
+            for (const auto& child : container)
+            {
+                const auto type = child.getType().toString();
+
+                if (type != "Header" && type != "Footer" && type != "Persistent")
+                    visit (child);
+            }
+
+            for (const auto& child : container.getChildWithName ("Footer"))
+                visit (child);
         };
 
         walk (list);

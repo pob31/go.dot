@@ -173,6 +173,14 @@ namespace wfg::client::ui
         /** What a box shows for a field: its value, or that the cues disagree. */
         static juce::String shown (const model::Field& field);
 
+        /*  Whether the box shows what an empty row stands for rather than a
+            value: drawn in the faint ink, and committed unchanged it writes
+            nothing. */
+        static bool standsIn (const model::Field& field)
+        {
+            return ! field.mixed && field.value.empty() && ! field.placeholder.empty();
+        }
+
         /*  Which item of a `busRef` menu stands for what the row currently
             says, counting from one as a ComboBox does. Nought when the stored
             identifier is in the menu nowhere - an output deleted out from

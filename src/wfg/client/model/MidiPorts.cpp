@@ -123,6 +123,7 @@ namespace wfg::client::model
             /*  FAIL-SAFE, as the engine reads it (PRD §3.32): only the exact
                 word takes back. */
             else if (name == "doh")           row.doh = text (node) == "takeBack" ? "takeBack" : "leave";
+            else if (name == "dohRollback")   row.dohRollback = text (node);
         }
 
         std::vector<PortRow> rows;

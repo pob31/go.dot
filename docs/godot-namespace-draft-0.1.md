@@ -16857,10 +16857,15 @@ level"*, and when nobody chose, *"Always leave to its operator"*.
   message (said), today's road. Sent by `flushDohWrites`, before the desk's put-back: an OSC one as
   an engine `node.set`, a MIDI one straight onto the port when its `tx` is on; the report says
   "<device>: rolled back with <line> (<cue>) - the next GO sends it again". The corrected GO sends the cue again, as `takeBack`
-  always did. `leave` never reads it. The inspector's **rollback** row shows under "Undo(h)" only,
-  the effective rollback greyed as its placeholder, an edit storing the text and a cleared field
-  removing it; the device rows gain a **Rollback** cell. Resolved from the document at the Doh,
-  carried on its report, so a replay sends what the session sent.
+  always did. `leave` never reads it. The inspector's **rollback** row sits under **on Doh!** on an
+  OSC and a MIDI cue, greyed under Meh - the panel's rule: greyed, never hidden - and an empty box
+  shows the effective rollback in faint ink, editable as it stands: committed unchanged it writes
+  nothing, edited it stores the text, cleared it follows again. The client walks the published
+  `headerOrder`, `order` and `footerOrder` for the previous command (`model::previousCommand`), the
+  engine the document in the same play order, and a test holds the two to one answer. The Network
+  and MIDI tabs gain a **Rollback** cell after **Doh!**, typed in place, faint under Meh. The web
+  console shows neither, as it never showed the Doh! setting. Resolved from the document at the
+  Doh, carried on its report, so a replay sends what the session sent.
 
 ### 24.6 The decisions
 

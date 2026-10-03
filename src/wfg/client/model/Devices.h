@@ -104,6 +104,12 @@ namespace wfg::client::model
             device - or "takeBack". */
         std::string doh { "leave" };
 
+        /*  ITS GENERAL GO-BACK COMMAND for Doh! (2026-10-03, OV-OX): what takes
+            back a cue sent here that nothing reads back, unless the cue has
+            its own - an address and a value, as a cue's rows spell them. Empty
+            leaves each cue to the previous command. */
+        std::string dohRollback;
+
         /*  "Meh" or "Undo(h)", in words: what the row's Doh! cell says - the
             author's words of 2026-10-02 for `leave` and `takeBack`. */
         std::string dohWord() const;

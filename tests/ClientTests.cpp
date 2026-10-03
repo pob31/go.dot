@@ -94,6 +94,7 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/DohSetting.h>
 #include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/LaneTable.h>
@@ -7381,6 +7382,96 @@ TEST_CASE ("client: Doh!'s choice on an OSC or a MIDI cue says what its device s
     CHECK (devices[0].id == "G1JS4VWE");
     CHECK (devices[0].dohWord() == "Undo(h)");
     CHECK (devices[1].dohWord() == "Meh");
+}
+
+TEST_CASE ("client: Doh!'s rollback row shows what the Doh would send - the device's command, else the previous command - and the engine agrees")
+{
+    /*  The author, 2026-10-03 (OV-OX): "We could have a default for the device
+        that is in the editable Doh rollback field. If the device default is
+        left blank then the previous message is in the field and can be edited
+        too." The previous command in PLAY order - a group's header, its
+        members, its footer - whichever order the file keeps the sections in:
+        the footer is made first here, so a walk in file order would differ. */
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto oscCue = [&rig] (const std::string& parent, int at, const char* atom)
+    {
+        const auto made = rig.document.createCue (parent, at, "osc", "Desk");
+        REQUIRE (made.ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + made.id + "/address", "/wfs/x").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + made.id + "/value", atom).ok);
+        return made.id;
+    };
+
+    const auto scene = rig.document.createCue (list, 0, "group", "Scene");
+    REQUIRE (scene.ok);
+    const auto footer = rig.document.createRole (scene.id, "footer");
+    REQUIRE (footer.ok);
+    oscCue (footer.id, 0, "i:3");
+    const auto member = oscCue (scene.id, 0, "i:2");
+    const auto header = rig.document.createRole (scene.id, "header");
+    REQUIRE (header.ok);
+    oscCue (header.id, 0, "i:1");
+    const auto target = oscCue (list, 1, "i:9");
+
+    const auto rollbackRow = [&rig, &target] (std::int64_t tick)
+    {
+        rig.parameters.markStale();
+        const auto inspection = model::inspect (*rig.publish (tick), target);
+        model::Field found;
+        auto afterDoh = false, seenDoh = false;
+
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+            {
+                if (field.name == "dohRollback")
+                {
+                    found = field;
+                    afterDoh = seenDoh;
+                }
+
+                seenDoh = field.name == "doh";
+            }
+
+        CHECK (afterDoh);
+        return found;
+    };
+
+    //  The client's walk is the engine's.
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+    CHECK (model::previousCommand (*snapshot, "osc", "G1JS4VWE", member) == "/wfs/x i:1");
+    CHECK (cue::rollbackOf (rig.document, member) == "/wfs/x i:1");
+    CHECK (model::previousCommand (*snapshot, "osc", "G1JS4VWE", target) == "/wfs/x i:3");
+    CHECK (cue::rollbackOf (rig.document, target) == "/wfs/x i:3");
+
+    //  Under Meh, greyed - never read - and still saying what it would be.
+    auto row = rollbackRow (2);
+    CHECK (row.label == "rollback");
+    CHECK (row.writable);
+    CHECK_FALSE (row.applies);
+    CHECK (row.value.empty());
+    CHECK (row.placeholder == "/wfs/x i:3");
+
+    //  Under Undo(h), live.
+    REQUIRE (rig.document.setAttribute ("/godot/mount/G1JS4VWE/doh", "takeBack").ok);
+    CHECK (rollbackRow (3).applies);
+
+    //  The device's general command stands in for the previous command.
+    REQUIRE (rig.document.setAttribute ("/godot/mount/G1JS4VWE/dohRollback", "/wfs/back I").ok);
+    CHECK (rollbackRow (4).placeholder == "/wfs/back I");
+    CHECK (model::readDevices (*rig.publish (5))[0].dohRollback == "/wfs/back I");
+
+    //  And the cue's own, typed, is its value: nothing stands in for it.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + target + "/dohRollback", "/wfs/x i:8").ok);
+    row = rollbackRow (6);
+    CHECK (row.value == "/wfs/x i:8");
+    CHECK (row.placeholder.empty());
+
+    //  A cue that overrides to Meh greys it again, whatever its device says.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + target + "/doh", "leave").ok);
+    CHECK_FALSE (rollbackRow (7).applies);
 }
 
 TEST_CASE ("client: the Doh! button names the GO the engine would take back, and stops naming it once a Doh, a fire by name or a jump has spent it")

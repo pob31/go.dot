@@ -28,6 +28,7 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <string>
@@ -94,8 +95,9 @@ namespace wfg::client::model
                 /*  WHAT DOH! DOES WITH WHAT IT SENT last on both (PRD §3.32,
                     2026-10-01): a question about after the send, so it comes
                     after everything the send itself is. */
-                { "osc",     { "device", "address", "value", "wait", "timeout", "doh" } },
-                { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait", "doh" } },
+                { "osc",     { "device", "address", "value", "wait", "timeout", "doh", "dohRollback" } },
+                { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait", "doh",
+                               "dohRollback" } },
 
                 /*  `takeover` BESIDE `mode`, because it is a question only a
                     sampler group is asked and the answer to `mode` is what
@@ -134,6 +136,7 @@ namespace wfg::client::model
                 { "levelOn", "moves level" },
                 { "rateOn", "moves speed" },
                 { "doh", "on Doh!" },
+                { "dohRollback", "rollback" },
             };
 
             return table;
@@ -399,6 +402,53 @@ namespace wfg::client::model
             }
         }
 
+        /** The cue a row's address is under: `/godot/cue/<id>/<row>`. */
+        std::string cueIdOf (const std::string& address)
+        {
+            const std::string head = "/godot/cue/";
+
+            if (address.rfind (head, 0) != 0)
+                return {};
+
+            const auto end = address.find ('/', head.size());
+            return address.substr (head.size(), end == std::string::npos ? std::string::npos : end - head.size());
+        }
+
+        /*  A CUE'S OWN MESSAGE as the rollback field is typed - the engine's
+            `cue::spellMessageOf`, read through the door. */
+        std::string spellMessage (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+        {
+            const auto base = "/godot/cue/" + cueId + "/";
+            const auto kind = text (snapshot, base + "kind");
+
+            if (kind == "osc")
+                return text (snapshot, base + "address") + " " + text (snapshot, base + "value");
+
+            if (kind != "midi")
+                return {};
+
+            const auto or_ = [&snapshot, &base] (const char* name, const char* fallback)
+            {
+                const auto value = text (snapshot, base + name);
+                return value.empty() ? std::string (fallback) : value;
+            };
+
+            const auto type = or_ ("type", "noteOn");
+
+            if (type == "sysex")
+                return "sysex " + text (snapshot, base + "sysex");
+
+            const auto channel = or_ ("channel", "1");
+
+            if (type == "programChange")
+                return type + " " + channel + " " + or_ ("data1", "0");
+
+            if (type == "channelPressure" || type == "pitchBend")
+                return type + " " + channel + " " + or_ ("data2", "0");
+
+            return type + " " + channel + " " + or_ ("data1", "0") + " " + or_ ("data2", "0");
+        }
+
         /*  WHAT DOH! DOES WITH WHAT THIS CUE SENT (PRD §3.32; the author,
             2026-10-01: "a default per device that can be overriden at cue
             level"), in words. The row stays the enum the node declares -
@@ -451,7 +501,55 @@ namespace wfg::client::model
                                                                : "as the device (Meh)" },
                                   { "takeBack", "Undo(h)" },
                                   { "leave", "Meh" } };
-                return;
+                break;
+            }
+
+            /*  AND THE ROLLBACK UNDER IT (2026-10-03, OV-OX): live under Undo(h)
+                only - Meh never reads it, so it is greyed there, not hidden -
+                and an empty box shows what the Doh would send: the device's
+                general go-back command, else the previous command. */
+            const auto own = valueOf ("doh");
+            auto deviceId = std::string {};
+            auto general = std::string {};
+            auto deviceTakesBack = false;
+
+            if (kind == "osc")
+            {
+                const auto devices = readDevices (snapshot);
+                deviceId = deviceOf (valueOf ("address"), devices);
+
+                for (const auto& row : devices)
+                    if (row.id == deviceId)
+                    {
+                        deviceTakesBack = row.doh == "takeBack";
+                        general = row.dohRollback;
+                    }
+            }
+            else
+            {
+                deviceId = valueOf ("port");
+
+                for (const auto& row : readPorts (snapshot))
+                    if (row.id == deviceId)
+                    {
+                        deviceTakesBack = row.doh == "takeBack";
+                        general = row.dohRollback;
+                    }
+            }
+
+            const auto takesBack = own == "takeBack" || (own != "leave" && deviceTakesBack);
+
+            for (auto& field : decided)
+            {
+                if (field.name != "dohRollback")
+                    continue;
+
+                field.applies = takesBack;
+
+                if (field.value.empty() && ! field.mixed)
+                    field.placeholder = ! general.empty()
+                                          ? general
+                                          : previousCommand (snapshot, kind, deviceId, cueIdOf (field.address));
             }
         }
 
@@ -797,6 +895,71 @@ namespace wfg::client::model
         }
 
         return line;
+    }
+
+    std::string previousCommand (const tree::TreeSnapshot& snapshot, const std::string& kind,
+                                 const std::string& deviceId, const std::string& cueId)
+    {
+        if (deviceId.empty() || cueId.empty())
+            return {};
+
+        const auto devices = kind == "osc" ? readDevices (snapshot) : std::vector<DeviceRow> {};
+
+        const auto routedHere = [&] (const std::string& id)
+        {
+            const auto base = "/godot/cue/" + id + "/";
+
+            if (text (snapshot, base + "kind") != kind)
+                return false;
+
+            return (kind == "osc" ? deviceOf (text (snapshot, base + "address"), devices)
+                                  : text (snapshot, base + "port")) == deviceId;
+        };
+
+        /*  IN PLAY ORDER, as the engine walks the document: a group's header,
+            its members, its footer; the last match before the cue wins. */
+        std::string found;
+        auto reached = false;
+
+        std::function<void (const std::string&, bool)> walk = [&] (const std::string& container, bool isList)
+        {
+            const auto base = (isList ? "/godot/list/" : "/godot/cue/") + container + "/";
+
+            for (const auto* order : { "headerOrder", "order", "footerOrder" })
+            {
+                if (isList && std::string (order) != "order")
+                    continue;
+
+                for (const auto& id : words (text (snapshot, base + order)))
+                {
+                    if (reached)
+                        return;
+
+                    if (id == cueId)
+                    {
+                        reached = true;
+                        return;
+                    }
+
+                    if (routedHere (id))
+                        found = spellMessage (snapshot, id);
+
+                    if (text (snapshot, "/godot/cue/" + id + "/kind") == "group")
+                        walk (id, false);
+                }
+            }
+        };
+
+        for (const auto& listId : words (text (snapshot, "/godot/list/order")))
+        {
+            found.clear();
+            walk (listId, true);
+
+            if (reached)
+                return found;
+        }
+
+        return {};
     }
 
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId)

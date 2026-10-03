@@ -215,6 +215,13 @@ namespace wfg::client::model
             `mixed` says the cues do not agree, and `value` is then empty. */
         std::vector<std::string> addresses;
         bool mixed = false;
+
+        /*  WHAT AN EMPTY BOX STANDS FOR, shown greyed in it: Doh!'s rollback
+            (2026-10-03, the author: "the previous message is in the field and
+            can be edited too") - its device's general command, else the
+            previous command. Only what somebody types is written; leaving it
+            as shown writes nothing. Empty for every other row. */
+        std::string placeholder;
     };
 
     struct Block
@@ -259,6 +266,14 @@ namespace wfg::client::model
 
     /** Everything published under one cue, sorted into blocks. Empty for no cue. */
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId);
+
+    /*  DOH!'S PREVIOUS COMMAND, as the engine's `cue::previousCommandOf`
+        reads it from the document and from this side of the door: the
+        nearest OSC (`kind` "osc") or MIDI cue before `cueId` in its list, in
+        play order - a group's header, its members, its footer - routed to
+        `deviceId`, spelled as the rollback field is typed; or empty. */
+    std::string previousCommand (const tree::TreeSnapshot& snapshot, const std::string& kind,
+                                 const std::string& deviceId, const std::string& cueId);
 
     /*  WHETHER A CLICK ON THIS FIELD PUTS IT ON THE MASTER DIAL (author,
         2026-09-26): a number somebody decides and may write, one value, not a

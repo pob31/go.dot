@@ -1283,6 +1283,7 @@ namespace wfg::client::ui
                                                                && a.rx == b.rx && a.tx == b.tx
                                                                && a.audible == b.audible
                                                                && a.doh == b.doh
+                                                               && a.dohRollback == b.dohRollback
                                                                && a.bound == b.bound
                                                                && a.problem == b.problem;
                                                        });
@@ -1338,9 +1339,10 @@ namespace wfg::client::ui
                 g.setColour (Look::colour (theme, "ink-off"));
 
                 const auto cells = cellsFor (heading.withWidth (rowWidth()));
-                const char* names[] { "Port", "Sends on", "Listens to", "Rx", "Tx", "Sound", "Doh!", "State" };
+                const char* names[] { "Port", "Sends on", "Listens to", "Rx", "Tx", "Sound", "Doh!", "Rollback",
+                                      "State" };
 
-                for (auto at = 0; at < 8; ++at)
+                for (auto at = 0; at < 9; ++at)
                     g.drawText (names[at], cells[static_cast<std::size_t> (at)],
                                 juce::Justification::centredLeft);
             }
@@ -1362,12 +1364,16 @@ namespace wfg::client::ui
                 author, 2026-10-01): whether it plays sound - a synth, not a
                 desk, so a MIDI cue sent here makes its scene heard - and what a
                 Doh! does with what was sent here. Taken from the name. */
-            static std::array<juce::Rectangle<int>, 9> cellsFor (juce::Rectangle<int> row)
+            static std::array<juce::Rectangle<int>, 10> cellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
                 const auto cross = area.removeFromRight (24);
                 const auto state = area.removeFromRight (190);
+
+                /*  And the port's general go-back command for Doh! (2026-10-03,
+                    OV-OX), typed in place. */
+                const auto rollback = area.removeFromRight (150);
                 const auto doh = area.removeFromRight (80);
                 const auto sound = area.removeFromRight (56);
                 const auto tx = area.removeFromRight (42);
@@ -1375,18 +1381,19 @@ namespace wfg::client::ui
                 const auto listens = area.removeFromRight (210);
                 const auto sends = area.removeFromRight (210);
 
-                return { area, sends, listens, rx, tx, sound, doh, state, cross };
+                return { area, sends, listens, rx, tx, sound, doh, rollback, state, cross };
             }
 
-            enum class Cell { name, sends, listens, rx, tx, sound, doh, state, cross };
+            enum class Cell { name, sends, listens, rx, tx, sound, doh, rollback, state, cross };
 
             static Cell cellAt (int x, int width)
             {
                 const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
                 const Cell order[] { Cell::name, Cell::sends, Cell::listens,
-                                     Cell::rx, Cell::tx, Cell::sound, Cell::doh, Cell::state, Cell::cross };
+                                     Cell::rx, Cell::tx, Cell::sound, Cell::doh, Cell::rollback, Cell::state,
+                                     Cell::cross };
 
-                for (auto at = 0; at < 9; ++at)
+                for (auto at = 0; at < 10; ++at)
                     if (x >= cells[static_cast<std::size_t> (at)].getX()
                           && x < cells[static_cast<std::size_t> (at)].getRight())
                         return order[at];
@@ -1401,7 +1408,9 @@ namespace wfg::client::ui
                 return "Sound: a MIDI cue sent here makes its scene heard for Doh! - a synth, not a desk. "
                        "Doh!: what Doh! does with what a cue sent here. Meh (the default): it is the "
                        "device's operator's - nothing put back, nothing sent again. Undo(h): sent again "
-                       "by the corrected GO.";
+                       "by the corrected GO. Rollback: under Undo(h), the message Doh! sends on the port "
+                       "to take back what was sent - programChange 1 11, or sysex then its hex. Empty: "
+                       "each cue's previous command.";
             }
 
             int getNumRows() override { return static_cast<int> (rows.size()); }
@@ -1451,16 +1460,20 @@ namespace wfg::client::ui
                 g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-dim"));
                 g.drawText (juce::String (entry.dohWord()), cells[6], juce::Justification::centredLeft, true);
 
+                /*  The rollback, faint under Meh, which never reads it. */
+                g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-off"));
+                g.drawText (juce::String (entry.dohRollback), cells[7], juce::Justification::centredLeft, true);
+
                 /*  THE STATE IN WORDS, and the sentence when there is one -
                     never a colour on its own (4.8). */
                 g.setColour (Look::colour (theme, entry.problem.empty() ? "ink-dim" : "failed"));
                 g.drawText (juce::String (entry.problem.empty() ? entry.stateWord() : entry.problem),
-                            cells[7], juce::Justification::centredLeft, true);
+                            cells[8], juce::Justification::centredLeft, true);
 
                 if (! locked)
                 {
                     g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[8],
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[9],
                                 juce::Justification::centred);
                 }
             }
@@ -1482,7 +1495,8 @@ namespace wfg::client::ui
                     case Cell::tx:      send (gesture::setNode (base + "tx", entry.tx ? "false" : "true")); return;
                     case Cell::sound:   send (gesture::setNode (base + "audible", entry.audible ? "false" : "true")); return;
                     case Cell::doh:     send (gesture::setNode (base + "doh", entry.doh == "takeBack" ? "leave" : "takeBack")); return;
-                    case Cell::name:    renameAt (row, width); return;
+                    case Cell::name:    renameAt (row, width, false); return;
+                    case Cell::rollback: renameAt (row, width, true); return;
                     case Cell::sends:   chooseAt (row, width, true); return;
                     case Cell::listens: chooseAt (row, width, false); return;
                     case Cell::state:   return;
@@ -1491,7 +1505,8 @@ namespace wfg::client::ui
 
             void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
 
-            void renameAt (int row, int width)
+            /*  THE NAME, OR DOH!'S ROLLBACK: the same editor over either cell. */
+            void renameAt (int row, int width, bool rollback)
             {
                 const auto& entry = rows[static_cast<std::size_t> (row)];
 
@@ -1499,8 +1514,10 @@ namespace wfg::client::ui
                 place.translate (list.getX(), list.getY());
 
                 editing = entry.id;
-                cellEditor.setBounds (cellsFor (place.withWidth (width).withX (list.getX()))[0]);
-                cellEditor.setText (juce::String (entry.name), juce::dontSendNotification);
+                editingRollback = rollback;
+                cellEditor.setBounds (cellsFor (place.withWidth (width).withX (list.getX()))[rollback ? 7u : 0u]);
+                cellEditor.setText (juce::String (rollback ? entry.dohRollback : entry.name),
+                                    juce::dontSendNotification);
                 cellEditor.setVisible (true);
                 cellEditor.showEditor();
             }
@@ -1564,10 +1581,11 @@ namespace wfg::client::ui
                     return;
 
                 const auto typed = cellEditor.getText().trim();
+                const auto row = editingRollback ? "dohRollback" : "name";
 
                 for (const auto& entry : rows)
-                    if (entry.id == id && typed != juce::String (entry.name))
-                        send (gesture::setNode ("/godot/port/" + id + "/name", typed.toStdString()));
+                    if (entry.id == id && typed != juce::String (editingRollback ? entry.dohRollback : entry.name))
+                        send (gesture::setNode ("/godot/port/" + id + "/" + row, typed.toStdString()));
             }
 
             void commitDevice()
@@ -1642,6 +1660,7 @@ namespace wfg::client::ui
             juce::ComboBox chooser;
             std::string editing, choosing;
             bool choosingOutput = true;
+            bool editingRollback = false;
 
             std::vector<model::PortRow> rows;
             std::vector<std::string> inputs, outputs;
@@ -1738,6 +1757,7 @@ namespace wfg::client::ui
                                                                && a.host == b.host && a.port == b.port
                                                                && a.rx == b.rx && a.tx == b.tx
                                                                && a.doh == b.doh
+                                                               && a.dohRollback == b.dohRollback
                                                                && a.sent == b.sent
                                                                && a.problem == b.problem;
                                                        });
@@ -1812,9 +1832,9 @@ namespace wfg::client::ui
                 auto cells = cellsFor (heading.withWidth (rowWidth()));
 
                 const char* names[] { "Name", "Prefix", "IPv4 Address", "Tx Port",
-                                      "Rx", "Tx", "Doh!", "Sent" };
+                                      "Rx", "Tx", "Doh!", "Rollback", "Sent" };
 
-                for (auto at = 0; at < 8; ++at)
+                for (auto at = 0; at < 9; ++at)
                     g.drawText (names[at], cells[static_cast<std::size_t> (at)],
                                 juce::Justification::centredLeft);
             }
@@ -1842,13 +1862,17 @@ namespace wfg::client::ui
                 Doh!'s setting (PRD §3.32), then the two switches, then the
                 numbers; the name takes what is left, because it is the one
                 that wants room. */
-            static std::array<juce::Rectangle<int>, 10> cellsFor (juce::Rectangle<int> row)
+            static std::array<juce::Rectangle<int>, 11> cellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
                 const auto cross = area.removeFromRight (24);
                 const auto problem = area.removeFromRight (150);
                 const auto sent = area.removeFromRight (54);
+
+                /*  DOH!'S ROLLBACK after its setting (2026-10-03, OV-OX): the
+                    desk's general go-back command, typed in place. */
+                const auto rollback = area.removeFromRight (150);
                 const auto doh = area.removeFromRight (80);
                 const auto tx = area.removeFromRight (42);
                 const auto rx = area.removeFromRight (42);
@@ -1860,21 +1884,22 @@ namespace wfg::client::ui
                     at all. Taken from the name, which has the rest of the row. */
                 const auto prefix = area.removeFromRight (200);
 
-                return { area, prefix, host, port, rx, tx, doh, sent, problem, cross };
+                return { area, prefix, host, port, rx, tx, doh, rollback, sent, problem, cross };
             }
 
             /*  What a click at this x is on, by the same arithmetic. Named
                 rather than an index, because a column moving should break a
                 compile and not a gesture. */
-            enum class Cell { name, prefix, host, port, rx, tx, doh, none, problem, cross };
+            enum class Cell { name, prefix, host, port, rx, tx, doh, rollback, none, problem, cross };
 
             static Cell cellAt (int x, int width)
             {
                 const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
                 const Cell order[] { Cell::name, Cell::prefix, Cell::host, Cell::port,
-                                     Cell::rx, Cell::tx, Cell::doh, Cell::none, Cell::problem, Cell::cross };
+                                     Cell::rx, Cell::tx, Cell::doh, Cell::rollback, Cell::none, Cell::problem,
+                                     Cell::cross };
 
-                for (auto at = 0; at < 10; ++at)
+                for (auto at = 0; at < 11; ++at)
                     if (x >= cells[static_cast<std::size_t> (at)].getX()
                           && x < cells[static_cast<std::size_t> (at)].getRight())
                         return order[at];
@@ -1888,7 +1913,10 @@ namespace wfg::client::ui
             {
                 return "Doh!: what Doh! does with what a cue sent here. Meh (the default): it is the "
                        "device's operator's - nothing put back, nothing sent again. Undo(h): put back "
-                       "where it can be read back, and sent again by the corrected GO.";
+                       "where it can be read back, and sent again by the corrected GO. Rollback: under "
+                       "Undo(h), the message Doh! sends to take back what nothing reads back - the desk's "
+                       "own go-back command, an address then a value (/lx/key/go_back I). Empty: each "
+                       "cue's previous command.";
             }
 
             int getNumRows() override { return static_cast<int> (rows.size()); }
@@ -1938,8 +1966,12 @@ namespace wfg::client::ui
                 g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-dim"));
                 g.drawText (juce::String (entry.dohWord()), cells[6], juce::Justification::centredLeft, true);
 
+                /*  The rollback, faint under Meh, which never reads it. */
+                g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-off"));
+                g.drawText (juce::String (entry.dohRollback), cells[7], juce::Justification::centredLeft, true);
+
                 g.setColour (Look::colour (theme, "ink-dim"));
-                g.drawText (juce::String (entry.sent), cells[7], juce::Justification::centredLeft);
+                g.drawText (juce::String (entry.sent), cells[8], juce::Justification::centredLeft);
 
                 /*  AND WHAT IS WRONG WITH IT, in the engine's own sentence.
                     This is the whole reason the row exists rather than a line
@@ -1949,14 +1981,14 @@ namespace wfg::client::ui
                 if (! entry.problem.empty())
                 {
                     g.setColour (Look::colour (theme, "failed"));
-                    g.drawText (juce::String (entry.problem), cells[8],
+                    g.drawText (juce::String (entry.problem), cells[9],
                                 juce::Justification::centredLeft, true);
                 }
 
                 if (! locked)
                 {
                     g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[9],
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[10],
                                 juce::Justification::centred);
                 }
             }
@@ -1986,7 +2018,8 @@ namespace wfg::client::ui
                     case Cell::name:
                     case Cell::prefix:
                     case Cell::host:
-                    case Cell::port:   editAt (row, cellAt (event.x, width), width); return;
+                    case Cell::port:
+                    case Cell::rollback: editAt (row, cellAt (event.x, width), width); return;
 
                     case Cell::problem:
                     case Cell::none:   return;
@@ -1994,6 +2027,29 @@ namespace wfg::client::ui
             }
 
             void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
+
+            /*  What a cell holds as text: what the editor opens on, and what an
+                unchanged commit is compared against. */
+            static juce::String cellText (const model::DeviceRow& entry, Cell cell)
+            {
+                switch (cell)
+                {
+                    case Cell::name:     return juce::String (entry.name);
+                    case Cell::prefix:   return juce::String (entry.prefix);
+                    case Cell::host:     return juce::String (entry.host);
+                    case Cell::rollback: return juce::String (entry.dohRollback);
+                    case Cell::port:     return entry.port > 0 ? juce::String (entry.port) : juce::String();
+
+                    case Cell::rx:
+                    case Cell::tx:
+                    case Cell::doh:
+                    case Cell::none:
+                    case Cell::problem:
+                    case Cell::cross:    return {};
+                }
+
+                return {};
+            }
 
             /*  EDITED IN PLACE, the output list's gesture exactly: one click
                 opens an editor over the cell, Return or clicking away commits,
@@ -2007,17 +2063,13 @@ namespace wfg::client::ui
 
                 const auto cells = cellsFor (place.withWidth (width).withX (list.getX()));
                 const auto index = cell == Cell::name ? 0 : cell == Cell::prefix ? 1
-                                 : cell == Cell::host ? 2 : 3;
+                                 : cell == Cell::host ? 2 : cell == Cell::rollback ? 7 : 3;
 
                 editing = entry.id;
                 editingCell = cell;
 
                 cellEditor.setBounds (cells[static_cast<std::size_t> (index)]);
-                cellEditor.setText (cell == Cell::name   ? juce::String (entry.name)
-                                  : cell == Cell::prefix ? juce::String (entry.prefix)
-                                  : cell == Cell::host   ? juce::String (entry.host)
-                                  : entry.port > 0 ? juce::String (entry.port) : juce::String(),
-                                    juce::dontSendNotification);
+                cellEditor.setText (cellText (entry, cell), juce::dontSendNotification);
                 cellEditor.setVisible (true);
                 cellEditor.showEditor();
             }
@@ -2044,17 +2096,13 @@ namespace wfg::client::ui
                         step and a line in the log, so a click that opened an
                         editor and a click that closed it must not leave a
                         record of somebody deciding nothing. */
-                    const auto was = cell == Cell::name   ? juce::String (entry.name)
-                                   : cell == Cell::prefix ? juce::String (entry.prefix)
-                                   : cell == Cell::host   ? juce::String (entry.host)
-                                   : entry.port > 0 ? juce::String (entry.port) : juce::String();
-
-                    if (typed == was)
+                    if (typed == cellText (entry, cell))
                         return;
 
-                    const auto name = cell == Cell::name   ? "name"
-                                    : cell == Cell::prefix ? "prefix"
-                                    : cell == Cell::host   ? "host" : "port";
+                    const auto name = cell == Cell::name     ? "name"
+                                    : cell == Cell::prefix   ? "prefix"
+                                    : cell == Cell::host     ? "host"
+                                    : cell == Cell::rollback ? "dohRollback" : "port";
 
                     send (gesture::setNode ("/godot/mount/" + id + "/" + name,
                                             typed.toStdString()));
