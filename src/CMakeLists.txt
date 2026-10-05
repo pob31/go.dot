@@ -535,6 +535,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/NetworkMonitorWindow.cpp
     wfg/client/ui/ImportWindow.cpp
     wfg/client/ui/ImportWindow.h
+    wfg/client/ui/MediaCopier.cpp
+    wfg/client/ui/MediaCopier.h
     wfg/client/ui/TemplateReviewWindow.cpp
     wfg/client/ui/TemplateReviewWindow.h
     wfg/client/ui/HistoryPanelComponent.h

@@ -268,17 +268,19 @@ namespace wfg::audio
             frozen one, so the two halves cannot disagree about a file they both
             know - the analyser's business there is the hash and the pyramid.
 
-            A PATH IT DID NOT is published as given, and `durations()` never
-            learns of it. The plan queues the analyser for "any file a
-            media/file edit introduces", which is a file somebody imported
-            mid-session: it has no frozen length, because the durations were
-            read once at open and must never change (the law above), and it
-            still deserves its colours now rather than at the next open. So the
-            snapshot may name a file `durations()` does not; the reverse can
-            never happen, and `durations()` never grows. *Corrected in PR 5.6's
-            review (2026-09-14):* the first build refused such a path, which
-            would have left an imported file grey until the show was reopened.
-            */
+            A PATH IT DID NOT is published as given, and its seconds are LEARNED:
+            `durations()` hands out a new map that has them, swapped whole
+            (above), so a file somebody imported mid-session has its length -
+            its timeline bar its end, its direct out a decision - from the
+            analyser's first read of it, not from the next open. The plan
+            queues the analyser for "any file a media/file edit introduces",
+            and the frozen map itself never changes: what a file the show named
+            at open lasts is what it lasted then. *Corrected in PR 5.6's review
+            (2026-09-14):* the first build refused such a path, which would
+            have left an imported file grey until the show was reopened.
+            *Corrected again 2026-10-05 (namespace draft §30, S7):* this said
+            `durations()` never learns of such a file, which stopped being
+            true when it began to learn, on 2026-09-22. */
         void publish (const std::string& path, MediaRecord record);
 
     private:

@@ -73,6 +73,7 @@
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
 #include <wfg/client/ui/MainWindow.h>
+#include <wfg/client/ui/MediaCopier.h>
 #include <wfg/client/ui/NewCueMenu.h>
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/Shell.h>
@@ -634,6 +635,11 @@ namespace wfg::client
             ~Window() override
             {
                 stopTimer();
+
+                /*  THE COPY UNDER WAY ENDS HERE, before anything it would
+                    answer to goes: its part-file is removed, and what it would
+                    have said is dropped (ui/MediaCopier.h). */
+                copier.stop();
                #if JUCE_MAC
                 juce::MenuBarModel::setMacMainMenu (nullptr);
                #endif
@@ -1635,7 +1641,7 @@ namespace wfg::client
                 sayIfTheMoveClashed (*snapshot, reading.revision);
 
                 //  And any import or create still waiting for the cue it made.
-                finishImports (*snapshot, reading.revision);
+                followImports (*snapshot, reading.revision);
                 finishCreations (*snapshot, reading.revision);
                 finishFooterMoves (*snapshot);
                 mirrorClipboard (*snapshot);
@@ -1787,32 +1793,6 @@ namespace wfg::client
                                       : inList;
             }
 
-            /*  COPYING THE BYTES IN. Answers the name the cue should carry, or
-                nothing when the copy did not happen - and then NOTHING is
-                sent, because a cue naming a file that is not there is worse
-                than no cue at all. */
-            std::string copyIn (const juce::File& source, bool replaceExisting)
-            {
-                const auto folder = mediaFolder();
-
-                if (folder == juce::File() || ! source.existsAsFile())
-                    return {};
-
-                folder.createDirectory();
-
-                const auto target = folder.getChildFile (source.getFileName());
-
-                if (target == source)
-                    return model::mediaNameFor (source.getFileName().toStdString());
-
-                if (target.existsAsFile() && ! replaceExisting)
-                    return {};
-
-                return source.copyFileTo (target)
-                         ? model::mediaNameFor (target.getFileName().toStdString())
-                         : std::string {};
-            }
-
             /*  A SHOW THAT DECLARES NO AUDIO TRACKS CANNOT PLAY MEDIA, and
                 the operator should hear that from the drop rather than from
                 the GO. `Audio/@tracks` is the polyphony ceiling and the show
@@ -1833,31 +1813,14 @@ namespace wfg::client
                 return "; this show declares no audio tracks, so nothing will sound yet";
             }
 
-            void finishLink (const std::string& cueId, const juce::File& source, bool replacing)
-            {
-                const auto name = copyIn (source, replacing);
-
-                if (name.empty())
-                {
-                    shell->transport.setNotice ("could not copy " + source.getFileName()
-                                                  + " into the show");
-                    return;
-                }
-
-                send (gesture::setNode ("/godot/cue/" + cueId + "/file", name));
-                routeImportedMedia (cueId, name);
-
-                if (const auto warning = silenceWarning(); ! warning.isEmpty())
-                    shell->transport.setNotice (juce::String (name) + " is on the cue" + warning);
-            }
-
             /*  A FILE DROPPED ONTO A MEDIA CUE NAMES THAT CUE'S FILE, and asks
-                first when there is something to lose - the author's own
-                condition on this gesture. Two different things can be at stake
-                and the question says which: the cue's current choice, and
-                bytes of the same name already in the bundle. With neither at
-                stake there is no question, because a dialogue nobody needs is
-                one people learn to dismiss unread. */
+                first when the cue already plays something - the author's own
+                condition on this gesture. A name already in `media/` is the
+                import's question now (namespace draft §30, S7): the same
+                three answers, asked the same way, and silence when the file
+                there is this one byte for byte. With nothing at stake there is
+                no question, because a dialogue nobody needs is one people learn
+                to dismiss unread. */
             void linkMedia (const std::string& cueId, const juce::String& path)
             {
                 if (refusedWhileLocked())
@@ -1865,33 +1828,26 @@ namespace wfg::client
 
                 const juce::File source { path };
 
+                if (mediaFolder() == juce::File())
+                {
+                    shell->transport.setNotice (juce::String (model::noFolderWords (source.getFileName().toStdString())));
+                    return;
+                }
+
                 const auto already = latest == nullptr
                                        ? std::string {}
                                        : model::text (*latest, "/godot/cue/" + cueId + "/file");
 
-                const auto target = mediaFolder().getChildFile (source.getFileName());
-                const auto wouldOverwrite = target.existsAsFile() && target != source;
-
-                if (already.empty() && ! wouldOverwrite)
+                if (already.empty())
                 {
-                    finishLink (cueId, source, false);
+                    linkInto (cueId, source);
                     return;
                 }
-
-                juce::String question;
-
-                if (! already.empty())
-                    question << "This cue plays " << juce::String (already) << ".";
-
-                if (wouldOverwrite)
-                    question << (question.isEmpty() ? "" : "\n\n")
-                             << "The show already has a file called " << source.getFileName()
-                             << ", and it is not this one.";
 
                 juce::AlertWindow::showAsync (juce::MessageBoxOptions()
                                                 .withIconType (juce::MessageBoxIconType::QuestionIcon)
                                                 .withTitle ("Use " + source.getFileName() + "?")
-                                                .withMessage (question)
+                                                .withMessage ("This cue plays " + juce::String (already) + ".")
                                                 .withButton ("Replace")
                                                 .withButton ("Leave it")
                                                 .withAssociatedComponent (window.get()),
@@ -1899,27 +1855,31 @@ namespace wfg::client
                                                this, cueId, source] (int result)
                                               {
                                                   if (result == 1 && safe != nullptr)
-                                                      finishLink (cueId, source, true);
+                                                      linkInto (cueId, source);
                                               });
+            }
+
+            /*  THE LINK, queued behind any import under way: looked at, copied
+                off this thread, and the cue named when it lands. */
+            void linkInto (const std::string& cueId, const juce::File& source)
+            {
+                imports.link (cueId, source.getFullPathName().toStdString());
+                followImports();
             }
 
             /*  AND FILES DROPPED ANYWHERE ELSE MAKE CUES: one per file, in the
                 order they were dropped, each named after its own.
 
-                THE INDEX IS RESOLVED HERE AND NOT WHERE THE HAND LET GO. The
-                pane knows the rows it drew; this knows the members the show
-                has, and the two are different numbers. An index past the end -
-                which -1 asks for outright - is pinned to the member count,
-                after which each file is exactly one further along. Leaving it
-                past the end would have worked for ONE file and quietly
-                mismatched cue and file for two, because every create beyond
-                the end lands at the same place.
+                WHERE THEY GO IS READ HERE, out of the members the show has -
+                the pane knows the rows it drew, which is a different number -
+                and turned into the member the cues follow (model::MediaImports),
+                so a long copy cannot move it.
 
-                THE CREATE AND THE NAMING ARE TWO COMMANDS AND A TICK APART,
-                because `cue.create` is applied on the tick thread and this
-                window sees the result only in a later published tree - and the
-                identifier is the engine's to draw, never a client's. So the
-                import is remembered and finished on a later pass. */
+                NOTHING IS COPIED HERE (§30, S7). The files are queued, a worker
+                reads and copies them one at a time, and each cue is asked for
+                when its file has landed - the create on this thread, as every
+                command is - and named a tick later, once the tree shows it: the
+                identifier is the engine's to draw, never a client's. */
             void importMedia (const std::string& parent, int index,
                               const juce::StringArray& files)
             {
@@ -1932,73 +1892,188 @@ namespace wfg::client
                     return;
                 }
 
-                const auto members = static_cast<int> (model::words (orderOf (parent)).size());
-                auto at = index < 0 ? members : juce::jlimit (0, members, index);
-                auto made = 0;
-
-                for (const auto& path : files)
-                {
-                    const juce::File source { path };
-                    const auto name = copyIn (source, false);
-
-                    if (name.empty())
-                    {
-                        shell->transport.setNotice ("could not copy " + source.getFileName()
-                                                      + " into the show");
-                        continue;
-                    }
-
-                    const auto cueName = model::cueNameFor (name);
-
-                    send (gesture::createCue (parent, at, "media", cueName));
-                    pending.push_back ({ parent, at, cueName, name, last.revision, 0 });
-                    ++at;
-                    ++made;
-                }
-
-                if (const auto warning = silenceWarning(); made > 0 && ! warning.isEmpty())
-                    shell->transport.setNotice (juce::String (made)
-                                                  + (made == 1 ? " cue" : " cues") + warning);
-            }
-
-            /*  THE OTHER HALF OF AN IMPORT, run every pass: find the cue the
-                create made and give it its file. The cue is CHECKED before it
-                is written (model::madeByImport), and an import that never
-                finds its cue is given up on with a sentence rather than
-                waiting for ever - a create refused for a reason this window
-                did not foresee must not leave a job in the queue behind it. */
-            void finishImports (const tree::TreeSnapshot& snapshot, std::uint64_t revision)
-            {
-                if (pending.empty())
+                if (files.isEmpty())
                     return;
 
-                std::vector<model::Import> waiting;
-
-                for (auto& job : pending)
+                if (mediaFolder() == juce::File())
                 {
-                    const auto id = revision > job.askedAt
-                                      ? model::createdAt (orderOf (job.parent), job.index)
-                                      : std::string {};
-
-                    if (! id.empty()
-                          && model::madeByImport (job,
-                                                  model::text (snapshot, "/godot/cue/" + id + "/kind"),
-                                                  model::text (snapshot, "/godot/cue/" + id + "/name"),
-                                                  model::text (snapshot, "/godot/cue/" + id + "/file")))
-                    {
-                        send (gesture::setNode ("/godot/cue/" + id + "/file", job.mediaName));
-                        routeImportedMedia (id, job.mediaName);
-                        continue;
-                    }
-
-                    if (++job.waited < model::importPatience)
-                        waiting.push_back (job);
-                    else
-                        shell->transport.setNotice (juce::String (job.mediaName)
-                                                      + " is in the show, but the cue for it was refused");
+                    shell->transport.setNotice (juce::String (model::noFolderWords (
+                        model::mediaNameFor (files[0].toStdString()))));
+                    return;
                 }
 
-                pending = std::move (waiting);
+                std::vector<std::string> sources;
+
+                for (const auto& path : files)
+                    sources.push_back (path.toStdString());
+
+                imports.add (parent, index, orderOf (parent), sources);
+                followImports();
+            }
+
+            /*  THE GO-BETWEEN, run on every pass and whenever the worker or a
+                question answers: the cue asked for found and named, the next
+                one asked for, each failure said in its own words, a file handed
+                to the worker when it has none, the next question asked, and
+                where the copying has got to on the foot - once per file, so
+                anything else said meanwhile stays readable. */
+            void followImports()
+            {
+                if (latest != nullptr)
+                    followImports (*latest, last.revision);
+            }
+
+            void followImports (const tree::TreeSnapshot& snapshot, std::uint64_t revision)
+            {
+                if (imports.idle() || shell == nullptr)
+                    return;
+
+                const auto steps = imports.follow (snapshot, revision);
+
+                for (const auto& naming : steps.namings)
+                {
+                    send (gesture::setNode ("/godot/cue/" + naming.cueId + "/file", naming.mediaName));
+
+                    if (const auto nowhere = routeImportedMedia (naming.cueId, naming.mediaName); nowhere.isNotEmpty())
+                        importWarning = nowhere;
+                }
+
+                //  Sent in this pass: the model has recorded it as asked.
+                if (steps.create.has_value())
+                    send (gesture::createCue (steps.create->parent, steps.create->index, "media",
+                                              steps.create->cueName));
+
+                for (const auto& sentence : steps.said)
+                {
+                    shell->transport.setNotice (juce::String (sentence));
+                    importSaid.clear();
+                }
+
+                /*  THE LAST WORD OF AN IMPORT, which stays: what it did, what
+                    went wrong first, and what the show still lacks for the
+                    cues to sound. */
+                for (const auto& ended : steps.ended)
+                {
+                    auto sentence = juce::String (ended.sentence);
+
+                    if (ended.made > 0)
+                    {
+                        sentence << silenceWarning();
+
+                        if (importWarning.isNotEmpty())
+                            sentence << ". " << importWarning;
+                    }
+
+                    importWarning.clear();
+                    importSaid.clear();
+                    shell->transport.setNotice (sentence);
+                }
+
+                handOutWork();
+                askAboutClash (snapshot);
+
+                if (const auto now = imports.progress(); ! now.empty() && now != importSaid)
+                {
+                    importSaid = now;
+                    shell->transport.setNotice (juce::String (now));
+                }
+            }
+
+            /*  ONE FILE TO THE WORKER WHEN IT HAS NONE, into the folder the show
+                has now - a Save As while the files copy sends the rest to the
+                new one. */
+            void handOutWork()
+            {
+                while (! copier.busy())
+                {
+                    const auto job = imports.nextJob();
+
+                    if (! job.has_value())
+                        return;
+
+                    const auto folder = mediaFolder();
+
+                    if (folder != juce::File())
+                    {
+                        copier.start (*job, folder);
+                        return;
+                    }
+
+                    model::MediaWork nowhere;
+                    nowhere.found = model::Found::noFolder;
+                    imports.worked (nowhere);
+                }
+            }
+
+            /*  ANOTHER FILE OF THE SAME NAME IS IN THE SHOW: the three answers,
+                Keep both on Return because it loses nothing, and "Use the one
+                in the show" on Escape because it changes nothing (SJ). One
+                question per file, in the order picked; while more of the same
+                import may meet a name, a tick answers them all at once.
+
+                IT COMES WITHIN MOMENTS OF THE DROP, never minutes into a copy:
+                every file is looked at before any is copied (SI), because a box
+                takes the keys GO is on. */
+            void askAboutClash (const tree::TreeSnapshot& snapshot)
+            {
+                if (askingAboutClash || window == nullptr)
+                    return;
+
+                const auto asked = imports.asking();
+
+                if (! asked.has_value())
+                    return;
+
+                /*  THE NAME KEEP BOTH WOULD GIVE, read off the folder as it is
+                    now - the worker reads it again when it copies, and lands on
+                    the same one unless something else took it first. */
+                const auto folder = mediaFolder();
+                std::vector<std::string> present;
+
+                for (const auto& file : folder.findChildFiles (juce::File::findFiles, false))
+                    present.push_back (file.getFileName().toStdString());
+
+                const auto keptAs = model::freeName (asked->picked, [&present, &folder] (const std::string& candidate)
+                {
+                    return ! model::nameAmong (present, candidate).empty()
+                        || folder.getChildFile (juce::String (candidate)).exists();
+                });
+
+                const auto question = model::clashWords (asked->picked, asked->met,
+                                                         model::cuesPlaying (snapshot, asked->met), keptAs);
+
+                auto* box = new juce::AlertWindow (juce::String (question.title), juce::String (question.message),
+                                                   juce::MessageBoxIconType::QuestionIcon, window.get());
+                box->addButton ("Keep both", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                box->addButton ("Replace it", 2);
+                box->addButton ("Use the one in the show", 3, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                std::shared_ptr<juce::ToggleButton> forTheRest;
+
+                if (asked->more)
+                {
+                    forTheRest = std::make_shared<juce::ToggleButton> ("The same for the other files whose names are taken");
+                    forTheRest->setSize (360, 24);
+                    box->addCustomComponent (forTheRest.get());
+                }
+
+                askingAboutClash = true;
+
+                box->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, forTheRest, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                    {
+                        if (safe == nullptr)
+                            return;
+
+                        askingAboutClash = false;
+
+                        const auto given = answer == 1 ? model::Clash::keepBoth
+                                         : answer == 2 ? model::Clash::replace
+                                                       : model::Clash::useTheShows;
+
+                        imports.answer (given, forTheRest != nullptr && forTheRest->getToggleState());
+                        followImports();
+                    }), true);
             }
 
             /*  WHAT AN IMPORTED FILE IS POINTED AT, and it is two plain
@@ -2091,14 +2166,17 @@ namespace wfg::client
                     shell->transport.setNotice (juce::String (*said));
             }
 
-            void routeImportedMedia (const std::string& cueId, const std::string& name)
+            /*  Answers what the cue still lacks to sound, in a sentence, or
+                nothing - said at the end of the import rather than here, where
+                the next file's progress would cover it (§30, S7). */
+            juce::String routeImportedMedia (const std::string& cueId, const std::string& name)
             {
                 // Read the copied file's header off the tick/audio threads.
                 juce::AudioFormatManager formats;
                 formats.registerBasicFormats();
                 const std::unique_ptr<juce::AudioFormatReader> reader (
                     formats.createReaderFor (mediaFolder().getChildFile (juce::String (name))));
-                if (! reader) return;
+                if (! reader) return {};
 
                 send (gesture::setNode ("/godot/cue/" + cueId + "/channels",
                                         std::to_string (reader->numChannels)));
@@ -2116,13 +2194,11 @@ namespace wfg::client
                 const auto lowest = firstDirectOut();
 
                 if (lowest.empty())
-                {
-                    shell->transport.setNotice ("This show has no direct out yet, so the cue has "
-                                                "nowhere to play - Show, Show settings, Outputs.");
-                    return;
-                }
+                    return "This show has no direct out yet, so the cue has "
+                           "nowhere to play - Show, Show settings, Outputs.";
 
                 send (gesture::setNode ("/godot/cue/" + cueId + "/directOut", lowest));
+                return {};
             }
 
             /*  Read from the pass's own snapshot, which `latest` is holding for
@@ -3270,8 +3346,20 @@ namespace wfg::client
                 is why every reader above checks. */
             std::shared_ptr<const tree::TreeSnapshot> latest;
 
-            /** Files copied in, cues asked for, and the naming still to do. */
-            std::vector<model::Import> pending;
+            /*  EVERY IMPORT UNDER WAY (namespace draft §30, S7): the files
+                picked, in order, what each met in `media/`, the cue asked
+                for - the decisions, in model/Media.h - and the worker that
+                reads and copies, off this thread, one file at a time. */
+            model::MediaImports imports;
+            ui::MediaCopier copier { [this] (const model::MediaWork& work)
+                                     {
+                                         imports.worked (work);
+                                         followImports();
+                                     } };
+
+            bool askingAboutClash = false;  ///< a question about a name already in media/ is up
+            std::string importSaid;         ///< the progress last put on the foot, so it is said once
+            juce::String importWarning;     ///< what routing an imported cue found missing, said at the end
 
             /** Creates sent from the new-cue row and not yet found, to be picked when they are. */
             std::vector<model::Creation> creations;

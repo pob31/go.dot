@@ -215,8 +215,9 @@ namespace wfg::audio
             would be the second copy §13.4 warns about, and the tree and the
             timbre route would each be right about a different number. A file
             imported after the open has no frozen length to agree with, so its
-            record keeps the seconds the analyser read - and `durations()`,
-            which is read only at open, never hears of it. */
+            record keeps the seconds the analyser read - and `durations()`
+            learns them below, so whatever reads the lengths knows this one
+            from now on rather than from the next open. */
         auto learned = false;
 
         if (const auto frozen = frozenDurations.find (path); frozen != frozenDurations.end())

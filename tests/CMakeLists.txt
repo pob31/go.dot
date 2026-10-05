@@ -180,7 +180,7 @@ target_compile_definitions(wfg_tests PRIVATE WFG_TEST_LV2_BUNDLE="${GODOT_TEST_L
 # These native-window checks need a Windows desktop and exercise the actual
 # settings panel with a live device; keep the ordinary unit runner headless.
 if(WIN32)
-    add_executable(wfg_audio_ui_tests TestMain.cpp ShowSettingsUiTests.cpp RunPaneUiTests.cpp)
+    add_executable(wfg_audio_ui_tests TestMain.cpp ShowSettingsUiTests.cpp RunPaneUiTests.cpp MediaCopierUiTests.cpp)
     target_link_libraries(wfg_audio_ui_tests PRIVATE wfg::engine wfg::client_ui wfg::warnings)
     add_test(NAME ui.show-settings.C COMMAND wfg_audio_ui_tests --wfg-locale=C)
     add_test(NAME ui.show-settings.fr_FR COMMAND wfg_audio_ui_tests --wfg-locale=${WFG_LOCALE_FR})

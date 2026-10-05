@@ -926,7 +926,7 @@ TEST_CASE ("client: a band with no section behind it makes one rather than takin
         had none at all, which is the half that was missing. */
     model::Row dragged;
     dragged.rowKind = model::RowKind::cue;
-    dragged.id = "CUE00001";
+    dragged.id = "M3D7ACQE";
 
     model::Row band;
     band.rowKind = model::RowKind::band;
@@ -1936,6 +1936,495 @@ TEST_CASE ("client: an import names its cue after the file, and finds what the c
     CHECK_FALSE (model::madeByImport (job, "group", "Thunder", ""));     // not a media cue
     CHECK_FALSE (model::madeByImport (job, "media", "Rain", ""));        // somebody else's
     CHECK_FALSE (model::madeByImport (job, "media", "Thunder", "Rain.wav"));  // already named
+}
+
+//==============================================================================
+/*  THE BUG ROUND OF 2026-10-05, item 6 (namespace draft §30, S7): "I had issues
+    importing some media files (wav) at first." A file whose name a session that
+    was never saved had left in `media/` was refused as "could not copy", the
+    copy ran on the window's thread, and a lagging engine ran an import's
+    patience down without having looked at its create. These are the decisions;
+    the reading and copying is ui/MediaCopier's, and wfg_audio_ui_tests holds it. */
+namespace
+{
+    model::MediaWork workOf (model::Found found, const std::string& name = {}, const std::string& why = {})
+    {
+        model::MediaWork work;
+        work.found = found;
+        work.name = name;
+        work.why = why;
+        return work;
+    }
+
+    /*  The window's half of `follow`, for a test: the create it hands back is
+        sent as the window sends it, through the real gesture. */
+    struct ImportRig
+    {
+        Rig rig;
+        std::int64_t tick = 1;
+        std::shared_ptr<const TreeSnapshot> snapshot = rig.publish (tick);
+        model::MediaImports imports;
+
+        static constexpr const char* listId = "7K2QM9X4";
+
+        std::string order() { return model::text (*snapshot, std::string ("/godot/list/") + listId + "/order"); }
+
+        Engine::TickResult send (const Event& event)
+        {
+            return rig.apply (tick++, event.origin, event.command, event.args);
+        }
+
+        model::MediaImports::Steps pass()
+        {
+            snapshot = rig.publish (tick);
+            return imports.follow (*snapshot, model::readTransport (*snapshot).revision);
+        }
+    };
+}
+
+TEST_CASE ("client: a name already in media/ is compared as a case-blind disk compares it, and the free one is the first number")
+{
+    //  The brief's ladder: "X.wav" -> "X 2.wav" -> "X 3.wav".
+    CHECK (model::freeName ("X.wav", std::vector<std::string> {}) == "X.wav");
+    CHECK (model::freeName ("X.wav", std::vector<std::string> { "X.wav" }) == "X 2.wav");
+    CHECK (model::freeName ("X.wav", std::vector<std::string> { "X.wav", "X 2.wav" }) == "X 3.wav");
+    CHECK (model::freeName ("X.wav", std::vector<std::string> { "X.wav", "X 3.wav" }) == "X 2.wav");   // the FIRST free
+
+    //  The last dot is the extension's, as cueNameFor reads one; no dot, no extension.
+    CHECK (model::freeName ("Take.01.wav", std::vector<std::string> { "Take.01.wav" }) == "Take.01 2.wav");
+    CHECK (model::freeName ("Thunder", std::vector<std::string> { "Thunder" }) == "Thunder 2");
+    CHECK (model::freeName (".hidden", std::vector<std::string> { ".hidden" }) == ".hidden 2");
+
+    /*  CASE-BLIND, because Windows and macOS keep "x.WAV" and "X.wav" as one
+        file and a show travels: a name free on Linux would not be on the Mac. */
+    CHECK (model::sameFileName ("Thunder.WAV", "thunder.wav"));
+    CHECK_FALSE (model::sameFileName ("Thunder.wav", "Thunder2.wav"));
+    CHECK (model::freeName ("X.wav", std::vector<std::string> { "x.WAV" }) == "X 2.wav");
+    CHECK (model::freeName ("X.wav", std::vector<std::string> { "x.wav", "X 2.WAV" }) == "X 3.wav");
+
+    /*  AND PAST ASCII: the author's own "Danse en Chœur" is one file with its
+        capitals, as are É and é, Ÿ and ÿ - and two different letters are not. */
+    CHECK (model::sameFileName ("Danse en Ch\xc5\x93ur + C10.wav", "DANSE EN CH\xc5\x92UR + C10.WAV"));
+    CHECK (model::sameFileName ("\xc3\x89t\xc3\xa9.wav", "\xc3\xa9T\xc3\x89.wav"));
+    CHECK (model::sameFileName ("\xc5\xb8.wav", "\xc3\xbf.wav"));
+    CHECK (model::sameFileName ("\xc5\xbd.wav", "\xc5\xbe.wav"));                     // Ž ž, a capital on an odd point
+    CHECK_FALSE (model::sameFileName ("\xc3\xa9.wav", "e.wav"));
+    CHECK_FALSE (model::sameFileName ("\xc5\x93.wav", "\xc5\x91.wav"));               // œ and ő
+
+    //  The name met is the one the disk has, which is what a cue that uses it names.
+    const std::vector<std::string> present { "Rain.wav", "THUNDER.wav" };
+    CHECK (model::nameAmong (present, "Thunder.wav") == "THUNDER.wav");
+    CHECK (model::nameAmong (present, "Wind.wav").empty());
+
+    //  A taken test can be anything - the window adds what its own disk says.
+    CHECK (model::freeName ("A.wav", [] (const std::string& name) { return name != "A 4.wav"; }) == "A 4.wav");
+    CHECK (model::freeName ("A.wav", [] (const std::string&) { return true; }).empty());
+}
+
+TEST_CASE ("client: the same file is used silently, and its bytes are read only when its size agrees")
+{
+    auto reads = 0;
+    const auto same = [&reads] { ++reads; return true; };
+    const auto other = [&reads] { ++reads; return false; };
+
+    model::Arrival arrival;
+    arrival.exists = true;
+    arrival.readable = true;
+    arrival.size = 1000;
+
+    CHECK (model::verdictFor (arrival, same) == model::Found::free);
+
+    arrival.meets = "Thunder.wav";
+    arrival.meetsSize = 999;
+    CHECK (model::verdictFor (arrival, same) == model::Found::other);
+    CHECK (reads == 0);                                // a size apart is another file, unread
+
+    arrival.meetsSize = 1000;
+    CHECK (model::verdictFor (arrival, same) == model::Found::same);
+    CHECK (model::verdictFor (arrival, other) == model::Found::other);
+    CHECK (reads == 2);
+
+    //  A file picked out of the show's own folder meets itself and is that file.
+    arrival.inShow = true;
+    CHECK (model::verdictFor (arrival, other) == model::Found::inShow);
+
+    arrival.readable = false;
+    CHECK (model::verdictFor (arrival, same) == model::Found::unreadable);
+
+    arrival.exists = false;
+    CHECK (model::verdictFor (arrival, same) == model::Found::missing);
+    CHECK (reads == 2);
+}
+
+TEST_CASE ("client: an import looks at every file before copying any, and makes its cues in the order picked, each after the one before")
+{
+    ImportRig rig;
+
+    /*  Three files let go after House to half, the list's first member. One
+        is already in the show byte for byte, which is the author's case: a
+        session that was never saved left it there. */
+    rig.imports.add (ImportRig::listId, 1, rig.order(),
+                     { "C:/sounds/Rain.wav", "D:/elsewhere/Thunder.wav", "C:/sounds/Wind.wav" });
+    CHECK_FALSE (rig.imports.idle());
+
+    //  EVERY LOOK BEFORE ANY COPY, one file at a time (SI).
+    auto job = rig.imports.nextJob();
+    REQUIRE (job.has_value());
+    CHECK_FALSE (job->copy);
+    CHECK (job->source == "C:/sounds/Rain.wav");
+    CHECK_FALSE (rig.imports.nextJob().has_value());   // the worker has one
+    CHECK (rig.imports.progress().empty());            // a look is not a copy
+    rig.imports.worked (workOf (model::Found::free, "Rain.wav"));
+
+    job = rig.imports.nextJob();
+    REQUIRE (job.has_value());
+    CHECK_FALSE (job->copy);
+    CHECK (job->source == "D:/elsewhere/Thunder.wav");
+    rig.imports.worked (workOf (model::Found::same, "Thunder.wav"));
+
+    job = rig.imports.nextJob();
+    REQUIRE (job.has_value());
+    CHECK_FALSE (job->copy);
+    rig.imports.worked (workOf (model::Found::free, "Wind.wav"));
+
+    job = rig.imports.nextJob();
+    REQUIRE (job.has_value());
+    CHECK (job->copy);
+    CHECK (job->source == "C:/sounds/Rain.wav");
+    CHECK (job->answer == model::Clash::ask);
+    CHECK (rig.imports.progress() == "Copying 1 of 3: Rain.wav");
+
+    //  Nothing is asked of the show until a file has landed.
+    auto steps = rig.pass();
+    CHECK_FALSE (steps.create.has_value());
+    CHECK (steps.namings.empty());
+
+    /*  A STRANGER ARRIVES WHILE THE BYTES COPY: a cue at the top of the list,
+        from the page. A position fixed at the drop would now name the wrong
+        place; the member the hand let go after has not moved. */
+    REQUIRE (rig.send ({ "page", "cue.create", { osc::Value::string (ImportRig::listId), osc::Value::int32 (0),
+                                                 osc::Value::string ("osc"), osc::Value::string ("Stranger") } })
+                 .applied == 1);
+
+    rig.imports.worked (workOf (model::Found::copied, "Rain.wav"));
+    job = rig.imports.nextJob();
+    REQUIRE (job.has_value());
+    CHECK (job->source == "C:/sounds/Wind.wav");
+    CHECK (rig.imports.progress() == "Copying 3 of 3: Wind.wav");
+
+    steps = rig.pass();
+    REQUIRE (steps.create.has_value());
+    CHECK (steps.create->parent == ImportRig::listId);
+    CHECK (steps.create->index == 2);                  // after House to half, now second
+    CHECK (steps.create->cueName == "Rain");
+    CHECK (steps.create->mediaName == "Rain.wav");
+    REQUIRE (rig.send (gesture::createCue (steps.create->parent, steps.create->index, "media",
+                                           steps.create->cueName)).applied == 1);
+
+    /*  FOUND AND NAMED, and the next cue asked for from the same tree, after
+        it - the one already in the show, which needed no copy. */
+    steps = rig.pass();
+    REQUIRE (steps.namings.size() == 1u);
+    const auto rain = steps.namings[0].cueId;
+    CHECK (steps.namings[0].mediaName == "Rain.wav");
+    CHECK (model::text (*rig.snapshot, "/godot/cue/" + rain + "/name") == "Rain");
+    REQUIRE (steps.create.has_value());
+    CHECK (steps.create->index == 3);
+    CHECK (steps.create->cueName == "Thunder");
+    REQUIRE (rig.send (gesture::createCue (steps.create->parent, steps.create->index, "media",
+                                           steps.create->cueName)).applied == 1);
+
+    //  Wind is still copying, so nothing more is asked for.
+    steps = rig.pass();
+    REQUIRE (steps.namings.size() == 1u);
+    const auto thunder = steps.namings[0].cueId;
+    CHECK_FALSE (steps.create.has_value());
+    CHECK (steps.ended.empty());
+
+    rig.imports.worked (workOf (model::Found::copied, "Wind.wav"));
+    CHECK (rig.imports.progress().empty());
+
+    steps = rig.pass();
+    REQUIRE (steps.create.has_value());
+    CHECK (steps.create->index == 4);
+    REQUIRE (rig.send (gesture::createCue (steps.create->parent, steps.create->index, "media",
+                                           steps.create->cueName)).applied == 1);
+
+    steps = rig.pass();
+    REQUIRE (steps.namings.size() == 1u);
+    const auto wind = steps.namings[0].cueId;
+
+    //  THE LAST WORD: what it did, which stays on the foot.
+    REQUIRE (steps.ended.size() == 1u);
+    CHECK (steps.ended[0].sentence == "imported 3 files (1 already in the show)");
+    CHECK (steps.ended[0].made == 3);
+    CHECK (rig.imports.idle());
+
+    //  The order the files were picked, after the member they were dropped after.
+    const auto members = model::words (rig.order());
+    REQUIRE (members.size() == 6u);
+    CHECK (model::text (*rig.snapshot, "/godot/cue/" + members[0] + "/name") == "Stranger");
+    CHECK (members[1] == "B3N8R5TW");
+    CHECK (members[2] == rain);
+    CHECK (members[3] == thunder);
+    CHECK (members[4] == wind);
+    CHECK (members[5] == "D9FH2JKA");
+}
+
+TEST_CASE ("client: an import waits for its cue in the engine's ticks, not the window's passes, and a second waits behind it")
+{
+    //  The rule itself: the engine's clock, and a clock gone backwards is no clock to wait for.
+    model::Import asked;
+    asked.askedTick = 100;
+    CHECK_FALSE (model::outOfPatience (asked, 100));
+    CHECK_FALSE (model::outOfPatience (asked, 100 + model::importPatienceTicks - 1));
+    CHECK (model::outOfPatience (asked, 100 + model::importPatienceTicks));
+    CHECK (model::outOfPatience (asked, 99));
+
+    ImportRig rig;
+
+    //  One file at the end, then a second import dropped at the top while it runs.
+    rig.imports.add (ImportRig::listId, -1, rig.order(), { "a/One.wav" });
+    rig.imports.add (ImportRig::listId, 0, rig.order(), { "b/Two.wav" });
+
+    for (const auto* name : { "One.wav", "Two.wav" })
+    {
+        const auto look = rig.imports.nextJob();
+        REQUIRE (look.has_value());
+        CHECK_FALSE (look->copy);
+        rig.imports.worked (workOf (model::Found::free, name));
+    }
+
+    for (const auto* name : { "One.wav", "Two.wav" })
+    {
+        const auto copy = rig.imports.nextJob();
+        REQUIRE (copy.has_value());
+        CHECK (copy->copy);
+        rig.imports.worked (workOf (model::Found::copied, name));
+    }
+
+    auto steps = rig.pass();
+    REQUIRE (steps.create.has_value());
+    CHECK (steps.create->cueName == "One");
+    CHECK (steps.create->index == 2);                  // the end: two members
+
+    /*  THE CREATE NEVER ARRIVES - refused, or not yet looked at - and the
+        window runs a thousand passes on a tree the engine has not moved past.
+        Counted in passes, that was the end of the file; counted in the
+        engine's ticks, nothing has happened yet. And Two, which landed too,
+        is not asked for ahead of it. */
+    const auto revision = model::readTransport (*rig.snapshot).revision;
+
+    for (auto i = 0; i < 1000; ++i)
+    {
+        steps = rig.imports.follow (*rig.snapshot, revision);
+        REQUIRE (steps.said.empty());
+        REQUIRE (steps.ended.empty());
+        REQUIRE_FALSE (steps.create.has_value());
+    }
+
+    //  The engine's clock runs on without the cue: given up, in words, and Two asked for.
+    rig.snapshot = rig.rig.publish (rig.tick + model::importPatienceTicks);
+    steps = rig.imports.follow (*rig.snapshot, revision);
+
+    REQUIRE (steps.said.size() == 1u);
+    CHECK (steps.said[0] == "One.wav is in the show, but the cue for it was refused");
+    REQUIRE (steps.ended.size() == 1u);
+    CHECK (steps.ended[0].sentence == "One.wav is in the show, but the cue for it was refused");
+    CHECK (steps.ended[0].made == 0);
+    REQUIRE (steps.create.has_value());
+    CHECK (steps.create->cueName == "Two");
+    CHECK (steps.create->index == 0);                  // the top, where it was dropped
+}
+
+TEST_CASE ("client: another file of the same name is asked about, one at a time, and an answer can stand for the rest")
+{
+    model::MediaImports imports;
+    imports.add ("L1", -1, "", { "a/P.wav", "a/Q.wav", "a/R.wav" });
+
+    imports.nextJob();
+    imports.worked (workOf (model::Found::other, "P.wav"));
+    imports.nextJob();
+    imports.worked (workOf (model::Found::other, "q.WAV"));    // met under the disk's own spelling
+
+    //  The first in the order picked, and the others may meet one too.
+    auto asked = imports.asking();
+    REQUIRE (asked.has_value());
+    CHECK (asked->picked == "P.wav");
+    CHECK (asked->met == "P.wav");
+    CHECK (asked->more);
+
+    //  The copies of what met nothing go on while the question is up.
+    imports.nextJob();
+    imports.worked (workOf (model::Found::free, "R.wav"));
+    auto job = imports.nextJob();
+    REQUIRE (job.has_value());
+    CHECK (job->copy);
+    CHECK (job->source == "a/R.wav");
+    imports.worked (workOf (model::Found::copied, "R.wav"));
+
+    //  Replace, for this one only: Q is asked in turn, and nothing else may meet one.
+    imports.answer (model::Clash::replace, false);
+    asked = imports.asking();
+    REQUIRE (asked.has_value());
+    CHECK (asked->picked == "Q.wav");
+    CHECK (asked->met == "q.WAV");
+    CHECK_FALSE (asked->more);
+
+    job = imports.nextJob();
+    REQUIRE (job.has_value());
+    CHECK (job->copy);
+    CHECK (job->source == "a/P.wav");
+    CHECK (job->answer == model::Clash::replace);
+    CHECK (job->met == "P.wav");
+    imports.worked (workOf (model::Found::copied, "P.wav"));
+
+    //  Use the one in the show: no copy, and the cue will play the show's own spelling.
+    imports.answer (model::Clash::useTheShows, false);
+    CHECK_FALSE (imports.asking().has_value());
+    CHECK_FALSE (imports.nextJob().has_value());
+
+    //  An answer for the rest stands for every file of that import still to meet a name.
+    model::MediaImports several;
+    several.add ("L1", -1, "", { "a/X.wav", "a/Y.wav", "a/Z.wav" });
+    several.nextJob();
+    several.worked (workOf (model::Found::other, "X.wav"));
+    several.nextJob();
+    several.worked (workOf (model::Found::other, "Y.wav"));
+
+    REQUIRE (several.asking().has_value());
+    several.answer (model::Clash::keepBoth, true);
+    CHECK_FALSE (several.asking().has_value());       // Y answered too
+
+    several.nextJob();
+    several.worked (workOf (model::Found::other, "Z.wav"));   // and Z, met after the answer
+    CHECK_FALSE (several.asking().has_value());
+
+    for (const auto* source : { "a/X.wav", "a/Y.wav", "a/Z.wav" })
+    {
+        job = several.nextJob();
+        REQUIRE (job.has_value());
+        CHECK (job->source == source);
+        CHECK (job->answer == model::Clash::keepBoth);
+        several.worked (workOf (model::Found::copied, "copied"));
+    }
+
+    //  And the question, in words: who else plays the file, and what Keep both would call this one.
+    auto words = model::clashWords ("X.wav", "X.wav", {}, "X 2.wav");
+    CHECK (words.title == "Another X.wav is in the show");
+    CHECK (words.message == "The show already has a file called X.wav, and it is not this one.\n\n"
+                            "Keep both puts this one beside it as X 2.wav.");
+
+    words = model::clashWords ("X.wav", "X.wav", { "Rain" }, "X 2.wav");
+    CHECK (words.message.find ("\"Rain\" plays it, so replacing it changes that cue too.") != std::string::npos);
+
+    words = model::clashWords ("X.wav", "X.wav", { "A", "B" }, "");
+    CHECK (words.message == "The show already has a file called X.wav, and it is not this one.\n\n"
+                            "\"A\" and \"B\" play it, so replacing it changes those cues too.");
+
+    words = model::clashWords ("X.wav", "X.wav", { "A", "B", "C" }, "");
+    CHECK (words.message.find ("\"A\", \"B\" and \"C\" play it") != std::string::npos);
+
+    words = model::clashWords ("X.wav", "X.wav", { "A", "B", "C", "D", "E" }, "");
+    CHECK (words.message.find ("\"A\", \"B\", \"C\" and 2 more play it") != std::string::npos);
+}
+
+TEST_CASE ("client: each way a file is not imported says its own cause, and the last word says them again")
+{
+    //  The four causes the one sentence "could not copy X into the show" used to cover.
+    CHECK (model::notFoundWords ("A.wav") == "A.wav could not be found");
+    CHECK (model::unreadableWords ("A.wav") == "A.wav could not be read");
+    CHECK (model::copyFailedWords ("A.wav", "There is not enough space on the disk")
+           == "A.wav could not be copied into the show: There is not enough space on the disk");
+    CHECK (model::copyFailedWords ("A.wav", "") == "A.wav could not be copied into the show");
+    CHECK (model::noFolderWords ("A.wav") == "A.wav has nowhere to go: the show has no folder yet");
+    CHECK (model::refusedWords ("A.wav") == "A.wav is in the show, but the cue for it was refused");
+
+    ImportRig rig;
+    rig.imports.add (ImportRig::listId, -1, rig.order(), { "s/A.wav", "s/B.wav", "s/C.wav", "s/D.wav" });
+
+    rig.imports.nextJob();
+    rig.imports.worked (workOf (model::Found::free, "A.wav"));
+    rig.imports.nextJob();
+    rig.imports.worked (workOf (model::Found::missing));
+    rig.imports.nextJob();
+    rig.imports.worked (workOf (model::Found::free, "C.wav"));
+    rig.imports.nextJob();
+    rig.imports.worked (workOf (model::Found::unreadable));
+
+    rig.imports.nextJob();
+    rig.imports.worked (workOf (model::Found::copied, "A.wav"));
+    rig.imports.nextJob();
+    rig.imports.worked (workOf (model::Found::failed, {}, "There is not enough space on the disk"));
+
+    //  Said as they happened, in order.
+    auto steps = rig.pass();
+    REQUIRE (steps.said.size() == 3u);
+    CHECK (steps.said[0] == "B.wav could not be found");
+    CHECK (steps.said[1] == "D.wav could not be read");
+    CHECK (steps.said[2] == "C.wav could not be copied into the show: There is not enough space on the disk");
+
+    REQUIRE (steps.create.has_value());
+    REQUIRE (rig.send (gesture::createCue (steps.create->parent, steps.create->index, "media",
+                                           steps.create->cueName)).applied == 1);
+
+    //  And again at the end, where it stays: the first, and how many more.
+    steps = rig.pass();
+    REQUIRE (steps.namings.size() == 1u);
+    REQUIRE (steps.ended.size() == 1u);
+    CHECK (steps.ended[0].sentence == "imported 1 of 4 files - B.wav could not be found (and 2 more)");
+    CHECK (steps.ended[0].made == 1);
+
+    //  One file: what it was called, and what it is called now.
+    rig.imports.add (ImportRig::listId, -1, rig.order(), { "s/X.wav" });
+    rig.imports.nextJob();
+    rig.imports.worked (workOf (model::Found::other, "X.wav"));
+    rig.imports.answer (model::Clash::keepBoth, false);
+    rig.imports.nextJob();
+    rig.imports.worked (workOf (model::Found::copied, "X 2.wav"));
+
+    steps = rig.pass();
+    REQUIRE (steps.create.has_value());
+    CHECK (steps.create->cueName == "X 2");            // named after the file it plays
+    REQUIRE (rig.send (gesture::createCue (steps.create->parent, steps.create->index, "media",
+                                           steps.create->cueName)).applied == 1);
+    steps = rig.pass();
+    REQUIRE (steps.ended.size() == 1u);
+    CHECK (steps.ended[0].sentence == "imported X.wav as X 2.wav");
+
+    //  A file dropped on a media cue names it, with no create, and says so.
+    rig.imports.link ("M3D7ACQE", "s/Thunder.wav");
+    rig.imports.nextJob();
+    rig.imports.worked (workOf (model::Found::same, "Thunder.wav"));
+
+    steps = rig.pass();
+    CHECK_FALSE (steps.create.has_value());
+    REQUIRE (steps.namings.size() == 1u);
+    CHECK (steps.namings[0].cueId == "M3D7ACQE");
+    CHECK (steps.namings[0].mediaName == "Thunder.wav");
+    REQUIRE (steps.ended.size() == 1u);
+    CHECK (steps.ended[0].sentence == "Thunder.wav is on the cue");
+    CHECK (rig.imports.idle());
+}
+
+TEST_CASE ("client: the question names the cues that play the file a replace would change")
+{
+    Rig rig;
+    std::int64_t tick = 1;
+
+    REQUIRE (rig.apply (tick++, "window", "cue.create",
+                        { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                          osc::Value::string ("media"), osc::Value::string ("Rain bed") }).applied == 1);
+    const auto made = model::createdAt (model::text (*rig.publish (tick), "/godot/list/7K2QM9X4/order"), 0);
+    REQUIRE_FALSE (made.empty());
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + made + "/file"),
+                          osc::Value::string ("Rain.wav") }).applied == 1);
+
+    const auto snapshot = rig.publish (tick);
+    CHECK (model::cuesPlaying (*snapshot, "Rain.wav") == std::vector<std::string> { "Rain bed" });
+    CHECK (model::cuesPlaying (*snapshot, "RAIN.WAV") == std::vector<std::string> { "Rain bed" });
+    CHECK (model::cuesPlaying (*snapshot, "Thunder.wav").empty());
 }
 
 //==============================================================================
