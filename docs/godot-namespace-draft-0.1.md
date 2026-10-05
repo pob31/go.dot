@@ -18843,3 +18843,76 @@ could not be read or a folder that could not be written.
 - **No shared effects** (QE), and so no hand on them: a rotary on a parked effect is reported.
 - **A warp that is not one ratio** is averaged into `rate` and reported.
 - **The conduite and the script are not read.** The script is Choufleur's (PRD §3.23).
+- **Colours are not imported.** Live's palette is an index into a table the importer does not have,
+  and a colour is never the only carrier of anything (PRD §4.8).
+
+### 29.5 What is built, and what waits
+
+*Written 2026-10-05.* AL.0 `b1dae62`, AL.2 `b419f7d` (the reader), AL.3 `29b2bbf` (the walk), AL.4-AL.6
+`273e81b` (the show written, the tour, the verb and the window), `04f62b5` and `ae3216b` after a render.
+Where the build departs from what §29 drew, or says more than it:
+
+- **A carrier is any track whose monitoring is In**, whatever its input says. §29.1 said "whose input
+  is another track"; Lazzi's "6 track in" listens to None and is fed by track 6's output. A carrier's
+  sound is the track that feeds it, by its output or by its input.
+- **A term at the bottom of its fader silences its path.** Live's -70 dB is minus infinity: a send
+  at the floor plus a fader a little up is no sound, not -69 dB. Summing decibels without that made
+  every silent send look heard and kept the "track in"'s fader off the level.
+- **Only paths ever heard decide what is shared.** What every heard path crosses goes on the level,
+  so a Lazzi source - silent on its own sends, heard through its "track in" - carries its "track in"'s
+  fader on its level lane and clean sends.
+- **A clip's volume modulation acts on the clip's own audio**, never on the input a carrier listens
+  to: the Pau carriers hold it at -1, silence, through cues that are plainly heard.
+- **Live on macOS writes file names decomposed** - an "e" and a combining accent - and a copy of the
+  project composes them. Five of Lazzi's files are named one way in the set and the other on the
+  disk, so the search by name compares names with their accents folded, and a size tells two takes
+  apart.
+- **A fresh document wrote `<Audio>` after `<Dcas>`** (`c91a296`): every show built from scratch -
+  File > New as well - failed `show.rng` while `wfg validate` passed it. The first importer checked
+  against the published grammar found it.
+- **Standby is set on the first GO** (`04f62b5`), as a show made by hand has it: without it the first
+  render of an imported show was silent.
+- **A performance's list keeps the show's name**, so "Update the show's template..." lists only what
+  the venues changed.
+- **A hand and a drawing on one fader** (`ae3216b`) are reported, not resolved: in Live a hand on a
+  mapped fader takes over from the clip's envelope once it moves, and the conduite's MISE lines often
+  do exactly that before GO; in Go.dot the DCA adds to the level lane. Q1 of Pau starts its lane at
+  -18.2 dB, so a DCA at 0 dB plays 18 dB under Live's fader at 0. Which reading is the show is the
+  author's to say.
+
+**The Lazzi tour, imported:** the eleven venue sets as one show - Pau the template, eleven
+performances of the conduite's fourteen GOs, 1.1 GB of media copied once - every show accepted by
+`wfg validate` and by `scripts/validate-show.py`; Agen against its template differs in the one fade its
+set changed. Q1 rendered hosted reaches the face's outputs and nothing else, as its sends say.
+
+**What waits:** the probe set (AL.1), which settles the three laws of QU; the driver that renders
+the imported probe against Live's own export (AL.7, M49); the author's answer on a hand and a drawing;
+and a listen, cue by cue, against Live playing the same set.
+
+### 29.6 The probe set (AL.1)
+
+Made in Live 12 by the author, once, and kept in `tests/fixtures/als/` with its export: what Live
+does, measured, rather than what the walk supposes. One set at 120 BPM, a 1 kHz sine at -12 dBFS ten
+seconds long (`tone.wav`, which the importer's tests can generate), two audio tracks - **Probe**
+(monitoring Off, output None) and **Probe in** (monitoring In, fed by Probe's output, output None) -
+and one return, **A**, on outputs 1/2, with Probe in's send to it at 0 dB. One scene per question:
+
+1. **The volume law.** Probe: the tone, its volume envelope from the bottom of the fader at the clip's
+   start to 0 dB at beat 20. Answers whether Live joins two points straight in decibels, in gain or
+   along its fader's throw.
+2. **The modulation law.** Probe: the tone, its clip volume modulation from 0 % to 100 % over beat 0 to
+   20, the volume at 0 dB. Answers what a percentage is in decibels.
+3. **A send.** Probe: the tone, Probe in's send to A from the bottom to 0 dB over beats 0 to 20, as a
+   carrier clip launched with it. Answers the send's law, and that a carrier with its sound folds.
+4. **A carrier alone.** Scene 4a: the tone on Probe with no envelope. Scene 4b: only a carrier clip on
+   Probe in, its volume from 0 dB to the bottom over beats 0 to 20. Answers that a carrier fades what
+   its track hears.
+5. **What holds after a stop.** Scene 5a: a 4-beat clip of the tone on Probe, its volume from 0 dB to
+   -20 dB over its length. Scene 5b: a clip of the tone on Probe with no volume envelope. Answers what
+   the second clip plays at.
+6. **A start before the file.** Probe: the tone, its start marker four beats before the file's first
+   sample.
+
+The export is Live's own: the session recorded into the arrangement while each scene is launched in
+turn, a few seconds apart, then exported as one WAV of outputs 1/2. AL.7's driver imports
+the set, renders it hosted, and compares level against time with the export, scene by scene (M49).

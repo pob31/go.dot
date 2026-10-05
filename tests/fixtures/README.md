@@ -450,4 +450,4 @@ the scene names Live 10 spells `SceneNames` and a file's path as a list of folde
 names were copied from the real sets by a person reading them; every name in them is made up. The
 real sets are not committed - their media is gigabytes and their notes a production's - and are read
 at the desk by setting `WFG_ALS_CORPUS` to a folder holding them. The laws the walk relies on are
-not these files' to settle: that is the probe set's (AL.1), exported from Live.
+not these files' to settle: that is the probe set's (AL.1), exported from Live. `session.als.xml` is also what `blackbox/import_als.py` imports through the shipped binary, with `--no-media`, and checks against both grammars.
