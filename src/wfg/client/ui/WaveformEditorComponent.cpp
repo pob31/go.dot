@@ -181,6 +181,10 @@ namespace wfg::client::ui
         addChildComponent (freeFader);
         sayWhatRecDoes();
 
+        lanePick.setWantsKeyboardFocus (false);
+        lanePick.onClick = [this] { pickLane(); };
+        addChildComponent (lanePick);
+
         /*  THE PICKED POINT, TYPED. A number that will not parse is put back
             to what the lane says rather than written as nought - a slip of the
             keyboard must not move a level - and a number that parses is held
@@ -259,6 +263,89 @@ namespace wfg::client::ui
         return height * 3 + (freeFader.isVisible() ? height : 0);
     }
 
+    int WaveformEditorComponent::pickWidth() const
+    {
+        return lanePick.isVisible() ? 120 : 0;
+    }
+
+    const std::vector<model::LanePoint>& WaveformEditorComponent::shownLane() const
+    {
+        if (sendPicked())
+            for (const auto& send : reading.sendLanes)
+                if (send.sendId == pickedSend)
+                    return send.points;
+
+        return reading.lane;
+    }
+
+    std::string WaveformEditorComponent::shownLaneAddress() const
+    {
+        return sendPicked() ? model::sendLaneAddress (pickedSend)
+                            : model::laneAddress (reading.subject.objectId);
+    }
+
+    /*  THE PICKER'S MENU: *Level*, then a line per send, the one drawn
+        ticked. Picking lets go of anything the hand was holding, which belongs
+        to the lane that was drawn. */
+    void WaveformEditorComponent::pickLane()
+    {
+        juce::PopupMenu menu;
+        menu.addItem (1, "Level", true, ! sendPicked());
+
+        for (std::size_t at = 0; at < reading.sendLanes.size(); ++at)
+        {
+            const auto& send = reading.sendLanes[at];
+            menu.addItem (static_cast<int> (at) + 2, "Send to " + juce::String (send.busName), true,
+                          send.sendId == pickedSend);
+        }
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&lanePick),
+                            [safe = juce::Component::SafePointer<WaveformEditorComponent> (this)] (int chosen)
+                            {
+                                if (safe != nullptr && chosen > 0)
+                                    safe->pickLaneAt (chosen == 1 ? -1 : chosen - 2);
+                            });
+    }
+
+    void WaveformEditorComponent::pickLaneAt (int sendIndex)
+    {
+        const auto at = static_cast<std::size_t> (sendIndex);
+
+        pickedSend = sendIndex < 0 || at >= reading.sendLanes.size() ? std::string {}
+                                                                      : reading.sendLanes[at].sendId;
+        held.reset();
+        grabbedPoint = hoverPoint = pickedPoint = noPoint;
+
+        sayWhichLane();
+        sayWhatRecDoes();
+        showPicked();
+        repaint();
+    }
+
+    /*  THE PICKER SAYS WHICH LANE IS DRAWN, in words (§4.8), and is there only
+        for a media cue that sends somewhere: with no send, the level is the
+        only lane there is. */
+    void WaveformEditorComponent::sayWhichLane()
+    {
+        const auto offered = reading.cueKind == "media" && ! reading.sendLanes.empty()
+                               && reading.notice.empty();
+
+        juce::String word = "Level";
+
+        for (const auto& send : reading.sendLanes)
+            if (send.sendId == pickedSend)
+                word = "Send to " + juce::String (send.busName);
+
+        lanePick.setButtonText (word + " " + juce::String::fromUTF8 ("\xe2\x96\xbe"));
+        lanePick.setTooltip ("Which lane is drawn over the waveform: the level, or one send's");
+
+        if (lanePick.isVisible() != offered)
+        {
+            lanePick.setVisible (offered);
+            resized();
+        }
+    }
+
     /*  WHAT THE LANE'S REC DOES NEXT, on the button in words (§4.8): Rec to arm
         this cue's lane; Rec… while it waits for a fader, a click cancelling;
         ● Rec to start a pass once a fader is taken; ■ to stop it. The ✕ is up
@@ -295,7 +382,13 @@ namespace wfg::client::ui
         rec.setToggleState (mine && (lane.waiting || recording), juce::dontSendNotification);
         rec.setColour (juce::TextButton::buttonOnColourId,
                        Look::colour (theme, recording ? "failed" : "standby"));
-        rec.setEnabled (recording || (reading.cueKind == "media" && ! reading.locked && reading.notice.empty()));
+        rec.setEnabled (recording || (reading.cueKind == "media" && ! reading.locked && reading.notice.empty()
+                                        && ! sendPicked()));
+
+        /*  A SEND'S LANE IS DRAWN, NOT RECORDED (namespace draft §28.5): Rec
+            says so rather than arming the level behind the drawing's back. */
+        if (sendPicked() && ! recording)
+            rec.setTooltip ("Rec records the level lane only - pick Level to record one");
 
         const auto freeable = mine && lane.taken && ! recording;
 
@@ -357,11 +450,24 @@ namespace wfg::client::ui
             grabbedPoint = hoverPoint = pickedPoint = noPoint;
         }
 
+        /*  A PICKED SEND THAT HAS GONE - another cue, or the send deleted -
+            gives the level lane back, and whatever the hand held with it. */
+        if (sendPicked()
+              && std::none_of (reading.sendLanes.begin(), reading.sendLanes.end(),
+                               [this] (const model::SendLaneReading& send) { return send.sendId == pickedSend; }))
+        {
+            pickedSend.clear();
+            held.reset();
+            grabbedPoint = hoverPoint = pickedPoint = noPoint;
+        }
+
+        sayWhichLane();
+
         /*  THE HAND'S COPY OF THE LANE LETS GO once the reading moves from
             where it was when the write went - or after a second of passes,
             for a write the engine refused and which will never come round. */
         if (held.has_value() && grabbedPoint == noPoint
-              && (model::writeLane (reading.lane) != laneBeforeSend || ++sentPasses > 25))
+              && (model::writeLane (shownLane()) != laneBeforeSend || ++sentPasses > 25))
             held.reset();
 
         if (pickedPoint >= lane().size())
@@ -419,7 +525,7 @@ namespace wfg::client::ui
 
     std::vector<model::LanePoint> WaveformEditorComponent::lane() const
     {
-        return held.has_value() ? *held : reading.lane;
+        return held.has_value() ? *held : shownLane();
     }
 
     double WaveformEditorComponent::heightAt (int y) const
@@ -481,7 +587,7 @@ namespace wfg::client::ui
 
         /*  NOTHING TO SEND when the lane is what the reading already says - a
             point typed back to the number it had. */
-        if (text == model::writeLane (reading.lane))
+        if (text == model::writeLane (shownLane()))
         {
             held.reset();
             showPicked();
@@ -490,11 +596,11 @@ namespace wfg::client::ui
         }
 
         held = points;
-        laneBeforeSend = model::writeLane (reading.lane);
+        laneBeforeSend = model::writeLane (shownLane());
         sentPasses = 0;
 
         if (actions.set != nullptr)
-            actions.set (model::laneAddress (reading.subject.objectId), text);
+            actions.set (shownLaneAddress(), text);
 
         showPicked();
         repaint();
@@ -962,7 +1068,7 @@ namespace wfg::client::ui
         wants "exactly when". */
     void WaveformEditorComponent::paintHead (juce::Graphics& g, juce::Rectangle<int> head)
     {
-        auto area = head.withTrimmedLeft (head.getHeight() * 2 + recWidth() + 8);
+        auto area = head.withTrimmedLeft (head.getHeight() * 2 + recWidth() + pickWidth() + 8);
 
         g.setFont (Look::font (theme, 12.0f));
         g.setColour (Look::colour (theme, reading.running ? "ink" : "ink-dim"));
@@ -991,7 +1097,8 @@ namespace wfg::client::ui
         {
             auto boxes = pointBoxes();
 
-            g.drawText ("level point at", boxes.removeFromLeft (boxes.getWidth() - 2 * 64 - 6).withTrimmedRight (4),
+            g.drawText (sendPicked() ? "send point at" : "level point at",
+                        boxes.removeFromLeft (boxes.getWidth() - 2 * 64 - 6).withTrimmedRight (4),
                         juce::Justification::centredRight, true);
             return;
         }
@@ -1022,7 +1129,8 @@ namespace wfg::client::ui
 
         const auto lanes = reading.cueKind == "media" && ! reading.locked
                              ? juce::String ("  ") + juce::String::fromUTF8 ("\xc2\xb7")
-                                 + "  double-click the level line to add a point"
+                                 + (sendPicked() ? "  double-click the send's line to add a point"
+                                                 : "  double-click the level line to add a point")
                              : juce::String();
 
         g.drawText ((reading.running ? "playing - drag the ruler to move the playhead"
@@ -1101,6 +1209,9 @@ namespace wfg::client::ui
 
         if (freeFader.isVisible())
             freeFader.setBounds (head.removeFromLeft (head.getHeight()).reduced (2, 1));
+
+        if (lanePick.isVisible())
+            lanePick.setBounds (head.removeFromLeft (pickWidth()).reduced (2, 1));
 
         auto boxes = pointBoxes();
         pointLevel.setBounds (boxes.removeFromRight (64));

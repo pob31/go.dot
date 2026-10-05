@@ -3687,6 +3687,36 @@ TEST_CASE ("client: the waveform's reading carries the cue's level lane, and the
     CHECK (model::readLane (*rig.publish (1), "P4GRP001").empty());
 }
 
+TEST_CASE ("client: the waveform's reading carries a lane for each send the cue has")
+{
+    /*  Namespace draft §28, QB: the picker's entries after Level are the
+        cue's sends, by their mix's name, each with its own lane - and a mix
+        the cue does not send into is not one of them. The fixture's cue sends
+        into the foldback and not into the reverb. */
+    Rig rig ("live");
+
+    CHECK (model::sendLaneAddress ("RV000006") == "/godot/send/RV000006/levelLane");
+
+    REQUIRE (rig.apply (1, "cli", "node.set", { osc::Value::string (model::sendLaneAddress ("RV000006")),
+                                                osc::Value::string ("1 -30 3 0") }).applied == 1);
+
+    const auto snapshot = rig.publish (1);
+    const auto reading = model::readFoot (*snapshot, { model::Subject::Kind::waveform, "RV000002" });
+
+    REQUIRE (reading.sendLanes.size() == 1u);
+    CHECK (reading.sendLanes[0].sendId == "RV000006");
+    CHECK (reading.sendLanes[0].busName == "Foldback");
+    REQUIRE (reading.sendLanes[0].points.size() == 2u);
+    CHECK (reading.sendLanes[0].points[0].levelDb == doctest::Approx (-30.0));
+    CHECK (reading.sendLanes[0].points[1].seconds == doctest::Approx (3.0));
+
+    //  The level's own lane is the cue's, and none is drawn on it.
+    CHECK (reading.lane.empty());
+
+    //  Read by its address, the same points.
+    CHECK (model::readLaneAt (*snapshot, model::sendLaneAddress ("RV000006")).size() == 2u);
+}
+
 TEST_CASE ("client: a lane recorded from a fader reads as the tree says, and names its fader as a person would")
 {
     /*  Namespace draft §20.9: the lane's cue, whether it waits, the fader taken

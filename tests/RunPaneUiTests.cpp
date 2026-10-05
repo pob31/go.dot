@@ -405,6 +405,79 @@ TEST_CASE ("waveform: a level lane is drawn over the file, and one gesture is on
     }
 }
 
+TEST_CASE ("waveform: a send's lane is picked, drawn over the file and written at the send")
+{
+    /*  Namespace draft §28, QB: one lane drawn at a time, the level's or one
+        send's. A gesture on the picked one writes at ITS address, and a send
+        that has gone gives the level lane back. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value)
+    { written.emplace_back (address, value); };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setSize (900, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 10.0;
+    reading.lane = { { 2.0, -12.0 } };                  // the level, down twelve
+    reading.sendLanes = { { "SND00001", "Loin", {} } }; // one send, no lane on it yet
+
+    editor.show (reading, nullptr);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+
+    const auto doubleClick = [&] (juce::Point<float> at)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        editor.mouseDoubleClick (juce::MouseEvent (source, at, left, juce::MouseInputSource::defaultPressure,
+                                                   0.0f, 0.0f, 0.0f, 0.0f, &editor, &editor, now, at, now,
+                                                   2, false));
+    };
+
+    /*  THE SEND PICKED: its line is the unity line, since nothing is drawn on
+        it, and a point added there is written on the send. */
+    editor.pickLaneAt (0);
+    doubleClick (editor.pointPosition ({ 3.0, 0.0 }));
+
+    REQUIRE (written.size() == 1u);
+    CHECK (written.back().first == "/godot/send/SND00001/levelLane");
+
+    auto parsed = wfg::doc::readLevelLane (written.back().second);
+    REQUIRE (parsed.problem.empty());
+    REQUIRE (parsed.points.size() == 1u);
+    CHECK (parsed.points[0].levelDb == doctest::Approx (0.0));
+
+    /*  THE LEVEL PICKED AGAIN: its line is at -12, and a point there is the
+        cue's - the send's lane is not touched. */
+    editor.pickLaneAt (-1);
+    doubleClick (editor.pointPosition ({ 6.0, -12.0 }));
+
+    REQUIRE (written.size() == 2u);
+    CHECK (written.back().first == "/godot/cue/CUE00001/levelLane");
+
+    parsed = wfg::doc::readLevelLane (written.back().second);
+    REQUIRE (parsed.problem.empty());
+    CHECK (parsed.points.size() == 2u);
+
+    /*  A SEND THAT GOES gives the level lane back: picked, then the reading
+        no longer has it, and the next point is the cue's again. */
+    editor.pickLaneAt (0);
+    reading.sendLanes.clear();
+    editor.show (reading, nullptr);
+
+    doubleClick (editor.pointPosition ({ 7.0, -12.0 }));
+
+    REQUIRE (written.size() == 3u);
+    CHECK (written.back().first == "/godot/cue/CUE00001/levelLane");
+}
+
 
 TEST_CASE ("surface panel: while a lane waits for a fader, a press takes it and does nothing else")
 {

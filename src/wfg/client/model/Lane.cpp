@@ -42,16 +42,26 @@ namespace wfg::client::model
         return "/godot/cue/" + cueId + "/levelLane";
     }
 
+    std::string sendLaneAddress (const std::string& sendId)
+    {
+        return "/godot/send/" + sendId + "/levelLane";
+    }
+
     std::vector<LanePoint> readLane (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+    {
+        if (cueId.empty() || text (snapshot, "/godot/cue/" + cueId + "/kind") != "media")
+            return {};
+
+        return readLaneAt (snapshot, laneAddress (cueId));
+    }
+
+    std::vector<LanePoint> readLaneAt (const tree::TreeSnapshot& snapshot, const std::string& address)
     {
         std::vector<LanePoint> out;
 
-        if (cueId.empty() || text (snapshot, "/godot/cue/" + cueId + "/kind") != "media")
-            return out;
-
         /*  A LIST NODE, read by its values as a fade's points are: `text`
             answers empty for one, deliberately. */
-        if (const auto* node = snapshot.find (laneAddress (cueId)))
+        if (const auto* node = snapshot.find (address))
         {
             const auto& values = node->values;
 

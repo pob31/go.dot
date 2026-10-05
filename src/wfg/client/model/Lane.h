@@ -66,9 +66,17 @@ namespace wfg::client::model
     /** The address a lane is written at: `/godot/cue/<id>/levelLane`. */
     std::string laneAddress (const std::string& cueId);
 
+    /*  The address a SEND's lane is written at (namespace draft §28):
+        `/godot/send/<id>/levelLane`. The same rules, on a send's level. */
+    std::string sendLaneAddress (const std::string& sendId);
+
     /*  The lane the tree publishes for a media cue, in order. Empty for none,
         for a cue that is not media, and for a list that is not pairs. */
     std::vector<LanePoint> readLane (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /*  The lane the tree publishes at an address - a cue's or a send's - in
+        order. Empty for none and for a list that is not pairs. */
+    std::vector<LanePoint> readLaneAt (const tree::TreeSnapshot&, const std::string& address);
 
     /*  What the lane asks for at a second of the file: straight in dB between
         points, held beyond both ends, nought for no lane - what the engine

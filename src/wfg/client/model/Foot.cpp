@@ -137,6 +137,12 @@ namespace wfg::client::model
             out.ranges = readRanges (snapshot, subject.objectId);
             out.lane = readLane (snapshot, subject.objectId);
             out.locked = isYes (flag (snapshot, "/godot/document/locked"));
+
+            if (out.cueKind == "media")
+                for (const auto& strip : readSends (snapshot, subject.objectId))
+                    if (! strip.sendId.empty())
+                        out.sendLanes.push_back ({ strip.sendId, strip.name,
+                                                   readLaneAt (snapshot, sendLaneAddress (strip.sendId)) });
             out.laneRecord = readLaneRecord (snapshot);
 
             /*  WHY THERE IS NOTHING TO DRAW, when there is nothing to draw, in

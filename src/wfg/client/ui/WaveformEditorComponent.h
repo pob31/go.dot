@@ -108,6 +108,11 @@ namespace wfg::client::ui
             point at nought on a lane nobody has drawn is on the unity line. */
         juce::Point<float> pointPosition (const model::LanePoint&) const;
 
+        /*  PICKS THE LANE DRAWN, as the picker's menu does: -1 for the level,
+            else a send by its place in the reading's `sendLanes`. Public so a
+            test can pick without a menu, which a test cannot click. */
+        void pickLaneAt (int sendIndex);
+
         void mouseMove (const juce::MouseEvent&) override;
         void mouseDown (const juce::MouseEvent&) override;
         void mouseDoubleClick (const juce::MouseEvent&) override;
@@ -218,6 +223,25 @@ namespace wfg::client::ui
         void sayWhatRecDoes();
         bool laneIsMine() const;
         int recWidth() const;
+
+        /*  WHICH LANE IS DRAWN (namespace draft §28, QB): the level's, or one
+            send's, picked from the button after Rec - *Level*, then each send
+            by its mix's name. One lane at a time, so two curves never share an
+            axis with two meanings. `pickedSend` is the send's identifier,
+            empty for the level; it goes back to the level when the cue or the
+            send goes. Rec records the level only (§28.5). */
+        juce::TextButton lanePick;
+        std::string pickedSend;
+        void pickLane();
+        void sayWhichLane();
+        int pickWidth() const;
+        bool sendPicked() const { return ! pickedSend.empty(); }
+
+        /** The points of the lane picked, as the reading has them. */
+        const std::vector<model::LanePoint>& shownLane() const;
+
+        /** Where that lane is written. */
+        std::string shownLaneAddress() const;
 
         /*  THE RIDE AS IT IS HEARD, drawn over the lane while a pass records -
             the file's second and the fader's level, a point a pass - until the

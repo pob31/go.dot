@@ -83,6 +83,17 @@ namespace wfg::client::model
     std::string wordFor (Subject::Kind);
     Subject::Kind subjectKindFor (const std::string& word);
 
+    /*  ONE SEND'S LANE, as the waveform's picker offers it (namespace draft
+        §28, QB): the send it rides, the mix it feeds by name - which is the
+        word the picker shows - and its points. A send of the cue, so a mix
+        the cue does not send into has none to draw. */
+    struct SendLaneReading
+    {
+        std::string sendId;
+        std::string busName;
+        std::vector<LanePoint> points;
+    };
+
     /*  Everything the foot needs for one pass, read while the window has its
         snapshot open. Only the fields the OPEN subject uses are filled: a shut
         panel costs one comparison, and a waveform does not pay for a reading
@@ -110,6 +121,11 @@ namespace wfg::client::model
             the lane may be grabbed, the lane being a decision the lock keeps. */
         std::vector<LanePoint> lane;
         bool locked = false;
+
+        /*  AND ITS SENDS' LANES (namespace draft §28), one per send the cue
+            has, in the order the show declares its mixes - the picker's
+            entries after *Level*. Filled with the waveform. */
+        std::vector<SendLaneReading> sendLanes;
 
         /*  AND A LANE BEING RECORDED FROM A FADER (namespace draft §20.9) -
             whichever cue it is for, so the waveform can say it is another's. */
