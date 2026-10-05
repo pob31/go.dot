@@ -71,16 +71,39 @@ namespace wfg::client::model
         preset,     ///< `node.set <dragged>/preset <cueId>`: prepared by that group's header
         header,     ///< move into the header of the group `cueId`, made first if it has none
         footer,     ///< move into the footer of the group `cueId`, made first if it has none
-        clearPreset ///< `node.set <dragged>/preset ""`: no longer prepared ahead
+        clearPreset,///< `node.set <dragged>/preset ""`: no longer prepared ahead
+        persistent  ///< move into the persistent section of the list `container`, made first (§30, S5)
     };
 
     struct Drop
     {
         DropKind kind = DropKind::none;
-        std::string container;   ///< for after/into: the list or group moved into
+        std::string container;   ///< for after/into: the list or group moved into; for persistent: the list
         int index = -1;          ///< for after: the member position; -1 is the end
         std::string cueId;       ///< for target: the fade or stop being aimed
+
+        /*  WHY LETTING GO HERE DOES NOTHING, when there is a reason worth a
+            sentence: the kind is `none` and this says so while the hand is
+            still in the air, rather than the drop being sent and refused - or,
+            worse, accepted and then ignored. Empty for every other `none`,
+            which is the row itself or a heading, and needs no telling. */
+        std::string refused;
     };
+
+    /*  WHAT A PERSISTENT SECTION KEEPS RUNNING (PRD §3.29, decision S; mic
+        since Phase 9b): media, mic, OSC and MIDI cues - the kinds the engine's
+        `solvePersistent` re-asserts. A fade asserts nothing, a stop is what
+        SUSPENDS an assertion and a group is a lifetime rather than a state, so
+        the engine takes any of them into the section and then ignores it, with
+        a validate warning nobody reads at the moment of the drag. A memo is
+        ignored without even the warning. This is that rule asked first, so the
+        window can refuse the drop in words instead (namespace draft §30, S5). */
+    bool persists (const Row& cue);
+
+    /*  The sentence a refused drop into the persistent section is said with:
+        which kinds the section keeps running, and that `cue` stays where it
+        is. */
+    std::string notPersistent (const Row& cue);
 
     /*  WHICH COLOUR SAYS WHAT LETTING GO WOULD DO (author, 2026-09-21: "so the
         drag and drop has a clear colour coding for the user to be sure what
@@ -136,7 +159,15 @@ namespace wfg::client::model
     std::string editAttributeFor (EditCell cell, const std::string& kind);
 
     /*  What letting go of `dragged` over `over` would do, `fraction` being how
-        far down the row the pointer is (0 at the top, 1 at the bottom). */
+        far down the row the pointer is (0 at the top, 1 at the bottom).
+
+        THE PERSISTENT BAND IS ALWAYS DRAWN since 2026-10-05 (namespace draft
+        §30, S5: "Permanent cues have disappeared" - nothing had removed them,
+        but a list with no section drew no band and offered nothing to drop
+        on). Letting go on it moves the cue into the section, or answers
+        `DropKind::persistent` when the list has none yet, for the window to
+        make it first. A cue the section would ignore is refused there and
+        after any of its rows, with `refused` saying why. */
     Drop dropFor (const Row& over, const Row& dragged, double fraction);
 
     /*  LEAVING A GROUP BY ITS END (author, 2026-09-25: "It's hard to move a

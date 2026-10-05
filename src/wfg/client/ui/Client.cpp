@@ -187,6 +187,8 @@ namespace wfg::client
                                               { moveIntoRole (cueId, group, "footer"); };
                 listActions.moveToHeader    = [this] (const std::string& cueId, const std::string& group)
                                               { moveIntoRole (cueId, group, "header"); };
+                listActions.moveToPersistent = [this] (const std::string& cueId, const std::string& listId)
+                                               { moveIntoPersistent (cueId, listId); };
 
                 //  A cell edited in place is one `node.set`, as a field in the inspector is.
                 listActions.setValue        = [this] (const std::string& address, const std::string& text)
@@ -1054,11 +1056,66 @@ namespace wfg::client
                 shell->transport.setNotice ("making " + nameOf (group) + "'s " + role);
             }
 
+            /*  INTO A LIST'S PERSISTENT SECTION, made first if it has none
+                (namespace draft §30, S5) - the same shape as a header or a
+                footer, one level up: the section is the list's, so the tree
+                names it at `/godot/list/<id>/persistent`, and it is made by
+                `list.persistent` rather than `group.role`. The move waits in
+                the same queue for the pass whose tree names the section.
+
+                WHAT MAY GO IN WAS ASKED BEFORE THIS (`model::dropFor`, which
+                refuses in words what the section would ignore), so nothing
+                here makes a section for a cue that will not be put in it. */
+            void moveIntoPersistent (const std::string& cueId, const std::string& listId)
+            {
+                if (refusedWhileLocked() || latest == nullptr || listId.empty())
+                    return;
+
+                const auto section = model::text (*latest, "/godot/list/" + listId + "/persistent");
+
+                if (! section.empty())
+                {
+                    const auto members = static_cast<int> (model::words (
+                        model::text (*latest, "/godot/list/" + listId + "/persistentOrder")).size());
+
+                    send (gesture::moveObject (cueId, section, members));
+                    shell->transport.setNotice ("into the persistent section");
+                    return;
+                }
+
+                send (gesture::listPersistent (listId));
+                footerMoves.push_back ({ cueId, listId, "persistent", 0 });
+                shell->transport.setNotice ("making the persistent section");
+            }
+
+            /*  ONE QUEUE FOR THE THREE SECTIONS that are made on the way: a
+                group's header and footer, and a list's persistent section,
+                which `group` then names and whose node is the list's. */
             struct FooterMove
             {
                 std::string cueId, group, role;
                 int waited = 0;
+
+                bool ofList() const { return role == "persistent"; }
+
+                std::string address() const
+                {
+                    return (ofList() ? "/godot/list/" : "/godot/cue/") + group + "/" + role;
+                }
             };
+
+            juce::String movedWords (const FooterMove& job) const
+            {
+                return job.ofList() ? juce::String ("into the persistent section")
+                                    : "into " + nameOf (job.group) + "'s " + juce::String (job.role);
+            }
+
+            juce::String refusedWords (const FooterMove& job) const
+            {
+                return job.ofList() ? juce::String ("the persistent section was refused")
+                                    : "the " + juce::String (job.role) + " for " + nameOf (job.group)
+                                        + " was refused";
+            }
 
             void finishFooterMoves (const tree::TreeSnapshot& snapshot)
             {
@@ -1069,20 +1126,20 @@ namespace wfg::client
 
                 for (auto& job : footerMoves)
                 {
-                    const auto footer = model::text (snapshot, "/godot/cue/" + job.group + "/" + job.role);
+                    const auto footer = model::text (snapshot, job.address());
 
                     if (! footer.empty())
                     {
-                        const auto members = static_cast<int> (model::words (model::text (snapshot, "/godot/cue/" + job.group + "/" + job.role + "Order")).size());
+                        const auto members = static_cast<int> (model::words (model::text (snapshot, job.address() + "Order")).size());
                         send (gesture::moveObject (job.cueId, footer, members));
-                        shell->transport.setNotice ("into " + nameOf (job.group) + "'s footer");
+                        shell->transport.setNotice (movedWords (job));
                         continue;
                     }
 
                     if (++job.waited < model::importPatience)
                         waiting.push_back (job);
                     else
-                        shell->transport.setNotice ("the footer for " + nameOf (job.group) + " was refused");
+                        shell->transport.setNotice (refusedWords (job));
                 }
 
                 footerMoves = std::move (waiting);

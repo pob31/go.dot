@@ -234,6 +234,13 @@ namespace wfg::client::model
         }
     };
 
+    /*  WHAT AN EMPTY PERSISTENT BAND SAYS IN PLACE OF ITS COUNT (namespace
+        draft §30, S5). The band is drawn for every list since 2026-10-05, with
+        nothing under it in most shows, and a heading over nothing reads as a
+        stray line unless it says what it is for. Empty for any other row: a
+        band with cues under it says how many, as it always has. */
+    std::string emptyBandWords (const Row& band);
+
     class ShowModel
     {
     public:
@@ -282,7 +289,8 @@ namespace wfg::client::model
                       const std::string& sectionId,
                       const std::vector<std::string>& ids, Section which,
                       const char* word, int depth,
-                      const std::vector<std::string>& derivedIds = {});
+                      const std::vector<std::string>& derivedIds = {},
+                      bool evenEmpty = false);
         void append (const tree::TreeSnapshot& snapshot, const std::string& cueId,
                      Section section, int depth, const std::string& parent,
                      int indexInParent = 0, bool derived = false,

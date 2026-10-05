@@ -235,6 +235,11 @@ namespace wfg::client::gesture
         the engine answers with the one that exists, so asking twice is safe. */
     Event groupRole (const std::string& group, const std::string& role);
 
+    /*  Gives a list its persistent section, so a cue can be moved into it
+        (namespace draft §30, S5): the same answer-with-the-one-it-has as
+        `groupRole`, one level up. */
+    Event listPersistent (const std::string& list);
+
     /*  COPY AND PASTE. Copy asks the engine for a fragment of these cues,
         which the tree then publishes and the window carries to the
         operating system's clipboard; paste hands a fragment back, to land in

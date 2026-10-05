@@ -118,6 +118,11 @@ namespace wfg::client::ui
             /** The same for a group's header, made first if it has none. */
             std::function<void (const std::string& cueId, const std::string& group)> moveToHeader;
 
+            /*  INTO A LIST'S PERSISTENT SECTION, made first if it has none: a
+                drop on the persistent band, which is drawn for every list
+                (namespace draft §30, S5). */
+            std::function<void (const std::string& cueId, const std::string& listId)> moveToPersistent;
+
             /** One value edited in place: the node's address and the text typed. */
             std::function<void (const std::string& address, const std::string& text)> setValue;
 
@@ -344,6 +349,13 @@ namespace wfg::client::ui
             cue's file is the only thing a file landing on a row can mean, so
             there is nothing for a colour to tell apart. */
         std::string dropTone = "drop-into";
+
+        /*  THE REFUSAL LAST SAID WHILE A DRAG WAS IN THE AIR (namespace draft
+            §30, S5): a cue the persistent section would ignore, held over it.
+            Kept so the sentence is said once as the hand arrives and taken back
+            when it moves somewhere that has nothing to say, rather than left at
+            the foot under a drop that is no longer refused. */
+        std::string refusalSaid;
         std::size_t drawnWalk = 0;
         std::string drawnList;
 

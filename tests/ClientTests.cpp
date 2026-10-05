@@ -656,6 +656,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::moveObject ("B3N8R5TW", "7K2QM9X4", 0),
         gesture::deleteObject ("B3N8R5TW"),
         gesture::groupRole ("B3N8R5TW", "footer"),
+        gesture::listPersistent ("7K2QM9X4"),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
         gesture::saveAs ("C:/shows/copy"),
         gesture::copyCues ({ "B3N8R5TW", "F7HR8TVD" }),
@@ -1068,6 +1069,277 @@ TEST_CASE ("client: a section is a band that folds, and the fold is the client's
     CHECK_FALSE (show.isShut (persistent->bandKey));
     CHECK (show.refresh (*snapshot, listId));
     CHECK (show.rows().size() == before);
+}
+
+//==============================================================================
+TEST_CASE ("client: a list with no persistent section still draws its band, empty, and the band makes the section")
+{
+    /*  The author, 2026-10-05: "Permanent cues have disappeared." Nothing had
+        removed them: a show made in the window has no `<Persistent>` element
+        until somebody asks for one, the band was drawn only for a section with
+        cues in it, and nothing the window offered ever asked (namespace draft
+        §30, S5). `minimal` is such a show. */
+    Rig rig;
+    auto tick = std::int64_t { 1 };
+
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE_FALSE (listId.empty());
+    REQUIRE (model::text (*rig.publish (0), "/godot/list/" + listId + "/persistent").empty());
+
+    const auto persistentBands = [] (const model::ShowModel& model)
+    {
+        std::vector<model::Row> found;
+
+        for (const auto& row : model.rows())
+            if (row.rowKind == model::RowKind::band && row.section == model::Section::persistent)
+                found.push_back (row);
+
+        return found;
+    };
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*rig.publish (0), listId));
+
+    //  ONE BAND, AT THE TOP, WHERE IT STANDS WHEN IT HAS CUES - and nothing under it.
+    auto bands = persistentBands (show);
+    REQUIRE (bands.size() == 1u);
+    REQUIRE_FALSE (show.rows().empty());
+
+    const auto& top = show.rows().front();
+    CHECK (top.rowKind == model::RowKind::band);
+    CHECK (top.section == model::Section::persistent);
+    CHECK (top.depth == 0);
+    CHECK (top.count == 0u);
+    CHECK (top.parent == listId);
+    CHECK (top.sectionId.empty());                       // no section yet, so nothing to name
+    CHECK (top.bandKey == listId + "/persistent");
+    CHECK_FALSE (top.mayPark());
+    CHECK (top.parksOn().empty());
+
+    //  It says what it is for, in place of a count of nothing.
+    CHECK (model::emptyBandWords (top) == "drop media, mic, OSC or MIDI cues here to keep them running all show");
+
+    //  The always-drawn band is the persistent one alone: the group's empty header and footer stay unframed.
+    for (const auto& row : show.rows())
+        if (row.rowKind == model::RowKind::band)
+            CHECK (row.section == model::Section::persistent);
+
+    //  Every cue row is still where the index says, under the band.
+    for (std::size_t at = 0; at < show.rows().size(); ++at)
+        if (show.rows()[at].rowKind == model::RowKind::cue)
+            CHECK (show.indexOf (show.rows()[at].id) == static_cast<int> (at));
+
+    /*  ITS FOLD WORKS AS ANY BAND'S, with nothing to hide: shut, it is still
+        drawn and still the only extra row. */
+    const auto drawn = show.rows().size();
+
+    show.toggle (top.bandKey);
+    REQUIRE (show.refresh (*rig.publish (0), listId));
+    bands = persistentBands (show);
+    REQUIRE (bands.size() == 1u);
+    CHECK (bands.front().shut);
+    CHECK (show.rows().size() == drawn);
+    CHECK (show.foldAddress (bands.front().bandKey) == "/godot/list/" + listId + "/persistentFolded");
+
+    show.toggle (bands.front().bandKey);
+    REQUIRE (show.refresh (*rig.publish (0), listId));
+    CHECK_FALSE (persistentBands (show).front().shut);
+
+    //  And the flag a fold writes is taken with no section behind it, and seeds a fresh model shut.
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/list/" + listId + "/persistentFolded"),
+                          osc::Value::boolean (true) }).applied == 1);
+
+    {
+        model::ShowModel reopened;
+        REQUIRE (reopened.refresh (*rig.publish (tick), listId));
+        CHECK (reopened.isShut (listId + "/persistent"));
+        REQUIRE (persistentBands (reopened).size() == 1u);
+    }
+
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/list/" + listId + "/persistentFolded"),
+                          osc::Value::boolean (false) }).applied == 1);
+
+    /*  A DROP ON IT ASKS FOR THE SECTION, and the engine makes it. An OSC cue,
+        which the section keeps running; the memo beside it is refused. */
+    REQUIRE (rig.apply (tick++, "window", "cue.create",
+                        { osc::Value::string (listId), osc::Value::int32 (0),
+                          osc::Value::string ("osc"), osc::Value::string ("Desk scene") }).applied == 1);
+    const auto oscCue = model::createdAt (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order"), 0);
+    REQUIRE_FALSE (oscCue.empty());
+
+    REQUIRE (show.refresh (*rig.publish (tick), listId));
+    const auto oscAt = show.indexOf (oscCue);
+    REQUIRE (oscAt >= 0);
+    const auto oscRow = show.rows()[static_cast<std::size_t> (oscAt)];
+    const auto memoAt = show.indexOf ("B3N8R5TW");
+    REQUIRE (memoAt >= 0);
+    const auto memoRow = show.rows()[static_cast<std::size_t> (memoAt)];
+
+    CHECK (model::dropFor (show.rows().front(), memoRow, 0.5).kind == model::DropKind::none);
+
+    const auto make = model::dropFor (show.rows().front(), oscRow, 0.5);
+    REQUIRE (make.kind == model::DropKind::persistent);
+    CHECK (make.container == listId);
+
+    const auto ask = gesture::listPersistent (make.container);
+    REQUIRE (rig.apply (tick++, ask.origin, ask.command, ask.args).applied == 1);
+
+    const auto section = model::text (*rig.publish (tick), "/godot/list/" + listId + "/persistent");
+    REQUIRE_FALSE (section.empty());
+
+    //  The pass that sees the section: the band names it, still empty, and a drop is now a plain move into it.
+    REQUIRE (show.refresh (*rig.publish (tick), listId));
+    REQUIRE (persistentBands (show).size() == 1u);
+    CHECK (show.rows().front().sectionId == section);
+    CHECK (show.rows().front().count == 0u);
+    CHECK_FALSE (model::emptyBandWords (show.rows().front()).empty());
+
+    const auto into = model::dropFor (show.rows().front(), oscRow, 0.5);
+    REQUIRE (into.kind == model::DropKind::into);
+    CHECK (into.container == section);
+
+    const auto move = gesture::moveObject (oscCue, into.container, 0);
+    REQUIRE (rig.apply (tick++, move.origin, move.command, move.args).applied == 1);
+    CHECK (model::text (*rig.publish (tick), "/godot/list/" + listId + "/persistentOrder") == oscCue);
+
+    //  And the band is an ordinary one again: a count, no words, the cue one level in under it.
+    REQUIRE (show.refresh (*rig.publish (tick), listId));
+    CHECK (show.rows().front().count == 1u);
+    CHECK (model::emptyBandWords (show.rows().front()).empty());
+    REQUIRE (show.indexOf (oscCue) == 1);
+    CHECK (show.rows()[1].section == model::Section::persistent);
+    CHECK (show.rows()[1].depth == 1);
+
+    //  Asking twice answers with the one it has, so a stale second drop makes nothing new.
+    REQUIRE (rig.apply (tick++, ask.origin, ask.command, ask.args).applied == 1);
+    CHECK (model::text (*rig.publish (tick), "/godot/list/" + listId + "/persistent") == section);
+}
+
+TEST_CASE ("client: the persistent band takes what the section keeps running, and refuses the rest in words")
+{
+    /*  Decision S (§3.29), and the engine's own rule since Phase 9b: media,
+        mic, OSC and MIDI are what a persistent section re-asserts. The engine
+        TAKES the others - a fade, a stop, a group - and ignores them with a
+        validate warning; this is where the window says so before anybody
+        lets go (namespace draft §30, S5). */
+    const auto cueOf = [] (const char* id, const char* kind, const char* name)
+    {
+        model::Row row;
+        row.rowKind = model::RowKind::cue;
+        row.id = id;
+        row.kind = kind;
+        row.name = name;
+        row.parent = "7K2QM9X4";
+        row.isGroup = std::string (kind) == "group";
+        return row;
+    };
+
+    model::Row band;
+    band.rowKind = model::RowKind::band;
+    band.section = model::Section::persistent;
+    band.parent = "7K2QM9X4";
+    band.name = "persistent";
+    band.bandKey = "7K2QM9X4/persistent";
+
+    SUBCASE ("with no section yet, a kept kind asks for one, named for the list")
+    {
+        for (const auto* kind : { "media", "mic", "osc", "midi" })
+        {
+            CAPTURE (kind);
+            const auto drop = model::dropFor (band, cueOf ("MED1A001", kind, "Bed"), 0.5);
+
+            CHECK (drop.kind == model::DropKind::persistent);
+            CHECK (drop.container == "7K2QM9X4");
+            CHECK (drop.refused.empty());
+        }
+
+        const auto drop = model::dropFor (band, cueOf ("MED1A001", "media", "Bed"), 0.5);
+
+        //  It lights the band as a move into a section does, and says so.
+        CHECK (model::dropTone (drop.kind) == "drop-into");
+        CHECK (model::describe (drop, band, false) == "into the persistent section");
+
+        //  Anywhere on the band: its top and its bottom are the band too.
+        CHECK (model::dropFor (band, cueOf ("MED1A001", "media", "Bed"), 0.05).kind == model::DropKind::persistent);
+        CHECK (model::dropFor (band, cueOf ("MED1A001", "media", "Bed"), 0.95).kind == model::DropKind::persistent);
+    }
+
+    SUBCASE ("anything else is refused, and the sentence says why and names the cue")
+    {
+        for (const auto* kind : { "memo", "fade", "transport", "group", "start" })
+        {
+            CAPTURE (kind);
+            const auto drop = model::dropFor (band, cueOf ("F4DE0001", kind, "Lights down"), 0.5);
+
+            CHECK (drop.kind == model::DropKind::none);
+            CHECK (drop.refused == "only media, mic, OSC and MIDI cues can be persistent, so Lights down"
+                                   " stays where it is");
+
+            //  The sentence is what `describe` says for it, so the list has one place to ask.
+            CHECK (model::describe (drop, band, false) == drop.refused);
+        }
+
+        //  A cue with no name is named by its identifier.
+        CHECK (model::dropFor (band, cueOf ("F4DE0001", "fade", ""), 0.5).refused.find ("so F4DE0001 stays")
+                 != std::string::npos);
+    }
+
+    SUBCASE ("with the section made, a kept kind moves into it and anything else is still refused")
+    {
+        band.sectionId = "PRS00001";
+
+        const auto drop = model::dropFor (band, cueOf ("MED1A001", "media", "Bed"), 0.5);
+        CHECK (drop.kind == model::DropKind::into);
+        CHECK (drop.container == "PRS00001");
+        CHECK (drop.index == -1);
+        CHECK (model::describe (drop, band, false) == "into the persistent section");
+
+        CHECK (model::dropFor (band, cueOf ("F4DE0001", "fade", "Lights down"), 0.5).kind
+                 == model::DropKind::none);
+    }
+
+    SUBCASE ("after one of the section's rows, the same rule")
+    {
+        auto bed = cueOf ("MED1A002", "media", "Rain");
+        bed.section = model::Section::persistent;
+        bed.sectionId = "PRS00001";
+        bed.depth = 1;
+        bed.indexInParent = 0;
+
+        const auto kept = model::dropFor (bed, cueOf ("MED1A001", "osc", "Desk"), 0.9);
+        CHECK (kept.kind == model::DropKind::after);
+        CHECK (kept.container == "PRS00001");
+        CHECK (kept.index == 1);
+
+        const auto refused = model::dropFor (bed, cueOf ("F4DE0001", "fade", "Lights down"), 0.9);
+        CHECK (refused.kind == model::DropKind::none);
+        CHECK_FALSE (refused.refused.empty());
+    }
+
+    SUBCASE ("what is already in the section can be reordered there, whatever it is")
+    {
+        band.sectionId = "PRS00001";
+
+        auto stray = cueOf ("F4DE0001", "fade", "Lights down");
+        stray.section = model::Section::persistent;
+        stray.sectionId = "PRS00001";
+
+        CHECK (model::dropFor (band, stray, 0.5).kind == model::DropKind::into);
+    }
+
+    SUBCASE ("a group's empty header and footer are untouched by the rule")
+    {
+        model::Row header;
+        header.rowKind = model::RowKind::band;
+        header.section = model::Section::header;
+        header.parent = "GRP00001";
+
+        const auto drop = model::dropFor (header, cueOf ("F4DE0001", "fade", "Lights down"), 0.5);
+        CHECK (drop.kind == model::DropKind::header);
+        CHECK (drop.refused.empty());
+    }
 }
 
 //==============================================================================

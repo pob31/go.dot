@@ -966,7 +966,17 @@ namespace wfg::client::ui
         const auto pad = unit / 2;
         const auto indent = unit * 2;
 
-        g.fillAll (Look::colour (theme, "panel-section"));
+        /*  AN EMPTY PERSISTENT BAND IS DRAWN LIGHT (namespace draft §30, S5).
+            It heads every list now, with nothing under it in most shows, and a
+            full band there would be the heaviest thing on an empty list. The
+            list box gives every row one height, so "thin" is drawn rather than
+            measured: the plain ground of a cue row, the top rule and no rail
+            dropping into rows that are not there, the word in the dimmer ink,
+            and in place of a count of nothing, what the band is for. */
+        const auto hint = model::emptyBandWords (entry);
+        const auto light = ! hint.empty();
+
+        g.fillAll (Look::colour (theme, light ? "panel-cue" : "panel-section"));
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (pad, 0);
         area.removeFromLeft (unit * 2 + numberChars * unit);
@@ -988,7 +998,7 @@ namespace wfg::client::ui
         g.setColour (Look::colour (theme, "rule"));
         g.fillRect (corner, 0, width - corner - pad, 1);
 
-        if (! entry.shut)
+        if (! entry.shut && ! light)
             g.fillRect (corner, 0, 1, height);
 
         auto text = area.withTrimmedLeft (entry.depth * indent);
@@ -1001,7 +1011,7 @@ namespace wfg::client::ui
             rather than through the glyph. */
         auto twist = text.removeFromLeft (indent);
 
-        g.setColour (Look::colour (theme, "panel-section"));
+        g.setColour (Look::colour (theme, light ? "panel-cue" : "panel-section"));
         g.fillRect (twist.reduced (0, 1));
 
         g.setColour (Look::colour (theme, "ink-dim"));
@@ -1013,10 +1023,20 @@ namespace wfg::client::ui
 
         //  The word reads at a glance or the band is a stripe nobody can name.
         auto word = juce::String (entry.name).toUpperCase();
-        g.setColour (Look::colour (theme, "ink"));
+        g.setColour (Look::colour (theme, light ? "ink-dim" : "ink"));
         g.setFont (Look::font (theme, 11.0f));
         const auto wordWidth = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), word) + pad;
         g.drawText (word, text.removeFromLeft (wordWidth), juce::Justification::centredLeft, false);
+
+        //  An empty persistent band says what it is for, where a count of nothing would be.
+        if (light)
+        {
+            g.setColour (Look::colour (theme, "ink-faint"));
+            g.drawText (juce::String (hint), text, juce::Justification::centredLeft, true);
+
+            juce::ignoreUnused (row);
+            return;
+        }
 
         /*  AND THE COUNT SAYS HOW MUCH: how many lines the section holds, or
             how many are hidden while it is shut. The dimmer grey, which is the
@@ -1536,8 +1556,28 @@ namespace wfg::client::ui
         dropWouldInsert = drop.kind == model::DropKind::after;
         dropWouldLink = drop.kind == model::DropKind::into || drop.kind == model::DropKind::target
                      || drop.kind == model::DropKind::preset || drop.kind == model::DropKind::footer
-                     || drop.kind == model::DropKind::header;
+                     || drop.kind == model::DropKind::header || drop.kind == model::DropKind::persistent;
         dropTone = model::dropTone (drop.kind);
+
+        /*  A DROP THE PERSISTENT SECTION WOULD IGNORE IS REFUSED IN WORDS
+            (namespace draft §30, S5). Nothing is lit, so the sentence is the
+            whole answer: said once as the hand arrives, and taken back when it
+            moves on to somewhere that has nothing to say. Somewhere that does
+            say something says it below, over this. */
+        if (drop.kind == model::DropKind::none && ! drop.refused.empty())
+        {
+            if (drop.refused != refusalSaid && actions.say)
+                actions.say (juce::String (drop.refused));
+
+            refusalSaid = drop.refused;
+        }
+        else if (! refusalSaid.empty())
+        {
+            refusalSaid.clear();
+
+            if (dropRow < 0 && actions.say)
+                actions.say ({});
+        }
 
         //  Out of the header: said even over nothing, since that is where the hand is.
         if (drop.kind == model::DropKind::clearPreset && actions.say)
@@ -1586,11 +1626,16 @@ namespace wfg::client::ui
 
         bandsFor = groupId;
 
-        //  Whatever was spliced in last time goes with the group it was for.
+        /*  Whatever was spliced in last time goes with the group it was for -
+            and only that. The persistent band has no section behind it and
+            nothing under it in most shows too, which is the same mark these
+            carry, but the model draws it for every list and it is not this
+            sweep's to take (namespace draft §30, S5). */
         rows.erase (std::remove_if (rows.begin(), rows.end(),
                                     [] (const model::Row& row)
                                     { return row.rowKind == model::RowKind::band && row.sectionId.empty()
-                                              && row.count == 0; }),
+                                              && row.count == 0
+                                              && row.section != model::Section::persistent; }),
                     rows.end());
 
         if (! bandsFor.empty())
@@ -1671,6 +1716,7 @@ namespace wfg::client::ui
         dropWouldInsert = false;
         dropDepth = -1;
         dropTone = "drop-into";
+        refusalSaid.clear();
 
         if (was >= 0)
             list.repaintRow (was);
@@ -1693,6 +1739,7 @@ namespace wfg::client::ui
         dropWouldInsert = false;
         dropDepth = -1;
         dropTone = "drop-into";
+        refusalSaid.clear();
 
         //  The bands were the hand's, and the hand has gone.
         showEmptyBands ({});
@@ -1704,7 +1751,13 @@ namespace wfg::client::ui
 
         switch (drop.kind)
         {
+            /*  A REFUSED DROP SAYS WHY ONCE MORE, after the hand has let go:
+                the sentence it was given in the air was cleared with every
+                other one above, and a cue that did not move with nothing at
+                the foot to say so reads as a drop that failed. */
             case model::DropKind::none:
+                if (actions.say && ! drop.refused.empty())
+                    actions.say (juce::String (drop.refused));
                 return;
 
             case model::DropKind::after:
@@ -1736,6 +1789,11 @@ namespace wfg::client::ui
             case model::DropKind::clearPreset:
                 if (actions.setPreset)
                     actions.setPreset (dragged, {});
+                return;
+
+            case model::DropKind::persistent:
+                if (actions.moveToPersistent)
+                    actions.moveToPersistent (dragged, drop.container);
                 return;
         }
     }

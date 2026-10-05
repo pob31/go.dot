@@ -297,6 +297,11 @@ namespace wfg::client::gesture
         return { origin::window, "group.role", { osc::Value::string (group), osc::Value::string (role) } };
     }
 
+    Event listPersistent (const std::string& list)
+    {
+        return { origin::window, "list.persistent", { osc::Value::string (list) } };
+    }
+
     Event deleteObject (const std::string& id)
     {
         return { origin::window, "object.delete", { osc::Value::string (id) } };

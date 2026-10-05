@@ -49,13 +49,28 @@ namespace wfg::client::model
             case DropKind::header:      return "drop-header";
             case DropKind::footer:      return "drop-footer";
 
+            /*  A section made on the way is still a move INTO a section, and
+                lights the band as a drop into one that exists does: whether
+                the list already had it is not the hand's business. */
             case DropKind::into:
+            case DropKind::persistent:
             case DropKind::none:
             case DropKind::after:
             case DropKind::clearPreset: break;
         }
 
         return "drop-into";
+    }
+
+    bool persists (const Row& cue)
+    {
+        return cue.kind == "media" || cue.kind == "mic" || cue.kind == "osc" || cue.kind == "midi";
+    }
+
+    std::string notPersistent (const Row& cue)
+    {
+        return "only media, mic, OSC and MIDI cues can be persistent, so "
+               + (cue.name.empty() ? cue.id : cue.name) + " stays where it is";
     }
 
     std::string containerOf (const Row& row)
@@ -116,6 +131,20 @@ namespace wfg::client::model
     {
         Drop drop;
 
+        /*  INTO THE PERSISTENT SECTION ONLY WHAT IT KEEPS RUNNING (namespace
+            draft §30, S5), by its band or after one of its rows. Asked before
+            anything else, because the answer is the same on either and says
+            why. A cue already in the section is reordered there whatever it
+            is: moving it changes nothing about what the section asserts, and
+            refusing would leave somebody unable to tidy a fixture's mistake
+            except by dragging it out. */
+        if (over.section == Section::persistent && over.rowKind != RowKind::step && ! persists (dragged)
+              && (over.sectionId.empty() || containerOf (dragged) != over.sectionId))
+        {
+            drop.refused = notPersistent (dragged);
+            return drop;
+        }
+
         /*  A SECTION'S BAND TAKES THE CUE INTO THAT SECTION (author,
             2026-09-18: "drag and drop directly in the footer if it already
             exists"): the header, the footer or the persistent section, at
@@ -142,6 +171,23 @@ namespace wfg::client::model
                 cue is being put into. The footer already had that path from a
                 group title (`moveToFooter`: the role, then the move, queued
                 until the section lands); the header now has the same. */
+            /*  THE PERSISTENT BAND IS THE LIST'S, and is drawn even before the
+                section exists (namespace draft §30, S5). Its parent is the
+                list, so the header-or-footer reading below would have asked
+                for a footer on a list - which the engine refuses, and is how
+                the band offered nothing at all. It asks for the section
+                instead: `list.persistent`, then the move, as a footer's is. */
+            if (over.section == Section::persistent)
+            {
+                if (! over.parent.empty())
+                {
+                    drop.kind = DropKind::persistent;
+                    drop.container = over.parent;
+                }
+
+                return drop;
+            }
+
             if (! over.parent.empty() && over.parent != dragged.id)
             {
                 drop.kind = over.section == Section::header ? DropKind::header
@@ -470,7 +516,12 @@ namespace wfg::client::model
 
     std::string describe (const Drop& drop, const Row& over, bool intoTimeline)
     {
-        const auto name = over.name.empty() ? over.id : over.name;
+        /*  THE PERSISTENT BAND IS NAMED FOR WHAT IT IS, whether or not the
+            section behind it exists yet: its row's name is the bare word, and
+            "into persistent" says less than the sentence the hand is owed. */
+        const auto persistentBand = over.rowKind == RowKind::band && over.section == Section::persistent;
+        const auto name = persistentBand ? std::string ("the persistent section")
+                                         : over.name.empty() ? over.id : over.name;
         const auto timelineNote = intoTimeline
             ? std::string (" - a timeline group: its members start together, each after its own "
                            "pre-wait, whatever their order")
@@ -478,7 +529,7 @@ namespace wfg::client::model
 
         switch (drop.kind)
         {
-            case DropKind::none:    return {};
+            case DropKind::none:    return drop.refused;
             case DropKind::after:   return "after " + name + timelineNote;
             case DropKind::into:    return "into " + name + timelineNote;
             case DropKind::target:  return "aim " + name + " at it";
@@ -486,6 +537,7 @@ namespace wfg::client::model
             case DropKind::header:  return "into " + name + "'s header";
             case DropKind::footer:  return "into " + name + "'s footer";
             case DropKind::clearPreset: return "no longer prepared ahead";
+            case DropKind::persistent:  return "into " + name;
         }
 
         return {};

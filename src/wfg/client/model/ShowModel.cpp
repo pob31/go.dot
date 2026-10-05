@@ -167,9 +167,24 @@ namespace wfg::client::model
         /*  Each section's own identifier rides with its rows, so a drop into
             the section has a container to name (`group/header`, `group/footer`,
             `list/persistent`; empty until the section exists). */
+        /*  AND THE PERSISTENT BAND IS DRAWN EVEN EMPTY (namespace draft §30,
+            S5). The author, 2026-10-05: "Permanent cues have disappeared."
+            Nothing had removed them; a show made in the window has no
+            `<Persistent>` element until somebody asks for one, so it drew no
+            band, and with no band there was nothing to drop a cue on and no
+            gesture anywhere that made the section - the feature was there and
+            unreachable. A header and a footer are a group's, and the drag
+            grows them over the group's title; the persistent section is the
+            LIST's, there is one per list, and it is always where it would be,
+            so it is simply always drawn. Not for a list the tree does not
+            have, which draws nothing at all. */
         if (isList)
-            section (snapshot, container, text (snapshot, address + "persistent"),
-                     members ("persistentOrder"), Section::persistent, "persistent", depth);
+        {
+            if (snapshot.find (address + "order") != nullptr)
+                section (snapshot, container, text (snapshot, address + "persistent"),
+                         members ("persistentOrder"), Section::persistent, "persistent", depth,
+                         {}, true);
+        }
         else
             /*  WRITTEN LINES, THEN DERIVED ONES: the header's own cues, and
                 after them every cue whose `preset` names this group, which
@@ -194,12 +209,14 @@ namespace wfg::client::model
                              const std::string& sectionId,
                              const std::vector<std::string>& ids, Section which,
                              const char* word, int depth,
-                             const std::vector<std::string>& derivedIds)
+                             const std::vector<std::string>& derivedIds,
+                             bool evenEmpty)
     {
         /*  NOTHING IS FRAMED WHEN THERE IS NOTHING TO FRAME. An empty section
             is not a thing an operator needs told about; the page drops its band
-            for the same reason. */
-        if (ids.empty() && derivedIds.empty())
+            for the same reason. Except the persistent one (`evenEmpty`, above),
+            which is the only door to its section. */
+        if (ids.empty() && derivedIds.empty() && ! evenEmpty)
             return;
 
         Row head;
@@ -242,6 +259,14 @@ namespace wfg::client::model
 
         for (const auto& id : derivedIds)
             append (snapshot, id, which, depth + 1, container, 0, true, sectionId);
+    }
+
+    std::string emptyBandWords (const Row& band)
+    {
+        if (band.rowKind != RowKind::band || band.section != Section::persistent || band.count != 0)
+            return {};
+
+        return "drop media, mic, OSC or MIDI cues here to keep them running all show";
     }
 
     void ShowModel::toggle (const std::string& bandKey)
