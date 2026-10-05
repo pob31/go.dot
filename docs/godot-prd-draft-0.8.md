@@ -934,6 +934,14 @@ transport Rec) plays the cue with the fader following the lane, and from the
 first touch the hand's level is heard and written, held after let-go, until
 the pass stops - one pass, one step of undo (namespace draft §20.9).
 
+*Added in 0.8, at the author's direction (2026-10-05).* **A send has a lane
+too** - the second lane built, before an importer of Ableton Live sets that
+needs it (namespace draft §28). It is `send/levelLane`: the level lane's text,
+judge and file clock, an offset on that send's level, so a sound can travel
+between the mixes while it plays and come back the same way on every pass of a
+loop. Media cues only, one lane drawn at a time in the waveform editor.
+Recording one from a fader is not built.
+
 **Curve editor:** breakpoint lists with numeric entry, not only draggable
 pixels.
 

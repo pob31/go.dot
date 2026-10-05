@@ -771,6 +771,29 @@ change at the tick rate.
 
 **Built 2026-10-03** (namespace draft §26). Load-to-time does not yet place moved values (PJ).
 
+### Send lanes · S
+
+*Added on 2026-10-05*, at the author's direction: send lanes are built first, as the first part
+of importing the author's Ableton Live sets, whose sends move all the time (namespace draft §28).
+Decisions PX-QB are the implementer's, and the author may overrule any of them. Not a phase: it
+sits here because it follows the fades in time, and no later phase is renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| SL.0 | Docs: namespace §28, PRD §3.10, this | - |
+| SL.1 | The row `send,levelLane` in the table, with the regenerated schema and grammar; the write door and `validate` judge it with `readLevelLane`, and refuse it on a mic cue's send (QA); one write is one undo step | SL.0 |
+| SL.2 | The engine: `applyLanes` reads the send lanes one coefficient slew ahead (PZ), `Run::sendLaneDb`, `sendLaneRevision` gating `applyRouting`, and the offset in `resolveRouting`'s `Send` branch and at the arm | SL.1 |
+| SL.3 | The window: the lane picker in the waveform editor (QB), with the level lane's gestures; the page lists the row on each send | SL.2 |
+| SL.4 | `SendLaneTests` and the `GoTests` cases, in both locales | SL.2 |
+| SL.5 | `blackbox/lane_send.py`, `logs/send-lane.wfglog`, M48 and the close-out | SL.3, SL.4 |
+
+**Done when:** a media cue's send follows a drawn curve over the file, round a looping range and
+through a jump, beside a fade's moved value and the lock's ride. Every render is bit-identical to
+the day before for a show with no send lane. CI is green.
+
+**Needs from the author:** a listen to a sound travelling between two mixes, and a look at the
+picker.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

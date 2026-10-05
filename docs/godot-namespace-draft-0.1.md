@@ -18636,3 +18636,79 @@ a fire after the GO.
 - **Load-to-time does not replay a jump.** The place it loads is where standby goes.
 - **The console client** shows the new verbs and `andGo` as plain rows. The worded list is the
   desktop's.
+
+## 28. Send lanes
+
+Written 2026-10-05, before any of it is built, as the first part of importing an Ableton Live set
+(§29). The author's Live shows move their sends all the time: in the Lazzi sets, 38 send curves of
+154 segments carry a sound between the front PA, the distant speakers and the surround while it
+plays. Go.dot had one lane, the level's (§20), and §20.7 had said what a lane on a send would be:
+*"a row beside the one it rides, not a generic object"*. Asked whether moving sends should come in
+as fade cues, as their start value only, or as lanes built first, the author chose lanes first.
+That choice is the author's; the options and their wording were the implementer's.
+
+**What it is, before its name.** A send may carry a curve of decibels against the file's own time,
+drawn over the waveform like the level's. While the cue plays, that send follows the curve wherever
+the file is, and the other sends and the cue's level are untouched.
+
+What there was before: a send had one `level`, which a hand could ride under the lock (§17.14) and
+a fade could move once, to one value (§26). Nothing moved a send with the file.
+
+### 28.1 Decisions
+
+The author's: lanes on sends, built before the importer that needs them. The rest are the
+implementer's, open to the author's overruling.
+
+- **PX - A row on the Send, `send/levelLane`**, with the text, the judge and the arithmetic of
+  `media/levelLane`: (seconds, dB) pairs, seconds of the file, straight in dB between points,
+  each end held beyond it, empty for no lane (§20.2-§20.3). One function judges both,
+  `doc::readLevelLane`, so the two cannot come to disagree about what a lane is.
+- **PY - An offset on the send's level, on the file's clock.** CZ's and DA's reasons: nought is the
+  send as written, so a lane composes with everything already deciding that send - the document,
+  the lock's live ride, and a fade's moved value (§26 OZ) - and a looping range hears the same
+  stretch on every pass. The sum is clamped to the send's own range, -120..12.
+- **PZ - Read one coefficient slew ahead.** A send reaches the voice as a coefficient of the cue's
+  matrix, and a coefficient slews over 50 ms (`CueMatrix::slewSeconds`), not the level's one tick.
+  A lane read only one tick ahead would arrive about 50 ms late on every ramp. Read where the file
+  will be one coefficient slew from now, a straight stretch lands on time and a corner is rounded
+  over 50 ms. M48 measures both.
+- **QA - Media cues only.** A mic cue's send has no file to be bound to, so the write door and
+  `wfg validate` refuse a lane on one, as CX does for the level.
+- **QB - One lane drawn at a time.** The foot's media editor gains a picker: *Level*, then one
+  entry per send by its mix's name. The picked lane is drawn and edited with the level lane's
+  gestures (§20.5); the others are not drawn, so two curves never sit on one axis with two
+  meanings.
+
+### 28.2 Row
+
+| row | type | default | meaning |
+|---|---|---|---|
+| `send/levelLane` | d* | empty | (seconds, dB) pairs over the file: an offset on this send's level, straight in dB between points, each end held beyond it |
+
+### 28.3 The engine
+
+`Runner::applyLanes` already reads each sounding media run's level lane on the tick. It now reads
+the run's send lanes in the same pass, from the same show revision, at the second of the file one
+coefficient slew ahead (PZ), and keeps the offsets on the run by bus, `Run::sendLaneDb`. A change
+of more than a hundredth of a decibel bumps `sendLaneRevision`, and the routing refresh
+(`applyRouting`) rebuilds the run's matrix when that, the show, the lock's layer, the plugins or a
+fade's moved values have moved. In the `Send` branch of `resolveRouting`, the offset is added to
+the send's level after the lock's ride and the fade's moved value. The arm's first routing reads
+the lane at the voice's starting second, so a send drawn up from silence starts silent. Nothing on
+the audio thread changes: a send's coefficients already arrive through `setRouting`, one change at
+a time, as a send fade's do.
+
+### 28.4 Fixtures and the measurement
+
+- **Unit.** `SendLaneTests`: the judge on a send, the door, validate, a mic cue's send refused, one
+  write one undo. `GoTests`: a send lane heard, a fade's moved value beside a lane, a looping range,
+  an edit while sounding.
+- **Replay and driver.** `logs/send-lane.wfglog`; `blackbox/lane_send.py`, a hosted render of a tone
+  into a mix under a drawn send lane: a ramp, a step and a looping slice.
+- **M48** - how closely a rendered send follows its lane: the error on a ramp, and how late a step
+  lands with the read-ahead.
+
+### 28.5 What it does not build
+
+Recording a send lane from a fader or a rotary (§20.9 records the level only); lanes on pan, EQ or a
+plugin's parameter; a lane on a group or a live take.
