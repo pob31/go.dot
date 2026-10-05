@@ -19363,3 +19363,339 @@ reach a sound's does; the console page (RC) still sends its seek box as typed. O
 the bench: the author's NADIA cue scrubbed live, the head under the hand across its ranges; a
 looping rain scene in its third round, the strip its round, the ghost held to it, one restart on
 release; the cursor and tooltip on the manual act and the sampler bank.
+
+### 30.7 What was built: S4 - the Surfaces tab
+
+The triage held. A DCA reaches a fader only through a strip, with `<Strip role="dca" dca="<id>">`,
+and the tree points a strip at `/godot/dca/<id>/trim` only when its role is `dca`. ADD DCA declares
+a DCA and nothing more. In the tab, the way to put a DCA on a fader took two steps, and the second
+was hidden. You chose DCA in the Role cell, and only then did the DCA cell beside it take a click.
+Until then it was a dash. The engine already moved strips (`object.move` into the surface, the
+index derived from the element's position, §16.2), but the tab offered no gesture for it. The
+author's show has four DCAs and twelve bare strips. Its three sampler members marked with DCA 1
+are cue marks, not faders, so no fader rode any of the four DCAs, and nothing on the tab said so.
+
+**One menu in the Role cell** (`model::roleChoices`). It offers "Sampler", then "DCA: <name>" for
+each DCA the show declares, in the show's order and by the whole name, as `dcaChoices` names them.
+A show with no DCA gets one greyed item instead: "No DCA yet: ADD DCA below makes one". Choosing a
+DCA sends `node.set /godot/slot/<id>/role dca` and then `.../dca <id>`, in that order
+(`model::roleWrites`). Choosing Sampler sends `role sampler` and clears `dca`. Anything already
+set is not written again, and the writes are worked out against the strip as it is when the
+choice lands, not as it was when the menu opened. The cell shows the words of the item that
+matches the strip now (`model::roleWords`): "Sampler", "DCA: Band".
+
+**Each DCA names the faders riding it** (`model::fadersRiding`), in a new read-only column,
+"Fader", between Short name and Inside. It reads "Fader 3", "Faders 3 and 7" or
+"Faders 3, 5 and 7". With more than one surface in the show, each fader is named with its
+surface: "Asparion D700 · faders 3 and 7; Virtual panel · fader 2". A pad is called a pad. A DCA
+no fader rides reads "no fader", drawn greyed. Only a strip whose role is `dca` counts, because the
+engine reads `dca` on no other strip. The column is redrawn when a strip's role changes, when a
+strip moves and when a surface is renamed.
+
+**Strips are reordered by dragging**, as the outputs, the inputs and a rack chain are. A row
+carries its identifier as `strip:<id>`, and a line between two rows shows where it would land.
+Letting go sends one `object.move <strip> <its surface> <position>`. The position follows
+model/Reorder.h's rule, in the list as it stands with the dragged strip still counted
+(`model::stripMovePosition`). Let go in the gap above or below itself, the strip is not moved and
+nothing is sent. Each row's number has a grip, "≡", drawn while the show is unlocked. Under the
+lock there is no drag, and anything dropped is refused.
+
+Tests:
+- ClientTests, both locales:
+  - `client: a strip's Role is one menu, Sampler then each DCA, and a choice sends the role before the DCA`
+    covers the menu for a sampler strip, a DCA strip, a DCA strip riding none, a strip naming
+    an undeclared DCA, and a show with no DCA. It covers the writes for every change and for
+    every choice that changes nothing. It then sends two choices through the registry and the
+    engine (`node.set`, `checkArgs`, one tick) and reads the strip riding Band's trim in the
+    tree, then the same strip back as a sampler strip with no DCA.
+  - `client: each DCA says which faders ride it, in words, and no fader when none does` runs on
+    two surfaces, then on one after the desk is deleted. It covers two and three faders, a
+    sampler strip still carrying the DCA (not counted), and pads.
+  - `client: a strip dragged in the Surfaces tab lands where its line was, and the engine renumbers the surface`
+    checks the gap arithmetic, edges included. It then sends a real `object.move` that makes the
+    panel's first strip the fourth: the indices come back re-derived, and the DCA's read-out
+    follows its fader from 2 to 1. A second move puts it back.
+- wfg_audio_ui_tests, both locales:
+  `show settings UI: a strip's Role is one menu of Sampler and the DCAs, and a strip dragged to a new place is moved`.
+  It clicks the drawn Role cell and reads the chooser's items and what is selected. It picks
+  "DCA: Keys" and finds two `node.set`s in order. A second pick of the same item sends nothing,
+  and Sampler sends the role and an empty DCA. It drags through the page's own
+  `DragAndDropTarget` and finds `object.move <strip> <surface> 3`. Letting go on either side of
+  the strip sends nothing, and a plugin is not taken. With no DCA, the greyed item is disabled.
+  Locked, there is no drag and nothing dropped is taken. The case was run against the page as it
+  was before this stage and failed on its first menu read: two items ("sampler", "DCA"), not three.
+
+- **SZ - The DCA column is gone; the Role cell says it.** "DCA: Band" in one cell is the menu that
+  set it, so a second column would say the same thing again. The Role cell takes the old DCA
+  cell's room, up to 360 px. Its colour follows the old DCA cell's: greyed for "DCA: none
+  chosen", the failure tone for a DCA the show no longer declares, and the words carry both
+  (§4.8). The Strip list's headings are now Strip, Role, State.
+- **TA - One choice, two undo steps.** The role and the DCA are two `node.set`s on two addresses,
+  and the document joins only repeated writes to one address into one step. So Ctrl-Z takes back
+  the DCA first and the role second. Merging them would need an engine change (a command that
+  writes both, or a joining rule), which is out of scope on a window-side stage. If one step
+  matters, it is the engine's to give.
+- **TB - A fader's surface is named the way the strip menu names it, "Asparion D700 · fader 5".**
+  The brief suggested "Surface 2, fader 5". The middle dot is how a sampler member's strip menu
+  and the level lane's taken fader already name a fader on a surface, and one fader should not
+  be named two ways. It also keeps the comma free for the list "3, 5 and 7". The surface is
+  named whenever the show declares more than one, even if every rider is on the same surface,
+  because "fader 3" alone would not say which desk.
+- **TC - Drag, not up/down buttons.** The table could take the output list's gesture as it is.
+  The strips list's click now fires on mouse-up (`setRowSelectedOnMouseDown (false)`), so a press
+  that becomes a drag does not open the Role menu under the hand on its way down. A click that
+  slips a few pixels becomes a drag that lands on itself and does nothing. A strip moves only
+  within the surface picked above. The engine would take it into another surface, but the tab does
+  not offer that.
+- **TD - The strip's current state is always one of the items.** A DCA strip riding none reads
+  "DCA: none chosen". One naming a DCA the show no longer declares reads "DCA: <id>  (not
+  declared)". Both come last, so the menu never opens with nothing selected. Choosing Sampler
+  also clears a DCA left on a sampler strip from before, which nothing shows.
+- **TF - ADD DCA's tooltip points back at the Role.** "Declare a DCA: a trim that the cues and
+  groups marked with it follow. A fader rides it once a strip's Role, above, names it." It was
+  "..., ridden from a dca strip", which named a cell nobody could find.
+
+Not done, for the bench: moving a strip while a sampler group holds it. A run's claim follows the
+strip's identifier, so the clip should go with the strip to its new fader. S3 owns how the D700
+shows that, and this stage did not touch the bridge.
+
+### 30.8 What was built: S5 - the persistent band
+
+The list's persistent band is now drawn at the top of every list, where it stands when it has
+cues, whether or not the list has a `<Persistent>` section yet. Empty, it is drawn light, with the
+words *"drop media, mic, OSC or MIDI cues here to keep them running all show"* where a count would
+be (`model::emptyBandWords`). It folds as before, through `list/persistentFolded`, which a list
+takes with no section behind it. A list the tree does not have still draws nothing. The drag that
+grows a group's empty header and footer bands no longer sweeps the persistent band away with them.
+
+A drop on the band moves the cue into the section when the section exists. When it does not, the
+drop is the new `DropKind::persistent`, naming the list. Before this, such a drop fell through to
+`DropKind::footer` on the list's id, which the engine refuses. The window answers it with
+`moveIntoPersistent`: `list.persistent <list>` first (the new `gesture::listPersistent`), then the
+`object.move` on the pass whose tree names the section. This uses the queue a header or footer
+made on the way already uses (`finishFooterMoves`, which now reads a list's section at
+`/godot/list/<id>/persistent`). Its sentences are "making the persistent section", "into the
+persistent section" and "the persistent section was refused". While the hand is in the air, the
+band says "into the persistent section" in both cases. It used to say "into persistent" over a
+section that existed.
+
+What may go in is asked first (`model::persists`): media, mic, OSC and MIDI. Anything else is
+refused, on the band and after any of the section's rows, with the reason in words:
+*"only media, mic, OSC and MIDI cues can be persistent, so <name> stays where it is"*
+(`Drop::refused`, which `describe` returns for a `none`). Nothing is lit for a refused drop, so
+the sentence is the whole answer.
+
+Tests (ClientTests, both locales):
+- `client: a list with no persistent section still draws its band, empty, and the band makes the section`
+  checks the band on `minimal` (top row, empty, no section id, its words). It checks the fold and the
+  flag, then drives the two-pass shape through the real commands: the drop asks for the section,
+  `list.persistent` makes it, the band names it, the move lands, and the band becomes an ordinary one.
+  It also checks that asking twice answers with the same section.
+- `client: the persistent band takes what the section keeps running, and refuses the rest in words`
+  checks each kind on the band, with and without the section and after a section row, and that a
+  group's empty header is untouched by the rule.
+- `gesture::listPersistent` was added to the gestures checked against the real registry.
+
+The first case was seen failing (no band) with the always-drawn band switched off.
+
+- **RZ - The window follows the engine's list, not the brief's: mic goes in, memo stays out.**
+  Decision S named media, OSC and MIDI. `solvePersistent` has re-asserted mic cues since Phase 9b,
+  and validate's warning names those four. A memo is refused although validate does not warn about
+  one, because the section asserts nothing from it either.
+- **SA - "Thin" is drawn, not measured.** JUCE's list box gives every row one height, and a shorter
+  row would mean replacing the list. The empty band is a row tall but drawn light: the plain ground
+  of a cue row, the top rule with no rail dropping into rows that are not there, the word in the
+  dimmer ink, and the sentence in place of a count.
+- **SB - A cue already in the section can be reordered there, whatever its kind.** Moving it changes
+  nothing about what the section asserts. Refusing it would leave a stray fade (a fixture's, or a
+  file from before this) movable only out of the section.
+- **SC - A refused drop is said in the air and said again after letting go.** The foot is cleared
+  when the hand lets go, and a cue that did not move with nothing at the foot reads as a drop that
+  failed.
+
+### 30.9 What was built: S6 - the preset mark
+
+A member let go on its own group's header band is now marked instead of moved (decision QZ). It
+stays where it is and takes `preset` naming that group, with one `node.set`. A drag carries one
+cue, so it is one write. "Its own group" means any group whose BODY the cue sits in, at any depth:
+a cue two groups down, dropped on the outer group's band, is marked for the outer group. The new
+`model::headerMarkFor` asks this. `dropAtDepth` asks it before anything else, because the answer
+depends on where the dragged cue sits, which `dropFor` (one row at a time) cannot see. Everything
+else on that band moves into the header as before: a cue from outside the group, and a cue from
+the group's own header or footer. The band lights in the mark's tone, and the words in the air are
+"prepare it in Scene's header, keeping it in its place". When the hand lets go, the foot says
+"prepared in Scene's header, and kept in its place". Every gesture that writes the mark now says
+it at the foot: the alt-drop on a title and a dragged header line, as the ctrl/⌘-arrows always
+did. The engine publishes the reading of the mark (`headerDerived`) on the next pass, and the list
+draws it there: an italic line in the header band, the cue's own row unmoved.
+
+The inspector's `preset` row is now a menu, `Control::groupRef` (`offerTheGroupsAround`). Its
+items are "not prepared ahead", then the cue's own group, then each group outside it, innermost
+first. Each group reads as its row does ("2.1 Inner") and is written as its identifier. The walk
+is the tree's `/parent` chain, so a header's or a footer's cue is offered its group too: the
+engine prepares a mark wherever under the group the cue sits. The menu is its own control rather
+than a `choice`, because a `choice` is the parameter table's closed set, while these answers
+come from where the cue sits, as an output menu's come from the rig. So it joins the menus the
+show writes: the same drawing, a commit by key, and a refill when the groups change while the
+cue stays picked.
+
+Over a band, `describe` named the band's own word ("header"), so a move that made a header said
+"into header's header". `model::groupNamedBy` now gives it the group's row for a mark and for a
+header or footer move: "into Inner's header".
+
+Tests:
+- ClientTests, both locales:
+  - `client: a member dropped on its own group's header band is marked and stays, and a cue from outside is moved in`
+    runs on the `descent` fixture: a member two groups down at every hand depth, a direct member,
+    the stranger, the footer's cue and the header's own cue, after a header row, and the footer
+    band. It writes the mark through the real `node.set` and reads the reading in the tree and in
+    the rows (`count` 2, one derived line, the own row still in Inner). It also checks the drop
+    again ("already prepared"), the mark moving inward onto a grown band, the outsider making
+    Inner's header, and the mark cleared.
+  - `client: a cue's preset is a menu of the groups around it, innermost first, and over several only theirs in common`
+    covers every place in `descent`, three selections, a picked mark, and a mark naming no group
+    around the cue.
+- wfg_audio_ui_tests, both locales: `inspector UI: a cue's preset is drawn as a menu of the groups around it, and a pick writes the group`
+  finds the drawn menu, checks its items and that it is visible, and checks that a pick sends
+  the group's identifier to `/godot/cue/<id>/preset`.
+
+Both ClientTests cases were seen failing (26 assertions) with `headerMarkFor` and the menu
+switched off.
+
+- **SD - The menu's first item reads "not prepared ahead", and a mark naming no group around the
+  cue stays in it.** The phrase is the one the arrows and a dragged header line already say when a
+  mark comes off. A stale mark (validate's "not a group this cue is inside") is shown as its own
+  item, "2 Scene (not a group it is in)". Without that, the menu would show nothing picked, which
+  says the cue has no mark.
+- **SE - Several cues are offered only the groups around every one of them.** The pick is written
+  to all of them, so an item only some of them sit under would mark the rest for a header that
+  never reaches them. "Not prepared ahead" is around everything, so the menu is never empty.
+- **SF - Only the body, and only the band.** A cue in the group's own header or footer is not a
+  member, and is moved as before, as is a cue from outside. A member dropped AFTER one of the
+  header's own rows is still moved into the header at that place. One consequence: while a header
+  is empty, a member cannot be put into its own group's header with one drag. It has to be dragged
+  out first, or dropped after a header row.
+- **SG - Dropped where it is already marked: nothing is written, and the foot says so.** The words
+  are "already prepared in Scene's header", through the refusal line S5 made, so a drop that
+  changed nothing is not read as one that failed.
+- **SH - No validate warning for a media cue in a header.** A header's media is armed at the park
+  and launched by the GO. That is §3.12's prepare and commit extended to a header ("preload media
+  ... then GO commits only the perceptible part"), so a warning would call a working show wrong.
+  It is left for the author: their own show still has media cues moved into headers before this
+  stage, and those play at the group's GO until each is dragged back to the body and marked.
+
+### 30.10 What was built: S7 - importing media
+
+The triage held. The author's WAVs are ordinary 24-bit PCM, and the non-ASCII "Danse en Chœur +
+C10.wav" imported fine. Two files that no cue names sit in their show's `media/`, left by a
+session of 4 October that was never saved. Dropping either again was refused, because a name
+already in `media/` was refused outright (`copyIn`, `replaceExisting` always false from an
+import). The operator was told "could not copy X into the show", the same sentence as for three
+other causes. The copy also ran on the message thread, and the import's patience was counted in
+the window's passes.
+
+**A name already in `media/`** is decided by content. The sizes are compared first, and the
+bytes only when the sizes agree. The same file is used silently, under the name the disk has,
+and the cue is made. Another file of that name brings up a question: *"Another X.wav is in the
+show"*, *"The show already has a file called X.wav, and it is not this one."* It names the cues
+that play that file and says that replacing it changes them too, and it gives the name Keep both
+would use. The buttons are **Keep both** (Return), **Replace it**, and **Use the one in the show**
+(Escape). These are the stage brief's words, not yet put to the author. Keep both copies the
+file in as "X 2.wav", the first free number. Names are compared
+case-blind everywhere (`model::sameFileName`), because Windows and macOS keep "x.WAV" and "X.wav"
+as one file and a show travels between machines. Letters are folded through Latin-1 and Latin
+Extended-A, and past that the disk's own answer is asked as well. The helpers are
+`model::freeName` and `model::nameAmong`. A file dropped on a media cue (`linkMedia`) asks its
+own question first, as before, when the cue already plays something. The name question is then
+the import's, so the two gestures cannot come to mean different things.
+
+**Each failure says its own cause**:
+- "X has nowhere to go: the show has no folder yet"
+- "X could not be found"
+- "X could not be read"
+- "X could not be copied into the show: <the system's words>", for example a full disk, or "the
+  one in the show could not be replaced - it may be in use"
+- "X is in the show, but the cue for it was refused"
+
+Each is said as it happens. The last word of the import says the first one again, with a count:
+"imported 7 of 8 files - X could not be found (and 1 more)". When nothing failed, the last word
+is "imported 3 files (1 already in the show)", "imported X.wav as X 2.wav", or "X.wav is on the
+cue". The show's own warnings follow it: no audio tracks, no direct out.
+
+**The bytes are copied off the window's thread.** `ui::MediaCopier` is one worker thread, owned
+by the window and stopped and joined in its destructor. It is handed one file at a time by
+`model::MediaImports`, which holds every decision and is what the tests hold. The bytes go into a
+hidden part-file beside the target and are moved over it whole (`juce::TemporaryFile`). So a full
+disk, a stop, or a Replace that cannot write over a file in use leaves `media/` as it was. While
+a file copies, the foot says "Copying 3 of 8: Thunder.wav", once per file, so anything else said
+meanwhile stays readable. Each cue is asked for on the message thread when its file has landed.
+A second import queues behind the first. Nothing in `media/` is ever deleted.
+
+**The patience is counted in the engine's ticks**: `importPatienceTicks`, 250, five seconds of
+the engine's clock. Before, it was counted in the window's passes.
+
+The two stale comments in `engine/audio/MediaInfo.h` (`publish`) and `MediaInfo.cpp` now say
+that `durations()` learns a file imported mid-session. It has done so since 2026-09-22.
+
+Tests:
+- ClientTests, both locales:
+  - `client: a name already in media/ is compared as a case-blind disk compares it, and the free one is the first number`
+    covers the ladder, names with dots, no extension, case, the author's "Chœur", É/é, Ÿ/ÿ and
+    Ž/ž, and that two different letters stay different.
+  - `client: the same file is used silently, and its bytes are read only when its size agrees`
+    counts the reads.
+  - `client: an import looks at every file before copying any, and makes its cues in the order picked, each after the one before`
+    runs on a real engine. A stranger is inserted from the page while the files copy, and the
+    case checks the final order.
+  - `client: an import waits for its cue in the engine's ticks, not the window's passes, and a second waits behind it`
+    runs a thousand passes on an unmoved tree, then lets the engine's clock run past the
+    patience.
+  - `client: another file of the same name is asked about, one at a time, and an answer can stand for the rest`
+    covers the question's flow and its words.
+  - `client: each way a file is not imported says its own cause, and the last word says them again`
+    covers the failure sentences, the endings, Keep both's cue name, and the link.
+  - `client: the question names the cues that play the file a replace would change`
+- wfg_audio_ui_tests, both locales:
+  - `media copier: a look says what a picked file meets in media/, and reads bytes only to tell the same from another`
+  - `media copier: a copy lands whole under its name, Keep both takes the first free number, and Replace writes over`
+  - `media copier: a copy stopped part of the way leaves nothing behind, and says it did not land`
+
+  These three run on real files in a folder of their own.
+
+The implementer's calls:
+
+- **SI - Every picked file is looked at before any is copied.** A look is a name and a size, and
+  the bytes only when a size agrees. Every question about a name therefore comes within moments
+  of the drop, never three minutes into a copy, when a hand may be on GO and a box would take
+  the keys. The one exception is two files of one name in one drop. Both are free when looked
+  at, so the second is asked about when its copy finds the first already there.
+- **SJ - One question per file, with "The same for the other files whose names are taken" while
+  more of the same import may meet a name.** A re-rendered set of eight would otherwise be eight
+  boxes. Return is Keep both, because it loses nothing. Escape is Use the one in the show,
+  because it changes nothing. Copies of files that met nothing go on while the box is up.
+- **SK - Compared byte for byte, not hashed.** Both files are on this machine, so a digest has
+  nowhere to travel. A compare stops at the first difference, which in two renders of one sound
+  is usually inside the first megabyte, while a hash reads both files to the end.
+- **SM - Patience in the engine's ticks, not its revisions and not the wall clock.** A create is
+  applied on the first tick after it is sent. A refused create moves no revision, so a lone
+  refusal would wait until somebody edited something else. A wall clock gives up on an engine
+  that is only busy. The engine's clock stops when it stops working, and runs on past a refusal.
+  The new-cue row's creates, groupings and moves into a section still count passes
+  (`importPatience`), as before.
+- **SN - Each cue is placed after the one before it, once that one is seen.** The drop's position
+  is turned into the member the hand let go after, so a long copy cannot move it. Before, it was
+  a number fixed at the drop, and a cue inserted above during a copy left every later file
+  looking at a stranger. Only one create is in flight at a time, which keeps the cues in the
+  order picked across imports. A cue made under Keep both is named after the file it plays
+  ("X 2"). A link takes the same road with no create.
+
+Known limits of Replace, left as they are:
+- On Windows, a file the engine has open cannot be written over. The copy then fails with "the
+  one in the show could not be replaced - it may be in use", and the old file stays.
+- A file the show named when it was opened keeps the length frozen then (`MediaInfo`, the law in
+  §14.12). A replaced file of another length is therefore read at its old length until the show
+  is reopened.
+- Other cues' `channels` are not re-read.
+
+Not built, for the author: a "Remove unused media…" command. It would clear what an unsaved
+session strands in `media/`, as it stranded MUT C2-C3.wav and MUT C3-C4.wav.
