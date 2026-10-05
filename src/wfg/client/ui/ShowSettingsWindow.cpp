@@ -2461,8 +2461,12 @@ namespace wfg::client::ui
                 auto area = row.reduced (8, 0);
 
                 const auto cross = area.removeFromRight (24);
-                const auto state = area.removeFromRight (150);
-                const auto enabled = area.removeFromRight (48);
+
+                /*  "Enabled" needs more than 48 px at the headings' size, and
+                    ran into "State": the room comes out of State, so every
+                    cell to the left stays where it was. */
+                const auto state = area.removeFromRight (134);
+                const auto enabled = area.removeFromRight (64);
                 const auto preset = area.removeFromRight (116);
                 const auto bank2 = area.removeFromRight (104);
                 const auto bank1 = area.removeFromRight (104);
