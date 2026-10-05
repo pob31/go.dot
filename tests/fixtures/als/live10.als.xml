@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Ableton MajorVersion="5" MinorVersion="10.0_370" SchemaChangeCount="9" Creator="Ableton Live 10.0.5" Revision="0">
+	<LiveSet>
+		<Tracks>
+			<GroupTrack Id="65">
+				<Name><EffectiveName Value="Voices" /></Name>
+				<TrackGroupId Value="-1" />
+				<DeviceChain>
+					<AudioInputRouting><Target Value="AudioIn/None" /></AudioInputRouting>
+					<AudioOutputRouting><Target Value="AudioOut/Master" /></AudioOutputRouting>
+					<Mixer>
+						<Sends>
+							<TrackSendHolder Id="0"><Send><Manual Value="0.0003162277571" /><AutomationTarget Id="10"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+						</Sends>
+						<Volume><Manual Value="0.9999952912" /><AutomationTarget Id="11"><LockEnvelope Value="0" /></AutomationTarget></Volume>
+						<Pan><Manual Value="0" /><AutomationTarget Id="12"><LockEnvelope Value="0" /></AutomationTarget></Pan>
+					</Mixer>
+					<DeviceChain><Devices /></DeviceChain>
+				</DeviceChain>
+			</GroupTrack>
+			<AudioTrack Id="51">
+				<Name><EffectiveName Value="Voice" /></Name>
+				<TrackGroupId Value="65" />
+				<DeviceChain>
+					<AudioInputRouting><Target Value="AudioIn/External/M0" /></AudioInputRouting>
+					<AudioOutputRouting><Target Value="AudioOut/GroupTrack" /></AudioOutputRouting>
+					<Mixer>
+						<Sends>
+							<TrackSendHolder Id="0"><Send><Manual Value="0.25" /><AutomationTarget Id="20"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+						</Sends>
+						<Volume><Manual Value="0.1778279543" /><AutomationTarget Id="21"><LockEnvelope Value="0" /></AutomationTarget></Volume>
+						<Pan><Manual Value="0" /><AutomationTarget Id="22"><LockEnvelope Value="0" /></AutomationTarget></Pan>
+					</Mixer>
+					<MainSequencer>
+						<ClipSlotList>
+							<ClipSlot Id="0">
+								<ClipSlot>
+									<Value>
+										<AudioClip Id="0" Time="0">
+											<CurrentStart Value="0" />
+											<CurrentEnd Value="396" />
+											<Loop>
+												<LoopStart Value="-200" />
+												<LoopEnd Value="196" />
+												<StartRelative Value="0" />
+												<LoopOn Value="false" />
+											</Loop>
+											<Name Value="voice papa" />
+											<ColorIndex Value="5" />
+											<Envelopes>
+												<Envelopes>
+													<ClipEnvelope Id="0">
+														<EnvelopeTarget><PointeeId Value="21" /></EnvelopeTarget>
+														<Automation>
+															<Events>
+																<FloatEvent Id="1" Time="-63072000" Value="0.1778279543" />
+															</Events>
+														</Automation>
+													</ClipEnvelope>
+												</Envelopes>
+											</Envelopes>
+											<FollowAction>
+												<FollowTime Value="4" />
+												<FollowActionA Value="1" />
+												<FollowActionB Value="0" />
+											</FollowAction>
+											<IsWarped Value="false" />
+											<SampleRef>
+												<FileRef>
+													<HasRelativePath Value="true" />
+													<RelativePathType Value="3" />
+													<RelativePath>
+														<RelativePathElement Id="1" Dir="Samples" />
+														<RelativePathElement Id="2" Dir="Imported" />
+													</RelativePath>
+													<Name Value="voice papa.wav" />
+													<Type Value="2" />
+													<Data>00</Data>
+												</FileRef>
+												<DefaultDuration Value="9415496" />
+												<DefaultSampleRate Value="48000" />
+											</SampleRef>
+											<WarpMode Value="0" />
+											<SampleVolume Value="1" />
+											<WarpMarkers>
+												<WarpMarker Id="0" SecTime="0" BeatTime="0" />
+												<WarpMarker Id="1" SecTime="0.015625" BeatTime="0.03125" />
+											</WarpMarkers>
+										</AudioClip>
+									</Value>
+								</ClipSlot>
+								<HasStop Value="true" />
+							</ClipSlot>
+						</ClipSlotList>
+						<MonitoringEnum Value="2" />
+						<VolumeModulationTarget Id="23"><LockEnvelope Value="0" /></VolumeModulationTarget>
+					</MainSequencer>
+					<DeviceChain><Devices /></DeviceChain>
+				</DeviceChain>
+			</AudioTrack>
+			<ReturnTrack Id="2">
+				<Name><EffectiveName Value="A-GRADIN" /></Name>
+				<TrackGroupId Value="-1" />
+				<DeviceChain>
+					<AudioInputRouting><Target Value="AudioIn/External/S0" /></AudioInputRouting>
+					<AudioOutputRouting><Target Value="AudioOut/External/S5" /></AudioOutputRouting>
+					<Mixer>
+						<Sends>
+							<TrackSendHolder Id="0"><Send><Manual Value="0.0003162277571" /><AutomationTarget Id="30"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+						</Sends>
+						<Volume><Manual Value="0.4466836154" /><AutomationTarget Id="31"><LockEnvelope Value="0" /></AutomationTarget></Volume>
+						<Pan><Manual Value="0" /><AutomationTarget Id="32"><LockEnvelope Value="0" /></AutomationTarget></Pan>
+					</Mixer>
+					<DeviceChain><Devices /></DeviceChain>
+				</DeviceChain>
+			</ReturnTrack>
+		</Tracks>
+		<MasterTrack>
+			<Name><EffectiveName Value="Master" /></Name>
+			<DeviceChain>
+				<AudioOutputRouting><Target Value="AudioOut/External/S0" /></AudioOutputRouting>
+				<Mixer>
+					<Volume><Manual Value="1" /><AutomationTarget Id="40"><LockEnvelope Value="0" /></AutomationTarget></Volume>
+					<Tempo><Manual Value="100" /><AutomationTarget Id="41"><LockEnvelope Value="0" /></AutomationTarget></Tempo>
+				</Mixer>
+				<DeviceChain><Devices /></DeviceChain>
+			</DeviceChain>
+		</MasterTrack>
+		<SendsPre>
+			<SendPreBool Id="0" Value="false" />
+		</SendsPre>
+		<SceneNames>
+			<Scene Id="2" Value="Beginning">
+				<Annotation Value="" />
+				<ColorIndex Value="3" />
+			</Scene>
+		</SceneNames>
+	</LiveSet>
+</Ableton>

@@ -438,3 +438,16 @@ cleared and put back by undo, and a write at a mix's address refused - its heade
 It was then annotated by hand. Made to fail before it was kept, two ways, each refused by the
 replay: a refusal edited to read applied, and the clear replaced by a lane of an odd count still
 marked applied.
+
+## `als/`
+
+Ableton Live sets for the importer's reader (namespace draft §29.1), hand-written as plain XML so a
+diff reads; Live itself writes gzip, which `AlsReaderTests` makes from one of them to prove the two
+read alike. `session.als.xml` is a Live 11 session in the shape of the author's Lazzi sets - a
+source track feeding a monitor-In "track in" track whose clip carries the fade, two returns, an EQ
+Eight and a Reverb, the controller mappings - and `live10.als.xml` a Live 10 one with a group track,
+the scene names Live 10 spells `SceneNames` and a file's path as a list of folders. The element
+names were copied from the real sets by a person reading them; every name in them is made up. The
+real sets are not committed - their media is gigabytes and their notes a production's - and are read
+at the desk by setting `WFG_ALS_CORPUS` to a folder holding them. The laws the walk relies on are
+not these files' to settle: that is the probe set's (AL.1), exported from Live.

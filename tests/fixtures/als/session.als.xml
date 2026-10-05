@@ -1,0 +1,459 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Ableton MajorVersion="5" MinorVersion="11.0_11202" SchemaChangeCount="11" Creator="Ableton Live 11.2.6" Revision="0">
+	<LiveSet>
+		<NextPointeeId Value="1000" />
+		<Tracks>
+			<AudioTrack Id="14">
+				<LomId Value="0" />
+				<Name>
+					<EffectiveName Value="1" />
+					<UserName Value="1" />
+				</Name>
+				<TrackGroupId Value="-1" />
+				<DeviceChain>
+					<AudioInputRouting>
+						<Target Value="AudioIn/None" />
+					</AudioInputRouting>
+					<AudioOutputRouting>
+						<Target Value="AudioOut/None" />
+					</AudioOutputRouting>
+					<Mixer>
+						<Sends>
+							<TrackSendHolder Id="0">
+								<Send>
+									<Manual Value="0.5" />
+									<AutomationTarget Id="104"><LockEnvelope Value="0" /></AutomationTarget>
+									<ModulationTarget Id="105"><LockEnvelope Value="0" /></ModulationTarget>
+								</Send>
+							</TrackSendHolder>
+							<TrackSendHolder Id="1">
+								<Send>
+									<KeyMidi>
+										<IsNote Value="false" />
+										<Channel Value="6" />
+										<NoteOrController Value="111" />
+									</KeyMidi>
+									<Manual Value="0.0003162277571" />
+									<AutomationTarget Id="106"><LockEnvelope Value="0" /></AutomationTarget>
+									<ModulationTarget Id="107"><LockEnvelope Value="0" /></ModulationTarget>
+								</Send>
+							</TrackSendHolder>
+						</Sends>
+						<Speaker>
+							<Manual Value="true" />
+							<AutomationTarget Id="108"><LockEnvelope Value="0" /></AutomationTarget>
+						</Speaker>
+						<Volume>
+							<KeyMidi>
+								<PersistentKeyString Value="" />
+								<IsNote Value="false" />
+								<Channel Value="6" />
+								<NoteOrController Value="120" />
+								<LowerRangeNote Value="-1" />
+								<UpperRangeNote Value="-1" />
+								<ControllerMapMode Value="0" />
+							</KeyMidi>
+							<Manual Value="0.0003162277571" />
+							<MidiControllerRange>
+								<Min Value="0.0003162277571" />
+								<Max Value="1.99526238" />
+							</MidiControllerRange>
+							<AutomationTarget Id="100"><LockEnvelope Value="0" /></AutomationTarget>
+							<ModulationTarget Id="101"><LockEnvelope Value="0" /></ModulationTarget>
+						</Volume>
+						<Pan>
+							<Manual Value="-0.25" />
+							<AutomationTarget Id="102"><LockEnvelope Value="0" /></AutomationTarget>
+							<ModulationTarget Id="103"><LockEnvelope Value="0" /></ModulationTarget>
+						</Pan>
+					</Mixer>
+					<MainSequencer>
+						<ClipSlotList>
+							<ClipSlot Id="0">
+								<ClipSlot>
+									<Value>
+										<AudioClip Id="0" Time="0">
+											<CurrentStart Value="0" />
+											<CurrentEnd Value="18" />
+											<Loop>
+												<LoopStart Value="-2" />
+												<LoopEnd Value="16" />
+												<StartRelative Value="0" />
+												<LoopOn Value="false" />
+												<OutMarker Value="16" />
+												<HiddenLoopStart Value="0" />
+												<HiddenLoopEnd Value="4" />
+											</Loop>
+											<Name Value="Rain été" />
+											<Annotation Value="" />
+											<Color Value="13" />
+											<LaunchMode Value="0" />
+											<LaunchQuantisation Value="0" />
+											<Envelopes>
+												<Envelopes>
+													<ClipEnvelope Id="0">
+														<EnvelopeTarget><PointeeId Value="100" /></EnvelopeTarget>
+														<Automation>
+															<Events>
+																<FloatEvent Id="1" Time="-63072000" Value="0.1" />
+																<FloatEvent Id="2" Time="0" Value="0.1" />
+																<FloatEvent Id="3" Time="8.5" Value="1" />
+															</Events>
+														</Automation>
+													</ClipEnvelope>
+													<ClipEnvelope Id="1">
+														<EnvelopeTarget><PointeeId Value="130" /></EnvelopeTarget>
+														<Automation>
+															<Events>
+																<FloatEvent Id="4" Time="-63072000" Value="1" />
+																<FloatEvent Id="5" Time="4" Value="-1" />
+															</Events>
+														</Automation>
+													</ClipEnvelope>
+													<ClipEnvelope Id="2">
+														<EnvelopeTarget><PointeeId Value="110" /></EnvelopeTarget>
+														<Automation>
+															<Events>
+																<BoolEvent Id="6" Time="-63072000" Value="false" />
+																<BoolEvent Id="7" Time="2" Value="true" />
+															</Events>
+														</Automation>
+													</ClipEnvelope>
+													<ClipEnvelope Id="3">
+														<EnvelopeTarget><PointeeId Value="999" /></EnvelopeTarget>
+														<Automation>
+															<Events>
+																<FloatEvent Id="8" Time="-63072000" Value="0" />
+															</Events>
+														</Automation>
+													</ClipEnvelope>
+												</Envelopes>
+											</Envelopes>
+											<Legato Value="false" />
+											<Disabled Value="false" />
+											<FollowAction>
+												<FollowTime Value="4" />
+												<FollowActionA Value="4" />
+												<FollowActionB Value="0" />
+												<FollowActionEnabled Value="false" />
+											</FollowAction>
+											<IsWarped Value="true" />
+											<SampleRef>
+												<FileRef>
+													<RelativePathType Value="3" />
+													<RelativePath Value="Samples/Imported/rain été.wav" />
+													<Path Value="/Users/someone/Show Project/Samples/Imported/rain été.wav" />
+													<Type Value="2" />
+													<OriginalFileSize Value="2880044" />
+													<OriginalCrc Value="54990" />
+												</FileRef>
+												<DefaultDuration Value="480000" />
+												<DefaultSampleRate Value="48000" />
+											</SampleRef>
+											<WarpMode Value="0" />
+											<PitchCoarse Value="0" />
+											<PitchFine Value="0" />
+											<SampleVolume Value="0.5011872336" />
+											<WarpMarkers>
+												<WarpMarker Id="0" SecTime="0.25" BeatTime="0" />
+												<WarpMarker Id="1" SecTime="0.265625" BeatTime="0.03125" />
+											</WarpMarkers>
+										</AudioClip>
+									</Value>
+								</ClipSlot>
+								<HasStop Value="true" />
+							</ClipSlot>
+							<ClipSlot Id="1">
+								<ClipSlot><Value /></ClipSlot>
+								<HasStop Value="true" />
+							</ClipSlot>
+							<ClipSlot Id="2">
+								<ClipSlot><Value /></ClipSlot>
+								<HasStop Value="false" />
+							</ClipSlot>
+						</ClipSlotList>
+						<MonitoringEnum Value="2" />
+						<Sample>
+							<ArrangerAutomation>
+								<Events>
+									<AudioClip Id="9" Time="0" />
+								</Events>
+							</ArrangerAutomation>
+						</Sample>
+						<VolumeModulationTarget Id="130"><LockEnvelope Value="0" /></VolumeModulationTarget>
+						<TranspositionModulationTarget Id="131"><LockEnvelope Value="0" /></TranspositionModulationTarget>
+					</MainSequencer>
+					<DeviceChain>
+						<Devices>
+							<Eq8 Id="0">
+								<On>
+									<Manual Value="true" />
+									<AutomationTarget Id="110"><LockEnvelope Value="0" /></AutomationTarget>
+								</On>
+								<UserName Value="" />
+								<Bands.0>
+									<ParameterA>
+										<IsOn><Manual Value="true" /><AutomationTarget Id="111"><LockEnvelope Value="0" /></AutomationTarget></IsOn>
+										<Mode><Manual Value="2" /><AutomationTarget Id="112"><LockEnvelope Value="0" /></AutomationTarget></Mode>
+										<Freq><Manual Value="120" /><AutomationTarget Id="113"><LockEnvelope Value="0" /></AutomationTarget><ModulationTarget Id="116"><LockEnvelope Value="0" /></ModulationTarget></Freq>
+										<Gain><Manual Value="-3.5" /><AutomationTarget Id="114"><LockEnvelope Value="0" /></AutomationTarget></Gain>
+										<Q><Manual Value="0.71" /><AutomationTarget Id="115"><LockEnvelope Value="0" /></AutomationTarget></Q>
+									</ParameterA>
+								</Bands.0>
+								<Bands.3>
+									<ParameterA>
+										<IsOn><Manual Value="false" /><AutomationTarget Id="117"><LockEnvelope Value="0" /></AutomationTarget></IsOn>
+										<Mode><Manual Value="5" /><AutomationTarget Id="118"><LockEnvelope Value="0" /></AutomationTarget></Mode>
+										<Freq><Manual Value="6388.70752" /><AutomationTarget Id="119"><LockEnvelope Value="0" /></AutomationTarget></Freq>
+										<Gain><Manual Value="0" /><AutomationTarget Id="122"><LockEnvelope Value="0" /></AutomationTarget></Gain>
+										<Q><Manual Value="4.02" /><AutomationTarget Id="123"><LockEnvelope Value="0" /></AutomationTarget></Q>
+									</ParameterA>
+								</Bands.3>
+							</Eq8>
+							<Reverb Id="1">
+								<On>
+									<Manual Value="false" />
+									<AutomationTarget Id="120"><LockEnvelope Value="0" /></AutomationTarget>
+								</On>
+								<MixDirect>
+									<KeyMidi>
+										<IsNote Value="false" />
+										<Channel Value="6" />
+										<NoteOrController Value="117" />
+									</KeyMidi>
+									<Manual Value="0.75" />
+									<AutomationTarget Id="121"><LockEnvelope Value="0" /></AutomationTarget>
+								</MixDirect>
+							</Reverb>
+						</Devices>
+					</DeviceChain>
+				</DeviceChain>
+			</AudioTrack>
+			<AudioTrack Id="27">
+				<Name>
+					<EffectiveName Value="4" />
+				</Name>
+				<TrackGroupId Value="-1" />
+				<DeviceChain>
+					<AudioInputRouting><Target Value="AudioIn/External/M0" /></AudioInputRouting>
+					<AudioOutputRouting><Target Value="AudioOut/Track.28/TrackIn" /></AudioOutputRouting>
+					<Mixer>
+						<Sends>
+							<TrackSendHolder Id="0"><Send><Manual Value="0.0003162277571" /><AutomationTarget Id="204"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+							<TrackSendHolder Id="1"><Send><Manual Value="0.0003162277571" /><AutomationTarget Id="206"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+						</Sends>
+						<Volume><Manual Value="1" /><AutomationTarget Id="200"><LockEnvelope Value="0" /></AutomationTarget></Volume>
+						<Pan><Manual Value="0" /><AutomationTarget Id="202"><LockEnvelope Value="0" /></AutomationTarget></Pan>
+					</Mixer>
+					<MainSequencer>
+						<ClipSlotList>
+							<ClipSlot Id="0">
+								<ClipSlot>
+									<Value>
+										<AudioClip Id="0" Time="0">
+											<CurrentStart Value="0" />
+											<CurrentEnd Value="40" />
+											<Loop>
+												<LoopStart Value="8" />
+												<LoopEnd Value="24" />
+												<StartRelative Value="-8" />
+												<LoopOn Value="true" />
+											</Loop>
+											<Name Value="Wind" />
+											<Color Value="27" />
+											<Envelopes><Envelopes /></Envelopes>
+											<Disabled Value="false" />
+											<IsWarped Value="true" />
+											<SampleRef>
+												<FileRef>
+													<RelativePath Value="Samples/Imported/wind.aiff" />
+													<Path Value="/Users/someone/Show Project/Samples/Imported/wind.aiff" />
+												</FileRef>
+												<DefaultDuration Value="1440000" />
+												<DefaultSampleRate Value="48000" />
+											</SampleRef>
+											<WarpMode Value="4" />
+											<SampleVolume Value="1" />
+											<WarpMarkers>
+												<WarpMarker Id="0" SecTime="0" BeatTime="0" />
+												<WarpMarker Id="1" SecTime="10" BeatTime="20" />
+												<WarpMarker Id="2" SecTime="20" BeatTime="30" />
+											</WarpMarkers>
+										</AudioClip>
+									</Value>
+								</ClipSlot>
+								<HasStop Value="true" />
+							</ClipSlot>
+							<ClipSlot Id="1"><ClipSlot><Value /></ClipSlot><HasStop Value="false" /></ClipSlot>
+							<ClipSlot Id="2"><ClipSlot><Value /></ClipSlot><HasStop Value="true" /></ClipSlot>
+						</ClipSlotList>
+						<MonitoringEnum Value="2" />
+						<VolumeModulationTarget Id="230"><LockEnvelope Value="0" /></VolumeModulationTarget>
+					</MainSequencer>
+					<DeviceChain><Devices /></DeviceChain>
+				</DeviceChain>
+			</AudioTrack>
+			<AudioTrack Id="28">
+				<Name>
+					<EffectiveName Value="4 track in" />
+				</Name>
+				<TrackGroupId Value="-1" />
+				<DeviceChain>
+					<AudioInputRouting><Target Value="AudioIn/Track.27/TrackOut" /></AudioInputRouting>
+					<AudioOutputRouting><Target Value="AudioOut/None" /></AudioOutputRouting>
+					<Mixer>
+						<Sends>
+							<TrackSendHolder Id="0"><Send><Manual Value="1" /><AutomationTarget Id="304"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+							<TrackSendHolder Id="1"><Send><Manual Value="0.25" /><AutomationTarget Id="306"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+						</Sends>
+						<Volume><Manual Value="1" /><AutomationTarget Id="300"><LockEnvelope Value="0" /></AutomationTarget></Volume>
+						<Pan><Manual Value="0" /><AutomationTarget Id="302"><LockEnvelope Value="0" /></AutomationTarget></Pan>
+					</Mixer>
+					<MainSequencer>
+						<ClipSlotList>
+							<ClipSlot Id="0"><ClipSlot><Value /></ClipSlot><HasStop Value="false" /></ClipSlot>
+							<ClipSlot Id="1">
+								<ClipSlot>
+									<Value>
+										<AudioClip Id="0" Time="0">
+											<CurrentStart Value="0" />
+											<CurrentEnd Value="20" />
+											<Loop>
+												<LoopStart Value="0" />
+												<LoopEnd Value="20" />
+												<StartRelative Value="0" />
+												<LoopOn Value="false" />
+											</Loop>
+											<Name Value="Wind" />
+											<Envelopes>
+												<Envelopes>
+													<ClipEnvelope Id="0">
+														<EnvelopeTarget><PointeeId Value="300" /></EnvelopeTarget>
+														<Automation>
+															<Events>
+																<FloatEvent Id="1" Time="-63072000" Value="1" />
+																<FloatEvent Id="2" Time="0" Value="1" />
+																<FloatEvent Id="3" Time="10" Value="0.0003162277571" />
+															</Events>
+														</Automation>
+													</ClipEnvelope>
+												</Envelopes>
+											</Envelopes>
+											<IsWarped Value="true" />
+											<SampleRef>
+												<FileRef>
+													<RelativePath Value="Samples/Imported/wind.aiff" />
+												</FileRef>
+											</SampleRef>
+											<SampleVolume Value="1" />
+										</AudioClip>
+									</Value>
+								</ClipSlot>
+								<HasStop Value="true" />
+							</ClipSlot>
+							<ClipSlot Id="2"><ClipSlot><Value /></ClipSlot><HasStop Value="false" /></ClipSlot>
+						</ClipSlotList>
+						<MonitoringEnum Value="0" />
+					</MainSequencer>
+					<DeviceChain><Devices /></DeviceChain>
+				</DeviceChain>
+			</AudioTrack>
+			<ReturnTrack Id="15">
+				<Name><EffectiveName Value="A-Face" /></Name>
+				<TrackGroupId Value="-1" />
+				<DeviceChain>
+					<AudioInputRouting><Target Value="AudioIn/External/S0" /></AudioInputRouting>
+					<AudioOutputRouting><Target Value="AudioOut/External/S0" /></AudioOutputRouting>
+					<Mixer>
+						<Sends>
+							<TrackSendHolder Id="0"><Send><Manual Value="0.0003162277571" /><AutomationTarget Id="404"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+							<TrackSendHolder Id="1"><Send><Manual Value="0.0003162277571" /><AutomationTarget Id="406"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+						</Sends>
+						<Volume><Manual Value="1" /><AutomationTarget Id="400"><LockEnvelope Value="0" /></AutomationTarget></Volume>
+						<Pan><Manual Value="0" /><AutomationTarget Id="402"><LockEnvelope Value="0" /></AutomationTarget></Pan>
+					</Mixer>
+					<DeviceChain><Devices /></DeviceChain>
+				</DeviceChain>
+			</ReturnTrack>
+			<ReturnTrack Id="16">
+				<Name><EffectiveName Value="B-Loin" /></Name>
+				<TrackGroupId Value="-1" />
+				<DeviceChain>
+					<AudioInputRouting><Target Value="AudioIn/External/S0" /></AudioInputRouting>
+					<AudioOutputRouting><Target Value="AudioOut/External/S1" /></AudioOutputRouting>
+					<Mixer>
+						<Sends>
+							<TrackSendHolder Id="0"><Send><Manual Value="0.0003162277571" /><AutomationTarget Id="504"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+							<TrackSendHolder Id="1"><Send><Manual Value="0.0003162277571" /><AutomationTarget Id="506"><LockEnvelope Value="0" /></AutomationTarget></Send></TrackSendHolder>
+						</Sends>
+						<Volume><Manual Value="0.945881784" /><AutomationTarget Id="500"><LockEnvelope Value="0" /></AutomationTarget></Volume>
+						<Pan><Manual Value="0" /><AutomationTarget Id="502"><LockEnvelope Value="0" /></AutomationTarget></Pan>
+					</Mixer>
+					<DeviceChain><Devices /></DeviceChain>
+				</DeviceChain>
+			</ReturnTrack>
+		</Tracks>
+		<MasterTrack>
+			<Name><EffectiveName Value="Master" /></Name>
+			<DeviceChain>
+				<AudioInputRouting><Target Value="AudioIn/External/S0" /></AudioInputRouting>
+				<AudioOutputRouting><Target Value="AudioOut/External/M17" /></AudioOutputRouting>
+				<Mixer>
+					<Volume><Manual Value="1" /><AutomationTarget Id="600"><LockEnvelope Value="0" /></AutomationTarget></Volume>
+					<Pan><Manual Value="0" /><AutomationTarget Id="602"><LockEnvelope Value="0" /></AutomationTarget></Pan>
+					<Tempo>
+						<Manual Value="120" />
+						<AutomationTarget Id="8"><LockEnvelope Value="0" /></AutomationTarget>
+					</Tempo>
+				</Mixer>
+				<DeviceChain><Devices /></DeviceChain>
+			</DeviceChain>
+		</MasterTrack>
+		<SendsPre>
+			<SendPreBool Id="2" Value="false" />
+			<SendPreBool Id="3" Value="true" />
+		</SendsPre>
+		<Scenes>
+			<Scene Id="37">
+				<FollowAction>
+					<FollowActionEnabled Value="false" />
+				</FollowAction>
+				<Name Value="top start" />
+				<Annotation Value="MISE : Fader 1 à -INF&#xA;&#xA;&quot;Il était une fois&quot; &gt; Top" />
+				<Color Value="13" />
+				<Tempo Value="120" />
+				<IsTempoEnabled Value="false" />
+			</Scene>
+			<Scene Id="39">
+				<Name Value="fo" />
+				<Annotation Value="" />
+				<Color Value="27" />
+				<Tempo Value="120" />
+				<IsTempoEnabled Value="false" />
+			</Scene>
+			<Scene Id="44">
+				<Name Value="" />
+				<Annotation Value="" />
+				<Color Value="-1" />
+				<Tempo Value="96" />
+				<IsTempoEnabled Value="true" />
+			</Scene>
+		</Scenes>
+		<KeyMidiFireSelectedScene>
+			<PersistentKeyString Value="" />
+			<IsNote Value="false" />
+			<Channel Value="6" />
+			<NoteOrController Value="126" />
+		</KeyMidiFireSelectedScene>
+		<KeyMidiSceneUp>
+			<IsNote Value="false" />
+			<Channel Value="6" />
+			<NoteOrController Value="124" />
+		</KeyMidiSceneUp>
+		<KeyMidiSceneDown>
+			<IsNote Value="false" />
+			<Channel Value="-1" />
+			<NoteOrController Value="-1" />
+		</KeyMidiSceneDown>
+	</LiveSet>
+</Ableton>
