@@ -120,6 +120,45 @@ namespace wfg::cue
 
             return out;
         }
+
+        /*  A MEDIA CUE'S SENDS' LANES (namespace draft §28), by the bus each
+            send feeds - the lists the write door and `validate` judged, read
+            here by the same judge (PX). A send with no lane, which is every
+            send written before there were lanes, has no entry, and a mic
+            cue's send has none (QA). */
+        std::map<std::string, std::vector<doc::LanePoint>> sendLanesOf (const juce::ValueTree& cue)
+        {
+            std::map<std::string, std::vector<doc::LanePoint>> out;
+
+            if (! cue.hasType ("Media"))
+                return out;
+
+            for (const auto& child : cue)
+            {
+                if (! child.hasType ("Send"))
+                    continue;
+
+                auto points = doc::readLevelLane (child[juce::Identifier ("levelLane")].toString().toStdString())
+                                  .points;
+
+                if (! points.empty())
+                    out[child[juce::Identifier ("bus")].toString().toStdString()] = std::move (points);
+            }
+
+            return out;
+        }
+
+        /** What those lanes ask for at one second of the file, by bus. */
+        std::map<std::string, double> sendLaneOffsets (const std::map<std::string, std::vector<doc::LanePoint>>& lanes,
+                                                       double seconds)
+        {
+            std::map<std::string, double> out;
+
+            for (const auto& [bus, points] : lanes)
+                out[bus] = doc::laneLevelDb (points, seconds);
+
+            return out;
+        }
     }
 
     //==============================================================================
@@ -3211,6 +3250,23 @@ namespace wfg::cue
         run.laneOutgoingAt = 0;
         run.laneDb = doc::laneLevelDb (run.lane, run.laneStart);
 
+        /*  AND ITS SENDS' LANES (namespace draft §28), read at the same second
+            and for the same reason: the arm's routing reaches the voice while
+            it is silent, with no glide, so a send drawn up from silence starts
+            silent rather than gliding down from where the send is written. */
+        run.sendLanes = live ? std::map<std::string, std::vector<doc::LanePoint>> {} : sendLanesOf (cue);
+        run.sendLaneDb = sendLaneOffsets (run.sendLanes, run.laneStart);
+
+        if (! run.sendLaneDb.empty())
+        {
+            std::string lanesProblem;
+            const auto withLanes = resolveRouting (cue, audio->channelsPerTrack(), lanesProblem,
+                                                   chainChannelsOf (cue), nullptr, &run.sendLaneDb);
+
+            if (lanesProblem.empty())
+                request.routing = withLanes;
+        }
+
         /*  THE CUE'S AUTHORED LEVEL IS THE RUN'S OWN, which is what a fade
             aimed at this cue moves and what a trim from a group above it is
             added TO. `level` itself is left for applyLevels to compute on the
@@ -4487,7 +4543,8 @@ namespace wfg::cue
                                                      int trackChannels,
                                                      std::string& problem,
                                                      int chainChannels,
-                                                     const std::map<std::string, double>* moved) const
+                                                     const std::map<std::string, double>* moved,
+                                                     const std::map<std::string, double>* laneOffsets) const
     {
         std::vector<Coefficient> out;
         problem.clear();
@@ -4836,6 +4893,15 @@ namespace wfg::cue
                 if (moved != nullptr)
                     if (const auto held = moved->find ("send/" + busId); held != moved->end())
                         level = held->second;
+
+                /*  AND WHAT ITS LANE ASKS FOR AT THIS SECOND OF THE FILE
+                    (namespace draft §28, PY): an offset on all of the above,
+                    as the level lane is a term beside a fade and a trim - so
+                    nought is the send as written, and the sum stays inside
+                    the send's own range. */
+                if (laneOffsets != nullptr)
+                    if (const auto lane = laneOffsets->find (busId); lane != laneOffsets->end())
+                        level = std::clamp (level + lane->second, silenceDb, 12.0);
 
                 sentTo.push_back (busId);
 
@@ -15558,11 +15624,45 @@ namespace wfg::cue
                 const auto cue = document.findById (run->cue);
 
                 if (cue.isValid())
+                {
                     run->lane = doc::readLevelLane (textOf (cue, "levelLane")).points;
+                    run->sendLanes = sendLanesOf (cue);
+                }
             }
 
             run->laneDb = run->lane.empty() ? 0.0
                                             : doc::laneLevelDb (run->lane, lanePositionAt (*run, at, rate));
+
+            /*  ITS SENDS' LANES, ONE COEFFICIENT SLEW AHEAD (namespace draft
+                §28, PZ). A send reaches the voice as a matrix coefficient,
+                and a coefficient glides over `sendLaneLeadSeconds` rather
+                than one tick, so a lane read only a tick ahead would land a
+                glide late on every ramp. Only a change worth hearing moves the
+                routing: the matrix is rebuilt for the runs it concerns, in
+                `applyRouting`, and a tick with every lane flat costs a lookup
+                a send. */
+            if (run->sendLanes.empty() && run->sendLaneDb.empty())
+                continue;
+
+            const auto sendAt = audio->samplesElapsed()
+                              + static_cast<std::int64_t> (sendLaneLeadSeconds * rate);
+            auto offsets = sendLaneOffsets (run->sendLanes, lanePositionAt (*run, sendAt, rate));
+
+            auto changed = offsets.size() != run->sendLaneDb.size();
+
+            for (const auto& [bus, db] : offsets)
+            {
+                const auto was = run->sendLaneDb.find (bus);
+
+                if (was == run->sendLaneDb.end() || std::abs (was->second - db) > 0.01)
+                    changed = true;
+            }
+
+            if (changed)
+            {
+                run->sendLaneDb = std::move (offsets);
+                ++sendLaneRevision;
+            }
         }
     }
 
@@ -15937,13 +16037,14 @@ namespace wfg::cue
         const auto plugins = pluginTable != nullptr ? pluginTable->revision() : 0;
 
         if (revision == routingRevision && layer == routingLiveRevision && plugins == routingPluginRevision
-              && movedRevision == routingMovedRevision)
+              && movedRevision == routingMovedRevision && sendLaneRevision == routingSendLaneRevision)
             return;
 
         routingRevision = revision;
         routingLiveRevision = layer;
         routingPluginRevision = plugins;
         routingMovedRevision = movedRevision;
+        routingSendLaneRevision = sendLaneRevision;
 
         for (const auto& snapshot : runs.all())
         {
@@ -15959,7 +16060,7 @@ namespace wfg::cue
 
             std::string problem;
             const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem, chainChannelsOf (cue),
-                                                 &run->moved);
+                                                 &run->moved, &run->sendLaneDb);
 
             if (problem.empty())
                 audio->setRouting (run->track, routing);

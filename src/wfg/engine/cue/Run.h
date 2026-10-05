@@ -468,6 +468,16 @@ namespace wfg::cue
         std::vector<doc::LanePoint> lane;
         double laneDb = 0.0;
 
+        /*  AND ITS SENDS' LANES (namespace draft §28): each a curve over the
+            same file, by the bus its send feeds - the key a fade's moved
+            send uses, so the two are found the same way (§26 PB). Read with
+            the level lane, and `sendLaneDb` is what they ask for this tick,
+            read one COEFFICIENT slew ahead (PZ): an offset on each send,
+            added in `resolveRouting` after the lock's ride and the fade's
+            moved value. A send with no lane has no entry; a media run's only. */
+        std::map<std::string, std::vector<doc::LanePoint>> sendLanes;
+        std::map<std::string, double> sendLaneDb;
+
         /*  WHERE THE LANE IS READ BEFORE THE VOICE IS: the second of the file
             the voice will start at - the start offset, the second somebody
             jumped to, or the in-point of the slice it enters - recorded at the

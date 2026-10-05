@@ -13892,6 +13892,188 @@ TEST_CASE ("level lane: across a slice boundary it keeps the outgoing slice unti
 }
 
 //==============================================================================
+namespace
+{
+    /*  A media cue with a lane drawn on one of its sends (namespace draft
+        §28): a stereo cue on its direct out, the main pair, and sending into
+        the foldback mix at channels 4-5. The sample clock is put where a
+        check wants the file to be, a coefficient glide ahead of now, which is
+        where a send's lane is read (PZ). */
+    struct SendLaneRig : RoutedRig
+    {
+        SendLaneRig()
+        {
+            document.findById (foldback).setProperty (juce::Identifier ("kind"), "mix", nullptr);
+            setMedia (mediaId, 2);
+            aimAt (mediaId, main);
+            sendId = addSend (mediaId, foldback, 0.0);
+        }
+
+        void drawSendLane (const std::string& text)
+        {
+            REQUIRE (document.setAttribute ("/godot/send/" + sendId + "/levelLane", text).ok);
+        }
+
+        std::string launch()
+        {
+            submitAndTick ("cue.fire", { osc::Value::string (mediaId) });
+            REQUIRE_FALSE (audio.arms.empty());
+            armed = audio.arms.back();
+
+            audio.completeArms (engine);
+            tickOnce();
+            tickOnce();
+
+            const auto id = runs.all().front().id;
+            REQUIRE (runs.find (id)->launchedAtSample > 0);
+
+            audio.playing.insert (runs.find (id)->track);
+            tickOnce();
+
+            return id;
+        }
+
+        void hearAt (const std::string& id, double seconds)
+        {
+            const auto launched = runs.find (id)->launchedAtSample;
+            const auto lead = static_cast<std::int64_t> (cue::Runner::sendLaneLeadSeconds * 48000.0);
+
+            audio.samples = launched + static_cast<std::int64_t> (std::llround (seconds * 48000.0)) - lead;
+            tickOnce();
+        }
+
+        /** The gain the cue's left channel reaches an output at, or -1 for none. */
+        static double gainInto (const std::vector<cue::Coefficient>& routing, int output)
+        {
+            for (const auto& one : routing)
+                if (one.input == 0 && one.output == output)
+                    return one.gain;
+
+            return -1.0;
+        }
+
+        /*  What the voice holds now: the last routing pushed at it while it
+            sounded, or the arm's when none has been - a lane that has not
+            moved since the arm has nothing to push. */
+        const std::vector<cue::Coefficient>& heldBy (const std::string& id)
+        {
+            const auto found = audio.routings.find (runs.find (id)->track);
+            return found == audio.routings.end() ? armed.routing : found->second;
+        }
+
+        double sentNow (const std::string& id)   { return gainInto (heldBy (id), 4); }
+        double directNow (const std::string& id) { return gainInto (heldBy (id), 0); }
+
+        std::string sendId;
+        cue::ArmRequest armed;
+    };
+
+    double gainOfDb (double db)
+    {
+        return std::pow (10.0, db / 20.0);
+    }
+}
+
+TEST_CASE ("send lane: it is read one coefficient glide ahead, the matrix's own")
+{
+    /*  PZ's number is the matrix's, repeated in the cue layer because that
+        layer names no audio type - and two copies of one number need
+        something that says they still agree. */
+    CHECK (cue::Runner::sendLaneLeadSeconds == doctest::Approx (audio::CueMatrix::slewSeconds));
+}
+
+TEST_CASE ("send lane: the send follows its lane over the file, and the arm starts at its first word")
+{
+    SendLaneRig rig;
+    rig.drawSendLane ("0 -40 2 0");         // the foldback comes up from -40 over two seconds
+
+    const auto id = rig.launch();
+
+    /*  THE ARM'S ROUTING CARRIES THE LANE'S START: set while the voice is
+        silent, so a send drawn up from silence starts there. The direct out
+        is untouched - a send's lane is that send's alone. */
+    CHECK (SendLaneRig::gainInto (rig.armed.routing, 4) == doctest::Approx (gainOfDb (-40.0)));
+    CHECK (SendLaneRig::gainInto (rig.armed.routing, 0) == doctest::Approx (1.0));
+
+    /*  A second into the file, halfway up, and the voice was told so. */
+    rig.hearAt (id, 1.0);
+    CHECK (rig.runs.find (id)->sendLaneDb.at (rig.foldback) == doctest::Approx (-20.0));
+    CHECK (rig.sentNow (id) == doctest::Approx (gainOfDb (-20.0)));
+    CHECK (rig.directNow (id) == doctest::Approx (1.0));
+
+    /*  Past the last point, the last point's level - and a flat lane pushes
+        nothing more: the matrix moves only when the lane does. */
+    rig.hearAt (id, 3.5);
+    CHECK (rig.sentNow (id) == doctest::Approx (1.0));
+
+    const auto pushes = rig.audio.routingPushes;
+    rig.hearAt (id, 4.0);
+    rig.hearAt (id, 4.5);
+    CHECK (rig.audio.routingPushes == pushes);
+}
+
+TEST_CASE ("send lane: an offset on the send as written, kept inside the send's range")
+{
+    SendLaneRig rig;
+
+    /*  PY: nought is the send as written, so a lane at -10 on a send at -6
+        arrives at -16. */
+    REQUIRE (rig.document.setAttribute ("/godot/send/" + rig.sendId + "/level", "-6").ok);
+    rig.drawSendLane ("0 -10");
+
+    const auto id = rig.launch();
+    rig.hearAt (id, 0.5);
+    CHECK (rig.sentNow (id) == doctest::Approx (gainOfDb (-16.0)));
+
+    /*  And the sum never leaves -120..12: a send at +8 lifted by ten more is
+        the most a send may be. */
+    REQUIRE (rig.document.setAttribute ("/godot/send/" + rig.sendId + "/level", "8").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/send/" + rig.sendId + "/levelLane", "0 10").ok);
+    rig.hearAt (id, 1.0);
+    CHECK (rig.sentNow (id) == doctest::Approx (gainOfDb (12.0)));
+}
+
+TEST_CASE ("send lane: an edit reaches the sounding cue, and clearing it gives the send back")
+{
+    SendLaneRig rig;
+    const auto id = rig.launch();
+
+    rig.hearAt (id, 1.0);
+    CHECK (rig.sentNow (id) == doctest::Approx (1.0));
+
+    /*  Drawn while it sounds: the next tick hears it (§20.1 DB's rule). */
+    rig.drawSendLane ("0 -12");
+    rig.hearAt (id, 1.5);
+    CHECK (rig.sentNow (id) == doctest::Approx (gainOfDb (-12.0)));
+
+    /*  Cleared, the send is as written again, and the run keeps no offset. */
+    rig.drawSendLane ("");
+    rig.hearAt (id, 2.0);
+    CHECK (rig.sentNow (id) == doctest::Approx (1.0));
+    CHECK (rig.runs.find (id)->sendLaneDb.empty());
+}
+
+TEST_CASE ("send lane: a looping slice hears the same stretch of the send's lane on every pass")
+{
+    SendLaneRig rig;
+
+    const auto range = rig.document.createRange (rig.mediaId, 2.0, 4.0);
+    REQUIRE (range.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + range.id + "/loops", "0").ok);
+
+    rig.drawSendLane ("0 0 2 -20 4 0");
+
+    const auto id = rig.launch();
+    CHECK (SendLaneRig::gainInto (rig.armed.routing, 4) == doctest::Approx (gainOfDb (-20.0)));
+
+    rig.hearAt (id, 1.0);                   // the first pass, the file's third second
+    CHECK (rig.sentNow (id) == doctest::Approx (gainOfDb (-10.0)));
+
+    rig.hearAt (id, 3.0);                   // the second pass, a second in
+    CHECK (rig.sentNow (id) == doctest::Approx (gainOfDb (-10.0)));
+}
+
+//==============================================================================
 /*  A CUE'S SPEED, AS THE RUNNER KEEPS IT (namespace draft §22.4): read at the
     arm, placed on the voice at the launch and a horizon ahead of every change,
     and read back off the same breakpoints for the playhead, the lane and a

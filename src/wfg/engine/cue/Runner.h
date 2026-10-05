@@ -987,12 +987,22 @@ namespace wfg::cue
 
         /*  `moved` is a run's values a fade moved (namespace draft §26): a
             send it holds is heard at that level, and a bus the cue has no
-            send into is a send of the run alone. Null at an arm. */
+            send into is a send of the run alone. Null at an arm.
+            `laneOffsets` is what the run's send lanes ask for, by bus
+            (namespace draft §28): added to each send's level after the
+            lock's ride and the fade's moved value (PY). Null for none. */
         std::vector<Coefficient> resolveRouting (const juce::ValueTree& cue,
                                                  int trackChannels,
                                                  std::string& problem,
                                                  int chainChannels = 0,
-                                                 const std::map<std::string, double>* moved = nullptr) const;
+                                                 const std::map<std::string, double>* moved = nullptr,
+                                                 const std::map<std::string, double>* laneOffsets = nullptr) const;
+
+        /*  HOW FAR AHEAD A SEND'S LANE IS READ (namespace draft §28, PZ): one
+            coefficient glide, `audio::CueMatrix::slewSeconds` - repeated here
+            because the cue layer names no audio type, and checked equal to it
+            by `GoTests`. */
+        static constexpr double sendLaneLeadSeconds = 0.05;
 
         /** Every fade in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<FadeJob>& fades() const noexcept { return running; }
@@ -2199,6 +2209,13 @@ namespace wfg::cue
             each. */
         std::uint64_t movedRevision = 0;
         std::uint64_t routingMovedRevision = 0;
+
+        /*  AND WHAT THE SENDS' LANES ASK FOR (namespace draft §28): bumped
+            when a sounding run's send lanes move by more than a hundredth of a
+            decibel, so the matrix follows a lane at the tick rate and costs
+            nothing where every lane is flat. */
+        std::uint64_t sendLaneRevision = 0;
+        std::uint64_t routingSendLaneRevision = 0;
         std::uint64_t eqMovedRevision = 0;
         std::uint64_t fxMovedRevision = 0;
 
