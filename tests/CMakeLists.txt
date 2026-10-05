@@ -98,6 +98,7 @@ add_executable(wfg_tests
     TriggerTests.cpp
     RangeTests.cpp
     LevelLaneTests.cpp
+    SendLaneTests.cpp
     LaneRecordTests.cpp
     RateClockTests.cpp
     AnalysisTests.cpp

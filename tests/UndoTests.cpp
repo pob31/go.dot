@@ -298,6 +298,41 @@ TEST_CASE ("undo: a level lane redrawn is taken back to the lane it was")
     CHECK (rig.document.getAttribute (lane) == std::string ("2 0 3 -20"));
 }
 
+TEST_CASE ("undo: a send lane redrawn is taken back to the lane it was")
+{
+    /*  Namespace §28, PX: the level lane's rule on a send - one gesture, one
+        `node.set` of the whole list, one step. */
+    Rig rig;
+
+    const std::string mix = "SN0000M1";
+    const std::string send = "SN0000S1";
+
+    REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+    REQUIRE (rig.apply (1, "cue.create", { text (mainList), osc::Value::int32 (0),
+                                           text ("media"), text ("Bed"),
+                                           text (firstCue) }).applied == 1);
+    REQUIRE (rig.apply (2, "bus.create", { text ("mix"), osc::Value::int32 (2),
+                                           osc::Value::int32 (-1), text (mix) }).applied == 1);
+    REQUIRE (rig.apply (3, "send.create", { text (firstCue), text (mix), text (send) }).applied == 1);
+
+    const auto lane = "/godot/send/" + send + "/levelLane";
+
+    REQUIRE (rig.apply (10, "node.set", { text (lane), text ("2 0 3 -20") }).applied == 1);
+    REQUIRE (rig.apply (200, "node.set", { text (lane), text ("2 0 3 -20 8 -20 9 0") }).applied == 1);
+
+    /*  A drawing that is not a lane is refused, and leaves nothing to undo. */
+    CHECK (rig.apply (300, "node.set", { text (lane), text ("2 0 3") }).rejected == 1);
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.set"));
+    CHECK (rig.document.getAttribute (lane) == std::string ("2 0 3 -20"));
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.set"));
+    CHECK (rig.document.getAttribute (lane) == std::string (""));
+
+    REQUIRE (rig.document.redo (doc::UndoDomain::document) == std::string ("node.set"));
+    CHECK (rig.document.getAttribute (lane) == std::string ("2 0 3 -20"));
+}
+
 TEST_CASE ("undo: a create taken back and put back keeps the identifier it drew")
 {
     Rig rig;

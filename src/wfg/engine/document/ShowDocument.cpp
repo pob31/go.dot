@@ -1073,6 +1073,18 @@ namespace wfg::doc
                 && ! readLevelLane (canonical).problem.empty())
                 return EditResult::failed (reason::badValue);
 
+            /*  And a send's, by the same judge (namespace §28, PX) - on a media
+                cue's send only: a mic cue has no file for a lane to follow (QA),
+                so an empty list, which is no lane, is the only one it takes. */
+            if (target.attribute->element == "Send" && name == "levelLane")
+            {
+                if (! readLevelLane (canonical).problem.empty())
+                    return EditResult::failed (reason::badValue);
+
+                if (! canonical.empty() && ! target.node.getParent().hasType ("Media"))
+                    return EditResult::failed (reason::badValue);
+            }
+
             if (name == "gains"
                 && ! coefficientsFit (countTokens (canonical), destinationWidth (*this, target.node)))
                 return EditResult::failed (reason::badValue);
@@ -3060,12 +3072,16 @@ namespace wfg::doc
                             if (! curve.problem.empty())
                                 problems.push_back (here + ": \"points\" " + curve.problem);
                         }
-                        else if (elementName == "Media" && attributeName == "levelLane")
+                        else if ((elementName == "Media" || elementName == "Send") && attributeName == "levelLane")
                         {
                             const auto lane = readLevelLane (canonical);
 
                             if (! lane.problem.empty())
                                 problems.push_back (here + ": \"levelLane\" " + lane.problem);
+                            else if (elementName == "Send" && ! canonical.empty()
+                                       && ! node.getParent().hasType ("Media"))
+                                problems.push_back (here + ": \"levelLane\" on a send of a cue that plays no "
+                                                           "file, which has nothing for a lane to follow");
                         }
 
                         continue;
