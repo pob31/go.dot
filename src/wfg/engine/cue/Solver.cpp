@@ -1060,6 +1060,8 @@ namespace wfg::cue
             if (entry.row > target->row || (entry.row == target->row && ! fired))
                 break;
 
+            read.pass (entry.node);
+
             if (entry.element != "Osc")
                 continue;
 
@@ -1107,11 +1109,14 @@ namespace wfg::cue
             the difference between where it was told to go and what its target
             cue says, which is the one thing a level can be trimmed BY. */
         std::map<std::string, std::size_t> trimmedAt;
+        read.forgetSwitches();
 
         for (const auto& entry : walk.placed)
         {
             if (entry.row > target->row || (entry.row == target->row && ! fired))
                 break;
+
+            read.pass (entry.node);
 
             if (entry.element != "Fade" || ! read.flag (entry.node, "cue", "enabled"))
                 continue;
@@ -1155,16 +1160,21 @@ namespace wfg::cue
             going is: whatever never ends on its own and nothing stopped, and
             the target's own chain at the offset. */
         std::vector<std::string> stopped;
+        read.forgetSwitches();
 
         for (const auto& entry : walk.placed)
         {
             if (entry.row > target->row)
                 break;
 
+            read.pass (entry.node);
+
             if (entry.element == "Transport" && read.flag (entry.node, "cue", "enabled")
-                  && ! isTakePress (read, entry.node))
+                  && ! isNotAStop (read, entry.node))
                 stopped.push_back (read.text (entry.node, "transport", "target"));
         }
+
+        read.forgetSwitches();
 
         const auto wasStopped = [&stopped] (const std::string& cueId)
         {
@@ -1175,6 +1185,8 @@ namespace wfg::cue
         {
             if (entry.row >= target->row)
                 break;
+
+            read.pass (entry.node);
 
             if ((entry.element != "Media" && entry.element != "Mic")
                   || ! read.flag (entry.node, "cue", "enabled"))
@@ -1198,6 +1210,13 @@ namespace wfg::cue
 
         if (fired && read.flag (target->node, "cue", "enabled"))
             planTarget (read, document, durations, walk, *target, aim.offset, stopped, plan);
+
+        /*  WHAT THE EVENING HAS SWITCHED BY THE PLACE (PK): every enable and
+            disable cue before it, and the target itself once it has fired. */
+        if (fired)
+            read.pass (target->node);
+
+        plan.switched = read.switches();
 
         return plan;
     }
@@ -1333,7 +1352,7 @@ namespace wfg::cue
             {
                 const auto targetCue = read.text (entry->node, "transport", "target");
 
-                if (! targetCue.empty() && ! isTakePress (read, entry->node))
+                if (! targetCue.empty() && ! isNotAStop (read, entry->node))
                 {
                     stopped.push_back (targetCue);
                     unplan (targetCue);
@@ -1498,6 +1517,18 @@ namespace wfg::cue
                     break;
                 }
 
+        /*  WHAT THE EVENING HAD SWITCHED BY THE INSTANT (PK), from the enable
+            and disable cues that fired before it, in the order they fired.
+            Worked out last and on its own, because the steps above are things
+            that DID fire: a bed disabled after it started is still playing,
+            and asking the switches about its step would have dropped it. */
+        for (const auto& step : past)
+            if (step.origin != 'p' && step.origin != 'd')
+                if (const auto* entry = placedOf (step.cue); entry != nullptr)
+                    read.pass (entry->node);
+
+        plan.switched = read.switches();
+
         return plan;
     }
 
@@ -1569,9 +1600,19 @@ namespace wfg::cue
         std::vector<std::string> stopped;
 
         for (const auto& entry : walk.placed)
-            if (entry.row < standbyRow && entry.element == "Transport"
-                 && read.flag (entry.node, "cue", "enabled") && ! isTakePress (read, entry.node))
+        {
+            if (entry.row >= standbyRow)
+                continue;
+
+            /*  An enable or disable cue before the pointer has switched its
+                target by now (PK), and a persistent cue switched off is not
+                asserted again. */
+            read.pass (entry.node);
+
+            if (entry.element == "Transport"
+                 && read.flag (entry.node, "cue", "enabled") && ! isNotAStop (read, entry.node))
                 stopped.push_back (read.text (entry.node, "transport", "target"));
+        }
 
         for (const auto& cue : section)
         {

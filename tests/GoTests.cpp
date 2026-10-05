@@ -40,6 +40,7 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/Tonight.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/LaneTable.h>
@@ -20394,4 +20395,250 @@ TEST_CASE ("fade moves: the door sets one entry, an empty text takes it out, and
     CHECK_FALSE (write (fade + "eq/eqB1Gain", "40")->applied);
     CHECK_FALSE (write ("/godot/cue/" + rig.mediaId + "/moves/send/" + bus.id, "-6")->applied);
     CHECK_FALSE (write (fade + "fx/nothing/0", "0.5")->applied);
+}
+
+//==============================================================================
+//  ENABLE, DISABLE AND JUMP TO (2026-10-05, namespace draft §27)
+//==============================================================================
+namespace
+{
+    std::string tonightOf (const Rig& rig, const std::string& cueId)
+    {
+        return cue::tonightWord (rig.document.findById (cueId));
+    }
+
+    /*  A transport cue with a verb, aimed at `target`, at `index` in the list. */
+    std::string transportCue (Rig& rig, int index, const char* verb, const std::string& target,
+                              const char* name = "Switch")
+    {
+        const auto id = rig.document.createCue (rig.listId, index, "transport", name).id;
+        REQUIRE (! id.empty());
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/target", target).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/verb", verb).ok);
+        return id;
+    }
+
+    bool logged (Rig& rig, const char* command)
+    {
+        for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+            if (record.command == command)
+                return true;
+
+        return false;
+    }
+}
+
+TEST_CASE ("tonight: a disable cue switches its target off, GO and a fire by name pass it by, and no file holds it")
+{
+    Rig rig;
+    const auto lights = rig.document.createCue (rig.listId, 2, "memo", "Lights").id;
+    const auto off = transportCue (rig, 0, "disable", rig.memoId);   // Off, Thunder, House, Lights
+
+    const auto dirtyBefore = rig.document.showRevision();
+
+    rig.setStandby (off);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    CHECK (tonightOf (rig, rig.memoId) == "off");
+    CHECK (rig.runs.find (rig.runOf (off))->kind == "transport");
+
+    //  The switch is the evening's: the unsaved dot is not lit, and the show file never says it.
+    CHECK (rig.document.showRevision() == dirtyBefore);
+    CHECK (doc::CanonicalXml::write (rig.document).find ("tonight") == std::string::npos);
+    CHECK (rig.document.validate().empty());
+
+    //  GO on Thunder, then the walk passes House to half by.
+    CHECK (rig.standby() == rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    CHECK (rig.standby() == lights);
+
+    //  A name cannot reach it either, nor can a park.
+    CHECK (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.memoId) }).rejected == 1);
+    CHECK (refusedFor (rig, "disabled"));
+    CHECK (rig.runOf (rig.memoId).empty());
+    CHECK (rig.submitAndTick ("standby.set", { osc::Value::string (rig.memoId) }).rejected == 1);
+}
+
+TEST_CASE ("tonight: a disable stops nothing; an enable switches on a cue its file has off")
+{
+    Rig rig;
+
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) }).rejected == 0);
+    const auto thunder = rig.runOf (rig.mediaId);
+    REQUIRE (! thunder.empty());
+
+    const auto off = transportCue (rig, 2, "disable", rig.mediaId);
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (off) }).rejected == 0);
+    rig.tickOnce();
+
+    CHECK (tonightOf (rig, rig.mediaId) == "off");
+    CHECK_FALSE (rig.runs.find (thunder)->isFinished());
+
+    //  Off in the file, on for tonight: a mark that differs from the file.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/enabled", "false").ok);
+    CHECK (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.memoId) }).rejected == 1);
+
+    const auto on = transportCue (rig, 3, "enable", rig.memoId, "Back on");
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (on) }).rejected == 0);
+    CHECK (tonightOf (rig, rig.memoId) == "on");
+    CHECK (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.memoId) }).rejected == 0);
+
+    //  Switched to what the file says, the mark goes.
+    const auto back = transportCue (rig, 4, "enable", rig.mediaId, "Thunder back");
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (back) }).rejected == 0);
+    CHECK (tonightOf (rig, rig.mediaId) == "file");
+}
+
+TEST_CASE ("tonight: a standby on the cue being switched off moves on to the next stop")
+{
+    Rig rig;
+    const auto lights = rig.document.createCue (rig.listId, 2, "memo", "Lights").id;
+    const auto off = transportCue (rig, 3, "disable", rig.memoId);
+
+    rig.setStandby (rig.memoId);
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (off) }).rejected == 0);
+
+    CHECK (rig.standby() == lights);
+}
+
+TEST_CASE ("tonight: Esc keeps a switch, Doh! of its GO puts it back, and a replay switches the same")
+{
+    Rig rig;
+    const auto off = transportCue (rig, 0, "disable", rig.memoId);
+
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (off) }).rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (tonightOf (rig, rig.memoId) == "off");
+
+    SUBCASE ("Esc and double Esc keep it: it is a decision, not processing")
+    {
+        REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+        REQUIRE (rig.submitAndTick ("run.killAll").rejected == 0);
+        CHECK (tonightOf (rig, rig.memoId) == "off");
+    }
+
+    SUBCASE ("Doh! puts the evening back as the GO found it")
+    {
+        REQUIRE (doh (rig).rejected == 0);
+        CHECK (tonightOf (rig, rig.memoId) == "file");
+        CHECK (rig.standby() == off);
+    }
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    replaysTheSame (rig);
+}
+
+TEST_CASE ("tonight: a load to time works the switches out again from the cues before the place")
+{
+    Rig rig;
+    const auto lights = rig.document.createCue (rig.listId, 2, "memo", "Lights").id;
+    const auto off = transportCue (rig, 1, "disable", lights);        // Thunder, Off, House, Lights
+
+    //  Switched off by hand, then a load to before the disable cue: nothing switched there.
+    REQUIRE (rig.submitAndTick ("cue.fire", { osc::Value::string (off) }).rejected == 0);
+    REQUIRE (tonightOf (rig, lights) == "off");
+
+    const auto loadTo = [&rig] (const std::string& cueId)
+    {
+        REQUIRE (rig.engine.submit ("cli", "list.aim", { osc::Value::string (rig.listId),
+                                                         osc::Value::string (cueId),
+                                                         osc::Value::float64 (-1.0) }));
+        rig.tickOnce();
+        return rig.submitAndTick ("list.loadToTime", { osc::Value::string (rig.listId) });
+    };
+
+    REQUIRE (loadTo (rig.mediaId).rejected == 0);
+    CHECK (tonightOf (rig, lights) == "file");
+
+    //  And to after it: switched off again, without the cue having fired.
+    REQUIRE (loadTo (rig.memoId).rejected == 0);
+    CHECK (tonightOf (rig, lights) == "off");
+}
+
+TEST_CASE ("jump: a jump cue moves standby onto its target and fires nothing")
+{
+    Rig rig;
+    const auto jump = transportCue (rig, 2, "jump", rig.mediaId, "Back to thunder");
+
+    rig.setStandby (jump);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (logged (rig, "standby.jump"));
+    CHECK (rig.standby() == rig.mediaId);
+    CHECK_FALSE (logged (rig, "list.loadToTime"));
+
+    //  The pointer standing on Thunder prepares it, as any park does; nothing fired it.
+    for (const auto& run : rig.runs.all())
+        if (run.cue == rig.mediaId)
+            CHECK (run.onlyPrepared());
+}
+
+TEST_CASE ("jump: and Go fires the target under the jump cue's GO, and one Doh! takes both back")
+{
+    Rig rig;
+    const auto jump = transportCue (rig, 2, "jump", rig.mediaId, "Thunder again");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + jump + "/andGo", "true").ok);
+
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (jump) }).rejected == 0);
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto thunder = rig.runOf (rig.mediaId);
+    REQUIRE (! thunder.empty());
+    CHECK (rig.runs.find (thunder)->goSerial == rig.runs.find (rig.runOf (jump))->goSerial);
+
+    //  GO moved the pointer on past the cue it fired, as GO does.
+    CHECK (rig.standby() == rig.memoId);
+
+    //  The fire is the GO's, not one after it: Doh! is not refused.
+    REQUIRE (doh (rig).rejected == 0);
+    CHECK (rig.runs.find (thunder)->takenBack);
+    CHECK (rig.standby() == jump);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    replaysTheSame (rig);
+}
+
+TEST_CASE ("jump: another list's cue is refused, and a jump-and-Go aimed at itself does nothing")
+{
+    Rig rig;
+
+    SUBCASE ("another list")
+    {
+        const auto other = rig.document.createList ("Lights").id;
+        const auto there = rig.document.createCue (other, 0, "memo", "Elsewhere").id;
+        const auto jump = transportCue (rig, 2, "jump", there);
+
+        rig.setStandby (jump);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        const auto after = rig.standby();
+
+        const auto moved = rig.tickOnce();
+        CHECK (moved.rejected == 1);
+        CHECK (refusedFor (rig, "not-in-list"));
+        CHECK (rig.standby() == after);
+    }
+
+    SUBCASE ("itself, with and Go")
+    {
+        const auto jump = transportCue (rig, 2, "jump", "");
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + jump + "/target", jump).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + jump + "/andGo", "true").ok);
+
+        rig.setStandby (jump);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        rig.tickOnce();
+        rig.tickOnce();
+
+        CHECK_FALSE (logged (rig, "standby.jump"));
+    }
 }

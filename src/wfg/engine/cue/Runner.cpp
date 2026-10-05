@@ -25,6 +25,7 @@
 #include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
+#include <wfg/engine/cue/Tonight.h>
 
 #include <wfg/engine/midi/MidiMessages.h>
 
@@ -53,7 +54,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <functional>
 #include <limits>
+#include <set>
 #include <utility>
 
 namespace wfg::cue
@@ -1796,6 +1799,133 @@ namespace wfg::cue
         return {};
     }
 
+    void Runner::switchTonight (const juce::ValueTree& cue, const std::string& runId)
+    {
+        const auto targetId = textOf (cue, "target");
+        const auto target = document.findById (targetId);
+
+        if (evening == nullptr || targetId.empty() || ! target.isValid())
+            return;
+
+        const auto on = textOf (cue, "verb") == "enable";
+        const auto before = tonightWord (target);
+
+        /*  WHERE A STANDBY ON IT GOES, asked BEFORE the switch, while the cue
+            is still a place the walk can start from (PQ): the next stop that is
+            neither the cue nor inside it - a group switched off takes its
+            members with it - or nowhere at the end of the list, which is a
+            pointer at rest rather than a list run out. No rounds: a manual
+            group's wrap would keep the walk inside the group being left. */
+        const auto listId = listOfCue (targetId);
+        juce::ValueTree list;
+
+        for (auto node = target; node.isValid(); node = node.getParent())
+            if (node.getType().toString() == "List")
+                list = node;
+
+        const auto standby = list.isValid() ? list[juce::Identifier ("standby")].toString().toStdString()
+                                            : std::string {};
+        std::string away;
+        auto mustLeave = false;
+
+        if (! on && ! standby.empty())
+        {
+            const auto standing = document.findById (standby);
+            mustLeave = standby == targetId || standing.isAChildOf (target);
+
+            if (mustLeave)
+            {
+                auto from = standby;
+
+                for (std::size_t guard = 0; guard < 100000; ++guard)
+                {
+                    const auto next = nextStandby (list, from);
+
+                    if (next.empty() || next == from)
+                        break;
+
+                    if (next != targetId && ! document.findById (next).isAChildOf (target))
+                    {
+                        away = next;
+                        break;
+                    }
+
+                    from = next;
+                }
+            }
+        }
+
+        evening->setTonight (targetId, on ? "on" : "off");
+
+        /*  NOTED ON ITS GO, for Doh! (PS): the first switch of a cue under it
+            only, so what is put back is the evening as the GO found it. */
+        if (const auto serial = goOfRun (runId); serial != 0 && serial == goRecord.serial)
+        {
+            const auto noted = std::any_of (goRecord.tonightBefore.begin(), goRecord.tonightBefore.end(),
+                                            [&targetId] (const auto& entry) { return entry.first == targetId; });
+
+            if (! noted && tonightWord (target) != before)
+                goRecord.tonightBefore.emplace_back (targetId, before);
+        }
+
+        if (mustLeave && ! mayStandOn (list, standby))
+            evening->setAttribute (standbyAddressOf (listId), away);
+    }
+
+    std::string Runner::jumpStandby (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
+                                     const std::string& listId, const std::string& target,
+                                     bool andGo, std::uint64_t cause,
+                                     const std::vector<std::string>& supplied, std::vector<std::string>& made)
+    {
+        juce::ValueTree list;
+
+        for (const auto& candidate : document.root().getChildWithName (juce::Identifier ("Lists")))
+            if (candidate[idProperty].toString().toStdString() == listId)
+                list = candidate;
+
+        if (! list.isValid())
+            return reason::notInList;
+
+        /*  ITS OWN LIST ONLY (PT), so a Doh! has one pointer to put back; and
+            where a park would land (§3.5): a header's, a footer's or a sampler
+            member's cue on its group, a persistent or a disabled one nowhere. */
+        if (! isInList (list, target))
+            return reason::notInList;
+
+        const auto landed = nearestStop (list, target);
+
+        if (landed.empty())
+            return reason::notAStop;
+
+        /*  JUMP TO: a park the show makes, and nothing else (PM). */
+        if (! andGo)
+        {
+            editable.setAttribute (standbyAddressOf (listId), landed);
+            editable.setAttribute (finishedAddressOf (listId), "false");
+            return {};
+        }
+
+        /*  AND GO: what GO does to the cue it now stands on - the pointer on past
+            it first, as GO moves it before it fires, then the fire - under the
+            GO that fired the jump cue (PN), so its runs carry that serial, Doh!
+            takes them back with the rest, and the fire does not count as one
+            after the GO. The step is a fire's, carrying its cause, as a start
+            cue's is. */
+        const auto next = standbyAfterFiring (list, landed, &runs);
+        editable.setAttribute (standbyAddressOf (listId), next);
+        editable.setAttribute (finishedAddressOf (listId), next.empty() ? "true" : "false");
+
+        noteFireOnList (landed, origin::engine, cause);
+        markFire (engine, tick, landed, origin::engine, cause);
+        lists.stepped (listId, { tick, landed, 'f', cause });
+
+        setFireCause (cause);
+        made = fireStandby (engine, tick, list, landed, supplied);
+        setFireCause (0);
+
+        return {};
+    }
+
     std::vector<std::string> Runner::loadToTime (Engine& engine, doc::ShowDocument& editable,
                                                  std::int64_t tick, const std::string& listId,
                                                  const std::vector<std::string>& supplied)
@@ -1833,6 +1963,46 @@ namespace wfg::cue
 
         if (! plan.ok)
             return used;
+
+        /*  TONIGHT'S SWITCHES, WORKED OUT AGAIN (namespace draft §27, PK): the
+            marks this list could have made - on its own cues, and on what its
+            enable and disable cues aim at, wherever that is - are taken away,
+            and the plan's are put on: what the cues before the place said, in
+            the order they said it. Before anything is built, so the seat below
+            reads the evening it is seating. */
+        {
+            const auto allLists = document.root().getChildWithName (juce::Identifier ("Lists"));
+            std::set<std::string> cleared;
+
+            std::function<void (const juce::ValueTree&)> collect = [&] (const juce::ValueTree& node)
+            {
+                for (const auto& child : node)
+                {
+                    if (const auto childId = child[idProperty].toString().toStdString(); ! childId.empty())
+                    {
+                        cleared.insert (childId);
+
+                        if (child.getType().toString() == "Transport")
+                            if (const auto verb = textOf (child, "verb"); verb == "enable" || verb == "disable")
+                                cleared.insert (textOf (child, "target"));
+                    }
+
+                    collect (child);
+                }
+            };
+
+            for (const auto& candidate : allLists)
+                if (candidate[idProperty].toString().toStdString() == listId)
+                    collect (candidate);
+
+            for (const auto& clearedId : cleared)
+                if (! clearedId.empty() && document.findById (clearedId).isValid())
+                    editable.setTonight (clearedId, "file");
+
+            for (const auto& [switchedId, on] : plan.switched)
+                if (document.findById (switchedId).isValid())
+                    editable.setTonight (switchedId, on ? "on" : "off");
+        }
 
         /*  WHOSE LIST A RUN BELONGS TO, by climbing its cue to the top. A jump
             is scoped to one list (§13.5's cross-list rule read from the other
@@ -4924,6 +5094,36 @@ namespace wfg::cue
     {
         const auto verb = textOf (cue, "verb");
 
+        /*  THREE ARE NOT STOPS EITHER (2026-10-05, namespace draft §27).
+            Enable and disable switch their target for tonight, now, and stop
+            nothing (PQ). Jump moves standby, on the next tick, through
+            `standby.jump` - the start cue's road, so a replay takes the record
+            the session logged and fires nothing of its own. The cue's own run
+            is over either way. */
+        if (verb == "enable" || verb == "disable")
+        {
+            switchTonight (cue, runId);
+            finishing.push_back (runId);
+            return;
+        }
+
+        if (verb == "jump")
+        {
+            const auto target = textOf (cue, "target");
+            const auto cueId = cue[idProperty].toString().toStdString();
+            const auto andGo = textOf (cue, "andGo") == "true";
+
+            /*  A JUMP-AND-GO AIMED AT ITSELF fires itself for ever, a tick
+                apart, and is applied and does nothing (PU). A jump back to an
+                earlier cue that comes round to this one again is the designer's
+                loop, and is let be. */
+            if (! target.empty() && ! (andGo && target == cueId))
+                jumpsToMake.push_back ({ listOfCue (cueId), target, andGo, goOfRun (runId) });
+
+            finishing.push_back (runId);
+            return;
+        }
+
         /*  ADVANCE: THE THIRD GRACEFUL VERB, and the one that belongs to a
             ranged media cue rather than to a group.
 
@@ -6439,8 +6639,10 @@ namespace wfg::cue
             earlier in this drain would fire its target a tick after the press.
             A hook's list: a replay never had the record, and does not now. And
             one the hook of this very tick submitted, draining behind the press,
-            is answered by `cue.fire` itself (`killedInDrain`). */
+            is answered by `cue.fire` itself (`killedInDrain`). A jump cue's
+            move is an action like any other, and goes with them (§27). */
         startsToFire.clear();
+        jumpsToMake.clear();
         killedAtTick = tick;
 
         /*  THE PERSISTENT PASS A GO BEFORE THE PRESS OPENED IS TAKEN BACK (the
@@ -8716,10 +8918,28 @@ namespace wfg::cue
         const auto leftAt = document.getAttribute (standbyAddressOf (record.list)).value_or (std::string {});
         const auto ranOutThere = document.getAttribute (finishedAddressOf (record.list)).value_or ("false") == "true";
 
+        /*  WHAT ITS ENABLE AND DISABLE CUES SWITCHED, PUT BACK FIRST (namespace
+            draft §27, PS), so a cue the GO switched off is a place the pointer
+            may stand again by the time the door below is asked - and switched
+            back again if the door refuses, so a refused Doh moves nothing. */
+        std::vector<std::pair<std::string, std::string>> switchedNow;
+
+        for (const auto& [cueId, word] : record.tonightBefore)
+            if (const auto node = document.findById (cueId); node.isValid())
+            {
+                switchedNow.emplace_back (cueId, tonightWord (node));
+                editable.setTonight (cueId, word);
+            }
+
         //  4. THE POINTER, THROUGH ITS OWN DOOR: a cue gone, or no longer one
         //     the pointer may stand on, refuses the Doh before anything moves.
         if (const auto moved = editable.setAttribute (standbyAddressOf (record.list), record.cue); ! moved.ok)
+        {
+            for (const auto& [cueId, word] : switchedNow)
+                editable.setTonight (cueId, word);
+
             return moved.reason;
+        }
 
         /*  THE LAST REPORT IS THIS PRESS'S TO REPLACE (D3) - by the record the
             flush composes on the next tick, an empty one included, so a press
@@ -12240,8 +12460,11 @@ namespace wfg::cue
                 group and the groups all completed instantly.
 
                 `getAttribute` resolves the row and supplies the default, which
-                is the whole reason the document has one door. */
-            if (textOf (child, "enabled") == "false")
+                is the whole reason the document has one door. `runsTonight`
+                reads the absent property as the default too (Tonight.h), and
+                puts tonight's mark over it: a member a disable cue switched off
+                is skipped from the next round on (namespace draft §27, PQ). */
+            if (! runsTonight (child))
                 continue;
 
             out.push_back (id);
@@ -14378,8 +14601,7 @@ namespace wfg::cue
             /*  A disabled member is not spawned, so arming it would reserve a
                 voice for a cue that is never going to play - and a voice held
                 by nothing is a cue that fails with `no-track` later. */
-            if (child.hasProperty (juce::Identifier ("enabled"))
-                  && ! static_cast<bool> (child[juce::Identifier ("enabled")]))
+            if (! runsTonight (child))
                 continue;
 
             if (! timeline)
@@ -14447,6 +14669,17 @@ namespace wfg::cue
         }
 
         startsToFire.clear();
+
+        /*  AND THE JUMP CUES' MOVES (namespace draft §27), the same road: a
+            record the session logs and a replay takes, carrying the GO the jump
+            cue fired under, so its "and Go" is that GO's to take back. */
+        for (const auto& jump : jumpsToMake)
+            engine.submit (origin::engine, "standby.jump",
+                           { osc::Value::string (jump.list), osc::Value::string (jump.target),
+                             osc::Value::boolean (jump.andGo),
+                             osc::Value::int64 (static_cast<std::int64_t> (jump.cause)) });
+
+        jumpsToMake.clear();
 
         /*  ABOVE THE NULL-PLAYER GATE, all three of them, and that is not an
             ordering detail. `wfg serve` without `--hosted` has no Player at all
@@ -16198,6 +16431,9 @@ namespace wfg::cue
     {
         juce::ignoreUnused (runIds);
 
+        /*  The one write a fire makes on the document (namespace draft §27). */
+        runner.setEvening (document);
+
         const auto withRun = [] (std::vector<osc::Value> args, std::size_t index,
                                  const std::string& id)
         {
@@ -17172,6 +17408,15 @@ namespace wfg::cue
                             if (from == origin::engine && runner.killedInDrain (context.tick))
                                 return Outcome::ok (args);
 
+                            /*  A CUE THAT DOES NOT RUN TONIGHT IS NOT FIRED
+                                (namespace draft §27, PP): its file has it
+                                disabled, or a disable cue has switched it off.
+                                GO could never reach one, since the pointer does
+                                not stand on it; a name, a trigger and a start
+                                cue could, until 2026-10-05. */
+                            if (! runsTonight (cue))
+                                return Outcome::rejected (reason::disabled);
+
                             /*  A MANUAL SEQUENCE GROUP HAS NOBODY TO BE ITS
                                 PARENT when it is fired by name. §3.6 makes the
                                 operator the parent: its members start on GO, one
@@ -17252,6 +17497,57 @@ namespace wfg::cue
             moves the standby. That is the whole reason a background list can be
             driven by something other than a person without the person losing
             their place, and it is why this is not `go` with a different name. */
+        /*  A JUMP CUE'S MOVE (2026-10-05, namespace draft §27): submitted by the
+            hook on the tick after the jump cue fired, as a start cue's `cue.fire`
+            is, and never `list.loadToTime`, which forgets the GO and would leave
+            Doh! nothing to take back. Standby onto the target on the jump cue's
+            own list; with andGo, that cue fired as GO fires it, under the GO
+            the jump cue belongs to. The identifiers its fire draws ride on the
+            applied record after the four arguments, as GO's do. */
+        registry.add ({ "standby.jump",
+                        "A jump cue moves its list's standby onto its target, and with andGo fires"
+                        " it as GO would, under the GO that fired the jump cue. Sent by the engine.",
+                        { { "list", 's', false }, { "target", 's', false }, { "andGo", 'T', false },
+                          { "cause", 'h', false }, { "run", 's', true, true } },
+                        true,
+                        [&engine, &runner, &document]
+                        (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto from = context.origin != nullptr ? *context.origin : std::string {};
+                            const auto cause = args[3].isInt64()
+                                                 ? static_cast<std::uint64_t> (std::max<std::int64_t> (0, args[3].getInt64()))
+                                                 : std::uint64_t { 0 };
+
+                            /*  UNDER A GO DOH! HAS TAKEN BACK, or behind a double
+                                Esc in this tick: queued before the press, and
+                                moving nothing after it - the start cue's two
+                                answers, for its two reasons. */
+                            if ((cause != 0 && runner.causeTakenBack (cause))
+                                  || (from == origin::engine && runner.killedInDrain (context.tick)))
+                                return Outcome::ok (args);
+
+                            std::vector<std::string> supplied;
+
+                            for (std::size_t at = 4; at < args.size(); ++at)
+                                supplied.push_back (args[at].getString());
+
+                            std::vector<std::string> made;
+                            const auto refusal = runner.jumpStandby (engine, document, context.tick,
+                                                                     args[0].getString(), args[1].getString(),
+                                                                     args[2].isBool() && args[2].getBool(), cause,
+                                                                     supplied, made);
+
+                            if (! refusal.empty())
+                                return Outcome::rejected (refusal);
+
+                            std::vector<osc::Value> applied (args.begin(), args.begin() + 4);
+
+                            for (const auto& id : made)
+                                applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
+                        } });
+
         registry.add ({ "trigger.fire",
                         "A trigger fired its cue. The standby does not move, whatever it was.",
                         { { "trigger", 's', false }, { "run", 's', true } },
@@ -17271,6 +17567,11 @@ namespace wfg::cue
                                 return Outcome::rejected (reason::unknownId);
 
                             const auto cueId = cue[idProperty].toString().toStdString();
+
+                            /*  NOR A CUE THAT DOES NOT RUN TONIGHT, as `cue.fire`
+                                refuses it (namespace draft §27, PP). */
+                            if (! runsTonight (cue))
+                                return Outcome::rejected (reason::disabled);
 
                             /*  A MANUAL SEQUENCE GROUP HAS NOBODY TO BE ITS
                                 PARENT, the same refusal `cue.fire` gives and for

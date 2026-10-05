@@ -1126,6 +1126,26 @@ namespace wfg::cue
         std::string goDoh (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
                            const std::vector<std::string>& supplied, std::vector<std::string>& drawn);
 
+        /*  THE ONE WRITE A FIRE MAKES ON THE DOCUMENT ITSELF (namespace draft
+            §27): an enable or disable cue's switch, and the standby a cue
+            switched off is stood on moving off it. The runner otherwise holds
+            the document read-only, and a fire is deep inside a handler with no
+            writable one to hand; deferring the switch to the next tick, as a
+            start cue's fire is, would let a cue fired in the same tick run on
+            the old answer. Given once, by `registerGoCommands`. A fire is a
+            logged record, so a replay switches the same cues. */
+        void setEvening (doc::ShowDocument& editable) noexcept { evening = &editable; }
+
+        /*  A JUMP CUE'S MOVE, as `standby.jump`'s handler makes it (§27, PM):
+            standby onto `target` on its list, and with `andGo` that cue fired as
+            GO fires it under `cause`, the GO that fired the jump cue. Answers a
+            refusal, or empty; `made` is every identifier the fire drew, in
+            order, which a replay hands back as `supplied`. */
+        std::string jumpStandby (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
+                                 const std::string& listId, const std::string& target,
+                                 bool andGo, std::uint64_t cause,
+                                 const std::vector<std::string>& supplied, std::vector<std::string>& made);
+
         /*  A SCENE THE GO STOPPED, PUT BACK ONCE IT HAS ENDED (2026-10-03, D3,
             namespace draft §24.13): `go.dohRelaunch`'s handler. The hook submits
             it the tick it sees the scene's run finished; the handler relaunches
@@ -1983,6 +2003,29 @@ namespace wfg::cue
             session logged. The one-tick lag is the cost of the record. */
         std::vector<std::pair<std::string, std::uint64_t>> startsToFire;
 
+        /*  THE MOVES OF JUMP CUES THAT FIRED THIS TICK (namespace draft §27),
+            submitted as `standby.jump` on the next `beforeTick`, the start
+            cue's road and for its reason. Landing a tick later also lands it
+            after the GO that fired the jump cue has advanced the pointer, so
+            the jump's placement is the one that stands. */
+        struct JumpToMake
+        {
+            std::string list, target;
+            bool andGo = false;
+            std::uint64_t cause = 0;
+        };
+
+        std::vector<JumpToMake> jumpsToMake;
+
+        /*  See `setEvening`. Null in a runner nobody registered commands for,
+            and then an enable or disable cue switches nothing. */
+        doc::ShowDocument* evening = nullptr;
+
+        /*  An enable or disable cue's switch of its target (§27, PK), noted on
+            the GO it belongs to for Doh! (PS), stepping the standby off a cue
+            switched off (PQ). */
+        void switchTonight (const juce::ValueTree& cue, const std::string& runId);
+
         /*  One per group run in flight. A vector like every other job list
             here, and drained by the same `remove_if` on a retired flag. */
         ListState lists;
@@ -2330,6 +2373,12 @@ namespace wfg::cue
 
             /*  What it adopted, as it was (D2). */
             std::vector<Adoption> adoptions;
+
+            /*  What its enable and disable cues switched, each cue's mark as
+                this GO found it - `file`, `on` or `off` - the first switch of a
+                cue only, so a Doh! puts back the evening before the GO
+                (namespace draft §27, PS). */
+            std::vector<std::pair<std::string, std::string>> tonightBefore;
         };
 
         /*  The cues a corrected GO sends nothing of, by its serial. */

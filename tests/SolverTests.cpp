@@ -291,6 +291,54 @@ TEST_CASE ("solve: a stop cue before the target ends what it names")
     CHECK (rig.solve (target, -1.0).runs.empty());
 }
 
+TEST_CASE ("solve: enable, disable and jump stop nothing; a disable reaches only what comes after it")
+{
+    /*  Namespace draft §27. The three verbs share the stop cue's targeting
+        and are not stops (PQ): a bed disabled after it started is still
+        playing further on, and the plan says what the evening has switched. */
+    SolverRig rig;
+
+    const auto bed = rig.media (rig.listId, 0, "Ambience");
+    const auto range = rig.document.createRange (bed, 0.0, 4.0);
+    REQUIRE (range.ok);
+    rig.document.findById (range.id)
+       .setProperty (juce::Identifier ("loops"), 0, nullptr);
+
+    //  Ambience, then an enable, a jump and a disable all aimed at it, then a
+    //  disable of Later, then Later - a bed too - then Here.
+    int index = 1;
+
+    for (const auto* verb : { "enable", "jump", "disable" })
+    {
+        const auto id = rig.document.createCue (rig.listId, index++, "transport", verb).id;
+        rig.document.setAttribute ("/godot/cue/" + id + "/target", bed);
+        rig.document.setAttribute ("/godot/cue/" + id + "/verb", verb);
+    }
+
+    const auto offLater = rig.document.createCue (rig.listId, index++, "transport", "Later off").id;
+
+    const auto later = rig.media (rig.listId, index++, "Later");
+    const auto laterRange = rig.document.createRange (later, 0.0, 4.0);
+    REQUIRE (laterRange.ok);
+    rig.document.findById (laterRange.id)
+       .setProperty (juce::Identifier ("loops"), 0, nullptr);
+
+    rig.document.setAttribute ("/godot/cue/" + offLater + "/target", later);
+    rig.document.setAttribute ("/godot/cue/" + offLater + "/verb", "disable");
+
+    const auto target = rig.document.createCue (rig.listId, index, "memo", "Here").id;
+    const auto plan = rig.solve (target, -1.0);
+
+    //  The bed was disabled after it started, and plays on; Later was disabled
+    //  before its turn came, and never started.
+    REQUIRE (plan.runs.size() == 1u);
+    CHECK (plan.runs.front().cue == bed);
+
+    //  What the cues before the place switched, the last word for each.
+    CHECK (plan.switched.at (bed) == false);
+    CHECK (plan.switched.at (later) == false);
+}
+
 TEST_CASE ("solve: a fade leaves a trim behind, as base plus what it moved")
 {
     /*  PR 3.12's shape. The cue says what somebody chose; the fade says where

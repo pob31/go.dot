@@ -154,6 +154,13 @@ namespace wfg
             different group from the one they wrote. */
         inline constexpr const char* needsGo          = "needs-go";
 
+        /*  A CUE THAT DOES NOT RUN TONIGHT was fired by name, by a trigger or
+            by a start cue (namespace draft §27, PP): its file has it disabled,
+            or a disable cue has switched it off. "A disabled cue is skipped,
+            not deleted", and until 2026-10-05 only GO honoured the first half
+            of that - a trigger still fired a cue its designer had switched off. */
+        inline constexpr const char* disabled         = "disabled";
+
         /*  A SAMPLER MEMBER FIRED BY NAME WITH NO STRIP UNDER IT (Phase 6). A
             member of a sampler group is launched by a hand on a strip; fired
             by name while it holds one, the firing is a press on that strip,

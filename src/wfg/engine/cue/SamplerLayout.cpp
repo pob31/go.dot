@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/SamplerLayout.h>
+#include <wfg/engine/cue/Tonight.h>
 
 #include <wfg/engine/document/ShowDocument.h>
 
@@ -99,7 +100,7 @@ namespace wfg::cue
 
             const auto id = idOf (child);
 
-            if (id.empty() || cueRow (document, id, "enabled") == "false")
+            if (id.empty() || ! runsTonight (child))
                 continue;
 
             out.push_back ({ id, {}, false });

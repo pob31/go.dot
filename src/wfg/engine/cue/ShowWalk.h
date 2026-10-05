@@ -154,14 +154,56 @@ namespace wfg::cue
         {
             const juce::Identifier property { name };
 
+            if (owner == "cue" && std::string_view (name) == "enabled" && ! switched.empty())
+                if (const auto found = switched.find (node[idProperty].toString().toStdString());
+                    found != switched.end())
+                    return found->second;
+
             if (node.hasProperty (property))
                 return static_cast<bool> (node[property]);
 
             return text (node, owner, name) == "true";
         }
 
+        /*  WHAT THE ENABLE AND DISABLE CUES A WALK HAS PASSED HAVE SWITCHED
+            (namespace draft §27, PK). A solve reads the show and works the
+            evening out from it, so it never asks a cue's live `tonight` mark:
+            it is told each cue it walks past, in order, and from then on
+            `flag (…, "cue", "enabled")` answers what those cues said, the
+            file's `enabled` otherwise.
+
+            IN ORDER, AND NOT THE ANSWER AT THE END. A disable stops nothing
+            (PQ): a bed fired at cue 5 and disabled at cue 8 is still playing
+            at cue 12, so the pass that asks about cue 5 must ask before it has
+            walked past cue 8. Each pass starts from `forgetSwitches`.
+
+            The shared reader of the per-tick questions is never told, so it
+            reads the file, as it did. */
+        void pass (const juce::ValueTree& node) const
+        {
+            if (node.getType().toString() != "Transport" || ! flag (node, "cue", "enabled"))
+                return;
+
+            const auto verb = text (node, "transport", "verb");
+
+            if (verb != "enable" && verb != "disable")
+                return;
+
+            if (const auto target = text (node, "transport", "target"); ! target.empty())
+                switched[target] = verb == "enable";
+        }
+
+        void forgetSwitches() const { switched.clear(); }
+
+        const std::map<std::string, bool>& switches() const noexcept { return switched; }
+
     private:
         std::map<std::string, std::string> defaults;
+
+        /*  Mutable because the readers are const throughout and this is a
+            walk's notebook rather than what the reader is: the defaults are
+            the reader, and they never move. */
+        mutable std::map<std::string, bool> switched;
     };
 
     /*  A TRANSPORT CUE THAT STOPS NOTHING (Phase 9c, namespace draft §19.6):
@@ -172,6 +214,19 @@ namespace wfg::cue
     {
         const auto verb = read.text (transport, "transport", "verb");
         return verb == "record" || verb == "loop" || verb == "overdub" || verb == "clear";
+    }
+
+    /*  A TRANSPORT CUE THAT ENDS NOTHING, the take presses and the three of
+        namespace draft §27: enable and disable switch their target for tonight
+        and jump moves standby onto it, and none of them stops it. Every walk
+        that counts what a transport cue has stopped asks this. */
+    inline bool isNotAStop (const Reader& read, const juce::ValueTree& transport)
+    {
+        if (isTakePress (read, transport))
+            return true;
+
+        const auto verb = read.text (transport, "transport", "verb");
+        return verb == "enable" || verb == "disable" || verb == "jump";
     }
 
     //======================================================================

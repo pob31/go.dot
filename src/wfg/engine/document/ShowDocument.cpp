@@ -17,6 +17,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/Tonight.h>
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/FadePoints.h>
@@ -632,9 +633,20 @@ namespace wfg::doc
             do - Schema applies that rule once, and this reads its result.
 
             A row the schema does not know counts as show: see `showRevision()`
-            for why guessing dirty is the safe way to be wrong. */
-        const auto* attribute = Schema::instance().attribute (node.getType().toString().toStdString(),
-                                                              property.toString().toStdString());
+            for why guessing dirty is the safe way to be wrong.
+
+            A ROW THAT PERSISTS NOWHERE is not one it does not know. Since
+            2026-10-05 one of them is held on the node itself - a cue's
+            `tonight` mark (`setTonight`) - and it is in neither file, so it
+            moves `revision()`, which the caches want, and never the dot. */
+        const auto elementName = node.getType().toString().toStdString();
+        const auto propertyName = property.toString().toStdString();
+        const auto* attribute = Schema::instance().attribute (elementName, propertyName);
+
+        if (attribute == nullptr)
+            if (const auto* element = Schema::instance().element (elementName);
+                element != nullptr && element->derivedAttribute (propertyName) != nullptr)
+                return;
 
         if (attribute == nullptr || attribute->persist() == Persist::show)
             ++showChangeCount;
@@ -955,6 +967,34 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    EditResult ShowDocument::setTonight (const std::string& cueId, std::string_view word)
+    {
+        if (word != "on" && word != "off" && word != "file")
+            return EditResult::failed (reason::badValue);
+
+        auto cue = findById (cueId);
+
+        if (! cue.isValid() || ownerForElement (cue.getType().toString().toStdString()) != "cue")
+            return EditResult::failed (reason::badAddress);
+
+        /*  A MARK IS ALWAYS A DIFFERENCE: switched to what the file says, the
+            mark goes, so `on tonight` is never drawn on a cue that would have
+            run anyway. No undo manager: the evening is not an edit, and Doh!
+            puts a GO's switch back itself (namespace draft §27, PS). */
+        const auto wanted = word == "file" || (word == "on") == cue::enabledInFile (cue)
+                              ? juce::String() : juce::String (std::string (word));
+
+        if (cue[cue::tonightProperty].toString() == wanted)
+            return EditResult::succeeded (cueId);
+
+        if (wanted.isEmpty())
+            cue.removeProperty (cue::tonightProperty, nullptr);
+        else
+            cue.setProperty (cue::tonightProperty, wanted, nullptr);
+
+        return EditResult::succeeded (cueId);
+    }
+
     EditResult ShowDocument::setAttribute (const std::string& address, std::string_view text)
     {
         auto target = resolve (address);
@@ -2981,6 +3021,12 @@ namespace wfg::doc
 
                     const auto attributeName = name.toString().toStdString();
                     const auto* attribute = element->attribute (attributeName);
+
+                    /*  A cue's `tonight` mark: held on the node and in no file
+                        (`setTonight`), so a live show validated mid-evening is
+                        not wrong for carrying it. */
+                    if (attribute == nullptr && element->derivedAttribute (attributeName) != nullptr)
+                        continue;
 
                     if (attribute == nullptr)
                     {

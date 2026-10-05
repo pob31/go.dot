@@ -18597,11 +18597,26 @@ The rest are the implementer's, the author's to overrule:
 
 ### 27.3 The engine
 
-The override lives in `cue::Tonight`, on the tick thread beside the live layer (§17.13), with a
-revision that the slot analysis and the sampler layout fold into their cache keys. Every reader of a
-cue's `enabled` asks it: `ShowWalk::Reader::flag`, `cue::isEnabled`, `Runner::membersOf` and
-`armablesFor`. `ShowDocument`'s check of a saved pointer keeps reading the file, because the file
-knows nothing of tonight.
+The switch is a mark on the cue's own node, `tonight`, written by `ShowDocument::setTonight` with
+no undo manager. `cue/tonight` persists nowhere, so neither writer writes it, `validate` passes over
+it, and the property listener moves `revision()` - which every cache keys on - and never the unsaved
+dot. A revert or a reopen builds a new tree, and the marks go with the old one. The runner holds the
+document read-only; `registerGoCommands` hands it the writable one for this write alone
+(`Runner::setEvening`), because a fire is deep inside a handler and deferring the switch a tick, as a
+start cue's fire is deferred, would let a cue fired in the same tick run on the old answer.
+
+Every live reader asks `cue::runsTonight` (`cue/Tonight.h`), the mark over the file's `enabled`:
+where the pointer may stand (`CueList`), which members a group plays (`Runner::membersOf`), what is
+armed (`armablesFor`), what the sampler lays out, and the gates of `cue.fire` and `trigger.fire`.
+
+A solve does not ask the marks: it works the evening out from the show. `ShowWalk::Reader` is told
+each enable and disable cue a pass walks by (`Reader::pass`), and from then on answers
+`flag (…, "cue", "enabled")` with what they said - in order, so a bed disabled after it started is
+still planned as playing further on (PQ). `Plan::switched` carries the answer at the place, and a
+load to time takes away the marks the list could have made - on its own cues and on what its enable
+and disable cues aim at - and puts the plan's on. The per-tick shared reader is never told, and
+reads the file as before. A Doh! restores the marks its GO noted (`GoRecord::tonightBefore`) before
+it moves the pointer, and switches them back if the pointer's door refuses.
 
 A jump cue copies the start cue: `fireStop` queues the list, the target, `andGo` and the GO the run
 belongs to, and `beforeTick` submits `standby.jump` on the next tick, after the GO's own advance, so

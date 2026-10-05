@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/Tonight.h>
 
 #include <wfg/engine/document/ShowDocument.h>
 
@@ -114,11 +115,13 @@ namespace wfg::cue
                      && cue[juce::Identifier ("mode")].toString() == "sampler";
         }
 
+        /*  AND TONIGHT'S MARK OVER IT (namespace draft §27): the pointer does
+            not stand on a cue a disable cue has switched off, and may stand on
+            one an enable cue has switched on against its file. The reading of
+            the file itself, written out above, lives in Tonight.h. */
         bool isEnabled (const juce::ValueTree& cue)
         {
-            const juce::Identifier enabled { "enabled" };
-
-            return ! cue.hasProperty (enabled) || static_cast<bool> (cue[enabled]);
+            return runsTonight (cue);
         }
 
         /*  Whether this element is a cue at all - not a header, a footer, a

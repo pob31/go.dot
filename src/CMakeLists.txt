@@ -103,6 +103,7 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/DohSetting.h
     wfg/engine/cue/DohSetting.cpp
     wfg/engine/cue/ShowWalk.h
+    wfg/engine/cue/Tonight.h
     wfg/engine/cue/Solver.h
     wfg/engine/cue/Solver.cpp
     wfg/engine/cue/SlotAnalysis.h

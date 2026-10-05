@@ -506,8 +506,18 @@ namespace wfg::doc
         //======================================================================
 
         /** Parses `text` against the schema and writes it. The single write
-            path: nothing else in the engine touches a property. */
+            path: nothing else in the engine touches a property - but for the
+            one below, which writes no attribute. */
         EditResult setAttribute (const std::string& address, std::string_view text);
+
+        /*  TONIGHT'S SWITCH ON A CUE (namespace draft §27, PK): `on`, `off`,
+            or `file` to take it away. Held on the node as `tonight`, a row that
+            persists nowhere, so it is in neither file, lights no unsaved dot,
+            is not undone by Undo and is let through a lock: the evening is not
+            an edit. A switch to what the file already says takes the mark
+            away, so a mark is always a difference. Refuses a word that is none
+            of the three and an identifier that names no cue. */
+        EditResult setTonight (const std::string& cueId, std::string_view word);
 
         /** The attribute's value as canonical text, or nullopt if the address
             does not resolve. Returns the default when the attribute is absent,
