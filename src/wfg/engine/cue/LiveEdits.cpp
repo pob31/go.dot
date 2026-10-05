@@ -298,6 +298,12 @@ namespace wfg::cue
 
     void LiveEdits::putBack (const LiveEdits& kept)
     {
+        /*  NOTHING CHANGED SINCE THE COPY - every change moves the revision -
+            is nothing to put back, and no news for a reader: a set that rode
+            nothing live does not make the Runner look at the layer again. */
+        if (rev == kept.rev)
+            return;
+
         rows = kept.rows;
         sends = kept.sends;
         fx = kept.fx;

@@ -75,7 +75,7 @@ namespace wfg
 
             /*  AND WHERE, when one command wrote several addresses and the
                 reason cannot say which refused (`node.setMany`, namespace
-                draft §30.11): a sixth word, after the command. */
+                draft §30.11): after the command, to the end of the line. */
             if (! r.detail.empty())
                 text += " " + r.detail;
 

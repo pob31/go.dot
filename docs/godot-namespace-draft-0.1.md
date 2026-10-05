@@ -19732,17 +19732,18 @@ a step on nearly every write, since a run joins only one address.
   rides live, so a drag over six sends under the lock opens no step at all.
 - *All or none.* Every pair is looked at before any is written: a string address, a value it can
   be, no address twice (`bad-value`), none that is not Go.dot's or is a hand's ride (`bad-address`).
-  Then each is written in order, and if a door refuses one, what the pairs before it wrote is put
-  back: the document's values by `ShowDocument::ScopedKeep`, which `setAttribute` tells what a value
-  held before it changes it, and which puts each back through the history it went on - a frame that
-  joined a drag's step leaves that step exactly as the drag had made it, and a set that opened its own
-  step takes the step off whole (`undoCurrentTransactionOnly`) and lets nothing join what JUCE leaves
-  open behind it; the live layer by a copy taken before the first pair (`cue::liveSideFor`, passed to
-  `registerDocumentCommands` as `doc::LiveSide`, `LiveEdits::putBack`).
+  Then the set is *tried*: every pair written in order through the doors on no history
+  (`ShowDocument::ScopedUndoSuppression`), and everything put back whatever the doors said - the
+  document's values by `ShowDocument::ScopedKeep`, which `setAttribute` tells what a value held
+  before it changes it, and the live layer by a copy taken before the first pair
+  (`cue::liveSideFor`, passed to `registerDocumentCommands` as `doc::LiveSide`,
+  `LiveEdits::putBack`). A pair a door refused refuses the set, with nothing on the history. A set
+  every door took is written again, for real, into the step the hook opened or joined. (As first
+  built it was written straight into its step and taken off on a refusal - see the review below.)
 - *The address refused is said.* A refusal carries the door's own reason, and `Outcome::detail`
-  carries the address it was refused at to `/godot/engine/lastError` as a sixth word, after the
-  command; the window reads it as "node.setMany refused: locked at /godot/cue/…/level - none of its
-  values was written". The log's line is unchanged: a refused record already carries every pair, and
+  carries the address it was refused at to `/godot/engine/lastError`, after the command - the rest
+  of the line, since an address a client sent may hold a space; the window reads it as
+  "node.setMany refused: locked at /godot/cue/…/level - none of its values was written". The log's line is unchanged: a refused record already carries every pair, and
   a replay refuses it at the same address for the same reason.
 
 **The foot follows the selection.** `model::servesMany`: the send mixer and the EQ act on every
@@ -19827,9 +19828,11 @@ with the GCC warnings finds nothing new in the changed sources and tests (the on
 - **TH - Nor is a hand's ride.** A fader's trim, a loop point, the lane's ride: no decision, no step of
   the history, and nothing a set could put back. Both are refused `bad-address`, before anything is
   written.
-- **TI - The address refused is a sixth word of `lastError`, never of the log.** The reason codes are
-  one word and a contract; the record already carries every pair. `Outcome::detail` and
-  `LogRecord::detail` carry it to the one place a person reads a refusal, and nowhere else.
+- **TI - The address refused follows the command in `lastError`, never in the log.** The reason
+  codes are one word and a contract; the record already carries every pair. `Outcome::detail` and
+  `LogRecord::detail` carry it to the one place a person reads a refusal, and nowhere else; the window
+  takes the whole rest of the line as the address, so one a client sent with a space in it is not cut
+  short.
 - **TJ - Over several cues the bar offers the EQ and the sends, and nothing else.** A chain, a
   waveform, a take and a timeline are one cue's, and a button that opened one of them from a selection
   of six would edit one where the hand meant six - so the FX button is absent rather than saying
@@ -19866,3 +19869,45 @@ One more, after the stage: one cue's EQ band dragged was two `node.set`s a frame
 taking turns, so nearly every frame was its own step of Undo, as it had been since the panel was
 built. Its frequency and gain now go as one `node.setMany`, and frame after frame joins as the same
 set (`EqPanelComponent::dragTo`; a fade's band still goes through the fade's own door).
+
+**The review, and what it mended (after the stage).** The first build kept a set all or none by
+writing it into its step and, when a door refused a later pair, putting the earlier ones back and
+taking a step the set had opened off whole, with JUCE's `undoCurrentTransactionOnly`. That call also
+puts back JUCE's stash of "future" steps - a step the operator had undone and then replaced by a new
+edit, which JUCE sets aside at that new edit and clears nowhere else, not even when a show is
+opened. So: a pre-wait set to 1, then 2; Undo; 7 written; a set refused part-way - and Redo offered
+the 2 again, wrote it over the 7, and an Undo after it went back to the 1: the 7 was lost. After a
+show was opened, the stash could hand back a step of the show before. A replay does the same, so a
+replay could not have caught it.
+
+A set is now **tried before it is written** (`DocumentCommands.cpp`): the pairs go through the doors
+inside a `ScopedUndoSuppression`, and the document's values and the live layer are put back whatever
+the doors said, so nothing of the try reaches the history. Only when every door took its pair are the
+pairs written again, into the step the hook opened or joined; the show and the layer are as the try
+found them, so the doors answer as they did. Were a door ever to refuse that second pass, what it
+wrote is put back through the history it went on - writes that cancel inside the step, never a step
+taken off. `undoCurrentTransactionOnly` is called nowhere. A refused set now leaves the stack as a
+refused `node.set` always has: no step, the redo history untouched, and the coalescing key the hook
+set, which a write to another address does not join. Nothing outside the document and the live layer
+sees the try: the document is the tree's only listener and moves only its two counters, the doors a
+set may take write only the show and the layer (a mount and a ride are refused before, TG and TH),
+and the Runner and the parameter tree read the show after the tick, not inside the command.
+
+**The counters are put back with the values.** `ScopedKeep::putBack` sets `revision()` and
+`showRevision()` back to what they were when the scope opened: the show is what it was, so the
+unsaved dot, the autosave and every cache keyed on a revision have nothing new to see. So the try
+leaves no trace, and a set refused at any point - at its try, as every refusal now is - moves neither
+counter. This is the implementer's call; the alternative was a refused set marking the show unsaved,
+as an Undo does. `LiveEdits::putBack` moves the layer's revision only when something was written to
+the layer since the copy, so a set that rides nothing live is no news to the Runner.
+
+Tests, in UndoTests, both locales: `undo: a set refused part-way never brings back a step that was
+undone and replaced` - the four steps above, then the refused set: nothing to redo, the 7 standing,
+`redo` refused, Undo to the 1 and Redo to the 7; and the same after the show is read back in, which
+clears the history and not JUCE's stash. And in the refused-set case, `a refused set, then a node.set
+to one of its addresses: that write is a step of its own`. In ClientTests, the refusal's sentence
+keeps an address that holds a space whole. The earlier `node.setMany` cases in UndoTests, GoTests and
+DocumentTests (the replay) pass unchanged. The new case failed on the first build with five assertions, the replaced step's return
+after a show was read back in among them. Counts after the mend: `wfg_tests` whole but `AudioTests`,
+1660 cases, green under C and `fr-FR`; `wfg_audio_ui_tests` whole, 67 cases, green under both; `ctest
+-R "replay|client|undo|schema|live|surface|document|lock"` 73 of 73.

@@ -120,9 +120,10 @@ namespace wfg::cue
         void clear();
 
         /*  WHAT A COPY KEPT, BACK AGAIN (namespace draft §30.11): a
-            `node.setMany` refused part-way leaves the layer as it found it.
-            The revision moves on all the same, so a reader that saw the
-            pairs before the refusal sees the layer change back. */
+            `node.setMany`'s try, or a set refused part-way, leaves the layer
+            as it found it. When anything was written since the copy the
+            revision moves on, never back, so a reader sees the layer change;
+            when nothing was, nothing moves. */
         void putBack (const LiveEdits& kept);
 
         const std::map<std::string, std::map<std::string, std::string>>& allRows() const noexcept { return rows; }

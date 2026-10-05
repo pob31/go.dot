@@ -174,9 +174,10 @@ namespace wfg::client::model
 
         /*  tick, sequence, origin, reason, command - and the command may carry
             no spaces, so five fields is exactly what a well-formed record has.
-            A sixth is where a refusal happened when the reason cannot say: the
-            address a `node.setMany` was refused at (namespace draft §30.11).
-            Anything else is shown as it came. */
+            What follows the fifth is where a refusal happened when the reason
+            cannot say: the address a `node.setMany` was refused at (namespace
+            draft §30.11) - the rest of the line, since an address a client
+            sent may hold a space. Anything else is shown as it came. */
         const auto fields = words (lastError);
 
         /*  THE CLOCK MOVED AND THE SHOW FOLLOWED IT (PRD §6.2, 2026-09-28):
@@ -192,8 +193,20 @@ namespace wfg::client::model
 
         /*  SEVERAL VALUES AS ONE EDIT, refused at one of them (§30.11): which
             one is the news, since none of the others was written either. */
-        if (fields.size() == 6 && fields[4] == "node.setMany")
-            return "node.setMany refused: " + fields[3] + " at " + fields[5] + " - none of its values was written";
+        if (fields.size() >= 6 && fields[4] == "node.setMany")
+        {
+            //  Past the fifth word and the space after it, whatever the address holds.
+            std::size_t at = 0;
+
+            for (int word = 0; word < 5; ++word)
+            {
+                at = lastError.find_first_not_of (' ', at);
+                at = lastError.find (' ', at);
+            }
+
+            const auto where = lastError.substr (lastError.find_first_not_of (' ', at));
+            return "node.setMany refused: " + fields[3] + " at " + where + " - none of its values was written";
+        }
 
         if (fields.size() != 5)
             return lastError;

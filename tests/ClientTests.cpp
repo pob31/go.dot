@@ -495,6 +495,11 @@ TEST_CASE ("client: a row the pointer cannot stand on is not offered, and a refu
     reading.lastError = "5501 28 window locked node.setMany /godot/cue/B3N8R5TW/level";
     CHECK (reading.errorLine() == "node.setMany refused: locked at /godot/cue/B3N8R5TW/level"
                                   " - none of its values was written");
+
+    //  An address a client sent may hold a space: the rest of the line is the address, whole.
+    reading.lastError = "5502 29 udp:10.0.0.5:9000 bad-address node.setMany /godot/cue/B3N8R5TW/my level";
+    CHECK (reading.errorLine() == "node.setMany refused: bad-address at /godot/cue/B3N8R5TW/my level"
+                                  " - none of its values was written");
     reading.lastError = "something else entirely";
 
     /*  THE CLOCK MOVED AND THE SHOW FOLLOWED IT (PRD §6.2, 2026-09-28): said

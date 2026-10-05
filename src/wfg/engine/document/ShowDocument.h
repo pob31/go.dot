@@ -643,12 +643,12 @@ namespace wfg::doc
         /*  WRITES INSIDE THIS SCOPE GO ON NO HISTORY, counted so that scopes
             may nest.
 
-            It guards exactly one call site today - `adopt`, which replaces the
-            show wholesale - and is said plainly here so that a reviewer finding
-            it used once does not think something is missing. The counted shape
-            is for Phase 6, where a cue-driven recall will write parameter rows
-            in a domain that does have a history and must not bury an operator's
-            edit under a hundred of them. */
+            It guards two call sites today - `adopt`, which replaces the show
+            wholesale, and `node.setMany`'s try, which writes a set and puts it
+            back before anything of it may reach the stack (namespace draft
+            §30.11). The counted shape is for Phase 6, where a cue-driven recall
+            will write parameter rows in a domain that does have a history and
+            must not bury an operator's edit under a hundred of them. */
         class ScopedUndoSuppression
         {
         public:
@@ -664,20 +664,24 @@ namespace wfg::doc
 
         /*  ALL OR NONE, for `node.setMany` (namespace draft §30.11): while one
             of these is in scope, every value the write door changes is kept as
-            it was, and `putBack` puts each one back, the last first.
+            it was, and `putBack` puts each one back, the last first, and the
+            two revision counters with them.
 
-            THROUGH THE SAME HISTORY THE WRITE WENT ON, because a set that joins
-            a drag's open step must leave that step holding exactly what the
-            drag had made before this frame - Undo still takes the whole drag
-            back. A set that opened its step (`node.setMany` is one command,
-            one step) leaves nothing on the stack: the step is taken off whole,
-            and the next write may not join it, since JUCE leaves an unnamed
-            transaction open behind an undo.
+            THROUGH THE SAME HISTORY THE WRITE WENT ON. A set is tried inside a
+            `ScopedUndoSuppression` first, where that history is none, so its
+            put-back touches no stack; and the one put-back that could meet a
+            history - a door refusing the real pass, which the try makes
+            impossible - writes the values back inside the same step, so the
+            step still holds exactly what it held. It never takes a step off:
+            JUCE's `undoCurrentTransactionOnly` also hands back, as Redo, a step
+            the operator undid and then replaced (the review of 72e5723).
 
-            Kept here and not by the command, because every door that reaches
-            the document - the EQ and send door unlocked, a plugin's values, a
-            fade's moves - writes through `setAttribute`, and the keeping has to
-            see them all. Nested scopes keep into the innermost. */
+            ONLY WHAT `setAttribute` WRITES IS KEPT, so nothing else may change
+            the show inside the scope - the counters are put back on that
+            promise. Kept here and not by the command, because every door that
+            reaches the document - the EQ and send door unlocked, a plugin's
+            values, a fade's moves - writes through `setAttribute`, and the
+            keeping has to see them all. Nested scopes keep into the innermost. */
         class ScopedKeep
         {
         public:
@@ -706,10 +710,10 @@ namespace wfg::doc
             std::vector<Kept> kept;
             ScopedKeep* outer = nullptr;
 
-            /*  Whether the command this scope serves opened its own step -
-                nothing performed on the step the stack has open - so that a
-                put-back takes the step away rather than leaving it empty. */
-            bool ownStep = false;
+            /*  The document's two revision counters when the scope opened, put
+                back with the values. */
+            std::uint64_t changesAt = 0;
+            std::uint64_t showChangesAt = 0;
         };
 
         //======================================================================

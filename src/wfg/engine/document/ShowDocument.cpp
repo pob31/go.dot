@@ -1008,14 +1008,9 @@ namespace wfg::doc
 
     //==============================================================================
     ShowDocument::ScopedKeep::ScopedKeep (ShowDocument& documentToKeep)
-        : target (documentToKeep), outer (documentToKeep.keeping)
+        : target (documentToKeep), outer (documentToKeep.keeping),
+          changesAt (documentToKeep.changeCount), showChangesAt (documentToKeep.showChangeCount)
     {
-        /*  NOTHING PERFORMED ON THE OPEN STEP means the transaction hook opened
-            a new one for this command - JUCE counts nought while a step is
-            named and empty - so whatever this command writes is the step. */
-        ownStep = target.histories[static_cast<std::size_t> (UndoDomain::document)]
-                      ->getNumActionsInCurrentTransaction() == 0;
-
         target.keeping = this;
     }
 
@@ -1036,17 +1031,11 @@ namespace wfg::doc
                 entry->node.removeProperty (entry->property, entry->onto);
         }
 
-        auto& stack = *target.histories[static_cast<std::size_t> (UndoDomain::document)];
-
-        /*  AND A STEP THIS COMMAND OPENED IS TAKEN OFF WHOLE: it holds only the
-            writes and their put-backs now, and an Undo that did nothing would
-            be a step nobody took. JUCE opens an unnamed transaction behind it,
-            so the next write must not join what is left - it opens its own. */
-        if (ownStep && stack.getNumActionsInCurrentTransaction() > 0)
-        {
-            stack.undoCurrentTransactionOnly();
-            target.forgetCoalescing();
-        }
+        /*  AND THE COUNTERS WITH THEM: the show is again what it was when the
+            scope opened, so nothing a revision keys - a cache, the unsaved
+            dot, the autosave - has anything new to see. */
+        target.changeCount = changesAt;
+        target.showChangeCount = showChangesAt;
 
         kept.clear();
     }

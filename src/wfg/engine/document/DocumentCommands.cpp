@@ -947,12 +947,28 @@ namespace wfg::doc
 
             ALL OR NONE. Every pair is looked at before any is written - an
             address and a value it can be, no address twice, none that is not
-            Go.dot's or is a hand's ride - and if a door then refuses one, what
-            the pairs before it wrote is put back: the document's values through
-            its history (`ShowDocument::ScopedKeep`), the live layer by the live
-            side's own keeping. The refusal is the door's reason, and the
-            address it was refused at is said after the command at
-            `/godot/engine/lastError` (`Outcome::detail`). */
+            Go.dot's or is a hand's ride - and then the set is TRIED: written
+            pair by pair through the doors on no history at all
+            (`ShowDocument::ScopedUndoSuppression`), and put back whatever the
+            doors said - the document's values by `ShowDocument::ScopedKeep`,
+            the live layer by the live side's own keeping. A pair a door
+            refused refuses the set, and nothing has reached the history. Only
+            a set every door took is written again, for real, into the step the
+            transaction hook opened or joined.
+
+            TRIED, NOT WRITTEN AND TAKEN BACK. The first build wrote the set into
+            its step and, on a refusal, took the step off with JUCE's
+            `undoCurrentTransactionOnly` - which also hands back, as Redo, a step
+            the operator had undone and then replaced, kept aside by JUCE ever
+            since; Redo then wrote an old value over the new one, and the new
+            one was lost (namespace draft §30.11, the review of 72e5723). A try
+            on no history never touches the stack, so a refused set leaves it
+            as a refused `node.set` does: no step, and the coalescing key the
+            hook set, which a write to another address does not join.
+
+            The refusal is the door's reason, and the address it was refused at
+            is said after the command at `/godot/engine/lastError`
+            (`Outcome::detail`). */
         registry.add ({ "node.setMany",
                         "Sets several values as one edit, by their addresses, given as address-value pairs:"
                         " all of them or none, one record and one step to undo.",
@@ -998,23 +1014,54 @@ namespace wfg::doc
                                 seen.push_back (address);
                             }
 
-                            ShowDocument::ScopedKeep kept { document };
-                            const auto putBackLive = many.keep ? many.keep() : std::function<void()> {};
-
-                            for (std::size_t at = 0; at < args.size(); at += 2)
+                            /*  ONE PASS OVER THE PAIRS, stopping at the first a
+                                door refuses. Unrecorded, it is the try: on no
+                                history, and always put back - the document and
+                                the live layer as they were, the document's
+                                counters too, since the doors write nothing else
+                                and nothing reads the show before the tick ends.
+                                Recorded, it is the write, put back only if a
+                                door refuses. */
+                            const auto pass = [&document, &writeOne, &many, &args, &refusedAt]
+                                              (bool recorded) -> std::optional<Outcome>
                             {
-                                const auto outcome = (*writeOne) ({ args[at], args[at + 1] });
+                                std::optional<ShowDocument::ScopedUndoSuppression> unrecorded;
 
-                                if (! outcome.applied)
+                                if (! recorded)
+                                    unrecorded.emplace (document);
+
+                                ShowDocument::ScopedKeep kept { document };
+                                const auto putBackLive = many.keep ? many.keep() : std::function<void()> {};
+
+                                std::optional<Outcome> refusal;
+
+                                for (std::size_t at = 0; at < args.size() && ! refusal.has_value(); at += 2)
+                                    if (const auto outcome = (*writeOne) ({ args[at], args[at + 1] }); ! outcome.applied)
+                                        refusal = refusedAt (outcome.reason, args[at].getString());
+
+                                if (! recorded || refusal.has_value())
                                 {
                                     kept.putBack();
 
                                     if (putBackLive)
                                         putBackLive();
-
-                                    return refusedAt (outcome.reason, args[at].getString());
                                 }
-                            }
+
+                                return refusal;
+                            };
+
+                            if (auto refusal = pass (false))
+                                return std::move (*refusal);
+
+                            /*  AND NOW FOR REAL, into the step the hook opened or
+                                joined. The show and the layer are as the try
+                                found them, so every door answers as it did. Were
+                                one ever to refuse here, what this pass wrote is put
+                                back through the history it went on - writes that
+                                cancel inside the step, never a step taken off -
+                                and the set is refused all the same. */
+                            if (auto refusal = pass (true))
+                                return std::move (*refusal);
 
                             return Outcome::ok (args);
                         } });

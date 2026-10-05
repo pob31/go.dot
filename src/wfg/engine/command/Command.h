@@ -70,8 +70,9 @@ namespace wfg
 
         /*  WHERE A REFUSAL HAPPENED, when the reason alone cannot say: the one
             address of several a `node.setMany` was refused at (namespace draft
-            §30.11). One word, no spaces, read at `/godot/engine/lastError`
-            after the command's name - and never written to the log, whose
+            §30.11). Read at `/godot/engine/lastError` after the command's name,
+            to the end of the line, since an address a client sent may hold a
+            space - and never written to the log, whose
             record already carries every argument and whose line is a contract
             this does not change. Empty for every other refusal. */
         std::string detail;

@@ -775,6 +775,96 @@ TEST_CASE ("undo: a set refused at one address writes none of them, says where, 
         CHECK (rig.engine.lastError().find ("locked node.setMany " + preWaitOf (firstCue)) != std::string::npos);
         CHECK (rig.document.getAttribute (preWaitOf (inGroupA)) == std::string ("0"));
     }
+
+    SUBCASE ("a refused set, then a node.set to one of its addresses: that write is a step of its own")
+    {
+        CHECK (rig.apply (10, "node.setMany", { text (preWaitOf (firstCue)), osc::Value::float64 (1.0),
+                                                text ("/godot/cue/ZZZZZZZZ/preWait"), osc::Value::float64 (2.0) })
+                   .rejected == 1);
+        REQUIRE (rig.apply (11, "node.set", { text (preWaitOf (firstCue)), osc::Value::float64 (9.0) }).applied == 1);
+
+        CHECK (steps() == 4);
+        CHECK (rig.undoName() == "node.set");
+
+        REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.set"));
+        CHECK (rig.document.getAttribute (preWaitOf (firstCue)) == std::string ("0"));
+        CHECK (rig.undoName() == "cue.create");
+    }
+}
+
+TEST_CASE ("undo: a set refused part-way never brings back a step that was undone and replaced")
+{
+    /*  The review of 72e5723 (namespace draft §30.11): a step undone and then
+        replaced by a new edit is gone - JUCE keeps it aside, in a stash only
+        `undoCurrentTransactionOnly` ever reads back. The first put-back took a
+        refused set's own step off with that call, and so handed the replaced
+        step back as Redo: Redo then wrote the old value over the operator's
+        new one, and an Undo after it lost the new one for good. A set is now
+        tried on no history first, and its writes reach the history only once
+        every pair is known good. */
+    Rig rig;
+    twoCues (rig);
+
+    const auto preWait = preWaitOf (firstCue);
+
+    const auto history = [&rig]
+    {
+        return rig.document.history (doc::UndoDomain::document).canRedo();
+    };
+
+    //  1, then 2; 2 undone; 7 written in its place - the 2 is no step any more.
+    REQUIRE (rig.apply (10, "node.set", { text (preWait), osc::Value::float64 (1.0) }).applied == 1);
+    REQUIRE (rig.apply (200, "node.set", { text (preWait), osc::Value::float64 (2.0) }).applied == 1);
+    REQUIRE (rig.apply (400, "undo").applied == 1);
+    REQUIRE (history());
+    REQUIRE (rig.apply (600, "node.set", { text (preWait), osc::Value::float64 (7.0) }).applied == 1);
+    REQUIRE_FALSE (history());
+
+    const auto refusedPartWay = [&rig, &preWait] (std::int64_t tick)
+    {
+        CHECK (rig.apply (tick, "node.setMany", { text (preWait), osc::Value::float64 (3.0),
+                                                  text ("/godot/cue/ZZZZZZZZ/preWait"), osc::Value::float64 (1.0) })
+                   .rejected == 1);
+    };
+
+    SUBCASE ("the 7 stands, nothing is offered to redo, and Undo goes back to the 1")
+    {
+        refusedPartWay (800);
+
+        CHECK_FALSE (history());
+        CHECK (rig.document.getAttribute (preWait) == std::string ("7"));
+        CHECK (rig.undoName() == "node.set");
+
+        //  Redo has nothing; Undo takes back the 7, to the 1, and Redo puts the 7 back.
+        CHECK (rig.apply (801, "redo").rejected == 1);
+        CHECK (rig.document.getAttribute (preWait) == std::string ("7"));
+
+        REQUIRE (rig.apply (1000, "undo").applied == 1);
+        CHECK (rig.document.getAttribute (preWait) == std::string ("1"));
+
+        REQUIRE (rig.apply (1200, "redo").applied == 1);
+        CHECK (rig.document.getAttribute (preWait) == std::string ("7"));
+    }
+
+    SUBCASE ("and the same after the show is replaced: a step of the show before is never offered")
+    {
+        /*  A load clears the history but not JUCE's stash, so the 2 is still
+            kept aside there when the same show is read back in. */
+        const auto xml = doc::CanonicalXml::write (rig.document);
+        const auto result = doc::CanonicalXml::read (xml, rig.document);
+
+        for (const auto& problem : result.problems)
+            INFO (problem);
+
+        REQUIRE (result.ok);
+        REQUIRE_FALSE (rig.canUndo());
+
+        refusedPartWay (800);
+
+        CHECK_FALSE (history());
+        CHECK_FALSE (rig.canUndo());
+        CHECK (rig.document.getAttribute (preWait) == std::string ("7"));
+    }
 }
 
 TEST_CASE ("undo: the step is the transaction and never the action")
