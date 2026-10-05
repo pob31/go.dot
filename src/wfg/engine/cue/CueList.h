@@ -187,6 +187,22 @@ namespace wfg::cue
     std::string standbyAfterFiring (const juce::ValueTree& list, const std::string& current,
                                     const RunTable* runs = nullptr);
 
+    /*  WHERE A POINTER STANDING ON THIS CUE REALLY STANDS: a manual group's ROW
+        is its first member (decision M, 2026-09-06), so this answers that member,
+        as deep as the manual groups go; every other cue answers itself, and so
+        does an id the list cannot find.
+
+        The walk never rests on that row, but a park can put the pointer there,
+        and a GO from it fires the group, which plays its first member. Stepping
+        on from the ROW then went past the whole group - the author's report of
+        2026-10-05, "the stand-by cursor didn't go to the second cue inside the
+        group but directly at the next line after the group" (namespace draft
+        §30). `standbyAfterFiring` and the arrows step on from here instead.
+        `nextStandby` itself does not, because a deletion's repair asks it what
+        follows a node that is about to disappear, and the inside of that node is
+        the one answer it must never give. */
+    std::string positionOf (const juce::ValueTree& list, const std::string& cueId);
+
     /*  MAY THE POINTER STAND HERE: is `cueId` one of this list's stops - an
         enabled cue it holds, at any depth, that is not inside a header, a footer
         or a persistent section - or the empty string, which is nowhere at all

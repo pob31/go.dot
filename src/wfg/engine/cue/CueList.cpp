@@ -514,7 +514,9 @@ namespace wfg::cue
         if (! list.isValid())
             return current;
 
-        const auto from = findOnPath (list, current);
+        /*  From the position the pointer held, which on a manual group's row is
+            its first member: that is the cue this GO played (`positionOf`). */
+        const auto from = descendTo (findOnPath (list, current));
 
         /*  Nowhere, or somewhere the pointer cannot be. That is not the end of
             anything - it is a list nobody has armed - so it is left alone, and
@@ -547,6 +549,16 @@ namespace wfg::cue
             nowhere stays put, deliberately and by the rule above, so both
             clients offer park on a row and that is how a list is armed again. */
         return next.isValid() ? next[idProperty].toString().toStdString() : std::string {};
+    }
+
+    std::string positionOf (const juce::ValueTree& list, const std::string& cueId)
+    {
+        const auto at = findOnPath (list, cueId);
+
+        if (! at.isValid())
+            return cueId;
+
+        return descendTo (at)[idProperty].toString().toStdString();
     }
 
     std::string previousStandby (const juce::ValueTree& list, const std::string& current)

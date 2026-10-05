@@ -5938,6 +5938,39 @@ TEST_CASE ("manual group: the pointer put in the middle enters there, not at the
     CHECK (rig.runOf (rig.first) == "");             // never started
 }
 
+TEST_CASE ("manual group: the pointer put on the group's row plays the first member and walks on to the second")
+{
+    /*  The author's report of 2026-10-05 (namespace draft §30, item 7): a
+        click parked the pointer on a manual group's own ROW, GO played the
+        first member, and the pointer went to the line after the group - so
+        the scene looked automatic and its other members were out of reach.
+        The row and its first member are one position (decision M), so the
+        step after the GO is the second member. */
+    ManualRig rig;
+    rig.setStandby (rig.groupId);
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    CHECK (rig.standby() == rig.second);
+
+    // And nothing else of the scene plays until the operator asks.
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto id = rig.runOf (rig.first);
+        return ! id.empty() && rig.runs.find (id)->isFinished();
+    }));
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (rig.second) == "");
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.second).empty(); }));
+    CHECK (rig.standby() == rig.third);
+}
+
 TEST_CASE ("manual group: killing it takes the members with it and skips the footer")
 {
     ManualRig rig;

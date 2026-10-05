@@ -18998,3 +18998,18 @@ S1 the manual row (7) · S2 the level lane recorded (2, 3) · S3 the surface pag
 Surfaces tab (1) · S5 the persistent band (9) · S6 the preset mark (8) · S7 importing (6) · S8
 scrubbing (10) · S9 several cues at once (5). The implementer's own calls are lettered from RD as
 each stage lands, below.
+
+### 30.3 What was built: S1 - the manual row
+
+`cue::positionOf` answers where a pointer standing on a cue really stands: a manual group's row is
+its first member, as deep as manual groups go, and every other cue is itself. `standbyAfterFiring`
+steps on from there, so a GO from the row plays the first member and leaves the pointer on the
+second. `nextStandby` keeps measuring from the node, because a deletion's repair asks it what
+follows a group about to disappear, and the inside of that group is the one answer it must never
+give. Tests: `cursor: a pointer parked on a manual group's row stands on its first member`
+(CueListTests), `manual group: the pointer put on the group's row plays the first member and walks
+on to the second` (GoTests).
+
+- **RD - The arrows agree with the GO.** `standby.next` from the row goes to the second member too,
+  since the row and the first member are one position; `standby.previous` already climbed out the
+  same way from either. A park on the row is still allowed and still shows on the row.

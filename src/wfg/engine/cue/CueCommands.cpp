@@ -269,8 +269,12 @@ namespace wfg::cue
                                 a log full of R records every time an operator
                                 reaches the end of a list would bury the
                                 rejections that matter. */
+                            /*  From where the pointer really stands: on a
+                                manual group's row, its first member, so `next`
+                                goes to the second, as a GO would (§30, S1). */
                             return moveStandbyTo (document, list,
-                                                  nextStandby (list, standbyOf (list)), args);
+                                                  nextStandby (list, positionOf (list, standbyOf (list))),
+                                                  args);
                         } });
 
         //----------------------------------------------------------------------

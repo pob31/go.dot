@@ -1445,6 +1445,40 @@ TEST_CASE ("cursor: nested manual groups, and an empty one the pointer stands on
     CHECK (nextStandby (rig.list(), empty) == empty);     // last, and stays put
 }
 
+TEST_CASE ("cursor: a pointer parked on a manual group's row stands on its first member")
+{
+    /*  §30, item 7: the walk never rests on the row, but a park can put the
+        pointer there - and a GO from it plays the first member, so the next
+        stop is the SECOND member, for a GO and for the arrows alike. It used to
+        be whatever followed the group. */
+    CursorRig rig;
+    const auto list = rig.list();
+
+    CHECK (positionOf (list, rig.manual) == rig.m1);
+    CHECK (standbyAfterFiring (list, rig.manual) == rig.m2);
+    CHECK (nextStandby (list, positionOf (list, rig.manual)) == rig.m2);
+
+    // Every other cue is where it stands, and an automatic group's row too.
+    CHECK (positionOf (list, rig.top) == rig.top);
+    CHECK (positionOf (list, rig.auto_) == rig.auto_);
+    CHECK (standbyAfterFiring (list, rig.auto_) == rig.tail);
+
+    // Nested manual groups go all the way down, as the walk's descent does.
+    const auto inner = rig.document.createCue (rig.manual, 0, "group", "Inner").id;
+    const auto i1 = rig.document.createCue (inner, 0, "memo", "I1").id;
+    CHECK (positionOf (rig.list(), rig.manual) == i1);
+    CHECK (standbyAfterFiring (rig.list(), rig.manual) == rig.m1);
+
+    // An empty manual group has no member to stand for it: it is its own stop.
+    const auto empty = rig.document.createCue (rig.listId, 4, "group", "Empty").id;
+    CHECK (positionOf (rig.list(), empty) == empty);
+
+    /*  And `nextStandby` itself still measures from the node, which is what a
+        deletion's repair asks it: what follows a group about to disappear is
+        never anything inside it. */
+    CHECK (nextStandby (rig.list(), rig.manual) == rig.auto_);
+}
+
 TEST_CASE ("cursor: at either end it stays put, and from empty it stays empty")
 {
     /*  Unchanged from Phase 1, and it has to be: there is no wrap anywhere, and
