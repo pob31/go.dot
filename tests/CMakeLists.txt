@@ -566,6 +566,17 @@ add_test(NAME wfg.replay.lane.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/lane.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/lane
                  --wfg-locale=${WFG_LOCALE_FR})
+# A SEND'S LANE AS RECORDS (namespace draft §28): a lane redrawn on a send in one
+# node.set, two drawings refused, a lane cleared and put back by undo - replayed
+# through the document door under both locales.
+add_test(NAME wfg.replay.send-lane.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/send-lane.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/send-lane
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.send-lane.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/send-lane.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/send-lane
+                 --wfg-locale=${WFG_LOCALE_FR})
 # A MEDIA CUE'S SPEED AS RECORDS (namespace draft §22): a speed edited, three
 # refused with the reason each deserves, a mode changed and taken back by undo, a
 # fade's switches set, and the fade fired with nothing to move - its run ending
@@ -1272,6 +1283,22 @@ add_test(NAME blackbox.lane-level.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_level.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.lane-level.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# A SEND'S LANE, HEARD (namespace draft §28.4): the level lane driver's ramp,
+# step and looping slice drawn on a send into the only mix there is, so the
+# render hears the send; a new lane written on the loop's send while it sounds;
+# M48 printed, with a step judged within one coefficient glide. Then the session
+# replays.
+add_test(NAME blackbox.lane-send.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_send.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.lane-send.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.lane-send.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_send.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.lane-send.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # A MEDIA CUE'S SPEED, HEARD (namespace draft §22): four cues at twice and half

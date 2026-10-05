@@ -1,0 +1,22 @@
+<Show>
+  <Lists>
+    <List id="SE000001" name="Sound">
+      <Media id="SE000002" channels="2" file="tone.wav" name="Travel" number="1">
+        <Send id="SE000003" bus="SE000004" levelLane="1 0 3 -20 5.5 -20 6 -25 6.001 -5 7 0"/>
+      </Media>
+      <Media id="SE000005" channels="2" file="tone.wav" name="Loop" number="2">
+        <Send id="SE000006" bus="SE000004" levelLane="2 0 4 -20"/>
+        <Range id="SE000007" in="2" loops="0" name="slice" out="4"/>
+      </Media>
+      <Cue id="SE000008" name="Clear" number="3"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="SE000004" kind="mix" name="Loin" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

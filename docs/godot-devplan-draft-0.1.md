@@ -794,6 +794,10 @@ the day before for a show with no send lane. CI is green.
 **Needs from the author:** a listen to a sound travelling between two mixes, and a look at the
 picker.
 
+**Built 2026-10-05, SL.0-SL.5** (namespace draft §28.6). M48: a send follows its lane within 0.06 dB
+away from its corners, and a step drawn on a send is a 50 ms ramp whose middle lands 26 to 31 ms
+early - the coefficient's glide, where a level's is one tick.
+
 ### Importing an Ableton Live set · L
 
 *Added on 2026-10-05*, at the author's direction: import the Lazzi tour's Live sets, one scene per

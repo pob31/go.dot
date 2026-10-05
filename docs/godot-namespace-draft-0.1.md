@@ -18713,6 +18713,23 @@ a time, as a send fade's do.
 Recording a send lane from a fader or a rotary (§20.9 records the level only); lanes on pan, EQ or a
 plugin's parameter; a lane on a group or a live take.
 
+### 28.6 What was built, against what §28 drew
+
+*Written at close-out, 2026-10-05.* SL.0 `5007dd3`, SL.1 `8e5a637`, SL.2 `c5069c0`, SL.3 `aabc1b6`,
+and SL.5 - the driver, the fixture and its log, M48 and this. Where the build departs from the
+drawing, or says more than it:
+
+- **The row comes with the stage that implements it**, as §20's did: SL.1, not SL.0.
+- **The picker shows only for a media cue that sends somewhere.** With no send, the level is the
+  only lane, and a button offering one entry would be a question with one answer.
+- **M48** (PRD §6.11): within 0.052 to 0.058 dB of the lane away from its corners, and a step's
+  middle 26 to 31 ms before it was drawn. A step on a send is the coefficient's 50 ms ramp, begun at
+  the tick whose read-ahead reaches it and straight in gain, so its middle in decibels comes a
+  quarter of the way along: 18 to 38 ms early by that arithmetic. The driver judges a step within
+  one glide; a level lane's step lands inside a tick, the level gliding one tick and not fifty
+  milliseconds. Whether that difference is audible on a cue the author knows is the listen SL.5
+  asks for.
+
 ## 29. Importing an Ableton Live set
 
 Written 2026-10-05, before any of it is built, at the author's direction: *"Can you plan for

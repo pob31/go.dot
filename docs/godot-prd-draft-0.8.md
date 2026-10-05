@@ -3629,6 +3629,13 @@ Mackie vs HUI first — first week with the D700.
   twenty (§22.11); the gate makes no step; a freeze holds its pitch 4 to 7 dB down; a stretched loop
   had a gap and a click at every pass - since its loop sits below the stretcher, none (§22.12).
   Namespace draft §22.10.
+- **A send lane** (§3.10, 2026-10-05, namespace draft §28): **M48** - how closely a rendered send
+  follows its lane: the largest error away from its corners, and where a step's middle lands, the
+  lane being read one coefficient glide ahead. *Taken 2026-10-05 on a Debug build:* within 0.052 to
+  0.058 dB of the lane away from its corners, and a step's middle -26 to -31 ms from where it was
+  drawn - a step on a send is the coefficient's 50 ms ramp, straight in gain, begun at the tick
+  whose read-ahead first reaches it, and a ramp straight in gain passes its middle in decibels a
+  quarter of the way along: 18 to 38 ms early by that arithmetic. Judged within one glide.
 
 ---
 

@@ -423,3 +423,18 @@ the audio side reaches a replay as the engine's own records. The unit cases pin 
 The mounts carry the placeholder ports the driver rewrites (`9000`/`5005` the console, `9001` the
 lights). A replay sends nothing and reads neither. No media under `media/`: with no audio side
 there is nothing to arm.
+
+## `bundles/send-lane/` and `logs/send-lane.wfglog`
+
+A send's lane (namespace draft §28). Hand-authored: two media cues with no direct out, each
+sending into one stereo mix - the only output, so a render hears the send and nothing else. The
+first send carries `lane/`'s ramp and step, the second a looping slice's lane, the same numbers
+`blackbox/lane_level.py` judges a cue's level by, so `blackbox/lane_send.py` reads both renders
+one way. No media under `media/`: the driver writes its own tone.
+
+The log is not hand-written. It is one session of a real `wfg serve` of this bundle with no audio
+device, driven over OSC: a lane redrawn on a send, the level lane's three refusals on it, a lane
+cleared and put back by undo, and a write at a mix's address refused - its header is that copy's.
+It was then annotated by hand. Made to fail before it was kept, two ways, each refused by the
+replay: a refusal edited to read applied, and the clear replaced by a lane of an odd count still
+marked applied.

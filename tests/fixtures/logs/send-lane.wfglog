@@ -1,0 +1,41 @@
+# wfg-log 1
+# fixture send-lane - a send's lane redrawn, refused, cleared and put back
+# (namespace draft §28).
+#
+# WHAT IT IS FOR: that a session in which the waveform's hands drew on a send's
+# lane - one node.set of the whole list per gesture, through the document's own
+# door, at the send's address - reproduces exactly, refusals included. What a
+# lane does to a SEND is not in this file and cannot be, for lane.wfglog's
+# reason: a replay runs no tick hooks, and the send a lane rides is checked in
+# GoTests and heard by blackbox/lane_send.py instead. Recorded from a real
+# `wfg serve` of tests/fixtures/bundles/send-lane driven over OSC with no audio
+# device; the header lines below are the session's own.
+#
+# bundle send-lane sha256:c299707c0eaa7c1fdad4d4c6375e41e0001c398985ac28ee7534d7dc751fb9d7
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media tone.wav 0 0.000
+#
+# THE FIRST CUE'S SEND REDRAWN: down to -30 by the second second, held, and back
+# at the sixth. One datagram carrying the whole list, as the waveform sends it
+# when a drag lets go.
+A 0 0 udp:127.0.0.1:49938 node.set s:"/godot/send/SE000003/levelLane" s:"1 0 2 -30 6 -30 6.001 0"
+#
+# THREE DRAWINGS THE DOOR WOULD NOT TAKE, the level lane's three, and the lane
+# drawn a moment ago stays (PX: one judge for both). A point missing its level:
+# `bad-value`.
+R 15 1 udp:127.0.0.1:49939 bad-value node.set s:"/godot/send/SE000003/levelLane" s:"1 0 2"
+#
+# A level no send may be at (-120..12): `bad-value`.
+R 31 2 udp:127.0.0.1:49941 bad-value node.set s:"/godot/send/SE000003/levelLane" s:"1 0 2 -130"
+#
+# And a word where a number goes, the wrong KIND of thing: `type-mismatch`.
+R 46 3 udp:127.0.0.1:49942 type-mismatch node.set s:"/godot/send/SE000003/levelLane" s:"1 0 2 later"
+#
+# THE LOOP'S SEND LANE CLEARED - the last point double-clicked away - and the
+# undo that puts it back: one step of the show's history, like the level's.
+A 61 4 udp:127.0.0.1:49943 node.set s:"/godot/send/SE000006/levelLane" s:""
+A 76 5 udp:127.0.0.1:49944 undo s:"document" s:"node.set"
+#
+# A MIX HAS NO LANE: the row is a send's, the cue's share of a mix, and never the
+# mix's own - `bad-address`, not a lane quietly ignored.
+R 91 6 udp:127.0.0.1:49945 bad-address node.set s:"/godot/bus/SE000004/levelLane" s:"0 -6"
