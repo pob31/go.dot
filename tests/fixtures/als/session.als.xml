@@ -106,6 +106,7 @@
 														<Automation>
 															<Events>
 																<FloatEvent Id="4" Time="-63072000" Value="1" />
+																<FloatEvent Id="10" Time="0" Value="1" />
 																<FloatEvent Id="5" Time="4" Value="-1" />
 															</Events>
 														</Automation>
