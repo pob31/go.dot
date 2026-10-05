@@ -1736,6 +1736,15 @@ retarget, generate sequences, conform to a venue's patch, import from a
 spreadsheet. With canonical XML, stable IDs and a published schema those are
 external tools in any language and need **no API surface at all**.
 
+*Added in 0.8, at the author's direction (2026-10-05).* **An Ableton Live set
+is imported by Go.dot itself** - File > Import Ableton Live set... and `wfg
+import-als` (namespace draft §29). A designer bringing a show over from Live
+should not need a toolchain to do it. The paragraph above still holds: the
+importer writes the same canonical XML through the same checked writes, and is
+no second door into a document. A set is read and never run; each sound is
+flattened onto a cue that owns its outputs (§4.12); and what does not come over
+is said, in a report beside the show.
+
 ### 3.21 Control-rate dataflow graph
 
 Sources (tree nodes, incoming OSC/MIDI/serial/sACN/PSN) → processors (scaling,

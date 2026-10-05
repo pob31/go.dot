@@ -3,6 +3,11 @@
 **Draft 0.1**, 2026-10-01. An idea written down, not a phase. Nothing here is scheduled, and
 nothing here amends the PRD.
 
+*Note, 2026-10-05:* the first importer actually built is Ableton Live's, and it lives **inside**
+Go.dot, at the author's direction (namespace draft §29, decision QC). A Live set is a file Go.dot can
+read on its own; this draft's case for an external tool rests on talking to a running QLab over
+OSC, which still stands.
+
 ---
 
 ## 1. The idea in one paragraph

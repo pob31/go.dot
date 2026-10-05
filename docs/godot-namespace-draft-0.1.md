@@ -18712,3 +18712,117 @@ a time, as a send fade's do.
 
 Recording a send lane from a fader or a rotary (§20.9 records the level only); lanes on pan, EQ or a
 plugin's parameter; a lane on a group or a live take.
+
+## 29. Importing an Ableton Live set
+
+Written 2026-10-05, before any of it is built, at the author's direction: *"Can you plan for
+Ableton Live import from the als file? ... They use empty clips and sound going from one track into
+the next for fade automations on trigger. Each cue is a separate line. There are a few manual
+actions on effects during the show."* The sets were the author's Lazzi tour of 2022
+(`E:\Régie\Lazzi Project\`, eleven venues, Live 11.1-11.2.6), with the conduite and the play's
+script beside them as the answer key.
+
+What there was before: no importer of any kind. A media file dropped on the cue list became a media
+cue (§14.16); the QLab draft (`docs/godot-qlab-import-0.1.md`) proposed an external tool and "no
+import code" in Go.dot; PRD §3.20 says document-time tools need no API surface.
+
+### 29.1 What a Live set is, as far as the importer is concerned
+
+An `.als` is gzipped XML. The importer reads Session view only.
+
+- **A scene is one GO.** Its name is the trigger ("top début spec"), and from Live 11.2 its
+  annotation holds the operator's text, word for word.
+- **A launch does three things, track by track.** A clip starts and replaces what the track was
+  playing; an empty slot with a stop button stops the track; one without leaves it running.
+- **A track whose monitoring is In plays its input and keeps its own clips silent.** The Lazzi
+  sets route tracks 4-6 into "N track in" tracks with monitoring In, whose clips - copies of the
+  source clip, kept for the waveform - are silent carriers of envelopes on that track's volume,
+  sends and devices. Launched with the sound, they shape it; launched in a later scene, they are a
+  fade. These are the author's "empty clips".
+- **Sound reaches the speakers through post-fader sends** to return tracks that are speaker groups,
+  each patched to an output pair; one return carries effects shared by several cues.
+- **Envelopes are straight segments in beats.** A clip's warp markers map beats to the file's
+  seconds; at 120 BPM two beats are a second.
+- **A MIDI controller's mappings** (`KeyMidi`) say which hand moved what: Lazzi's faders 1-5 are
+  track volumes, its rotaries a send or an effect's dry/wet.
+
+### 29.2 Decisions
+
+The author's, 2026-10-05, each picked from options the implementer wrote and worded:
+
+- **QC - Inside Go.dot.** File > Import Ableton Live set... and `wfg import-als`, in C++, writing
+  through `ShowDocument`'s checked writes. The QLab draft's "no import code" was about a tool that
+  talks to QLab over OSC, and PRD §3.20 gains a paragraph saying why this one is different (against
+  the implementer's recommendation, an external Python tool).
+- **QD - Send lanes first** (§28): Live's moving sends come over one to one.
+- **QE - The shared effects are parked.** A send to a return that carries effects is written with
+  `on="false"`, its level kept, into a mix of its own; Live's own devices are reported and noted on
+  their cue. A bus that carries a plugin chain is a separate, later feature.
+- **QF - A tour is a show with performances** (§25): the newest set the template, each venue a
+  performance in the show's folder, the media copied once into the show's `media/`.
+
+The implementer's, the author's to overrule:
+
+- **QG - A scene becomes a timeline group**, numbered 1.. in scene order, named after the scene,
+  its `notes` the annotation verbatim. A scene that does one thing becomes that cue alone,
+  numbered. A scene that does nothing is skipped.
+- **QH - The walk.** The scenes are replayed top to bottom, as a night runs them, keeping per track
+  what plays and where each parameter stands; each sound is FLATTENED at its launch, everything on
+  its path multiplied onto the one cue, because a cue owns its outputs and nothing inherits
+  (PRD §4.12). A stop aimed at a cue that is not running does nothing, so running out of order is
+  safe.
+- **QI - Carriers.** A carrier launched with its sound folds into that cue: its volume into
+  `levelLane`, its sends into the send lanes. One launched later is a **fade** on the cue the walk
+  says is sounding on its track: the volume as `points`, relative to the value it takes over
+  from; its sends, EQ and plugin values moved once, to their value at the end, the shape reported;
+  `stopWhenDone` when it reaches silence.
+- **QJ - Stops** - a stop button, or a clip replacing another - are `Transport verb="hard"` on the
+  cue the walk says is playing on that track.
+- **QK - Returns are mix buses**, width two, in the order of the output pairs they were patched
+  to, so the outputs land where they were.
+- **QL - EQ Eight becomes the cue's EQ when it fits**: a low cut the high-pass, a high cut the
+  low-pass, a low shelf band 1, a high shelf band 4, bells bands 1-4. A notch, more than four bands
+  or a slope the EQ does not have is reported.
+- **QM - Live's other devices** (Reverb, Grain Delay, Resonator, ...) are reported, and one
+  generated line under the cue's notes says what was there and what it did.
+- **QN - A fader mapped to a track's volume becomes a DCA** named after the track, and that track's
+  cues are marked with it: the D700's DCA strip is then the operator's "Fader 1", a trim that is
+  never saved (PRD §4.10). Strips are not created; the room is the author's.
+- **QO - Nothing about the controller is written** (PRD §4.9). The report's hands table says each
+  control, what it moved in Live, and the Go.dot gesture that does the same - for a send, the
+  D700's Send page on the aimed cue.
+- **QP - A parameter's resting value at save time is used only where no envelope covers it**, and
+  flagged where a hand was mapped to it: a fader left down after the last show is what the machine
+  was doing, not a decision (PRD §4.10).
+- **QQ - Identifiers are drawn from the set**: Crockford base32 of a hash of the scene's and the
+  track's Live identifiers and the kind, checked for collisions. Live keeps them across Save As, so
+  two venues imported apart compare cue by cue under "Update the show's template..." (§25 JP).
+- **QR - Media** is found by `RelativePath` from the set's folder, then the absolute `Path`, then
+  by name and size under the project folder (a `:` in a Mac name tried as `/`, `_` and a space). A
+  file not found keeps its cue and is listed.
+- **QS - The window asks which scenes**: a list with a tick box each, named scenes ticked, unnamed
+  ones not - a rehearsal stash stays out unless somebody wants it.
+- **QT - A set with no annotations takes its notes from the template**, matched by scene, so an
+  older venue does not read as "notes removed".
+- **QU - The laws are measured before they are trusted.** How Live interpolates a volume envelope,
+  what a modulation percentage is in decibels, and what a parameter holds after its clip stops are
+  read from a probe set made in Live and exported, never assumed.
+- **QV - The import never hides an approximation.** `import-report.md`, beside the show, lists what
+  came over, what was approximated and how, what was dropped, the media not found, and the hands
+  table. The window opens it; the verb's exit code is 1 when there is anything in it to read.
+
+### 29.3 The verb
+
+`wfg import-als <set.als>... --into <folder> [--template <set.als>] [--scenes <list>]`. One set makes
+a show folder; several make a show with a performance per set (QF), the template the newest unless
+named. Exit codes: 0 imported with nothing to report, 1 imported with approximations, 2 a set that
+could not be read or a folder that could not be written.
+
+### 29.4 Named limits
+
+- **Session view only.** Arrangement clips, MIDI clips, follow actions, tempo changes and grooves
+  are reported, not imported.
+- **No pan.** A pan away from centre is reported; Go.dot has no pan row.
+- **No shared effects** (QE), and so no hand on them: a rotary on a parked effect is reported.
+- **A warp that is not one ratio** is averaged into `rate` and reported.
+- **The conduite and the script are not read.** The script is Choufleur's (PRD §3.23).

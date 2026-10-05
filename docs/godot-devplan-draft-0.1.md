@@ -794,6 +794,31 @@ the day before for a show with no send lane. CI is green.
 **Needs from the author:** a listen to a sound travelling between two mixes, and a look at the
 picker.
 
+### Importing an Ableton Live set · L
+
+*Added on 2026-10-05*, at the author's direction: import the Lazzi tour's Live sets, one scene per
+GO, the silent "track in" clips as the fades they are (namespace draft §29). The author's decisions
+are QC-QF; QG-QV are the implementer's, the author's to overrule. Not a phase: it follows the send
+lanes, which it needs, and no later phase is renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| AL.0 | Docs: namespace §29, PRD §3.20, this, a note in the QLab draft | - |
+| AL.1 | The probe set (the author, in Live 12): one scene per law the walk relies on, exported (QU) | - |
+| AL.2 | `import/AlsReader`: the set read into plain facts, Live 10 to 12; `AlsReaderTests` on the probes | AL.1 |
+| AL.3 | `import/AlsWalk`: the scenes replayed and each sound flattened (QH-QJ); `AlsWalkTests` | AL.2 |
+| AL.4 | `import/AlsTranslate` and `ImportReport`: cues, buses, EQ, DCAs, media, ids (QK-QR, QV); `wfg import-als`; the imported probe validated by both grammars | AL.3, SL.1 |
+| AL.5 | Venues: a show with a performance per set, notes from the template (QF, QT) | AL.4 |
+| AL.6 | The window: the menu, the scene list (QS), the import off the message thread, the show and its report opened | AL.4 |
+| AL.7 | `blackbox/import_als.py`: the probe imported, rendered and compared with Live's export (M49); the close-out | AL.5, AL.6, SL.5 |
+
+**Done when:** the Lazzi sets import as one show with a performance per venue whose cues are the
+conduite's Q1-Q14 in its words; each cue sounds as Live played it, the parked effects aside; and
+the report names every approximation, the hands table among them.
+
+**Needs from the author:** the probe set in Live (AL.1); a look at the scene list and the report; a
+listen, cue by cue, against Live playing the same set.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M
