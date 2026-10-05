@@ -18916,3 +18916,85 @@ and one return, **A**, on outputs 1/2, with Probe in's send to it at 0 dB. One s
 The export is Live's own: the session recorded into the arrangement while each scene is launched in
 turn, a few seconds apart, then exported as one WAV of outputs 1/2. AL.7's driver imports
 the set, renders it hosted, and compares level against time with the export, scene by scene (M49).
+
+## 30. The bug round of 2026-10-05
+
+Written 2026-10-05, after the author ran a test build (later than v0.1.0, earlier than Doh!) on the
+D700 and the MADIface with a show of their own, and reported ten things that went wrong. The show
+they made is the evidence each item below was read against. Ten items, each one read on main as it
+stood at `bec318e`; two parts were already mended since their build, and are named where they fall.
+
+1. *"Removing sampler faders and adding some DCA in the surface parameters did not show the DCA
+   anywhere and there is no way to rearrange the order."* A DCA reaches a fader only through a
+   strip whose Role is DCA and whose DCA cell names it, and the tab hides that cell behind the Role.
+   ADD DCA declares a DCA and gives it no fader. The engine moves strips (`object.move`); the tab
+   offers no gesture for it.
+2. *"The fader used for the level automation on a sample was not released back to its sampler."*
+   §20.9's DN kept a taken fader for the session, and the window's ✕ only shows while the waveform
+   shows that cue.
+3. *"The recorded level automation on the waveform did not add points in time, they all stayed
+   together at the initial time ... it didn't even work when starting from 0s."* No clock that stops
+   was found. What was found is the sample's path: a pass started from 0 s (and every pass from the
+   D700's Rec) does not restart a sample that is already sounding, so it records wherever the sample
+   already is; a sample whose fader is pulled down plays the pass at -120 dB; a quick second Rec
+   finds the first pass's run still ringing out and ends on its first tick; and a cue with ranges
+   starts its pass at the range's in-point, not at the playhead. A 647 s file is drawn whole, about
+   1.5 px a second, and the points only appear at the stop.
+4. *"Pressing the Eq toggle on the controller does switch the rotaries to EQ, but it should open
+   also the EQ footer ... Dim the RGB LEDs in the rotaries when no media file is selected."* The
+   foot waited for the first turn (`footForSurface`), deliberately until now.
+5. *"Selecting multiple media cues did not show all the parameters and panels to adjust their sends
+   all at once."* Every foot panel edits one cue, the selection's anchor; a selection of several shows
+   no panel buttons, and a send is never an inspector row.
+6. *"I had issues importing some media files (wav) at first."* The files are plain 24-bit PCM. The
+   likeliest reading: a file whose name was already in the show's `media/` (left there by a session
+   that was never saved) was refused as "could not copy", and the copy ran on the window's thread.
+7. *"A group in sequence mode and manual order behaved as if it were in auto mode. The playback/
+   stand-by cursor didn't go to the second cue inside the group but directly at the next line after
+   the group."* A real fault on the GO path: with standby put on a manual group's own row, GO fired
+   the first member and then stepped from the ROW, past the group. Decision M says the row and its
+   first member are one position; the walk knew it, the GO did not.
+8. *"The cues moved to the preset were not preloaded but started when the group was going to be
+   next. Same for OSC it disappeared from the group body when affected to the header. And I could not
+   see a header/preset toggle in the cues."* Moving a cue into a header is a move, and a header's media
+   plays before the members at the GO. What the author wanted is the `preset` mark, which the engine
+   already prepares (a media cue armed silent at the park, played at its own moment), and which only
+   alt-drop and ctrl-arrows could set. Their build also started a nested scene at the park when the
+   outer header had something to prepare; that was mended in `cf695e6`.
+9. *"Permanent cues have disappeared."* Nothing removed them: the band is drawn only for a section
+   that has cues, and no gesture in either client makes the first one.
+10. *"Scrubbing a group containing media cues with loops was confusing."* Neither of the author's
+    groups could be scrubbed (a manual sequence and a sampler) and nothing said so; on a cue with
+    ranges every scrub restarted at the start of a range, and past the end at the top of the file,
+    while the box showed the second the hand was at. Looping and shuffled scenes were mended since
+    their build by K9 (§23).
+
+### 30.1 Decisions
+
+The author's, 2026-10-05:
+
+- **QX - The touch takes the fader, and the stop gives it back.** Recording a level lane keeps the
+  touch that takes a fader (DF), and the fader is the sample's again the moment the pass stops,
+  however it stops. This replaces DN's "taken for the session" and K4's "a single Esc keeps the
+  association" (§23.15). *Against the implementer's recommendation, which was to take the sample's
+  own strip at Rec with no touch.*
+- **QY - The waveform's button reads "Level autom."**, the author's words. Its other states - "Touch
+  a fader…", "● Rec level", "■ Stop" - were offered with it in the question and taken with it.
+- **QZ - A member dropped on its own group's header band is marked, not moved.** It stays in the
+  body, takes `preset` naming that group, and is prepared when the pointer parks there: a media cue
+  armed silent, an anticipatable write pre-sent. The inspector's `preset` row becomes a menu: none,
+  this group, each group outside it. *Offered as "Mark it, keep in body".*
+- **RA - Several cues picked, one fader: the same amount for all.** A drag moves every picked cue's
+  level or send by the same number of decibels, keeping their differences; a typed number sets them
+  all to it; one gesture is one undo.
+- **RB - A group's strip jumps on release.** Dragging a running group's strip moves a ghost head;
+  the members are put at the new time once, when the hand lets go. A media strip keeps scrubbing live.
+- **RC - The window first, the page later.** Every change goes through named commands, so the
+  page catches up in a round of its own.
+
+### 30.2 Stages
+
+S1 the manual row (7) · S2 the level lane recorded (2, 3) · S3 the surface pages (4) · S4 the
+Surfaces tab (1) · S5 the persistent band (9) · S6 the preset mark (8) · S7 importing (6) · S8
+scrubbing (10) · S9 several cues at once (5). The implementer's own calls are lettered from RD as
+each stage lands, below.
