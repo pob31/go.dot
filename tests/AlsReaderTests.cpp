@@ -58,10 +58,13 @@ namespace
         return *result.set;
     }
 
-    const Track& trackNamed (const LiveSet& set, const std::string& name)
+    /*  The name as a pointer, not a std::string: GCC 13 takes a reference
+        returned beside a temporary string argument for one that may dangle
+        (-Wdangling-reference), and the strict build makes that an error. */
+    const Track& trackNamed (const LiveSet& set, const char* name)
     {
         const auto found = std::find_if (set.tracks.begin(), set.tracks.end(),
-                                         [&name] (const Track& track) { return track.name == name; });
+                                         [name] (const Track& track) { return track.name == name; });
         REQUIRE (found != set.tracks.end());
         return *found;
     }
