@@ -1450,28 +1450,28 @@ TEST_CASE ("client: the network monitor reads OSC and MIDI as lines a person can
     CHECK (csv.find ("12:00:00.000,in,osc,udp,10.0.0.5:8000,/desk/fader,,\"\"\"a, b\"\"\",\n") != std::string::npos);
 }
 
-TEST_CASE ("client: tonight's switch is a mark in words, dims the row, and a jump with and Go says so")
+TEST_CASE ("client: a switch for this run is a mark in words, dims the row, and a jump with and Go says so")
 {
     /*  Namespace draft §27 (PW): words beside the shape, not colour alone. */
     model::Row row;
     row.kind = "memo";
     CHECK (model::marksFor (row).empty());
-    CHECK (row.runsTonight());
+    CHECK (row.runsNow());
 
-    row.tonight = "off";
-    CHECK_FALSE (row.runsTonight());
+    row.overridden = "off";
+    CHECK_FALSE (row.runsNow());
     REQUIRE (! model::marksFor (row).empty());
     CHECK (model::marksFor (row).front().icon == model::Icon::disabled);
-    CHECK (model::marksFor (row).front().text == "off tonight");
+    CHECK (model::marksFor (row).front().text == "off for this run");
 
-    //  Off in the file, on tonight: runs, and says why.
+    //  Off in the file, on for this run: runs, and says why.
     row.enabled = false;
-    row.tonight = "on";
-    CHECK (row.runsTonight());
-    CHECK (model::marksFor (row).front().text == "on tonight");
+    row.overridden = "on";
+    CHECK (row.runsNow());
+    CHECK (model::marksFor (row).front().text == "on for this run");
 
-    row.tonight = "file";
-    CHECK_FALSE (row.runsTonight());
+    row.overridden = "file";
+    CHECK_FALSE (row.runsNow());
     CHECK (model::marksFor (row).front().text.empty());
 
     CHECK (model::verbWord ("jump") == "jump");

@@ -21,7 +21,7 @@
 #include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/ShowWalk.h>
-#include <wfg/engine/cue/Tonight.h>
+#include <wfg/engine/cue/Override.h>
 
 #include <wfg/engine/midi/PortTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
@@ -1060,13 +1060,13 @@ namespace wfg::tree
                 {
                     text = live != nullptr ? live->rowsOf (id) : std::string {};
                 }
-                /*  WHAT TONIGHT HAS SWITCHED (namespace draft §27): read off the
-                    node, where `setTonight` holds it. Safe in this cached half,
+                /*  WHAT THIS RUN HAS SWITCHED (namespace draft §27): read off the
+                    node, where `setOverride` holds it. Safe in this cached half,
                     because a mark that moves moves `revision()` and the cache
                     with it. */
-                else if (name == "tonight")
+                else if (name == "override")
                 {
-                    text = cue::tonightWord (node);
+                    text = cue::overrideWord (node);
                 }
                 else if (name == "sends" && isMedia)
                 {

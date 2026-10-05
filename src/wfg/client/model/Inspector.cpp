@@ -396,8 +396,8 @@ namespace wfg::client::model
                 { "loop", "Loop on the take" },
                 { "overdub", "Overdub on the take" },
                 { "clear", "Clear the take" },
-                { "enable", "enable the target tonight" },
-                { "disable", "disable the target tonight" },
+                { "enable", "enable the target for this run" },
+                { "disable", "disable the target for this run" },
                 { "jump", "jump standby to the target" },
             };
 

@@ -295,7 +295,7 @@ TEST_CASE ("solve: enable, disable and jump stop nothing; a disable reaches only
 {
     /*  Namespace draft §27. The three verbs share the stop cue's targeting
         and are not stops (PQ): a bed disabled after it started is still
-        playing further on, and the plan says what the evening has switched. */
+        playing further on, and the plan says what this run has switched. */
     SolverRig rig;
 
     const auto bed = rig.media (rig.listId, 0, "Ambience");

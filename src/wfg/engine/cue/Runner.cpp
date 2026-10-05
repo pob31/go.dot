@@ -25,7 +25,7 @@
 #include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
-#include <wfg/engine/cue/Tonight.h>
+#include <wfg/engine/cue/Override.h>
 
 #include <wfg/engine/midi/MidiMessages.h>
 
@@ -1799,16 +1799,16 @@ namespace wfg::cue
         return {};
     }
 
-    void Runner::switchTonight (const juce::ValueTree& cue, const std::string& runId)
+    void Runner::switchOverride (const juce::ValueTree& cue, const std::string& runId)
     {
         const auto targetId = textOf (cue, "target");
         const auto target = document.findById (targetId);
 
-        if (evening == nullptr || targetId.empty() || ! target.isValid())
+        if (overrideDocument == nullptr || targetId.empty() || ! target.isValid())
             return;
 
         const auto on = textOf (cue, "verb") == "enable";
-        const auto before = tonightWord (target);
+        const auto before = overrideWord (target);
 
         /*  WHERE A STANDBY ON IT GOES, asked BEFORE the switch, while the cue
             is still a place the walk can start from (PQ): the next stop that is
@@ -1855,21 +1855,21 @@ namespace wfg::cue
             }
         }
 
-        evening->setTonight (targetId, on ? "on" : "off");
+        overrideDocument->setOverride (targetId, on ? "on" : "off");
 
         /*  NOTED ON ITS GO, for Doh! (PS): the first switch of a cue under it
-            only, so what is put back is the evening as the GO found it. */
+            only, so what is put back is the override as the GO found it. */
         if (const auto serial = goOfRun (runId); serial != 0 && serial == goRecord.serial)
         {
-            const auto noted = std::any_of (goRecord.tonightBefore.begin(), goRecord.tonightBefore.end(),
+            const auto noted = std::any_of (goRecord.overridesBefore.begin(), goRecord.overridesBefore.end(),
                                             [&targetId] (const auto& entry) { return entry.first == targetId; });
 
-            if (! noted && tonightWord (target) != before)
-                goRecord.tonightBefore.emplace_back (targetId, before);
+            if (! noted && overrideWord (target) != before)
+                goRecord.overridesBefore.emplace_back (targetId, before);
         }
 
         if (mustLeave && ! mayStandOn (list, standby))
-            evening->setAttribute (standbyAddressOf (listId), away);
+            overrideDocument->setAttribute (standbyAddressOf (listId), away);
     }
 
     std::string Runner::jumpStandby (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
@@ -1964,12 +1964,12 @@ namespace wfg::cue
         if (! plan.ok)
             return used;
 
-        /*  TONIGHT'S SWITCHES, WORKED OUT AGAIN (namespace draft §27, PK): the
+        /*  THE SWITCHES FOR THIS RUN, WORKED OUT AGAIN (namespace draft §27, PK): the
             marks this list could have made - on its own cues, and on what its
             enable and disable cues aim at, wherever that is - are taken away,
             and the plan's are put on: what the cues before the place said, in
             the order they said it. Before anything is built, so the seat below
-            reads the evening it is seating. */
+            reads the switches of the place it is seating. */
         {
             const auto allLists = document.root().getChildWithName (juce::Identifier ("Lists"));
             std::set<std::string> cleared;
@@ -1997,11 +1997,11 @@ namespace wfg::cue
 
             for (const auto& clearedId : cleared)
                 if (! clearedId.empty() && document.findById (clearedId).isValid())
-                    editable.setTonight (clearedId, "file");
+                    editable.setOverride (clearedId, "file");
 
             for (const auto& [switchedId, on] : plan.switched)
                 if (document.findById (switchedId).isValid())
-                    editable.setTonight (switchedId, on ? "on" : "off");
+                    editable.setOverride (switchedId, on ? "on" : "off");
         }
 
         /*  WHOSE LIST A RUN BELONGS TO, by climbing its cue to the top. A jump
@@ -5095,14 +5095,14 @@ namespace wfg::cue
         const auto verb = textOf (cue, "verb");
 
         /*  THREE ARE NOT STOPS EITHER (2026-10-05, namespace draft §27).
-            Enable and disable switch their target for tonight, now, and stop
+            Enable and disable switch their target for this run, now, and stop
             nothing (PQ). Jump moves standby, on the next tick, through
             `standby.jump` - the start cue's road, so a replay takes the record
             the session logged and fires nothing of its own. The cue's own run
             is over either way. */
         if (verb == "enable" || verb == "disable")
         {
-            switchTonight (cue, runId);
+            switchOverride (cue, runId);
             finishing.push_back (runId);
             return;
         }
@@ -8924,11 +8924,11 @@ namespace wfg::cue
             back again if the door refuses, so a refused Doh moves nothing. */
         std::vector<std::pair<std::string, std::string>> switchedNow;
 
-        for (const auto& [cueId, word] : record.tonightBefore)
+        for (const auto& [cueId, word] : record.overridesBefore)
             if (const auto node = document.findById (cueId); node.isValid())
             {
-                switchedNow.emplace_back (cueId, tonightWord (node));
-                editable.setTonight (cueId, word);
+                switchedNow.emplace_back (cueId, overrideWord (node));
+                editable.setOverride (cueId, word);
             }
 
         //  4. THE POINTER, THROUGH ITS OWN DOOR: a cue gone, or no longer one
@@ -8936,7 +8936,7 @@ namespace wfg::cue
         if (const auto moved = editable.setAttribute (standbyAddressOf (record.list), record.cue); ! moved.ok)
         {
             for (const auto& [cueId, word] : switchedNow)
-                editable.setTonight (cueId, word);
+                editable.setOverride (cueId, word);
 
             return moved.reason;
         }
@@ -12460,11 +12460,11 @@ namespace wfg::cue
                 group and the groups all completed instantly.
 
                 `getAttribute` resolves the row and supplies the default, which
-                is the whole reason the document has one door. `runsTonight`
-                reads the absent property as the default too (Tonight.h), and
-                puts tonight's mark over it: a member a disable cue switched off
+                is the whole reason the document has one door. `runsNow`
+                reads the absent property as the default too (Override.h), and
+                puts the override over it: a member a disable cue switched off
                 is skipped from the next round on (namespace draft §27, PQ). */
-            if (! runsTonight (child))
+            if (! runsNow (child))
                 continue;
 
             out.push_back (id);
@@ -14601,7 +14601,7 @@ namespace wfg::cue
             /*  A disabled member is not spawned, so arming it would reserve a
                 voice for a cue that is never going to play - and a voice held
                 by nothing is a cue that fails with `no-track` later. */
-            if (! runsTonight (child))
+            if (! runsNow (child))
                 continue;
 
             if (! timeline)
@@ -16432,7 +16432,7 @@ namespace wfg::cue
         juce::ignoreUnused (runIds);
 
         /*  The one write a fire makes on the document (namespace draft §27). */
-        runner.setEvening (document);
+        runner.setOverrideDocument (document);
 
         const auto withRun = [] (std::vector<osc::Value> args, std::size_t index,
                                  const std::string& id)
@@ -17408,13 +17408,13 @@ namespace wfg::cue
                             if (from == origin::engine && runner.killedInDrain (context.tick))
                                 return Outcome::ok (args);
 
-                            /*  A CUE THAT DOES NOT RUN TONIGHT IS NOT FIRED
+                            /*  A CUE THAT IS OFF FOR THIS RUN IS NOT FIRED
                                 (namespace draft §27, PP): its file has it
                                 disabled, or a disable cue has switched it off.
                                 GO could never reach one, since the pointer does
                                 not stand on it; a name, a trigger and a start
                                 cue could, until 2026-10-05. */
-                            if (! runsTonight (cue))
+                            if (! runsNow (cue))
                                 return Outcome::rejected (reason::disabled);
 
                             /*  A MANUAL SEQUENCE GROUP HAS NOBODY TO BE ITS
@@ -17568,9 +17568,9 @@ namespace wfg::cue
 
                             const auto cueId = cue[idProperty].toString().toStdString();
 
-                            /*  NOR A CUE THAT DOES NOT RUN TONIGHT, as `cue.fire`
+                            /*  NOR A CUE THAT IS OFF FOR THIS RUN, as `cue.fire`
                                 refuses it (namespace draft §27, PP). */
-                            if (! runsTonight (cue))
+                            if (! runsNow (cue))
                                 return Outcome::rejected (reason::disabled);
 
                             /*  A MANUAL SEQUENCE GROUP HAS NOBODY TO BE ITS

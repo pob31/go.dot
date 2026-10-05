@@ -17,21 +17,21 @@
 #pragma once
 
 /*
-    WHETHER A CUE RUNS TONIGHT (namespace draft §27).
+    WHETHER A CUE RUNS NOW (namespace draft §27): ITS OVERRIDE.
 
     A cue's `enabled` is what the designer decided. An enable or disable cue
-    switches it for the evening (PK), and the switch is held on the cue's own
-    node as a `tonight` mark - `on` or `off`, absent when nothing has switched
+    switches it for this run (PK) - until the show is closed, and the switch is held on the cue's own
+    node as an `override` mark - `on` or `off`, absent when nothing has switched
     it or when what was switched is what the file says anyway - which no file
-    holds: `cue/tonight` persists nowhere, so neither writer writes it and the
+    holds: `cue/override` persists nowhere, so neither writer writes it and the
     unsaved dot does not light (ShowDocument::valueTreePropertyChanged). A
     revert or a reopen builds a new tree, and the marks go with the old one.
 
     EVERY LIVE READER ASKS THIS, never `enabled` alone: where the pointer may
     stand, which members a group plays, what is armed, what the sampler lays
-    out, whether a fire is let through. A solve does not: it works the evening
-    out from the show (`Reader::pass`, ShowWalk.h), because the evening is what
-    it is computing.
+    out, whether a fire is let through. A solve does not: it works the switches
+    out from the show (`Reader::pass`, ShowWalk.h), because what this run has
+    switched is what it is computing.
 
     Tick thread only, as the document is.
 */
@@ -43,7 +43,7 @@
 namespace wfg::cue
 {
     /** The node property the mark is held in, and the row it is published as. */
-    inline const juce::Identifier tonightProperty { "tonight" };
+    inline const juce::Identifier overrideProperty { "override" };
 
     /*  What the file says. A cue nobody has disabled has no `enabled` property
         at all, and one somebody has holds a boolean false - every value goes
@@ -55,17 +55,17 @@ namespace wfg::cue
         return ! cue.hasProperty (enabled) || static_cast<bool> (cue[enabled]);
     }
 
-    /** `file`, `on` or `off`: the published `cue/tonight`. */
-    inline std::string tonightWord (const juce::ValueTree& cue)
+    /** `file`, `on` or `off`: the published `cue/override`. */
+    inline std::string overrideWord (const juce::ValueTree& cue)
     {
-        const auto word = cue[tonightProperty].toString();
+        const auto word = cue[overrideProperty].toString();
         return word == "on" || word == "off" ? word.toStdString() : std::string ("file");
     }
 
-    /** Whether the cue runs tonight: the mark when there is one, the file otherwise. */
-    inline bool runsTonight (const juce::ValueTree& cue)
+    /** Whether the cue runs now: the mark when there is one, the file otherwise. */
+    inline bool runsNow (const juce::ValueTree& cue)
     {
-        const auto word = cue[tonightProperty].toString();
+        const auto word = cue[overrideProperty].toString();
 
         if (word == "on")
             return true;

@@ -35,7 +35,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
-    inline constexpr std::string_view enum_cue_tonight[] = { "file", "on", "off" };
+    inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
     inline constexpr std::string_view enum_media_rateMode[] = { "varispeed", "timestretch" };
     inline constexpr std::string_view enum_media_release[] = { "hold", "playOut" };
@@ -604,14 +604,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Where this cue sits in the thing that contains it: an ordinary member, one of the cues in its group's header or footer, or one of the list's persistent cues. Derived from the element that contains it rather than stored, like `kind` and for the same reason - a client that could write it could move a cue between a group's preparation and its members without the group knowing. A cue at the top level of a list is a member. The whole vocabulary is declared here although `persistent` cannot occur until the section exists, because an enum that grows later grows under a client that has already read it." },
-        { "cue", "tonight",
+        { "cue", "override",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "file",
           false, 0.0, false, 0.0,
-          enum_cue_tonight, 3,
+          enum_cue_override, 3,
           "", 50.0, false, "park",
           "",
-          "Whether an enable or disable cue has switched this cue on or off for tonight (namespace draft 27). file means none has, and the cue runs as its enabled says; on and off override enabled until the show is closed or reverted, or loaded to a time, which works it out again from the cues it walks past. Never saved: the show file holds what the designer decided, not where a performance had got to (PRD 4.10)." },
+          "Whether an enable or disable cue has switched this cue on or off for this run (namespace draft 27). file means none has, and the cue runs as its enabled says; on and off override enabled until the show is closed or reverted, or loaded to a time, which works it out again from the cues it walks past. Never saved: the show file holds what the designer decided, not where a performance had got to (PRD 4.10)." },
         { "cue", "prepare",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "idle",
@@ -1363,7 +1363,7 @@ namespace wfg::doc::generated
           enum_transport_verb, 12,
           "", 50.0, false, "park",
           "",
-          "How it stops. Hard stops now and takes Tracktion's own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary. record, loop, overdub and clear are not stops at all (Phase 9c, namespace draft 19.6): aimed at a sounding mic cue on a sampling channel they are the press of that name on its take - Rec, Loop, a layer begun or closed, the channel emptied - and against anything else they are applied and do nothing, as a stop aimed at a cue that is not running is. enable, disable and jump are not stops either (namespace draft 27): enable and disable switch the target on or off FOR TONIGHT - the show file is never written, reopening the show forgets it, and Doh! of the GO puts it back - and jump moves the standby pointer of this cue's own list onto the target, firing it too when andGo is on." },
+          "How it stops. Hard stops now and takes Tracktion's own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary. record, loop, overdub and clear are not stops at all (Phase 9c, namespace draft 19.6): aimed at a sounding mic cue on a sampling channel they are the press of that name on its take - Rec, Loop, a layer begun or closed, the channel emptied - and against anything else they are applied and do nothing, as a stop aimed at a cue that is not running is. enable, disable and jump are not stops either (namespace draft 27): enable and disable switch the target on or off FOR THIS RUN - the show file is never written, reopening the show forgets it, and Doh! of the GO puts it back - and jump moves the standby pointer of this cue's own list onto the target, firing it too when andGo is on." },
         { "transport", "andGo",
           ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show,
           true, "false",

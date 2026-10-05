@@ -18543,9 +18543,14 @@ button (§19.6).
 
 The author's, 2026-10-05, each the recommended option:
 
-- **PK - Tonight only.** An enable or disable cue sets a live override over its target's `enabled`.
+- **PK - For this run only.** An enable or disable cue sets a live override over its target's
+  `enabled`.
   The show file is never written (PRD §4.10), reopening or reverting the show forgets it, and a
-  load-to-time works it out again from the enable and disable cues before the place it loads.
+  load-to-time works it out again from the enable and disable cues before the place it loads. *The
+  option was put to the author as "tonight only", which was the implementer's word, not the
+  author's; the author chose the operator's wording later the same day - "for this run" - and the
+  engine's name is the neutral `override`, since a *run* is already one playing of a cue
+  (`Run`, `RunTable`).*
 - **PL - The words are Enable and Disable**, not Arm and Disarm. *Arm* already means getting a voice
   ready before GO (PRD §3.12), and a stop cue on a sampler group is already called its disarm
   (§3.27). One word, one meaning.
@@ -18558,17 +18563,17 @@ The author's, 2026-10-05, each the recommended option:
 
 The rest are the implementer's, the author's to overrule:
 
-- **PO - Three states.** `cue/tonight` reads `file`, `on` or `off`. An enable cue can switch on a
+- **PO - Three states.** `cue/override` reads `file`, `on` or `off`. An enable cue can switch on a
   cue the file has off: an alternative ending is written off in the file and switched on by a cue at
   the fork. What runs is the override when there is one, otherwise `enabled`.
-- **PP - Every way in honours it.** GO cannot stand on a cue that is off tonight, a group does not
+- **PP - Every way in honours it.** GO cannot stand on a cue that is off for this run, a group does not
   play a member that is off, and `cue.fire` - by name, by a trigger or by a start cue - refuses a
   cue that is off with `disabled`. That last gate is new for a cue the file has off as well: until
   now a trigger still fired a disabled cue, which contradicted "a disabled cue is skipped".
 - **PQ - Disabling stops nothing.** A cue or a group that is running plays on, and only a later
   fire skips it. A member disabled while its group loops is skipped from the next round. A standby
   standing on the cue being disabled moves on to the next stop, as a GO's advance would.
-- **PR - Esc and double Esc keep it.** The override is a decision about the evening, not something
+- **PR - Esc and double Esc keep it.** The override is a decision about this run, not something
   Go.dot is doing; the stops act on processing (PRD §4.4).
 - **PS - Doh! puts it back.** A GO that fired an enable or disable cue keeps what it changed and the
   value before, and its Doh! restores them with the rest (PRD §4.5).
@@ -18580,8 +18585,9 @@ The rest are the implementer's, the author's to overrule:
   to it again is the designer's loop, and it is allowed.
 - **PV - "and Go" is two lines in the + transport list**, *Jump to* and *Jump to and Go*, because a
   line of the list makes one cue as it stands. The inspector's switch turns one into the other.
-- **PW - The row says it in words.** A cue switched off tonight is drawn dimmed with the mark
-  *off tonight*; one switched on tonight against its file wears *on tonight* (PRD §4.8).
+- **PW - The row says it in words.** A cue switched off for this run is drawn dimmed with the
+  mark *off for this run*; one switched on against its file wears *on for this run* (PRD §4.8).
+  The + transport list heads the two under *For this run*.
 
 ### 27.2 Rows and the command
 
@@ -18589,7 +18595,7 @@ The rest are the implementer's, the author's to overrule:
 |---|---|---|---|
 | `transport/verb` | s | `hard` | gains `enable`, `disable` and `jump`. None of the three is a stop: the solver and the slot analysis do not count them as ending their target |
 | `transport/andGo` | T | false | with `jump`: the target is fired as GO would fire it once standby is on it, and standby moves past it |
-| `cue/tonight` | s, read | `file` | `file`, `on` or `off`; never saved (`Persist::none`) |
+| `cue/override` | s, read | `file` | `file`, `on` or `off`; never saved (`Persist::none`) |
 
 | command | address | arguments | meaning |
 |---|---|---|---|
@@ -18597,25 +18603,25 @@ The rest are the implementer's, the author's to overrule:
 
 ### 27.3 The engine
 
-The switch is a mark on the cue's own node, `tonight`, written by `ShowDocument::setTonight` with
-no undo manager. `cue/tonight` persists nowhere, so neither writer writes it, `validate` passes over
+The switch is a mark on the cue's own node, `override`, written by `ShowDocument::setOverride`
+with no undo manager. `cue/override` persists nowhere, so neither writer writes it, `validate` passes over
 it, and the property listener moves `revision()` - which every cache keys on - and never the unsaved
 dot. A revert or a reopen builds a new tree, and the marks go with the old one. The runner holds the
 document read-only; `registerGoCommands` hands it the writable one for this write alone
-(`Runner::setEvening`), because a fire is deep inside a handler and deferring the switch a tick, as a
+(`Runner::setOverrideDocument`), because a fire is deep inside a handler and deferring the switch a tick, as a
 start cue's fire is deferred, would let a cue fired in the same tick run on the old answer.
 
-Every live reader asks `cue::runsTonight` (`cue/Tonight.h`), the mark over the file's `enabled`:
+Every live reader asks `cue::runsNow` (`cue/Override.h`), the mark over the file's `enabled`:
 where the pointer may stand (`CueList`), which members a group plays (`Runner::membersOf`), what is
 armed (`armablesFor`), what the sampler lays out, and the gates of `cue.fire` and `trigger.fire`.
 
-A solve does not ask the marks: it works the evening out from the show. `ShowWalk::Reader` is told
+A solve does not ask the marks: it works the switches out from the show. `ShowWalk::Reader` is told
 each enable and disable cue a pass walks by (`Reader::pass`), and from then on answers
 `flag (…, "cue", "enabled")` with what they said - in order, so a bed disabled after it started is
 still planned as playing further on (PQ). `Plan::switched` carries the answer at the place, and a
 load to time takes away the marks the list could have made - on its own cues and on what its enable
 and disable cues aim at - and puts the plan's on. The per-tick shared reader is never told, and
-reads the file as before. A Doh! restores the marks its GO noted (`GoRecord::tonightBefore`) before
+reads the file as before. A Doh! restores the marks its GO noted (`GoRecord::overridesBefore`) before
 it moves the pointer, and switches them back if the pointer's door refuses.
 
 A jump cue copies the start cue: `fireStop` queues the list, the target, `andGo` and the GO the run

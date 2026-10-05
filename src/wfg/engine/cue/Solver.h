@@ -220,7 +220,7 @@ namespace wfg::cue
 
         /*  What the enable and disable cues before the place have switched, by
             cue: true for on, false for off (namespace draft §27, PK). A load to
-            time makes tonight's marks say this and nothing else. */
+            time makes the override marks say this and nothing else. */
         std::map<std::string, bool> switched;
 
         /** Whether the aim named anything this list holds. */

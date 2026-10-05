@@ -233,7 +233,7 @@ namespace wfg::client::ui
                     break;
 
                 case model::Icon::enable:
-                    //  The disabled ring, its slash turned into a tick: runs again tonight.
+                    //  The disabled ring, its slash turned into a tick: runs again, for this run.
                     ring (l, 12.0f, 12.0f, 8.5f);
                     line (l, 8.0f, 12.5f, 11.0f, 15.5f);
                     line (l, 11.0f, 15.5f, 16.5f, 9.0f);

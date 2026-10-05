@@ -154,7 +154,7 @@ namespace wfg
             different group from the one they wrote. */
         inline constexpr const char* needsGo          = "needs-go";
 
-        /*  A CUE THAT DOES NOT RUN TONIGHT was fired by name, by a trigger or
+        /*  A CUE THAT IS OFF FOR THIS RUN was fired by name, by a trigger or
             by a start cue (namespace draft §27, PP): its file has it disabled,
             or a disable cue has switched it off. "A disabled cue is skipped,
             not deleted", and until 2026-10-05 only GO honoured the first half

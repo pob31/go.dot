@@ -1211,7 +1211,7 @@ namespace wfg::cue
         if (fired && read.flag (target->node, "cue", "enabled"))
             planTarget (read, document, durations, walk, *target, aim.offset, stopped, plan);
 
-        /*  WHAT THE EVENING HAS SWITCHED BY THE PLACE (PK): every enable and
+        /*  WHAT THIS RUN HAS SWITCHED BY THE PLACE (PK): every enable and
             disable cue before it, and the target itself once it has fired. */
         if (fired)
             read.pass (target->node);
@@ -1517,7 +1517,7 @@ namespace wfg::cue
                     break;
                 }
 
-        /*  WHAT THE EVENING HAD SWITCHED BY THE INSTANT (PK), from the enable
+        /*  WHAT THIS RUN HAD SWITCHED BY THE INSTANT (PK), from the enable
             and disable cues that fired before it, in the order they fired.
             Worked out last and on its own, because the steps above are things
             that DID fire: a bed disabled after it started is still playing,

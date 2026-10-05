@@ -135,12 +135,12 @@ namespace wfg::client::model
         /*  WHETHER IT PLAYS AT ALL comes first: a disabled row is dimmed, and
             this is the shape beside the dimming, for somebody who cannot tell
             one grey from another. */
-        if (row.tonight == "off")
-            marks.push_back ({ Icon::disabled, "off tonight",
-                               "off tonight: a disable cue switched it off until the show closes" });
-        else if (row.tonight == "on")
-            marks.push_back ({ Icon::enable, "on tonight",
-                               "on tonight: an enable cue switched it on until the show closes" });
+        if (row.overridden == "off")
+            marks.push_back ({ Icon::disabled, "off for this run",
+                               "off for this run: a disable cue switched it off until the show closes" });
+        else if (row.overridden == "on")
+            marks.push_back ({ Icon::enable, "on for this run",
+                               "on for this run: an enable cue switched it on until the show closes" });
         else if (! row.enabled)
             marks.push_back ({ Icon::disabled, {}, "disabled: skipped, not deleted" });
 

@@ -314,8 +314,8 @@ namespace wfg::client::model
         row.indexInParent = indexInParent;
         row.enabled = flag (snapshot, "/godot/cue/" + cueId + "/enabled") != Flag::no;
 
-        if (const auto tonight = attribute (snapshot, cueId, "tonight"); tonight == "on" || tonight == "off")
-            row.tonight = tonight;
+        if (const auto word = attribute (snapshot, cueId, "override"); word == "on" || word == "off")
+            row.overridden = word;
 
         /*  WHAT MAKES A ROW A GROUP is that it has members to draw, which is
             the question this file is asking - not that its `kind` reads

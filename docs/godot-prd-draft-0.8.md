@@ -564,7 +564,7 @@ crowd hit that overlaps itself is two clips on two pads.
 §27)*. Three more verbs share the stop cue's targeting object and are not stops:
 
 - **Enable** and **Disable** switch their target — a cue or a whole group — on or off **for
-  tonight**. The show file is never written (§4.10): reopening or reverting the show forgets them,
+  this run**, until the show is closed. The show file is never written (§4.10): reopening or reverting the show forgets them,
   and a load-to-time works them out again from the cues it walks past. Disabling stops nothing that
   is running; a later GO, trigger or fire skips the target. An Enable can switch on a cue the file
   has off, which is how an alternative ending is written. The words are not *arm* and *disarm*,

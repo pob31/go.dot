@@ -17,7 +17,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 
 #include <wfg/engine/cue/CueList.h>
-#include <wfg/engine/cue/Tonight.h>
+#include <wfg/engine/cue/Override.h>
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/FadePoints.h>
@@ -637,7 +637,7 @@ namespace wfg::doc
 
             A ROW THAT PERSISTS NOWHERE is not one it does not know. Since
             2026-10-05 one of them is held on the node itself - a cue's
-            `tonight` mark (`setTonight`) - and it is in neither file, so it
+            `override` mark (`setOverride`) - and it is in neither file, so it
             moves `revision()`, which the caches want, and never the dot. */
         const auto elementName = node.getType().toString().toStdString();
         const auto propertyName = property.toString().toStdString();
@@ -967,7 +967,7 @@ namespace wfg::doc
     }
 
     //==============================================================================
-    EditResult ShowDocument::setTonight (const std::string& cueId, std::string_view word)
+    EditResult ShowDocument::setOverride (const std::string& cueId, std::string_view word)
     {
         if (word != "on" && word != "off" && word != "file")
             return EditResult::failed (reason::badValue);
@@ -978,19 +978,19 @@ namespace wfg::doc
             return EditResult::failed (reason::badAddress);
 
         /*  A MARK IS ALWAYS A DIFFERENCE: switched to what the file says, the
-            mark goes, so `on tonight` is never drawn on a cue that would have
-            run anyway. No undo manager: the evening is not an edit, and Doh!
+            mark goes, so `on for this run` is never drawn on a cue that would have
+            run anyway. No undo manager: a switch for this run is not an edit, and Doh!
             puts a GO's switch back itself (namespace draft §27, PS). */
         const auto wanted = word == "file" || (word == "on") == cue::enabledInFile (cue)
                               ? juce::String() : juce::String (std::string (word));
 
-        if (cue[cue::tonightProperty].toString() == wanted)
+        if (cue[cue::overrideProperty].toString() == wanted)
             return EditResult::succeeded (cueId);
 
         if (wanted.isEmpty())
-            cue.removeProperty (cue::tonightProperty, nullptr);
+            cue.removeProperty (cue::overrideProperty, nullptr);
         else
-            cue.setProperty (cue::tonightProperty, wanted, nullptr);
+            cue.setProperty (cue::overrideProperty, wanted, nullptr);
 
         return EditResult::succeeded (cueId);
     }
@@ -3022,8 +3022,8 @@ namespace wfg::doc
                     const auto attributeName = name.toString().toStdString();
                     const auto* attribute = element->attribute (attributeName);
 
-                    /*  A cue's `tonight` mark: held on the node and in no file
-                        (`setTonight`), so a live show validated mid-evening is
+                    /*  A cue's `override` mark: held on the node and in no file
+                        (`setOverride`), so a live show validated mid-run is
                         not wrong for carrying it. */
                     if (attribute == nullptr && element->derivedAttribute (attributeName) != nullptr)
                         continue;

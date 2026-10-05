@@ -167,7 +167,7 @@ namespace wfg::cue
 
         /*  WHAT THE ENABLE AND DISABLE CUES A WALK HAS PASSED HAVE SWITCHED
             (namespace draft §27, PK). A solve reads the show and works the
-            evening out from it, so it never asks a cue's live `tonight` mark:
+            switches out from it, so it never asks a cue's live `override` mark:
             it is told each cue it walks past, in order, and from then on
             `flag (…, "cue", "enabled")` answers what those cues said, the
             file's `enabled` otherwise.
@@ -217,7 +217,7 @@ namespace wfg::cue
     }
 
     /*  A TRANSPORT CUE THAT ENDS NOTHING, the take presses and the three of
-        namespace draft §27: enable and disable switch their target for tonight
+        namespace draft §27: enable and disable switch their target for this run
         and jump moves standby onto it, and none of them stops it. Every walk
         that counts what a transport cue has stopped asks this. */
     inline bool isNotAStop (const Reader& read, const juce::ValueTree& transport)

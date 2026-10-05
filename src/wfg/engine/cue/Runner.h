@@ -1134,7 +1134,7 @@ namespace wfg::cue
             start cue's fire is, would let a cue fired in the same tick run on
             the old answer. Given once, by `registerGoCommands`. A fire is a
             logged record, so a replay switches the same cues. */
-        void setEvening (doc::ShowDocument& editable) noexcept { evening = &editable; }
+        void setOverrideDocument (doc::ShowDocument& editable) noexcept { overrideDocument = &editable; }
 
         /*  A JUMP CUE'S MOVE, as `standby.jump`'s handler makes it (§27, PM):
             standby onto `target` on its list, and with `andGo` that cue fired as
@@ -2017,14 +2017,14 @@ namespace wfg::cue
 
         std::vector<JumpToMake> jumpsToMake;
 
-        /*  See `setEvening`. Null in a runner nobody registered commands for,
+        /*  See `setOverrideDocument`. Null in a runner nobody registered commands for,
             and then an enable or disable cue switches nothing. */
-        doc::ShowDocument* evening = nullptr;
+        doc::ShowDocument* overrideDocument = nullptr;
 
         /*  An enable or disable cue's switch of its target (§27, PK), noted on
             the GO it belongs to for Doh! (PS), stepping the standby off a cue
             switched off (PQ). */
-        void switchTonight (const juce::ValueTree& cue, const std::string& runId);
+        void switchOverride (const juce::ValueTree& cue, const std::string& runId);
 
         /*  One per group run in flight. A vector like every other job list
             here, and drained by the same `remove_if` on a retired flag. */
@@ -2376,9 +2376,9 @@ namespace wfg::cue
 
             /*  What its enable and disable cues switched, each cue's mark as
                 this GO found it - `file`, `on` or `off` - the first switch of a
-                cue only, so a Doh! puts back the evening before the GO
+                cue only, so a Doh! puts back the overrides as they were before the GO
                 (namespace draft §27, PS). */
-            std::vector<std::pair<std::string, std::string>> tonightBefore;
+            std::vector<std::pair<std::string, std::string>> overridesBefore;
         };
 
         /*  The cues a corrected GO sends nothing of, by its serial. */

@@ -60,6 +60,15 @@
       "VALUE": ["2.2"],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     },
+    "override": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/override",
+      "DESCRIPTION": "Whether an enable or disable cue has switched this cue on or off for this run (namespace draft 27). file means none has, and the cue runs as its enabled says; on and off override enabled until the show is closed or reverted, or loaded to a time, which works it out again from the cues it walks past. Never saved: the show file holds what the designer decided, not where a performance had got to (PRD 4.10).",
+      "TYPE": "s",
+      "ACCESS": 1,
+      "VALUE": ["file"],
+      "RANGE": [{"VALS": ["file", "on", "off"]}],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
     "parent": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/parent",
       "DESCRIPTION": "The identifier of the containing list or group.",
@@ -120,15 +129,6 @@
       "TYPE": "s",
       "ACCESS": 3,
       "VALUE": [""],
-      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
-    },
-    "tonight": {
-      "FULL_PATH": "/godot/cue/F7HR8TVD/tonight",
-      "DESCRIPTION": "Whether an enable or disable cue has switched this cue on or off for tonight (namespace draft 27). file means none has, and the cue runs as its enabled says; on and off override enabled until the show is closed or reverted, or loaded to a time, which works it out again from the cues it walks past. Never saved: the show file holds what the designer decided, not where a performance had got to (PRD 4.10).",
-      "TYPE": "s",
-      "ACCESS": 1,
-      "VALUE": ["file"],
-      "RANGE": [{"VALS": ["file", "on", "off"]}],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     }
   }

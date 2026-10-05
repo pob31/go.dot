@@ -166,15 +166,15 @@ namespace wfg::client::model
         bool derived = false;
         bool enabled = true;
 
-        /*  WHAT AN ENABLE OR DISABLE CUE HAS SWITCHED TONIGHT (namespace draft
-            §27): `file`, `on` or `off`, the engine's `cue/tonight`. `enabled`
+        /*  WHAT AN ENABLE OR DISABLE CUE HAS SWITCHED FOR THIS RUN (namespace draft
+            §27): `file`, `on` or `off`, the engine's `cue/override`. `enabled`
             stays what the file says, which the inspector edits; whether the
-            row is drawn as running is `runsTonight`. */
-        std::string tonight = "file";
+            row is drawn as running is `runsNow`. */
+        std::string overridden = "file";
 
-        bool runsTonight() const noexcept
+        bool runsNow() const noexcept
         {
-            return tonight == "on" || (tonight != "off" && enabled);
+            return overridden == "on" || (overridden != "off" && enabled);
         }
 
         Section section = Section::member;
