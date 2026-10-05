@@ -1597,8 +1597,11 @@ namespace wfg::client::ui
                 const auto* container = rowById (drop.container);
                 const auto intoTimeline = container != nullptr && container->mode == "timeline";
 
-                actions.say (juce::String (model::describe (drop, rows[static_cast<std::size_t> (at)],
-                                                            intoTimeline)));
+                /*  A mark or a header or footer move is said with the GROUP's
+                    name, which a band's own row does not carry (§30, S6). */
+                const auto& named = model::groupNamedBy (drop, rows[static_cast<std::size_t> (at)], rows);
+
+                actions.say (juce::String (model::describe (drop, named, intoTimeline)));
             }
         }
     }

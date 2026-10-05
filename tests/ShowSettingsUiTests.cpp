@@ -742,6 +742,62 @@ TEST_CASE ("inspector UI: a MIDI cue's labels follow the type when the panel is 
     CHECK_FALSE (shows (drawn(), "velocity"));
 }
 
+TEST_CASE ("inspector UI: a cue's preset is drawn as a menu of the groups around it, and a pick writes the group")
+{
+    /*  Namespace draft §30, decision QZ - the author: "I could not see a
+        header/preset toggle in the cues." The row was a bare box wanting a
+        group's identifier. Asserted on the screen, as the case above is: the
+        menu is drawn, says the groups by name, and a pick writes the
+        identifier to the row it is drawn on. */
+    Rig rig;
+
+    const auto list = rig.document.createList ("Cues");
+    REQUIRE (list.ok);
+
+    const auto scene = rig.document.createCue (list.id, 0, "group", "Scene");
+    REQUIRE (scene.ok);
+
+    const auto bed = rig.document.createCue (scene.id, 0, "media", "Bed");
+    REQUIRE (bed.ok);
+
+    std::vector<std::pair<std::string, std::string>> written;
+
+    client::ui::InspectorComponent::Actions actions;
+    actions.set = [&written] (const std::string& address, const std::string& text)
+                  { written.emplace_back (address, text); };
+
+    client::ui::InspectorComponent panel (rig.theme, actions);
+    panel.setSize (420, 2000);
+    panel.show (client::model::inspect (*rig.publish(), bed.id));
+    panel.resized();
+
+    juce::ComboBox* menu = nullptr;
+
+    const std::function<void (juce::Component&)> walk = [&] (juce::Component& root)
+    {
+        if (auto* box = dynamic_cast<juce::ComboBox*> (&root))
+            if (box->getNumItems() > 0 && box->getItemText (0) == "not prepared ahead")
+                menu = box;
+
+        for (auto* child : root.getChildren())
+            walk (*child);
+    };
+
+    walk (panel);
+
+    REQUIRE (menu != nullptr);
+    CHECK (menu->isVisible());
+    REQUIRE (menu->getNumItems() == 2);
+    CHECK (menu->getItemText (1) == "Scene");
+    CHECK (menu->getSelectedId() == 1);                  // not prepared ahead, as it stands
+
+    menu->setSelectedId (2, juce::sendNotificationSync);
+
+    REQUIRE (written.size() == 1u);
+    CHECK (written.front().first == "/godot/cue/" + bed.id + "/preset");
+    CHECK (written.front().second == scene.id);
+}
+
 TEST_CASE ("show settings UI: the Network tab declares devices and switches the sender filter")
 {
     Rig rig;

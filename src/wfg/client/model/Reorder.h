@@ -189,7 +189,10 @@ namespace wfg::client::model
         lands after `endingAt`'s row; on a group's or a fade's middle band, and
         on anything that is not a cue row, it is `dropFor` over the row itself.
         `landed`, when given, is the depth the cue lands at - where the line
-        that shows it starts. */
+        that shows it starts.
+
+        AND ON A HEADER BAND, `headerMarkFor` first: the one drop whose answer
+        depends on where the dragged cue sits, which a lone row cannot say. */
     Drop dropAtDepth (const std::vector<Row>& rows, std::size_t at, const Row& dragged,
                       double fraction, int depth, int* landed = nullptr);
 
@@ -240,6 +243,27 @@ namespace wfg::client::model
         that no header will ever prepare it. */
     Drop presetDropFor (const Row& over, const Row& dragged, const std::vector<Row>& rows);
 
+    /*  A MEMBER DROPPED ON ITS OWN GROUP'S HEADER BAND IS MARKED, NOT MOVED
+        (namespace draft §30, decision QZ). The author, 2026-10-05: "The cues
+        moved to the preset were not preloaded but started when the group was
+        going to be next." A header is a place, and a cue moved into one leaves
+        the body and plays before the members at the GO, audibly. What they
+        wanted was the mark, which leaves the cue where it is and has the
+        group's header get it ready when the pointer parks there - and which
+        only alt-drop and the ctrl/⌘-arrows could set.
+
+        So letting go on the header band of a group the dragged cue sits in
+        the BODY of, at any depth, is the preset gesture with no modifier: one
+        write to the cue's `preset`. Only the body: a cue in that group's own
+        header or footer is not one of its members and is moved as before (to
+        the end of the header), and so is a cue from outside the group, which
+        is what a header is for. Only the band, too: after one of the header's
+        own rows is still a place in the header.
+
+        Nothing when the band is not this gesture, and `dropFor` answers.
+        Already marked for that group, the answer is a `none` that says so. */
+    std::optional<Drop> headerMarkFor (const Row& over, const Row& dragged, const std::vector<Row>& rows);
+
     /*  The groups `cueId` is inside, innermost first, by the rows' parent
         chain; the list itself is not among them. */
     std::vector<std::string> ancestorsOf (const std::string& cueId, const std::vector<Row>& rows);
@@ -260,6 +284,16 @@ namespace wfg::client::model
         and a reorder there changes the reading and nothing else. The author
         moved cues about in one and found "discrepancies between the displayed
         order and the playing order" (2026-09-18); this is where the window
-        says so, before the hand lets go. */
+        says so, before the hand lets go.
+
+        A MARK AND A MOVE INTO A HEADER OR A FOOTER NAME A GROUP, and `over`
+        is then best the group's own row (`groupNamedBy`): over a band, the
+        row's own name is the word "header", and the words came out as "into
+        header's header". */
     std::string describe (const Drop& drop, const Row& over, bool intoTimeline);
+
+    /*  The row whose name `describe` should say for `drop` over `over`: the
+        group a mark or a header or footer move names, when it is among
+        `rows`, else `over` itself. */
+    const Row& groupNamedBy (const Drop& drop, const Row& over, const std::vector<Row>& rows);
 }

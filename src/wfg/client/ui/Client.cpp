@@ -174,13 +174,26 @@ namespace wfg::client
                                                                           show.isShut (key) ? "true" : "false"));
                                               };
 
-                /*  THE PRESET GESTURES: alt-drop on an ancestor group, and
-                    ctrl/⌘-arrows stepping through the ancestors. Both are one
-                    write to the cue's `preset` (model/Reorder.h). */
+                /*  THE PRESET GESTURES: alt-drop on an ancestor group, a
+                    member dropped on its own group's header band (namespace
+                    draft §30, QZ), a header line dragged, and ctrl/⌘-arrows
+                    stepping through the ancestors. All are one write to the
+                    cue's `preset` (model/Reorder.h).
+
+                    AND THE FOOT SAYS WHAT HAPPENED, as the arrows' steps
+                    always have: the band lights for a mark as it does for a
+                    move, and a cue that stays where it was after a drop on a
+                    header reads as a drop that failed unless somebody says it
+                    was marked instead. */
                 listActions.setPreset       = [this] (const std::string& cueId, const std::string& group)
                                               {
-                                                  if (! refusedWhileLocked())
-                                                      send (gesture::setNode ("/godot/cue/" + cueId + "/preset", group));
+                                                  if (refusedWhileLocked())
+                                                      return;
+
+                                                  send (gesture::setNode ("/godot/cue/" + cueId + "/preset", group));
+                                                  shell->transport.setNotice (group.empty()
+                                                      ? juce::String ("no longer prepared ahead")
+                                                      : "prepared in " + nameOf (group) + "'s header, and kept in its place");
                                               };
                 listActions.presetStep      = [this] (int direction) { ladderStep (direction); };
                 listActions.moveToFooter    = [this] (const std::string& cueId, const std::string& group)

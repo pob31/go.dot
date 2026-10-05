@@ -38,6 +38,43 @@ namespace wfg::client::model
         {
             return row.kind == "fade" || row.kind == "transport";
         }
+
+        /*  A CUE'S OWN ROW, never a derived line of it: the line carries the
+            same identifier and sits under the header of the group it names,
+            so reasoning from it would put the cue in the wrong place. */
+        const Row* ownRowOf (const std::string& id, const std::vector<Row>& rows)
+        {
+            for (const auto& row : rows)
+                if (row.rowKind == RowKind::cue && row.id == id && ! row.derived)
+                    return &row;
+
+            return nullptr;
+        }
+
+        /*  WHETHER `cueId` SITS IN THE BODY OF `group`, at any depth. Walking
+            up its parents, the row whose parent is the group has to be one of
+            the group's MEMBERS: the tree names the group as the parent of its
+            header's and its footer's cues too, and neither is in the body.
+            Bounded by the row count, as `ancestorsOf` is. */
+        bool inBodyOf (const std::string& cueId, const std::string& group, const std::vector<Row>& rows)
+        {
+            const auto* at = ownRowOf (cueId, rows);
+
+            for (std::size_t steps = 0; at != nullptr && steps < rows.size(); ++steps)
+            {
+                if (at->parent == group)
+                    return at->section == Section::member;
+
+                const auto* parent = ownRowOf (at->parent, rows);
+
+                if (parent == nullptr || ! parent->isGroup)
+                    return false;
+
+                at = parent;
+            }
+
+            return false;
+        }
     }
 
     std::string dropTone (DropKind kind)
@@ -296,6 +333,16 @@ namespace wfg::client::model
             return {};
 
         const auto& over = rows[at];
+
+        //  A member on its own group's header band: the mark, and not a move (§30, QZ).
+        if (auto mark = headerMarkFor (over, dragged, rows))
+        {
+            if (landed != nullptr)
+                *landed = over.depth;
+
+            return *mark;
+        }
+
         const auto onIt = inOnBand (fraction) && (aimable (over) || over.isGroup);
 
         /*  OUT OF THE GROUP WHEN THE HAND IS LEFT OF IT: after the group the
@@ -467,6 +514,31 @@ namespace wfg::client::model
         return drop;
     }
 
+    std::optional<Drop> headerMarkFor (const Row& over, const Row& dragged, const std::vector<Row>& rows)
+    {
+        if (over.rowKind != RowKind::band || over.section != Section::header || over.parent.empty()
+              || over.parent == dragged.id || ! inBodyOf (dragged.id, over.parent, rows))
+            return std::nullopt;
+
+        Drop drop;
+
+        /*  WHERE IT ALREADY IS: nothing to write, and said, since a hand that
+            lets go on a lit band and sees nothing change reads it as a drop
+            that failed. */
+        if (dragged.preset == over.parent)
+        {
+            const auto* group = ownRowOf (over.parent, rows);
+            drop.refused = "already prepared in "
+                           + (group == nullptr || group->name.empty() ? over.parent : group->name)
+                           + "'s header";
+            return drop;
+        }
+
+        drop.kind = DropKind::preset;
+        drop.cueId = over.parent;
+        return drop;
+    }
+
     std::optional<std::string> presetStep (const std::string& cueId, const std::string& current,
                                            int direction, const std::vector<Row>& rows)
     {
@@ -533,7 +605,10 @@ namespace wfg::client::model
             case DropKind::after:   return "after " + name + timelineNote;
             case DropKind::into:    return "into " + name + timelineNote;
             case DropKind::target:  return "aim " + name + " at it";
-            case DropKind::preset:  return "prepare it in " + name + "'s header";
+            /*  A MARK, AND NOT A MOVE, SAID AS ONE (§30, QZ): the author
+                dragged cues into a header expecting this and got the other,
+                and the band lights the same either way. */
+            case DropKind::preset:  return "prepare it in " + name + "'s header, keeping it in its place";
             case DropKind::header:  return "into " + name + "'s header";
             case DropKind::footer:  return "into " + name + "'s footer";
             case DropKind::clearPreset: return "no longer prepared ahead";
@@ -541,5 +616,14 @@ namespace wfg::client::model
         }
 
         return {};
+    }
+
+    const Row& groupNamedBy (const Drop& drop, const Row& over, const std::vector<Row>& rows)
+    {
+        if (drop.kind == DropKind::preset || drop.kind == DropKind::header || drop.kind == DropKind::footer)
+            if (const auto* group = ownRowOf (drop.cueId, rows))
+                return *group;
+
+        return over;
     }
 }

@@ -151,6 +151,18 @@ namespace wfg::client::model
             fit. */
         channelRef,
 
+        /*  A MENU OF THE GROUPS AROUND THIS CUE, for its `preset` (namespace
+            draft §30, decision QZ): which group's header gets the cue ready
+            when the pointer parks there. The author looked for "a header/
+            preset toggle in the cues" and found a bare box wanting a group's
+            eight-character identifier. The legal answers are a fact about
+            where THIS cue sits, not about the parameter table, so they arrive
+            with the reading as an output's do: not prepared ahead, then its
+            own group, then each group outside it, innermost first, read by
+            name and written as the identifier. Over several cues, only the
+            groups around every one of them. */
+        groupRef,
+
         /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
             2026-09-21: "it would be great if the controls to show the
             waveform, the send levels, the EQ, the group timeline were in the

@@ -697,6 +697,71 @@ namespace wfg::client::model
             }
         }
 
+        /*  A GROUP AS A MENU READS IT: number and name, as its row does, else
+            whichever of the two it has, else its identifier. */
+        std::string groupLabel (const tree::TreeSnapshot& snapshot, const std::string& groupId)
+        {
+            const auto base = "/godot/cue/" + groupId + "/";
+            const auto number = text (snapshot, base + "number");
+            const auto name = text (snapshot, base + "name");
+
+            if (! number.empty() && ! name.empty())
+                return number + " " + name;
+
+            if (! name.empty())
+                return name;
+
+            return number.empty() ? groupId : number;
+        }
+
+        /*  WHICH GROUP'S HEADER GETS THIS CUE READY, as a menu of the groups
+            around it rather than a box wanting an identifier typed from memory
+            (namespace draft §30, decision QZ - the author: "I could not see a
+            header/preset toggle in the cues").
+
+            THE PARENTS, WALKED UP AS THE TREE NAMES THEM: a header's or a
+            footer's cue has its group as parent too, and the engine prepares a
+            preset wherever under the group it sits, so they are offered the
+            same groups a member is. Innermost first, the order the ctrl/⌘-arrows
+            step them in, and bounded as the new-cue lists' walk is.
+
+            A VALUE NAMING NO GROUP AROUND IT is kept as an item of its own and
+            said to be one - a mark the engine ignores with a warning, which
+            the menu would otherwise show as nothing picked, a different and
+            wrong sentence. */
+        void offerTheGroupsAround (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                                   std::vector<Field>& decided)
+        {
+            for (auto& field : decided)
+            {
+                if (field.name != "preset" || ! field.writable)
+                    continue;
+
+                field.control = Control::groupRef;
+                field.choices = { { "", "not prepared ahead" } };
+
+                auto at = text (snapshot, "/godot/cue/" + cueId + "/parent");
+
+                for (int depth = 0; depth < 64 && ! at.empty(); ++depth)
+                {
+                    if (text (snapshot, "/godot/cue/" + at + "/kind") != "group")
+                        break;
+
+                    field.choices.push_back ({ at, groupLabel (snapshot, at) });
+                    at = text (snapshot, "/godot/cue/" + at + "/parent");
+                }
+
+                const auto& value = field.value;
+                const auto known = std::any_of (field.choices.begin(), field.choices.end(),
+                                                [&value] (const auto& choice) { return choice.first == value; });
+
+                if (! known)
+                    field.choices.push_back ({ value, groupLabel (snapshot, value) + " (not a group it is in)" });
+
+                return;
+            }
+        }
+
         /*  WHAT ONLY A HAND ON A STRIP ASKS, greyed where no hand can reach it
             (PRD §3.27). A media cue carries the sampler rows whatever group it
             is in, and they mean something only on a MEMBER of a SAMPLER group:
@@ -1113,6 +1178,9 @@ namespace wfg::client::model
             gains it next gets the menu with no line here. */
         aimAtADca (snapshot, decided);
 
+        //  Which group's header prepares it, on every kind: the row is every cue's (§30, QZ).
+        offerTheGroupsAround (snapshot, cueId, decided);
+
         greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
 
         /*  THE EQ'S NINETEEN ROWS HAVE AN EDITOR OF THEIR OWN (Phase 9a), the
@@ -1315,6 +1383,29 @@ namespace wfg::client::model
 
                 if (! everywhere)
                     continue;
+
+                /*  THE GROUPS AROUND EVERY ONE OF THEM, and no others (§30,
+                    QZ). Each cue's menu is the groups it sits in, and the one
+                    answer is written to all of them - so an item only some of
+                    them sit under would mark the rest with a group no header
+                    of theirs will ever prepare them in. "Not prepared ahead"
+                    is around everything, so the menu is never empty. */
+                if (field.control == Control::groupRef)
+                    std::erase_if (field.choices, [&each, &findField, &first] (const auto& choice)
+                    {
+                        for (std::size_t index = 1; index < each.size(); ++index)
+                        {
+                            const auto* theirs = findField (each[index], first.name);
+
+                            if (theirs == nullptr
+                                  || std::none_of (theirs->choices.begin(), theirs->choices.end(),
+                                                   [&choice] (const auto& their)
+                                                   { return their.first == choice.first; }))
+                                return true;
+                        }
+
+                        return false;
+                    });
 
                 if (field.mixed)
                     field.value.clear();

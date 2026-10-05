@@ -2756,6 +2756,248 @@ TEST_CASE ("client: a cue marked as a group's preset appears in that group's hea
 }
 
 //==============================================================================
+TEST_CASE ("client: a member dropped on its own group's header band is marked and stays, and a cue from outside is moved in")
+{
+    /*  Namespace draft §30, decision QZ. The author dragged cues into a header
+        expecting them to be got ready there, and they were MOVED: out of the
+        body, and played audibly before the members at the GO. A member let go
+        on its own group's header band, at any depth, is now marked instead -
+        one write to its `preset` - and stays where it was; anything else on
+        that band is moved into the header as before. Read on `descent`: Scene
+        holds a header, a nested Inner, a member after it, and a footer. */
+    Rig rig { "descent" };
+
+    auto tick = std::int64_t { 1 };
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*rig.publish (0), listId));
+
+    const auto rowAt = [&show] (const std::string& id) -> const model::Row&
+    {
+        const auto found = show.indexOf (id);
+        REQUIRE (found >= 0);
+        return show.rows()[static_cast<std::size_t> (found)];
+    };
+
+    const auto bandOf = [&show] (const std::string& group, model::Section which)
+    {
+        for (std::size_t row = 0; row < show.rows().size(); ++row)
+            if (show.rows()[row].rowKind == model::RowKind::band && show.rows()[row].parent == group
+                  && show.rows()[row].section == which)
+                return row;
+
+        return show.rows().size();
+    };
+
+    auto sceneBand = bandOf ("BBBB2222", model::Section::header);
+    REQUIRE (sceneBand < show.rows().size());
+    REQUIRE (show.rows()[sceneBand].sectionId == "HDR30000");
+
+    //  A member two groups down is marked for Scene, wherever across the band the hand is.
+    for (const auto x : { 0, 1, 2, 3 })
+    {
+        CAPTURE (x);
+        const auto drop = model::dropAtDepth (show.rows(), sceneBand, rowAt ("DDDD6666"), 0.5, x);
+        CHECK (drop.kind == model::DropKind::preset);
+        CHECK (drop.cueId == "BBBB2222");
+        CHECK (model::dropTone (drop.kind) == "drop-header");
+    }
+
+    //  And a member directly in Scene.
+    CHECK (model::dropAtDepth (show.rows(), sceneBand, rowAt ("FFFF8888"), 0.5, 1).kind
+             == model::DropKind::preset);
+
+    //  From outside the group, and from its own footer, it is still a move into the header.
+    for (const auto* id : { "AAAA1111", "FTR91000", "GGGG9999" })
+    {
+        CAPTURE (id);
+        const auto drop = model::dropAtDepth (show.rows(), sceneBand, rowAt (id), 0.5, 1);
+        CHECK (drop.kind == model::DropKind::into);
+        CHECK (drop.container == "HDR30000");
+        CHECK_FALSE (model::headerMarkFor (show.rows()[sceneBand], rowAt (id), show.rows()).has_value());
+    }
+
+    //  A cue of the header itself is moved within it, and after a header row is still a place in it.
+    CHECK (model::dropAtDepth (show.rows(), sceneBand, rowAt ("HDR40000"), 0.5, 2).kind
+             == model::DropKind::into);
+    {
+        const auto afterRow = model::dropAtDepth (show.rows(), static_cast<std::size_t> (show.indexOf ("HDR40000")),
+                                                  rowAt ("DDDD6666"), 0.9, 2);
+        CHECK (afterRow.kind == model::DropKind::after);
+        CHECK (afterRow.container == "HDR30000");
+    }
+
+    //  The footer's band is not a mark, whoever is dropped on it.
+    {
+        const auto footer = bandOf ("BBBB2222", model::Section::footer);
+        REQUIRE (footer < show.rows().size());
+        CHECK_FALSE (model::headerMarkFor (show.rows()[footer], rowAt ("DDDD6666"), show.rows()).has_value());
+    }
+
+    //  Said in the air with the group's name, and that the cue stays where it is.
+    const auto mark = model::dropAtDepth (show.rows(), sceneBand, rowAt ("DDDD6666"), 0.5, 2);
+    REQUIRE (mark.kind == model::DropKind::preset);
+    CHECK (model::describe (mark, model::groupNamedBy (mark, show.rows()[sceneBand], show.rows()), false)
+             == "prepare it in Scene's header, keeping it in its place");
+
+    /*  LETTING GO IS ONE `node.set` OF THE CUE'S `preset`, through the real
+        command: the cue stays in Inner, nothing moves into the header, and
+        the engine publishes the reading of the mark at once. */
+    const auto write = gesture::setNode ("/godot/cue/DDDD6666/preset", mark.cueId);
+    REQUIRE (rig.apply (tick++, write.origin, write.command, write.args).applied == 1);
+
+    const auto marked = rig.publish (tick);
+    CHECK (model::text (*marked, "/godot/cue/DDDD6666/preset") == "BBBB2222");
+    CHECK (model::text (*marked, "/godot/cue/BBBB2222/headerDerived") == "DDDD6666");
+    CHECK (model::text (*marked, "/godot/cue/CCCC5555/order") == "DDDD6666 EEEE7777");
+    CHECK (model::text (*marked, "/godot/cue/BBBB2222/headerOrder") == "HDR40000");
+
+    //  And the list draws it on the next pass: the reading under Scene's header, the cue in Inner.
+    REQUIRE (show.refresh (*marked, listId));
+    sceneBand = bandOf ("BBBB2222", model::Section::header);
+    REQUIRE (sceneBand < show.rows().size());
+    CHECK (show.rows()[sceneBand].count == 2u);
+
+    auto readings = 0;
+
+    for (const auto& row : show.rows())
+        if (row.rowKind == model::RowKind::cue && row.id == "DDDD6666" && row.derived)
+        {
+            ++readings;
+            CHECK (row.section == model::Section::header);
+            CHECK (row.parent == "BBBB2222");
+        }
+
+    CHECK (readings == 1);
+    CHECK_FALSE (rowAt ("DDDD6666").derived);
+    CHECK (rowAt ("DDDD6666").parent == "CCCC5555");
+    CHECK (rowAt ("DDDD6666").section == model::Section::member);
+    CHECK (rowAt ("DDDD6666").preset == "BBBB2222");
+
+    //  Dropped there again: nothing to write, and said.
+    {
+        const auto again = model::dropAtDepth (show.rows(), sceneBand, rowAt ("DDDD6666"), 0.5, 2);
+        CHECK (again.kind == model::DropKind::none);
+        CHECK (again.refused == "already prepared in Scene's header");
+        CHECK (model::describe (again, show.rows()[sceneBand], false) == "already prepared in Scene's header");
+    }
+
+    /*  INNER HAS NO HEADER, so its band is the one a drag grows over its
+        title, built here by hand: the mark moves inward onto it, while
+        Scene's other member - not inside Inner - makes Inner's header and is
+        moved into it, said with Inner's name and not the band's word. */
+    model::Row innerBand;
+    innerBand.rowKind = model::RowKind::band;
+    innerBand.section = model::Section::header;
+    innerBand.parent = "CCCC5555";
+    innerBand.name = "header";
+    innerBand.depth = 2;
+
+    const auto inward = model::headerMarkFor (innerBand, rowAt ("DDDD6666"), show.rows());
+    REQUIRE (inward.has_value());
+    CHECK (inward->kind == model::DropKind::preset);
+    CHECK (inward->cueId == "CCCC5555");
+
+    CHECK_FALSE (model::headerMarkFor (innerBand, rowAt ("FFFF8888"), show.rows()).has_value());
+    const auto made = model::dropFor (innerBand, rowAt ("FFFF8888"), 0.5);
+    CHECK (made.kind == model::DropKind::header);
+    CHECK (made.cueId == "CCCC5555");
+    CHECK (model::describe (made, model::groupNamedBy (made, innerBand, show.rows()), false)
+             == "into Inner's header");
+
+    //  And the menu's first item takes the mark off: the reading goes, the cue never moved.
+    const auto clear = gesture::setNode ("/godot/cue/DDDD6666/preset", "");
+    REQUIRE (rig.apply (tick++, clear.origin, clear.command, clear.args).applied == 1);
+    CHECK (model::text (*rig.publish (tick), "/godot/cue/BBBB2222/headerDerived").empty());
+    CHECK (model::text (*rig.publish (tick), "/godot/cue/CCCC5555/order") == "DDDD6666 EEEE7777");
+}
+
+//==============================================================================
+TEST_CASE ("client: a cue's preset is a menu of the groups around it, innermost first, and over several only theirs in common")
+{
+    /*  Namespace draft §30, decision QZ - the author: "I could not see a
+        header/preset toggle in the cues." The row was a bare box wanting a
+        group's identifier. It is a menu now: not prepared ahead, then the
+        cue's own group, then each group outside it, read by number and name
+        and written as the identifier. */
+    Rig rig { "descent" };
+
+    auto tick = std::int64_t { 1 };
+    const auto snapshot = rig.publish (0);
+
+    using Choices = std::vector<std::pair<std::string, std::string>>;
+
+    const auto presetIn = [] (const model::Inspection& in) -> model::Field
+    {
+        for (const auto& block : in.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == "preset")
+                {
+                    CHECK (block.heading == "in the list");
+                    return field;
+                }
+
+        FAIL_CHECK ("no preset row");
+        return model::Field {};
+    };
+
+    const auto none = std::pair<std::string, std::string> { "", "not prepared ahead" };
+    const auto scene = std::pair<std::string, std::string> { "BBBB2222", "2 Scene" };
+    const auto inner = std::pair<std::string, std::string> { "CCCC5555", "2.1 Inner" };
+
+    //  Two groups down: its own group first, then the one outside it.
+    {
+        const auto field = presetIn (model::inspect (*snapshot, "DDDD6666"));
+        CHECK (field.control == model::Control::groupRef);
+        CHECK (field.writable);
+        CHECK (field.address == "/godot/cue/DDDD6666/preset");
+        CHECK (field.value.empty());
+        CHECK (field.choices == Choices { none, inner, scene });
+    }
+
+    //  At the top of the list there is nothing around it but the list.
+    CHECK (presetIn (model::inspect (*snapshot, "AAAA1111")).choices == Choices { none });
+
+    //  A header's cue and a footer's are under their group as a member is; a group is offered the ones outside it.
+    CHECK (presetIn (model::inspect (*snapshot, "HDR40000")).choices == Choices { none, scene });
+    CHECK (presetIn (model::inspect (*snapshot, "FTR91000")).choices == Choices { none, scene });
+    CHECK (presetIn (model::inspect (*snapshot, "CCCC5555")).choices == Choices { none, scene });
+
+    //  Several: the groups around every one of them, each written to all.
+    {
+        const auto siblings = presetIn (model::inspectMany (*snapshot, { "DDDD6666", "EEEE7777" }));
+        CHECK (siblings.control == model::Control::groupRef);
+        CHECK (siblings.choices == Choices { none, inner, scene });
+        CHECK (siblings.addresses == std::vector<std::string> { "/godot/cue/DDDD6666/preset",
+                                                                "/godot/cue/EEEE7777/preset" });
+
+        CHECK (presetIn (model::inspectMany (*snapshot, { "DDDD6666", "FFFF8888" })).choices
+                 == Choices { none, scene });
+        CHECK (presetIn (model::inspectMany (*snapshot, { "FFFF8888", "DDDD6666" })).choices
+                 == Choices { none, scene });
+        CHECK (presetIn (model::inspectMany (*snapshot, { "DDDD6666", "AAAA1111" })).choices
+                 == Choices { none });
+    }
+
+    //  A pick is the cue's mark: the menu shows it picked.
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/DDDD6666/preset"),
+                          osc::Value::string ("BBBB2222") }).applied == 1);
+    CHECK (presetIn (model::inspect (*rig.publish (tick), "DDDD6666")).value == "BBBB2222");
+
+    //  A mark naming no group around the cue is shown, and said to be one.
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/AAAA1111/preset"),
+                          osc::Value::string ("BBBB2222") }).applied == 1);
+    {
+        const auto stale = presetIn (model::inspect (*rig.publish (tick), "AAAA1111"));
+        CHECK (stale.value == "BBBB2222");
+        CHECK (stale.choices == Choices { none, { "BBBB2222", "2 Scene (not a group it is in)" } });
+    }
+}
+
+//==============================================================================
 TEST_CASE ("client: a group names its header and footer in the tree, and a cue moved into the footer says so")
 {
     /*  The footer as a PLACE (author, 2026-09-18): the tree now publishes a

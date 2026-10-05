@@ -106,8 +106,10 @@ namespace wfg::client::ui
             std::function<void()> pickAll;
 
             /*  THE PRESET: a cue marked as prepared by an ancestor group's
-                header. Alt-drop on the group says which; ctrl/⌘-up and -down
-                step the mark outward and inward through the ancestors. */
+                header. Alt-drop on the group says which, and so does a plain
+                drop of a member on its group's header band (namespace draft
+                §30, QZ); ctrl/⌘-up and -down step the mark outward and inward
+                through the ancestors. */
             std::function<void (const std::string& cueId, const std::string& group)> setPreset;
             std::function<void (int direction)> presetStep;
 
