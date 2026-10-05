@@ -1498,11 +1498,12 @@ namespace wfg::import::als
                     out.notes.push_back ({ Note::Kind::info, -1, {}, hand.control + ": " + hand.moved + " - in Go.dot, "
                                                                      + hand.goDot });
 
-                /*  A SOUND FROM A TRACK WHOSE FADER A HAND RODE answers to its DCA -
-                    and where its clip also drew that fader, the two do not add in
-                    Live as they do here: a hand on a mapped fader overrides the
-                    clip's envelope once it moves, and a MISE in the conduite is
-                    often exactly that, done before GO. Said, not guessed. */
+                /*  A SOUND FROM A TRACK WHOSE FADER A HAND RODE answers to its DCA,
+                    and where its clip also drew that fader the drawing is kept:
+                    the import takes the set as it is stopped, not as a night runs
+                    it (the author, QW) - a hand taking over in Live is the show,
+                    and the DCA is the hand. Said, so the operator knows where the
+                    level starts. */
                 for (auto& step : out.steps)
                     for (auto& sound : step.sounds)
                         if (out.dcas.count (sound.trackId) != 0)
@@ -1510,12 +1511,12 @@ namespace wfg::import::als
                             sound.dcaTrack = sound.trackId;
 
                             if (! sound.levelLane.empty())
-                                out.notes.push_back ({ Note::Kind::approximated, sound.scene, sound.trackName,
+                                out.notes.push_back ({ Note::Kind::info, sound.scene, sound.trackName,
                                                        "\"" + sound.name + "\" has its fader drawn in Live and a hand "
-                                                       "on it too: in Live the hand takes over from the drawing once "
-                                                       "it moves; in Go.dot the DCA adds to the level lane, which "
-                                                       "starts at " + osc::formatDouble (std::round (sound.levelLane.front().db * 10.0) / 10.0)
-                                                       + " dB - so a DCA at 0 dB plays the drawing, not the fader at 0" });
+                                                       "on it too: the drawing is imported, as the set is when stopped, "
+                                                       "and the DCA is the hand - its lane starts at "
+                                                       + osc::formatDouble (std::round (sound.levelLane.front().db * 10.0) / 10.0)
+                                                       + " dB, so a DCA at 0 dB plays the drawing (QW)" });
                         }
             }
 

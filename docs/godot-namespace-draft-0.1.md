@@ -18874,11 +18874,11 @@ Where the build departs from what §29 drew, or says more than it:
   render of an imported show was silent.
 - **A performance's list keeps the show's name**, so "Update the show's template..." lists only what
   the venues changed.
-- **A hand and a drawing on one fader** (`ae3216b`) are reported, not resolved: in Live a hand on a
-  mapped fader takes over from the clip's envelope once it moves, and the conduite's MISE lines often
-  do exactly that before GO; in Go.dot the DCA adds to the level lane. Q1 of Pau starts its lane at
-  -18.2 dB, so a DCA at 0 dB plays 18 dB under Live's fader at 0. Which reading is the show is the
-  author's to say.
+- **QW - A hand and a drawing on one fader: the drawing is imported** (the author, 2026-10-05: *"The
+  import should import when stopped, not when running the show."*). In Live a hand on a mapped fader
+  takes over from the clip's envelope once it moves, and the conduite's MISE lines often do that
+  before GO; that is the show running, and in Go.dot the hand is the DCA, which adds to the level lane.
+  So Q1 of Pau keeps its lane starting at -18.2 dB, and the report says so for each such sound.
 
 **The Lazzi tour, imported:** the eleven venue sets as one show - Pau the template, eleven
 performances of the conduite's fourteen GOs, 1.1 GB of media copied once - every show accepted by
@@ -18886,8 +18886,8 @@ performances of the conduite's fourteen GOs, 1.1 GB of media copied once - every
 set changed. Q1 rendered hosted reaches the face's outputs and nothing else, as its sends say.
 
 **What waits:** the probe set (AL.1), which settles the three laws of QU; the driver that renders
-the imported probe against Live's own export (AL.7, M49); the author's answer on a hand and a drawing;
-and a listen, cue by cue, against Live playing the same set.
+the imported probe against Live's own export (AL.7, M49); and a listen, cue by cue, against Live
+playing the same set.
 
 ### 29.6 The probe set (AL.1)
 

@@ -826,8 +826,8 @@ listen, cue by cue, against Live playing the same set.
 **Built 2026-10-05, AL.0 and AL.2-AL.6** (namespace draft §29.5): the reader, the walk, the show
 written, the tour, `wfg import-als` and File > Import Ableton Live set.... The Lazzi tour imports as one
 show with eleven performances of fourteen GOs. A fresh document's `<Audio>` order was found wrong and
-mended on the way. Waiting: the probe set (AL.1), AL.7's render against Live's export, and the
-author's answer on a hand and a drawing on one fader.
+mended on the way. A hand and a drawing on one fader: the drawing is imported (the author, QW).
+Waiting: the probe set (AL.1) and AL.7's render against Live's export.
 
 ---
 
