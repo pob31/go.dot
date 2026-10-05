@@ -478,7 +478,14 @@ namespace wfg::doc
             a placeholder standing in for one. */
         juce::ValueTree audio { "Audio" };
         audio.setProperty ("tracks", 0, nullptr);
-        showNode.addChild (audio, -1, nullptr);
+
+        /*  WHERE THE SCHEMA DECLARES IT, after <Mounts> - ensureContainers'
+            rule, for its reason. Appended, as it was until 2026-10-05, it came
+            after <Dcas>, and every show built from a fresh document - File >
+            New, and the first importer to be checked against the published
+            grammar - wrote a show.xml that `wfg validate` passed and
+            `scripts/validate-show.py` refused. */
+        showNode.addChild (audio, showNode.indexOf (showNode.getChildWithName ("Mounts")) + 1, nullptr);
 
         makeHistories();
 
