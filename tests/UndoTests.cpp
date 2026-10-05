@@ -576,6 +576,207 @@ TEST_CASE ("undo: a different address, a different origin and a pause each split
     }
 }
 
+//==============================================================================
+//  One gesture over several addresses (namespace draft §30.11, RA).
+
+namespace
+{
+    /*  Two cues, two pre-waits: the smallest show where "several cues at once"
+        means anything. */
+    void twoCues (Rig& rig)
+    {
+        REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+        REQUIRE (rig.apply (1, "cue.create", { text (mainList), osc::Value::int32 (0),
+                                               text ("memo"), text ("Walk-in"),
+                                               text (firstCue) }).applied == 1);
+        REQUIRE (rig.apply (2, "cue.create", { text (mainList), osc::Value::int32 (1),
+                                               text ("memo"), text ("Announce"),
+                                               text (inGroupA) }).applied == 1);
+    }
+
+    std::string preWaitOf (const std::string& cue) { return "/godot/cue/" + cue + "/preWait"; }
+
+    /*  `node.setMany`'s arguments: an address and a number, and another. */
+    std::vector<osc::Value> twoWaits (double first, double second)
+    {
+        return { text (preWaitOf (firstCue)), osc::Value::float64 (first),
+                 text (preWaitOf (inGroupA)), osc::Value::float64 (second) };
+    }
+}
+
+TEST_CASE ("undo: one gesture over several cues is one command, one record and one step")
+{
+    Rig rig;
+    twoCues (rig);
+
+    REQUIRE (rig.apply (10, "node.setMany", twoWaits (1.5, 2.5)).applied == 1);
+
+    CHECK (rig.document.getAttribute (preWaitOf (firstCue)) == std::string ("1.5"));
+    CHECK (rig.document.getAttribute (preWaitOf (inGroupA)) == std::string ("2.5"));
+
+    //  One record, as applied, carrying every pair.
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (! parsed.records.empty());
+    CHECK (parsed.records.back().command == "node.setMany");
+    CHECK (parsed.records.back().args.size() == 4u);
+
+    //  One step, named after the command, and one press takes both back.
+    CHECK (rig.undoName() == "node.setMany");
+    REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.setMany"));
+    CHECK (rig.document.getAttribute (preWaitOf (firstCue)) == std::string ("0"));
+    CHECK (rig.document.getAttribute (preWaitOf (inGroupA)) == std::string ("0"));
+
+    REQUIRE (rig.document.redo (doc::UndoDomain::document) == std::string ("node.setMany"));
+    CHECK (rig.document.getAttribute (preWaitOf (firstCue)) == std::string ("1.5"));
+    CHECK (rig.document.getAttribute (preWaitOf (inGroupA)) == std::string ("2.5"));
+
+    //  The set and the three creates: four steps, not five.
+    CHECK (rig.drainUndoSteps() == 4);
+}
+
+TEST_CASE ("undo: a drag over several cues is one step, and joins only the same set from the same hand in time")
+{
+    Rig rig;
+    twoCues (rig);
+
+    SUBCASE ("ten frames of one drag are one step, whatever order each frame lists the cues in")
+    {
+        for (int frame = 0; frame < 10; ++frame)
+        {
+            const auto first = 0.5 + 0.1 * static_cast<double> (frame);
+            auto args = twoWaits (first, first + 1.0);
+
+            //  Every other frame names the cues the other way round: a set, not a list.
+            if (frame % 2 == 1)
+                args = { args[2], args[3], args[0], args[1] };
+
+            REQUIRE (rig.apply (10 + frame, "node.setMany", std::move (args)).applied == 1);
+        }
+
+        REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.setMany"));
+        CHECK (rig.document.getAttribute (preWaitOf (firstCue)) == std::string ("0"));
+        CHECK (rig.document.getAttribute (preWaitOf (inGroupA)) == std::string ("0"));
+        CHECK (rig.drainUndoSteps() == 3);
+    }
+
+    SUBCASE ("another set of addresses is another edit")
+    {
+        REQUIRE (rig.apply (10, "node.setMany", twoWaits (1.0, 2.0)).applied == 1);
+        REQUIRE (rig.apply (11, "node.setMany", { text (preWaitOf (firstCue)), osc::Value::float64 (3.0),
+                                                  text ("/godot/cue/" + inGroupA + "/postWait"),
+                                                  osc::Value::float64 (4.0) }).applied == 1);
+        REQUIRE (rig.apply (12, "node.setMany", twoWaits (5.0, 6.0)).applied == 1);
+
+        CHECK (rig.drainUndoSteps() == 6);
+    }
+
+    SUBCASE ("two hands, or a pause, split it as they split one address")
+    {
+        REQUIRE (rig.applyFrom (10, "ws:192.168.1.20:51234", "node.setMany", twoWaits (1.0, 2.0)).applied == 1);
+        REQUIRE (rig.applyFrom (11, "udp:10.0.0.5:9000", "node.setMany", twoWaits (3.0, 4.0)).applied == 1);
+        REQUIRE (rig.applyFrom (12 + doc::ShowDocument::coalescingWindowTicks, "udp:10.0.0.5:9000",
+                                "node.setMany", twoWaits (5.0, 6.0)).applied == 1);
+
+        CHECK (rig.drainUndoSteps() == 6);
+    }
+
+    SUBCASE ("a set of one address is that address, and joins a node.set to it")
+    {
+        REQUIRE (rig.apply (10, "node.set", { text (preWaitOf (firstCue)), osc::Value::float64 (1.0) }).applied == 1);
+        REQUIRE (rig.apply (11, "node.setMany", { text (preWaitOf (firstCue)), osc::Value::float64 (2.0) }).applied == 1);
+
+        CHECK (rig.drainUndoSteps() == 4);
+    }
+}
+
+TEST_CASE ("undo: a set refused at one address writes none of them, says where, and leaves no step")
+{
+    Rig rig;
+    twoCues (rig);
+
+    const auto steps = [&rig]
+    {
+        return rig.document.history (doc::UndoDomain::document).getUndoDescriptions().size();
+    };
+
+    SUBCASE ("refused before anything is written: odd, twice, not Go.dot's")
+    {
+        CHECK (rig.apply (10, "node.setMany", { text (preWaitOf (firstCue)), osc::Value::float64 (1.0),
+                                                text (preWaitOf (inGroupA)) }).rejected == 1);
+        CHECK (rig.engine.lastError().find ("arity node.setMany") != std::string::npos);
+
+        CHECK (rig.apply (11, "node.setMany", { text (preWaitOf (firstCue)), osc::Value::float64 (1.0),
+                                                text (preWaitOf (firstCue)), osc::Value::float64 (2.0) }).rejected == 1);
+        CHECK (rig.engine.lastError().find ("bad-value node.setMany " + preWaitOf (firstCue)) != std::string::npos);
+
+        CHECK (rig.apply (12, "node.setMany", { text (preWaitOf (firstCue)), osc::Value::float64 (1.0),
+                                                text ("/desk/fader/1"), osc::Value::float64 (0.5) }).rejected == 1);
+        CHECK (rig.engine.lastError().find ("bad-address node.setMany /desk/fader/1") != std::string::npos);
+
+        CHECK (rig.document.getAttribute (preWaitOf (firstCue)) == std::string ("0"));
+        CHECK (steps() == 3);
+    }
+
+    SUBCASE ("refused by the door after the first pair was written: put back, and no step")
+    {
+        const auto gone = "/godot/cue/ZZZZZZZZ/preWait";
+
+        CHECK (rig.apply (10, "node.setMany", { text (preWaitOf (firstCue)), osc::Value::float64 (1.0),
+                                                text (preWaitOf (inGroupA)), osc::Value::float64 (2.0),
+                                                text (gone), osc::Value::float64 (3.0) }).rejected == 1);
+
+        //  Neither cue moved, the address refused is named, and the record keeps every pair.
+        CHECK (rig.document.getAttribute (preWaitOf (firstCue)) == std::string ("0"));
+        CHECK (rig.document.getAttribute (preWaitOf (inGroupA)) == std::string ("0"));
+        CHECK (rig.engine.lastError().find (std::string ("bad-address node.setMany ") + gone) != std::string::npos);
+
+        const auto parsed = LogFile::parse (rig.engine.log().contents());
+        REQUIRE (! parsed.records.empty());
+        CHECK (parsed.records.back().kind == LogRecord::Kind::rejected);
+        CHECK (parsed.records.back().reason == reason::badAddress);
+        CHECK (parsed.records.back().args.size() == 6u);
+
+        //  NO STEP: the one the hook opened for it is gone, so Undo takes back the last create.
+        CHECK (steps() == 3);
+        CHECK (rig.undoName() == "cue.create");
+
+        /*  And the next set of the same addresses opens a step of its own,
+            named - not the unnamed one JUCE leaves open behind its undo. */
+        REQUIRE (rig.apply (11, "node.setMany", twoWaits (1.0, 2.0)).applied == 1);
+        CHECK (rig.undoName() == "node.setMany");
+        CHECK (steps() == 4);
+    }
+
+    SUBCASE ("refused in the middle of a drag: the drag keeps what it had, and is still one step")
+    {
+        REQUIRE (rig.apply (10, "node.setMany", twoWaits (1.0, 2.0)).applied == 1);
+        REQUIRE (rig.apply (11, "node.setMany", twoWaits (1.5, 2.5)).applied == 1);
+
+        //  The same set, in the window - and a value the second row cannot take.
+        CHECK (rig.apply (12, "node.setMany", { text (preWaitOf (firstCue)), osc::Value::float64 (9.0),
+                                                text (preWaitOf (inGroupA)), text ("soon") }).rejected == 1);
+        CHECK (rig.engine.lastError().find ("type-mismatch node.setMany " + preWaitOf (inGroupA)) != std::string::npos);
+
+        CHECK (rig.document.getAttribute (preWaitOf (firstCue)) == std::string ("1.5"));
+        CHECK (rig.document.getAttribute (preWaitOf (inGroupA)) == std::string ("2.5"));
+
+        //  One step for the drag, and one press takes the whole of it back.
+        CHECK (steps() == 4);
+        REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.setMany"));
+        CHECK (rig.document.getAttribute (preWaitOf (firstCue)) == std::string ("0"));
+        CHECK (rig.document.getAttribute (preWaitOf (inGroupA)) == std::string ("0"));
+    }
+
+    SUBCASE ("a locked show refuses the set at its first address, and writes none")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+
+        CHECK (rig.apply (10, "node.setMany", twoWaits (1.0, 2.0)).rejected == 1);
+        CHECK (rig.engine.lastError().find ("locked node.setMany " + preWaitOf (firstCue)) != std::string::npos);
+        CHECK (rig.document.getAttribute (preWaitOf (inGroupA)) == std::string ("0"));
+    }
+}
+
 TEST_CASE ("undo: the step is the transaction and never the action")
 {
     /*  JUCE returns no coalesced action at all when one of the two is ADDING a

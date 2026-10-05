@@ -662,6 +662,56 @@ namespace wfg::doc
             ShowDocument& target;
         };
 
+        /*  ALL OR NONE, for `node.setMany` (namespace draft §30.11): while one
+            of these is in scope, every value the write door changes is kept as
+            it was, and `putBack` puts each one back, the last first.
+
+            THROUGH THE SAME HISTORY THE WRITE WENT ON, because a set that joins
+            a drag's open step must leave that step holding exactly what the
+            drag had made before this frame - Undo still takes the whole drag
+            back. A set that opened its step (`node.setMany` is one command,
+            one step) leaves nothing on the stack: the step is taken off whole,
+            and the next write may not join it, since JUCE leaves an unnamed
+            transaction open behind an undo.
+
+            Kept here and not by the command, because every door that reaches
+            the document - the EQ and send door unlocked, a plugin's values, a
+            fade's moves - writes through `setAttribute`, and the keeping has to
+            see them all. Nested scopes keep into the innermost. */
+        class ScopedKeep
+        {
+        public:
+            explicit ScopedKeep (ShowDocument& documentToKeep);
+            ~ScopedKeep();
+
+            /** Every value written since this scope opened, as it was. */
+            void putBack();
+
+            ScopedKeep (const ScopedKeep&) = delete;
+            ScopedKeep& operator= (const ScopedKeep&) = delete;
+
+        private:
+            struct Kept
+            {
+                juce::ValueTree node;
+                juce::Identifier property;
+                bool had = false;
+                juce::var before;
+                juce::UndoManager* onto = nullptr;
+            };
+
+            friend class ShowDocument;
+
+            ShowDocument& target;
+            std::vector<Kept> kept;
+            ScopedKeep* outer = nullptr;
+
+            /*  Whether the command this scope serves opened its own step -
+                nothing performed on the step the stack has open - so that a
+                put-back takes the step away rather than leaving it empty. */
+            bool ownStep = false;
+        };
+
         //======================================================================
         // Lookup
         //======================================================================
@@ -987,6 +1037,14 @@ namespace wfg::doc
 
         /** Nought means writes are recorded. See `ScopedUndoSuppression`. */
         int undoSuppressions = 0;
+
+        /*  The innermost `ScopedKeep` open, or null: what the write door tells
+            about a value before it changes it. */
+        ScopedKeep* keeping = nullptr;
+
+        /** Tells the open `ScopedKeep`, if any, what `property` holds before it is written. */
+        void keepBefore (const juce::ValueTree& node, const juce::Identifier& property,
+                         juce::UndoManager* onto);
 
     public:
         /*  MOVED WITH CARE AND NEVER COPIED, because the listener behind

@@ -16,12 +16,17 @@
 
 #include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/FxRows.h>
+#include <wfg/engine/cue/LiveRows.h>
 
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/document/ShowDocument.h>
 
+#include <cstddef>
+#include <functional>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace wfg::cue
 {
@@ -291,6 +296,14 @@ namespace wfg::cue
         ++rev;
     }
 
+    void LiveEdits::putBack (const LiveEdits& kept)
+    {
+        rows = kept.rows;
+        sends = kept.sends;
+        fx = kept.fx;
+        ++rev;
+    }
+
     //==========================================================================
     doc::LiveWrite liveEditFor (LiveEdits& live, doc::ShowDocument& document)
     {
@@ -462,6 +475,22 @@ namespace wfg::cue
         if (commandName == "send.create" || commandName == "eq.reset")
             return document.isLocked();
 
+        /*  A SET OF VALUES (namespace draft §30.11) rides when every one of
+            them does - a drag over six cues' sends under the lock is no step
+            of the history either. One that rides beside one that edits is an
+            edit, and opens its step; the riding pairs put nothing on it. */
+        if (commandName == "node.setMany")
+        {
+            if (args.size() < 2)
+                return false;
+
+            for (std::size_t at = 0; at + 1 < args.size(); at += 2)
+                if (! isLiveEdit ("node.set", { args[at], args[at + 1] }, document, live))
+                    return false;
+
+            return true;
+        }
+
         if (commandName != "node.set" || args.empty() || ! args[0].isString())
             return false;
 
@@ -484,6 +513,23 @@ namespace wfg::cue
         }
 
         return false;
+    }
+
+    doc::LiveSide liveSideFor (LiveEdits& live)
+    {
+        doc::LiveSide side;
+
+        side.isRide = [] (const std::string& address) { return isLiveAddress (address); };
+
+        /*  A WHOLE COPY, taken once a set, on the tick thread: the layer is a
+            few rows of text at most, and a copy is the one keeping that cannot
+            miss a door - EQ, sends, a send made live, a plugin's values. */
+        side.keep = [&live]
+        {
+            return std::function<void()> ([&live, kept = live] { live.putBack (kept); });
+        };
+
+        return side;
     }
 
     //==========================================================================

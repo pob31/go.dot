@@ -756,7 +756,10 @@ namespace
                                     wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                         wfg::cue::eitherOf (wfg::cue::fxWriteFor (document, nullptr, &liveEdits),
                                                                             wfg::cue::fadeMoveWriteFor (document, nullptr)))),
-                wfg::cue::liveSendFor (liveEdits, document));
+                wfg::cue::liveSendFor (liveEdits, document),
+                /*  AND A SET OF VALUES PUT BACK WHOLE when one is refused
+                    (`node.setMany`, namespace draft §30.11), as `serve` has it. */
+                wfg::cue::liveSideFor (liveEdits));
 
             wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
             wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
@@ -3214,7 +3217,11 @@ namespace
                                 wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
                                                     wfg::cue::eitherOf (wfg::cue::fxWriteFor (document, &catalogues, &liveEdits),
                                                                         wfg::cue::fadeMoveWriteFor (document, &catalogues)))),
-            wfg::cue::liveSendFor (liveEdits, document));
+            wfg::cue::liveSendFor (liveEdits, document),
+            /*  AND ONE GESTURE OVER SEVERAL ADDRESSES, all or none (namespace
+                draft §30.11): `node.setMany` refuses a hand's ride and puts
+                the live layer back when a later pair of its set is refused. */
+            wfg::cue::liveSideFor (liveEdits));
 
         wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
         wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);

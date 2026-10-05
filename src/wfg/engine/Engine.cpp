@@ -73,6 +73,12 @@ namespace wfg
             if (! r.command.empty())
                 text += " " + r.command;
 
+            /*  AND WHERE, when one command wrote several addresses and the
+                reason cannot say which refused (`node.setMany`, namespace
+                draft §30.11): a sixth word, after the command. */
+            if (! r.detail.empty())
+                text += " " + r.detail;
+
             const std::lock_guard<std::mutex> lock (errorMutex);
             lastErrorText = std::move (text);
         }
@@ -142,6 +148,7 @@ namespace wfg
         {
             r.kind = LogRecord::Kind::rejected;
             r.reason = std::move (outcome.reason);
+            r.detail = std::move (outcome.detail);
             r.args = std::move (check.args);
             return r;
         }

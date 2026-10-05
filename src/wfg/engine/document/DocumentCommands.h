@@ -40,8 +40,8 @@
 
 namespace wfg::doc
 {
-    /** Adds list.create, cue.create, mount.create, object.delete, object.move
-        and node.set, all bound to `document`. */
+    /** Adds list.create, cue.create, mount.create, object.delete, object.move,
+        node.set and node.setMany, all bound to `document`. */
     /*  Where a write goes when the address is not the document's.
 
         `node.set` is the one value-write command (PRD §4.11 - a client reaches
@@ -78,7 +78,22 @@ namespace wfg::doc
         `cue::liveSendFor` is the one implementation. */
     using LiveCreate = std::function<std::optional<Outcome> (const std::vector<osc::Value>& args)>;
 
+    /*  AND WHAT `node.setMany` ASKS OF THE LIVE SIDE (namespace draft §30.11).
+        A set is all or none, and two things `node.set`'s doors write are not
+        the document's to put back: a hand's ride - a fader's trim, a loop
+        point, the lane's ride - and the layer a locked show's EQ, sends and
+        plugin values ride in. So the live side says which addresses are rides,
+        which a set refuses, and keeps its layer while a set is written,
+        answering what puts the layer back as it was. `cue::liveSideFor` is the
+        one implementation. Absent - `wfg tree`, `wfg canon` and every document
+        test - nothing is a ride and there is no layer to keep. */
+    struct LiveSide
+    {
+        std::function<bool (const std::string& address)> isRide;
+        std::function<std::function<void()> ()> keep;
+    };
+
     void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document,
                                    ForeignWrite foreign = {}, LiveWrite live = {},
-                                   LiveCreate liveSend = {});
+                                   LiveCreate liveSend = {}, LiveSide many = {});
 }

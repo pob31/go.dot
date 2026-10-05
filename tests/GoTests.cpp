@@ -13526,7 +13526,8 @@ namespace
                                            cue::eitherOf (cue::liveWriteFor (runs, dcas, document),
                                                           cue::eitherOf (cue::liveEditFor (live, document),
                                                                          cue::fxWriteFor (document, nullptr, &live))),
-                                           cue::liveSendFor (live, document));
+                                           cue::liveSendFor (live, document),
+                                           cue::liveSideFor (live));
             cue::registerCueCommands (engine.commands(), document, focus, &live);
             cue::registerLiveCommands (engine.commands(), document, live);
 
@@ -13791,6 +13792,67 @@ TEST_CASE ("live: under the lock a send rides live, a new one is made live, and 
         rig.lock (false);
         CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
                                                    osc::Value::string (rig.reverb) }).rejected == 1);
+    }
+}
+
+TEST_CASE ("live: a set of values rides live under the lock, is put back whole when one pair is refused, and is one step unlocked")
+{
+    /*  `node.setMany` (namespace draft §30.11) through the doors serve
+        installs: the send mixer dragged over several sends is one command, and
+        each pair takes the door its `node.set` would - live under the lock
+        (AJ-AP), the document otherwise. */
+    LiveRig rig;
+    const auto foldback = rig.addSend (rig.mediaId, rig.foldback, -6.0);
+    const auto reverb = rig.addSend (rig.mediaId, rig.reverb, -12.0);
+
+    const auto levelOf = [] (const std::string& send) { return "/godot/send/" + send + "/level"; };
+    const auto both = [&] (double first, double second)
+    {
+        return rig.submitAndTick ("node.setMany", { osc::Value::string (levelOf (foldback)), osc::Value::float64 (first),
+                                                    osc::Value::string (levelOf (reverb)), osc::Value::float64 (second) });
+    };
+
+    SUBCASE ("locked: both ride, nothing is saved, and the history does not move")
+    {
+        rig.lock (true);
+        const auto steps = rig.steps();
+
+        CHECK (both (-3.0, -9.0).applied == 1);
+        CHECK (rig.published (levelOf (foldback)) == "-3");
+        CHECK (rig.published (levelOf (reverb)) == "-9");
+        CHECK (rig.saved (levelOf (foldback)) == "-6");
+        CHECK (rig.saved (levelOf (reverb)) == "-12");
+        CHECK (rig.steps() == steps);
+
+        /*  A pair the layer does not take - the cue's name, refused by a locked
+            show - refuses the set, and what rode before it is put back. */
+        const auto ridingBefore = rig.live.size();
+
+        CHECK (rig.submitAndTick ("node.setMany", { osc::Value::string (levelOf (foldback)), osc::Value::float64 (-1.0),
+                                                    osc::Value::string ("/godot/cue/" + rig.mediaId + "/name"),
+                                                    osc::Value::string ("Rain") }).rejected == 1);
+        CHECK (rig.engine.lastError().find ("locked node.setMany /godot/cue/" + rig.mediaId + "/name") != std::string::npos);
+        CHECK (rig.published (levelOf (foldback)) == "-3");
+        CHECK (rig.live.size() == ridingBefore);
+        CHECK (rig.steps() == steps);
+
+        //  And a hand's ride is no part of a set.
+        CHECK (rig.submitAndTick ("node.setMany", { osc::Value::string ("/godot/run/R4NID001/trim"),
+                                                    osc::Value::float64 (-6.0) }).rejected == 1);
+    }
+
+    SUBCASE ("unlocked: both written, one step, one press of Undo")
+    {
+        const auto steps = rig.steps();
+
+        CHECK (both (-3.0, -9.0).applied == 1);
+        CHECK (rig.saved (levelOf (foldback)) == "-3");
+        CHECK (rig.saved (levelOf (reverb)) == "-9");
+        CHECK (rig.steps() == steps + 1);
+
+        CHECK (rig.submitAndTick ("undo").applied == 1);
+        CHECK (rig.saved (levelOf (foldback)) == "-6");
+        CHECK (rig.saved (levelOf (reverb)) == "-12");
     }
 }
 

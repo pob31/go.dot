@@ -1652,7 +1652,7 @@ TEST_CASE ("document commands: every structural edit is a named command")
     registerDocumentCommands (registry, document);
 
     for (const char* name : { "list.create", "cue.create", "mount.create",
-                              "object.delete", "object.move", "node.set" })
+                              "object.delete", "object.move", "node.set", "node.setMany" })
     {
         INFO ("command: " << name);
         CHECK (registry.find (name) != nullptr);
@@ -1773,6 +1773,73 @@ TEST_CASE ("replay: a session that builds a cue list reproduces itself and its d
     CHECK (result.producedLog == session.log().contents());
 
     // And the document the replay arrived at is the same show.
+    CHECK (CanonicalXml::write (freshDocument) == sessionXml);
+}
+
+TEST_CASE ("replay: a set of values over several cues reproduces itself, its refusals and its document")
+{
+    /*  `node.setMany` (namespace draft §30.11): applied, joined in a drag,
+        refused part-way and put back - each a record, and a replay that lands
+        on the same records and the same show. The record of a refusal carries
+        every pair, so the replay refuses it at the same address for the same
+        reason. */
+    const auto record = [] (Engine& engine)
+    {
+        engine.submit (origin::cli, "list.create", { osc::Value::string ("Main"), osc::Value::string ("7K2QM9X4") });
+        engine.processTick (0);
+
+        for (const auto& [index, id] : { std::pair { 0, "B3N8R5TW" }, std::pair { 1, "E4GP6QSC" } })
+            engine.submit (origin::cli, "cue.create",
+                           { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (index),
+                             osc::Value::string ("memo"), osc::Value::string ("Cue"), osc::Value::string (id) });
+        engine.processTick (1);
+
+        const auto pairs = [] (double first, double second)
+        {
+            return std::vector<osc::Value> { osc::Value::string ("/godot/cue/B3N8R5TW/preWait"), osc::Value::float64 (first),
+                                             osc::Value::string ("/godot/cue/E4GP6QSC/preWait"), osc::Value::float64 (second) };
+        };
+
+        for (int frame = 0; frame < 4; ++frame)
+        {
+            engine.submit ("ws:127.0.0.1:51234", "node.setMany",
+                           pairs (1.0 + static_cast<double> (frame), 2.0 + static_cast<double> (frame)));
+            engine.processTick (10 + frame);
+        }
+
+        auto refused = pairs (8.0, 9.0);
+        refused.push_back (osc::Value::string ("/godot/cue/ZZZZZZZZ/name"));
+        refused.push_back (osc::Value::string ("x"));
+        engine.submit ("ws:127.0.0.1:51234", "node.setMany", std::move (refused));
+        engine.processTick (20);
+    };
+
+    Engine session;
+    ShowDocument sessionDocument;
+    registerDocumentCommands (session.commands(), sessionDocument);
+    session.log().openInMemory ({});
+    record (session);
+
+    const auto sessionXml = CanonicalXml::write (sessionDocument);
+    const auto original = LogFile::parse (session.log().contents());
+
+    REQUIRE (original.errors.empty());
+    REQUIRE (original.records.size() == 8);
+    CHECK (original.records.back().kind == LogRecord::Kind::rejected);
+    CHECK (sessionDocument.getAttribute ("/godot/cue/B3N8R5TW/preWait") == std::string ("4"));
+    CHECK (sessionDocument.getAttribute ("/godot/cue/E4GP6QSC/preWait") == std::string ("5"));
+
+    Engine fresh;
+    ShowDocument freshDocument;
+    registerDocumentCommands (fresh.commands(), freshDocument);
+
+    const auto result = replay (fresh, original);
+
+    for (const auto& mismatch : result.mismatches)
+        INFO (mismatch);
+
+    CHECK (result.ok);
+    CHECK (result.producedLog == session.log().contents());
     CHECK (CanonicalXml::write (freshDocument) == sessionXml);
 }
 

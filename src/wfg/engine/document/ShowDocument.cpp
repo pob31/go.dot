@@ -288,6 +288,29 @@ namespace wfg::doc
         {
             return cue.hasType ("Media") || cue.hasType ("Mic");
         }
+
+        /*  THE ADDRESSES OF A `node.setMany`, as the key its writes coalesce
+            on: every first of a pair, sorted, one to a line - a newline being
+            the one character no address the tree publishes holds. Whatever is
+            not a string is left out; such a set is refused anyway, and the
+            key it leaves behind only has to differ from a drag's. */
+        std::string addressSetOf (const std::vector<osc::Value>& args)
+        {
+            std::vector<std::string> addresses;
+
+            for (std::size_t at = 0; at < args.size(); at += 2)
+                if (args[at].isString())
+                    addresses.push_back (args[at].getString());
+
+            std::sort (addresses.begin(), addresses.end());
+
+            std::string key;
+
+            for (const auto& address : addresses)
+                key += (key.empty() ? "" : "\n") + address;
+
+            return key;
+        }
     }
 
     //==============================================================================
@@ -539,6 +562,7 @@ namespace wfg::doc
         makeHistories();
         forgetCoalescing();
         undoSuppressions = 0;
+        keeping = nullptr;
 
         showNode.addListener (this);
         return *this;
@@ -833,10 +857,19 @@ namespace wfg::doc
     {
         /*  ONLY A `node.set` HAS AN ADDRESS TO COALESCE ON, and everything else
             leaves this empty - which is how a create, a delete, a move and an
-            `undo` each break a run without needing a rule of their own. */
+            `undo` each break a run without needing a rule of their own.
+
+            AND A `node.setMany` ITS SET OF THEM (namespace draft §30.11): one
+            gesture over several cues writes the same addresses on every frame
+            of a drag, so the same set from the same origin within the window
+            joins, exactly as one address does. As a set - sorted, one to a
+            line - so the order a client lists them in is no part of the key;
+            and a set of one is its address, so it joins a `node.set` to the
+            same place, which is the same gesture. */
         const auto address = (commandName == "node.set" && ! args.empty() && args[0].isString())
                                ? args[0].getString()
-                               : std::string {};
+                               : commandName == "node.setMany" ? addressSetOf (args)
+                                                               : std::string {};
 
         /*  The address is tested FIRST and the arithmetic is behind it, so the
             tick difference is only ever computed against a tick a real write
@@ -974,6 +1007,60 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    ShowDocument::ScopedKeep::ScopedKeep (ShowDocument& documentToKeep)
+        : target (documentToKeep), outer (documentToKeep.keeping)
+    {
+        /*  NOTHING PERFORMED ON THE OPEN STEP means the transaction hook opened
+            a new one for this command - JUCE counts nought while a step is
+            named and empty - so whatever this command writes is the step. */
+        ownStep = target.histories[static_cast<std::size_t> (UndoDomain::document)]
+                      ->getNumActionsInCurrentTransaction() == 0;
+
+        target.keeping = this;
+    }
+
+    ShowDocument::ScopedKeep::~ScopedKeep()
+    {
+        target.keeping = outer;
+    }
+
+    void ShowDocument::ScopedKeep::putBack()
+    {
+        /*  THE LAST FIRST, through the history each went on: a value written
+            twice comes back to what it was before the first. */
+        for (auto entry = kept.rbegin(); entry != kept.rend(); ++entry)
+        {
+            if (entry->had)
+                entry->node.setProperty (entry->property, entry->before, entry->onto);
+            else
+                entry->node.removeProperty (entry->property, entry->onto);
+        }
+
+        auto& stack = *target.histories[static_cast<std::size_t> (UndoDomain::document)];
+
+        /*  AND A STEP THIS COMMAND OPENED IS TAKEN OFF WHOLE: it holds only the
+            writes and their put-backs now, and an Undo that did nothing would
+            be a step nobody took. JUCE opens an unnamed transaction behind it,
+            so the next write must not join what is left - it opens its own. */
+        if (ownStep && stack.getNumActionsInCurrentTransaction() > 0)
+        {
+            stack.undoCurrentTransactionOnly();
+            target.forgetCoalescing();
+        }
+
+        kept.clear();
+    }
+
+    void ShowDocument::keepBefore (const juce::ValueTree& node, const juce::Identifier& property,
+                                   juce::UndoManager* onto)
+    {
+        if (keeping == nullptr)
+            return;
+
+        keeping->kept.push_back ({ node, property, node.hasProperty (property), node[property], onto });
+    }
+
+    //==============================================================================
     EditResult ShowDocument::setOverride (const std::string& cueId, std::string_view word)
     {
         if (word != "on" && word != "off" && word != "file")
@@ -1096,8 +1183,11 @@ namespace wfg::doc
                 && ! coefficientsFit (countTokens (canonical), destinationWidth (*this, target.node)))
                 return EditResult::failed (reason::badValue);
 
-            target.node.setProperty (juce::Identifier (juce::String (std::string (name))),
-                                     juce::var (juce::String (canonical)), historyFor (*target.attribute));
+            const juce::Identifier property { juce::String (std::string (name)) };
+            auto* const onto = historyFor (*target.attribute);
+
+            keepBefore (target.node, property, onto);
+            target.node.setProperty (property, juce::var (juce::String (canonical)), onto);
 
             return EditResult::succeeded (target.node[idProperty].toString().toStdString());
         }
@@ -1174,8 +1264,13 @@ namespace wfg::doc
             argument here and the SECOND to the `removeChild` overload `remove`
             and `move` use, which is the detail a reader who learns "third" gets
             wrong in exactly one place. */
-        target.node.setProperty (juce::Identifier (juce::String (std::string (target.attribute->name()))),
-                                 toVar (value), historyFor (*target.attribute));
+        /*  AND KEPT AS IT WAS FIRST, when a `node.setMany` may have to put it
+            back (`ScopedKeep`). */
+        const juce::Identifier property { juce::String (std::string (target.attribute->name())) };
+        auto* const onto = historyFor (*target.attribute);
+
+        keepBefore (target.node, property, onto);
+        target.node.setProperty (property, toVar (value), onto);
 
         return EditResult::succeeded (target.node[idProperty].toString().toStdString());
     }

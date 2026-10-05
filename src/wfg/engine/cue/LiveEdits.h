@@ -119,6 +119,12 @@ namespace wfg::cue
         void dropFxValue (const std::string& fxId, int index);
         void clear();
 
+        /*  WHAT A COPY KEPT, BACK AGAIN (namespace draft §30.11): a
+            `node.setMany` refused part-way leaves the layer as it found it.
+            The revision moves on all the same, so a reader that saw the
+            pairs before the refusal sees the layer change back. */
+        void putBack (const LiveEdits& kept);
+
         const std::map<std::string, std::map<std::string, std::string>>& allRows() const noexcept { return rows; }
         const std::map<std::string, Send>& allSends() const noexcept { return sends; }
         const std::map<std::string, std::map<int, double>>& allFx() const noexcept { return fx; }
@@ -154,6 +160,12 @@ namespace wfg::cue
         ride opens no transaction. Asked before the command applies. */
     bool isLiveEdit (const std::string& commandName, const std::vector<osc::Value>& args,
                      const doc::ShowDocument& document, const LiveEdits& live);
+
+    /*  WHAT `node.setMany` ASKS OF THE LIVE SIDE (namespace draft §30.11):
+        which addresses are a hand's rides (`isLiveAddress`), which a set
+        refuses, and a copy of this layer taken before a set is written, which
+        puts it back if a later pair is refused. */
+    doc::LiveSide liveSideFor (LiveEdits& live);
 
     /*  `live.keep` and `live.drop`: what the window's bar sends once the show
         is unlocked. Keep is refused under the lock, and is one transaction; a

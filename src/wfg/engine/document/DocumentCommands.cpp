@@ -19,10 +19,14 @@
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/FxValues.h>
 
+#include <algorithm>
 #include <cstddef>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace wfg::doc
@@ -153,7 +157,8 @@ namespace wfg::doc
     }
 
     void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document,
-                                   ForeignWrite foreign, LiveWrite live, LiveCreate liveSend)
+                                   ForeignWrite foreign, LiveWrite live, LiveCreate liveSend,
+                                   LiveSide many)
     {
         registry.add ({ "audio.configure", "Set the show's audio interface and channel patches as one edit.",
                         { { "enabled", 'T', false }, { "deviceType", 's', false },
@@ -876,38 +881,142 @@ namespace wfg::doc
             number - the check simply happens one layer in, where the type is
             actually known, rather than at a parameter list that cannot know
             it. */
+        /*  ONE VALUE THROUGH EVERY DOOR `node.set` HAS, as a function both
+            value writes share (namespace draft §30.11): `node.setMany` writes
+            each of its pairs through this and nothing else, so a value reaches
+            a mount, a live row, the layer a locked show rides in or the
+            document by the same road whichever command carried it. Shared by
+            pointer because both handlers hold it and the doors it captures are
+            moved in once. */
+        using WriteOne = std::function<Outcome (const std::vector<osc::Value>&)>;
+
+        const auto writeOne = std::make_shared<const WriteOne> (
+            [&document, foreign = std::move (foreign), live = std::move (live)]
+            (const std::vector<osc::Value>& args) -> Outcome
+            {
+                const auto address = args[0].getString();
+
+                /*  THE DOCUMENT FIRST, ALWAYS. `/godot` is Go.dot's and a
+                    mount prefix may not be `/`, so the two can never both
+                    claim an address - but asking the show first means a mount
+                    could never shadow it even if that rule were ever relaxed. */
+                if (foreign && address.rfind ("/godot", 0) != 0)
+                    return foreign (address, args[1]);
+
+                const auto text = canonicalText (args[1]);
+
+                if (! text.has_value())
+                    return Outcome::rejected (reason::typeMismatch);
+
+                /*  A ROW A HAND RIDES, answered in front of the document
+                    because the document cannot hold it: a fader's trim is
+                    `persist=none`. Asked after the text is canonical, so the
+                    live door and the document parse a value from the same
+                    spelling. */
+                if (live)
+                    if (auto outcome = live (address, *text, args))
+                        return std::move (*outcome);
+
+                return fromEdit (document.setAttribute (address, *text), args);
+            });
+
         registry.add ({ "node.set",
                         "Sets one value, by its address in the parameter tree.",
                         { { "address", 's', false }, { "value", '*', false } },
                         true,
-                        [&document, foreign = std::move (foreign), live = std::move (live)]
-                        (CommandContext&, const std::vector<osc::Value>& args)
+                        [writeOne] (CommandContext&, const std::vector<osc::Value>& args)
                         {
-                            const auto address = args[0].getString();
+                            return (*writeOne) (args);
+                        } });
 
-                            /*  THE DOCUMENT FIRST, ALWAYS. `/godot` is Go.dot's
-                                and a mount prefix may not be `/`, so the two
-                                can never both claim an address - but asking the
-                                show first means a mount could never shadow it
-                                even if that rule were ever relaxed. */
-                            if (foreign && address.rfind ("/godot", 0) != 0)
-                                return foreign (address, args[1]);
+        //----------------------------------------------------------------------
+        /*  ONE GESTURE OVER SEVERAL ADDRESSES (namespace draft §30.11, the
+            author's RA: "one gesture is one undo"). A fader dragged over six
+            picked cues, a field typed over a selection, a strip's Role that
+            names a DCA: N values that are one decision. As N `node.set`s they
+            were N records and N steps of Undo, and a drag over six cues opened
+            a step on nearly every write, since a run joins only one address.
 
-                            const auto text = canonicalText (args[1]);
+            `address value` PAIRS, like `cue.create`'s, written in order through
+            `node.set`'s own doors (`writeOne` above) - so a locked show's EQ and
+            sends still ride live in its layer, unsaved (AJ-AP), and a value
+            the document takes goes through its one write door - as ONE
+            command: one record, one transaction, and the same set of addresses
+            from the same origin within the window joins it, as one address does
+            for `node.set` (`ShowDocument::beginTransaction`).
 
-                            if (! text.has_value())
-                                return Outcome::rejected (reason::typeMismatch);
+            ALL OR NONE. Every pair is looked at before any is written - an
+            address and a value it can be, no address twice, none that is not
+            Go.dot's or is a hand's ride - and if a door then refuses one, what
+            the pairs before it wrote is put back: the document's values through
+            its history (`ShowDocument::ScopedKeep`), the live layer by the live
+            side's own keeping. The refusal is the door's reason, and the
+            address it was refused at is said after the command at
+            `/godot/engine/lastError` (`Outcome::detail`). */
+        registry.add ({ "node.setMany",
+                        "Sets several values as one edit, by their addresses, given as address-value pairs:"
+                        " all of them or none, one record and one step to undo.",
+                        { { "address", 's', false }, { "value", '*', false }, { "more", '*', true, true } },
+                        true,
+                        [&document, writeOne, many = std::move (many)] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto refusedAt = [] (std::string why, std::string where)
+                            {
+                                auto outcome = Outcome::rejected (std::move (why));
+                                outcome.detail = std::move (where);
+                                return outcome;
+                            };
 
-                            /*  A ROW A HAND RIDES, answered in front of the
-                                document because the document cannot hold it:
-                                a fader's trim is `persist=none`. Asked after
-                                the text is canonical, so the live door and the
-                                document parse a value from the same spelling. */
-                            if (live)
-                                if (auto outcome = live (address, *text, args))
-                                    return std::move (*outcome);
+                            //  A value missing its address is a message cut short.
+                            if (args.size() % 2 != 0)
+                                return Outcome::rejected (reason::arity);
 
-                            return fromEdit (document.setAttribute (address, *text), args);
+                            std::vector<std::string> seen;
+
+                            for (std::size_t at = 0; at < args.size(); at += 2)
+                            {
+                                if (! args[at].isString())
+                                    return Outcome::rejected (reason::typeMismatch);
+
+                                const auto address = args[at].getString();
+
+                                /*  NOT A MOUNT'S NODE, which leaves the machine
+                                    the moment it is written and cannot be put
+                                    back (TG), and not a hand's ride, which is
+                                    no decision and opens no step (TH): both are
+                                    `node.set`'s alone. */
+                                if (address.rfind ("/godot", 0) != 0 || (many.isRide && many.isRide (address)))
+                                    return refusedAt (reason::badAddress, address);
+
+                                //  Twice in one set is two answers to one question.
+                                if (std::find (seen.begin(), seen.end(), address) != seen.end())
+                                    return refusedAt (reason::badValue, address);
+
+                                if (! canonicalText (args[at + 1]).has_value())
+                                    return refusedAt (reason::typeMismatch, address);
+
+                                seen.push_back (address);
+                            }
+
+                            ShowDocument::ScopedKeep kept { document };
+                            const auto putBackLive = many.keep ? many.keep() : std::function<void()> {};
+
+                            for (std::size_t at = 0; at < args.size(); at += 2)
+                            {
+                                const auto outcome = (*writeOne) ({ args[at], args[at + 1] });
+
+                                if (! outcome.applied)
+                                {
+                                    kept.putBack();
+
+                                    if (putBackLive)
+                                        putBackLive();
+
+                                    return refusedAt (outcome.reason, args[at].getString());
+                                }
+                            }
+
+                            return Outcome::ok (args);
                         } });
 
         //----------------------------------------------------------------------

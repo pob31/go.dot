@@ -63,6 +63,12 @@ namespace wfg
         std::string command;                // applied and rejected only
         std::vector<osc::Value> args;
 
+        /*  A refusal's `Outcome::detail` - the address a `node.setMany` was
+            refused at - carried to `/godot/engine/lastError` and NEVER to the
+            line: `toLine` does not write it and `fromLine` does not read it,
+            so the log's format is what it was. */
+        std::string detail;
+
         /** The line this record writes, without its newline. */
         std::string toLine() const;
 
