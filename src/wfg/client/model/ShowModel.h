@@ -115,6 +115,7 @@ namespace wfg::client::model
             record...), so the kind column can say what the cue does the way a
             group's says its mode (2026-09-27). Empty on anything else. */
         std::string verb;
+        bool andGo = false;      ///< a jump cue's "and Go" (namespace draft §27)
 
         /*  A GROUP'S BEHAVIOUR, as the tree spells it: `sequential` or
             `shuffle`, and how many rounds it plays - where nought is for ever
@@ -164,6 +165,18 @@ namespace wfg::client::model
             index and is not walked into. */
         bool derived = false;
         bool enabled = true;
+
+        /*  WHAT AN ENABLE OR DISABLE CUE HAS SWITCHED TONIGHT (namespace draft
+            §27): `file`, `on` or `off`, the engine's `cue/tonight`. `enabled`
+            stays what the file says, which the inspector edits; whether the
+            row is drawn as running is `runsTonight`. */
+        std::string tonight = "file";
+
+        bool runsTonight() const noexcept
+        {
+            return tonight == "on" || (tonight != "off" && enabled);
+        }
+
         Section section = Section::member;
 
         /** The group this row sits in, or empty at the top of the list. */

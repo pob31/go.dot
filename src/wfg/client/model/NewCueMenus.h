@@ -136,7 +136,8 @@ namespace wfg::client::model
 
     /*  The word a transport row shows in the list's kind column, as a group
         row shows its mode (the author, 2026-09-27): stop, fade out, member,
-        round, advance, rec, loop, overdub, clear. Eight characters at most -
-        the column's width. */
-    std::string verbWord (const std::string& verb);
+        round, advance, rec, loop, overdub, clear, enable, disable, jump, and
+        jump+go for a jump with "and Go" on (2026-10-05). Eight characters at
+        most - the column's width. */
+    std::string verbWord (const std::string& verb, bool andGo = false);
 }

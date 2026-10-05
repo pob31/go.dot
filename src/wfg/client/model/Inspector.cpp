@@ -90,7 +90,7 @@ namespace wfg::client::model
                     both's shape, so it comes after both. */
                 { "fade",    { "target", "dca", "levelOn", "level", "rateOn", "rate", "curve", "points",
                                "stopWhenDone" } },
-                { "transport", { "target", "verb", "range", "curve" } },
+                { "transport", { "target", "verb", "andGo", "range", "curve" } },
                 { "start",   { "target" } },
                 /*  WHAT DOH! DOES WITH WHAT IT SENT last on both (PRD §3.32,
                     2026-10-01): a question about after the send, so it comes
@@ -126,6 +126,7 @@ namespace wfg::client::model
             {
                 { "play", "items to play" },
                 { "stopWhenDone", "stop when done" },
+                { "andGo", "and Go" },
                 { "shortName", "short name" },
                 { "secondPress", "second press" },
                 { "velocityFloor", "velocity floor" },
@@ -373,6 +374,62 @@ namespace wfg::client::model
                     field.applies = rateOn;
                 else if (field.name == "curve")
                     field.applies = levelOn || rateOn;
+            }
+        }
+
+        /*  WHAT A TRANSPORT CUE'S VERB DOES, in words, and WHAT IT LEAVES ALONE
+            greyed (2026-10-05, namespace draft §27): the slice only for
+            advance, the curve and the length only for a fade, "and Go" only
+            for a jump. Greyed and never hidden, the fade's rule, so changing
+            the verb finds each row where it was. The stored words are the
+            tree's; a verb added later keeps its own word in the menu. */
+        void wordTheVerb (std::vector<Field>& decided)
+        {
+            static const std::map<std::string, std::string> words
+            {
+                { "hard", "stop at once" },
+                { "fade", "fade out and stop" },
+                { "afterMember", "stop after this member" },
+                { "afterIteration", "stop after this round" },
+                { "advance", "advance to the next slice" },
+                { "record", "Rec on the take" },
+                { "loop", "Loop on the take" },
+                { "overdub", "Overdub on the take" },
+                { "clear", "Clear the take" },
+                { "enable", "enable the target tonight" },
+                { "disable", "disable the target tonight" },
+                { "jump", "jump standby to the target" },
+            };
+
+            std::string verb = "hard";
+
+            for (auto& field : decided)
+            {
+                if (field.name != "verb")
+                    continue;
+
+                verb = field.value.empty() ? std::string ("hard") : field.value;
+
+                if (field.writable && ! field.options.empty())
+                {
+                    field.choices.clear();
+
+                    for (const auto& option : field.options)
+                    {
+                        const auto found = words.find (option);
+                        field.choices.emplace_back (option, found != words.end() ? found->second : option);
+                    }
+                }
+            }
+
+            for (auto& field : decided)
+            {
+                if (field.name == "range")
+                    field.applies = verb == "advance";
+                else if (field.name == "curve" || field.name == "duration")
+                    field.applies = verb == "fade";
+                else if (field.name == "andGo")
+                    field.applies = verb == "jump";
             }
         }
 
@@ -1046,6 +1103,9 @@ namespace wfg::client::model
 
         if (out.kind == "fade")
             greyWhatAFadeLeavesAlone (decided);
+
+        if (out.kind == "transport")
+            wordTheVerb (decided);
 
         /*  THE DCA A CUE ANSWERS TO, on the three kinds that carry the row -
             a media cue and a group marked with one, a fade that moves one - and

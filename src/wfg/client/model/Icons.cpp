@@ -48,6 +48,9 @@ namespace wfg::client::model
             if (verb == "loop")                                   return Icon::loop;
             if (verb == "overdub")                                return Icon::overdub;
             if (verb == "clear")                                  return Icon::clear;
+            if (verb == "enable")                                 return Icon::enable;
+            if (verb == "disable")                                return Icon::disabled;
+            if (verb == "jump")                                   return Icon::jump;
 
             return Icon::stop;      // hard, and a verb nobody has read yet
         }
@@ -132,7 +135,13 @@ namespace wfg::client::model
         /*  WHETHER IT PLAYS AT ALL comes first: a disabled row is dimmed, and
             this is the shape beside the dimming, for somebody who cannot tell
             one grey from another. */
-        if (! row.enabled)
+        if (row.tonight == "off")
+            marks.push_back ({ Icon::disabled, "off tonight",
+                               "off tonight: a disable cue switched it off until the show closes" });
+        else if (row.tonight == "on")
+            marks.push_back ({ Icon::enable, "on tonight",
+                               "on tonight: an enable cue switched it on until the show closes" });
+        else if (! row.enabled)
             marks.push_back ({ Icon::disabled, {}, "disabled: skipped, not deleted" });
 
         if (row.isGroup)

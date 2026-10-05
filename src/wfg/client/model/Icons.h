@@ -59,7 +59,7 @@ namespace wfg::client::model
         memo, media, mic, fade, start, osc, midi, group, range, trigger,
 
         //  What a transport cue does, by its verb.
-        stop, stopFade, stopAfter, advance, record, loop, overdub, clear,
+        stop, stopFade, stopAfter, advance, record, loop, overdub, clear, enable, jump,
 
         //  How a group runs its members, by its mode.
         sequence, timeline, sampler,

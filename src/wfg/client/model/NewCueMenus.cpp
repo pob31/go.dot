@@ -163,6 +163,20 @@ namespace wfg::client::model
             { "Loop", "the take's Loop button", "transport", { { "verb", "loop" } }, "On a take", false, true },
             { "Overdub", "a layer begun or closed", "transport", { { "verb", "overdub" } }, "On a take", false, true },
             { "Clear", "the take emptied", "transport", { { "verb", "clear" } }, "On a take", false, true },
+
+            /*  THE EVENING'S SWITCHES AND THE SHOW'S OWN PARK (the author,
+                2026-10-05, namespace draft §27). Not arm and disarm: arm already
+                means a voice made ready. "and Go" is a second line rather than a
+                question after the first, because a line makes one cue as it
+                stands; the inspector's switch turns one into the other (PV). */
+            { "Enable", "the target runs again, until the show closes", "transport",
+              { { "verb", "enable" } }, "Tonight", false, true },
+            { "Disable", "the target is skipped, until the show closes", "transport",
+              { { "verb", "disable" } }, "Tonight", false, true },
+            { "Jump to", "standby moves to the target", "transport",
+              { { "verb", "jump" } }, "Standby", false, true },
+            { "Jump to and Go", "standby moves to the target and fires it", "transport",
+              { { "verb", "jump" }, { "andGo", "true" } }, "Standby", false, true },
         };
 
         return choices;
@@ -362,14 +376,15 @@ namespace wfg::client::model
     }
 
     //==============================================================================
-    std::string verbWord (const std::string& verb)
+    std::string verbWord (const std::string& verb, bool andGo)
     {
         if (verb == "hard" || verb.empty())  return "stop";
         if (verb == "fade")                  return "fade out";
         if (verb == "afterMember")           return "member";
         if (verb == "afterIteration")        return "round";
         if (verb == "record")                return "rec";
+        if (verb == "jump")                  return andGo ? "jump+go" : "jump";
 
-        return verb;    // advance, loop, overdub, clear: already a word, already short
+        return verb;    // advance, loop, overdub, clear, enable, disable: already a word, already short
     }
 }

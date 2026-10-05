@@ -645,7 +645,7 @@ namespace wfg::client::ui
         const auto isStandby = row == standbyRow;
         const auto isPicked = isChosen (rows[static_cast<std::size_t> (row)].id);
 
-        const auto ink = Look::colour (theme, entry.enabled ? "ink" : "ink-off");
+        const auto ink = Look::colour (theme, entry.runsTonight() ? "ink" : "ink-off");
         const auto faint = Look::colour (theme, "ink-faint");
         const auto standbyColour = Look::colour (theme, "standby");
 
@@ -786,7 +786,7 @@ namespace wfg::client::ui
         auto kindCell = area.removeFromRight (kindChars * unit);
         g.setColour (faint);
         g.drawText (entry.isGroup && ! entry.mode.empty() ? juce::String (entry.mode)
-                      : ! entry.verb.empty()               ? juce::String (model::verbWord (entry.verb))
+                      : ! entry.verb.empty()               ? juce::String (model::verbWord (entry.verb, entry.andGo))
                                                            : juce::String (entry.kind),
                     kindCell, juce::Justification::centredRight, true);
 
@@ -860,7 +860,7 @@ namespace wfg::client::ui
             const auto side = juce::jmin (static_cast<float> (indent) * 0.82f, 13.0f * static_cast<float> (theme.type));
             auto tint = Look::colour (theme, model::accentFor (entry.kind).c_str());
 
-            if (! entry.enabled || entry.derived)
+            if (! entry.runsTonight() || entry.derived)
                 tint = tint.withMultipliedAlpha (0.45f);
 
             icons::draw (g, model::iconFor (entry.kind, entry.mode, entry.verb),

@@ -1450,6 +1450,37 @@ TEST_CASE ("client: the network monitor reads OSC and MIDI as lines a person can
     CHECK (csv.find ("12:00:00.000,in,osc,udp,10.0.0.5:8000,/desk/fader,,\"\"\"a, b\"\"\",\n") != std::string::npos);
 }
 
+TEST_CASE ("client: tonight's switch is a mark in words, dims the row, and a jump with and Go says so")
+{
+    /*  Namespace draft §27 (PW): words beside the shape, not colour alone. */
+    model::Row row;
+    row.kind = "memo";
+    CHECK (model::marksFor (row).empty());
+    CHECK (row.runsTonight());
+
+    row.tonight = "off";
+    CHECK_FALSE (row.runsTonight());
+    REQUIRE (! model::marksFor (row).empty());
+    CHECK (model::marksFor (row).front().icon == model::Icon::disabled);
+    CHECK (model::marksFor (row).front().text == "off tonight");
+
+    //  Off in the file, on tonight: runs, and says why.
+    row.enabled = false;
+    row.tonight = "on";
+    CHECK (row.runsTonight());
+    CHECK (model::marksFor (row).front().text == "on tonight");
+
+    row.tonight = "file";
+    CHECK_FALSE (row.runsTonight());
+    CHECK (model::marksFor (row).front().text.empty());
+
+    CHECK (model::verbWord ("jump") == "jump");
+    CHECK (model::verbWord ("jump", true) == "jump+go");
+    CHECK (model::iconFor ("transport", {}, "enable") == model::Icon::enable);
+    CHECK (model::iconFor ("transport", {}, "disable") == model::Icon::disabled);
+    CHECK (model::iconFor ("transport", {}, "jump") == model::Icon::jump);
+}
+
 TEST_CASE ("client: a row's important settings are marks, and the ordinary case says nothing")
 {
     const auto iconsOf = [] (const model::Row& row)
@@ -5926,6 +5957,45 @@ TEST_CASE ("client: a fade's two switches, each before what it moves, and what a
     //  Neither: nothing to shape.
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/rateOn", "false").ok);
     panel = panelNow();
+    CHECK_FALSE (rowIn (panel, "curve")->applies);
+}
+
+TEST_CASE ("client: a transport cue's verb is a worded menu, and what the verb leaves alone is greyed")
+{
+    /*  Namespace draft §27: "and Go" after the verb, live for a jump only; the
+        slice for advance; the curve for a fade. Greyed, never hidden. */
+    Rig rig;
+
+    const auto jump = rig.document.createCue ("7K2QM9X4", 0, "transport", "Back");
+    REQUIRE (jump.ok);
+
+    const auto panelNow = [&rig, &jump]
+    {
+        rig.parameters.markStale();
+        return model::inspect (*rig.publish (1), jump.id);
+    };
+
+    auto panel = panelNow();
+    const auto does = namesUnder (panel, "what it does");
+    const auto verbAt = positionOf (does, "verb");
+    REQUIRE (verbAt + 1 < does.size());
+    CHECK (does[verbAt + 1] == "andGo");
+    REQUIRE (rowIn (panel, "andGo") != nullptr);
+    CHECK (rowIn (panel, "andGo")->label == "and Go");
+
+    //  A stop: and Go and the slice greyed.
+    CHECK_FALSE (rowIn (panel, "andGo")->applies);
+    CHECK_FALSE (rowIn (panel, "range")->applies);
+
+    const auto& verb = *rowIn (panel, "verb");
+    const auto worded = std::find_if (verb.choices.begin(), verb.choices.end(),
+                                      [] (const auto& choice) { return choice.first == "jump"; });
+    REQUIRE (worded != verb.choices.end());
+    CHECK (worded->second == "jump standby to the target");
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + jump.id + "/verb", "jump").ok);
+    panel = panelNow();
+    CHECK (rowIn (panel, "andGo")->applies);
     CHECK_FALSE (rowIn (panel, "curve")->applies);
 }
 

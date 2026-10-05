@@ -314,6 +314,9 @@ namespace wfg::client::model
         row.indexInParent = indexInParent;
         row.enabled = flag (snapshot, "/godot/cue/" + cueId + "/enabled") != Flag::no;
 
+        if (const auto tonight = attribute (snapshot, cueId, "tonight"); tonight == "on" || tonight == "off")
+            row.tonight = tonight;
+
         /*  WHAT MAKES A ROW A GROUP is that it has members to draw, which is
             the question this file is asking - not that its `kind` reads
             "group". They are the same thing today; asking the structure means
@@ -322,7 +325,10 @@ namespace wfg::client::model
         row.isGroup = snapshot.find ("/godot/cue/" + cueId + "/order") != nullptr;
 
         if (row.kind == "transport")
+        {
             row.verb = attribute (snapshot, cueId, "verb");
+            row.andGo = flag (snapshot, "/godot/cue/" + cueId + "/andGo") == Flag::yes;
+        }
 
         /*  WHAT THE MARKS BESIDE THE NAME ARE READ FROM, by address and only
             for the kinds that carry each row: a handful of binary searches per

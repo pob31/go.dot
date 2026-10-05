@@ -232,6 +232,20 @@ namespace wfg::client::ui
                     line (l, 15.0f, 9.0f, 9.0f, 15.0f);
                     break;
 
+                case model::Icon::enable:
+                    //  The disabled ring, its slash turned into a tick: runs again tonight.
+                    ring (l, 12.0f, 12.0f, 8.5f);
+                    line (l, 8.0f, 12.5f, 11.0f, 15.5f);
+                    line (l, 11.0f, 15.5f, 16.5f, 9.0f);
+                    break;
+
+                case model::Icon::jump:
+                    //  Over the rows in between, from here to there: where standby lands.
+                    ring (f, 4.5f, 15.0f, 1.9f);
+                    arc (l, 12.0f, 15.0f, 7.5f, -90.0f, 90.0f);
+                    headOnArc (f, 12.0f, 15.0f, 7.5f, 90.0f);
+                    break;
+
                 //  HOW A GROUP RUNS ------------------------------------------------
                 case model::Icon::sequence:
                     //  One after another: three blocks, one leading to the next.
