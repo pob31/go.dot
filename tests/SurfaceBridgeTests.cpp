@@ -56,6 +56,7 @@
 #include <wfg/engine/surface/McuCodec.h>
 #include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
+#include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
 #include <wfg/engine/surface/SurfaceTable.h>
@@ -1542,6 +1543,14 @@ TEST_CASE ("surface bridge: a D700 strip wears its cue's colour, blue last, re-a
     stage.set ("/godot/cue/" + stage.members[0] + "/colour", "#FF8000");
     stage.arm();
 
+    /*  A CUE AIMED, so the colours are at full: with nothing aimed a rotary
+        at rest is dimmed (namespace draft §30.5), which a case of its own
+        pins. */
+    surface::registerSurfaceCommands (stage.engine.commands(), stage.document, stage.table);
+    REQUIRE (stage.engine.submit ("cli", "surface.aim", { osc::Value::string (stage.members[1]) }));
+    stage.tickOnce();
+    REQUIRE (stage.published ("/godot/surface/aim") == stage.members[1]);
+
     surface::SurfaceSpec spec;
     spec.id = stage.surfaceId;
     spec.profile = "d700";
@@ -1616,6 +1625,9 @@ TEST_CASE ("surface bridge: a sounding strip wears what it sounds like, and its 
     fake.text ("/godot/run/RUN00001/timbre", "0 1 0.5");           // pure red
     fake.text ("/godot/cue/CUE00001/colour", "#0000FF");
     fake.text ("/godot/cue/CUE00001/name", "Rain");
+
+    //  Aimed, so its colour at rest is at full (namespace draft §30.5).
+    fake.text ("/godot/surface/aim", "CUE00001");
 
     surface::SurfaceSpec spec;
     spec.id = "SURF0001";
@@ -2881,6 +2893,208 @@ TEST_CASE ("m29: what a full refresh of a sixteen-strip D700 costs the tick thre
     CHECK (stage.bridge.refusedSysEx() == 0u);
 }
 
+namespace
+{
+    /*  WHAT A MESSAGE TO A MACKIE SURFACE IS, in a word: a page key's light,
+        another light, a colour, a ring, a motor, a meter, or one of the
+        SysEx kinds - a top row, a third row, the track numbers, the query. */
+    std::string kindOf (const midi::Bytes& bytes)
+    {
+        if (bytes.empty())
+            return "empty";
+
+        const auto status = bytes.front();
+
+        if (status == 0xf0)
+        {
+            const auto command = bytes.size() > 5 ? bytes[5] : 0xff;
+            return command == 0x1a ? "row" : command == 0x19 ? "row3" : command == 0x17 ? "numbers"
+                 : command == 0x12 ? "lcd" : command == 0x00 ? "query" : "sysex";
+        }
+
+        if (status == 0x90 && bytes.size() > 1)
+            return bytes[1] >= 0x29 && bytes[1] <= 0x2c ? "key" : "led";
+
+        if (status >= 0x91 && status <= 0x93)
+            return "colour";
+
+        if (status >= 0xb0 && status <= 0xb2)
+            return "ring";
+
+        if ((status & 0xf0) == 0xe0)
+            return "motor";
+
+        if (status == 0xd0)
+            return "meter";
+
+        return "other";
+    }
+
+    /*  The kinds in the order they were sent, run-length: "key 1, colour 48,
+        ring 16, row 32". */
+    std::string orderOf (const std::vector<RecordingSink::Message>& sent)
+    {
+        std::string out;
+        std::string last;
+        auto run = 0;
+
+        const auto closeRun = [&out, &last, &run]
+        {
+            if (run > 0)
+                out += (out.empty() ? "" : ", ") + last + " " + std::to_string (run);
+        };
+
+        for (const auto& message : sent)
+        {
+            const auto kind = kindOf (message.bytes);
+
+            if (kind != last)
+            {
+                closeRun();
+                last = kind;
+                run = 0;
+            }
+
+            ++run;
+        }
+
+        closeRun();
+        return out;
+    }
+}
+
+TEST_CASE ("m50: what a page change sends, in what order, and how soon its key says so" * doctest::skip())
+{
+    /*  M50 - AN INSTRUMENT, NOT A GATE (namespace draft §30.5). Skipped in
+        every ordinary run, and taken with
+
+            wfg_tests --test-case="m50*" --no-skip
+
+        The author, 2026-10-05: "I'm not sure it was very responsive." What a
+        D700 of sixteen strips, every one holding an armed clip, is sent when
+        EQ is pressed with a cue aimed, and when it is pressed again to leave:
+        the kinds in the order they leave the bridge, how many, how many SysEx
+        bytes stand in the one sending thread's queue ahead of the EQ key's
+        own light, and the colours the rate limit holds back to later ticks.
+
+        THE TIME is a model, said as one: the press waits for the next tick's
+        drain (up to a tick, 20 ms), the tick runs (timed here, in whatever
+        build this is), and then the queue is sent in order by one thread, a
+        SysEx holding it about 32 ms a hundred bytes on Windows (§12.11) - so
+        what stands ahead of the key's light is that many milliseconds. A
+        short message is not counted: over USB it costs next to nothing, and
+        nobody has measured it on this unit. */
+    Stage stage { "d700", 16 };
+    stage.audio.tracks = 16;
+    surface::registerSurfaceCommands (stage.engine.commands(), stage.document, stage.table);
+
+    for (std::size_t n = 0; n < stage.members.size(); ++n)
+        stage.set ("/godot/cue/" + stage.members[n] + "/colour", n % 2 == 0 ? "#FF8000" : "#2080FF");
+
+    stage.arm();
+
+    surface::SurfaceSpec spec;
+    spec.id = stage.surfaceId;
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1", "PORTBNK2" };
+    spec.strips = stage.strips;
+    stage.bridge.declare ({ spec }, [] (const std::string& port) { return plugged (port); });
+    stage.ticks (200);
+
+    //  SELECT on the first strip: the rotaries aimed at its clip.
+    stage.arrive ("PORTBNK1", { 0x90, 0x18, 0x7f });
+    stage.arrive ("PORTBNK1", { 0x90, 0x18, 0x00 });
+    stage.ticks (10);
+    REQUIRE_FALSE (stage.published ("/godot/surface/aim").empty());
+
+    const auto change = [&stage] (const char* label, bool afterColours)
+    {
+        /*  THE WORST CASE FOR THE RATE LIMIT: the press lands the tick after
+            the strips' colours were written - the idle re-assert, here; a
+            sounding strip's pulse writes every fifth tick. */
+        if (afterColours)
+            for (int n = 0; n < 2 * static_cast<int> (surface::idleColourReassertTicks); ++n)
+            {
+                stage.sink.sent.clear();
+                stage.tickOnce();
+
+                //  A rotary's colour, not the master dial's (0x38), which keeps its own time.
+                if (std::any_of (stage.sink.sent.begin(), stage.sink.sent.end(),
+                                 [] (const RecordingSink::Message& message)
+                                 { return kindOf (message.bytes) == "colour" && message.bytes[1] < 0x28; }))
+                    break;
+            }
+
+        stage.sink.sent.clear();
+        stage.arrive ("PORTBNK1", { 0x90, 0x2c, 0x7f });
+        stage.arrive ("PORTBNK1", { 0x90, 0x2c, 0x00 });
+
+        const auto started = std::chrono::steady_clock::now();
+        stage.tickOnce();
+        const auto took = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - started).count();
+
+        const auto inTheTick = stage.sink.sent;
+
+        //  And what the rate limit held back, over the next half second.
+        stage.sink.sent.clear();
+        auto lateColours = 0;
+        auto lastLate = 0;
+
+        for (int n = 1; n <= 25; ++n)
+        {
+            const auto before = stage.sink.sent.size();
+            stage.tickOnce();
+
+            for (auto i = before; i < stage.sink.sent.size(); ++i)
+                if (kindOf (stage.sink.sent[i].bytes) == "colour")
+                {
+                    ++lateColours;
+                    lastLate = n;
+                }
+        }
+
+        std::size_t key = inTheTick.size();
+        std::size_t sysexAhead = 0;
+        std::size_t sysexAll = 0;
+        std::size_t bytesAll = 0;
+
+        for (std::size_t i = 0; i < inTheTick.size(); ++i)
+        {
+            const auto& bytes = inTheTick[i].bytes;
+
+            if (key == inTheTick.size() && kindOf (bytes) == "key" && bytes[1] == 0x2c)
+                key = i;
+
+            bytesAll += bytes.size();
+
+            if (bytes.front() == 0xf0)
+            {
+                sysexAll += bytes.size();
+
+                if (key == inTheTick.size())
+                    sysexAhead += bytes.size();
+            }
+        }
+
+        MESSAGE (std::string (label) << ": " << inTheTick.size() << " messages, " << bytesAll << " bytes ("
+                 << sysexAll << " SysEx) in the press's tick, which took " << took << " ms here.\n"
+                 << "  order: " << orderOf (inTheTick) << "\n"
+                 << "  the EQ key's light is message " << (key + 1) << ", behind " << sysexAhead
+                 << " SysEx bytes - about " << static_cast<double> (sysexAhead) * 0.32
+                 << " ms on the wire; the last screen goes about " << static_cast<double> (sysexAll) * 0.32
+                 << " ms after the first message\n"
+                 << "  colour messages held back to later ticks: " << lateColours
+                 << (lateColours > 0 ? ", the last " + std::to_string (lastLate) + " ticks later" : std::string {}));
+    };
+
+    change ("EQ pressed, the page comes up", false);
+    change ("EQ pressed again, the surface's own page", false);
+    change ("EQ pressed the tick after the colours were written", true);
+    change ("and again", true);
+
+    CHECK (stage.bridge.refusedSysEx() == 0u);
+}
+
 //==============================================================================
 //  The EQ and Send pages (author, 2026-09-25).
 
@@ -3926,4 +4140,254 @@ TEST_CASE ("surface bridge: a D700 strip taken for a lane says lane on its third
     stage.sink.sent.clear();
     stage.ticks (2);
     CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "sampler")));
+}
+
+//==============================================================================
+//  The surface pages, answered sooner, and the desk dimmed where nothing is in
+//  play (the bug round of 2026-10-05, namespace draft §30.5).
+
+namespace
+{
+    bool isSysEx (const RecordingSink::Message& message)
+    {
+        return ! message.bytes.empty() && message.bytes.front() == 0xf0;
+    }
+
+    /*  The colour last sent to one RGB element, as its three components; -1s
+        when none was. */
+    surface::Rgb lastColourOf (const RecordingSink& sink, const std::string& port, int note)
+    {
+        const auto three = colourOf (sink, port, note);
+
+        if (three.size() < 3u)
+            return { -1, -1, -1 };
+
+        const auto at = three.size() - 3;
+        return { three[at][2], three[at + 1][2], three[at + 2][2] };
+    }
+
+    std::string cueNumbered (int n)
+    {
+        return "CUE000" + std::string (n < 10 ? "0" : "") + std::to_string (n);
+    }
+}
+
+TEST_CASE ("surface bridge: a page change answers the hand first - its key's light, then rings and colours, the screens last")
+{
+    /*  The author, 2026-10-05: "I'm not sure it was very responsive." One
+        thread sends to both ports, and on Windows a SysEx holds it about a
+        third of a millisecond a byte: the EQ key's light went out behind its
+        bank's eight strips' rows, the last screen some three hundred
+        milliseconds after the first message, and a colour written a moment
+        before the press waited for the rate limit (M50). */
+    PageDesk desk;
+
+    for (int n = 1; n <= 16; ++n)
+        desk.fake.text ("/godot/cue/" + cueNumbered (n) + "/colour", "#FF8000");
+
+    desk.aimAt ("CUE00001");
+    desk.settle (10);
+
+    /*  EVERY ROTARY'S COLOUR MOVES, and is written on this tick - so EQ,
+        pressed on the very next, meets the rate limit on every one. */
+    for (int n = 1; n <= 16; ++n)
+        desk.fake.text ("/godot/cue/" + cueNumbered (n) + "/colour", "#2080FF");
+
+    desk.sink.sent.clear();
+    desk.settle (1);
+    REQUIRE (colourOf (desk.sink, "PORTBNK1", 0x20).size() == 3u);
+    REQUIRE (colourOf (desk.sink, "PORTBNK2", 0x27).size() == 3u);
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    REQUIRE (desk.page().word == "eq");
+    desk.publish();
+
+    const auto& sent = desk.sink.sent;
+    REQUIRE_FALSE (sent.empty());
+
+    //  THE KEY'S OWN LIGHT, FIRST.
+    CHECK (sent.front().port == "PORTBNK1");
+    CHECK (sent.front().bytes == surface::led (0x2c, surface::Led::on));
+
+    //  THE SCREENS LAST: after the first SysEx, nothing but SysEx.
+    const auto firstScreen = std::find_if (sent.begin(), sent.end(), isSysEx);
+    REQUIRE (firstScreen != sent.end());
+    CHECK (std::all_of (firstScreen, sent.end(), isSysEx));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (3, 0, "B1 gain")));
+
+    //  AND EVERY ROTARY'S BAND COLOUR IN THIS TICK, though each was written the tick before.
+    auto colours = 0;
+
+    for (auto at = sent.begin(); at != firstScreen; ++at)
+        if (at->bytes.size() == 3 && at->bytes[0] >= 0x91 && at->bytes[0] <= 0x93
+              && at->bytes[1] >= 0x20 && at->bytes[1] <= 0x27)
+            ++colours;
+
+    CHECK (colours == 16 * 3);
+    CHECK (hasBandColour (sentOn (desk.sink, "PORTBNK1"), 0x23, audio::eqBand1Colour, 1.0));
+
+    //  ONCE: a colour that moves on the next tick waits for the rate again.
+    desk.sink.sent.clear();
+    desk.fake.flag ("/godot/cue/CUE00001/eqB1On", false);
+    ++desk.tick;
+    desk.publish();
+    CHECK (colourOf (desk.sink, "PORTBNK1", 0x23).empty());
+    desk.settle();
+    CHECK (hasBandColour (sentOn (desk.sink, "PORTBNK1"), 0x23, audio::eqBand1Colour, surface::pageOffLight));
+
+    //  LEAVING, the same: the key dark before anything else.
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    REQUIRE (desk.page().word == "show");
+    desk.publish();
+    REQUIRE_FALSE (desk.sink.sent.empty());
+    CHECK (desk.sink.sent.front().bytes == surface::led (0x2c, surface::Led::off));
+    CHECK (std::all_of (std::find_if (desk.sink.sent.begin(), desk.sink.sent.end(), isSysEx),
+                        desk.sink.sent.end(), isSysEx));
+}
+
+TEST_CASE ("surface bridge: from one page to the next, what the rotaries already show is not sent again")
+{
+    /*  Each cache says what the surface shows whatever page drew it, so a
+        page change sends what differs (namespace draft §30.5): on eight
+        rotaries the EQ is two pages, and the aimed cue's name on the third
+        row of every rotary but the first is the same on both. */
+    PageDesk desk ("d700", 8);
+    desk.aimAt ("CUE00001");
+    desk.press ("PORTBNK1", 0x2c);
+    desk.settle();
+    REQUIRE (desk.page().index == 0);
+    REQUIRE (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (1, "Kick")));
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    REQUIRE (desk.page().index == 1);
+    desk.publish();
+
+    const auto sent = sentOn (desk.sink, "PORTBNK1");
+
+    //  What moved is sent: the page's word on the first rotary, the controls under each.
+    CHECK (contains (sent, surface::d700DisplayRow3 (0, "EQ 2/2")));
+    CHECK (contains (sent, surface::d700DisplayRow (0, 0, "B3 freq")));
+    CHECK (contains (sent, surface::d700DisplayRow (7, 0, "LP freq off")));
+
+    //  What did not is not.
+    for (int element = 1; element < 8; ++element)
+    {
+        INFO (element);
+        CHECK_FALSE (contains (sent, surface::d700DisplayRow3 (element, "Kick")));
+    }
+}
+
+TEST_CASE ("surface bridge: with nothing aimed a rotary at rest is dimmed, SELECT brings every one back, and a sounding one is not dimmed")
+{
+    /*  The author, 2026-10-05: "Dim the RGB LEDs in the rotaries when no
+        media file is selected." Selected is SELECT's aim (AJ), not the cue
+        list's pick. */
+    PageDesk desk;
+    desk.fake.text ("/godot/cue/CUE00002/colour", "#FF8000");
+
+    //  Strip three sounds a pure red, and its run has no envelope yet: its light is the timbre's, whole.
+    desk.fake.text ("/godot/slot/STRIP003/word", "playing");
+    desk.fake.text ("/godot/slot/STRIP003/holder", "RUN00003");
+    desk.fake.text ("/godot/run/RUN00003/timbre", "0 1 0.5");
+    desk.settle();
+
+    const auto orange = surface::Rgb { 127, 64, 0 };
+    const auto dim = surface::Rgb { static_cast<int> (std::lround (127 * surface::noAimLight)),
+                                    static_cast<int> (std::lround (64 * surface::noAimLight)), 0 };
+
+    CHECK (surface::noAimLight > 0.0);
+    CHECK (surface::noAimLight < 1.0);
+    CHECK (lastColourOf (desk.sink, "PORTBNK1", 0x21) == surface::forTheLeds (dim));
+    CHECK (lastColourOf (desk.sink, "PORTBNK1", 0x22) == surface::Rgb { 127, 0, 0 });
+
+    //  STILL A COLOUR, dimmed: the D700's steps carry it well clear of dark.
+    CHECK (surface::forTheLeds (dim).red >= 8);
+
+    //  A strip with no colour is dark, aimed or not.
+    CHECK (lastColourOf (desk.sink, "PORTBNK1", 0x23) == surface::Rgb { 0, 0, 0 });
+
+    //  AIMED - at another strip's cue - and every rotary at rest is at full again.
+    desk.sink.sent.clear();
+    desk.aimAt ("CUE00001");
+    desk.settle();
+    CHECK (lastColourOf (desk.sink, "PORTBNK1", 0x21) == surface::forTheLeds (orange));
+
+    //  Let go, dimmed again.
+    desk.sink.sent.clear();
+    desk.aimAt ("");
+    desk.settle();
+    CHECK (lastColourOf (desk.sink, "PORTBNK1", 0x21) == surface::forTheLeds (dim));
+}
+
+TEST_CASE ("surface bridge: a position with no strip is dark, says so, and does nothing")
+{
+    /*  The author's D700 has sixteen faders and their show twelve strips; the
+        four past the last were never painted, and the firmware's idle
+        animation ran under them (namespace draft §30.5). */
+    PageDesk desk ("d700", 12);
+    desk.settle (4);
+
+    const auto second = sentOn (desk.sink, "PORTBNK2");
+
+    for (int element = 4; element < 8; ++element)
+    {
+        INFO (element);
+        CHECK (contains (second, surface::d700DisplayRow (element, 0, "")));
+        CHECK (contains (second, surface::d700DisplayRow (element, 1, "")));
+        CHECK (contains (second, surface::d700DisplayRow3 (element, "no strip")));
+        CHECK (contains (second, surface::d700Ring (element, 0, 2)));
+        CHECK (lastColourOf (desk.sink, "PORTBNK2", 0x20 + element) == surface::Rgb { 0, 0, 0 });
+        CHECK (contains (second, surface::led (0x18 + element, surface::Led::off)));     // SELECT
+        CHECK (contains (second, surface::led (0x10 + element, surface::Led::off)));     // MUTE
+        CHECK (contains (second, surface::led (0x08 + element, surface::Led::off)));     // SOLO
+        CHECK (contains (second, surface::led (0x00 + element, surface::Led::off)));     // REC
+        CHECK (contains (second, surface::meter (element, 0)));
+
+        //  The fader to the bottom, a step short of it first, as any fader nobody has placed.
+        const auto moves = motorMoves (desk.sink, "PORTBNK2", element);
+        REQUIRE (moves.size() == 2u);
+        CHECK (moves.front() == surface::motorStepPerTick);
+        CHECK (moves.back() == 0);
+    }
+
+    //  The twelfth strip is still its own.
+    CHECK (contains (second, surface::d700DisplayRow (3, 0, "Clip 12")));
+    CHECK_FALSE (contains (second, surface::d700DisplayRow3 (3, "no strip")));
+
+    //  PAINTED ONCE, and only its surround re-asserted, which the idle animation takes back.
+    desk.sink.sent.clear();
+    desk.settle (static_cast<int> (surface::idleColourReassertTicks) + 1);
+    CHECK (colourOf (desk.sink, "PORTBNK2", 0x24).size() == 3u);
+    CHECK_FALSE (contains (sentOn (desk.sink, "PORTBNK2"), surface::d700DisplayRow3 (4, "no strip")));
+    CHECK (motorMoves (desk.sink, "PORTBNK2", 4).empty());
+
+    //  On a page too: an EQ page has twelve rotaries, and the thirteenth is still nobody's.
+    desk.aimAt ("CUE00001");
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    REQUIRE (desk.page().word == "eq");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK2"), surface::d700DisplayRow (3, 0, "B4 shape")));
+    CHECK_FALSE (contains (sentOn (desk.sink, "PORTBNK2"), surface::d700DisplayRow (4, 0, "B4 freq")));
+    CHECK (lastColourOf (desk.sink, "PORTBNK2", 0x24).red == -1);              // dark already, and not resent
+
+    //  TOUCHED, MOVED, PRESSED, TURNED: nothing. The same SELECT on the twelfth strip aims.
+    desk.press ("PORTBNK1", 0x2c);
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK2", { 0x90, 0x68 + 4, 0x7f } },
+                  { "PORTBNK2", { 0xe4, 0x00, 0x40 } },
+                  { "PORTBNK2", { 0x90, 0x68 + 4, 0x00 } },
+                  { "PORTBNK2", { 0xb0, 0x14, 0x01 } } });
+    desk.press ("PORTBNK2", 0x20 + 4);
+    desk.press ("PORTBNK2", 0x18 + 4);
+    desk.press ("PORTBNK2", 0x10 + 4);
+    desk.press ("PORTBNK2", 0x08 + 4);
+    desk.press ("PORTBNK2", 0x00 + 4);
+    CHECK (desk.submitted.empty());
+
+    desk.press ("PORTBNK2", 0x18 + 3);
+    CHECK (desk.writes() == std::vector<std::string> { "surface.aim CUE00012" });
 }

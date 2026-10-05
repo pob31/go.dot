@@ -19119,3 +19119,102 @@ the button (QY). And three limits: a pass started inside an Esc's panic fade tak
 the stop but not from the fade, which still brings it down; a pass's ride is still thinned to a tenth
 of a decibel (DL), so a steady ride writes few points; the D700's Rec after a pass, with the fader
 given back, records a sampling take (DI) - a retake is Level autom. and a touch first.
+
+### 30.5 What was built: S3 - the surface pages
+
+Item 4, on the bridge and in the window's model, and one thing the item did not name: the author's
+D700 has sixteen faders and their show twelve strips, and the four positions past the last were
+never painted.
+
+**The foot opens on the press (RN).** `model::footForSurface` is asked the page and the aim, and no
+longer what the page last wrote: with a cue aimed, an EQ page up is that cue's EQ panel at the foot,
+a Send page its send mixer, an FX page its chain and a Loop page its take, from the press that puts
+the page up - before any turn. It comes down as before: the window puts back what the foot showed
+when the page closes (`Client.cpp`). The client test that pinned the wait for a turn is turned round.
+
+**What a page change sent, measured (M50).** A D700 of sixteen strips, each holding an armed clip,
+a cue aimed, EQ pressed on the first port and pressed again to leave - the instrument
+`m50: what a page change sends, in what order, and how soon its key says so` (SurfaceBridgeTests,
+skipped in ordinary runs, taken with `--no-skip`), on the real tree and the bridge's recording sink.
+The time is a model, said as one: the queue is sent in order by the one sending thread, a SysEx
+holding it about 32 ms a hundred bytes on Windows (§12.11); a short message is not counted.
+
+| | before | after |
+|---|---|---|
+| sent in the press's tick | 113 messages: 48 display SysEx (928 bytes), 16 rings, 48 colour note-ons, the key's light | 107: 44 display SysEx (844 bytes), 14 rings, 48 colour note-ons, the key's light - four rows and two rings the unit already showed are not sent again |
+| the order | strip by strip: two rows, the third row, the ring, the colour; the page key after its bank's eight strips | the key's light; every ring and colour; then every screen |
+| the EQ key's light | message 57, behind 464 SysEx bytes: about 150 ms of the sending thread | message 1, behind nothing |
+| the last rotary's ring and colour | behind all 928 SysEx bytes: about 300 ms | ahead of every screen |
+| the colours, pressed the tick after they were written | all 48 held by the rate limit, the last four ticks (80 ms) later | none held |
+| the last screen | about 300 ms after the first message | about 270 ms |
+
+Ahead of all of it the press waits for the next tick's drain (up to 20 ms), and the tick it is
+drained in ran 120 to 225 ms in this Debug build on a loaded machine - the publish, which M29 put at
+1.5 ms in Release (§16.12): a Debug build at the desk is the first suspect for a slow page.
+
+**The keys first, the screens last (RP).** Every paint now sends the page keys' lights before
+anything else, then every strip's motor, ring, colour and lights, the transport's Rec and the
+dial's colour, and only then the screens - every SysEx the paint made, the D700's rows and track
+numbers or an MCU's scribble strip, held in the order made (`holdScreens`, `releaseScreens`). The
+query a surface is sent when it connects still goes first.
+
+**Nothing forgotten on a page change, and the colours let through once (RQ).** `forgetPage`
+forgot every row, ring and colour, so all of it was sent again whatever it was. Each cache says
+what the unit shows whatever page drew it - a row by the text it was written from, through the same
+field on every page; a ring by its value and fill; a colour by its levels - so the page change only
+tells each strip so (`pageChanged`), and its next colour goes at once, past the rate limit, that
+one time.
+
+**Dimmed with nothing aimed (RO).** On the show page a rotary at rest - its cue's authored colour -
+is lit at `noAimLight`, three tenths, while no cue is aimed; SELECT on any strip, or a click on a
+running cue's name, brings every rotary back to full. "On a page with no aim" asks for nothing more:
+EQ, Send, FX and Pan do nothing without an aim, and a page whose aim is let go closes (§17.14).
+
+**A position with no strip is dark, and says so (RR).** Its fader flies to the bottom, a step short
+of it first as any fader nobody has placed; its ring, surround and meter are out, its SELECT, MUTE,
+SOLO and REC dark, its top rows blank and its third row "no strip"; and its surround is written dark
+again at every colour's re-assert, since the firmware's idle animation takes back what nothing
+drives. Touched, moved, turned or pressed it does nothing, as before (no strip is found there). Its
+track number stays its own position, 13 to 16.
+
+Tests: in SurfaceBridgeTests, `a page change answers the hand first - its key's light, then rings
+and colours, the screens last`, `from one page to the next, what the rotaries already show is not
+sent again`, `with nothing aimed a rotary at rest is dimmed, SELECT brings every one back, and a
+sounding one is not dimmed` and `a position with no strip is dark, says so, and does nothing`, each
+seen failing on the bridge before the change; two colour cases now aim a cue first, so they keep
+pinning full colours. In ClientTests, `a surface's page holds the foot on the aimed cue from the
+press that puts it up`.
+
+- **RN - Every page opens the foot on the press.** EQ, Send, FX and Loop alike: each edits the aimed
+  cue, and each has its panel. While the page is up the foot stays on the aimed cue whatever the
+  list's pick does, as it already did once a turn had been made (AJ).
+- **RO - Three tenths, the same share as a band switched out, and never a sounding strip.** One dim
+  on the desk means one thing - not in play - and the D700's steps carry it: a full component at
+  three tenths is sent as 11 of 127 after the LEDs' gamma, where a fifth would be 5. A sounding
+  strip's light is its sound, pulsing from a fifth of full upwards; dimmed, its quiet end would be
+  sent as nothing, and dark is silence (§16.6). The cost: the weaker components of a colour shrink
+  faster than its strongest, so a dimmed colour leans to it - #FF8000 is sent as 126, 32, 0 at full
+  and 11, 3, 0 dimmed, an orange leaning to red.
+- **RP - The order is every paint's, not only a page change's.** The rule is the same on every
+  tick: the short messages a hand reads at once go before the long ones that hold the thread. On a
+  tick where nothing moved nothing is sent either way.
+- **RQ - A page change keeps the caches, and lets each rotary's colour through once.** One colour
+  pass a rotary a press, bounded by the hand; a colour the rotary already wears is not sent again.
+- **RR - "no strip", on the D700's third row only.** Eight characters, the field's width. An MCU's
+  rows are seven wide, and a word cut there would be worse than blank, so they are blank. The fader
+  is put at the bottom once and left: the D700 puts a released fader back where the host last put
+  it, and a strip-less fader holds nothing to fight a hand for.
+- **RS - M50 is an instrument, not a gate, and its time a model.** The order and the counts are
+  pinned by the order case above; the milliseconds depend on a wire nobody has timed on this unit,
+  so they are printed from §12.11's figure rather than asserted.
+
+**For the author:** the words above in quotation marks are the implementer's, "no strip" among
+them. **Owed to the D700:** whether the key's light and the rotaries now answer at once, and how
+long its screens take over USB (the 32 ms a hundred bytes is the DIN cable's rate, and USB may
+differ); whether pressing a page key changes anything on the unit's screens or rings by itself -
+if it does, RQ's caches are wrong after a press, and `pageChanged` forgetting the rows again is the
+way back; whether forty-eight colour note-ons at once on a page change are taken (M27's question);
+whether a dimmed rotary reads as its cue's colour dimmed; and positions 13 to 16 - "no strip", dark,
+their faders down, no idle animation, and what the track-number field shows. And one thing left as
+it was: a page has as many rotaries as the surface has strips, so on twelve strips the EQ is two
+pages of twelve, not one of sixteen.

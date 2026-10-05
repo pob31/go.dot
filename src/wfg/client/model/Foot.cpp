@@ -246,10 +246,9 @@ namespace wfg::client::model
         return out;
     }
 
-    Subject footForSurface (bool pageUp, const std::string& pageWord, const std::string& edited,
-                            const std::string& aim)
+    Subject footForSurface (bool pageUp, const std::string& pageWord, const std::string& aim)
     {
-        if (! pageUp || edited.empty() || aim.empty())
+        if (! pageUp || aim.empty())
             return {};
 
         if (pageWord == "eq")

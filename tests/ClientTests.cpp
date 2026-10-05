@@ -6694,10 +6694,13 @@ TEST_CASE ("client: closing two fingers narrows a band, on every road a pinch ta
     CHECK (model::turnedQ (9.9, 10.0, false, false) == doctest::Approx (model::eqQHighest));
 }
 
-TEST_CASE ("client: a surface adjusting a cue holds the foot on it, and the rest of the window reads what rides")
+TEST_CASE ("client: a surface's page holds the foot on the aimed cue from the press that puts it up")
 {
     /*  The author, 2026-09-25: "When adjusting either EQ or send levels
-        display the footer on screen." */
+        display the footer on screen." And 2026-10-05: "Pressing the Eq toggle
+        on the controller does switch the rotaries to EQ, but it should open
+        also the EQ footer for the selected channel for visualisation" - the
+        page up is enough, before any turn (namespace draft §30.5). */
     Rig rig ("first-sound");
     surface::SurfaceTable surfaces;
     rig.parameters.setSurfaces (&surfaces);
@@ -6714,20 +6717,22 @@ TEST_CASE ("client: a surface adjusting a cue holds the foot on it, and the rest
     auto page = model::readSurfacePage (*rig.publish (4));
     CHECK_FALSE (page.up);
     CHECK (page.aim == cue);
-    CHECK_FALSE (model::footForSurface (page.up, page.word, page.edited, page.aim).isOpen());
+    CHECK_FALSE (model::footForSurface (page.up, page.word, page.aim).isOpen());
 
-    //  An EQ page up, not yet turned: still nothing for the foot.
+    //  An EQ page up, not yet turned: the aimed cue's EQ panel already.
     surfaces.setPage (surfaceId, { "eq", 0, 2, "" });
     page = model::readSurfacePage (*rig.publish (5));
     CHECK (page.up);
     CHECK (page.word == "eq");
     CHECK (page.count == 2);
-    CHECK_FALSE (model::footForSurface (page.up, page.word, page.edited, page.aim).isOpen());
+    CHECK (page.edited.empty());
+    CHECK (model::footForSurface (page.up, page.word, page.aim)
+             == model::Subject { model::Subject::Kind::eq, cue });
 
-    //  Turned: the aimed cue's EQ panel, and the band the rotary is on.
+    //  Turned: still the EQ panel, and the band the rotary is on.
     surfaces.setPage (surfaceId, { "eq", 0, 2, "/godot/cue/" + cue + "/eqB3Gain" });
     page = model::readSurfacePage (*rig.publish (6));
-    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+    CHECK (model::footForSurface (page.up, page.word, page.aim)
              == model::Subject { model::Subject::Kind::eq, cue });
     CHECK (model::eqHandleForAddress (cue, page.edited) == 2);
     CHECK (model::eqHandleForAddress (cue, "/godot/cue/" + cue + "/eqHpfFreq") == 4);
@@ -6735,25 +6740,34 @@ TEST_CASE ("client: a surface adjusting a cue holds the foot on it, and the rest
     CHECK (model::eqHandleForAddress (cue, "/godot/cue/" + cue + "/eqOn") == -1);
     CHECK (model::eqHandleForAddress (cue, "/godot/cue/OTHERCUE/eqB1Gain") == -1);
 
-    //  A Send page: the send mixer.
-    surfaces.setPage (surfaceId, { "send", 0, 1, "/godot/send/SND00001/level" });
+    //  A Send page, the moment it is up: the send mixer.
+    surfaces.setPage (surfaceId, { "send", 0, 1, "" });
     page = model::readSurfacePage (*rig.publish (7));
-    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+    CHECK (model::footForSurface (page.up, page.word, page.aim)
              == model::Subject { model::Subject::Kind::sends, cue });
 
-    //  An FX page, turned (2026-09-26): the cue's chain.
-    surfaces.setPage (surfaceId, { "fx", 1, 3, "/godot/fx/FXAA0001/p4" });
+    //  An FX page (2026-09-26), the moment it is up: the cue's chain.
+    surfaces.setPage (surfaceId, { "fx", 1, 3, "" });
     page = model::readSurfacePage (*rig.publish (8));
     CHECK (page.word == "fx");
-    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+    CHECK (model::footForSurface (page.up, page.word, page.aim)
              == model::Subject { model::Subject::Kind::fx, cue });
 
-    //  A Loop page, turned (Phase 9c): the take it rides.
-    surfaces.setPage (surfaceId, { "loop", 0, 1, "/godot/slot/CHAN0001/loopIn" });
+    //  A Loop page (Phase 9c), the moment it is up: the take it rides.
+    surfaces.setPage (surfaceId, { "loop", 0, 1, "" });
     page = model::readSurfacePage (*rig.publish (9));
     CHECK (page.word == "loop");
-    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+    CHECK (model::footForSurface (page.up, page.word, page.aim)
              == model::Subject { model::Subject::Kind::take, cue });
+
+    /*  THE PAGE DOWN, the foot the window's own again (the window puts back
+        what it showed, Client.cpp); and with the aim let go there is no cue
+        for a page to be of. */
+    surfaces.setPage (surfaceId, { "show", 0, 1, "" });
+    page = model::readSurfacePage (*rig.publish (10));
+    CHECK_FALSE (page.up);
+    CHECK_FALSE (model::footForSurface (page.up, page.word, page.aim).isOpen());
+    CHECK_FALSE (model::footForSurface (true, "eq", "").isOpen());
 }
 
 TEST_CASE ("client: a click on a number puts it on the master dial, and the window says what the dial turns")

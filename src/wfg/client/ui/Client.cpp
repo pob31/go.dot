@@ -1428,12 +1428,13 @@ namespace wfg::client
                 /*  A SURFACE ADJUSTING A CUE HOLDS THE FOOT ON IT (author,
                     2026-09-25: "When adjusting either EQ or send levels
                     display the footer on screen"): the aimed cue's EQ panel
-                    for an EQ page, its send mixer for a Send page, once the
-                    page has written something - and not the list's pick, which
-                    the rotaries do not follow. When the page comes down the
-                    foot goes back to what it was showing. */
+                    for an EQ page, its send mixer for a Send page, from the
+                    press that puts the page up (2026-10-05, namespace draft
+                    §30.5) - and not the list's pick, which the rotaries do not
+                    follow. When the page comes down the foot goes back to what
+                    it was showing. */
                 const auto page = model::readSurfacePage (*snapshot);
-                const auto held = model::footForSurface (page.up, page.word, page.edited, page.aim);
+                const auto held = model::footForSurface (page.up, page.word, page.aim);
 
                 if (held.isOpen())
                 {

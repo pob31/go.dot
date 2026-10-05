@@ -192,14 +192,20 @@ namespace wfg::client::model
 
     FootReading readFoot (const tree::TreeSnapshot&, const Subject&);
 
-    /*  WHERE THE FOOT GOES WHILE A SURFACE ADJUSTS A CUE (author, 2026-09-25:
-        "When adjusting either EQ or send levels display the footer on
-        screen"): the aimed cue's EQ panel for an EQ page, its send mixer for
-        a Send page, its chain for an FX page and its take for a Loop page
-        (Phase 9c) - once the page has written something, since a page that
-        is only up has adjusted nothing. Nothing otherwise, and the foot is the
-        window's own again. `page` is `readSurfacePage`'s answer, passed by its
-        parts so this file needs no surface model. */
-    Subject footForSurface (bool pageUp, const std::string& pageWord, const std::string& edited,
-                            const std::string& aim);
+    /*  WHERE THE FOOT GOES WHILE A SURFACE SHOWS A PAGE OF A CUE (author,
+        2026-09-25: "When adjusting either EQ or send levels display the
+        footer on screen"): the aimed cue's EQ panel for an EQ page, its send
+        mixer for a Send page, its chain for an FX page and its take for a
+        Loop page (Phase 9c). Nothing otherwise, and the foot is the window's
+        own again.
+
+        FROM THE PRESS THAT PUTS THE PAGE UP (author, 2026-10-05: "Pressing
+        the Eq toggle on the controller does switch the rotaries to EQ, but it
+        should open also the EQ footer for the selected channel for
+        visualisation"; namespace draft §30.5, RN). Until then it waited for the
+        first turn, on the reading that a page only up had adjusted nothing;
+        but the page is where the hand is about to adjust, and the panel is
+        what it adjusts, drawn whole. `page` is `readSurfacePage`'s answer,
+        passed by its parts so this file needs no surface model. */
+    Subject footForSurface (bool pageUp, const std::string& pageWord, const std::string& aim);
 }

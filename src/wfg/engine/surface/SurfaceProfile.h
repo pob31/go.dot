@@ -233,6 +233,18 @@ namespace wfg::surface
         says "off" too (§4.8). */
     inline constexpr double pageOffLight = 0.3;
 
+    /*  A ROTARY AT REST WITH NOTHING AIMED (author, 2026-10-05: "Dim the RGB
+        LEDs in the rotaries when no media file is selected"; namespace draft
+        §30.5, RO) is lit at this share of its cue's colour: SELECT on a strip,
+        or a click on a running cue's name, brings every rotary back to full.
+        The same share as `pageOffLight`, so a dimmed rotary means one thing
+        on the desk - not in play - and because the D700's 128 steps carry it:
+        a full component at three tenths is sent as 11 after the LEDs' gamma,
+        well clear of dark, where a fifth would be sent as 5 and a weak
+        component lost. A sounding strip's light is not dimmed - its quiet end
+        would go dark, and dark is silence (§16.6). */
+    inline constexpr double noAimLight = 0.3;
+
     /*  WHICH PAGE, BLINKED ON ITS BUTTON (author, 2026-09-25: "If there are
         more than one page blink the D700 button once, twice or more every
         second and a half to show which page we're on"): page n blinks n

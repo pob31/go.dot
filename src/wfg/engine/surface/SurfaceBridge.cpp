@@ -119,6 +119,10 @@ namespace wfg::surface
             return address;
         }
 
+        /*  WHAT A POSITION WITH NO STRIP SAYS on a D700's third row (namespace
+            draft §30.5): the field's eight characters exactly. */
+        constexpr std::string_view vacantWord = "no strip";
+
         /*  A space-separated list of identifiers, as the tree publishes one. */
         std::vector<std::string> wordsOf (std::string_view text)
         {
@@ -166,6 +170,18 @@ namespace wfg::surface
 
             return Rgb { component ((argb >> 16) & 0xffu), component ((argb >> 8) & 0xffu),
                          component (argb & 0xffu) };
+        }
+
+        /*  A colour at a share of its light, as the eye should see it - the
+            LEDs' shaping comes after (`forTheLeds`). */
+        Rgb dimmed (Rgb colour, double share) noexcept
+        {
+            const auto scaled = [share] (int component)
+            {
+                return static_cast<int> (std::lround (static_cast<double> (component) * share));
+            };
+
+            return Rgb { scaled (colour.red), scaled (colour.green), scaled (colour.blue) };
         }
 
         //======================================================================
@@ -537,6 +553,11 @@ namespace wfg::surface
             Rgb colourLevel;
             std::int64_t colourTick = std::numeric_limits<std::int64_t>::min() / 2;
 
+            /*  A PAGE HAS JUST CHANGED UNDER IT (namespace draft §30.5): its
+                next colour goes at once, past the rate limit, and only that
+                one - the hand that pressed EQ is waiting for it. */
+            bool colourPrompt = false;
+
             /*  ON AN EQ OR SEND PAGE (2026-09-25): what the hand did this tick,
                 folded - detents add, a press is a press - and the control under
                 this rotary, made when the page, its index or the aim changes. */
@@ -566,6 +587,13 @@ namespace wfg::surface
 
             //  The transport's Rec, on the first port only - where the transport is (Phase 9c).
             int recLed = -1;
+
+            /*  THE POSITIONS OF THIS BANK THAT HAVE NO STRIP (namespace draft
+                §30.5): a D700 has sixteen faders and a show may give it
+                twelve strips. What each was last sent, as a strip's caches
+                hold it, so it is painted dark once and kept dark - only those
+                past the surface's last strip are used. */
+            std::array<Strip, stripsPerBank> vacant;
         };
 
         /*  WHAT A SURFACE'S ROTARIES SHOW (author, 2026-09-25), and where the
@@ -672,6 +700,9 @@ namespace wfg::surface
             labelScratch.reserve (32);
             pageScratch.reserve (32);
             colourScratch.reserve (3);
+
+            //  A sixteen-strip surface painted whole: three rows a strip and two banks' numbers.
+            screens.reserve (64);
         }
 
         //======================================================================
@@ -762,18 +793,21 @@ namespace wfg::surface
             strip.recLed = -1;
         }
 
-        /*  WHAT A PAGE CHANGES, forgotten when the page changes: the screen,
-            the ring and the colour. Never the motor - a page is the rotaries'
-            and the faders stay where they are; forgotten, a fader would be
-            flown again and twitch. */
-        static void forgetPage (Strip& strip)
-        {
-            for (auto& row : strip.rows)
-                row.known = false;
+        /*  A PAGE CHANGED UNDER THE STRIP: its colour may go at once.
 
-            strip.ring = -1;
-            strip.ringMode = -1;
-            strip.colourKnown = false;
+            NOTHING IS FORGOTTEN (namespace draft §30.5, RQ; until 2026-10-05 the
+            screen, the ring and the colour were, and every one was sent again
+            whatever it was). Each cache says what the surface shows whatever
+            page drew it - a row by the text it was written from, through the
+            same field on every page; a ring by its value and its fill; a
+            colour by its levels - so what the new page draws differently is
+            sent and what it draws the same is not: a cue's name on the third
+            row of every rotary but the first, from one EQ page to the next.
+            Never the motor either - a page is the rotaries', and the faders
+            stay where they are. */
+        static void pageChanged (Strip& strip)
+        {
+            strip.colourPrompt = true;
         }
 
         //======================================================================
@@ -886,8 +920,9 @@ namespace wfg::surface
         }
 
         /*  THE CONTROLS UNDER THE ROTARIES, made again when the page, its
-            index or the aim changes - and every strip's screen, ring and
-            colour forgotten then, so the next paint shows the new ones. */
+            index or the aim changes - and every strip told so, so its colour
+            is not kept waiting (`pageChanged`); the next paint sends what the
+            new page shows differently. */
         void composePage (Surface& box, const std::string& aim) const
         {
             auto& paging = box.paging;
@@ -963,7 +998,7 @@ namespace wfg::surface
                     strip.pagePress = false;
                 }
 
-                forgetPage (strip);
+                pageChanged (strip);
             }
 
             if (base.empty())
@@ -2220,13 +2255,60 @@ namespace wfg::surface
             if (bytes.empty())
                 return;
 
-            if (bytes.front() == sysexStart && ! isSafeSysEx (bytes))
+            if (bytes.front() == sysexStart)
             {
-                refused.fetch_add (1, std::memory_order_relaxed);
-                return;
+                if (! isSafeSysEx (bytes))
+                {
+                    refused.fetch_add (1, std::memory_order_relaxed);
+                    return;
+                }
+
+                if (holdingScreens)
+                {
+                    screens.push_back ({ &port, bytes });
+                    return;
+                }
             }
 
             sink.send (port, bytes);
+        }
+
+        /*  The same for bytes made for this send alone - a display row, the
+            track numbers - which a held screen keeps without a copy. */
+        void send (const std::string& port, midi::Bytes&& bytes)
+        {
+            if (holdingScreens && ! bytes.empty() && bytes.front() == sysexStart && isSafeSysEx (bytes))
+            {
+                screens.push_back ({ &port, std::move (bytes) });
+                return;
+            }
+
+            send (port, static_cast<const midi::Bytes&> (bytes));
+        }
+
+        /*  THE SCREENS GO LAST (namespace draft §30.5). Every SysEx a paint
+            makes - the D700's rows and track numbers, an MCU's scribble strip
+            - is held while the paint runs and sent after everything else it
+            made: one thread sends to both ports, and on Windows a SysEx holds
+            it about a third of a millisecond a byte (§12.11), so a page
+            change's forty-eight rows ahead of the lights kept the hand
+            waiting some three hundred milliseconds for the rings, and half
+            that for the light of the key it pressed. Held in the order made,
+            each on the port it was made for - a bank's port, which outlives
+            the paint. */
+        void holdScreens() noexcept
+        {
+            holdingScreens = true;
+        }
+
+        void releaseScreens()
+        {
+            holdingScreens = false;
+
+            for (const auto& held : screens)
+                sink.send (*held.first, held.second);
+
+            screens.clear();
         }
 
         /*  THREE MESSAGES, BLUE LAST, each its own send: a sink hands a port
@@ -2342,6 +2424,9 @@ namespace wfg::surface
                     bank.fxLed = -1;
                     bank.loopLed = -1;
                     bank.recLed = -1;
+
+                    for (auto& spot : bank.vacant)
+                        forgetShown (spot);
                 }
 
                 for (auto& strip : box.strips)
@@ -2359,6 +2444,20 @@ namespace wfg::surface
 
             composePage (box, box.paging.page == Page::show ? std::string {} : aimed);
 
+            /*  WHAT A HAND IS WAITING FOR GOES FIRST (namespace draft §30.5, RP;
+                author 2026-10-05: "I'm not sure it was very responsive"). The
+                page keys' lights, before anything else - a press is answered by
+                its own key - then every strip's motor, ring, colour and lights,
+                and the screens last of all (`releaseScreens`): the bytes that
+                hold the one sending thread longest go where they keep nothing
+                else waiting. Until then the key's light left behind its bank's
+                eight strips, rows and all: some 460 SysEx bytes, a hundred and
+                fifty milliseconds on the wire. */
+            for (std::size_t bank = 0; bank < box.banks.size(); ++bank)
+                paintPageButtons (box, bank, tick);
+
+            holdScreens();
+
             for (std::size_t bank = 0; bank < box.banks.size(); ++bank)
             {
                 std::array<int, stripsPerBank> numbers {};
@@ -2371,6 +2470,9 @@ namespace wfg::surface
                     if (index < box.strips.size())
                         paintStrip (box, box.strips[index], box.banks[bank].port,
                                     static_cast<int> (element), touches, tick, numbers[element]);
+                    else
+                        paintVacant (box, box.banks[bank].vacant[element], box.banks[bank].port,
+                                     static_cast<int> (element), tick);
                 }
 
                 /*  THE D700'S TRACK-NUMBER FIELD: all eight of a bank in one
@@ -2386,8 +2488,6 @@ namespace wfg::surface
                         shown.numbersKnown = true;
                     }
                 }
-
-                paintPageButtons (box, bank, tick);
             }
 
             if (! box.banks.empty())
@@ -2395,6 +2495,74 @@ namespace wfg::surface
 
             if (box.topology.hasRgb && ! box.banks.empty())
                 paintDial (box, tick);
+
+            releaseScreens();
+        }
+
+        /*  A POSITION WITH NO STRIP IS DARK, AND SAYS SO (namespace draft
+            §30.5, RR). The author's D700 has sixteen faders and their show
+            twelve strips; the four past the last were never painted, so the
+            firmware's idle animation ran under them as if they were somebody's.
+            Its fader flies to the bottom, its ring, surround and meter are out,
+            its buttons dark, its top rows blank and its third row "no strip"
+            - eight characters, the field's width - and an MCU's seven-wide rows
+            blank, which a cut word would not improve on. Touched, turned or
+            pressed it does nothing (`stripAt` finds no strip there). The
+            surround is written dark again with every other colour's re-assert,
+            since the idle animation takes back what is not driven. */
+        void paintVacant (const Surface& box, Strip& spot, const std::string& port, int element, std::int64_t tick)
+        {
+            if (box.topology.hasFaders)
+                moveMotor (port, element, spot, 0, false);
+
+            if (box.topology.nativeDisplay)
+            {
+                if (changed (spot.rows[0], std::string_view {}))
+                    send (port, d700DisplayRow (element, 0, {}));
+
+                if (changed (spot.rows[1], std::string_view {}))
+                    send (port, d700DisplayRow (element, 1, {}));
+
+                if (changed (spot.rows[2], vacantWord))
+                    send (port, d700DisplayRow3 (element, vacantWord));
+
+                if (spot.ring != 0 || spot.ringMode != ringFillMode)
+                    send (port, d700Ring (element, 0, ringFillMode));
+            }
+            else
+            {
+                if (changed (spot.rows[0], std::string_view {}))
+                    send (port, lcdCell (deviceId, 0, element, {}));
+
+                if (changed (spot.rows[1], std::string_view {}))
+                    send (port, lcdCell (deviceId, 1, element, {}));
+
+                if (spot.ring != 0 || spot.ringMode != ringFillMode)
+                    send (port, ringMcu (element, 0, ringFillMode, false));
+            }
+
+            spot.ring = 0;
+            spot.ringMode = ringFillMode;
+
+            const auto darken = [this, &port, element] (int& lastSent, int noteBase)
+            {
+                if (lastSent == static_cast<int> (Led::off))
+                    return;
+
+                send (port, led (noteBase + element, Led::off));
+                lastSent = static_cast<int> (Led::off);
+            };
+
+            darken (spot.led, selectNote);
+            darken (spot.muteLed, muteNote);
+            darken (spot.soloLed, soloNote);
+            darken (spot.recLed, recNote);
+
+            if (box.topology.hasRgb)
+                paintColour (port, vpotNote + element, spot, Rgb {}, tick);
+
+            if (box.topology.hasMeters)
+                paintMeter (port, element, spot, {}, tick);
         }
 
         /*  THE DIAL SAYS WHETHER IT HAS A NUMBER (2026-09-26): dark when it is
@@ -2730,8 +2898,9 @@ namespace wfg::surface
                     otherwise - §3.30's (proposed) policy, built as the default -
                     and dark with neither. */
                 std::optional<Rgb> wanted;
+                const auto sounding = word == "playing" || word == "held";
 
-                if (word == "playing" || word == "held")
+                if (sounding)
                 {
                     wanted = colourFromTimbre (textAt (at, strip.timbreAt));
 
@@ -2745,6 +2914,14 @@ namespace wfg::surface
 
                 if (! wanted.has_value() && ! strip.cueId.empty())
                     wanted = colourFromHex (textAt (at, strip.cueColourAt));
+
+                /*  AT REST WITH NOTHING AIMED, DIMMED (author, 2026-10-05: "Dim
+                    the RGB LEDs in the rotaries when no media file is
+                    selected"; namespace draft §30.5, RO): SELECT on any strip
+                    brings every rotary back to full. Not a sounding strip's
+                    light, whose quiet end would go dark (`noAimLight`). */
+                if (wanted.has_value() && ! sounding && aimNow().empty())
+                    wanted = dimmed (*wanted, noAimLight);
 
                 paintColour (port, vpotNote + element, strip, wanted.value_or (Rgb {}), tick);
             }
@@ -3123,7 +3300,14 @@ namespace wfg::surface
             const auto due = ! strip.colourKnown || levels != strip.colourLevel
                              || since >= idleColourReassertTicks;
 
-            if (! due || since < colourIntervalTicks)
+            /*  ONCE ON A PAGE CHANGE the rate limit lets it through (namespace
+                draft §30.5): the hand that pressed EQ waited up to a hundred
+                milliseconds for the band colours otherwise. The page's first
+                paint uses the pass whether or not it sends - a colour the
+                rotary already wears is not sent again. */
+            const auto prompt = std::exchange (strip.colourPrompt, false);
+
+            if (! due || (since < colourIntervalTicks && ! prompt))
                 return;
 
             sendColour (port, note, forTheLeds (colour));
@@ -3152,6 +3336,10 @@ namespace wfg::surface
         std::string labelScratch;
         std::string pageScratch;
         midi::Bytes colourScratch;
+
+        //  The screens a paint holds back until its lights have gone (`releaseScreens`).
+        bool holdingScreens = false;
+        std::vector<std::pair<const std::string*, midi::Bytes>> screens;
 
         std::mutex inboxLock;
         std::vector<Inbound> inbox;
