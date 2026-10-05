@@ -947,6 +947,22 @@ namespace wfg::import::als
             }
         }
 
+        /*  STANDBY ON THE FIRST GO, where a show made by hand has it once its
+            first cue is made: with no standby, GO has nothing to fire. */
+        if (const auto first = std::find_if (walked.steps.begin(), walked.steps.end(),
+                                             [&cueOf, &ids] (const Step& step)
+                                             {
+                                                 return ids.given.count ("go:" + step.sceneId) != 0
+                                                          || (step.sounds.size() == 1 && cueOf.count (step.sounds.front().key) != 0);
+                                             });
+              first != walked.steps.end())
+        {
+            const auto groupKey = "go:" + first->sceneId;
+            const auto standby = ids.given.count (groupKey) != 0 ? ids.given.at (groupKey)
+                                                                 : cueOf.at (first->sounds.front().key);
+            write ("/godot/list/" + listId + "/standby", standby, -1);
+        }
+
         (void) set;
         return built;
     }

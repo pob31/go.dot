@@ -151,6 +151,9 @@ TEST_CASE ("als import: the session fixture becomes a show - GOs, sounds, the fa
     CHECK (at (document, "/godot/cue/" + first + "/notes").rfind ("MISE", 0) == 0u);
     CHECK (parentOf (document, rain) == first);
 
+    /*  STANDBY ON IT, so the first GO fires it - as a show made by hand has. */
+    CHECK (at (document, "/godot/list/" + idFor ("list") + "/standby") == first);
+
     /*  THE RAIN: its file, its gain, its pre-wait, its range, its lane, its DCA,
         and its EQ Eight's low shelf on band 1. */
     CHECK (at (document, "/godot/cue/" + rain + "/file") == "rain \xc3\xa9t\xc3\xa9.wav");
