@@ -19857,9 +19857,12 @@ foot of the window: …"; the mixer's "mixed", "4 of 6 cues" on a mix only some 
 3 of 4" on a switch that is split; and the refusal "node.setMany refused: <reason> at <address> -
 none of its values was written". Named limits: a typed level's new sends and a Flat over several are
 a step of Undo each; the master dial, from a strip or a box over several cues, turns the anchor's
-number only; one cue's EQ band dragged is still two `node.set`s a frame on two addresses, so a step
-on nearly every frame, as it was before this stage - `node.setMany` would make it one, and it was left
-for being outside the item; the import's `channels` and `directOut` after its create are two more; the
+number only; the import's `channels` and `directOut` after its create are two more; the
 console page (RC) still writes a selection one `node.set` a cue. Owed to the bench: a drag over six
 picked media cues' sends into one mix, and one Ctrl-Z taking it back; the same under the lock, heard
 and not saved; the band and "mixed" read across the booth.
+
+One more, after the stage: one cue's EQ band dragged was two `node.set`s a frame on two addresses
+taking turns, so nearly every frame was its own step of Undo, as it had been since the panel was
+built. Its frequency and gain now go as one `node.setMany`, and frame after frame joins as the same
+set (`EqPanelComponent::dragTo`; a fade's band still goes through the fade's own door).

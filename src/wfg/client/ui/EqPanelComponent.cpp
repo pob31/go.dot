@@ -837,6 +837,23 @@ namespace wfg::client::ui
                     actions.setMany (writes);
                 }
             }
+            /*  ON ONE CUE, ONE WRITE A FRAME TOO. Two `node.set`s a frame, on
+                two addresses taking turns, never joined: the document joins a
+                drag only on the address it is on, so nearly every frame of one
+                band dragged was its own step of Undo. Its frequency and gain as
+                one `node.setMany` join frame after frame as the addresses of
+                one set (namespace draft §30.11). A fade's band still goes
+                through `write`, the fade's own door. */
+            else if (actions.setMany && ! onFade() && ! reading.subject.objectId.empty())
+            {
+                const auto freq = std::clamp (static_cast<double> (band.freq), lowestHz, highestHz);
+                const auto gain = std::clamp (static_cast<double> (band.gain), -rangeDb, rangeDb);
+
+                actions.setMany ({ { model::eqAddress (reading.subject.objectId, model::eqBandRow (dragged, "Freq")),
+                                     numberText (freq, 0) },
+                                   { model::eqAddress (reading.subject.objectId, model::eqBandRow (dragged, "Gain")),
+                                     numberText (gain, 1) } });
+            }
             else
             {
                 writeNumber (model::eqBandRow (dragged, "Freq"), band.freq, 0);

@@ -2513,6 +2513,49 @@ TEST_CASE ("eq panel: a dragged point follows the hand, however often the readin
     panel.endDrag();
 }
 
+TEST_CASE ("eq panel: on one cue a band dragged is one write a frame too, its frequency and gain together")
+{
+    /*  Two `node.set`s a frame on two addresses taking turns never joined into
+        one step of Undo; one `node.setMany` of the same two addresses does
+        (namespace draft §30.11). */
+    std::vector<std::vector<std::pair<std::string, std::string>>> sets;
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::EqPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.setMany = [&] (const std::vector<std::pair<std::string, std::string>>& writes) { sets.push_back (writes); };
+
+    ui::EqPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (720, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::eq, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.eq.present = true;
+    reading.eq.settings.band[1] = { wfg::audio::EqSettings::Shape::peak, 1000.0f, 0.0f, 1.0f };
+
+    panel.show (reading);
+
+    const auto from = panel.handlePosition (1);
+    panel.beginDrag (from);
+    panel.dragTo (from + juce::Point<float> (20.0f, -15.0f), false);
+    panel.dragTo (from + juce::Point<float> (40.0f, -30.0f), false);
+    panel.endDrag();
+
+    CHECK (written.empty());
+    REQUIRE (sets.size() == 2u);
+
+    for (const auto& frame : sets)
+    {
+        REQUIRE (frame.size() == 2u);
+        CHECK (frame[0].first == "/godot/cue/CUE00001/eqB2Freq");
+        CHECK (frame[1].first == "/godot/cue/CUE00001/eqB2Gain");
+        CHECK (wfg::osc::parseDouble (frame[0].second).value_or (0.0) > 1000.0);   // never the locale's
+        CHECK (wfg::osc::parseDouble (frame[1].second).value_or (0.0) > 0.0);
+    }
+}
+
 TEST_CASE ("eq panel: over several cues a band dragged is one write a frame - its frequency for all, its gain moved from each one's own")
 {
     /*  Namespace draft §30.11, TL: the band's frequency the same on every
