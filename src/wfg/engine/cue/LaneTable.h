@@ -77,11 +77,34 @@ namespace wfg::cue
             clearPass();
         }
 
+        /*  THE PASS IS OVER, HOWEVER IT ENDED, AND THE FADER IS THE SAMPLE'S
+            AGAIN (2026-10-05, QX, the author's decision; namespace draft §30):
+            what the Runner's `lane.stop kept|untouched|locked|dropped` does.
+            It replaces DN's fader "taken for the session" and K4's single Esc
+            that "would keep the association" (§23.15) - a retake is a new arm
+            and a new touch. `said` is what the pass ended in, kept for the
+            window to say (`lastPass`). */
+        void endPass (const std::string& said)
+        {
+            lastPass = said;
+            free();
+        }
+
+        /*  WHAT THE LAST PASS ENDED IN, published as `/godot/surface/lanePass`
+            so nothing ends in silence (namespace draft §30.4): the tick it
+            ended on, its cue, and `kept` with the points it wrote and the
+            seconds they span, `untouched` for a pass nobody rode, `locked` for
+            one the lock kept from being written, or `dropped` for one a kill
+            took. Empty until a pass has ended; never cleared by
+            `free`, since the fader going is exactly when it is read. */
+        std::string lastPass;
+
         //==============================================================================
         /*  THE PASS (decision DH, latch): started by `lane.record`, asked to end
             by `lane.stop`, ended by the Runner once it has written the lane - or
-            dropped, for a run killed under it. `run` is the run the pass plays;
-            `touched` latches at the first touch of the ride in the pass. */
+            dropped, for a run killed under it - and the fader given back with
+            it (QX, `endPass`). `run` is the run the pass plays; `touched`
+            latches at the first touch of the ride in the pass. */
         bool recording = false;
         bool stopping = false;
         std::string run;

@@ -3761,6 +3761,148 @@ TEST_CASE ("client: a lane recorded from a fader reads as the tree says, and nam
     CHECK (foot.laneRecord.cue == "SRF00005");
 }
 
+TEST_CASE ("client: what a lane's last pass ended in is read from the tree and said in words, a full stop in every locale")
+{
+    /*  Namespace draft §30.4: the fader has gone back by the time a pass has
+        ended (QX), so `lanePass` is the one row left to say what the pass did
+        - the points it wrote and the seconds they span, or that nothing was
+        written and why - under the recorder's own name, the button's (QY). */
+    Rig rig ("surfaces");
+    cue::LaneTable lanes;
+    rig.parameters.setLanes (&lanes);
+
+    auto reading = model::readLaneRecord (*rig.publish (0));
+    CHECK (reading.pass.tick < 0);
+    CHECK (model::lanePassWords (reading.pass).empty());
+
+    lanes.arm ("SRF00005");
+    lanes.take ("SRFT0003");
+    lanes.startPass ("RN000001");
+    lanes.endPass ("4242 SRF00005 kept 7 12 41.5");
+    rig.parameters.markStale();
+    reading = model::readLaneRecord (*rig.publish (1));
+
+    CHECK_FALSE (reading.taken);
+    CHECK (reading.cue.empty());
+    CHECK (reading.pass.tick == 4242);
+    CHECK (reading.pass.cue == "SRF00005");
+    CHECK (reading.pass.how == "kept");
+    REQUIRE (reading.pass.spans);
+    CHECK (reading.pass.points == 7);
+    CHECK (reading.pass.from == doctest::Approx (12.0));
+    CHECK (reading.pass.to == doctest::Approx (41.5));
+    CHECK (model::lanePassWords (reading.pass) == "Level autom.: 7 points, 12.0\xe2\x80\x93" "41.5 s");
+
+    model::LanePass pass;
+    pass.tick = 10;
+    pass.cue = "SRF00005";
+
+    //  Past a minute, as the ruler writes it; one point is a point.
+    pass.how = "kept";
+    pass.spans = true;
+    pass.points = 1;
+    pass.from = 150.25;
+    pass.to = 224.3;
+    CHECK (model::lanePassWords (pass) == "Level autom.: 1 point, 2:30.3\xe2\x80\x93" "3:44.3");
+
+    //  A record from before the numbers were carried.
+    pass.spans = false;
+    CHECK (model::lanePassWords (pass) == "Level autom.: written");
+
+    //  And every end that wrote nothing, saying why.
+    pass.how = "untouched";
+    CHECK (model::lanePassWords (pass) == "Level autom.: nothing written - the fader was not touched while the cue played");
+    pass.how = "locked";
+    CHECK (model::lanePassWords (pass) == "Level autom.: nothing written - the show is locked");
+    pass.how = "dropped";
+    CHECK (model::lanePassWords (pass) == "Level autom.: nothing written - the pass was dropped");
+}
+
+TEST_CASE ("client: a level lane's refusals read as sentences under the recorder's name")
+{
+    /*  Namespace draft §30.4: a pass that does not start writes nothing, and
+        that is said in words rather than left to a code. */
+    model::TransportReading reading;
+
+    reading.lastError = "5411 26 window no-fader lane.record";
+    CHECK (reading.errorLine() == "Level autom. not recorded: no fader is taken - press Level autom., then touch a fader");
+
+    reading.lastError = "5411 26 window busy lane.record";
+    CHECK (reading.errorLine() == "Level autom.: a pass is running - stop it first");
+
+    reading.lastError = "5411 26 window locked lane.record";
+    CHECK (reading.errorLine() == "Level autom. not recorded: the show is locked");
+
+    reading.lastError = "5411 26 window locked lane.arm";
+    CHECK (reading.errorLine() == "Level autom. not armed: the show is locked");
+
+    reading.lastError = "5411 26 window bad-value lane.arm";
+    CHECK (reading.errorLine() == "Level autom. records a media cue's level only");
+
+    reading.lastError = "5411 26 window busy lane.free";
+    CHECK (reading.errorLine() == "Level autom.: a pass is running - stop it first");
+
+    //  Anything else on the lane is the engine's words, as before.
+    reading.lastError = "5411 26 window not-waiting lane.take";
+    CHECK (reading.errorLine() == "lane.take refused: not-waiting");
+}
+
+TEST_CASE ("client: a view follows a playhead at a readable scale, paging rather than scrolling, and frames a stretch")
+{
+    /*  Namespace draft §30.4: a 647-second file drawn whole is a pixel and a
+        half a second, and a ride drawn at that scale is a smudge. While a pass
+        records the window follows no wider than a minute (or as close as the
+        hand had zoomed), and when it ends what was written is framed. */
+    model::View view;
+    view.reset (647.0);
+
+    //  Whole, it narrows to a minute, the playhead in it.
+    view.follow (10.0, 60.0);
+    CHECK (view.span() == doctest::Approx (60.0));
+    CHECK (view.from == doctest::Approx (0.0));
+    CHECK (view.to == doctest::Approx (60.0));
+
+    //  Inside the window it stays still - the picture does not move under the eye.
+    view.follow (40.0, 60.0);
+    CHECK (view.from == doctest::Approx (0.0));
+
+    //  Into its last tenth it pages, the playhead a quarter of the way in.
+    view.follow (55.0, 60.0);
+    CHECK (view.from == doctest::Approx (40.0));
+    CHECK (view.span() == doctest::Approx (60.0));
+
+    //  A playhead outside the window - a seek - pages to it.
+    view.follow (300.0, 60.0);
+    CHECK (view.from == doctest::Approx (285.0));
+
+    //  Near the end it stays inside the file.
+    view.follow (640.0, 60.0);
+    CHECK (view.to == doctest::Approx (647.0));
+    CHECK (view.span() == doctest::Approx (60.0));
+
+    //  Zoomed closer by hand, the hand's zoom is kept.
+    view.from = 100.0;
+    view.to = 110.0;
+    view.follow (105.0, 60.0);
+    CHECK (view.from == doctest::Approx (100.0));
+    view.follow (120.0, 60.0);
+    CHECK (view.span() == doctest::Approx (10.0));
+    CHECK (view.from == doctest::Approx (117.5));
+
+    //  Framing what a pass wrote: a tenth of its length either side, a second at the least.
+    view.frame (12.0, 41.5);
+    CHECK (view.from == doctest::Approx (9.05));
+    CHECK (view.to == doctest::Approx (44.45));
+
+    view.frame (0.0, 0.5);
+    CHECK (view.from == doctest::Approx (0.0));
+    CHECK (view.span() == doctest::Approx (2.5));
+
+    //  Wider than the file, the file.
+    view.frame (0.0, 640.0);
+    CHECK (view.isWholeThing());
+}
+
 TEST_CASE ("client: drawing on a fade, point by point")
 {
     const std::vector<model::CurvePoint> line { { 0.0, 0.0 }, { 1.0, -20.0 } };

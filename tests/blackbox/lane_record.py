@@ -20,8 +20,9 @@ this drives the SHIPPED BINARY with a real Tracktion graph, the way the
 virtual panel does - every step a named command over OSC: the lane armed, a
 strip of the show's virtual panel taken, a pass recorded, the ride touched,
 moved, let go (latched) and stopped - and reads back both what was HEARD (the
-render) and what was WRITTEN (the lane), then takes the pass away in one undo
-and replays the session.
+render) and what was WRITTEN (the lane), that the stop gave the fader back and
+said what it wrote (namespace draft §30.4, QX), then takes the pass away in one
+undo and replays the session.
 
 THE BUNDLE IS tests/fixtures/bundles/lane-record: one media cue with no lane,
 and a virtual panel of two strips. The media is `lane_level.py`'s tone, and
@@ -146,6 +147,17 @@ def run(locale: "str | None") -> int:
             written = lane_of(server)
             report.check(len(written) >= 3, "and the ride is written into the cue's lane, one pass one write",
                          f"{len(written)} points")
+
+            # --- the stop gives the fader back (QX, namespace draft §30.4) -------
+            report.equal(first_sound.wait_for(server, "/godot/surface/laneFader", ""), "",
+                         "the moment the pass stops, the fader is given back (QX)")
+            report.check(first_sound.value_of(server, f"/godot/slot/{STRIP}/target") != RIDE,
+                         "and its strip no longer rides the lane's node")
+            said = str(first_sound.value_of(server, "/godot/surface/lanePass") or "").split()
+            report.check(len(said) == 6 and said[1] == CUE and said[2] == "kept"
+                         and int(said[3]) == len(written),
+                         "and what the pass wrote is said: kept, its points and the seconds they span",
+                         f"{said}")
 
             report.equal(first_sound.value_of(server, "/godot/engine/rtViolations"), 0,
                          "Go.dot's own code allocated nothing on the audio thread")

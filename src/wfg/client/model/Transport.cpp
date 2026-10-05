@@ -17,6 +17,7 @@
 #include <wfg/client/model/Transport.h>
 
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/Surfaces.h>
 
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -215,6 +216,30 @@ namespace wfg::client::model
 
             if (fields[3] == "too-soon")
                 return "Doh! ignored: pressed again too soon (Show settings > Playback)";
+        }
+
+        /*  THE LEVEL LANE'S REFUSALS IN WORDS (namespace draft §30.4): a pass
+            that does not start writes nothing, and that is said rather than
+            left to a code - under the recorder's own name, the button's (QY),
+            and with what to do about it where there is something. */
+        if (fields[4] == "lane.record" || fields[4] == "lane.arm" || fields[4] == "lane.free")
+        {
+            const std::string name = laneRecorderName;
+
+            if (fields[3] == "no-fader")
+                return name + " not recorded: no fader is taken - press " + name + ", then touch a fader";
+
+            if (fields[3] == "busy")
+                return name + ": a pass is running - stop it first";
+
+            if (fields[3] == "locked")
+                return name + " not " + (fields[4] == "lane.arm" ? "armed" : "recorded") + ": the show is locked";
+
+            if (fields[4] == "lane.arm" && fields[3] == "bad-value")
+                return name + " records a media cue's level only";
+
+            if (fields[4] == "lane.record" && (fields[3] == "bad-value" || fields[3] == "unknown-id"))
+                return name + " not recorded: its cue cannot be played";
         }
 
         return fields[4] + " refused: " + fields[3];

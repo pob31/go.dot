@@ -31,6 +31,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/LaneRecording.h>
@@ -45,11 +46,13 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/log/Replay.h>
+#include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/tree/Touches.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -72,16 +75,21 @@ namespace
         std::int64_t samplesElapsed() const override         { return samples; }
         int blockSize() const override                       { return 128; }
         int channelsPerTrack() const override                { return 2; }
-        int slotCount() const override                       { return 1; }
+        int slotCount() const override                       { return 4; }
         int sampleRate() const override                      { return 48000; }
 
         void requestArm (const cue::ArmRequest& request) override { arms.push_back (request); }
         bool launchAtSample (int, int, std::int64_t) override    { return true; }
 
+        /*  `tails`: a stopped voice rings on - its EQ and inserts' tail - and
+            the audio side still says it plays, so its run stays `stopping`. */
         bool stop (int track) override
         {
             ++stops;
-            playing.erase (track);
+
+            if (! tails)
+                playing.erase (track);
+
             return true;
         }
 
@@ -116,6 +124,7 @@ namespace
         double lastLevel = 0.0;
         int stops = 0;
         int kills = 0;
+        bool tails = false;
         std::vector<cue::ArmRequest> arms;
         std::set<int> playing;
         std::set<int> ready;
@@ -213,8 +222,83 @@ namespace
 
         std::vector<doc::LanePoint> laneOfCue() const
         {
-            return doc::readLevelLane (document.getAttribute ("/godot/cue/" + mediaId + "/levelLane")
+            return laneOf (mediaId);
+        }
+
+        std::vector<doc::LanePoint> laneOf (const std::string& cueId) const
+        {
+            return doc::readLevelLane (document.getAttribute ("/godot/cue/" + cueId + "/levelLane")
                                            .value_or ("")).points;
+        }
+
+        /*  A RUN'S VOICE LANDS: its arms answered, its launch placed, the
+            clock at the launch and the audio side saying it plays - what a
+            pass, a press or a seek waits for before anything is heard. */
+        void land (const std::string& runId)
+        {
+            audio.completeArms (engine);
+
+            for (int n = 0; n < 10 && runs.find (runId)->launchedAtSample <= 0; ++n)
+                tickOnce();
+
+            REQUIRE (runs.find (runId)->launchedAtSample > 0);
+            audio.samples = std::max (audio.samples, runs.find (runId)->launchedAtSample);
+            audio.playing.insert (runs.find (runId)->track);
+            tickOnce();
+        }
+
+        /*  A SAMPLER BANK OF TWO, GONE TO and armed - its members on the
+            panel's first two strips, waiting for a hand. A script presses GO
+            here, faster than any hand: the show says the GO window is off. */
+        std::string samplerBank()
+        {
+            set ("/godot/list/goDebounce", "0");
+
+            const auto bank = document.createCue (listId, 2, "group", "Bank").id;
+            set ("/godot/cue/" + bank + "/mode", "sampler");
+
+            for (int i = 0; i < 2; ++i)
+            {
+                const auto member = document.createCue (bank, i, "media", "Clip " + std::to_string (i)).id;
+                set ("/godot/cue/" + member + "/file", "clip" + std::to_string (i) + ".wav");
+                members.push_back (member);
+            }
+
+            REQUIRE (document.setAttribute (cue::standbyAddressOf (listId), bank).ok);
+            tickOnce();
+            REQUIRE (send ("go").applied >= 1);
+
+            for (int n = 0; n < 20 && (liveRunOf (members[0]) == nullptr || liveRunOf (members[1]) == nullptr); ++n)
+                tickOnce();
+
+            REQUIRE (liveRunOf (members[0]) != nullptr);
+            REQUIRE (liveRunOf (members[1]) != nullptr);
+
+            audio.completeArms (engine);
+            tickOnce();
+            tickOnce();
+            return bank;
+        }
+
+        /** The newest unfinished run of a cue, or null. */
+        const cue::Run* liveRunOf (const std::string& cueId) const
+        {
+            const cue::Run* newest = nullptr;
+
+            for (const auto& run : runs.all())
+                if (run.cue == cueId && ! run.isFinished())
+                    newest = runs.find (run.id);
+
+            return newest;
+        }
+
+        /*  A range on the cue, `loops` passes of it, made through the
+            document as the window's table makes one. */
+        void addRange (double in, double out, int loops = 1)
+        {
+            const auto made = document.createRange (mediaId, in, out);
+            REQUIRE (made.ok);
+            set ("/godot/range/" + made.id + "/loops", std::to_string (loops));
         }
 
         std::string published (const std::string& address)
@@ -241,6 +325,7 @@ namespace
 
         std::string listId, mediaId, memoId;
         std::vector<std::string> strips;
+        std::vector<std::string> members;
         std::int64_t tick = 1;
     };
 }
@@ -492,6 +577,7 @@ TEST_CASE ("lane record: a pass nobody touched writes nothing, and a killed one 
         rig.tickOnce();
 
         CHECK_FALSE (rig.lanes.recording);
+        CHECK_FALSE (rig.lanes.taken());
         REQUIRE_FALSE (rig.laneOfCue().empty());
         CHECK (doc::laneLevelDb (rig.laneOfCue(), 0.3) == doctest::Approx (-9.0));
     }
@@ -627,36 +713,43 @@ TEST_CASE ("lane record: a session with a double Esc in the middle of a pass rep
     CHECK (fresh.lanes.cue() == rig.mediaId);
 }
 
-TEST_CASE ("lane record: Esc keeps the taken fader, and the pass it ended keeps its ride")
+TEST_CASE ("lane record: Esc ends the pass and gives the fader back, and the pass it ended keeps its ride")
 {
-    /*  THE OTHER HALF OF THE AUTHOR'S RULING (2026-10-02, K4): "a single Esc
-        would keep the association". Esc ends the pass as the cue ending would -
-        the ride written (DM) - and the fader stays taken, on the lane's node,
-        ready for the next pass. A guard: Esc never freed it. */
+    /*  THE STOP GIVES IT BACK, HOWEVER IT STOPS (2026-10-05, QX, the author's;
+        namespace draft §30.4), replacing K4's "a single Esc would keep the
+        association" (§23.15), which this case pinned until then. Esc ends the
+        pass as the cue ending would - the ride written (DM) - and the strip
+        rides what it rode before it was taken; the next pass is a new arm
+        and a new touch. */
     Rig rig;
     rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -20");
+
+    const auto target = "/godot/slot/" + rig.strips[0] + "/target";
+    const auto before = rig.published (target);
+
     rig.startPass();
 
     rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
     rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
     rig.play (30);
 
+    REQUIRE (rig.published (target) == ride);
     REQUIRE (rig.send ("run.stopAll", {}, "window").rejected == 0);
     rig.play (60);                              // past the panic fade (1 s)
 
     CHECK_FALSE (rig.lanes.recording);
-    CHECK (rig.lanes.taken());
-    CHECK (rig.lanes.cue() == rig.mediaId);
-    CHECK (rig.lanes.strip() == rig.strips[0]);
-    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/target") == ride);
-    CHECK (rig.published ("/godot/surface/laneFader") == rig.strips[0]);
+    CHECK_FALSE (rig.lanes.taken());
+    CHECK (rig.lanes.cue().empty());
+    CHECK (rig.published (target) == before);
+    CHECK (rig.published ("/godot/surface/laneFader").empty());
+    CHECK (rig.published ("/godot/surface/lane").empty());
 
     REQUIRE_FALSE (rig.laneOfCue().empty());
     CHECK (doc::laneLevelDb (rig.laneOfCue(), 0.3) == doctest::Approx (-9.0));
 
-    //  The next pass needs nothing taken again.
-    CHECK (rig.send ("lane.record").rejected == 0);
-    CHECK (rig.lanes.recording);
+    //  The next pass needs a fader taken again.
+    CHECK (rig.send ("lane.record").rejected == 1);
+    CHECK_FALSE (rig.lanes.recording);
 }
 
 TEST_CASE ("lane record: the hand ending a pass stops its cue gracefully, and its tail rings")
@@ -683,7 +776,7 @@ TEST_CASE ("lane record: the hand ending a pass stops its cue gracefully, and it
     rig.play (3);
 
     CHECK_FALSE (rig.lanes.recording);
-    CHECK (rig.lanes.taken());
+    CHECK_FALSE (rig.lanes.taken());                    // and the fader given back (QX)
 
     const auto* run = rig.runs.find (runId);
     REQUIRE (run != nullptr);
@@ -710,4 +803,462 @@ TEST_CASE ("lane record: a touch with no move latches where the fader was, not a
 
     CHECK (rig.lanes.touched);
     CHECK (rig.runs.find (runId)->laneDb == doctest::Approx (-7.0));
+}
+
+//==============================================================================
+/*  THE BUG ROUND OF 2026-10-05 (namespace draft §30, items 2 and 3; §30.4).
+    The author recorded a lane on a 647-second sample in a sampler bank, with
+    four ranges, from its own strip: the points all stayed "together at the
+    initial time", it "didn't even work when starting from 0s", and the fader
+    "was not released back to its sampler". The cases below walk the paths
+    that took them there - a sampler member, ranges, a retake, every end of a
+    pass - which the cases above, one plain cue on one slot, never did. */
+
+namespace
+{
+    /*  The fields of `/godot/surface/lanePass`: tick, cue, how, and for a pass
+        kept, the points and the seconds they span. */
+    std::vector<std::string> fieldsOf (const std::string& line)
+    {
+        std::vector<std::string> out;
+        std::string word;
+
+        for (const auto c : line)
+        {
+            if (c == ' ')
+            {
+                if (! word.empty())
+                    out.push_back (word);
+
+                word.clear();
+            }
+            else
+            {
+                word += c;
+            }
+        }
+
+        if (! word.empty())
+            out.push_back (word);
+
+        return out;
+    }
+}
+
+TEST_CASE ("lane record: a sampler member sounding under a pulled-down fader is recorded from its start, and heard")
+{
+    /*  Item 3: a pass with no `from` - the D700's Rec, or the window's from
+        nought - took the run `cue.fire` handed back as it found it. A sampler
+        member playing out under a fader pulled to the bottom is sounding
+        (play-out mutes, it does not stop), so the pass recorded wherever the
+        sample had got to, at -120 dB. Now it is moved to the cue's start, and
+        the fader's bottom is lifted as a press lifts it. */
+    Rig rig;
+    rig.samplerBank();
+
+    const auto member = rig.members[0];
+    const auto* holder = rig.liveRunOf (member);
+    REQUIRE (holder != nullptr);
+    REQUIRE (holder->strip == rig.strips[0]);
+
+    const auto runId = holder->id;
+
+    //  The clip pressed and sounding two seconds, then its fader pulled to the bottom.
+    REQUIRE (rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "surface:PANEL").rejected == 0);
+    rig.land (runId);
+    rig.play (100);
+    REQUIRE (rig.runs.find (runId)->position > 1.5);
+
+    rig.send ("node.set", { osc::Value::string ("/godot/run/" + runId + "/trim"), osc::Value::float64 (-120.0) },
+              "surface:PANEL");
+    rig.play (5);
+    REQUIRE (rig.runs.find (runId)->trim <= -118.0);
+    REQUIRE_FALSE (rig.runs.find (runId)->isFinished());
+
+    //  Its own strip taken for its lane, as the author did, and a pass with no `from`.
+    REQUIRE (rig.send ("lane.arm", { osc::Value::string (member) }).applied == 1);
+    REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "surface:PANEL").applied == 1);
+    REQUIRE (rig.send ("lane.record").applied == 1);
+
+    //  The same run, moved to the cue's start, and its fader lifted to the member's initial level.
+    CHECK (rig.lanes.run == runId);
+    CHECK (rig.runs.find (runId)->launchedAtSample == 0);
+    CHECK (rig.runs.find (runId)->position < 0.01);
+    CHECK (rig.runs.find (runId)->trim == doctest::Approx (0.0));
+
+    rig.land (runId);
+    CHECK (rig.runs.find (runId)->position < 0.1);
+    CHECK (rig.runs.find (runId)->level > -60.0);
+
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-6.0) }, "surface:PANEL");
+    rig.play (50);
+    rig.send ("lane.stop", {}, "surface:PANEL");
+    rig.tickOnce();
+
+    //  Written from the start, over about the second it was ridden - not from two seconds in.
+    const auto lane = rig.laneOf (member);
+    REQUIRE (lane.size() >= 2u);
+    CHECK (lane.front().seconds < 0.2);
+    CHECK (lane.back().seconds > 0.9);
+    CHECK (lane.back().seconds < 1.4);
+    CHECK (doc::laneLevelDb (lane, 0.5) == doctest::Approx (-6.0));
+
+    //  And the fader is the sample's again (QX).
+    CHECK_FALSE (rig.lanes.taken());
+    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/target") != ride);
+}
+
+TEST_CASE ("lane record: a pass started while the last pass's cue still rings out plays, and is not over on its first tick")
+{
+    /*  Item 3: since K4 the hand's end of a pass is a graceful `run.stop`, so a
+        cue with a tail is still `stopping` a moment later - and a retake then
+        was handed that run, read it as stopped, and ended on its first tick,
+        writing nothing. The pass now takes the run back from its stop. */
+    Rig rig;
+    rig.audio.tails = true;
+    rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -3");
+
+    const auto runId = rig.startPass();
+
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
+    rig.play (30);
+    rig.send ("node.release", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("lane.stop", {}, "window");
+    rig.play (2);
+
+    REQUIRE (rig.runs.find (runId)->state == cue::runState::stopping);
+    REQUIRE_FALSE (rig.lanes.taken());          // QX: a retake is a new arm and a new touch
+
+    REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
+    REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window").applied == 1);
+    REQUIRE (rig.send ("lane.record").applied == 1);
+
+    CHECK (rig.lanes.run == runId);
+    CHECK (rig.runs.find (runId)->state == cue::runState::playing);
+
+    rig.land (runId);
+    rig.play (10);
+
+    CHECK (rig.lanes.recording);
+    CHECK (rig.runs.find (runId)->state == cue::runState::playing);
+
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-12.0) }, "surface:PANEL");
+    rig.play (30);
+    rig.send ("lane.stop", {}, "window");
+    rig.tickOnce();
+
+    CHECK_FALSE (rig.lanes.recording);
+    CHECK (doc::laneLevelDb (rig.laneOfCue(), 0.4) == doctest::Approx (-12.0));
+}
+
+TEST_CASE ("lane record: a cue with ranges is recorded from the second asked, inside its range, and its points start there")
+{
+    /*  Item 3: a pass from 21.5 s on a cue whose third range is 20 to 30 s
+        started at 20 - the seek landed at the start of the range that held
+        the second. It lands at the second now, by K8's `sliceFrom`. A session
+        a minute old, so the slice's start can be dated back before the launch. */
+    Rig rig;
+    rig.audio.samples = 48000 * 60;
+
+    rig.addRange (0.0, 10.0);
+    rig.addRange (10.0, 20.0, 2);
+    rig.addRange (20.0, 30.0);
+    rig.addRange (30.0, 60.0);
+
+    REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
+    REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window").applied == 1);
+    REQUIRE (rig.send ("lane.record", { osc::Value::float64 (21.5) }).applied == 1);
+
+    const auto runId = rig.lanes.run;
+    const auto* run = rig.runs.find (runId);
+    REQUIRE (run != nullptr);
+
+    CHECK (run->startRange == 2);
+    CHECK (run->sliceFrom == doctest::Approx (1.5));
+    REQUIRE_FALSE (rig.audio.arms.empty());
+    CHECK (rig.audio.arms.back().startSlot == 2);
+    CHECK (rig.audio.arms.back().sliceOffset == doctest::Approx (1.5));
+
+    rig.land (runId);
+    CHECK (rig.runs.find (runId)->range == 2);
+    CHECK (std::abs (rig.runs.find (runId)->position - 21.5) < 0.05);
+
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-6.0) }, "surface:PANEL");
+    rig.play (50);
+    rig.send ("lane.stop", {}, "window");
+    rig.tickOnce();
+
+    const auto lane = rig.laneOfCue();
+    REQUIRE (lane.size() >= 2u);
+    CHECK (std::abs (lane.front().seconds - 21.45) < 0.1);
+    CHECK (doc::laneLevelDb (lane, 21.0) == doctest::Approx (0.0));
+    CHECK (doc::laneLevelDb (lane, 22.0) == doctest::Approx (-6.0));
+}
+
+TEST_CASE ("lane record: a seek on a cue with ranges lands at the second asked - its pass kept, a gap to the next range, past the end in the last")
+{
+    /*  Items 3 and 10, the arithmetic S8's scrubbing builds on (§30.4): a
+        second inside the range the run is in keeps the pass it is on; inside
+        another range, that range's first pass; in a gap, the next range's
+        start; at or past the last out-point, a hair inside the last range -
+        never the top of the file, where the first range's start used to send
+        it. */
+    Rig rig;
+    rig.audio.samples = 48000 * 100;
+
+    rig.addRange (0.0, 10.0);
+    rig.addRange (10.0, 20.0, 3);
+    rig.addRange (25.0, 30.0);
+
+    REQUIRE (rig.send ("cue.fire", { osc::Value::string (rig.mediaId) }).applied >= 1);
+    const auto* fired = rig.liveRunOf (rig.mediaId);
+    REQUIRE (fired != nullptr);
+
+    const auto runId = fired->id;
+    rig.land (runId);
+
+    const auto seek = [&rig, &runId] (double seconds)
+    {
+        REQUIRE (rig.send ("run.seek", { osc::Value::string (runId), osc::Value::float64 (seconds) }).applied == 1);
+    };
+
+    const auto now = [&rig, &runId] { return rig.runs.find (runId); };
+
+    //  Into another range: at the second, on its first pass.
+    seek (12.0);
+    CHECK (now()->range == 1);
+    CHECK (now()->sliceFrom == doctest::Approx (2.0));
+    CHECK (now()->position == doctest::Approx (12.0));
+    rig.land (runId);
+    CHECK (std::abs (now()->position - 12.0) < 0.05);
+
+    //  Twelve seconds on, the second pass of that range, four seconds in.
+    rig.play (600);
+    REQUIRE (now()->rangeIteration == 2);
+    REQUIRE (std::abs (now()->position - 14.0) < 0.1);
+
+    //  Inside it again: the pass it was on is kept.
+    seek (15.0);
+    CHECK (now()->range == 1);
+    CHECK (now()->rangeIteration == 2);
+    CHECK (now()->sliceFrom == doctest::Approx (15.0));
+    rig.land (runId);
+    rig.play (2);
+    CHECK (now()->rangeIteration == 2);
+    CHECK (std::abs (now()->position - 15.0) < 0.1);
+
+    //  A gap between ranges: the next range's start.
+    seek (22.0);
+    CHECK (now()->range == 2);
+    CHECK (now()->position == doctest::Approx (25.0));
+    CHECK (now()->sliceFrom == doctest::Approx (0.0));
+
+    //  Past the end, and on the last out-point itself: a hair inside the last range, not the top.
+    for (const auto past : { 40.0, 30.0 })
+    {
+        seek (past);
+        CHECK (now()->range == 2);
+        CHECK (now()->position > 29.9);
+        CHECK (now()->position < 30.0);
+        CHECK (now()->sliceFrom == doctest::Approx (4.999));
+    }
+
+    //  And back to the first range, its first pass.
+    seek (5.0);
+    CHECK (now()->range == 0);
+    CHECK (now()->rangeIteration == 1);
+    CHECK (now()->sliceFrom == doctest::Approx (5.0));
+}
+
+TEST_CASE ("lane record: the fader is the sample's again however the pass ends, and what the pass ended in is published")
+{
+    /*  QX (the author's decision, 2026-10-05): the touch takes the fader and
+        the end of the pass gives it back - kept, nobody riding it, a kill, Esc
+        (above), the cue ending on its own. And each end says what it was, for
+        the window to say in words (§30.4). */
+    Rig rig;
+    rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -3");
+
+    const auto target = "/godot/slot/" + rig.strips[0] + "/target";
+    const auto before = rig.published (target);
+    REQUIRE (rig.published ("/godot/surface/lanePass").empty());
+
+    std::string how;
+
+    SUBCASE ("kept - the hand's stop, with what it wrote")
+    {
+        rig.startPass();
+        rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+        rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-6.0) }, "surface:PANEL");
+        rig.play (50);
+        rig.send ("lane.stop", {}, "window");
+        rig.tickOnce();
+        how = "kept";
+
+        const auto fields = fieldsOf (rig.published ("/godot/surface/lanePass"));
+        REQUIRE (fields.size() == 6u);
+        //  Read as the log writes numbers - a full stop in every locale.
+        CHECK (osc::parseDouble (fields[3]).value_or (0.0) >= 2.0);
+        CHECK (osc::parseDouble (fields[4]).value_or (9.0) < 0.1);
+        CHECK (osc::parseDouble (fields[5]).value_or (0.0) > 0.9);
+        CHECK (osc::parseDouble (fields[5]).value_or (9.0) < 1.3);
+    }
+
+    SUBCASE ("untouched - the cue ended on its own, nobody riding it")
+    {
+        const auto runId = rig.startPass();
+        rig.play (30);
+        rig.audio.playing.erase (rig.runs.find (runId)->track);
+        rig.play (3);
+        how = "untouched";
+    }
+
+    SUBCASE ("dropped - the pane's kill")
+    {
+        const auto runId = rig.startPass();
+        rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+        rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-6.0) }, "surface:PANEL");
+        rig.play (30);
+        rig.send ("run.kill", { osc::Value::string (runId) }, "window");
+        rig.play (3);
+        how = "dropped";
+        CHECK (rig.laneOfCue().size() == 1u);
+    }
+
+    CHECK_FALSE (rig.lanes.recording);
+    CHECK_FALSE (rig.lanes.taken());
+    CHECK (rig.lanes.cue().empty());
+    CHECK (rig.published (target) == before);
+    CHECK (rig.published ("/godot/surface/laneFader").empty());
+
+    const auto fields = fieldsOf (rig.published ("/godot/surface/lanePass"));
+    REQUIRE (fields.size() >= 3u);
+    CHECK (fields[1] == rig.mediaId);
+    CHECK (fields[2] == how);
+}
+
+TEST_CASE ("lane record: locking the show lets a waiting or taken fader go, and a pass under way ends before its fader does")
+{
+    /*  DN said the lock frees the fader, and only the refusals were built: a
+        fader taken for a lane the lock will not let anybody record played
+        nothing for as long as the show stayed locked (§30.4). Let go by
+        `lane.free`, the engine's, so the log says why. */
+    Rig rig;
+
+    SUBCASE ("taken")
+    {
+        REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
+        REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window").applied == 1);
+        REQUIRE (rig.lanes.taken());
+
+        rig.set ("/godot/document/locked", "true");
+        rig.play (2);
+
+        CHECK_FALSE (rig.lanes.taken());
+        CHECK (rig.lanes.cue().empty());
+        CHECK (rig.published ("/godot/surface/laneFader").empty());
+        CHECK (rig.engine.log().contents().find ("engine lane.free") != std::string::npos);
+    }
+
+    SUBCASE ("waiting for a touch")
+    {
+        REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
+        REQUIRE (rig.lanes.waiting());
+
+        rig.set ("/godot/document/locked", "true");
+        rig.play (2);
+
+        CHECK_FALSE (rig.lanes.waiting());
+        CHECK (rig.lanes.cue().empty());
+    }
+
+    SUBCASE ("a pass under way: it runs on, and its end gives the fader back, writing nothing the lock keeps")
+    {
+        rig.startPass();
+        rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+        rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-6.0) }, "surface:PANEL");
+
+        rig.set ("/godot/document/locked", "true");
+        rig.play (20);
+
+        CHECK (rig.lanes.recording);
+        CHECK (rig.lanes.taken());
+
+        rig.send ("lane.stop", {}, "window");
+        rig.tickOnce();
+
+        CHECK_FALSE (rig.lanes.recording);
+        CHECK_FALSE (rig.lanes.taken());
+        CHECK (rig.laneOfCue().empty());
+
+        const auto fields = fieldsOf (rig.published ("/godot/surface/lanePass"));
+        REQUIRE (fields.size() >= 3u);
+        CHECK (fields[2] == "locked");
+    }
+}
+
+TEST_CASE ("lane record: a session of passes - a retake under a ringing stop, the cue ending on its own, the lock - replays record for record")
+{
+    /*  Everything §30.4 moved is a handler's or rides a record: the pass's
+        start (`startLanePass`, from the run table and the document), its end
+        and what it ended in (`lane.stop`'s arguments), the lock's let-go
+        (`lane.free` from the engine). So a replay, which runs no hook,
+        answers every record the night did. */
+    Rig rig;
+    rig.audio.tails = true;
+    rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -3");
+
+    const auto runId = rig.startPass();
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
+    rig.play (30);
+    rig.send ("node.release", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("lane.stop", {}, "window");
+    rig.play (2);
+
+    rig.send ("lane.arm", { osc::Value::string (rig.mediaId) });
+    rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.send ("lane.record", { osc::Value::float64 (0.5) });
+    rig.land (runId);
+    rig.play (20);
+    rig.audio.playing.erase (rig.runs.find (runId)->track);
+    rig.play (3);
+
+    rig.send ("lane.arm", { osc::Value::string (rig.mediaId) });
+    rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window");
+    rig.set ("/godot/document/locked", "true");
+    rig.play (3);
+
+    REQUIRE_FALSE (rig.lanes.taken());
+
+    const auto log = rig.engine.log().contents();
+    REQUIRE (log.find ("lane.stop s:\"kept\" i:") != std::string::npos);
+    REQUIRE (log.find ("lane.stop s:\"untouched\"") != std::string::npos);
+    REQUIRE (log.find ("engine lane.free") != std::string::npos);
+
+    const auto show = doc::CanonicalXml::write (rig.document);
+    const auto original = LogFile::parse (log);
+    REQUIRE (original.errors.empty());
+
+    Rig fresh { false };
+    const auto read = doc::CanonicalXml::read (show, fresh.document);
+
+    for (const auto& problem : read.problems)
+        MESSAGE (problem);
+
+    REQUIRE (read.ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        MESSAGE (mismatch);
+
+    CHECK (result.ok);
+    CHECK (result.recordsReplayed == result.recordsExpected);
+    CHECK_FALSE (fresh.lanes.taken());
+    CHECK (fresh.lanes.lastPass == rig.lanes.lastPass);
 }

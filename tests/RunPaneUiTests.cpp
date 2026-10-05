@@ -544,7 +544,9 @@ TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops 
 {
     /*  Namespace draft §20.9: one button, four states read from the tree at
         every click, and the transport's stop ending a pass rather than
-        killing it (a kill drops the ride). */
+        killing it (a kill drops the ride). In the author's words since
+        2026-10-05 (QY): "Level autom.", "Touch a fader…", "● Rec level",
+        "■ Stop" - each one whole on a button as wide as the longest. */
     std::vector<std::string> said;
 
     ui::WaveformEditorComponent::Actions actions;
@@ -570,16 +572,30 @@ TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops 
         juce::Button* found = nullptr;
 
         for (auto* button : buttonsUnder (editor))
-            if (button->getButtonText().contains ("Rec") || button->getButtonText().contains ("Stop"))
-                found = button;
+            for (const auto* word : { "Level autom.", "Touch a fader", "Rec level", "Stop" })
+                if (button->getButtonText().contains (juce::String::fromUTF8 (word)))
+                    found = button;
 
         REQUIRE (found != nullptr);
         return found;
     };
 
-    //  IDLE: Rec arms this cue's lane.
+    /*  WHOLE ON THE BUTTON, in the font it is drawn in: no state is cut to
+        an ellipsis (QY widened the button). */
+    const auto fits = [&rec]
+    {
+        auto* button = dynamic_cast<juce::TextButton*> (rec());
+        REQUIRE (button != nullptr);
+
+        const auto font = button->getLookAndFeel().getTextButtonFont (*button, button->getHeight());
+        return juce::GlyphArrangement::getStringWidthInt (font, button->getButtonText()) < button->getWidth();
+    };
+
+    //  IDLE: "Level autom." arms this cue's lane.
     editor.show (reading, nullptr);
-    CHECK (rec()->getButtonText() == "Rec");
+    CHECK (rec()->getButtonText() == "Level autom.");
+    CHECK (rec()->getTooltip().startsWith ("Level autom."));
+    CHECK (fits());
     rec()->onClick();
     CHECK (said.back() == "arm CUE00001");
 
@@ -587,7 +603,9 @@ TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops 
     reading.laneRecord.cue = "CUE00001";
     reading.laneRecord.waiting = true;
     editor.show (reading, nullptr);
-    CHECK (rec()->getButtonText().startsWith ("Rec"));
+    CHECK (rec()->getButtonText() == juce::String::fromUTF8 ("Touch a fader\xe2\x80\xa6"));
+    CHECK (rec()->getTooltip().startsWith (juce::String::fromUTF8 ("Touch a fader\xe2\x80\xa6")));
+    CHECK (fits());
     CHECK (rec()->getToggleState());
     rec()->onClick();
     CHECK (said.back() == "arm ");
@@ -601,7 +619,9 @@ TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops 
     reading.laneRecord.rideDb = 0.0;
     editor.show (reading, nullptr);
 
-    CHECK (rec()->getButtonText().endsWith ("Rec"));
+    CHECK (rec()->getButtonText() == juce::String::fromUTF8 ("\xe2\x97\x8f Rec level"));
+    CHECK (rec()->getTooltip().contains (juce::String::fromUTF8 ("Panel \xc2\xb7 fader 3")));
+    CHECK (fits());
     rec()->onClick();
     CHECK (said.back() == "record 0");
 
@@ -628,7 +648,8 @@ TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops 
         editor.show (reading, nullptr);
     }
 
-    CHECK (rec()->getButtonText().contains ("Stop"));
+    CHECK (rec()->getButtonText() == juce::String::fromUTF8 ("\xe2\x96\xa0 Stop"));
+    CHECK (fits());
     rec()->onClick();
     CHECK (said.back() == "stop");
 
@@ -667,6 +688,113 @@ TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops 
     reading.locked = true;
     editor.show (reading, nullptr);
     CHECK_FALSE (rec()->isEnabled());
+}
+
+TEST_CASE ("waveform: a pass follows the playhead at a readable scale, and its end frames what it wrote and says so, once")
+{
+    /*  Namespace draft §30, item 3, and §30.4. A 647-second file drawn whole is
+        a pixel and a half a second: the author's ride was a smudge at the
+        playhead, and its points appeared only at the stop, somewhere off the
+        picture. While this cue's lane records the window follows the playhead
+        no wider than a minute (RG); when the pass has ended, what it wrote is
+        framed and said - and a pass that wrote nothing says why. */
+    std::vector<juce::String> notes;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.say = [&notes] (const juce::String& sentence) { notes.push_back (sentence); };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setSize (1000, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "Danse";
+    reading.cueKind = "media";
+    reading.file = "danse.wav";
+    reading.fileLength = 647.0;
+
+    //  A pass that ended before this editor opened is not said.
+    reading.laneRecord.pass.tick = 50;
+    reading.laneRecord.pass.cue = "CUE00001";
+    reading.laneRecord.pass.how = "untouched";
+    editor.show (reading, nullptr);
+    CHECK (notes.empty());
+
+    /*  How many pixels thirty seconds is: about 45 with the whole file drawn,
+        about half the bar at a minute across. */
+    const auto thirty = [&editor]
+    {
+        return editor.pointPosition ({ 30.0, 0.0 }).x - editor.pointPosition ({ 0.0, 0.0 }).x;
+    };
+
+    CHECK (thirty() < 80.0f);
+
+    //  RECORDING: the view follows, a minute across.
+    reading.laneRecord.cue = "CUE00001";
+    reading.laneRecord.strip = "STRP0003";
+    reading.laneRecord.faderLabel = "Panel \xc2\xb7 fader 3";
+    reading.laneRecord.taken = true;
+    reading.laneRecord.recording = true;
+    reading.laneRecord.hasRide = true;
+    reading.running = true;
+    reading.runId = "RN000001";
+
+    for (int pass = 0; pass < 20; ++pass)
+    {
+        reading.position = 12.0 + 0.5 * pass;
+        reading.laneRecord.rideDb = -3.0 - 0.25 * pass;
+        editor.show (reading, nullptr);
+    }
+
+    CHECK (thirty() > 200.0f);
+
+    //  And the playhead on the picture: between its edges.
+    const auto head = editor.pointPosition ({ reading.position, 0.0 }).x;
+    CHECK (head > editor.pointPosition ({ 0.0, 0.0 }).x);
+    CHECK (head < 1000.0f);
+    CHECK (notes.empty());
+
+    //  THE PASS ENDS: the fader given back, and what it wrote framed and said.
+    reading.laneRecord = {};
+    reading.running = false;
+    reading.laneRecord.pass.tick = 900;
+    reading.laneRecord.pass.cue = "CUE00001";
+    reading.laneRecord.pass.how = "kept";
+    reading.laneRecord.pass.points = 7;
+    reading.laneRecord.pass.from = 12.0;
+    reading.laneRecord.pass.to = 21.5;
+    reading.laneRecord.pass.spans = true;
+    editor.show (reading, nullptr);
+
+    REQUIRE (notes.size() == 1u);
+    CHECK (notes.back() == juce::String::fromUTF8 ("Level autom.: 7 points, 12.0\xe2\x80\x93" "21.5 s"));
+
+    //  Framed: the stretch spans most of the bar, both its ends on the picture.
+    const auto from = editor.pointPosition ({ 12.0, 0.0 }).x;
+    const auto to = editor.pointPosition ({ 21.5, 0.0 }).x;
+    CHECK (from > 0.0f);
+    CHECK (to < 1000.0f);
+    CHECK (to - from > 300.0f);
+
+    //  Said once: the next pass of the window says nothing more.
+    editor.show (reading, nullptr);
+    CHECK (notes.size() == 1u);
+
+    //  A pass on another cue is that cue's to say.
+    reading.laneRecord.pass.tick = 950;
+    reading.laneRecord.pass.cue = "CUE00002";
+    editor.show (reading, nullptr);
+    CHECK (notes.size() == 1u);
+
+    //  A pass that wrote nothing says why.
+    reading.laneRecord.pass.tick = 990;
+    reading.laneRecord.pass.cue = "CUE00001";
+    reading.laneRecord.pass.how = "untouched";
+    reading.laneRecord.pass.spans = false;
+    editor.show (reading, nullptr);
+
+    REQUIRE (notes.size() == 2u);
+    CHECK (notes.back().startsWith ("Level autom.: nothing written"));
 }
 
 TEST_CASE ("range table: every slice shows its times, and the arrow gives the next one this length")

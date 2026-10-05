@@ -44,9 +44,13 @@ A 206 12 udp:127.0.0.1:54597 lane.stop
 #
 # THE RUNNER ENDS IT on the next tick: the cue stopped, and the pass cleared as
 # kept - with no lane written, there being no sound to have been at a second of.
+# (Recorded before K4 and §30.4: a session today logs `run.stop` here, and
+# `lane.stop s:"untouched"`, a pass with nothing to write. The handlers take
+# these records as they took them then, and since §30.4 the end of the pass
+# gives the fader back - QX.)
 A 207 13 engine run.kill s:"Y63KSHEK"
 A 207 14 engine lane.stop s:"kept"
 A 208 15 engine run.ended s:"Y63KSHEK"
 #
-# And the fader goes back to what it rode.
+# And `lane.free`, applied - with nothing left to let go since QX.
 A 246 16 udp:127.0.0.1:54598 lane.free

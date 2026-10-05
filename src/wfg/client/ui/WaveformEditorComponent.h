@@ -39,6 +39,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -213,16 +214,31 @@ namespace wfg::client::ui
 
         juce::TextButton transport;
 
-        /*  THE LANE'S REC (namespace draft §20.9), beside the transport: `Rec`
-            arms this cue's lane, `Rec…` waits for a fader to be touched (a
-            click cancels), `● Rec` starts a pass from the playhead once one is
-            taken, `■` stops it - the words say which, never the colour alone
-            (§4.8) - and the ✕ lets the fader go. */
+        /*  THE LANE'S REC (namespace draft §20.9), beside the transport, in the
+            author's words (2026-10-05, QY): "Level autom." arms this cue's
+            lane, "Touch a fader…" waits for a fader to be touched (a click
+            cancels), "● Rec level" starts a pass from the playhead once one is
+            taken, "■ Stop" ends it - the words say which, never the colour
+            alone (§4.8) - and the ✕ lets the fader go. As wide as the longest
+            of the four (`recWide`, measured in the button's own font), so no
+            state is cut short. */
         juce::TextButton rec;
         juce::TextButton freeFader;
         void sayWhatRecDoes();
         bool laneIsMine() const;
         int recWidth() const;
+        void measureRec();
+        int recWide = 0;
+
+        /*  WHERE THE VIEW GOES WHILE A PASS RECORDS, AND AFTER (namespace draft
+            §30.4): it follows the playhead no wider than `followSeconds` (RG),
+            and when the pass has ended it frames what was written and says
+            so. `passSeen` is the tick of the last pass's end this editor has
+            already said, so a pass is said once, and one that ended before the
+            editor opened is not said at all. */
+        static constexpr double followSeconds = 60.0;
+        std::int64_t passSeen = -1;
+        bool passSeenSet = false;
 
         /*  WHICH LANE IS DRAWN (namespace draft §28, QB): the level's, or one
             send's, picked from the button after Rec - *Level*, then each send

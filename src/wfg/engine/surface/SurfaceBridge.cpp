@@ -2663,11 +2663,16 @@ namespace wfg::surface
                     fader, and the author read "pads" on it as something the
                     fader could not do. And "picked" on the strip the rotaries
                     are aimed at - the SELECT light says so too, and a light is
-                    never the only carrier (§4.8). */
-                const std::string_view role = isDca                ? "dca"
-                                            : strip.cueId.empty() ? "free"
-                                            : picked               ? "picked"
-                                                                   : "sampler";
+                    never the only carrier (§4.8). And "lane" on the strip taken
+                    to record a level lane, for as long as it is taken (§20.9
+                    said so; built 2026-10-05, namespace draft §30.4): it rides
+                    the lane, whatever its role says it rides otherwise. */
+                const auto lane = laneState();
+                const std::string_view role = lane.taken && lane.strip == strip.id ? "lane"
+                                            : isDca                                ? "dca"
+                                            : strip.cueId.empty()                 ? "free"
+                                            : picked                               ? "picked"
+                                                                                   : "sampler";
 
                 if (changed (strip.rows[2], role))
                     send (port, d700DisplayRow3 (element, role));

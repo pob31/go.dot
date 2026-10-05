@@ -25,6 +25,20 @@ namespace wfg::client::ui
             on a trackpad is not. */
         constexpr int grabRadius = 7;
 
+        /*  THE LANE RECORDER'S FOUR WORDS (2026-10-05, QY, the author's): at
+            rest, waiting for a touch, ready with a fader, and recording. The
+            first is the model's, so the sentences that report a pass open with
+            the same name. */
+        const char* const recAtRest    = model::laneRecorderName;
+        const char* const recWaiting   = "Touch a fader\xe2\x80\xa6";
+        const char* const recReady     = "\xe2\x97\x8f Rec level";
+        const char* const recRecording = "\xe2\x96\xa0 Stop";
+
+        juce::String said (const char* utf8)
+        {
+            return juce::String::fromUTF8 (utf8);
+        }
+
         /*  What the head row says of a media cue's speed: nothing when it plays
             at one in varispeed, its speed and its mode otherwise. */
         juce::String speedWords (const model::FootReading& reading)
@@ -260,7 +274,23 @@ namespace wfg::client::ui
     int WaveformEditorComponent::recWidth() const
     {
         const auto height = headArea().getHeight();
-        return height * 3 + (freeFader.isVisible() ? height : 0);
+        return recWide + (freeFader.isVisible() ? height : 0);
+    }
+
+    /*  WIDE ENOUGH FOR THE LONGEST OF ITS FOUR WORDS (QY), in the font the
+        button draws them in, and a row's height of margin - so "Touch a
+        fader…" is never cut to "Touch a f…" while "■ Stop" sits in a button
+        twice its size. Measured on every layout, the font following the row. */
+    void WaveformEditorComponent::measureRec()
+    {
+        const auto height = headArea().getHeight();
+        const auto font = rec.getLookAndFeel().getTextButtonFont (rec, height);
+        auto widest = 0;
+
+        for (const auto* label : { recAtRest, recWaiting, recReady, recRecording })
+            widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidthInt (font, said (label)));
+
+        recWide = juce::jmax (height * 3, widest + height);
     }
 
     int WaveformEditorComponent::pickWidth() const
@@ -346,9 +376,12 @@ namespace wfg::client::ui
         }
     }
 
-    /*  WHAT THE LANE'S REC DOES NEXT, on the button in words (§4.8): Rec to arm
-        this cue's lane; Rec… while it waits for a fader, a click cancelling;
-        ● Rec to start a pass once a fader is taken; ■ to stop it. The ✕ is up
+    /*  WHAT THE LANE'S REC DOES NEXT, on the button in words (§4.8), the
+        author's (2026-10-05, QY): "Level autom." to arm this cue's lane;
+        "Touch a fader…" while it waits for one, a click cancelling; "● Rec
+        level" to start a pass once a fader is taken; "■ Stop" to end it. The
+        tooltip and the head row's line name the same four, so what the
+        button says and what the row says are one vocabulary. The ✕ is up
         while this cue's lane has a fader and no pass runs. Nothing under the
         lock but the stop - a lane is the show's. */
     void WaveformEditorComponent::sayWhatRecDoes()
@@ -356,27 +389,31 @@ namespace wfg::client::ui
         const auto& lane = reading.laneRecord;
         const auto mine = laneIsMine();
         const auto recording = mine && lane.recording;
+        const auto fader = juce::String::fromUTF8 (lane.faderLabel.c_str());
 
         if (recording)
         {
-            rec.setButtonText (juce::String::fromUTF8 ("\xe2\x96\xa0 Stop"));
-            rec.setTooltip ("End the pass, and write what the fader rode into the level lane");
+            rec.setButtonText (said (recRecording));
+            rec.setTooltip (said (recRecording) + ": end the pass, write what " + fader
+                              + " rode into the level lane, and give the fader back");
         }
         else if (mine && lane.taken)
         {
-            rec.setButtonText (juce::String::fromUTF8 ("\xe2\x97\x8f Rec"));
-            rec.setTooltip ("Play the cue from the playhead and record the level from the first touch"
-                            " of the fader, held until the pass stops");
+            rec.setButtonText (said (recReady));
+            rec.setTooltip (said (recReady) + ": play the cue from the playhead and record the level from the"
+                              " first touch of " + fader + ", held until " + said (recRecording));
         }
         else if (mine && lane.waiting)
         {
-            rec.setButtonText (juce::String::fromUTF8 ("Rec\xe2\x80\xa6"));
-            rec.setTooltip ("Waiting for a fader: touch one on any surface to take it. Click to cancel");
+            rec.setButtonText (said (recWaiting));
+            rec.setTooltip (said (recWaiting) + " on any surface to take it for " + said (recAtRest)
+                              + " Click to cancel");
         }
         else
         {
-            rec.setButtonText ("Rec");
-            rec.setTooltip ("Record the level lane from a fader: the next fader touched is taken for it");
+            rec.setButtonText (said (recAtRest));
+            rec.setTooltip (said (recAtRest) + ": record this cue's level from a fader - click, then touch"
+                              " a fader on any surface");
         }
 
         rec.setToggleState (mine && (lane.waiting || recording), juce::dontSendNotification);
@@ -388,7 +425,7 @@ namespace wfg::client::ui
         /*  A SEND'S LANE IS DRAWN, NOT RECORDED (namespace draft §28.5): Rec
             says so rather than arming the level behind the drawing's back. */
         if (sendPicked() && ! recording)
-            rec.setTooltip ("Rec records the level lane only - pick Level to record one");
+            rec.setTooltip (said (recAtRest) + " records the level lane only - pick Level to record one");
 
         const auto freeable = mine && lane.taken && ! recording;
 
@@ -508,6 +545,40 @@ namespace wfg::client::ui
             trail.push_back ({ reading.position, reading.laneRecord.rideDb });
         else if (! (laneIsMine() && reading.laneRecord.recording))
             trail.clear();
+
+        /*  AND THE VIEW FOLLOWS THE PASS (namespace draft §30.4): a 647-second
+            file drawn whole is a pixel and a half a second, and a ride drawn
+            at that scale is a smudge at the playhead - the author's points
+            that "all stayed together at the initial time". So while this cue's
+            lane records, the window keeps the playhead in sight no wider than
+            a minute (RG), or as close as the hand had zoomed, paging as it
+            goes. */
+        if (laneIsMine() && reading.laneRecord.recording && reading.running)
+            view.follow (reading.position, followSeconds);
+
+        /*  WHEN THE PASS HAS ENDED, WHAT IT WROTE IS PUT ON SCREEN AND SAID -
+            the points and the seconds they span, framed - and a pass that
+            wrote nothing says why rather than ending in silence. Once per
+            pass, by the tick it ended on; a pass that ended before this editor
+            opened, or on another cue, is not said here. */
+        if (const auto& pass = reading.laneRecord.pass; ! passSeenSet)
+        {
+            passSeen = pass.tick;
+            passSeenSet = true;
+        }
+        else if (pass.tick != passSeen)
+        {
+            passSeen = pass.tick;
+
+            if (pass.tick >= 0 && pass.cue == reading.subject.objectId)
+            {
+                if (pass.how == "kept" && pass.spans)
+                    view.frame (pass.from, pass.to);
+
+                if (actions.say != nullptr)
+                    actions.say (said (model::lanePassWords (pass).c_str()));
+            }
+        }
 
         if (table != nullptr)
         {
@@ -1105,24 +1176,29 @@ namespace wfg::client::ui
 
         /*  A LANE BEING RECORDED FROM A FADER says so here, in place of the
             row's instructions: what it waits for, which fader has it, what a
-            pass is doing - and whose it is when it is another cue's. */
+            pass is doing - in the button's own words (QY), so the line names
+            the button that does the next thing. */
         const auto& laneRecord = reading.laneRecord;
 
         if (laneIsMine() && laneRecord.waiting)
         {
             g.setColour (Look::colour (theme, "standby"));
-            g.drawText ("touch a fader on any surface to take it for the level", area,
-                        juce::Justification::centredLeft, true);
+            g.drawText (said (recWaiting) + " on any surface to take it for " + said (recAtRest)
+                          + " - click " + said (recWaiting) + " to cancel",
+                        area, juce::Justification::centredLeft, true);
             return;
         }
 
         if (laneIsMine() && laneRecord.taken)
         {
+            const auto fader = juce::String::fromUTF8 (laneRecord.faderLabel.c_str());
+
             g.setColour (Look::colour (theme, laneRecord.recording ? "failed" : "ink-dim"));
-            g.drawText (juce::String (laneRecord.recording ? "recording the level from " : "level on ")
-                          + juce::String (laneRecord.faderLabel)
-                          + (laneRecord.recording ? " - held from the first touch until you stop"
-                                                  : " - Rec plays the cue and records from the first touch"),
+            g.drawText (laneRecord.recording
+                          ? "recording the level from " + fader + ", held from the first touch - "
+                              + said (recRecording) + " ends the pass and gives the fader back"
+                          : said (recAtRest) + " on " + fader + " - " + said (recReady)
+                              + " plays the cue from the playhead and records from the first touch",
                         area, juce::Justification::centredLeft, true);
             return;
         }
@@ -1204,8 +1280,9 @@ namespace wfg::client::ui
         barsWidth = 0;   // the bucketing is per width
 
         auto head = headArea();
+        measureRec();
         transport.setBounds (head.removeFromLeft (head.getHeight() * 2).reduced (2, 1));
-        rec.setBounds (head.removeFromLeft (head.getHeight() * 3).reduced (2, 1));
+        rec.setBounds (head.removeFromLeft (recWide).reduced (2, 1));
 
         if (freeFader.isVisible())
             freeFader.setBounds (head.removeFromLeft (head.getHeight()).reduced (2, 1));

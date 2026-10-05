@@ -648,6 +648,15 @@ namespace wfg::cue
             motor and both bytes are where its fader would be. */
         static double levelForByte (int byte, double floor) noexcept;
 
+        /*  A FADER SOMEBODY PULLED TO THE BOTTOM, lifted for a sound somebody
+            asked to hear: the run's trim, at or below `parkedDb`, goes to the
+            cue's `initialLevel`, or to unity when that is the bottom too. What
+            a press that is not the touch does (`pressStrip`), and what a level
+            lane's pass does at its start (`startLanePass`, namespace draft
+            §30.4) - a pass at -120 dB records a ride nobody can hear. A trim
+            above the bottom is left where the hand put it. */
+        void liftParkedFader (Run& run, const juce::ValueTree& cue) const;
+
         /** The published `/godot/engine/launchLatencyTicks`, or 0 with no audio. */
         int latencyTicks() const noexcept;
 
@@ -776,9 +785,31 @@ namespace wfg::cue
             members or has a header. `seconds` are the scene's own, as its
             `position` reads; the round's second is that less where the round
             began, clamped to the round, and a second inside a header changes
-            nothing. A manual group and a sampler bank still change nothing. */
+            nothing. A manual group and a sampler bank still change nothing.
+
+            (2026-10-05, namespace draft §30.4:) A MEDIA RUN WITH RANGES LANDS AT
+            THE SECOND ASKED, inside the range that holds it, by K8's
+            `sliceFrom` - not at that range's in-point. In the range it was
+            already in it keeps the pass it was on when `keepPass` says so (a
+            scrub); every other landing is the range's first pass. A second in
+            a gap between ranges is the next range's start, and one at or past
+            the last out-point is a hair inside the last range's end - never
+            the top of the file. */
         bool seekMedia (Engine& engine, std::int64_t tick, const std::string& runId,
-                        double seconds);
+                        double seconds, bool keepPass);
+
+        /*  A LEVEL LANE'S PASS STARTS (namespace draft §20.9; 2026-10-05,
+            §30.4): what `lane.record` calls. The cue is fired as `cue.fire`
+            fires it, and the run it hands back plays from `from` - nought being
+            the cue's own start, its start offset or its first range's in-point
+            - whatever it was doing: one already sounding (a sampler member
+            muted at the bottom of its fader plays on) is moved there, and one
+            still on its way out from the last pass's stop is taken back from
+            it, as a seek takes it. A fader pulled to the bottom is lifted as a
+            press lifts it (`liftParkedFader`), so the pass is heard. Returns
+            the run, empty when the cue does not play. */
+        std::string startLanePass (Engine& engine, std::int64_t tick, const std::string& cueId,
+                                   double from, const std::string& runId);
         std::vector<std::string> seekGroup (Engine& engine, std::int64_t tick,
                                             const std::string& runId, double seconds,
                                             const std::vector<std::string>& supplied);
@@ -1076,9 +1107,10 @@ namespace wfg::cue
             association"). What `lane.free` does, from the press's handler: the
             taken strip rides what it rode before, the lane is forgotten, and a
             pass under way is dropped with its ride (DM) - nothing is written,
-            and no `lane.stop` follows, there being no pass left to end. Esc
-            keeps the fader. Handler state only, so a replay frees it in the
-            same record. */
+            and no `lane.stop` follows, there being no pass left to end.
+            Handler state only, so a replay frees it in the same record. (Since
+            2026-10-05, QX, every other end of a pass gives the fader back too,
+            Esc's included: `lane.stop`'s handler, namespace draft §30.4.) */
         void freeLane() noexcept;
 
         /*  WHETHER A DOUBLE ESC WAS APPLIED EARLIER IN THIS DRAIN (the review

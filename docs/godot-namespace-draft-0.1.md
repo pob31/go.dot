@@ -19013,3 +19013,109 @@ on to the second` (GoTests).
 - **RD - The arrows agree with the GO.** `standby.next` from the row goes to the second member too,
   since the row and the first member are one position; `standby.previous` already climbed out the
   same way from either. A park on the row is still allowed and still shows on the row.
+
+### 30.4 What was built: S2 - the level lane recorded
+
+Items 2 and 3, on the engine and in the window. Each fault the triage named was found where it said.
+
+**The pass starts where it is asked to, on a run that plays, and is heard.** `lane.record` calls
+`Runner::startLanePass`: the cue is fired as `cue.fire` fires it, and whatever run was there before
+the fire - sounding, muted at the bottom of a sampler fader, armed, or still ringing out from the
+last pass's graceful stop (K4) - is moved by `seekMedia` to `from`, nought being the cue's own start
+(its start offset, or its first range's in-point, where DG already put the fader). The seek withdraws
+any stop asked of the run (HB), so a quick retake no longer meets a `stopping` run and ends on its
+first tick. A fader parked at the bottom is lifted at the pass's start by `Runner::liftParkedFader`,
+the code `strip.press` used for a pulled-down fader, now one function both call: the cue's
+`initialLevel`, or unity when that is the bottom too.
+
+**A seek on a cue with ranges lands at the second asked** (`seekMedia`, so `run.seek` has it too, and
+S8 builds on it), by K8's `sliceFrom`: inside the range that holds the second; in the range the run
+was already in, on the pass it was on, for a scrub; in a gap or before the first range, at the next
+range's start; at or past the last out-point, a hair inside the range that ends last - never the top
+of the file, where a second no range held used to go. A strip's second press (`restart`) and a lane's
+pass enter their range on its first pass. No replay log in `tests/fixtures/logs` holds a `run.seek`,
+so none changed.
+
+**The stop gives the fader back (QX).** `lane.stop`'s handler, for every end the Runner reports,
+calls `LaneTable::endPass`, which frees the fader: the hand's stop, Esc, the cue ending on its own, a
+kill; the double Esc already did. The cases that pinned the old rule are turned round - "Esc ends the
+pass and gives the fader back" (LaneRecordTests), and `lane_record.py` now asks that `laneFader`
+empties at the stop and the strip leaves the lane's node. `lane-record.wfglog` still reproduces: its
+records are the handlers' to take, and a note says what a session today would log instead.
+
+**What a pass ended in is said.** `lane.stop` from the Runner carries it - `kept` with the points it
+wrote and the seconds they span (its joins included, since they are dots on the lane too),
+`untouched` when nobody rode the fader while the cue sounded, `locked` when the show was locked under
+the pass, `dropped` for a kill - and a new row publishes the last one:
+
+| Node | Type | Access | Meaning |
+|---|---|---|---|
+| `/godot/surface/lanePass` | `s` | r | `<tick> <cue> <how> [<points> <from> <to>]`, the last pass's end; empty until one has ended |
+
+**The lock frees a fader that is waiting** - armed for a touch, or taken with no pass - by the
+engine's own `lane.free`, from the Runner's hook, so the log says why (DN's "the lock frees it",
+never built until now). A pass under way runs on to its stop; if the show is still locked then, its
+write is not sent and the pass ends `locked`.
+
+**The D700's third row says `lane`** on the strip taken, for as long as it is taken (§20.9 drew it).
+
+**The window**, in the author's words (QY): the button reads "Level autom." at rest, "Touch a
+fader…" while it waits, "● Rec level" with a fader taken, "■ Stop" while a pass runs - as wide as the
+longest of the four in the button's own font - and its tooltips and the head row's line name the
+same four. While this cue's lane records, the view follows the playhead (`model::View::follow`); when
+the pass has ended, what it wrote is framed (`View::frame`) and the foot's line says it -
+"Level autom.: 7 points, 12.0–41.5 s", minutes past a minute as the ruler writes them - or says
+"nothing written" and why (`model::lanePassWords`). A refused `lane.record`, `lane.arm` or
+`lane.free` reads as a sentence under the same name on the transport's line.
+
+Tests: in LaneRecordTests, `a sampler member sounding under a pulled-down fader is recorded from its
+start, and heard`, `a pass started while the last pass's cue still rings out plays, and is not over
+on its first tick`, `a cue with ranges is recorded from the second asked, inside its range, and its
+points start there`, `a seek on a cue with ranges lands at the second asked - its pass kept, a gap to
+the next range, past the end in the last`, `the fader is the sample's again however the pass ends,
+and what the pass ended in is published`, `locking the show lets a waiting or taken fader go, and a
+pass under way ends before its fader does`, and `a session of passes ... replays record for record`;
+in SurfaceBridgeTests, `a D700 strip taken for a lane says lane on its third row, and its role again
+once it is given back`; in ClientTests, the pass's words, the refusals' and the view's follow and
+frame; in RunPaneUiTests, the button's four states whole on it, and `a pass follows the playhead at a
+readable scale, and its end frames what it wrote and says so, once`.
+
+- **RG - A minute across, paging.** While a pass records, the view is no wider than 60 seconds -
+  or as close as the hand had zoomed - and it pages rather than scrolls: when the playhead reaches
+  the window's last tenth, or leaves it, the window is put with the playhead a quarter of the way
+  in. A minute across a foot panel of eight or nine hundred pixels is some fifteen pixels a second,
+  where a hand's ride reads as a shape; paging keeps the ride just drawn on screen behind the
+  playhead, and the picture still under the eye between pages. When the pass ends, what it wrote is framed with a tenth of its
+  length either side, a second at the least.
+- **RH - Past the end is a millisecond inside the last range.** The hair a seek past the last
+  out-point lands before it: the end, heard as the end, the same floor `seekMedia` already keeps at
+  the top of a file. "The last range" is the one whose out-point is latest in the file, and "the next
+  range" across a gap the one that starts soonest after the second, so a playlist written out of
+  order still lands where the file says.
+- **RI - Only a scrub keeps the pass.** `seekMedia` keeps the pass the run was on only when its
+  caller asks (`run.seek`); a lane's pass and a strip's restart play the range from its first pass,
+  as a fire would. The pass kept is the playhead's own count (`rangeIteration`), a readout no record
+  carries or depends on: a replay, whose count stays at one, logs the same records.
+- **RJ - The end of a pass carries its result, and one row publishes it.** Rather than leaving the
+  window to compare the lane before and after, which cannot tell a pass nobody touched from one a
+  kill dropped: `lane.stop` gained the words `untouched` and `locked` and, for `kept`, three numbers;
+  a `kept` with none - every log before today - is still a pass kept. The count is every point from
+  the first join to the last, which is what the window shows as new.
+- **RK - The lock lets go by a record, and never under a pass.** The Runner's hook sends `lane.free`
+  when it finds the show locked with a fader waiting or taken and no pass, so the free is in the log
+  and a replay frees it there; a pass already running is the hand's to end, and its stop gives the
+  fader back as any stop does (QX).
+- **RL - The run that was there is moved, not replaced.** A pass on a cue already sounding, armed or
+  still stopping takes that run back to `from`, rather than firing a second beside it: a sampler
+  member keeps its strip and its bank's place, and the stop of a run on its way out is withdrawn as a
+  seek withdraws it (HB). A run the fire has just made starts at its own arm, unless `from` names
+  another second.
+- **RM - Any parked fader is lifted for a pass, not only a sampler member's.** A pass, like a press,
+  is a request to hear the cue; a trim at the bottom is lifted to the cue's `initialLevel`, or unity.
+  Only a sampler strip writes a run's trim today, so this is the sampler case in practice.
+
+**For the author:** the words above in quotation marks are the implementer's, apart from the four on
+the button (QY). And three limits: a pass started inside an Esc's panic fade takes its run back from
+the stop but not from the fade, which still brings it down; a pass's ride is still thinned to a tenth
+of a decibel (DL), so a steady ride writes few points; the D700's Rec after a pass, with the fader
+given back, records a sampling take (DI) - a retake is Level autom. and a touch first.

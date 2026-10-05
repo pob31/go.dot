@@ -74,6 +74,12 @@ namespace wfg::cue
             dependency that would let a Tracktion header in. */
         constexpr double silenceDb = -120.0;
 
+        /*  HOW FAR INSIDE ITS LAST RANGE A SEEK PAST THE END LANDS (namespace
+            draft §30.4, RH): a millisecond before the out-point - the end, and
+            the same floor a seek to the top of a file keeps - so a hand that
+            ran off the end of the ruler hears the end, not the top again. */
+        constexpr double seekHairSeconds = 0.001;
+
         std::string kindOfCue (const juce::ValueTree& cue)
         {
             const auto element = cue.getType().toString();
@@ -2772,7 +2778,7 @@ namespace wfg::cue
     }
 
     bool Runner::seekMedia (Engine& engine, std::int64_t tick, const std::string& runId,
-                            double seconds)
+                            double seconds, bool keepPass)
     {
         auto* run = runs.find (runId);
 
@@ -2789,27 +2795,85 @@ namespace wfg::cue
         if (! cue.isValid())
             return false;
 
-        /*  A CUE WITH RANGES IS A PLAYLIST OVER ONE FILE (§3.24), and the
-            second asked for lands in whichever range holds it - at that
-            range's own start, since the audio side takes an offset for a
-            whole file and a slot for a range, and not both. A second no range
-            holds is the last range's start. */
-        auto range = -1;
-        auto origin = seconds;
-        auto index = 0;
+        /*  A CUE WITH RANGES IS A PLAYLIST OVER ONE FILE (§3.24), and the audio
+            side takes an offset for a whole file and a slot for a range, not
+            both - so a second inside a range is that range's slot entered
+            part-way, by K8's `sliceFrom` (§23.17): the seconds of the slice
+            played, passes and all. The arm starts the clip that far into its
+            loop, and the launch dates the slice's start back by it, so the
+            pass count, the playhead, the lane and the boundary all read on
+            from there.
 
-        for (const auto& spec : rangesOf (cue))
+            UNTIL 2026-10-05 THE SECOND LANDED AT THE START OF THE RANGE THAT
+            HELD IT, and a second no range held - in a gap, or past the end -
+            at the first range's start, the top of the file: a lane recorded
+            from 21.5 s started at the range's in-point, and a scrub across a
+            looping range snapped back to it on every move (namespace draft
+            §30, items 3 and 10). Now (§30.4):
+            - inside a range, at that second: in the range the run was already
+              in, on the pass it was on when `keepPass` asks (a scrub); on the
+              range's first pass otherwise (a restart, a lane's pass);
+            - in a gap between ranges, or before the first, at the start of
+              the next range to begin;
+            - at or past the last out-point, a hair inside the range that ends
+              last (RH), so a seek past the end is the end, never the top. */
+        const auto ranges = rangesOf (cue);
+        const auto count = static_cast<int> (ranges.size());
+        auto range = -1;
+        auto at = seconds;
+        auto into = 0.0;
+        auto passKept = 0;
+
+        if (count > 0)
         {
-            if (range < 0 || (seconds >= spec.in && seconds < spec.out))
+            const auto sliceAt = [&ranges] (int index) -> const RangeSpec&
             {
-                range = index;
-                origin = spec.in;
+                return ranges[static_cast<std::size_t> (index)];
+            };
+
+            for (auto index = 0; index < count && range < 0; ++index)
+                if (seconds >= sliceAt (index).in && seconds < sliceAt (index).out)
+                    range = index;
+
+            if (range < 0)
+            {
+                auto next = -1;
+                auto last = 0;
+
+                for (auto index = 0; index < count; ++index)
+                {
+                    if (sliceAt (index).in > seconds && (next < 0 || sliceAt (index).in < sliceAt (next).in))
+                        next = index;
+
+                    if (sliceAt (index).out > sliceAt (last).out)
+                        last = index;
+                }
+
+                range = next >= 0 ? next : last;
+                at = next >= 0 ? sliceAt (next).in
+                               : std::max (sliceAt (last).in, sliceAt (last).out - seekHairSeconds);
             }
 
-            if (seconds >= spec.in && seconds < spec.out)
-                break;
+            const auto& slice = sliceAt (range);
+            const auto length = slice.out - slice.in;
 
-            ++index;
+            into = std::max (0.0, at - slice.in);
+
+            /*  THE PASS IT WAS ON, kept for a scrub inside the range it is in -
+                the playhead's own count, a readout (`advanceRanges`). It only
+                places the voice: no record carries it or depends on it, so a
+                replay, whose count stays at the first pass, logs the same. A
+                loop count lowered since keeps the point and gives it its last
+                pass, as K8's resume does. */
+            if (keepPass && range == run->range && run->rangeIteration > 1 && length > 0.0)
+            {
+                passKept = run->rangeIteration - 1;
+
+                if (slice.loops > 0)
+                    passKept = std::min (passKept, slice.loops - 1);
+
+                into += static_cast<double> (passKept) * length;
+            }
         }
 
         /*  THE VOICE IS STOPPED AND ASKED FOR AGAIN AT THE NEW SECOND, on the
@@ -2828,12 +2892,12 @@ namespace wfg::cue
 
         run->startOffset = range >= 0 ? 0.0 : std::max (seconds, 0.001);
         run->startRange = std::max (range, 0);
-        run->sliceFrom = 0.0;
+        run->sliceFrom = range >= 0 ? into : 0.0;
         run->armedOrigin = run->startOffset;
-        run->positionOrigin = origin;
-        run->position = origin;
+        run->positionOrigin = range >= 0 ? ranges[static_cast<std::size_t> (range)].in : seconds;
+        run->position = at;
         run->range = range;
-        run->rangeIteration = range >= 0 ? 1 : 0;
+        run->rangeIteration = range >= 0 ? passKept + 1 : 0;
         run->rangeStartedAtSample = 0;
         run->rangesFinished = false;
         run->boundaryPlacedAt = -1;
@@ -2872,6 +2936,60 @@ namespace wfg::cue
             requestArmOn (engine, cue, *run, run->ownLevel);
 
         return true;
+    }
+
+    std::string Runner::startLanePass (Engine& engine, std::int64_t tick, const std::string& cueId,
+                                       double from, const std::string& runId)
+    {
+        const auto cue = document.findById (cueId);
+
+        if (! cue.isValid())
+            return {};
+
+        /*  WHAT THE FIRE HANDS BACK IS NOT ALWAYS A NEW RUN (decision N): a
+            cue already sounding is ignored and its run handed back as it is,
+            wherever it has got to - and a sampler member muted at the bottom of
+            its fader is sounding, since play-out mutes and does not stop. Until
+            2026-10-05 a pass with no `from` (nought, and every pass from the
+            D700's Rec) took that run as it found it, and recorded wherever the
+            sample happened to be (namespace draft §30, item 3). So whatever
+            was there before the fire is moved to where the pass starts. A run
+            the fire has just made is armed at the cue's own start already, and
+            is left to it unless another second was asked. */
+        const auto existed = liveUntakenRunOf (cueId) != nullptr;
+        const auto made = fire (engine, tick, cueId, runId);
+
+        if (made.empty())
+            return made;
+
+        if (const auto* fired = runs.find (made); fired == nullptr || fired->kind != "media")
+            return made;
+
+        /*  FROM `from`, OR THE CUE'S OWN START - its start offset, or its first
+            range's in-point - where DG puts the fader before a pass. The seek
+            withdraws any stop asked of the run (HB): a run still on its way out
+            from the last pass's stop - a graceful stop since K4, its tail
+            ringing - is playing again, and the pass is not over on its first
+            tick. A range's first pass, not the one it was on: the pass plays
+            the cue from there, as a fire would. */
+        if (existed || from > 0.0)
+        {
+            const auto ranges = rangesOf (cue);
+            const auto start = from > 0.0       ? from
+                             : ranges.empty()   ? numberOf (cue, "startOffset")
+                                                : ranges.front().in;
+
+            seekingRun (engine, tick, made);
+            seekMedia (engine, tick, made, start, false);
+        }
+
+        /*  HEARD: a fader parked at the bottom plays the pass at -120 dB, and a
+            ride nobody can hear is a ride nobody can judge. Lifted as a press
+            lifts it, before anything is heard. */
+        if (auto* fired = runs.find (made))
+            liftParkedFader (*fired, cue);
+
+        return made;
     }
 
     std::vector<std::string> Runner::seekGroup (Engine& engine, std::int64_t tick,
@@ -11330,11 +11448,8 @@ namespace wfg::cue
                 and its origin is logged, so a replay decides the same. */
             if (byVelocity)
                 run->trim = levelForByte (velocity, floor);
-            else if (origin != origin::engine && run->trim <= FaderEdge::parkedDb)
-            {
-                const auto initial = numberOf (cue, "initialLevel");
-                run->trim = initial > FaderEdge::parkedDb ? initial : 0.0;
-            }
+            else if (origin != origin::engine)
+                liftParkedFader (*run, cue);
 
             run->launchRequested = true;
             run->launchRequestedAtTick = tick;
@@ -11372,10 +11487,20 @@ namespace wfg::cue
         if (byVelocity)
             run->trim = levelForByte (velocity, floor);
 
+        /*  FROM THE TOP, AND ITS FIRST PASS: a restart, not a scrub. */
         notePlayed (*run);
-        seekMedia (engine, tick, run->id, 0.0);
+        seekMedia (engine, tick, run->id, 0.0, false);
         step();
         return {};
+    }
+
+    void Runner::liftParkedFader (Run& run, const juce::ValueTree& cue) const
+    {
+        if (run.trim > FaderEdge::parkedDb)
+            return;
+
+        const auto initial = numberOf (cue, "initialLevel");
+        run.trim = initial > FaderEdge::parkedDb ? initial : 0.0;
     }
 
     void Runner::notePlayed (const Run& member)
@@ -15771,7 +15896,25 @@ namespace wfg::cue
 
     void Runner::recordLane (Engine& engine)
     {
-        if (lanes == nullptr || ! lanes->taken())
+        if (lanes == nullptr)
+            return;
+
+        /*  THE LOCK FREES A FADER THAT IS ONLY WAITING (DN, which said so and
+            was never built; namespace draft §30.4). Under the lock a lane can
+            be neither armed nor recorded, so a fader taken for one - or a lane
+            still waiting for its touch - would be a fader that plays nothing
+            for as long as the show stays locked. Let go as `lane.free` lets
+            it go, by that command, so the log says why and a replay frees it
+            in the same record. A pass already running is left to end: its
+            stop gives the fader back (QX). */
+        if (document.isLocked() && ! lanes->recording && (lanes->waiting() || lanes->taken()))
+        {
+            ride.clear();
+            engine.submit (origin::engine, "lane.free", {});
+            return;
+        }
+
+        if (! lanes->taken())
         {
             ride.clear();
             return;
@@ -15820,7 +15963,8 @@ namespace wfg::cue
             cue or Esc keeps it and leaves the stop to what started it; a KILL -
             the pane's, or Doh!'s taking back - drops it. A double Esc never
             reaches here since K4: its handler lets the fader go and the pass
-            with it (`freeLane`). */
+            with it (`freeLane`). Every one of these ends in `lane.stop`, whose
+            handler gives the fader back (QX, namespace draft §30.4). */
         const auto handAsked = lanes->stopping;
         const auto gone = run == nullptr || run->isFinished();
         /*  AND A CUE DOH! TOOK BACK DROPS ITS RIDE as a kill does (§24): the
@@ -15839,17 +15983,64 @@ namespace wfg::cue
                 return;
             }
 
-            if (lanes->touched && ! ride.empty())
+            /*  WHAT THE PASS ENDS IN, SAID (namespace draft §30.4): the points
+                it wrote and the seconds they span - the ride's own stretch,
+                its joins included, which is what the window frames - or that
+                nobody rode the fader while the cue sounded, or that the show
+                was locked under the pass and the lock keeps the lane as it
+                was (the write it would refuse is not sent). A pass that ends
+                in nothing says so rather than ending in silence. */
+            std::vector<osc::Value> said { osc::Value::string ("untouched") };
+
+            if (lanes->touched && ! ride.empty() && document.isLocked())
+            {
+                said = { osc::Value::string ("locked") };
+            }
+            else if (lanes->touched && ! ride.empty())
             {
                 const auto text = laneText (spliceRide (rideLane, ride, 0.05, 0.1));
 
                 /*  JUDGED BEFORE IT IS SENT: a lane the door would refuse is a
                     ride lost with nothing to show for it, and the refusal is
-                    worth a record of its own rather than a surprise. */
-                if (doc::readLevelLane (text).problem.empty())
+                    worth a record of its own rather than a surprise - the pass
+                    ends `dropped`, nothing written. */
+                if (const auto written = doc::readLevelLane (text); written.problem.empty())
+                {
                     engine.submit (origin::engine, "node.set",
                                    { osc::Value::string ("/godot/cue/" + lanes->cue() + "/levelLane"),
                                      osc::Value::string (text) });
+
+                    auto first = std::numeric_limits<double>::max();
+                    auto last = std::numeric_limits<double>::lowest();
+
+                    for (const auto& segment : ride)
+                        if (! segment.empty())
+                        {
+                            first = std::min (first, segment.front().seconds);
+                            last = std::max (last, segment.back().seconds);
+                        }
+
+                    /*  THE JOINS ARE POINTS TOO, a dot each on the lane, and the
+                        splice put nothing else between them: every point from
+                        the first join to the last is the pass's. */
+                    const auto from = first - 0.05;
+                    const auto to = last + 0.05;
+                    const auto points = std::count_if (written.points.begin(), written.points.end(),
+                                                       [from, to] (const doc::LanePoint& point)
+                                                       {
+                                                           return point.seconds >= from - 1.0e-4
+                                                                    && point.seconds <= to + 1.0e-4;
+                                                       });
+
+                    said = { osc::Value::string ("kept"),
+                             osc::Value::int32 (static_cast<std::int32_t> (points)),
+                             osc::Value::float64 (std::max (0.0, from)),
+                             osc::Value::float64 (to) };
+                }
+                else
+                {
+                    said = { osc::Value::string ("dropped") };
+                }
             }
 
             ride.clear();
@@ -15862,7 +16053,7 @@ namespace wfg::cue
             if (handAsked && run != nullptr && ! gone && ! stopped)
                 engine.submit (origin::engine, "run.stop", one (run->id));
 
-            engine.submit (origin::engine, "lane.stop", one ("kept"));
+            engine.submit (origin::engine, "lane.stop", std::move (said));
             return;
         }
 
@@ -16904,7 +17095,7 @@ namespace wfg::cue
                                 /*  A SEEK OF THE ARM A DOH LEFT AT THE POINT
                                     spends the resume on it (D2, GN). */
                                 runner.seekingRun (engine, context.tick, runId);
-                                runner.seekMedia (engine, context.tick, runId, seconds);
+                                runner.seekMedia (engine, context.tick, runId, seconds, true);
                                 return Outcome::ok (applied);
                             }
 

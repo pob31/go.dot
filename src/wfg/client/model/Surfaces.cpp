@@ -22,7 +22,9 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <set>
 #include <string>
@@ -304,7 +306,89 @@ namespace wfg::client::model
             out.faderLabel = surfaceLabel + " · fader " + std::to_string (static_cast<int> (index) + 1);
         }
 
+        /*  "<tick> <cue> <how> [<points> <from> <to>]", the engine's spelling:
+            numbers as the log writes them, a full stop in every locale. */
+        if (const auto fields = words (text (snapshot, "/godot/surface/lanePass")); fields.size() >= 3)
+        {
+            const auto tick = osc::parseDouble (fields[0]);
+
+            if (tick.has_value())
+            {
+                out.pass.tick = static_cast<std::int64_t> (*tick);
+                out.pass.cue = fields[1];
+                out.pass.how = fields[2];
+
+                if (fields.size() >= 6)
+                {
+                    const auto points = osc::parseDouble (fields[3]);
+                    const auto from = osc::parseDouble (fields[4]);
+                    const auto to = osc::parseDouble (fields[5]);
+
+                    if (points.has_value() && from.has_value() && to.has_value())
+                    {
+                        out.pass.points = static_cast<int> (*points);
+                        out.pass.from = *from;
+                        out.pass.to = *to;
+                        out.pass.spans = true;
+                    }
+                }
+            }
+        }
+
         return out;
+    }
+
+    namespace
+    {
+        /*  A SECOND TO THE TENTH, as the waveform's ruler writes it - 12.0, or
+            2:32.8 once there are minutes - in whole numbers, so no locale has
+            a say in the decimal point. */
+        std::string tenthsText (double seconds)
+        {
+            const auto tenths = static_cast<long long> (std::llround (std::max (0.0, seconds) * 10.0));
+            const auto whole = tenths / 10;
+            const auto tenth = std::to_string (tenths % 10);
+
+            if (whole < 60)
+                return std::to_string (whole) + "." + tenth;
+
+            const auto rest = whole % 60;
+
+            return std::to_string (whole / 60) + ":" + (rest < 10 ? "0" : "")
+                     + std::to_string (rest) + "." + tenth;
+        }
+    }
+
+    std::string lanePassWords (const LanePass& pass)
+    {
+        if (pass.tick < 0 || pass.how.empty())
+            return {};
+
+        const std::string name = laneRecorderName;
+
+        if (pass.how == "kept")
+        {
+            if (! pass.spans)
+                return name + ": written";
+
+            const auto minutes = std::llround (std::max (0.0, pass.to) * 10.0) >= 600;
+            const auto span = tenthsText (pass.from) + "\xe2\x80\x93" + tenthsText (pass.to)
+                                + (minutes ? "" : " s");
+
+            return name + ": " + std::to_string (pass.points) + (pass.points == 1 ? " point, " : " points, ")
+                     + span;
+        }
+
+        if (pass.how == "untouched")
+            return name + ": nothing written - the fader was not touched while the cue played";
+
+        if (pass.how == "locked")
+            return name + ": nothing written - the show is locked";
+
+        if (pass.how == "dropped")
+            return name + ": nothing written - the pass was dropped";
+
+        return name + ": " + pass.how;
     }
 
     std::vector<StripRow> readStrips (const tree::TreeSnapshot& snapshot)

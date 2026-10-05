@@ -133,6 +133,47 @@ namespace wfg::client::model
             clamp();
         }
 
+        /*  FOLLOWING A PLAYHEAD (namespace draft §30.4): while a level lane
+            records, the second being ridden stays in sight at a scale a person
+            can read - no wider than `widest` seconds, so a ten-minute file is
+            not drawn at a pixel and a half a second, and no wider than the
+            hand had zoomed it. It PAGES rather than scrolls: when the playhead
+            is outside the window or into its last tenth, the window is put
+            with the playhead a quarter of the way in, so the ride just drawn
+            stays on screen behind it and the picture is not moving under a
+            hand that is reading it. */
+        void follow (double seconds, double widest) noexcept
+        {
+            if (! (length > 0.0) || ! (widest > 0.0))
+                return;
+
+            const auto now = span() > 0.0 ? span() : length;
+            const auto width = std::min (now, widest);
+
+            if (width < now || seconds < from || seconds > from + width * 0.9)
+            {
+                from = seconds - width * 0.25;
+                to = from + width;
+                clamp();
+            }
+        }
+
+        /*  FRAMING A STRETCH (namespace draft §30.4): the window over `first`
+            to `last` with a tenth of its length either side - a second at the
+            least - so neither end sits on an edge; the whole thing when that
+            is wider than it. What a pass just wrote, put on screen. */
+        void frame (double first, double last) noexcept
+        {
+            if (! (length > 0.0) || last < first)
+                return;
+
+            const auto margin = std::max (1.0, (last - first) * 0.1);
+
+            from = first - margin;
+            to = last + margin;
+            clamp();
+        }
+
         /** Slid by a number of pixels, the span kept. */
         void panBy (double pixels, int width) noexcept
         {

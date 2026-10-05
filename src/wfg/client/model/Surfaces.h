@@ -45,6 +45,7 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -127,6 +128,22 @@ namespace wfg::client::model
         says: the lane's cue, the fader taken for it (and how a person names
         it - "Panel · fader 3"), whether it still waits for a touch, whether a
         pass runs, and what the fader rides. */
+    /*  WHAT THE LAST PASS ENDED IN (namespace draft §30.4), as
+        `/godot/surface/lanePass` says it: the tick it ended on - nought or
+        less for no pass yet - its cue, and `kept` with the points it wrote and
+        the seconds they span (`spans`), `untouched`, `locked` or `dropped`. The fader
+        has gone back by then (QX), so this is the one row left to say it. */
+    struct LanePass
+    {
+        std::int64_t tick = -1;
+        std::string cue;
+        std::string how;
+        int points = 0;
+        double from = 0.0;
+        double to = 0.0;
+        bool spans = false;
+    };
+
     struct LaneRecordReading
     {
         std::string cue;
@@ -137,9 +154,23 @@ namespace wfg::client::model
         bool recording = false;
         bool hasRide = false;
         double rideDb = 0.0;
+        LanePass pass;
     };
 
     LaneRecordReading readLaneRecord (const tree::TreeSnapshot&);
+
+    /*  THE LANE RECORDER'S NAME, the author's (2026-10-05, QY): on the
+        waveform's button at rest, and at the head of every sentence that
+        says what a pass did, so the button and what it reports are one
+        thing by one name. */
+    inline constexpr const char* laneRecorderName = "Level autom.";
+
+    /*  WHAT A PASS ENDED IN, IN WORDS (namespace draft §30.4): the points it
+        wrote and the seconds they span - "Level autom.: 7 points, 12.0–41.5 s",
+        minutes and seconds past a minute as the ruler writes them, a full stop
+        for the decimal in every locale - or that nothing was written, and why.
+        Empty for no pass. */
+    std::string lanePassWords (const LanePass&);
 
     /** The strips of one surface, from a readStrips result, in index order. */
     std::vector<StripRow> stripsOf (const std::vector<StripRow>& strips, const std::string& surfaceId);

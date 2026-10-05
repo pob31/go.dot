@@ -3879,3 +3879,51 @@ TEST_CASE ("surface bridge: a Mackie's jog wheel turns the dial's number, and it
     desk.press ("PORTBNK1", 0x39);
     CHECK (desk.submitted.empty());
 }
+
+TEST_CASE ("surface bridge: a D700 strip taken for a lane says lane on its third row, and its role again once it is given back")
+{
+    /*  §20.9 drew it - "the strip's screen reads `lane`" - and the D700's own
+        third row never said it (namespace draft §30, item 2; built §30.4):
+        the strip taken read "sampler" while it rode the lane. It says "lane"
+        for as long as it is taken, and its role again from the moment the
+        pass gives it back (QX). */
+    Stage stage { "d700" };
+    cue::LaneTable lanes;
+    stage.parameters.setLanes (&lanes);
+    stage.arm();
+
+    surface::SurfaceSpec spec;
+    spec.id = stage.surfaceId;
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1", "PORTBNK2" };
+    spec.strips = stage.strips;
+    stage.bridge.declare ({ spec }, [] (const std::string& port) { return plugged (port); });
+    stage.tickOnce();
+
+    REQUIRE (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "sampler")));
+
+    //  Armed, waiting for a touch: nothing is taken yet, and the row says so.
+    lanes.arm (stage.members[0]);
+    stage.sink.sent.clear();
+    stage.ticks (2);
+    CHECK_FALSE (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "lane")));
+
+    //  Taken: "lane", and only on that strip.
+    lanes.take (stage.strips[0]);
+    stage.sink.sent.clear();
+    stage.ticks (2);
+    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "lane")));
+    CHECK_FALSE (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (1, "lane")));
+
+    //  Recording: still "lane".
+    lanes.startPass ("RN000001");
+    stage.sink.sent.clear();
+    stage.ticks (2);
+    CHECK_FALSE (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "sampler")));
+
+    //  The pass over, the fader given back: its role again.
+    lanes.endPass ("12 " + stage.members[0] + " untouched");
+    stage.sink.sent.clear();
+    stage.ticks (2);
+    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "sampler")));
+}

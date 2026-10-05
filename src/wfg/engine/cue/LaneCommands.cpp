@@ -113,13 +113,16 @@ namespace wfg::cue
 
         /*  THE PASS STARTS BY FIRING THE CUE the way `cue.fire` does - not a GO,
             so the GO window (§21.2) never holds it back and the standby does not
-            move - and moving it to the window's playhead when one is given. The
-            run's identifier is drawn here and written into the record, so a
-            replay re-supplies it, as `cue.fire` does. */
+            move - and AT THE SECOND ASKED, nought being the cue's own start
+            (2026-10-05, namespace draft §30.4): a cue already sounding is
+            moved there rather than recorded wherever it had got to. The
+            Runner's `startLanePass` says how. The run's identifier is drawn
+            here and written into the record, so a replay re-supplies it, as
+            `cue.fire` does. */
         registry.add ({ "lane.record",
-                        "Starts a pass on the lane that has a fader: its cue plays, from the"
-                        " second given, and the fader's level is written from its first touch"
-                        " until the pass stops.",
+                        "Starts a pass on the lane that has a fader: its cue plays from the"
+                        " second given, or from its own start with none, and the fader's level"
+                        " is written from its first touch until the pass stops.",
                         { { "from", 'd', true }, { "run", 's', true } },
                         true,
                         [&engine, &runner, &document, &lanes]
@@ -139,13 +142,11 @@ namespace wfg::cue
 
                             const auto from = ! args.empty() ? args[0].getFloat64() : 0.0;
                             const auto supplied = args.size() > 1 ? args[1].getString() : std::string {};
-                            const auto runId = runner.fire (engine, context.tick, lanes.cue(), supplied);
+                            const auto runId = runner.startLanePass (engine, context.tick, lanes.cue(),
+                                                                     from, supplied);
 
                             if (runId.empty())
                                 return Outcome::rejected (reason::badValue);
-
-                            if (from > 0.0)
-                                runner.seekMedia (engine, context.tick, runId, from);
 
                             lanes.startPass (runId);
 
@@ -155,15 +156,28 @@ namespace wfg::cue
         /*  TWO VOICES, ONE VERB. With no argument it is a hand asking the pass
             to end - the window's stop, the D700's Rec - and only marks it: the
             Runner holds the samples and writes the lane on its next tick. With
-            `kept` or `dropped` it is the Runner saying it has, which clears the
-            pass; logged after the lane's own `node.set`, so a replay reads the
-            ask, the lane and the end in the order they happened. */
+            a word it is the Runner saying it has, which ends the pass; logged
+            after the lane's own `node.set`, so a replay reads the ask, the lane
+            and the end in the order they happened.
+
+            AND THE END GIVES THE FADER BACK, however the pass ended (2026-10-05,
+            QX, the author's decision) - so a pass never leaves a fader riding a
+            lane nobody is recording. What it ended in is kept for the window to
+            say (namespace draft §30.4): `kept` with the points the pass wrote
+            and the seconds they span; `untouched` when nobody rode the fader
+            while the cue sounded, and there is nothing to write; `locked` when
+            the show was locked under the pass, which keeps the lane as it was;
+            `dropped` when a kill took the pass. A `kept` with no numbers is a
+            record from before they were carried, and is still a pass kept. */
         registry.add ({ "lane.stop",
-                        "Ends the pass: with no argument, asks it to end; with kept or dropped,"
-                        " says the lane has been written or the pass dropped.",
-                        { { "how", 's', true } },
+                        "Ends the pass: with no argument, asks it to end; with kept, untouched,"
+                        " locked or dropped, says the lane has been written (how many points, over"
+                        " which seconds), that nobody rode the fader, that the lock kept the lane,"
+                        " or that the pass was dropped - and gives the fader back.",
+                        { { "how", 's', true }, { "points", 'i', true },
+                          { "from", 'd', true }, { "to", 'd', true } },
                         true,
-                        [&lanes] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&lanes] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             if (! lanes.recording)
                                 return Outcome::rejected (reason::notRunning);
@@ -176,10 +190,17 @@ namespace wfg::cue
 
                             const auto how = args[0].getString();
 
-                            if (how != "kept" && how != "dropped")
+                            if (how != "kept" && how != "untouched" && how != "locked" && how != "dropped")
                                 return Outcome::rejected (reason::badValue);
 
-                            lanes.clearPass();
+                            auto said = std::to_string (context.tick) + " " + lanes.cue() + " " + how;
+
+                            if (how == "kept" && args.size() >= 4)
+                                said += " " + std::to_string (args[1].getInt32())
+                                          + " " + osc::formatDouble (args[2].getFloat64())
+                                          + " " + osc::formatDouble (args[3].getFloat64());
+
+                            lanes.endPass (said);
                             return Outcome::ok (args);
                         } });
     }

@@ -1657,6 +1657,12 @@ namespace wfg::tree
                     if (name == "laneRecording")
                         text = lanes != nullptr && lanes->recording ? "true" : "false";
 
+                    /*  AND WHAT THE LAST PASS ENDED IN (namespace draft §30.4):
+                        written by `lane.stop`'s handler, a command, so this
+                        half is rebuilt when it changes. */
+                    if (name == "lanePass" && lanes != nullptr)
+                        text = lanes->lastPass;
+
                     nodes.push_back (makeLeaf (std::string (godot) + "/surface/" + name,
                                                *row, text));
                 }
