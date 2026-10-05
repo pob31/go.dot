@@ -25,8 +25,38 @@
 
 namespace wfg::client::ui
 {
+    namespace
+    {
+        /*  THE CURSOR OF A STRIP THAT WILL NOT SCRUB (2026-10-05, namespace
+            draft §30.6), the universal "not here": a ring and the bar across
+            it, ink over a light edge so it reads on the dark pane and the
+            light one alike. Shape alone, no colour that means anything (§4.8).
+            The platform's own set has no such cursor. */
+        juce::MouseCursor drawRefusedCursor()
+        {
+            constexpr int size = 24;
+            juce::Image image (juce::Image::ARGB, size, size, true);
+
+            {
+                juce::Graphics g (image);
+                const auto ring = juce::Rectangle<float> (3.0f, 3.0f, 18.0f, 18.0f);
+                const auto centre = ring.getCentre();
+                const auto bar = juce::Line<float> (centre.translated (-6.0f, -6.0f), centre.translated (6.0f, 6.0f));
+
+                g.setColour (juce::Colours::white);
+                g.drawEllipse (ring, 4.5f);
+                g.drawLine (bar, 4.5f);
+                g.setColour (juce::Colours::black);
+                g.drawEllipse (ring, 2.0f);
+                g.drawLine (bar, 2.0f);
+            }
+
+            return juce::MouseCursor (image, size / 2, size / 2);
+        }
+    }
+
     RunPaneComponent::RunPaneComponent (const model::Theme& themeToUse, Actions actionsToUse)
-        : actions (std::move (actionsToUse)), theme (themeToUse)
+        : actions (std::move (actionsToUse)), theme (themeToUse), refused (drawRefusedCursor())
     {
         viewport.setViewedComponent (&canvas, false);
         viewport.setScrollBarsShown (true, false);
@@ -257,34 +287,63 @@ namespace wfg::client::ui
             at its right end is the other gesture. */
         std::string strip;
 
+        /*  AND A STRIP THAT WILL NOT SCRUB SAYS SO (2026-10-05, namespace draft
+            §30.6): a drag on a manual act or a sampler bank did nothing at all
+            - a plain cursor, no ghost, no word - and the author could not tell
+            a strip that does not scrub from one that had not heard the hand.
+            Its cursor is a ring with a bar across it, and the tooltip says
+            why. */
+        std::string refusal;
+
         if (index >= 0 && over.empty())
         {
             const auto& entry = rows[static_cast<std::size_t> (index)];
 
-            if (scrubbable (entry)
-                 && stripFor (entry, canvas.getWidth(), heightOf (entry))
-                        .translated (0, topOf (index)).contains (event.getPosition()))
-                strip = entry.id;
+            if (stripFor (entry, canvas.getWidth(), heightOf (entry))
+                    .translated (0, topOf (index)).contains (event.getPosition()))
+            {
+                if (scrubbable (entry))
+                    strip = entry.id;
+                else
+                    refusal = refusalOf (entry);
+            }
         }
 
-        if (over == hoverKill && strip == hoverScrub)
+        if (over == hoverKill && strip == hoverScrub && refusal == hoverRefusal)
             return;
 
         hoverKill = over;
         hoverScrub = strip;
-        canvas.setMouseCursor (! hoverKill.empty() ? juce::MouseCursor::PointingHandCursor
-                               : ! hoverScrub.empty() ? juce::MouseCursor::LeftRightResizeCursor
-                                                      : juce::MouseCursor::NormalCursor);
+        hoverRefusal = refusal;
+        canvas.setMouseCursor (! hoverKill.empty() ? juce::MouseCursor (juce::MouseCursor::PointingHandCursor)
+                               : ! hoverScrub.empty() ? juce::MouseCursor (juce::MouseCursor::LeftRightResizeCursor)
+                               : ! hoverRefusal.empty() ? refused
+                                                        : juce::MouseCursor (juce::MouseCursor::NormalCursor));
         canvas.repaint();
+    }
+
+    std::string RunPaneComponent::refusalOf (const model::RunRow& entry) const
+    {
+        if (! entry.scrubRefusal.empty())
+            return entry.scrubRefusal;
+
+        /*  A SOUND THE ENGINE WOULD MOVE whose length nobody has measured yet:
+            a file imported this session, before its analysis arrives. */
+        if (entry.kind == "media" && entry.state == "playing" && entry.seekable
+             && ! spanOf (entry).known())
+            return "Its length is not known yet \xe2\x80\x94 it cannot be scrubbed";
+
+        return {};
     }
 
     void RunPaneComponent::unhovered()
     {
-        if (hoverKill.empty() && hoverScrub.empty())
+        if (hoverKill.empty() && hoverScrub.empty() && hoverRefusal.empty())
             return;
 
         hoverKill.clear();
         hoverScrub.clear();
+        hoverRefusal.clear();
 
         if (! scrub.active())
             canvas.setMouseCursor (juce::MouseCursor::NormalCursor);
@@ -429,10 +488,23 @@ namespace wfg::client::ui
         they play loops"*). */
     double RunPaneComponent::throughOf (const model::RunRow& entry) const
     {
-        if (entry.playTo > entry.playFrom)
-            return model::playhead (entry.seconds, entry.playFrom, entry.playTo);
+        /*  (2026-10-05, namespace draft §30.6:) AND A SCENE'S over the round it
+            is in, once the engine has solved one: its `position` counts across
+            every round, and a head drawn against anything longer than a round
+            sat pinned at the right edge from round two on. */
+        const auto span = spanOf (entry);
 
-        return model::playhead (entry.seconds, lengthOf (entry));
+        if (span.known())
+            return model::playhead (entry.seconds, span.from, span.to);
+
+        return 0.0;
+    }
+
+    model::StripSpan RunPaneComponent::spanOf (const model::RunRow& entry) const
+    {
+        /*  A scene with no solved round has none, and draws no head - as
+            before: its scrub falls back to the old gearing (`pressed`). */
+        return model::stripSpan (entry, entry.kind == "group" ? 0.0 : lengthOf (entry));
     }
 
     /*  WHAT GOES UNDER THE WORDS, which is one of three things and never two
@@ -481,9 +553,11 @@ namespace wfg::client::ui
             g.fillRect (strip);
         }
 
-        const auto length = lengthOf (entry);
-
-        if (! (length > 0.0) || ! entry.launched())
+        /*  A SCENE'S HEAD TOO, over the round it is in, whenever the engine has
+            solved one (2026-10-05, namespace draft §30.6) - a group's row drew
+            no head at all, since a group has no length of its own, and the
+            ghost of a grab was the only head it ever showed. */
+        if (! spanOf (entry).known() || ! entry.launched())
             return;
 
         const auto through = throughOf (entry);
@@ -582,7 +656,7 @@ namespace wfg::client::ui
             is a cue imported in this session - its duration arrives when the
             show is next opened - so the head sits at the left rather than
             sliding across a bar nobody has measured. */
-        const auto length = lengthOf (entry);
+        const auto known = spanOf (entry).known();
         const auto through = throughOf (entry);
 
         /*  WHERE ONE SLICE ENDS AND THE NEXT BEGINS, when the cue has more
@@ -604,7 +678,7 @@ namespace wfg::client::ui
             }
         }
 
-        if (entry.launched() && length > 0.0)
+        if (entry.launched() && known)
         {
             /*  A HEAD THAT READS ON ANY COLOUR: two pixels of ink between one
                 of black each side, since one pixel of ink over a yellow or a
@@ -819,6 +893,14 @@ namespace wfg::client::ui
             whatever else the run says: "×0.5". */
         auto beside = entry.samplerWords.empty() ? entry.liveWords : entry.samplerWords;
 
+        /*  AND ITS COUNTS (2026-10-05, namespace draft §30.6; PRD §3.6 and
+            §3.24, "current count visible on the strip"): "R2 2/2" on a sound
+            with ranges, "round 2/3" on a scene - so a head that leaps back to
+            a slice's in-point, or a scene's to its round's start, is read as
+            the next pass and not as a fault. */
+        if (const auto counts = model::countWords (entry); ! counts.empty())
+            beside = beside.empty() ? counts : beside + " \xc2\xb7 " + counts;
+
         if (const auto speed = model::speedText (entry.rate); ! speed.empty())
             beside = beside.empty() ? speed : beside + " \xc2\xb7 " + speed;
 
@@ -939,7 +1021,7 @@ namespace wfg::client::ui
             return false;
 
         if (entry.kind == "media")
-            return entry.launched() && lengthOf (entry) > 0.0;
+            return entry.launched() && spanOf (entry).known();
 
         return entry.kind == "group";
     }
@@ -991,13 +1073,14 @@ namespace wfg::client::ui
             part of the file between the first in-point and the last out-point
             rather than the whole recording. A gearing measured against the
             whole file would move the sound a different distance from the one
-            the hand travelled over the picture. */
-        const auto played = entry.playTo - entry.playFrom;
+            the hand travelled over the picture. (2026-10-05, namespace draft
+            §30.6:) For a scene, the round it is in when the engine has solved
+            one; else the longest thing it plays, as before. */
+        const auto span = spanOf (entry);
+        const auto seconds = span.known() ? span.length()
+                                          : entry.kind == "group" ? extentOf (entry) : lengthOf (entry);
 
-        const auto span = entry.kind == "media" ? (played > 0.0 ? played : lengthOf (entry))
-                                                : extentOf (entry);
-
-        return span / static_cast<double> (juce::jmax (1, stripWidth - 1));
+        return seconds / static_cast<double> (juce::jmax (1, stripWidth - 1));
     }
 
     void RunPaneComponent::pressed (const juce::MouseEvent& event)
@@ -1020,18 +1103,44 @@ namespace wfg::client::ui
             pixel of travel moves it. The gearing halves every strip height
             above or below the strip - a band for a waveform, a line for a
             row - so the same reach means the same precision on both. */
+        /*  HELD TO WHAT THE STRIP SHOWS, WHICH IS WHAT THE ENGINE HONOURS
+            (2026-10-05, namespace draft §30.6): a sound to the stretch its
+            ranges play - a second outside them lands at the next range's start
+            or a hair inside the last (S2) - and a scene to the round it is in
+            (K9's LW). The ghost head of a sound with ranges was drawn and
+            clamped against the whole file while the strip showed its ranges,
+            and moved a tenth as far as the hand; a scene's was clamped to
+            nothing, while the seek it sent was clamped to the round. A scene
+            with no solved round keeps its old gearing, a scale and not a
+            claim, and no clamp.
+
+            AND A SCENE IS SOUGHT ONCE, ON RELEASE (the author's RB): each seek
+            ends every member and seats them again, so a seek a fifth of a
+            second was a string of restarts and flickering rows. The ghost
+            follows the hand; nothing is sent until it lets go. A sound keeps
+            scrubbing live. */
+        const auto span = spanOf (entry);
+        const auto scene = entry.kind == "group";
+
         model::Scrub::Setup setup;
         setup.position = entry.seconds;
-        setup.length = entry.kind == "media" ? lengthOf (entry) : 0.0;
+        setup.from = span.known() ? span.from : 0.0;
+        setup.to = span.known() ? span.to : 0.0;
         setup.secondsPerPixel = secondsPerPixel (entry, strip.getWidth());
         setup.unit = hasWaveform (entry) ? stripHeight() : rowHeight();
         setup.x = event.position.x;
+        setup.onRelease = scene;
 
         scrub.begin (setup);
         scrubRun = entry.id;
         scrubStrip = strip;
         scrubDistance = 0.0;
         scrubPush = 0;
+
+        /*  The scale frozen at the grab: the hand's scale stays under it. */
+        scrubFrom = span.known() ? span.from : 0.0;
+        scrubTo = span.known() ? span.to : extentOf (entry);
+        scrubInRound = scene && span.known();
 
         canvas.setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
         canvas.repaint();
@@ -1097,7 +1206,39 @@ namespace wfg::client::ui
                                 : scrub.due (juce::Time::getMillisecondCounterHiRes());
 
         if (send)
-            actions.seek (scrubRun, scrub.target());
+            actions.seek (scrubRun, ghostSecond());
+    }
+
+    double RunPaneComponent::ghostThrough() const
+    {
+        return scrubTo > scrubFrom ? juce::jlimit (0.0, 1.0, (scrub.target() - scrubFrom) / (scrubTo - scrubFrom))
+                                   : 0.0;
+    }
+
+    double RunPaneComponent::ghostSecond() const
+    {
+        if (! scrub.active())
+            return 0.0;
+
+        /*  THE SECOND SENT IS THE GHOST'S PLACE IN THE ROUND THE SCENE IS IN
+            NOW (namespace draft §30.6): a round that turned under a held ghost
+            would otherwise send a second of the round just gone, which the
+            engine clamps to the new round's start (K9's LW) - the hand let go
+            three seconds into a round and the scene went back to its top. */
+        if (scrubInRound)
+            for (const auto& row : rows)
+                if (row.id == scrubRun && row.roundLength > 0.0)
+                    return row.roundFrom + (scrub.target() - scrubFrom);
+
+        return scrub.target();
+    }
+
+    int RunPaneComponent::ghostX() const
+    {
+        if (! scrub.active())
+            return -1;
+
+        return scrubStrip.getX() + juce::roundToInt (ghostThrough() * (scrubStrip.getWidth() - 3));
     }
 
     void RunPaneComponent::endScrub()
@@ -1119,10 +1260,13 @@ namespace wfg::client::ui
             sound is until the seek lands. Its clock and gearing sit in a
             small box next to it, on the strip's own ground, so a long track
             can be read to the tenth while it is being scrubbed. */
-        const auto target = scrub.target();
-        const auto span = entry.kind == "media" ? lengthOf (entry) : extentOf (entry);
-        const auto through = span > 0.0 ? juce::jlimit (0.0, 1.0, target / span) : 0.0;
-        const auto x = strip.getX() + juce::roundToInt (through * (strip.getWidth() - 3));
+        /*  OVER THE STRETCH THE STRIP SHOWED AT THE GRAB (2026-10-05,
+            namespace draft §30.6): the part of a file its ranges play, the
+            round a scene is in. It was drawn against the whole file - a tenth
+            as far as the hand on a cue with ranges - and a scene's against a
+            length read again every paint, so the scale moved under a still
+            hand. The clock says the second a release sends. */
+        const auto x = strip.getX() + juce::roundToInt (ghostThrough() * (strip.getWidth() - 3));
 
         const auto picked = Look::colour (theme, "picked");
 
@@ -1131,7 +1275,7 @@ namespace wfg::client::ui
         g.setColour (picked);
         g.fillRect (x + 1, strip.getY(), 2, strip.getHeight());
 
-        auto words = juce::String (model::clockText (target));
+        auto words = juce::String (model::clockText (ghostSecond()));
         const auto gearing = model::rateText (scrub.rate());
 
         if (! gearing.empty())

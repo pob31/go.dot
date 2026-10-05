@@ -1850,6 +1850,14 @@ namespace wfg::cue
             for every run not over (K9). A hook's: nothing is logged. */
         void mirrorSeekable();
 
+        /*  `Run::roundFrom` and `Run::roundLength` (namespace draft §30.6, S8):
+            for a scene a seek would move, where the round it is in began and
+            how long it is, solved by `solveRound` once a round - again only
+            when the round, the scene's start or the show changes. Nought
+            everywhere else. A hook's, after `mirrorSeekable`: nothing is
+            logged. */
+        void mirrorRound();
+
         /*  A PREPARATION GIVEN BACK, as records: every value the block under
             `runId` pre-sent is written back with an ordinary `node.set`, and
             then `run.revoke` ends the block and everything in it. The pointer

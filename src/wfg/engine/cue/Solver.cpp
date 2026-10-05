@@ -777,12 +777,29 @@ namespace wfg::cue
 
         out.at = seconds;
 
+        /*  THE ROUND'S OWN SCENE IS NEVER GIVEN ITS ROUND AGAIN (2026-10-05,
+            namespace draft §30.6, SU). `planTarget` hands every looping scene
+            it placed with nothing under it to `expandInnerRounds` (K9's MP),
+            and the scene this copy stands for is one: read off the DOCUMENT,
+            it loops, shuffles or has a header. Whenever the walk timed none of
+            its members - an automatic sequence whose first file this build
+            cannot measure - nothing was under it, and its round was solved
+            again, which solved it again, for ever: a seek or a jump on such a
+            scene overflowed the stack. So the target is planned once, the
+            scene's own run is left out, and only the scenes inside the round
+            are expanded. Where any member was placed nothing changes: the
+            scene was passed over as having something under it. */
         Plan plan;
-        planTarget (read, document, durations, walk, *scene, seconds, stopped, plan);
+        planTargetOnce (read, document, durations, walk, *scene, seconds, stopped, plan);
+
+        plan.runs.erase (std::remove_if (plan.runs.begin(), plan.runs.end(),
+                                         [&groupId] (const PlannedRun& made) { return made.cue == groupId; }),
+                         plan.runs.end());
+
+        expandInnerRounds (read, document, durations, plan.runs, 0, stopped, plan.confused);
 
         for (const auto& made : plan.runs)
-            if (made.cue != groupId)
-                out.runs.push_back (made);
+            out.runs.push_back (made);
 
         /*  A MEMBER IN THE WAIT WRITTEN AFTER IT (K9's review, MO): over, and
             the round not to go on until the wait has run. Placed over, the

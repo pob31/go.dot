@@ -124,6 +124,35 @@ namespace wfg::client::model
 
     namespace
     {
+        /*  WHY A PLAYING SCENE WILL NOT SCRUB, said (2026-10-05, namespace draft
+            §30.6, S8). Asked only of a scene the engine says a seek would not
+            move: the words come from what the cue is and where the run is, and
+            the offer stays the engine's (`seekable`, K9). The em dash is UTF-8. */
+        std::string refusalOf (const tree::TreeSnapshot& snapshot, const RunRow& row)
+        {
+            if (row.kind != "group" || row.state != "playing" || row.seekable)
+                return {};
+
+            const auto cue = "/godot/cue/" + row.cueId + "/";
+            const auto mode = text (snapshot, cue + "mode");
+
+            if (mode == "sampler")
+                return "A sampler group is played by hand \xe2\x80\x94 it cannot be scrubbed";
+
+            if (mode != "timeline" && text (snapshot, cue + "advance") != "auto")
+                return "A manual sequence is played by GO \xe2\x80\x94 it cannot be scrubbed";
+
+            const auto phase = at (snapshot, row.id, "phase");
+
+            if (phase == "header")
+                return "Its header is playing \xe2\x80\x94 it can be scrubbed once the header is over";
+
+            if (phase == "footer")
+                return "Its footer is playing \xe2\x80\x94 it can no longer be scrubbed";
+
+            return "It cannot be scrubbed until its round has begun";
+        }
+
         /*  A MIC RUN'S WORDS (Phase 9b), read off the tree: its cue's channel
             by the name somebody gave it, its queue, and its state. */
         std::string micWords (const tree::TreeSnapshot& snapshot, const RunRow& row)
@@ -193,6 +222,51 @@ namespace wfg::client::model
         count ("stopping", stopping);
 
         return line;
+    }
+
+    StripSpan stripSpan (const RunRow& row, double fileLength)
+    {
+        if (row.kind == "group")
+        {
+            if (row.roundLength > 0.0)
+                return { row.roundFrom, row.roundFrom + row.roundLength };
+
+            return {};
+        }
+
+        if (row.playTo > row.playFrom)
+            return { row.playFrom, row.playTo };
+
+        return { 0.0, std::max (0.0, fileLength) };
+    }
+
+    std::string countWords (const RunRow& row)
+    {
+        //  For ever, as the PRD's own "N or infinite" writes it.
+        const auto ofHowMany = [] (int count)
+        {
+            return count > 0 ? std::to_string (count) : std::string ("\xe2\x88\x9e");
+        };
+
+        if (row.kind == "group")
+        {
+            if (row.iteration < 1 || row.iterations == 1)
+                return {};
+
+            return "round " + std::to_string (row.iteration) + "/" + ofHowMany (row.iterations);
+        }
+
+        if (row.rangeIndex < 0 || row.rangeIteration < 1
+             || static_cast<std::size_t> (row.rangeIndex) >= row.ranges.size())
+            return {};
+
+        const auto loops = row.ranges[static_cast<std::size_t> (row.rangeIndex)].loops;
+
+        if (row.ranges.size() < 2 && loops == 1)
+            return {};
+
+        return "R" + std::to_string (row.rangeIndex + 1) + " "
+               + std::to_string (row.rangeIteration) + "/" + ofHowMany (loops);
     }
 
     std::string RunRow::mark() const
@@ -363,6 +437,13 @@ namespace wfg::client::model
                 engine's, and the console reads the same node. */
             row.seekable = flag (snapshot, "/godot/run/" + id + "/seekable") == Flag::yes;
 
+            /*  AND THE ROUND IT IS HELD TO, and which round of how many
+                (2026-10-05, namespace draft §30.6, S8). */
+            row.roundFrom = osc::parseDouble (at (snapshot, id, "roundFrom")).value_or (0.0);
+            row.roundLength = osc::parseDouble (at (snapshot, id, "roundLength")).value_or (0.0);
+            row.iteration = static_cast<int> (osc::parseDouble (at (snapshot, id, "iteration")).value_or (0.0));
+            row.iterations = static_cast<int> (osc::parseDouble (at (snapshot, id, "iterations")).value_or (1.0));
+
             if (row.kind == "group" && ! row.cueId.empty()
                  && text (snapshot, "/godot/cue/" + row.cueId + "/mode") == "sampler")
                 samplerGroups.insert (id);
@@ -377,6 +458,9 @@ namespace wfg::client::model
 
             if (row.kind == "mic")
                 row.liveWords = micWords (snapshot, row);
+
+            if (! row.cueId.empty())
+                row.scrubRefusal = refusalOf (snapshot, row);
 
             if (const auto late = osc::parseDouble (at (snapshot, id, "late")); late.has_value())
                 row.late = static_cast<int> (*late);

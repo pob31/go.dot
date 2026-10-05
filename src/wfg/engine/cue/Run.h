@@ -1069,6 +1069,24 @@ namespace wfg::cue
             seek's handler asks, never logged, and false through a replay. */
         bool seekable = false;
 
+        /*  THE ROUND A SCRUB IS HELD TO (2026-10-05, namespace draft §30.6, S8),
+            published as `run/roundFrom` and `run/roundLength` so a client draws
+            a running scene's strip over the round it is in and keeps the hand
+            inside what `seekGroup` will honour (K9's round). Seconds of the
+            scene's own clock, as `position` reads it: where the round in
+            progress began, and how long it is - nought when the round cannot be
+            solved, a member's length unknown or the scene not one a seek would
+            move. A READOUT like `seekable`: solved by a hook once a round, never
+            logged, nought through a replay. The last four say which round the
+            numbers were solved for, so a round is solved once and not every
+            tick. */
+        double roundFrom = 0.0;
+        double roundLength = 0.0;
+        std::int64_t roundSolvedAt = -1;
+        std::int64_t roundSolvedLaunch = -1;
+        int roundSolvedIteration = -1;
+        std::uint64_t roundSolvedRevision = 0;
+
         /*  Whether the tick thread has already told the audio side to stop this
             run's voice.
 

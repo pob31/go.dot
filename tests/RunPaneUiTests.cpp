@@ -1852,6 +1852,243 @@ TEST_CASE ("run pane: a click on a running cue's name aims the rotaries, and on 
 }
 
 //==============================================================================
+/*  SCRUBBING A SCENE WITH LOOPS (2026-10-05, namespace draft §30.6, S8; item 10
+    of the bug round), through the pane's own mouse handlers: a scene's strip is
+    its round, the ghost stays inside it and is sent once, on release (the
+    author's RB); a sound's ghost keeps to the stretch its ranges play and is
+    sent as it moves; and a strip that will not scrub says why. */
+namespace
+{
+    struct ScrubHand
+    {
+        explicit ScrubHand (juce::Component& surfaceToUse) : surface (surfaceToUse) {}
+
+        juce::MouseEvent at (float x, float y, bool buttonDown, bool dragged) const
+        {
+            const auto now = juce::Time::getCurrentTime();
+            const juce::Point<float> where { x, y };
+            const auto mods = buttonDown ? juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier)
+                                         : juce::ModifierKeys();
+
+            return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), where, mods,
+                                     juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f,
+                                     &surface, &surface, now, where, now, 1, dragged);
+        }
+
+        void press (float x, float y)   { surface.mouseDown (at (x, y, true, false)); }
+        void drag (float x, float y)    { surface.mouseDrag (at (x, y, true, true)); }
+        void release (float x, float y) { surface.mouseUp (at (x, y, true, true)); }
+        void hover (float x, float y)   { surface.mouseMove (at (x, y, false, false)); }
+
+        juce::Component& surface;
+    };
+}
+
+TEST_CASE ("run pane: a scene's strip is its round - the ghost stays in it and is sought once, on release")
+{
+    std::vector<std::pair<std::string, double>> sought;
+
+    ui::RunPaneComponent::Actions actions;
+    actions.seek = [&sought] (const std::string& runId, double seconds) { sought.emplace_back (runId, seconds); };
+
+    //  A looping scene in its second round, 20 s to 30 s of its own clock, three seconds in.
+    model::RunRow scene;
+    scene.id = "RUN00001";
+    scene.cueId = "CUE00001";
+    scene.cueName = "Rain";
+    scene.kind = "group";
+    scene.state = "playing";
+    scene.seekable = true;
+    scene.seconds = 23.0;
+    scene.position = "23.0";
+    scene.roundFrom = 20.0;
+    scene.roundLength = 10.0;
+    scene.iteration = 2;
+    scene.iterations = 3;
+
+    ui::RunPaneComponent pane (model::Theme {}, actions);
+    pane.setSize (450, 300);
+    pane.show ({ scene }, {});
+
+    ScrubHand hand { pane.rowsSurface() };
+    const auto row = static_cast<float> (juce::roundToInt (model::Theme {}.row * model::Theme {}.type));
+    const auto middle = row / 2.0f;
+
+    //  Taken where it is: the ghost on the head, which is drawn over the round, three tenths in.
+    hand.press (100.0f, middle);
+    REQUIRE (pane.ghostX() >= 0);
+    CHECK (pane.ghostSecond() == doctest::Approx (23.0));
+    const auto left = pane.ghostX();
+
+    //  Dragged right past the round's end: held there, and nothing sent while the hand moves.
+    hand.drag (300.0f, middle);
+    hand.drag (440.0f, middle);
+    CHECK (pane.ghostSecond() == doctest::Approx (30.0));
+    CHECK (pane.ghostX() > left);
+    CHECK (sought.empty());
+
+    //  And left past its start.
+    hand.drag (5.0f, middle);
+    CHECK (pane.ghostSecond() == doctest::Approx (20.0));
+    CHECK (pane.ghostX() < left);
+    CHECK (sought.empty());
+
+    //  Let go a little way in: one seek, at the second the box said.
+    hand.drag (60.0f, middle);
+    const auto settled = pane.ghostSecond();
+    CHECK (settled > 20.0);
+    CHECK (settled < 30.0);
+
+    juce::Image canvas (juce::Image::ARGB, 450, 300, true);
+    {
+        juce::Graphics g (canvas);
+        pane.paintEntireComponent (g, true);
+    }
+
+    hand.release (60.0f, middle);
+    REQUIRE (sought.size() == 1u);
+    CHECK (sought[0].first == "RUN00001");
+    CHECK (sought[0].second == doctest::Approx (settled));
+    CHECK (pane.ghostX() == -1);
+
+    /*  A ROUND THAT TURNS UNDER A HELD GHOST: the second sent is the ghost's
+        place in the round the scene is in when the hand lets go - not a second
+        of the round gone, which the engine would put at the new round's top. */
+    sought.clear();
+    hand.press (100.0f, middle);
+    hand.drag (160.0f, middle);
+    const auto intoRound = pane.ghostSecond() - 20.0;
+    REQUIRE (intoRound > 3.0);
+
+    scene.roundFrom = 30.0;
+    scene.seconds = 30.2;
+    scene.iteration = 3;
+    pane.show ({ scene }, {});
+
+    CHECK (pane.ghostSecond() == doctest::Approx (30.0 + intoRound));
+    hand.release (160.0f, middle);
+    REQUIRE (sought.size() == 1u);
+    CHECK (sought[0].second == doctest::Approx (30.0 + intoRound));
+}
+
+TEST_CASE ("run pane: a sound's ghost keeps to the stretch its ranges play, and is sought as it moves")
+{
+    std::vector<std::pair<std::string, double>> sought;
+
+    ui::RunPaneComponent::Actions actions;
+    actions.seek = [&sought] (const std::string& runId, double seconds) { sought.emplace_back (runId, seconds); };
+
+    /*  A 95 s file whose ranges play 10 s to 20 s, sounding at 15 s - the
+        author's NADIA cue in miniature. Before S8 the ghost was drawn and held
+        against the whole file: dragged to the strip's right end it sat a fifth
+        of the way along, and the hand could send 95 s. */
+    model::RangeRow first;
+    first.in = 10.0;
+    first.out = 14.0;
+
+    model::RangeRow second = first;
+    second.in = 14.0;
+    second.out = 20.0;
+    second.loops = 2;
+
+    model::RunRow sound;
+    sound.id = "RUN00002";
+    sound.cueId = "CUE00002";
+    sound.cueName = "Nadia";
+    sound.kind = "media";
+    sound.state = "playing";
+    sound.seekable = true;
+    sound.file = "nadia.wav";
+    sound.length = 95.0;
+    sound.playFrom = 10.0;
+    sound.playTo = 20.0;
+    sound.ranges = { first, second };
+    sound.rangeIndex = 1;
+    sound.rangeIteration = 2;
+    sound.seconds = 15.0;
+    sound.position = "15.0";
+
+    ui::RunPaneComponent pane (model::Theme {}, actions);
+    pane.setSize (450, 300);
+    pane.show ({ sound }, {});
+
+    ScrubHand hand { pane.rowsSurface() };
+    const auto middle = static_cast<float> (juce::roundToInt (model::Theme {}.row * model::Theme {}.type)) / 2.0f;
+
+    hand.press (100.0f, middle);
+    const auto start = pane.ghostX();
+    REQUIRE (start >= 0);
+
+    //  Half the strip from where it was taken, near enough: the head moves as far as the hand.
+    hand.drag (440.0f, middle);
+    CHECK (pane.ghostSecond() == doctest::Approx (20.0));
+
+    //  Sent as it moves, never past the ranges' end.
+    REQUIRE_FALSE (sought.empty());
+    CHECK (sought.back().first == "RUN00002");
+    CHECK (sought.back().second <= 20.0 + 1.0e-9);
+
+    //  At the strip's right end, where the ranges end - not a fifth of the way along.
+    const auto right = pane.ghostX();
+    CHECK (right > start + 150);
+
+    hand.release (440.0f, middle);
+    CHECK (pane.ghostX() == -1);
+}
+
+TEST_CASE ("run pane: a strip that will not scrub says why, with its cursor and its tooltip")
+{
+    std::vector<std::pair<std::string, double>> sought;
+
+    ui::RunPaneComponent::Actions actions;
+    actions.seek = [&sought] (const std::string& runId, double seconds) { sought.emplace_back (runId, seconds); };
+
+    model::RunRow act;
+    act.id = "RUN00003";
+    act.cueId = "CUE00003";
+    act.cueName = "Act one";
+    act.kind = "group";
+    act.state = "playing";
+    act.seconds = 12.0;
+    act.scrubRefusal = "A manual sequence is played by GO \xe2\x80\x94 it cannot be scrubbed";
+
+    model::RunRow rain = act;
+    rain.id = "RUN00004";
+    rain.cueId = "CUE00004";
+    rain.cueName = "Rain";
+    rain.seekable = true;
+    rain.scrubRefusal.clear();
+
+    ui::RunPaneComponent pane (model::Theme {}, actions);
+    pane.setSize (450, 300);
+    pane.show ({ act, rain }, {});
+
+    auto& surface = pane.rowsSurface();
+    ScrubHand hand { surface };
+    const auto row = static_cast<float> (juce::roundToInt (model::Theme {}.row * model::Theme {}.type));
+
+    auto* tips = dynamic_cast<juce::TooltipClient*> (&surface);
+    REQUIRE (tips != nullptr);
+
+    //  Resting on the act's strip: the cursor that says no, and the words that say why.
+    hand.hover (100.0f, row / 2.0f);
+    CHECK (surface.getMouseCursor() == pane.refusedCursor());
+    CHECK (tips->getTooltip() == juce::String (juce::CharPointer_UTF8 (act.scrubRefusal.c_str())));
+
+    //  A drag on it: no ghost, nothing sent.
+    hand.press (100.0f, row / 2.0f);
+    hand.drag (300.0f, row / 2.0f);
+    CHECK (pane.ghostX() == -1);
+    hand.release (300.0f, row / 2.0f);
+    CHECK (sought.empty());
+
+    //  On the scene that scrubs: the left-right arrows, and no words.
+    hand.hover (100.0f, row + row / 2.0f);
+    CHECK (surface.getMouseCursor() == juce::MouseCursor (juce::MouseCursor::LeftRightResizeCursor));
+    CHECK (tips->getTooltip().isEmpty());
+}
+
+//==============================================================================
 TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writes a flag, Flat is one command")
 {
     /*  PHASE 9a's editor for the nineteen rows. What the hand shapes is

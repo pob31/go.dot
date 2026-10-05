@@ -1688,7 +1688,7 @@ Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's ar
 | `run.stopAll` | `/godot/cmd/run/stopAll` | — | *(2026-09-18)* §4.4's **Esc**: `run.stop hard` applied to every root run, so members come down in order and every footer runs. An empty table is applied and does nothing. *(2026-09-30, H2: every root except one that was only made ready - the standby's arm, the block its horizon prepared - which is left ready, §23.3; a block with a run somebody asked for under it, such as a member fired by name, is stopped like any root)* |
 | `run.killAll` | `/godot/cmd/run/killAll` | — | *(2026-09-18)* §4.4's **double Esc**: `run.kill` applied to every root run; no footer runs. Which of the two a press means is the client's reading of a hand, and each reading is one of these two records. *(2026-09-30, H2: the standby's preparation is left ready here too, on the same terms, §23.3)* *(2026-10-01, H3: and Go.dot's own effects are swept once - every voice silenced, every EQ and every rack channel's inserts emptied, the standby's left as its arm made it - §23.6)* |
 | `run.solo` | `/godot/cmd/run/solo` | `s` run, `[T on]` | *(2026-09-25, at the author's direction)* a sampler clip soloed on its strip: while it holds, a press on any other strip of its bank - a touch, a pad, a fire by name - is applied and starts nothing. Without `on` it toggles, and the value it came to is what is logged. It lets go by itself when the clip stops (its end, a stop, a kill, a release); a clip that has stopped takes none; a run that is no sampler clip: `bad-value`. The SOLO button of a Mackie strip sends it |
-| `run.seek` | `/godot/cmd/run/seek` | `s` run, `d` seconds, `[s made…]` | *(2026-09-18)* a scrub settling: a **media** run is moved to that second of its file - the voice stopped and asked for again on the same track, at the level a fade had brought it to, the run keeping its identifier - and a **group** run is re-seated at that second of its own timeline under the same group run, its members built again from the solver's answer for the scene at that second (over, sounding at their offset, or waiting for their due tick), which is what brings a member already over back. Nothing beside the group is touched. The identifiers a group seek draws ride on the applied arguments as a jump's do. A ranged media run lands at the start of the range holding the second. A fade, a wait, a message: `bad-value`; a run that is over: applied and nothing *(2026-10-01, J1, §23.8, HX: and a group the walk cannot time - one that loops, shuffles or plays some of its members, a timeline with a header, a manual group - has no second to be re-seated at: applied and nothing, the scene left as it is)* |
+| `run.seek` | `/godot/cmd/run/seek` | `s` run, `d` seconds, `[s made…]` | *(2026-09-18)* a scrub settling: a **media** run is moved to that second of its file - the voice stopped and asked for again on the same track, at the level a fade had brought it to, the run keeping its identifier - and a **group** run is re-seated at that second of its own timeline under the same group run, its members built again from the solver's answer for the scene at that second (over, sounding at their offset, or waiting for their due tick), which is what brings a member already over back. Nothing beside the group is touched. The identifiers a group seek draws ride on the applied arguments as a jump's do. A ranged media run lands at the start of the range holding the second *(2026-10-05, §30.4: at the second itself, inside its range; §30.6: and a group seek seats a ranged member at its range, pass and point, SP)*. A fade, a wait, a message: `bad-value`; a run that is over: applied and nothing *(2026-10-01, J1, §23.8, HX: and a group the walk cannot time - one that loops, shuffles or plays some of its members, a timeline with a header, a manual group - has no second to be re-seated at: applied and nothing, the scene left as it is)* |
 | `record.start` | `/godot/cmd/record/start` | — | *(2026-09-19)* the live recorder on: from now every applied `go`, `cue.fire` and `trigger.fire` on any list is kept with its tick, unbounded, beside the sixty-four-step history |
 | `record.stop` | `/godot/cmd/record/stop` | `[s made…]` | *(2026-09-19)* the live recorder off, and what it kept written into a take: a **timeline** group *Take N* in a list named *Live recorder* (made the first time, found by name after), one `start` cue per step with `preWait` the second it was pressed and `target` the cue. Every identifier drawn rides on the applied arguments in order. Refused `bad-value` when nothing is recording, `locked` under the lock |
 | `trigger.fire` | `/godot/cmd/trigger/fire` | `s` trigger, `[s run]` | what a matched trigger submits (§12.8); fires the trigger's cue as `cue.fire` does and never moves standby or focus |
@@ -19218,3 +19218,148 @@ whether a dimmed rotary reads as its cue's colour dimmed; and positions 13 to 16
 their faders down, no idle animation, and what the track-number field shows. And one thing left as
 it was: a page has as many rotaries as the surface has strips, so on twelve strips the EQ is two
 pages of twelve, not one of sixteen.
+
+### 30.6 What was built: S8 - scrubbing
+
+Item 10, on the engine and in the window, built on S2's `seekMedia` (§30.4). Every fault the triage
+named was found where it said: neither of the author's groups offered a drag and a drag on either
+did nothing - plain cursor, no ghost, no word; the media ghost was drawn and clamped against the
+whole file while its strip and gearing covered the ranges; a scene's strip was geared to the
+longest file on screen (else a minute), its rate frozen at the grab but its ghost re-measured every
+paint, pinned at the right edge from round two on since `position` spans the rounds, and no head at
+all outside a grab; a group seek's ranged members started their range at its in-point on pass one,
+since the seat handed the audio side an offset it does not read for a cue with ranges; each send of
+a group seek, a fifth of a second apart, ended every member and seated it again; `rangeIteration`
+was read and never drawn. And one thing the triage did not see, below: a round that could not be
+timed was solved again for ever.
+
+**A scene's strip is its round (SO).** For a scene a seek would move (`seekable`), the engine says
+which round it holds the seek to - K9's round - in the scene's own seconds, as `position` reads
+them:
+
+| Node | Type | Access | Meaning |
+|---|---|---|---|
+| `/godot/run/<id>/roundFrom` | `d` | r | where the round in progress began; nought for every other run |
+| `/godot/run/<id>/roundLength` | `d` | r | how long it is, its last member's end and the wait after it (MO); nought when it cannot be solved |
+
+`Runner::mirrorRound`, a hook after `mirrorSeekable`, solves it with `solveRound` - the function
+`seekGroup` clamps with - once a round: again only when the round, its start, the scene's own start
+(a seek re-dates it) or the show's half of the document (`showRevision`) changes. A scene that
+plays once as written is one round, begun when its pre-wait ended. Readouts, `persist = none`, never
+logged, nought through a replay. The window reads them into `RunRow` with `run/iteration` and
+`run/iterations`, and `model::stripSpan` is the one span the head is drawn over, the scrub geared
+to and the ghost held inside: a sound's ranges (or its start offset to its end, else the whole
+file), a scene's round. A scene's head is drawn over its round at every pass, not only in a grab.
+The scale is frozen at the grab and the ghost drawn against that. With no solved round - a member
+whose length is not known - a scene keeps its old gearing, no clamp and no head, as before.
+
+**A scene is sought once, on release (RB).** `Scrub::Setup::onRelease`: the ghost follows the
+hand, with its clock box, and `due` never answers yes; the release sends the one `run.seek`. The box
+says the second the release will send. A sound keeps scrubbing live, a send at most every fifth of a
+second, as before.
+
+**Members land at their phase (SP).** `seatPlan` enters a ranged member's slice where the solver
+placed it - range, pass and the point inside it (`placeInRanges`) - by K8's `sliceFrom`, the
+passes before it and the point, as `seekMedia` enters one since S2: the arm starts the clip that far
+into its loop and the launch dates the slice's start back, so the pass count and the playhead read
+on from there. A seek and a jump alike, since they share the seat.
+
+**The media ghost and clamp use the played span**, the ranges' earliest in-point to their latest
+out-point: a second outside the ranges was S2's to place, and is never asked now.
+
+**Counts drawn (SV)**, beside the name, after a sampler's or a mic's words and before a speed: "R2
+2/2" on a sound with ranges - its range, counted from one, and its pass of how many, "R1 3/∞" for a
+range that plays for ever - and "round 2/3" on a scene, "round 2/∞" for one that loops for ever.
+
+**A strip that will not scrub says why (SQ).** Resting on the strip of a running scene the engine
+says no to, the pointer is a ring with a bar across it (drawn by the pane: the platform's cursors
+have none) and the tooltip gives the reason; a press does nothing, as before. The words come from
+the cue and the run's `phase` (`model::readRuns`); whether the scrub is offered is still
+`seekable`'s alone. A sound the engine would move whose length nobody has measured yet says so too.
+
+**Found on the way: a round solved for ever (SU).** `planRound` planned the round on a copy of the
+scene through `planTarget`, which gives every looping scene it placed with nothing under it its
+round (K9's MP) - and the copy's own scene is one, read off the document. When the walk timed
+none of its members - an automatic sequence whose first file this build cannot measure, a file
+imported this session - nothing was under it, and the round was solved again, and again: a stack
+overflow. K9's seek and jump on such a scene took the engine down (seen on the code before the fix,
+with S8's hook switched off: the seek's tick); S8's hook, solving once a round, took it down by
+merely playing one - which is how the Doh! case "a scene that loops, shuffles or plays some of its
+members starts from the top", whose scene opens on an unmeasured file, found it. The round is now
+planned with `planTargetOnce`, the scene's own run left out, and only the scenes inside the round
+expanded. Where any member was placed nothing changes.
+
+Tests, the engine's and the pane's each seen failing first - the engine cases on the tree with the
+seat's change and the hook switched off, and the solve's before its fix; the pane's on the pane put
+back to the old clamp and live sends; the model's name what did not exist before: in `GoTests`, "seek:
+the engine publishes the round a running scene is in - where it began and how long it is" (a
+timeline that plays once, one that loops in its second round and after a seek re-dates it, its round
+growing when a slice is added, a member of unknown length, a manual group; before, `0 == 14`, `0 ==
+4.1`), "seek: a member with a looping range lands at its point and in its pass, not at the range's
+in-point" (a scene that plays once, one that loops in its second round, a jump onto the member;
+before, `sliceFrom` `0 == 4.5`, the arm's slice offset `0 == 0.5`, `rangeIteration` `1 == 3`, the
+playhead at the in-point) and "seek: a looping scene none of whose members has a known length is
+solved without end, and stays as it is" (before: a stack overflow, at the seek with the hook off and
+while it played with it on). In `ClientTests`, "client: a scene's scrub is held to its round and sent
+once, when the hand lets go", "client: a strip spans what the engine honours, and says its range's
+pass and its scene's round" and "client: a scene that will not scrub says why, and the round it is
+held to is read". In `RunPaneUiTests`, through the pane's own mouse handlers, "run pane: a scene's
+strip is its round - the ghost stays in it and is sought once, on release" (a round turning under a
+held ghost among it), "run pane: a sound's ghost keeps to the stretch its ranges play, and is sought
+as it moves" (before: the ghost `23.2 == 20` and a fifth of the way along) and "run pane: a strip
+that will not scrub says why, with its cursor and its tooltip". K9's and S2's seek cases are
+unchanged and pass.
+
+**Counts.** The nine new cases under C and `fr-FR`: 235 assertions each, green. The seek and jump
+cases with the client's scrub cases (46): 1200 each. `wfg_tests` whole but `AudioTests` - 1637 cases
+- green under both, and `AudioTests` (100) under C; `wfg_audio_ui_tests` whole (58 cases, 1253 assertions) green under both. `ctest
+-R "scrub|seek|replay|client|schema|^ui\.|lane"`: 79 of 79 - every `wfg.replay.*` fixture replays
+record for record. What it changes for a replay: nothing logged - the round is a readout, and the
+point a ranged member is seated at is handler state no record carries; a log holding a seek or a
+jump on a scene whose members' lengths are all unknown no longer takes the engine down.
+`scripts/check-comments.py`, `check-client-boundary.py` and the schema check pass; clang-tidy with
+the GCC warnings finds nothing in `Runner.cpp`, `Solver.cpp`, `ParameterTree.cpp`, `RunModel.cpp`,
+`Scrub.cpp` and `RunPaneComponent.cpp`, nor on the new lines of the tests.
+
+- **SO - The round is the engine's to say, solved once a round.** Not the client's arithmetic from
+  the members' lengths, which is what made the old gearing wrong: the span is the one `seekGroup`
+  clamps to, so what the strip shows is what a release will do - K9's own rule, a readout the engine
+  publishes rather than a rule each client keeps. A scene that plays once is the same shape, one
+  round from its pre-wait's end, so the window has one case, not two.
+- **SP - A jump lands a ranged member at its phase too.** The seek and the jump share `seatPlan`,
+  and the solver already said where; the jump started the range at its in-point for the same reason
+  the seek did. Keeping the old landing for a jump would have taken a flag to keep a fault. A range
+  that plays for ever is still placed at its start, pass one, by the solver's §3.24 rule.
+- **SQ - The window says why, from the cue and the run's phase; the engine still decides.** A manual
+  sequence, a sampler bank, a header playing and a footer playing each have their sentence, and every
+  other refusal a general one. A reason node in the engine would be a second readout to keep beside
+  `seekable` for words only a window shows.
+- **SR - A round that turns under a held ghost keeps the ghost's place in the round.** The second
+  sent at the release is the round the scene is in then, plus how far into the round the ghost
+  stands; sent as it was, it would be a second of the round just gone, which the engine clamps to
+  the new round's start (LW) - a scene a hand let go of three seconds in would go back to its top.
+- **ST - Esc is not taken from the show during a drag.** The brief offered Esc as a cancel; it stays
+  the stop it always is (§4, law 4), and a scene it stops ends the drag with nothing sent, since a run
+  that is no longer playing lets the ghost go. A ghost let go where it was taken sends nothing
+  either, as a grab never did.
+- **SU - The round's own scene is never given its round again.** Above; a guard inside
+  `expandInnerRounds` would have had to tell a copy's scene from a real one by its node, where
+  `planRound` knows which one it is planning.
+- **SV - A count only where there is more than one of something.** "R1 1/1" on a cue with one range
+  played once, or "round 1/1" on a scene that plays once, would be words with nothing to say on every
+  row; a count appears once a cue has two ranges or its range loops, and once a scene plays more than
+  one round.
+
+**For the author:** the words in quotation marks are the implementer's, the counts' form "R2 2/2"
+and "round 2/3" apart, which the brief gave: "A manual sequence is played by GO — it cannot be
+scrubbed", "A sampler group is played by hand — it cannot be scrubbed", "Its header is playing — it
+can be scrubbed once the header is over", "Its footer is playing — it can no longer be scrubbed",
+"It cannot be scrubbed until its round has begun", "Its length is not known yet — it cannot be
+scrubbed", and "∞" in a count. Named limits: a range that plays for ever is restarted at its in-point
+by a scrub of its scene (§3.24's landing), and such a scene, like any with a member of unknown length,
+has no round to draw - its strip keeps the old gearing; the precision step above and below a scene's
+row is still one row's height, against a waveform's band, so a scene's gearing halves at half the
+reach a sound's does; the console page (RC) still sends its seek box as typed. Owed to
+the bench: the author's NADIA cue scrubbed live, the head under the hand across its ranges; a
+looping rain scene in its third round, the strip its round, the ghost held to it, one restart on
+release; the cursor and tooltip on the manual act and the sampler bank.

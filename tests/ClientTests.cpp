@@ -5450,6 +5450,213 @@ TEST_CASE ("client: a run says whether it can be scrubbed as the engine says, ne
 }
 
 //==============================================================================
+/*  SCRUBBING A SCENE WITH LOOPS (2026-10-05, namespace draft §30.6, S8; item 10
+    of the bug round). The model's half: a scene's scrub held to its round and
+    sent once on release (the author's RB), a sound's held to the stretch its
+    ranges play, the strip's span and its counts, and why a scene will not
+    scrub - read off the tree. */
+TEST_CASE ("client: a scene's scrub is held to its round and sent once, when the hand lets go")
+{
+    /*  A scene in a round from 20 s to 30 s of its own clock, taken at 23 s,
+        a tenth of a second a pixel. Before S8 it had no floor, no end - a
+        scene "has no file to run out of" - and sent a seek every fifth of a
+        second the hand moved. */
+    model::Scrub::Setup setup;
+    setup.position = 23.0;
+    setup.from = 20.0;
+    setup.to = 30.0;
+    setup.secondsPerPixel = 0.1;
+    setup.unit = 20.0;
+    setup.x = 100.0;
+    setup.onRelease = true;
+
+    model::Scrub scene;
+    scene.begin (setup);
+    REQUIRE (scene.sendsOnRelease());
+
+    //  The ghost follows the hand, and nothing is due however long it moves.
+    CHECK (scene.moveTo (130.0, 0.0) == doctest::Approx (26.0));
+    CHECK_FALSE (scene.due (0.0));
+    CHECK_FALSE (scene.due (100000.0));
+
+    //  Held to the round at both ends.
+    CHECK (scene.moveTo (1000.0, 0.0) == doctest::Approx (30.0));
+    CHECK (scene.push (1, 1.0, 0.0) == doctest::Approx (30.0));
+    CHECK (scene.moveTo (-1000.0, 0.0) == doctest::Approx (20.0));
+    CHECK_FALSE (scene.due (200000.0));
+
+    //  Let go: sent once.
+    CHECK (scene.moveTo (-950.0, 0.0) == doctest::Approx (25.0));
+    CHECK (scene.settle());
+    CHECK_FALSE (scene.settle());
+
+    //  A head a tick past the round's end, as the round turns, is taken at its end - and a grab is not a seek.
+    setup.position = 30.04;
+    model::Scrub turning;
+    turning.begin (setup);
+    CHECK (turning.target() == doctest::Approx (30.0));
+    CHECK_FALSE (turning.settle());
+
+    //  A sound keeps scrubbing live, held to the stretch its ranges play: 10 s to 20 s of a 95 s file.
+    model::Scrub sound;
+    sound.begin ({ 15.0, 20.0, 0.05, 40.0, 0.0, 10.0, false });
+    CHECK_FALSE (sound.sendsOnRelease());
+    CHECK (sound.moveTo (-1000.0, 0.0) == doctest::Approx (10.0));
+    CHECK (sound.due (0.0));
+    CHECK (sound.moveTo (100000.0, 0.0) == doctest::Approx (20.0));
+}
+
+TEST_CASE ("client: a strip spans what the engine honours, and says its range's pass and its scene's round")
+{
+    //  A sound: the stretch its ranges play, else the whole file the pane measured.
+    model::RunRow sound;
+    sound.kind = "media";
+    sound.playFrom = 10.0;
+    sound.playTo = 20.0;
+
+    auto span = model::stripSpan (sound, 95.0);
+    CHECK (span.known());
+    CHECK (span.from == doctest::Approx (10.0));
+    CHECK (span.to == doctest::Approx (20.0));
+
+    sound.playFrom = 0.0;
+    sound.playTo = 0.0;
+    span = model::stripSpan (sound, 95.0);
+    CHECK (span.from == doctest::Approx (0.0));
+    CHECK (span.to == doctest::Approx (95.0));
+    CHECK_FALSE (model::stripSpan (sound, 0.0).known());
+
+    //  A scene: the round the engine solved, or nothing.
+    model::RunRow scene;
+    scene.kind = "group";
+    scene.roundFrom = 20.0;
+    scene.roundLength = 10.0;
+
+    span = model::stripSpan (scene, 0.0);
+    CHECK (span.from == doctest::Approx (20.0));
+    CHECK (span.to == doctest::Approx (30.0));
+    CHECK (span.length() == doctest::Approx (10.0));
+
+    scene.roundLength = 0.0;
+    CHECK_FALSE (model::stripSpan (scene, 0.0).known());
+
+    /*  The counts (PRD §3.6, §3.24: "3/8"): range two, its second pass of two;
+        a range that plays for ever; one range played once says nothing. */
+    model::RangeRow first;
+    first.in = 0.0;
+    first.out = 10.0;
+
+    model::RangeRow second = first;
+    second.in = 10.0;
+    second.out = 20.0;
+    second.loops = 2;
+
+    sound.ranges = { first, second };
+    sound.rangeIndex = 1;
+    sound.rangeIteration = 2;
+    CHECK (model::countWords (sound) == "R2 2/2");
+
+    sound.ranges[1].loops = 0;
+    sound.rangeIteration = 3;
+    CHECK (model::countWords (sound) == "R2 3/\xe2\x88\x9e");
+
+    sound.ranges = { first };
+    sound.rangeIndex = 0;
+    sound.rangeIteration = 1;
+    CHECK (model::countWords (sound).empty());
+
+    sound.ranges[0].loops = 4;
+    CHECK (model::countWords (sound) == "R1 1/4");
+
+    sound.rangeIndex = -1;
+    CHECK (model::countWords (sound).empty());
+
+    scene.iteration = 2;
+    scene.iterations = 3;
+    CHECK (model::countWords (scene) == "round 2/3");
+
+    scene.iterations = 0;
+    CHECK (model::countWords (scene) == "round 2/\xe2\x88\x9e");
+
+    scene.iteration = 1;
+    scene.iterations = 1;
+    CHECK (model::countWords (scene).empty());
+}
+
+TEST_CASE ("client: a scene that will not scrub says why, and the round it is held to is read")
+{
+    /*  Item 10: neither of the author's groups could be scrubbed - a manual
+        sequence and a sampler bank - and a drag on either did nothing and said
+        nothing. The row says why now, from the cue and the run's phase, while
+        the offer stays the engine's (`seekable`). And the round the engine
+        solved, and which of how many, are read beside it. */
+    Rig rig;
+
+    const auto listId = rig.document.createList ("Sound").id;
+    const auto manual = rig.document.createCue (listId, 0, "group", "Act").id;
+    const auto bank = rig.document.createCue (listId, 1, "group", "Pads").id;
+    const auto opening = rig.document.createCue (listId, 2, "group", "Opening").id;
+    const auto closing = rig.document.createCue (listId, 3, "group", "Closing").id;
+    const auto rain = rig.document.createCue (listId, 4, "group", "Rain").id;
+
+    rig.document.setAttribute ("/godot/cue/" + bank + "/mode", "sampler");
+
+    for (const auto& id : { opening, closing, rain })
+        rig.document.setAttribute ("/godot/cue/" + id + "/mode", "timeline");
+
+    const auto play = [&rig] (const char* runId, const std::string& cueId, const char* phase)
+    {
+        rig.runs.create (runId, cueId, "group");
+        auto* run = rig.runs.find (runId);
+        REQUIRE (run != nullptr);
+        run->state = cue::runState::playing;
+        run->phase = phase;
+        return run;
+    };
+
+    play ("RVNMANV1", manual, "members");
+    play ("RVNBANK1", bank, "members");
+    play ("RVNHEAD1", opening, "header");
+    play ("RVNF00T1", closing, "footer");
+
+    //  The engine's answer for the looping scene, as its hooks would mirror it.
+    auto* looping = play ("RVNRA1N1", rain, "members");
+    looping->seekable = true;
+    looping->roundFrom = 20.0;
+    looping->roundLength = 10.0;
+    looping->iteration = 2;
+    looping->iterations = 3;
+
+    std::map<std::string, model::RunRow> read;
+
+    for (const auto& row : model::readRuns (*rig.publish (1)))
+        read[row.id] = row;
+
+    REQUIRE (read.size() == 5u);
+
+    CHECK (read["RVNMANV1"].scrubRefusal == "A manual sequence is played by GO \xe2\x80\x94 it cannot be scrubbed");
+    CHECK (read["RVNBANK1"].scrubRefusal == "A sampler group is played by hand \xe2\x80\x94 it cannot be scrubbed");
+    CHECK (read["RVNHEAD1"].scrubRefusal
+             == "Its header is playing \xe2\x80\x94 it can be scrubbed once the header is over");
+    CHECK (read["RVNF00T1"].scrubRefusal == "Its footer is playing \xe2\x80\x94 it can no longer be scrubbed");
+
+    const auto& scene = read["RVNRA1N1"];
+    CHECK (scene.scrubRefusal.empty());
+    CHECK (scene.roundFrom == doctest::Approx (20.0));
+    CHECK (scene.roundLength == doctest::Approx (10.0));
+    CHECK (scene.iteration == 2);
+    CHECK (scene.iterations == 3);
+    CHECK (model::countWords (scene) == "round 2/3");
+
+    //  A manual sequence that is not playing is not a strip anybody would drag: nothing said.
+    rig.runs.find ("RVNMANV1")->state = cue::runState::armed;
+
+    for (const auto& row : model::readRuns (*rig.publish (2)))
+        if (row.id == "RVNMANV1")
+            CHECK (row.scrubRefusal.empty());
+}
+
+//==============================================================================
 TEST_CASE ("client: the list's history is read newest first, and the steps after the aimed cue sit under it")
 {
     /*  As `list/history` spells it: newest first, tick:cue:origin. */

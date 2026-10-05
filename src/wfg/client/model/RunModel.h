@@ -74,6 +74,30 @@ namespace wfg::client::model
             between its members and no second to seek to, and is never one. */
         bool seekable = false;
 
+        /*  WHY IT WILL NOT SCRUB, in words, for a scene that is playing and
+            that the engine says a seek would not move (2026-10-05, namespace
+            draft §30.6, S8): a drag on such a row did nothing at all - a plain
+            cursor, no ghost, no word - and the author could not tell a strip
+            that does not scrub from one that had not heard the hand. Read from
+            the cue's mode and the run's phase, to SAY why; whether to offer the
+            scrub is still `seekable`'s alone. Empty when it scrubs, and for
+            every run nobody would try to drag. */
+        std::string scrubRefusal;
+
+        /*  THE ROUND A SCENE'S SCRUB IS HELD TO (S8), as the engine solves it
+            (`run/roundFrom`, `run/roundLength`): seconds of the scene's own
+            clock, as `position` reads them. The strip is drawn over this
+            stretch and the ghost head kept inside it, which is the round
+            `run.seek` lands in (K9). A length of nought is a round nobody could
+            solve, and the strip falls back to its old gearing. */
+        double roundFrom = 0.0;
+        double roundLength = 0.0;
+
+        /*  WHICH ROUND OF HOW MANY (`run/iteration`, `run/iterations`), for
+            the "round 2/3" a scene's row says - nought rounds is for ever. */
+        int iteration = 0;
+        int iterations = 1;
+
         /*  WHETHER A SURFACE'S ROTARIES ARE AIMED AT THIS RUN'S CUE (author,
             2026-09-25): a click on a media run's name aims them, and the row
             says so in a mark and not a colour alone. */
@@ -223,6 +247,34 @@ namespace wfg::client::model
     /*  The ordering `readRuns` finishes with, on its own so a test can hand it
         rows and assert the rule rather than building a tree to imply it. */
     std::vector<RunRow> inShowOrder (const std::vector<RunRow>& rows);
+
+    /*  THE STRETCH A RUN'S STRIP IS DRAWN OVER, in the run's own seconds
+        (2026-10-05, namespace draft §30.6, S8): for a sound, the part of its
+        file it plays - its ranges' span, or its start offset to the end - else
+        the whole file, `fileLength` long, as the pane measured it; for a scene,
+        the round it is in, when the engine could solve one. The head is drawn
+        against it, a scrub geared to it and held inside it: one span for the
+        three, where the ghost head of a sound with ranges used to be drawn and
+        clamped against the whole file while the strip showed its ranges. */
+    struct StripSpan
+    {
+        double from = 0.0;
+        double to = 0.0;
+
+        bool known() const noexcept { return to > from; }
+        double length() const noexcept { return known() ? to - from : 0.0; }
+    };
+
+    StripSpan stripSpan (const RunRow& row, double fileLength);
+
+    /*  THE COUNTS A RUN'S ROW SAYS (PRD §3.6 and §3.24: "current count
+        visible on the strip ('3/8')"), and S8 drew them at last: a sound with
+        ranges says its range and its pass of how many - "R2 2/2", "R1 3/∞" for
+        a range that plays for ever - once there is more than one range or the
+        one it is in loops; a scene that plays more than one round says
+        "round 2/3", or "round 2/∞". Empty otherwise. `rangeIteration` was read
+        and never drawn until then. */
+    std::string countWords (const RunRow& row);
 
     /*  A SAMPLER GROUP'S MEMBERS, COUNTED IN WORDS: "armed 5 · pending 3 ·
         playing 1", from the runs whose parent is `groupRunId`. A member

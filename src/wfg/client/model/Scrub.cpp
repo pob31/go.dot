@@ -26,12 +26,17 @@ namespace wfg::client::model
     void Scrub::begin (const Setup& setup)
     {
         live = true;
-        at = setup.position;
-        length = setup.length;
+        onRelease = setup.onRelease;
+        earliest = std::max (0.0, setup.from);
+        latest = setup.to;
         secondsPerPixel = setup.secondsPerPixel;
         unit = setup.unit > 0.0 ? setup.unit : 40.0;
         lastX = setup.x;
         lastRate = 1.0;
+
+        /*  INSIDE WHAT THE STRIP COVERS FROM THE START: a scene's head a tick
+            past its round's end, as the round turns, is taken at the end. */
+        at = clamp (setup.position);
 
         /*  Where the hand took it counts as sent: a grab is not a seek, and
             nothing goes out until the head has moved. */
@@ -58,9 +63,9 @@ namespace wfg::client::model
 
     double Scrub::clamp (double seconds) const noexcept
     {
-        seconds = std::max (0.0, seconds);
+        seconds = std::max (earliest, seconds);
 
-        return length > 0.0 ? std::min (seconds, length) : seconds;
+        return latest > earliest ? std::min (seconds, latest) : seconds;
     }
 
     double Scrub::moveTo (double x, double distance)
@@ -94,7 +99,7 @@ namespace wfg::client::model
 
     bool Scrub::due (double nowMs, double intervalMs)
     {
-        if (! live || ! unsent() || nowMs - sentMs < intervalMs)
+        if (! live || onRelease || ! unsent() || nowMs - sentMs < intervalMs)
             return false;
 
         sentMs = nowMs;

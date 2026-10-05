@@ -9239,6 +9239,242 @@ TEST_CASE ("seek: the engine publishes which runs a seek would move, and a manua
 }
 
 //==============================================================================
+/*  SCRUBBING A SCENE WITH LOOPS (2026-10-05, namespace draft §30.6, S8; item
+    10 of the bug round: "Scrubbing a group containing media cues with loops
+    was confusing"). The engine says which round a scrub is held to, so a
+    client draws the strip over it; and a member with ranges is seated where
+    the solver places it - its range, its pass, the point in it - not at the
+    range's in-point, which every scrub of a looping member went back to. */
+namespace
+{
+    /*  What the engine publishes at `/godot/run/<id>/<name>` as a number, or
+        -1 when there is no such node. */
+    double numberSaid (JumpRig& rig, const std::string& runId, const char* name)
+    {
+        tree::MountTable mounts;
+        tree::ParameterTree parameters { rig.document, rig.engine.commands(), mounts, rig.runs };
+        parameters.markStale();
+
+        tree::EngineState state;
+        const auto snapshot = parameters.publish (rig.tick, state);
+        REQUIRE (snapshot != nullptr);
+
+        const auto* node = snapshot->find ("/godot/run/" + runId + "/" + name);
+
+        if (node == nullptr || ! node->soleValue().has_value() || ! node->soleValue()->isNumber())
+            return -1.0;
+
+        return node->soleValue()->asDouble();
+    }
+
+    /*  The scene's first member made a slice of two seconds, 1 s to 3 s of
+        its file, played three times: six seconds of material. */
+    void loopFirstMember (JumpRig& rig)
+    {
+        const auto range = rig.document.createRange (rig.early, 1.0, 3.0);
+        REQUIRE (range.ok);
+        REQUIRE (rig.document.setAttribute ("/godot/range/" + range.id + "/loops", "3").ok);
+    }
+}
+
+TEST_CASE ("seek: the engine publishes the round a running scene is in - where it began and how long it is")
+{
+    /*  `run/roundFrom` and `run/roundLength`: the span the desktop draws a
+        scene's strip over and holds its ghost head to, the round `seekGroup`
+        clamps a seek to (K9's LW) - in the scene's own seconds, as `position`
+        reads them. Before S8 there were no such nodes, and the strip was
+        geared to the longest file on screen, or a minute. */
+    JumpRig rig;
+    std::map<std::string, std::int64_t> since;
+
+    SUBCASE ("a timeline that plays once: one round, as long as its last member's end")
+    {
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        playOn (rig, [] { return false; }, since, 25);
+
+        const auto* scene = rig.liveRunOf (rig.scene);
+        REQUIRE (scene != nullptr);
+        REQUIRE_FALSE (roundTicks (rig, scene->id).empty());
+
+        const auto began = static_cast<double> (roundTicks (rig, scene->id).front() - scene->launchRequestedAtTick) / 50.0;
+
+        CHECK (numberSaid (rig, scene->id, "roundFrom") == doctest::Approx (began));
+        CHECK (numberSaid (rig, scene->id, "roundLength") == doctest::Approx (14.0));
+    }
+
+    SUBCASE ("a timeline that loops, in its second round, and after a seek re-dates it")
+    {
+        loopTwiceAtNought (rig);
+        const auto sceneRun = goIntoRound (rig, since, 2);
+        const auto* scene = rig.runs.find (sceneRun);
+
+        const auto began = static_cast<double> (roundTicks (rig, sceneRun).back() - scene->launchRequestedAtTick) / 50.0;
+        REQUIRE (began > 3.9);
+
+        CHECK (numberSaid (rig, sceneRun, "roundFrom") == doctest::Approx (began));
+        CHECK (numberSaid (rig, sceneRun, "roundLength") == doctest::Approx (4.0));
+
+        /*  A seek moves where the scene says it began, and the round with it:
+            the round is the same seconds of the scene's clock. */
+        REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                                  osc::Value::float64 (began + 1.0) }).rejected == 0);
+        playOn (rig, [] { return false; }, since, 1);
+
+        scene = rig.runs.find (sceneRun);
+        REQUIRE (scene->iteration == 2);
+        CHECK (numberSaid (rig, sceneRun, "roundFrom")
+                 == doctest::Approx (static_cast<double> (scene->roundStartedAtTick - scene->launchRequestedAtTick) / 50.0));
+        CHECK (numberSaid (rig, sceneRun, "roundLength") == doctest::Approx (4.0));
+
+        //  And its first member's slice, made longer while it plays, is a longer round.
+        loopFirstMember (rig);
+        playOn (rig, [] { return false; }, since, 1);
+        CHECK (numberSaid (rig, sceneRun, "roundLength") == doctest::Approx (6.0));
+    }
+
+    SUBCASE ("a member whose length is not known: the round has none")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.late + "/file", "unmeasured.wav").ok);
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        playOn (rig, [] { return false; }, since, 25);
+
+        const auto* scene = rig.liveRunOf (rig.scene);
+        REQUIRE (scene != nullptr);
+        CHECK (seekableSaid (rig, scene->id) == "true");
+        CHECK (numberSaid (rig, scene->id, "roundLength") == doctest::Approx (0.0));
+    }
+
+    SUBCASE ("a manual group, which a seek never moves: nought")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence").ok);
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.early) }).applied == 1);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        playOn (rig, [] { return false; }, since, 25);
+
+        const auto* scene = rig.liveRunOf (rig.scene);
+        REQUIRE (scene != nullptr);
+        CHECK (numberSaid (rig, scene->id, "roundFrom") == doctest::Approx (0.0));
+        CHECK (numberSaid (rig, scene->id, "roundLength") == doctest::Approx (0.0));
+    }
+}
+
+TEST_CASE ("seek: a member with a looping range lands at its point and in its pass, not at the range's in-point")
+{
+    /*  The first member loops a two-second slice three times; the scene is put
+        four and a half seconds into its round. The solver places the member in
+        its third pass, half a second in - the file's second 1.5 - and the seat
+        enters the slice that far, passes and all (K8's `sliceFrom`): before
+        S8 it handed over the second alone, which the audio side does not read
+        for a cue with ranges, and the member started its slice again from the
+        in-point, on its first pass (`0 == 4.5`). The sample clock runs, so
+        the slice's start can be dated back before the launch. */
+    JumpRig rig;
+    rig.clockRuns = true;
+    std::map<std::string, std::int64_t> since;
+    std::string sceneRun;
+    auto second = 4.5;
+    auto jumped = false;
+
+    loopFirstMember (rig);
+
+    SUBCASE ("a scene that plays once, scrubbed")
+    {
+        REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string (rig.scene) }).rejected == 0);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        sceneRun = rig.liveRunOf (rig.scene)->id;
+        playOn (rig, [] { return false; }, since, 260);
+    }
+
+    SUBCASE ("a scene that loops, scrubbed in its second round")
+    {
+        //  Two seconds of an empty show first, so the clock has room to date the slice back.
+        playOn (rig, [] { return false; }, since, 100);
+        loopTwiceAtNought (rig);
+        sceneRun = goIntoRound (rig, since, 2);
+        second = sceneSecondFor (rig, sceneRun, 4.5);
+    }
+
+    SUBCASE ("a jump onto the member, four and a half seconds in")
+    {
+        playOn (rig, [] { return false; }, since, 260);
+        REQUIRE (rig.jumpTo (rig.early, 4.5).rejected == 0);
+        jumped = true;
+    }
+
+    if (! jumped)
+    {
+        REQUIRE (rig.runs.find (sceneRun)->seekable);
+        REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                                  osc::Value::float64 (second) }).rejected == 0);
+    }
+
+    const auto* member = rig.liveRunOf (rig.early);
+    REQUIRE (member != nullptr);
+    const auto memberRun = member->id;
+
+    CHECK (member->startRange == 0);
+    CHECK (member->sliceFrom == doctest::Approx (4.5));
+
+    //  The arm: the slice, entered half a second into its loop.
+    REQUIRE_FALSE (rig.audio.arms.empty());
+    const auto arm = std::find_if (rig.audio.arms.begin(), rig.audio.arms.end(),
+                                   [&memberRun] (const cue::ArmRequest& request) { return request.runId == memberRun; });
+    REQUIRE (arm != rig.audio.arms.end());
+    CHECK (arm->startSlot == 0);
+    CHECK (arm->sliceOffset == doctest::Approx (0.5));
+
+    //  Launched, it reads on from there: the third pass, the file's second 1.5.
+    REQUIRE (playOn (rig, [&] { return rig.runs.find (memberRun)->launchedAtSample > 0; }, since, 20));
+    playOn (rig, [] { return false; }, since, 2);
+
+    const auto* playing = rig.runs.find (memberRun);
+    CHECK (playing->range == 0);
+    CHECK (playing->rangeIteration == 3);
+    CHECK (playing->position > 1.45);
+    CHECK (playing->position < 1.8);
+}
+
+TEST_CASE ("seek: a looping scene none of whose members has a known length is solved without end, and stays as it is")
+{
+    /*  Found by S8 (namespace draft §30.6, SU): a round is solved on a copy
+        of the scene, and when the walk timed none of its members - an
+        automatic sequence whose first file this build cannot measure, a file
+        imported this session - the plan held the scene alone, and the pass
+        that gives a looping scene placed with nothing under it its round
+        (K9's MP) read the scene off the document, looping, and solved the
+        same round again, for ever: a stack overflow. K9's seek and jump on
+        such a scene took the engine down; S8's round readout, solved once a
+        round, took it down by playing one. Now the copy's own scene is never
+        given its round again: nothing is published for it, a seek leaves it
+        as it is, and a jump onto it seats it. */
+    JumpRig rig;
+    std::map<std::string, std::int64_t> since;
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/advance", "auto").ok);
+    loopTwiceAtNought (rig);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.early + "/file", "unmeasured.wav").ok);
+
+    const auto sceneRun = goIntoRound (rig, since, 1);
+
+    CHECK (seekableSaid (rig, sceneRun) == "true");
+    CHECK (numberSaid (rig, sceneRun, "roundLength") == doctest::Approx (0.0));
+
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (sceneRun),
+                                              osc::Value::float64 (sceneSecondFor (rig, sceneRun, 1.0))
+                                            }).rejected == 0);
+    playOn (rig, [] { return false; }, since, 5);
+    CHECK (rig.runs.find (sceneRun) != nullptr);
+
+    //  And a jump onto its second member, which solves the same round.
+    REQUIRE (rig.jumpTo (rig.middle, 0.5).rejected == 0);
+    playOn (rig, [] { return false; }, since, 5);
+    CHECK (rig.liveRunOf (rig.scene) != nullptr);
+}
+
+//==============================================================================
 /*  K9'S REVIEW (2026-10-03, namespace draft §23.18): the shapes the round seek
     and the round jump met and did not finish - a sequence sought to its round's
     end, a looping scene long over read back from the history, a looping scene

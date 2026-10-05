@@ -3377,6 +3377,10 @@ namespace wfg::tree
 
                 //  Whether a seek would move it, as the Runner keeps it (K9, namespace draft §23.18).
                 else if (name == "seekable")  text = run.seekable && ! run.isFinished() ? "true" : "false";
+
+                /*  The round a scrub is held to, as the Runner solved it (namespace draft §30.6). */
+                else if (name == "roundFrom")   text = osc::formatDouble (run.roundFrom);
+                else if (name == "roundLength") text = osc::formatDouble (run.roundLength);
                 else if (name == "strip")     text = run.strip;
                 else if (name == "held")      text = run.held ? "true" : "false";
                 else if (name == "solo")      text = run.solo ? "true" : "false";

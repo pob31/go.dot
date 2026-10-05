@@ -82,6 +82,22 @@ namespace wfg::client::ui
             the surfaces' rotaries. Public so a test clicks where a hand would. */
         void clickAt (int x, int y);
 
+        /*  WHERE THE GHOST HEAD IS DRAWN, in the canvas's pixels, and the
+            second its clock box says - the second a release would send - while
+            a scrub is held; -1 and nought otherwise. Public so a test reads
+            what a hand would see (namespace draft §30.6). */
+        int ghostX() const;
+        double ghostSecond() const;
+
+        /** The rows' surface, where the mouse lands: so a test can press, drag and hover. */
+        juce::Component& rowsSurface() noexcept { return canvas; }
+
+        /*  THE CURSOR OF A STRIP THAT WILL NOT SCRUB (2026-10-05, §30.6): a
+            ring with a bar across it, drawn by the pane since the platform's
+            set has none, so a strip says before the press that a drag will do
+            nothing. */
+        const juce::MouseCursor& refusedCursor() const noexcept { return refused; }
+
         /*  The runs this pass found, and the analyser's table to draw their
             waveforms from. Cheap when they are the ones already drawn.
 
@@ -133,10 +149,14 @@ namespace wfg::client::ui
         bool editing = true;
         /*  The rows' surface: paints each row at its own top and height by
             asking its owner, and hands clicks back the same way. */
-        class Canvas final : public juce::Component
+        class Canvas final : public juce::Component, public juce::TooltipClient
         {
         public:
             explicit Canvas (RunPaneComponent& ownerToUse) : owner (ownerToUse) {}
+
+            /*  WHY THE STRIP UNDER THE POINTER WILL NOT SCRUB, when it will
+                not (§30.6): asked by the window's tooltip as the pointer rests. */
+            juce::String getTooltip() override { return juce::String (owner.hoverRefusal); }
 
             void paint (juce::Graphics& g) override;
             void mouseDown (const juce::MouseEvent& event) override;
@@ -165,10 +185,24 @@ namespace wfg::client::ui
         void dragged (const juce::MouseEvent& event);
         void released (const juce::MouseEvent& event);
         bool scrubbable (const model::RunRow& entry) const;
+
+        /*  Why this row's strip will not scrub, in words, or empty: the
+            engine's no read into words by the model, or a sound whose length
+            nobody has measured yet. Only for a row somebody would try to drag. */
+        std::string refusalOf (const model::RunRow& entry) const;
         double secondsPerPixel (const model::RunRow& entry, int stripWidth) const;
         double extentOf (const model::RunRow& entry) const;
+
+        /*  The stretch this row's strip is drawn over (`model::stripSpan`),
+            with the pane's own measure of a file's length. None for a scene
+            with no solved round, which draws no head and scrubs on its old
+            gearing (`extentOf`). */
+        model::StripSpan spanOf (const model::RunRow& entry) const;
         void sendScrub (bool letGo);
         void endScrub();
+
+        /** Where the ghost head sits over the stretch frozen at the grab, in [0, 1]. */
+        double ghostThrough() const;
         void paintScrub (const model::RunRow& entry, juce::Graphics& g,
                          juce::Rectangle<int> strip);
 
@@ -230,6 +264,7 @@ namespace wfg::client::ui
 
         Actions actions;
         model::Theme theme;
+        juce::MouseCursor refused;
         juce::Viewport viewport;
         Canvas canvas { *this };
         std::vector<model::RunRow> rows;
@@ -240,11 +275,24 @@ namespace wfg::client::ui
         /** The run whose strip the pointer rests on and could scrub; empty when none. */
         std::string hoverScrub;
 
+        /** Why the strip the pointer rests on will not scrub; empty when it would, or none. */
+        std::string hoverRefusal;
+
         model::Scrub scrub;
         std::string scrubRun;
         juce::Rectangle<int> scrubStrip;   ///< on the canvas
         double scrubDistance = 0.0;
         int scrubPush = 0;                 ///< -1, 0 or +1: which edge the pointer is against
+
+        /*  THE STRETCH THE GHOST IS DRAWN OVER, FROZEN AT THE GRAB (§30.6): the
+            scale the hand started with stays the scale under it, whatever the
+            row's span does meanwhile. And for a scene with a solved round,
+            whether the second sent is counted from the round the run is in
+            when the hand lets go - a round that turned under a held ghost
+            keeps the ghost where it was in the round, not in the old one. */
+        double scrubFrom = 0.0;
+        double scrubTo = 0.0;
+        bool scrubInRound = false;
 
         std::shared_ptr<const audio::MediaRecords> media;
         /*  KEYED ON THE WINDOW AS WELL AS THE FILE. Two cues can play two

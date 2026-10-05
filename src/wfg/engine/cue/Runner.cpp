@@ -2469,6 +2469,38 @@ namespace wfg::cue
             run->startOffset = wants.offset;
             run->startRange = std::max (wants.range, 0);
 
+            /*  A CUE WITH RANGES AT ITS PHASE (2026-10-05, namespace draft
+                §30.6, S8). The solver says which range, which pass and where in
+                it (`placeInRanges`), and the plan's offset is that second of the
+                file - but the audio side takes an offset for a whole file and a
+                slot for a range, not both, so a seat that handed over the
+                offset alone started the range at its in-point, on its first
+                pass: every scrub of a scene restarted its looping members, and
+                a jump into one did the same. So the slice is entered part-way,
+                by K8's `sliceFrom` - the passes before it and the point inside
+                it, as `seekMedia` enters one since S2 - and the launch dates the
+                slice's start back by all of it, so the pass count and the
+                playhead read on from there. A range that plays for ever is
+                placed at its start, pass one, by the solver's own rule (§3.24),
+                and stays so. Doh! carries on from what it read below. */
+            if (wants.range >= 0 && resume == nullptr)
+            {
+                const auto ranges = rangesOf (cue);
+
+                if (static_cast<std::size_t> (wants.range) < ranges.size())
+                {
+                    const auto& slice = ranges[static_cast<std::size_t> (wants.range)];
+                    const auto length = slice.out - slice.in;
+                    const auto into = wants.offset - slice.in;
+
+                    /*  Only a point the solver placed inside the slice: past
+                        every range it hands back where the cue had got to, not
+                        a second of the file, and that is the in-point's. */
+                    if (length > 0.0 && into >= 0.0 && into < length)
+                        run->sliceFrom = into + static_cast<double> (std::max (wants.pass - 1, 0)) * length;
+                }
+            }
+
             /*  CARRIED ON BY DOH! (D2, namespace draft §24.12): arriving over the de-click at the
                 level it had at the press, and on into the rest of a fade its
                 scene had moving then; inside the slice it was in, at the point
@@ -2774,6 +2806,75 @@ namespace wfg::cue
             if (now != snapshot.seekable)
                 if (auto* run = runs.find (snapshot.id))
                     run->seekable = now;
+        }
+    }
+
+    void Runner::mirrorRound()
+    {
+        /*  THE ROUND A SCRUB IS DRAWN OVER AND HELD TO (2026-10-05, namespace
+            draft §30.6, S8). Until today a scene's strip was geared to the
+            longest file among the rows on screen, or to a minute, and its ghost
+            head was drawn against that and clamped to nothing - while the seek
+            it sent was clamped to the round the scene is in (K9's LW). In a
+            looping scene's second round the hand dragged a head pinned at the
+            right edge, since `position` counts across every round, and let go
+            somewhere the engine then moved to the round's start or end.
+
+            So the engine says what it honours: for a scene a seek would move
+            now (`seekable`, which this follows), the second of its own clock
+            its round began at - `roundStartedAtTick`, the handler's stamp,
+            against the start `position` counts from - and the round's length,
+            the furthest end of its members and the wait after it, exactly as
+            `seekGroup` clamps (`solveRound`, MO). A scene that plays once as
+            written is one round, begun when its pre-wait ended.
+
+            SOLVED ONCE A ROUND, since `solveRound` walks a copy of the scene:
+            again only when the round, its start, the scene's own start (a seek
+            re-dates it) or the show changes - the show's own half
+            (`showRevision`), so a GO moving the pointer solves nothing again.
+            Nought when nothing can be solved
+            - a member's length unknown, the scene not one a seek would move -
+            and the client then falls back to its old gearing. A readout: never
+            logged, nought through a replay, which runs no hooks. */
+        const auto revision = document.showRevision();
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.kind != "group")
+                continue;
+
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr)
+                continue;
+
+            if (! run->seekable || run->iteration < 1)
+            {
+                run->roundFrom = 0.0;
+                run->roundLength = 0.0;
+                run->roundSolvedAt = -1;
+                continue;
+            }
+
+            if (run->roundSolvedAt == run->roundStartedAtTick
+                 && run->roundSolvedLaunch == run->launchRequestedAtTick
+                 && run->roundSolvedIteration == run->iteration
+                 && run->roundSolvedRevision == revision)
+                continue;
+
+            run->roundSolvedAt = run->roundStartedAtTick;
+            run->roundSolvedLaunch = run->launchRequestedAtTick;
+            run->roundSolvedIteration = run->iteration;
+            run->roundSolvedRevision = revision;
+
+            const auto group = document.findById (run->cue);
+            const auto round = run->round.empty() ? membersOf (group) : run->round;
+            const auto solved = solveRound (document, durations, group, round, 0.0);
+
+            run->roundFrom = static_cast<double> (std::max (std::int64_t { 0 },
+                                                            run->roundStartedAtTick - run->launchRequestedAtTick))
+                               / static_cast<double> (TickClock::rateHz);
+            run->roundLength = solved.length.has_value() && *solved.length > 0.0 ? *solved.length : 0.0;
         }
     }
 
@@ -14882,6 +14983,7 @@ namespace wfg::cue
         advanceWaits (engine, tick);
         advanceGroups (engine);
         mirrorSeekable();
+        mirrorRound();
         samplerEdges (engine);
         releaseSolos();
         armStandby (engine);

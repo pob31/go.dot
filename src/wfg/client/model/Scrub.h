@@ -48,7 +48,15 @@
 
     THE TARGET IS A SECOND, never a pixel, and it is clamped to the material:
     nought at the left, the length at the right, and unbounded when the length
-    is not known - a group has no file to run out of.
+    is not known - a group has no file to run out of. (2026-10-05, namespace
+    draft §30.6:) or to the stretch the strip is drawn over, which is what the
+    engine will honour: the part of a file a cue's ranges play, the round a
+    scene is in.
+
+    AND A SCENE'S SCRUB IS SENT ONCE, WHEN THE HAND LETS GO (the author's RB,
+    2026-10-05): each seek of a scene ends every member and seats them again,
+    so a seek a fifth of a second was a string of restarts. `onRelease` says
+    so, and `due` then never answers yes.
 
     std only, like the rest of model/.
 */
@@ -65,8 +73,8 @@ namespace wfg::client::model
             /** Where the head is when the hand takes it, in seconds. */
             double position = 0.0;
 
-            /** How long the material is, in seconds; nought means unbounded. */
-            double length = 0.0;
+            /** Where the material ends, in seconds; nought means unbounded. */
+            double to = 0.0;
 
             /** What a pixel of travel is worth inside the strip. */
             double secondsPerPixel = 0.0;
@@ -76,6 +84,12 @@ namespace wfg::client::model
 
             /** The pointer's x when the hand took the head. */
             double x = 0.0;
+
+            /** Where the material begins, in seconds: the head goes no earlier. */
+            double from = 0.0;
+
+            /** Sent only when the hand lets go, never while it moves (a scene, RB). */
+            bool onRelease = false;
         };
 
         void begin (const Setup& setup);
@@ -100,8 +114,12 @@ namespace wfg::client::model
             a drag makes a hundred events a second, and each `run.seek` stops
             and re-asks a voice. Answers whether a send is due - the head has
             moved since the last one and `intervalMs` has passed - and marks it
-            sent when it is. The release sends regardless, through `settle`. */
+            sent when it is. The release sends regardless, through `settle`.
+            Never, for a scrub that sends on release alone. */
         bool due (double nowMs, double intervalMs = 200.0);
+
+        /** Whether this scrub is sent only when the hand lets go. */
+        bool sendsOnRelease() const noexcept { return onRelease; }
         bool settle();
 
         /** The rate `distance` pixels from the strip sets: 1, 1/2, 1/4 ... 1/256. */
@@ -114,8 +132,10 @@ namespace wfg::client::model
         bool unsent() const noexcept;
 
         bool live = false;
+        bool onRelease = false;
         double at = 0.0;
-        double length = 0.0;
+        double earliest = 0.0;
+        double latest = 0.0;
         double secondsPerPixel = 0.0;
         double unit = 40.0;
         double lastX = 0.0;
