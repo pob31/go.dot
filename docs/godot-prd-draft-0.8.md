@@ -560,6 +560,20 @@ A stop or fade aimed at a cue with several live runs acts on the newest.
 **Layering** — a second instance of a media cue — is deliberately absent: a
 crowd hit that overlaps itself is two clips on two pads.
 
+**Enable, Disable and Jump to** *(added 2026-10-05, at the author's direction — namespace draft
+§27)*. Three more verbs share the stop cue's targeting object and are not stops:
+
+- **Enable** and **Disable** switch their target — a cue or a whole group — on or off **for
+  tonight**. The show file is never written (§4.10): reopening or reverting the show forgets them,
+  and a load-to-time works them out again from the cues it walks past. Disabling stops nothing that
+  is running; a later GO, trigger or fire skips the target. An Enable can switch on a cue the file
+  has off, which is how an alternative ending is written. The words are not *arm* and *disarm*,
+  which already mean preparing a voice (§3.12).
+- **Jump to** moves standby onto its target, on its own list, and nothing else: it is a park written
+  into the show, not the rehearsal jump of §3.13. With **and Go** it also fires the target and
+  standby moves past it. That fire belongs to the GO that fired the jump cue, so one Doh! (§3.32)
+  takes back both and puts standby back on the jump cue.
+
 ### 3.9 Exclusive resources: faders, processor slots, interface channels
 
 Three scarce, physically fixed, exclusive resources share **one allocator**

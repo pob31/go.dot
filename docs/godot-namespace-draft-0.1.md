@@ -18526,3 +18526,92 @@ second is the step a rotary's turn already makes.
   moves only its level trim.
 - **No drawn curve for these.** The drawn `points` shape the level.
 - **The console client** shows the three lists as text rows. The mixer is the desktop's.
+
+## 27. Enable, Disable and Jump to
+
+Written 2026-10-05, at the author's direction: *"I would like to add a couple of cue types that can
+be in the +Transport button. "Arm" and "Disarm" cues to be able to selectively enable or disable
+certain cues or groups. "Jump to" with a toggle to jump to "and Go" to move the standby pointer to a
+specified cue and eventually trigger the target cue skipping some cues or going back."*
+
+What there was before: a cue's `enabled` (§2) said whether it runs at all, and only an edit of the
+show could change it. The pointer moved by GO, by the arrows and by a park (`standby.set`), and a
+show could not move it from inside itself. A transport cue only stopped its target or pressed a take
+button (§19.6).
+
+### 27.1 Decisions
+
+The author's, 2026-10-05, each the recommended option:
+
+- **PK - Tonight only.** An enable or disable cue sets a live override over its target's `enabled`.
+  The show file is never written (PRD §4.10), reopening or reverting the show forgets it, and a
+  load-to-time works it out again from the enable and disable cues before the place it loads.
+- **PL - The words are Enable and Disable**, not Arm and Disarm. *Arm* already means getting a voice
+  ready before GO (PRD §3.12), and a stop cue on a sampler group is already called its disarm
+  (§3.27). One word, one meaning.
+- **PM - Jump to moves standby, and nothing else.** It is a park written into the show: nothing that
+  is playing changes and nothing is sent again. The rehearsal jump that solves the state (PRD §3.13,
+  `list.loadToTime`) is a different thing and keeps its name.
+- **PN - "and Go" belongs to the GO that fired the jump cue.** The target's fire is filed under that
+  GO, as a start cue's fire is (§24), so one Doh! takes back both and puts standby back on the jump
+  cue.
+
+The rest are the implementer's, the author's to overrule:
+
+- **PO - Three states.** `cue/tonight` reads `file`, `on` or `off`. An enable cue can switch on a
+  cue the file has off: an alternative ending is written off in the file and switched on by a cue at
+  the fork. What runs is the override when there is one, otherwise `enabled`.
+- **PP - Every way in honours it.** GO cannot stand on a cue that is off tonight, a group does not
+  play a member that is off, and `cue.fire` - by name, by a trigger or by a start cue - refuses a
+  cue that is off with `disabled`. That last gate is new for a cue the file has off as well: until
+  now a trigger still fired a disabled cue, which contradicted "a disabled cue is skipped".
+- **PQ - Disabling stops nothing.** A cue or a group that is running plays on, and only a later
+  fire skips it. A member disabled while its group loops is skipped from the next round. A standby
+  standing on the cue being disabled moves on to the next stop, as a GO's advance would.
+- **PR - Esc and double Esc keep it.** The override is a decision about the evening, not something
+  Go.dot is doing; the stops act on processing (PRD §4.4).
+- **PS - Doh! puts it back.** A GO that fired an enable or disable cue keeps what it changed and the
+  value before, and its Doh! restores them with the rest (PRD §4.5).
+- **PT - A jump stays on its own list.** Its target must be on the jump cue's list, so a Doh! has
+  one pointer to put back. A target elsewhere is a warning on the cue and the jump does nothing. A
+  header's, a footer's or a sampler member's target lands on its group, as a park does; a persistent
+  or disabled target is refused, with a warning.
+- **PU - A jump-and-Go aimed at itself is refused.** A jump back to an earlier cue that comes round
+  to it again is the designer's loop, and it is allowed.
+- **PV - "and Go" is two lines in the + transport list**, *Jump to* and *Jump to and Go*, because a
+  line of the list makes one cue as it stands. The inspector's switch turns one into the other.
+- **PW - The row says it in words.** A cue switched off tonight is drawn dimmed with the mark
+  *off tonight*; one switched on tonight against its file wears *on tonight* (PRD §4.8).
+
+### 27.2 Rows and the command
+
+| row | type | default | meaning |
+|---|---|---|---|
+| `transport/verb` | s | `hard` | gains `enable`, `disable` and `jump`. None of the three is a stop: the solver and the slot analysis do not count them as ending their target |
+| `transport/andGo` | T | false | with `jump`: the target is fired as GO would fire it once standby is on it, and standby moves past it |
+| `cue/tonight` | s, read | `file` | `file`, `on` or `off`; never saved (`Persist::none`) |
+
+| command | address | arguments | meaning |
+|---|---|---|---|
+| `standby.jump` | `/godot/cmd/standby/jump` | `s list, s target, T andGo, h cause` | the jump cue's move, submitted by the engine on the tick after the cue fires, as a start cue's `cue.fire` is. Nothing a client sends. It is never `list.loadToTime`, which forgets the GO and would leave Doh! nothing to take back |
+
+### 27.3 The engine
+
+The override lives in `cue::Tonight`, on the tick thread beside the live layer (§17.13), with a
+revision that the slot analysis and the sampler layout fold into their cache keys. Every reader of a
+cue's `enabled` asks it: `ShowWalk::Reader::flag`, `cue::isEnabled`, `Runner::membersOf` and
+`armablesFor`. `ShowDocument`'s check of a saved pointer keeps reading the file, because the file
+knows nothing of tonight.
+
+A jump cue copies the start cue: `fireStop` queues the list, the target, `andGo` and the GO the run
+belongs to, and `beforeTick` submits `standby.jump` on the next tick, after the GO's own advance, so
+the jump's placement wins. With `andGo` the handler advances the pointer past the target and fires
+it under `setFireCause`, so the run carries the GO's serial and `noteFireOnList` does not count it as
+a fire after the GO.
+
+### 27.4 Named limits
+
+- **A jump does not cross lists** (PT).
+- **Load-to-time does not replay a jump.** The place it loads is where standby goes.
+- **The console client** shows the new verbs and `andGo` as plain rows. The worded list is the
+  desktop's.

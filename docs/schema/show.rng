@@ -1542,6 +1542,15 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="andGo">
+          <a:documentation>With the jump verb: once standby is on the target, the target is fired as GO would fire it, and standby moves past it. The fire belongs to the GO that fired this cue, so one Doh! takes back both and puts standby back here (namespace draft 27). Ignored by every other verb.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="colour">
           <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
           <data type="string"/>
@@ -1633,7 +1642,7 @@
       </optional>
       <optional>
         <attribute name="verb">
-          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary. record, loop, overdub and clear are not stops at all (Phase 9c, namespace draft 19.6): aimed at a sounding mic cue on a sampling channel they are the press of that name on its take - Rec, Loop, a layer begun or closed, the channel emptied - and against anything else they are applied and do nothing, as a stop aimed at a cue that is not running is.</a:documentation>
+          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary. record, loop, overdub and clear are not stops at all (Phase 9c, namespace draft 19.6): aimed at a sounding mic cue on a sampling channel they are the press of that name on its take - Rec, Loop, a layer begun or closed, the channel emptied - and against anything else they are applied and do nothing, as a stop aimed at a cue that is not running is. enable, disable and jump are not stops either (namespace draft 27): enable and disable switch the target on or off FOR TONIGHT - the show file is never written, reopening the show forgets it, and Doh! of the GO puts it back - and jump moves the standby pointer of this cue&apos;s own list onto the target, firing it too when andGo is on.</a:documentation>
           <choice>
             <value>hard</value>
             <value>fade</value>
@@ -1644,6 +1653,9 @@
             <value>loop</value>
             <value>overdub</value>
             <value>clear</value>
+            <value>enable</value>
+            <value>disable</value>
+            <value>jump</value>
           </choice>
         </attribute>
       </optional>
