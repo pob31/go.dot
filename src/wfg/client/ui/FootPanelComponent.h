@@ -44,6 +44,8 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace wfg::client::ui
 {
@@ -53,6 +55,11 @@ namespace wfg::client::ui
         struct Actions
         {
             std::function<void (const std::string& address, const std::string& text)> set;
+
+            /*  SEVERAL VALUES AS ONE GESTURE (namespace draft §30.11): the send
+                mixer and the EQ over several picked cues, one `node.setMany` a
+                frame. */
+            std::function<void (const std::vector<std::pair<std::string, std::string>>& writes)> setMany;
 
             /** `range.create`, asked for by the editor the panel is showing. */
             std::function<void (const std::string& cueId, double in, double out)> createRange;

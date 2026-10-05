@@ -3367,7 +3367,12 @@ namespace wfg::client::ui
                             as it is now rather than as it was when the menu
                             opened, so nothing already so is written again.
                             Gathered before the first is sent: a write may
-                            refresh the rows under `entry`. */
+                            refresh the rows under `entry`.
+
+                            ONE CHOICE, ONE STEP (namespace draft §30.11): the
+                            two writes go as one `node.setMany`, the role
+                            first, so one press of Undo takes back both - TA's
+                            two steps were the engine's to merge, and now are. */
                         const auto* entry = stripOf (id);
                         const auto chosen = static_cast<std::size_t> (at);
 
@@ -3376,8 +3381,8 @@ namespace wfg::client::ui
 
                         const auto writes = model::roleWrites (*entry, roleMenu[chosen]);
 
-                        for (const auto& write : writes)
-                            send (gesture::setNode (write.first, write.second));
+                        if (! writes.empty())
+                            send (gesture::setNodes (writes));
 
                         return;
                     }

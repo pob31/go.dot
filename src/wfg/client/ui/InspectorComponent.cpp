@@ -381,15 +381,25 @@ namespace wfg::client::ui
         return panelButtons.empty() ? 0 : row + row / 3;
     }
 
-    void InspectorComponent::rebuildPanels (const std::vector<model::Field>& panels)
+    void InspectorComponent::rebuildPanels (const std::vector<model::Field>& panels, bool several)
     {
         std::vector<std::string> words;
 
         for (const auto& panel : panels)
             words.push_back (panel.value);
 
-        if (words == panelWords)
+        /*  THE LABELS TOO, since over several cues they say how many (§30.11)
+            and the same two buttons over one cue and over six are not the same
+            buttons. */
+        std::string labels;
+
+        for (const auto& panel : panels)
+            labels += panel.label + "|";
+
+        if (words == panelWords && labels == panelLabels)
             return;
+
+        panelLabels = labels;
 
         for (auto& button : panelButtons)
             removeChildComponent (button.get());
@@ -405,14 +415,18 @@ namespace wfg::client::ui
             const auto word = label.upToFirstOccurrenceOf (",", false, false).trim();
 
             auto button = std::make_unique<IconButton> (model::iconForPanel (panel.value), word);
-            button->setTooltip ("Opens at the foot of the window, on this cue: " + label
-                                  + ". Pressed again, shuts it.");
+
+            /*  OVER SEVERAL CUES the label says how many it acts on (namespace
+                draft §30.11), and "on this cue" would contradict it. */
+            button->setTooltip ((several ? "Opens at the foot of the window: "
+                                         : "Opens at the foot of the window, on this cue: ")
+                                  + label + ". Pressed again, shuts it.");
 
             //  The subject is the button's; which cue it opens on is read when pressed.
             button->onClick = [this, subject = panel.value]
             {
                 if (actions.openPanel)
-                    actions.openPanel (drawnCue, subject);
+                    actions.openPanel (panelCue, subject);
             };
 
             addAndMakeVisible (*button);
@@ -426,7 +440,7 @@ namespace wfg::client::ui
     {
         for (std::size_t at = 0; at < panelButtons.size() && at < panelWords.size(); ++at)
             panelButtons[at]->setToggleState (! footWord.empty() && panelWords[at] == footWord
-                                                && ! drawnCue.empty() && footCue == drawnCue,
+                                                && ! panelCue.empty() && footCue == panelCue,
                                               juce::dontSendNotification);
     }
 
@@ -510,7 +524,7 @@ namespace wfg::client::ui
             are about which cue this is, not about its rows. */
         const auto accentWas = headAccent;
         readHead (inspection);
-        rebuildPanels (inspection.panels);
+        rebuildPanels (inspection.panels, inspection.count > 1);
 
         if (headAccent != accentWas)
             applyTheme (theme);
@@ -531,6 +545,7 @@ namespace wfg::client::ui
             addressed, and the address is the cue's - so the identifier moves
             here, before the values do, and the buttons read it when pressed. */
         drawnCue = inspection.cueId;
+        panelCue = inspection.panelCue.empty() ? inspection.cueId : inspection.panelCue;
         lightPanels();
 
         heading.setText (headingFor (inspection), juce::dontSendNotification);
@@ -723,32 +738,28 @@ namespace wfg::client::ui
 
     void InspectorComponent::commitField (const model::Field& field, const std::string& text)
     {
-        if (! actions.set)
-            return;
-
         if (field.addresses.empty())
         {
-            actions.set (field.address, text);
+            if (actions.set)
+                actions.set (field.address, text);
+
             return;
         }
 
-        for (const auto& address : field.addresses)
-            actions.set (address, text);
+        /*  OVER SEVERAL CUES, ONE GESTURE (namespace draft §30.11, RA): the
+            same text to every picked cue's own row, as one write the engine
+            applies whole or not at all, and one press of Undo takes back. It
+            was one `node.set` a cue, and as many presses. */
+        if (actions.setAll)
+            actions.setAll (field.addresses, text);
     }
 
     void InspectorComponent::commitCueRef (const model::Field& field, const std::string& text)
     {
-        if (! actions.setCueRef)
-            return;
-
-        if (field.addresses.empty())
-        {
-            actions.setCueRef (field.address, text);
-            return;
-        }
-
-        for (const auto& address : field.addresses)
-            actions.setCueRef (address, text);
+        if (actions.setCueRef)
+            actions.setCueRef (field.addresses.empty() ? std::vector<std::string> { field.address }
+                                                       : field.addresses,
+                               text);
     }
 
     juce::String InspectorComponent::shown (const model::Field& field)
@@ -839,6 +850,7 @@ namespace wfg::client::ui
         content.addAndMakeVisible (*detailsHead);
 
         drawnCue = inspection.cueId;
+        panelCue = inspection.panelCue.empty() ? inspection.cueId : inspection.panelCue;
         drawnShape = shapeOf (inspection);
         drawnKind = inspection.kind;
 
@@ -879,7 +891,7 @@ namespace wfg::client::ui
                 line->opener.onClick = [this, subject]
                 {
                     if (actions.openPanel)
-                        actions.openPanel (drawnCue, subject);
+                        actions.openPanel (panelCue, subject);
                 };
 
                 content.addAndMakeVisible (line->opener);
@@ -1007,7 +1019,7 @@ namespace wfg::client::ui
                         happened to be picked when the row was first drawn. */
                     line->sends.setWantsKeyboardFocus (false);
                     line->sends.setTooltip ("Send levels from this cue into the show's mix channels");
-                    line->sends.onClick = [this] { if (actions.openPanel) actions.openPanel (drawnCue, "sends"); };
+                    line->sends.onClick = [this] { if (actions.openPanel) actions.openPanel (panelCue, "sends"); };
 
                     content.addAndMakeVisible (line->sends);
                 }

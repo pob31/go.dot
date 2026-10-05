@@ -322,6 +322,11 @@ namespace wfg::client
                 inspectorActions.set = [this] (const std::string& address, const std::string& text)
                                        { send (gesture::setNode (address, text)); };
 
+                /*  AND ONE FIELD OVER SEVERAL CUES, ONE GESTURE (namespace
+                    draft §30.11): one `node.setMany`, one step to undo. */
+                inspectorActions.setAll = [this] (const std::vector<std::string>& addresses, const std::string& text)
+                                          { send (gesture::setAll (addresses, text)); };
+
                 /*  CLOSING THE PANEL IS PICKING NOTHING, which is client state
                     like the folds and never reaches the engine. */
                 inspectorActions.close = [this] { selection.clear(); };
@@ -365,11 +370,14 @@ namespace wfg::client
                     the rows this window is drawing. An empty field clears the
                     target; a name nobody has, or two cues have, writes nothing
                     and says so. */
-                inspectorActions.setCueRef  = [this] (const std::string& address, const std::string& text)
+                inspectorActions.setCueRef  = [this] (const std::vector<std::string>& addresses, const std::string& text)
                                               {
+                                                  if (addresses.empty())
+                                                      return;
+
                                                   if (text.empty())
                                                   {
-                                                      send (gesture::setNode (address, text));
+                                                      send (gesture::setAll (addresses, text));
                                                       return;
                                                   }
 
@@ -379,7 +387,7 @@ namespace wfg::client
                                                       shell->transport.setNotice ("no one cue is numbered or named "
                                                                                     + juce::String (text));
                                                   else
-                                                      send (gesture::setNode (address, id));
+                                                      send (gesture::setAll (addresses, id));
                                               };
 
                 /*  THE NEW-CUE ROW: one button per kind, one `cue.create` each,
@@ -420,6 +428,12 @@ namespace wfg::client
                 ui::FootPanelComponent::Actions footActions;
                 footActions.set = [this] (const std::string& address, const std::string& value)
                 { send (gesture::setNode (address, value)); };
+
+                /*  AND A SEND MIXER OR AN EQ OVER SEVERAL PICKED CUES (namespace
+                    draft §30.11): one `node.setMany` a frame, so a drag over six
+                    cues is one record a frame and one step of Undo in all. */
+                footActions.setMany = [this] (const std::vector<std::pair<std::string, std::string>>& writes)
+                { send (gesture::setNodes (writes)); };
                 footActions.close = [this]
                 {
                     /*  SHUT MEANS SHUT, for the one subject that opens itself:
@@ -1629,7 +1643,14 @@ namespace wfg::client
                                                   ? host.takes->snapshot()
                                                   : nullptr;
 
-                    shell->foot.show (model::readFoot (*snapshot, subject), mediaTable, takePictures);
+                    /*  OVER THE SELECTION, for a send mixer or an EQ
+                        (namespace draft §30.11): every media and mic cue
+                        picked, the anchor's values drawn. Not while a
+                        surface's page holds the foot - a page edits the one
+                        cue it is aimed at, and the panel shows that one. */
+                    shell->foot.show (model::readFoot (*snapshot, subject,
+                                                       surfaceHoldsFoot ? std::vector<std::string> {} : selection.ids()),
+                                      mediaTable, takePictures);
                 }
 
                 /*  AND EVERY OPEN PLUGIN WINDOW FOLLOWS THE PICK, from this
@@ -1666,7 +1687,7 @@ namespace wfg::client
                                                  : ui::Shell::Panel::none);
 
                 if (inspecting && ! loadingToTime && ! browsingUndo)
-                    shell->inspector.show (model::inspectMany (*snapshot, selection.ids()));
+                    shell->inspector.show (model::inspectMany (*snapshot, selection.ids(), selection.anchor()));
 
                 /*  WHICH PANEL IS OPEN AT THE FOOT, and on which cue, so the
                     inspector's panel buttons are lit while theirs is. */

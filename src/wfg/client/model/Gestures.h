@@ -253,6 +253,16 @@ namespace wfg::client::gesture
         which is the whole reason it needs no table of field names. */
     Event setNode (const std::string& address, const std::string& text);
 
+    /*  SEVERAL FIELDS, ONE GESTURE (namespace draft §30.11, the author's RA:
+        "one gesture is one undo"): a fader dragged over six picked cues, a
+        field typed over a selection, a strip's Role that also names its DCA.
+        `node.setMany` with the pairs in order - one record, one step, all or
+        none. One pair is `setNode`'s Event, the same write it always was. */
+    Event setNodes (const std::vector<std::pair<std::string, std::string>>& writes);
+
+    /** The same text to every one of `addresses`: a field typed over a selection. */
+    Event setAll (const std::vector<std::string>& addresses, const std::string& text);
+
     /*  Stops one run and everything under it. The running pane's cross, and
         only the cross: a cue stopped by a click that landed anywhere on a row
         is a cue nobody meant to stop. */

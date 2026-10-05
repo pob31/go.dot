@@ -196,6 +196,7 @@ namespace wfg::client::ui
             {
                 EqPanelComponent::Actions shaping;
                 shaping.set = actions.set;
+                shaping.setMany = actions.setMany;
                 shaping.reset = actions.resetEq;
                 shaping.say = [this] (const juce::String& sentence)
                 {
@@ -246,6 +247,7 @@ namespace wfg::client::ui
             {
                 SendMixerComponent::Actions mixing;
                 mixing.set = actions.set;
+                mixing.setMany = actions.setMany;
                 mixing.createSend = actions.createSend;
                 mixing.removeSend = actions.removeObject;
                 mixing.say = [this] (const juce::String& sentence)

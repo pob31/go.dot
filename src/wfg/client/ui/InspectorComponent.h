@@ -61,6 +61,11 @@ namespace wfg::client::ui
             /** One committed field: the node's own address, and the text typed into it. */
             std::function<void (const std::string& address, const std::string& text)> set;
 
+            /*  ONE FIELD COMMITTED OVER SEVERAL CUES (namespace draft §30.11):
+                every picked cue's own address for the row, and the one text -
+                one gesture, so one `node.setMany`, one step to undo. */
+            std::function<void (const std::vector<std::string>& addresses, const std::string& text)> setAll;
+
             /*  ASKS THE MACHINE FOR A FILE, which is the one thing a
                 browser cannot do (decision Y) and so the one control here
                 that is the desktop's alone. It is an ACCELERATOR and never a
@@ -70,8 +75,9 @@ namespace wfg::client::ui
 
             /*  A FIELD THAT NAMES A CUE, committed as typed: a number, a name
                 or an identifier. The window resolves it to the identifier the
-                document stores and says so when it cannot. */
-            std::function<void (const std::string& address, const std::string& text)> setCueRef;
+                document stores and says so when it cannot. Every picked cue's
+                address for the row, one for one cue - written as one gesture. */
+            std::function<void (const std::vector<std::string>& addresses, const std::string& text)> setCueRef;
 
             /*  OPENS THE PANEL AT THE FOOT on this cue, named by the subject
                 the field carries. The inspector does not know what a foot
@@ -148,7 +154,8 @@ namespace wfg::client::ui
             panel is open on this cue. Rebuilt only when the set changes. */
         std::vector<std::unique_ptr<IconButton>> panelButtons;
         std::vector<std::string> panelWords;
-        void rebuildPanels (const std::vector<model::Field>& panels);
+        std::string panelLabels;
+        void rebuildPanels (const std::vector<model::Field>& panels, bool several);
         void lightPanels();
         int panelBarHeight() const noexcept;
         std::string footWord, footCue;
@@ -199,6 +206,10 @@ namespace wfg::client::ui
 
         std::vector<std::unique_ptr<Line>> lines;
         std::string drawnCue;
+
+        /*  The cue the panel bar opens on and is lit for: `drawnCue` for one
+            cue, the anchor over several (namespace draft §30.11). */
+        std::string panelCue;
 
         /*  THE SHAPE OF THE PANEL AND NOT THE CUE IN IT, which is what stops
             it blinking (author, 2026-09-22: "is there a way so that the

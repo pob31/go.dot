@@ -27,8 +27,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <iterator>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace wfg::client::ui
 {
@@ -214,8 +217,21 @@ namespace wfg::client::ui
 
         flat.onClick = [this]
         {
-            if (actions.reset && ! reading.subject.objectId.empty())
-                actions.reset (reading.subject.objectId);
+            if (! actions.reset || reading.subject.objectId.empty())
+                return;
+
+            /*  OVER SEVERAL CUES, EVERY ONE OF THEM FLAT (namespace draft
+                §30.11) - one `eq.reset` a cue, so one step of Undo a cue: the
+                reset is its own command, and a set of values cannot carry it. */
+            if (reading.many())
+            {
+                for (const auto& cueId : reading.cues)
+                    actions.reset (cueId);
+
+                return;
+            }
+
+            actions.reset (reading.subject.objectId);
         };
 
         /*  THE TWO SHAPE MENUS, on the bands the table lets be shelves: the
@@ -406,6 +422,18 @@ namespace wfg::client::ui
             }
 
             actions.set (model::fadeMoveAddress (reading.eq.fadeId, "eq/" + row), text);
+            return;
+        }
+
+        /*  OVER SEVERAL PICKED CUES, THE ROW OF EVERY ONE (namespace draft
+            §30.11): a switch, a shape, a number typed, a width turned - the
+            same answer for all, as one gesture. A band's gain dragged moves
+            each from its own place instead, in `dragTo`. */
+        if (reading.many())
+        {
+            if (actions.setMany)
+                actions.setMany (model::eqRowForAll (reading.cues, row, text));
+
             return;
         }
 
@@ -720,6 +748,12 @@ namespace wfg::client::ui
         dragFrom = at;
         handleFrom = placeOf (dragged, held);
         dragFine = false;
+
+        //  And over several cues, where each one's EQ stood (§30.11).
+        grabbed.clear();
+
+        for (const auto& each : reading.eqs)
+            grabbed.push_back (each.settings);
     }
 
     juce::Point<float> EqPanelComponent::handlePosition (int handle) const
@@ -772,8 +806,42 @@ namespace wfg::client::ui
             auto& band = held.band[dragged];
             band.freq = static_cast<float> (frequency);
             band.gain = static_cast<float> (dbForY (target.y));
-            writeNumber (model::eqBandRow (dragged, "Freq"), band.freq, 0);
-            writeNumber (model::eqBandRow (dragged, "Gain"), band.gain, 1);
+
+            /*  OVER SEVERAL CUES, ONE WRITE A FRAME (namespace draft §30.11,
+                TL): the band's frequency the same for every cue, its gain moved
+                by what the lead's has moved, from where each stood at the grab -
+                the author's fader rule (RA) for the one EQ number that is a
+                level. One `node.setMany`, so the drag is one step of Undo. */
+            if (reading.many() && grabbed.size() == reading.cues.size())
+            {
+                if (actions.setMany)
+                {
+                    const auto freqRow = model::eqBandRow (dragged, "Freq");
+                    const auto gainRow = model::eqBandRow (dragged, "Gain");
+                    const auto freqText = numberText (std::clamp (static_cast<double> (band.freq), lowestHz, highestHz), 0);
+                    const auto leadFrom = static_cast<double> (grabbed.front().band[dragged].gain);
+
+                    std::vector<std::pair<std::string, std::string>> writes;
+
+                    for (std::size_t index = 0; index < reading.cues.size(); ++index)
+                    {
+                        const auto own = static_cast<double> (grabbed[index].band[dragged].gain);
+
+                        writes.emplace_back (model::eqAddress (reading.cues[index], freqRow), freqText);
+                        writes.emplace_back (model::eqAddress (reading.cues[index], gainRow),
+                                             numberText (model::eqGainMoved (own, leadFrom,
+                                                                             static_cast<double> (band.gain), rangeDb),
+                                                         1));
+                    }
+
+                    actions.setMany (writes);
+                }
+            }
+            else
+            {
+                writeNumber (model::eqBandRow (dragged, "Freq"), band.freq, 0);
+                writeNumber (model::eqBandRow (dragged, "Gain"), band.gain, 1);
+            }
         }
 
         refreshControls();

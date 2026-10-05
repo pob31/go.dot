@@ -318,6 +318,35 @@ namespace wfg::client::gesture
                  { osc::Value::string (address), osc::Value::string (text) } };
     }
 
+    Event setNodes (const std::vector<std::pair<std::string, std::string>>& writes)
+    {
+        if (writes.size() == 1)
+            return setNode (writes.front().first, writes.front().second);
+
+        std::vector<osc::Value> args;
+        args.reserve (writes.size() * 2);
+
+        //  As strings, for `setNode`'s reason: the engine parses each against its row.
+        for (const auto& [address, text] : writes)
+        {
+            args.push_back (osc::Value::string (address));
+            args.push_back (osc::Value::string (text));
+        }
+
+        return { origin::window, "node.setMany", std::move (args) };
+    }
+
+    Event setAll (const std::vector<std::string>& addresses, const std::string& text)
+    {
+        std::vector<std::pair<std::string, std::string>> writes;
+        writes.reserve (addresses.size());
+
+        for (const auto& address : addresses)
+            writes.emplace_back (address, text);
+
+        return setNodes (writes);
+    }
+
     Event kill (const std::string& runId)
     {
         return { origin::window, "run.kill", { osc::Value::string (runId) } };

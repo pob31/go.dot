@@ -20,6 +20,8 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -109,7 +111,47 @@ namespace wfg::client::model
         return false;
     }
 
-    FootReading readFoot (const tree::TreeSnapshot& snapshot, const Subject& subject)
+    bool servesMany (Subject::Kind kind)
+    {
+        return kind == Subject::Kind::sends || kind == Subject::Kind::eq;
+    }
+
+    std::vector<std::string> footCues (const tree::TreeSnapshot& snapshot, Subject::Kind kind,
+                                       const std::string& anchor, const std::vector<std::string>& picked)
+    {
+        if (! servesMany (kind) || picked.size() < 2)
+            return {};
+
+        const auto serves = [&snapshot] (const std::string& id)
+        {
+            const auto kindWord = text (snapshot, "/godot/cue/" + id + "/kind");
+            return kindWord == "media" || kindWord == "mic";
+        };
+
+        std::vector<std::string> out;
+
+        /*  THE ANCHOR FIRST, when the panel serves it: it is the cue clicked
+            last on purpose, and the one whose values the panel draws. */
+        if (std::find (picked.begin(), picked.end(), anchor) != picked.end() && serves (anchor))
+            out.push_back (anchor);
+
+        for (const auto& id : picked)
+            if (id != anchor && serves (id))
+                out.push_back (id);
+
+        return out;
+    }
+
+    std::string manyCuesWords (std::size_t acting, std::size_t picked)
+    {
+        if (acting >= picked)
+            return std::to_string (acting) + " cues";
+
+        return std::to_string (acting) + " of " + std::to_string (picked) + " cues";
+    }
+
+    FootReading readFoot (const tree::TreeSnapshot& snapshot, const Subject& subject,
+                          const std::vector<std::string>& picked)
     {
         FootReading out;
         out.subject = subject;
@@ -122,7 +164,23 @@ namespace wfg::client::model
             return text (snapshot, address);
         };
 
-        const auto cue = "/godot/cue/" + subject.objectId + "/";
+        /*  SEVERAL CUES AT ONCE (namespace draft §30.11, the author's report:
+            "it didn't spread to the complete selection"): a send mixer or an
+            EQ over a selection acts on every media and mic cue in it, and
+            draws the lead's values - the anchor's, when the anchor is one of
+            them. One such cue among several picked is simply that cue. */
+        if (const auto acting = footCues (snapshot, subject.kind, subject.objectId, picked); ! acting.empty())
+        {
+            out.subject.objectId = acting.front();
+
+            if (acting.size() > 1)
+            {
+                out.cues = acting;
+                out.picked = picked.size();
+            }
+        }
+
+        const auto cue = "/godot/cue/" + out.subject.objectId + "/";
 
         out.cueName = at (cue + "name");
         out.cueKind = at (cue + "kind");
@@ -134,12 +192,12 @@ namespace wfg::client::model
             out.fileLength = osc::parseDouble (at (cue + "duration")).value_or (0.0);
             out.rate = osc::parseDouble (at (cue + "rate")).value_or (1.0);
             out.rateMode = at (cue + "rateMode");
-            out.ranges = readRanges (snapshot, subject.objectId);
-            out.lane = readLane (snapshot, subject.objectId);
+            out.ranges = readRanges (snapshot, out.subject.objectId);
+            out.lane = readLane (snapshot, out.subject.objectId);
             out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 
             if (out.cueKind == "media")
-                for (const auto& strip : readSends (snapshot, subject.objectId))
+                for (const auto& strip : readSends (snapshot, out.subject.objectId))
                     if (! strip.sendId.empty())
                         out.sendLanes.push_back ({ strip.sendId, strip.name,
                                                    readLaneAt (snapshot, sendLaneAddress (strip.sendId)) });
@@ -161,14 +219,14 @@ namespace wfg::client::model
         }
 
         if (subject.kind == Subject::Kind::timeline)
-            out.timeline = readTimeline (snapshot, subject.objectId);
+            out.timeline = readTimeline (snapshot, out.subject.objectId);
 
         if (subject.kind == Subject::Kind::curve)
-            out.curve = readCurve (snapshot, subject.objectId);
+            out.curve = readCurve (snapshot, out.subject.objectId);
 
         if (subject.kind == Subject::Kind::fade)
         {
-            out.fadeMix = readFadeMix (snapshot, subject.objectId);
+            out.fadeMix = readFadeMix (snapshot, out.subject.objectId);
 
             if (! out.fadeMix.present)
                 out.notice = out.fadeMix.notice;
@@ -176,8 +234,12 @@ namespace wfg::client::model
 
         if (subject.kind == Subject::Kind::eq)
         {
-            out.eq = out.cueKind == "fade" ? readFadeEq (snapshot, subject.objectId)
-                                           : readEq (snapshot, subject.objectId);
+            out.eq = out.cueKind == "fade" ? readFadeEq (snapshot, out.subject.objectId)
+                                           : readEq (snapshot, out.subject.objectId);
+
+            //  Over several, every one's - the lead's is `eq`, read again here as the first.
+            for (const auto& id : out.cues)
+                out.eqs.push_back (id == out.subject.objectId ? out.eq : readEq (snapshot, id));
 
             if (! out.eq.present)
                 out.notice = out.eq.notice;
@@ -185,8 +247,8 @@ namespace wfg::client::model
 
         if (subject.kind == Subject::Kind::fx)
         {
-            out.fx = readFx (snapshot, subject.objectId);
-            out.eq = readEq (snapshot, subject.objectId);
+            out.fx = readFx (snapshot, out.subject.objectId);
+            out.eq = readEq (snapshot, out.subject.objectId);
 
             if (! out.fx.present)
                 out.notice = out.fx.notice;
@@ -194,7 +256,7 @@ namespace wfg::client::model
 
         if (subject.kind == Subject::Kind::take)
         {
-            out.take = readTake (snapshot, subject.objectId);
+            out.take = readTake (snapshot, out.subject.objectId);
 
             if (! out.take.present)
                 out.notice = out.take.notice;
@@ -203,7 +265,11 @@ namespace wfg::client::model
         if (subject.kind == Subject::Kind::sends)
         {
             out.cueLevel = osc::parseDouble (at (cue + "level")).value_or (0.0);
-            out.sends = readSends (snapshot, subject.objectId);
+            out.sends = out.many() ? readSendsMany (snapshot, out.cues)
+                                   : readSends (snapshot, out.subject.objectId);
+
+            for (const auto& id : out.cues)
+                out.cueLevels.push_back (osc::parseDouble (at ("/godot/cue/" + id + "/level")).value_or (0.0));
 
             if (out.cueKind != "media" && out.cueKind != "mic")
                 out.notice = "Only a media or a mic cue has send levels.";
@@ -211,6 +277,10 @@ namespace wfg::client::model
                 out.notice = "This show declares no mix channels yet - Show, Audio settings, "
                              "Outputs, add a mix channel.";
         }
+
+        /*  "6 CUES" IN THE HEAD, where one cue's name would stand (§30.11). */
+        if (out.many())
+            out.cueName = manyCuesWords (out.cues.size(), out.picked);
 
         /*  AND THE PLAYHEAD, from whichever run is sounding this cue. Read from
             the run half rather than from the document, because where a cue has
@@ -228,7 +298,7 @@ namespace wfg::client::model
             if (slash == std::string::npos || rest.substr (slash + 1) != "cue")
                 continue;
 
-            if (text (node) != subject.objectId)
+            if (text (node) != out.subject.objectId)
                 continue;
 
             const auto run = "/godot/run/" + rest.substr (0, slash) + "/";

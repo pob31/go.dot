@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <functional>
 #include <chrono>
+#include <cstddef>
 #include <string>
 #include <thread>
 #include <utility>
@@ -798,6 +799,84 @@ TEST_CASE ("inspector UI: a cue's preset is drawn as a menu of the groups around
     CHECK (written.front().second == scene.id);
 }
 
+TEST_CASE ("inspector UI: over several cues a field is one write to all of them, and the bar opens the EQ and sends on the anchor")
+{
+    /*  Namespace draft §30.11: "Selecting multiple media cues did not show all
+        the parameters and panels to adjust their sends all at once." A field
+        committed over a selection is one gesture - one write naming every
+        cue's row - and the panel bar is drawn for the selection. */
+    Rig rig;
+
+    const auto list = rig.document.createList ("Cues");
+    REQUIRE (list.ok);
+
+    const auto scene = rig.document.createCue (list.id, 0, "group", "Scene");
+    REQUIRE (scene.ok);
+
+    const auto bed = rig.document.createCue (scene.id, 0, "media", "Bed");
+    const auto rain = rig.document.createCue (scene.id, 1, "media", "Rain");
+    REQUIRE (bed.ok);
+    REQUIRE (rain.ok);
+
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::pair<std::vector<std::string>, std::string>> everywhere;
+    std::vector<std::pair<std::string, std::string>> opened;
+
+    client::ui::InspectorComponent::Actions actions;
+    actions.set = [&written] (const std::string& address, const std::string& text)
+                  { written.emplace_back (address, text); };
+    actions.setAll = [&everywhere] (const std::vector<std::string>& addresses, const std::string& text)
+                     { everywhere.emplace_back (addresses, text); };
+    actions.openPanel = [&opened] (const std::string& cueId, const std::string& subject)
+                        { opened.emplace_back (cueId, subject); };
+
+    client::ui::InspectorComponent panel (rig.theme, actions);
+    panel.setSize (420, 2000);
+    panel.show (client::model::inspectMany (*rig.publish(), { bed.id, rain.id }, rain.id));
+    panel.resized();
+
+    juce::ComboBox* menu = nullptr;
+    std::vector<juce::Button*> bar;
+
+    const std::function<void (juce::Component&)> walk = [&] (juce::Component& root)
+    {
+        if (auto* box = dynamic_cast<juce::ComboBox*> (&root))
+            if (box->getNumItems() > 0 && box->getItemText (0) == "not prepared ahead")
+                menu = box;
+
+        if (auto* button = dynamic_cast<juce::Button*> (&root))
+            if (button->getTooltip().startsWith ("Opens at the foot of the window: "))
+                bar.push_back (button);
+
+        for (auto* child : root.getChildren())
+            walk (*child);
+    };
+
+    walk (panel);
+
+    //  The menu's pick, over both: one write naming both rows.
+    REQUIRE (menu != nullptr);
+    menu->setSelectedId (2, juce::sendNotificationSync);
+
+    CHECK (written.empty());
+    REQUIRE (everywhere.size() == 1u);
+    CHECK (everywhere[0].first == std::vector<std::string> { "/godot/cue/" + bed.id + "/preset",
+                                                             "/godot/cue/" + rain.id + "/preset" });
+    CHECK (everywhere[0].second == scene.id);
+
+    //  The bar: the EQ and the sends, saying how many, opening on the anchor.
+    REQUIRE (bar.size() == 2u);
+    CHECK (bar[0]->getTooltip().contains ("on all 2 cues at once"));
+
+    //  A click, as the button delivers it (triggerClick posts, and this build runs no nested loop).
+    REQUIRE (bar[1]->onClick != nullptr);
+    bar[1]->onClick();
+
+    REQUIRE (opened.size() == 1u);
+    CHECK (opened[0].first == rain.id);
+    CHECK (opened[0].second == "sends");
+}
+
 TEST_CASE ("show settings UI: the Network tab declares devices and switches the sender filter")
 {
     Rig rig;
@@ -1388,25 +1467,27 @@ TEST_CASE ("show settings UI: a strip's Role is one menu of Sampler and the DCAs
     CHECK (chooser->getSelectedId() == itemReading (*chooser, "Sampler"));
     CHECK (rig.sent.empty());
 
-    //  Choosing a DCA sends the role, then the DCA: one choice, both writes.
+    /*  Choosing a DCA sends the role, then the DCA: one choice, both writes -
+        as ONE `node.setMany`, so one step of Undo (namespace draft §30.11,
+        TA's two steps made one). */
     chooser->setSelectedId (itemReading (*chooser, "DCA: Keys"), juce::dontSendNotification);
     REQUIRE (chooser->onChange != nullptr);
     chooser->onChange();
 
     const auto base = "/godot/slot/" + made[0] + "/";
 
-    REQUIRE (rig.sent.size() == 2u);
-    CHECK (rig.sent[0].command == "node.set");
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent[0].command == "node.setMany");
+    REQUIRE (rig.sent[0].args.size() == 4u);
     CHECK (rig.sent[0].args[0].getString() == base + "role");
     CHECK (rig.sent[0].args[1].getString() == "dca");
-    CHECK (rig.sent[1].command == "node.set");
-    CHECK (rig.sent[1].args[0].getString() == base + "dca");
-    CHECK (rig.sent[1].args[1].getString() == keys.id);
+    CHECK (rig.sent[0].args[2].getString() == base + "dca");
+    CHECK (rig.sent[0].args[3].getString() == keys.id);
     CHECK_FALSE (chooser->isVisible());
 
     //  Landed, the menu opens on it - and choosing it again writes nothing.
-    for (const auto& event : rig.sent)
-        REQUIRE (rig.document.setAttribute (event.args[0].getString(), event.args[1].getString()).ok);
+    for (std::size_t at = 0; at + 1 < rig.sent[0].args.size(); at += 2)
+        REQUIRE (rig.document.setAttribute (rig.sent[0].args[at].getString(), rig.sent[0].args[at + 1].getString()).ok);
 
     panel.refresh (*rig.publish());
     rig.sent.clear();
@@ -1421,14 +1502,16 @@ TEST_CASE ("show settings UI: a strip's Role is one menu of Sampler and the DCAs
     chooser->setSelectedId (itemReading (*chooser, "Sampler"), juce::dontSendNotification);
     chooser->onChange();
 
-    REQUIRE (rig.sent.size() == 2u);
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent[0].command == "node.setMany");
+    REQUIRE (rig.sent[0].args.size() == 4u);
     CHECK (rig.sent[0].args[0].getString() == base + "role");
     CHECK (rig.sent[0].args[1].getString() == "sampler");
-    CHECK (rig.sent[1].args[0].getString() == base + "dca");
-    CHECK (rig.sent[1].args[1].getString().empty());
+    CHECK (rig.sent[0].args[2].getString() == base + "dca");
+    CHECK (rig.sent[0].args[3].getString().empty());
 
-    for (const auto& event : rig.sent)
-        REQUIRE (rig.document.setAttribute (event.args[0].getString(), event.args[1].getString()).ok);
+    for (std::size_t at = 0; at + 1 < rig.sent[0].args.size(); at += 2)
+        REQUIRE (rig.document.setAttribute (rig.sent[0].args[at].getString(), rig.sent[0].args[at + 1].getString()).ok);
 
     rig.sent.clear();
 

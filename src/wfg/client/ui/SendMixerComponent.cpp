@@ -24,7 +24,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace wfg::client::ui
 {
@@ -73,14 +76,30 @@ namespace wfg::client::ui
                     done to a mistyped level - nought is full level. */
                 const auto typed = value.getText().trim();
 
+                /*  OVER SEVERAL CUES A TYPED NUMBER SETS THEM ALL TO IT (the
+                    author's RA, namespace draft §30.11) - and a drag moves
+                    them all by the same amount, below. */
+                const auto wanted = [this] (double decibels)
+                {
+                    if (owner.many())
+                    {
+                        owner.askedSends.clear();
+                        owner.levelsSet (at, decibels);
+                    }
+                    else
+                    {
+                        owner.levelWanted (at, decibels);
+                    }
+                };
+
                 if (typed.equalsIgnoreCase ("-inf") || typed.equalsIgnoreCase ("inf"))
                 {
-                    owner.levelWanted (at, model::silenceDb);
+                    wanted (model::silenceDb);
                     return;
                 }
 
                 if (const auto parsed = spatcore::ui::typed::number (typed))
-                    owner.levelWanted (at, static_cast<double> (*parsed));
+                    wanted (static_cast<double> (*parsed));
                 else
                     owner.refresh();
             };
@@ -144,7 +163,36 @@ namespace wfg::client::ui
             auto area = getLocalBounds().reduced (scaled (gap, owner.theme), 0);
             area.removeFromTop (scaled (26, owner.theme));    // the name and its width word
             area.removeFromBottom (scaled (isMaster ? 20 : 40, owner.theme));  // value, and the cross
+
+            //  Over several cues, a line under it for "mixed" (§30.11).
+            if (owner.many())
+                area.removeFromBottom (scaled (12, owner.theme));
+
             return area;
+        }
+
+        /** Under the throw, over several cues: where "mixed" is said. */
+        juce::Rectangle<int> captionArea() const
+        {
+            const auto track = throwArea();
+            return { track.getX(), track.getBottom(), track.getWidth(), scaled (12, owner.theme) };
+        }
+
+        /*  THE QUIETEST AND THE LOUDEST LEVEL AT THIS STRIP over the picked
+            cues: their own levels on the master, the sends that exist on a
+            mix. */
+        std::pair<double, double> spread() const
+        {
+            if (! isMaster)
+                return { send().lowestDb, send().loudestDb };
+
+            const auto& levels = owner.reading.cueLevels;
+
+            if (levels.empty())
+                return { owner.reading.cueLevel, owner.reading.cueLevel };
+
+            const auto [low, high] = std::minmax_element (levels.begin(), levels.end());
+            return { *low, *high };
         }
 
         /*  WHERE THE FADER IS DRAWN, which is the HAND while a hand is on it
@@ -177,6 +225,16 @@ namespace wfg::client::ui
             shown = held;
             dragging = true;
             dragFrom = event.position.y;
+
+            /*  AND OVER SEVERAL CUES, where each one stood when the hand went
+                down: every frame of the drag moves them from there, never from
+                the last frame, so a level the bottom held comes back to its
+                own place on the way up (§30.11). */
+            if (owner.many())
+            {
+                grabbed = owner.levelsAt (at);
+                owner.askedSends.clear();
+            }
         }
 
         void mouseUp (const juce::MouseEvent& event) override
@@ -213,7 +271,17 @@ namespace wfg::client::ui
             shown = model::dbForFraction (model::fractionForDb (held)
                                             + static_cast<double> (moved * scale));
 
-            owner.levelWanted (at, shown);
+            /*  OVER SEVERAL CUES THE SAME NUMBER OF DECIBELS FOR ALL (RA): the
+                cap is the lead's, and every cue that sends here moves by what
+                the lead has moved. A mix none of them sent to is made on every
+                one at the hand's level, as one cue's silent strip is. */
+            if (! owner.many())
+                owner.levelWanted (at, shown);
+            else if (! grabbed.empty())
+                owner.levelsMoved (grabbed, shown - held);
+            else
+                owner.levelsSet (at, shown);
+
             owner.refresh();
         }
 
@@ -224,7 +292,15 @@ namespace wfg::client::ui
                 return;
 
             //  Unity, which is where a strip is when nobody has decided otherwise.
-            owner.levelWanted (at, 0.0);
+            if (owner.many())
+            {
+                owner.askedSends.clear();
+                owner.levelsSet (at, 0.0);
+            }
+            else
+            {
+                owner.levelWanted (at, 0.0);
+            }
         }
 
         void mouseWheelMove (const juce::MouseEvent& event,
@@ -235,9 +311,25 @@ namespace wfg::client::ui
 
             const auto clicks = juce::roundToInt (wheel.deltaY * 10.0f);
 
-            if (clicks != 0)
-                owner.levelWanted (at, model::stepDb (levelHere(), clicks,
-                                                      event.mods.isShiftDown()));
+            if (clicks == 0)
+                return;
+
+            const auto stepped = model::stepDb (levelHere(), clicks, event.mods.isShiftDown());
+
+            //  A turn of the wheel is a small drag: the same step for every cue (RA).
+            if (! owner.many())
+            {
+                owner.levelWanted (at, stepped);
+            }
+            else if (const auto now = owner.levelsAt (at); ! now.empty())
+            {
+                owner.levelsMoved (now, stepped - levelHere());
+            }
+            else
+            {
+                owner.askedSends.clear();
+                owner.levelsSet (at, stepped);
+            }
         }
 
         void paint (juce::Graphics& g) override
@@ -272,9 +364,17 @@ namespace wfg::client::ui
 
             /*  "live" beside what the output is, while a locked show rides
                 this send (2026-09-25): heard, and not saved until kept. */
+            /*  OVER SEVERAL CUES, A MIX ONLY SOME OF THEM SEND TO SAYS HOW MANY
+                (§30.11): a drag moves those, and a number typed gives the rest
+                a send too. */
+            const auto someOf = ! isMaster && owner.many() && send().having() < owner.reading.cues.size();
+
             g.drawFittedText (isMaster ? juce::String ("a DCA over everything below")
-                                       : juce::String (send().widthWord + " " + send().channelWord
-                                                         + (send().live ? " - live" : "")),
+                                       : someOf ? juce::String (std::to_string (send().having()) + " of "
+                                                                  + std::to_string (owner.reading.cues.size()) + " cues"
+                                                                  + (send().live ? " - live" : ""))
+                                                : juce::String (send().widthWord + " " + send().channelWord
+                                                                  + (send().live ? " - live" : "")),
                               head, juce::Justification::centred, 1);
 
             //  The throw: a groove, a mark at unity, and the cap where the level is.
@@ -300,6 +400,28 @@ namespace wfg::client::ui
 
             const auto level = levelHere();
             const auto cap = placeOf (level);
+
+            /*  OVER SEVERAL CUES, THE SPREAD BEHIND THE CAP (§30.11): a band
+                from the quietest to the loudest of them, the lead's cap on it,
+                and the word "mixed" under the throw when they differ - the band
+                is a shape and the word says it again (§4.8). */
+            if (owner.many())
+            {
+                const auto [lowest, loudest] = spread();
+
+                if (loudest - lowest > 0.005)
+                {
+                    const auto top = placeOf (loudest);
+                    const auto bottom = placeOf (lowest);
+
+                    g.setColour (Look::colour (look, "ink-off").withMultipliedAlpha (0.45f));
+                    g.fillRect (juce::Rectangle<int> (track.getX() + 2, top - 1, track.getWidth() - 4, bottom - top + 2));
+
+                    g.setColour (Look::colour (look, "ink-faint"));
+                    g.setFont (Look::font (look, 10.0f));
+                    g.drawFittedText ("mixed", captionArea(), juce::Justification::centred, 1);
+                }
+            }
 
             /*  A SILENT STRIP WITH NOTHING BEHIND IT is drawn dimmer, and the
                 word under it says which it is - a send at silence and no send
@@ -347,6 +469,10 @@ namespace wfg::client::ui
         double shown = 0.0;     ///< where the hand has asked for it to be
         bool dragging = false;
         float dragFrom = 0.0f;
+
+        /*  Over several cues, every level at this strip when the hand went
+            down, by address (§30.11). */
+        std::vector<std::pair<std::string, double>> grabbed;
     };
 
     //==============================================================================
@@ -488,11 +614,27 @@ namespace wfg::client::ui
                 here rather than in the constructor because a send arriving is
                 no longer a rebuild: there is something to delete now, so there
                 is a cross, and the strip it belongs to has not moved. */
-            strip->showCross (! strip->isMaster && strip->send().present() && ! strip->send().live);
-            strip->showSwitch (! strip->isMaster && strip->send().present());
+            /*  OVER SEVERAL CUES, NO CROSS (§30.11, TK): taking six sends away
+                would be six deletes, six steps of Undo, for one press - a drag
+                to the bottom or the switch is the gesture there. The switch
+                stands for every cue that sends here, and says how many are on
+                when they differ. */
+            const auto several = many();
+
+            strip->showCross (! strip->isMaster && strip->send().present() && ! strip->send().live && ! several);
+            strip->showSwitch (! strip->isMaster && (several ? strip->send().having() > 0 : strip->send().present()));
 
             if (! strip->isMaster)
-                strip->onSwitch.setToggleState (strip->send().on, juce::dontSendNotification);
+            {
+                const auto having = several ? strip->send().having() : std::size_t { 0 };
+                const auto on = several ? strip->send().onCount() : std::size_t { 0 };
+                const auto split = several && on != 0 && on != having;
+
+                strip->onSwitch.setToggleState (several ? having > 0 && on == having : strip->send().on,
+                                                juce::dontSendNotification);
+                strip->onSwitch.setButtonText (split ? "on " + juce::String (on) + " of " + juce::String (having)
+                                                     : juce::String ("on"));
+            }
 
             if (strip->value.isBeingEdited())
                 continue;
@@ -505,10 +647,97 @@ namespace wfg::client::ui
 
     void SendMixerComponent::switchAt (std::size_t at, bool on)
     {
-        if (at == 0 || at - 1 >= reading.sends.size() || ! reading.sends[at - 1].present() || ! actions.set)
+        if (at == 0 || at - 1 >= reading.sends.size())
+            return;
+
+        /*  OVER SEVERAL CUES, EVERY SEND THERE IS TO THE ONE STATE, as one
+            write (§30.11). A cue with no send into this mix is given none: a
+            send made by a switch would be born at the row's nought, full level,
+            on a cue nobody raised (TM). */
+        if (many())
+        {
+            std::vector<std::pair<std::string, std::string>> writes;
+
+            for (const auto& share : reading.sends[at - 1].each)
+                if (share.present())
+                    writes.emplace_back ("/godot/send/" + share.sendId + "/on", on ? "true" : "false");
+
+            if (! writes.empty() && actions.setMany)
+                actions.setMany (writes);
+
+            return;
+        }
+
+        if (! reading.sends[at - 1].present() || ! actions.set)
             return;
 
         actions.set ("/godot/send/" + reading.sends[at - 1].sendId + "/on", on ? "true" : "false");
+    }
+
+    std::vector<std::pair<std::string, double>> SendMixerComponent::levelsAt (std::size_t at) const
+    {
+        std::vector<std::pair<std::string, double>> out;
+
+        if (at == 0)
+        {
+            for (std::size_t index = 0; index < reading.cues.size() && index < reading.cueLevels.size(); ++index)
+                out.emplace_back ("/godot/cue/" + reading.cues[index] + "/level", reading.cueLevels[index]);
+
+            return out;
+        }
+
+        if (at - 1 >= reading.sends.size())
+            return out;
+
+        for (const auto& share : reading.sends[at - 1].each)
+            if (share.present())
+                out.emplace_back ("/godot/send/" + share.sendId + "/level", share.levelDb);
+
+        return out;
+    }
+
+    std::vector<std::string> SendMixerComponent::missingAt (std::size_t at) const
+    {
+        std::vector<std::string> out;
+
+        if (at == 0 || at - 1 >= reading.sends.size())
+            return out;
+
+        for (const auto& share : reading.sends[at - 1].each)
+            if (! share.present())
+                out.push_back (share.cueId);
+
+        return out;
+    }
+
+    void SendMixerComponent::levelsMoved (const std::vector<std::pair<std::string, double>>& from, double decibels)
+    {
+        if (! from.empty() && actions.setMany)
+            actions.setMany (model::levelsMovedBy (from, decibels));
+    }
+
+    void SendMixerComponent::levelsSet (std::size_t at, double decibels)
+    {
+        std::vector<std::string> addresses;
+
+        for (const auto& held : levelsAt (at))
+            addresses.push_back (held.first);
+
+        if (! addresses.empty() && actions.setMany)
+            actions.setMany (model::levelsSetTo (addresses, decibels));
+
+        /*  AND A SEND FOR EVERY CUE THAT HAS NONE INTO THIS MIX, born at the
+            level asked for (TM) - each its own `send.create`, so its own step
+            of Undo: a send is an object, and making one is not a value the set
+            above could carry. Asked once a gesture. */
+        if (at == 0 || at - 1 >= reading.sends.size() || ! actions.createSend)
+            return;
+
+        const auto busId = reading.sends[at - 1].busId;
+
+        for (const auto& cueId : missingAt (at))
+            if (askedSends.insert (cueId + " " + busId).second)
+                actions.createSend (cueId, busId, std::round (std::clamp (decibels, model::silenceDb, model::loudestDb) * 10.0) / 10.0);
     }
 
     void SendMixerComponent::levelWanted (std::size_t at, double decibels)

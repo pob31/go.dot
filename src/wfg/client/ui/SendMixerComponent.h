@@ -48,7 +48,9 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::client::ui
@@ -60,6 +62,11 @@ namespace wfg::client::ui
         {
             /** One `node.set`: the cue's level, or one send's. */
             std::function<void (const std::string& address, const std::string& text)> set;
+
+            /*  SEVERAL AT ONCE (namespace draft §30.11): one gesture over the
+                picked cues - a frame of a drag, a number typed, a switch - as
+                one `node.setMany`, one step to undo. */
+            std::function<void (const std::vector<std::pair<std::string, std::string>>& writes)> setMany;
 
             /** `send.create` on this cue into that mix, when a silent strip is raised. */
             std::function<void (const std::string& cueId, const std::string& busId, double level)> createSend;
@@ -112,6 +119,24 @@ namespace wfg::client::ui
         /** A send's switch, by the mixer's index (2026-09-25). */
         void switchAt (std::size_t at, bool on);
 
+        /*  OVER SEVERAL PICKED CUES (namespace draft §30.11, the author's RA).
+            `levelsAt` is every picked cue's level at a strip - its address and
+            where it stands - for the cues that have one there: every cue's own
+            level on the master, the sends that exist on a mix. `missingAt` is
+            the cues with no send into that mix. */
+        bool many() const noexcept { return reading.many(); }
+        std::vector<std::pair<std::string, double>> levelsAt (std::size_t at) const;
+        std::vector<std::string> missingAt (std::size_t at) const;
+
+        /*  A DRAG OR A TURN: every level in `from` moved by the same number of
+            decibels, each kept in its range - their differences kept. */
+        void levelsMoved (const std::vector<std::pair<std::string, double>>& from, double decibels);
+
+        /*  A NUMBER TYPED, OR THE STRIP RESET: every picked cue to the one
+            level - and a cue with no send into the mix is given one, born at
+            that level (`send.create`, one each, once per gesture). */
+        void levelsSet (std::size_t at, double decibels);
+
         model::Theme theme;
         Actions actions;
 
@@ -123,6 +148,11 @@ namespace wfg::client::ui
         double awaitingLevel = 0.0;
 
         std::vector<std::unique_ptr<Strip>> strips;
+
+        /*  The sends a gesture over several cues has asked to be made, as
+            "cue bus", so a drag asks for each once - cleared when the hand
+            goes down again. */
+        std::set<std::string> askedSends;
 
         std::string dialed;
 

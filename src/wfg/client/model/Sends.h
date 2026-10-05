@@ -32,13 +32,30 @@
     channels are what the desk has, and what is up is what somebody pushed.
 */
 
+#include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::tree { class TreeSnapshot; }
 
 namespace wfg::client::model
 {
+    /*  ONE PICKED CUE'S PART OF A STRIP, when the mixer stands over several
+        cues at once (namespace draft §30.11). */
+    struct SendShare
+    {
+        std::string cueId;
+
+        /** Empty when this cue sends nothing into the mix yet. */
+        std::string sendId;
+
+        double levelDb = -120.0;
+        bool on = true;
+
+        bool present() const noexcept { return ! sendId.empty(); }
+    };
+
     /** One mix channel, and what this cue sends into it. */
     struct SendStrip
     {
@@ -70,6 +87,24 @@ namespace wfg::client::model
         bool live = false;
 
         bool present() const noexcept { return ! sendId.empty(); }
+
+        /*  OVER SEVERAL PICKED CUES (namespace draft §30.11): every cue's send
+            into this mix, in the reading's order - the first is the lead, whose
+            values are the ones above, drawn as the fader's cap - and how they
+            spread, drawn as a band behind it. Empty over one cue. */
+        std::vector<SendShare> each;
+
+        /*  The quietest and the loudest of the cues that have a send here -
+            the lead's level, when none has. */
+        double lowestDb = -120.0;
+        double loudestDb = -120.0;
+
+        /** How many of the picked cues send here at all, and how many of those are on. */
+        std::size_t having() const noexcept;
+        std::size_t onCount() const noexcept;
+
+        /** Whether the cues that send here do so at different levels. */
+        bool mixed() const noexcept;
     };
 
     /*  Every mix channel of the show, in output-list order, joined with this
@@ -77,4 +112,28 @@ namespace wfg::client::model
         all, which the panel says in a sentence rather than by drawing nothing.
     */
     std::vector<SendStrip> readSends (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /*  AND JOINED WITH SEVERAL CUES' (namespace draft §30.11): the strips of
+        the first of `cueIds` - the lead - each carrying every cue's send in
+        `each`, in the order given, and the spread of their levels. One scan of
+        the tree, however many cues. */
+    std::vector<SendStrip> readSendsMany (const tree::TreeSnapshot&, const std::vector<std::string>& cueIds);
+
+    /*  A FADER DRAGGED OVER SEVERAL CUES (namespace draft §30.11, the author's
+        RA: "the same number of decibels for all, keeping their differences"):
+        each address in `held` - with its level when the hand went down - moved
+        by `decibels`, kept between silence and the loudest a level takes, and
+        rounded to the tenth every level here is. Measured from the grab and
+        not from the last frame, so a level held at the bottom by the drag
+        comes back to its own place when the hand goes back up. */
+    std::vector<std::pair<std::string, std::string>> levelsMovedBy (const std::vector<std::pair<std::string, double>>& held,
+                                                                    double decibels);
+
+    /*  AND A NUMBER TYPED, or the strip reset: every one of `addresses` to the
+        one level, clamped and rounded the same way. */
+    std::vector<std::pair<std::string, std::string>> levelsSetTo (const std::vector<std::string>& addresses, double decibels);
+
+    /*  THE NUMBER A LEVEL IS WRITTEN AS: clamped between silence and the
+        loudest, to the tenth of a decibel, in the locale-free spelling. */
+    std::string levelText (double decibels);
 }

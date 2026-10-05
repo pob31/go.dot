@@ -1474,6 +1474,189 @@ TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes 
     }
 }
 
+TEST_CASE ("send mixer: over several cues a drag moves every one by the same decibels as one write, a number typed sets them all")
+{
+    /*  Namespace draft §30.11, the author's RA: "A drag moves every picked
+        cue's level or send by the same number of decibels, keeping their
+        differences; a typed number sets them all to it; one gesture is one
+        undo." Three cues; the reverb fed by two of them, at -6 and -12. */
+    std::vector<std::vector<std::pair<std::string, std::string>>> sets;
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::pair<std::string, double>> made;
+
+    ui::SendMixerComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.setMany = [&] (const std::vector<std::pair<std::string, std::string>>& writes) { sets.push_back (writes); };
+    actions.createSend = [&] (const std::string& cueId, const std::string& busId, double level)
+    {
+        made.emplace_back (cueId + " " + busId, level);
+    };
+
+    ui::SendMixerComponent mixer (model::Theme {}, actions);
+    mixer.setSize (420, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::sends, "CUE0000B" };
+    reading.cues = { "CUE0000B", "CUE0000A", "CUE0000C" };
+    reading.picked = 3;
+    reading.cueName = "3 cues";
+    reading.cueKind = "media";
+    reading.cueLevel = -3.0;
+    reading.cueLevels = { -3.0, 0.0, -10.0 };
+
+    model::SendStrip reverb;
+    reverb.busId = "BUS00001";
+    reverb.name = "Reverb";
+    reverb.widthWord = "Stereo";
+    reverb.channelWord = "5-6";
+    reverb.sendId = "SND0000B";
+    reverb.levelDb = -12.0;
+    reverb.each = { { "CUE0000B", "SND0000B", -12.0, true },
+                    { "CUE0000A", "SND0000A", -6.0, false },
+                    { "CUE0000C", {}, -120.0, true } };
+    reverb.lowestDb = -12.0;
+    reverb.loudestDb = -6.0;
+
+    reading.sends = { reverb };
+    mixer.show (reading);
+
+    {
+        juce::Image canvas (juce::Image::ARGB, 420, 220, true);
+        juce::Graphics g (canvas);
+        mixer.paintEntireComponent (g, true);
+    }
+
+    /*  NO CROSS OVER SEVERAL (TK), and the switch stands for the two that send
+        here, saying how many are on. */
+    std::vector<juce::Button*> crosses, switches;
+
+    for (auto* button : buttonsUnder (mixer))
+        (button->getButtonText() == "x" ? crosses : switches).push_back (button);
+
+    CHECK (crosses.empty());
+    REQUIRE (switches.size() == 1);
+    CHECK (switches[0]->getButtonText() == "on 1 of 2");
+    CHECK_FALSE (switches[0]->getToggleState());
+
+    std::vector<juce::Component*> strips;
+    std::vector<juce::Label*> boxes;
+
+    for (auto* child : mixer.getChildren())
+    {
+        strips.push_back (child);
+
+        for (auto* inner : child->getChildren())
+            if (auto* label = dynamic_cast<juce::Label*> (inner))
+                boxes.push_back (label);
+    }
+
+    REQUIRE (strips.size() == 2);
+    REQUIRE (boxes.size() == 2);
+
+    //  The cap is the anchor's number.
+    CHECK (boxes[0]->getText() == "-3");
+    CHECK (boxes[1]->getText() == "-12");
+
+    const auto texts = [] (const std::vector<std::pair<std::string, std::string>>& writes)
+    {
+        std::map<std::string, std::string> out;
+
+        for (const auto& [address, text] : writes)
+            out[address] = text;
+
+        return out;
+    };
+
+    SUBCASE ("a drag on the reverb moves the two sends by the same, from where they stood, one write a frame")
+    {
+        auto& strip = *strips[1];
+        const auto source = juce::Desktop::getInstance().getMainMouseSource();
+        const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+
+        const auto mouse = [&] (float y, bool dragged)
+        {
+            const auto now = juce::Time::getCurrentTime();
+            const juce::Point<float> at { 30.0f, y };
+            return juce::MouseEvent (source, at, left, juce::MouseInputSource::defaultPressure,
+                                     0.0f, 0.0f, 0.0f, 0.0f, &strip, &strip, now, { 30.0f, 120.0f }, now,
+                                     1, dragged);
+        };
+
+        //  A few pixels: the taper puts -12 high on the throw, and a long pull would reach the top.
+        strip.mouseDown (mouse (120.0f, false));
+        strip.mouseDrag (mouse (118.0f, true));
+        strip.mouseDrag (mouse (116.0f, true));
+
+        REQUIRE (sets.size() == 2u);
+        CHECK (written.empty());
+        CHECK (made.empty());
+
+        //  Both sends, and only those: the cue with none is not given one by a drag.
+        auto frame = texts (sets.back());
+        REQUIRE (frame.size() == 2u);
+
+        const auto anchor = wfg::osc::parseDouble (frame.at ("/godot/send/SND0000B/level")).value_or (0.0);
+        const auto other = wfg::osc::parseDouble (frame.at ("/godot/send/SND0000A/level")).value_or (0.0);
+
+        INFO ("anchor " << anchor << ", other " << other);
+        CHECK (anchor > -12.0);
+        CHECK (other - anchor == doctest::Approx (6.0).epsilon (0.02));
+
+        //  The same frame's drag from the grab, not from the last frame: back where it began, back where they were.
+        strip.mouseDrag (mouse (120.0f, true));
+        frame = texts (sets.back());
+        CHECK (frame.at ("/godot/send/SND0000B/level") == "-12");
+        CHECK (frame.at ("/godot/send/SND0000A/level") == "-6");
+
+        strip.mouseUp (mouse (120.0f, true));
+    }
+
+    SUBCASE ("a number typed sets every send to it, and gives the cue with none a send born at it")
+    {
+        boxes[1]->setText ("-3", juce::sendNotificationSync);
+
+        REQUIRE (sets.size() == 1u);
+        const auto frame = texts (sets[0]);
+        CHECK (frame.size() == 2u);
+        CHECK (frame.at ("/godot/send/SND0000B/level") == "-3");
+        CHECK (frame.at ("/godot/send/SND0000A/level") == "-3");
+
+        REQUIRE (made.size() == 1u);
+        CHECK (made[0].first == "CUE0000C BUS00001");
+        CHECK (made[0].second == doctest::Approx (-3.0));
+        CHECK (written.empty());
+    }
+
+    SUBCASE ("the master typed sets every cue's own level, as one write")
+    {
+        boxes[0]->setText ("-6,5", juce::sendNotificationSync);
+
+        REQUIRE (sets.size() == 1u);
+        const auto frame = texts (sets[0]);
+        REQUIRE (frame.size() == 3u);
+
+        for (const auto& [address, text] : frame)
+        {
+            INFO (address);
+            CHECK (text == "-6.5");
+        }
+
+        CHECK (frame.count ("/godot/cue/CUE0000C/level") == 1u);
+    }
+
+    SUBCASE ("the switch puts every send there is to one state, and makes none")
+    {
+        switches[0]->setToggleState (true, juce::sendNotificationSync);
+
+        REQUIRE (sets.size() == 1u);
+        const auto frame = texts (sets[0]);
+        CHECK (frame.size() == 2u);
+        CHECK (frame.at ("/godot/send/SND0000A/on") == "true");
+        CHECK (frame.at ("/godot/send/SND0000B/on") == "true");
+        CHECK (made.empty());
+    }
+}
+
 TEST_CASE ("active cue errors: collapsed drawer retains failures and respects edit mode")
 {
     std::string inspected;
@@ -2328,6 +2511,82 @@ TEST_CASE ("eq panel: a dragged point follows the hand, however often the readin
     CHECK (fine - third == doctest::Approx (0.5 * (third - second)).epsilon (0.1));
 
     panel.endDrag();
+}
+
+TEST_CASE ("eq panel: over several cues a band dragged is one write a frame - its frequency for all, its gain moved from each one's own")
+{
+    /*  Namespace draft §30.11, TL: the band's frequency the same on every
+        picked cue, its gain moved by what the anchor's has moved, from where
+        each stood when the hand went down; a switch the same for all. */
+    std::vector<std::vector<std::pair<std::string, std::string>>> sets;
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::string> flattened;
+
+    ui::EqPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.setMany = [&] (const std::vector<std::pair<std::string, std::string>>& writes) { sets.push_back (writes); };
+    actions.reset = [&] (const std::string& cueId) { flattened.push_back (cueId); };
+
+    ui::EqPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (720, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::eq, "CUE0000B" };
+    reading.cues = { "CUE0000B", "CUE0000A" };
+    reading.picked = 2;
+    reading.cueName = "2 cues";
+    reading.cueKind = "media";
+    reading.eq.present = true;
+    reading.eq.settings.band[1] = { wfg::audio::EqSettings::Shape::peak, 1000.0f, 0.0f, 1.0f };
+
+    auto other = reading.eq;
+    other.settings.band[1] = { wfg::audio::EqSettings::Shape::peak, 4000.0f, 3.0f, 1.0f };
+    reading.eqs = { reading.eq, other };
+
+    panel.show (reading);
+
+    const auto from = panel.handlePosition (1);
+    panel.beginDrag (from);
+    panel.dragTo (from + juce::Point<float> (20.0f, -15.0f), false);
+    panel.endDrag();
+
+    CHECK (written.empty());
+    REQUIRE (sets.size() == 1u);
+
+    std::map<std::string, double> frame;
+
+    for (const auto& [address, text] : sets[0])
+        frame[address] = wfg::osc::parseDouble (text).value_or (std::nan (""));   // never the locale's
+
+    REQUIRE (frame.size() == 4u);
+
+    //  One frequency for both, wherever each stood.
+    CHECK (frame.at ("/godot/cue/CUE0000B/eqB2Freq") == doctest::Approx (frame.at ("/godot/cue/CUE0000A/eqB2Freq")));
+    CHECK (frame.at ("/godot/cue/CUE0000B/eqB2Freq") > 1000.0);
+
+    //  The gain: the anchor's move, added to each one's own.
+    const auto moved = frame.at ("/godot/cue/CUE0000B/eqB2Gain");
+    CHECK (moved > 0.0);
+    CHECK (frame.at ("/godot/cue/CUE0000A/eqB2Gain") == doctest::Approx (3.0 + moved).epsilon (0.02));
+
+    //  A switch: the same for both, one write. Flat: each cue's own reset.
+    sets.clear();
+    panel.show (reading);
+
+    for (auto* child : panel.getChildren())
+        if (auto* toggle = dynamic_cast<juce::ToggleButton*> (child); toggle != nullptr && toggle->getButtonText() == "High-pass")
+            toggle->setToggleState (true, juce::sendNotificationSync);
+
+    REQUIRE (sets.size() == 1u);
+    REQUIRE (sets[0].size() == 2u);
+    CHECK (sets[0][0] == std::pair<std::string, std::string> { "/godot/cue/CUE0000B/eqHpf", "true" });
+    CHECK (sets[0][1] == std::pair<std::string, std::string> { "/godot/cue/CUE0000A/eqHpf", "true" });
+
+    for (auto* child : panel.getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*> (child); button != nullptr && button->getButtonText() == "Flat")
+            button->onClick();
+
+    CHECK (flattened == std::vector<std::string> { "CUE0000B", "CUE0000A" });
 }
 
 TEST_CASE ("eq panel: two fingers pinch a band's width, closing them narrows it, and the band taken is ringed")

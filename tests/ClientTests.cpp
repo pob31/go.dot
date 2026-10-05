@@ -489,6 +489,12 @@ TEST_CASE ("client: a row the pointer cannot stand on is not offered, and a refu
     /*  A BOUNCED GO IS SAID IN WORDS, and where to change it (2026-09-28). */
     reading.lastError = "5500 27 window too-soon go";
     CHECK (reading.errorLine() == "GO ignored: too soon after the last one (Show settings > Playback)");
+
+    /*  SEVERAL VALUES REFUSED AT ONE (namespace draft §30.11): the sixth field
+        is the address, and the sentence says none was written. */
+    reading.lastError = "5501 28 window locked node.setMany /godot/cue/B3N8R5TW/level";
+    CHECK (reading.errorLine() == "node.setMany refused: locked at /godot/cue/B3N8R5TW/level"
+                                  " - none of its values was written");
     reading.lastError = "something else entirely";
 
     /*  THE CLOCK MOVED AND THE SHOW FOLLOWED IT (PRD §6.2, 2026-09-28): said
@@ -652,6 +658,8 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::aim ("7K2QM9X4", "B3N8R5TW", 12.5), gesture::loadToTime ("7K2QM9X4"),
         gesture::recordStart(), gesture::recordStop(),
         gesture::setNode ("/godot/cue/B3N8R5TW/name", "Renamed"),
+        gesture::setNodes ({ { "/godot/cue/B3N8R5TW/name", "Renamed" }, { "/godot/cue/F7HR8TVD/name", "Too" } }),
+        gesture::setAll ({ "/godot/cue/B3N8R5TW/preWait", "/godot/cue/F7HR8TVD/preWait" }, "2"),
         gesture::createCue ("7K2QM9X4", 0, "media", "Thunder"),
         gesture::moveObject ("B3N8R5TW", "7K2QM9X4", 0),
         gesture::deleteObject ("B3N8R5TW"),
@@ -4360,8 +4368,14 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
         for (const auto& field : block.fields)
             CHECK (field.control != model::Control::opener);
 
-    //  Several cues at once have no bar: a panel is about one cue.
-    CHECK (model::inspectMany (*snapshot, { "P4MED001", "P4MED002" }).panels.empty());
+    /*  SEVERAL CUES AT ONCE HAVE THE PANELS THAT ACT ON ALL OF THEM (namespace
+        draft §30.11) - the EQ and the sends - and no others: the case below
+        has the rest. */
+    const auto several = model::inspectMany (*snapshot, { "P4MED001", "P4MED002" });
+
+    REQUIRE (several.panels.size() == 2u);
+    CHECK (several.panels[0].value == "eq");
+    CHECK (several.panels[1].value == "sends");
 }
 
 TEST_CASE ("client: a zoomed bar reads finer frames of a shorter span, not the same ones wider")
@@ -5399,6 +5413,267 @@ TEST_CASE ("client: the mixer draws a strip per mix channel, not per send")
 
         CHECK (model::readSends (*rig.publish (5), cue).front().present() == false);
     }
+}
+
+//==============================================================================
+/*  SEVERAL CUES AT ONCE (namespace draft §30.11): the author's report - "I
+    managed to open the panel, select multiple media cues and see the send
+    levels then, but it didn't spread to the complete selection" - and their
+    rule for it, RA: a fader over several picked cues moves every one by the
+    same number of decibels, a typed number sets them all, one gesture is one
+    undo.
+*/
+namespace
+{
+    /*  `minimal` with both its outputs made mixes and three media cues: the
+        first two send into the foldback at different levels, the third into
+        nothing; the first two into the main at one level. */
+    struct ManyRig : Rig
+    {
+        ManyRig()
+        {
+            const auto rows = model::readOutputs (*publish (0));
+            REQUIRE (rows.size() == 2);
+            mainBus = rows[0].id;
+            foldback = rows[1].id;
+
+            for (const auto& bus : { mainBus, foldback })
+                REQUIRE (apply (1, "window", "node.set", { osc::Value::string ("/godot/bus/" + bus + "/kind"),
+                                                           osc::Value::string ("mix") }).applied == 1);
+
+            int index = 0;
+
+            for (const auto& id : { first, second, third })
+                REQUIRE (apply (2, "window", "cue.create",
+                                { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (index++),
+                                  osc::Value::string ("media"), osc::Value::string ("Rain " + id),
+                                  osc::Value::string (id) }).applied == 1);
+
+            const auto send = [this] (const std::string& cue, const std::string& bus, const char* level, const char* id)
+            {
+                REQUIRE (apply (3, "window", "send.create", { osc::Value::string (cue), osc::Value::string (bus),
+                                                              osc::Value::string (id), osc::Value::string (level) })
+                             .applied == 1);
+            };
+
+            send (first, foldback, "-6", "SND0000A");
+            send (second, foldback, "-12", "SND0000B");
+            send (first, mainBus, "-3", "SND0000C");
+            send (second, mainBus, "-3", "SND0000D");
+
+            REQUIRE (apply (4, "window", "node.set", { osc::Value::string ("/godot/cue/" + first + "/level"),
+                                                       osc::Value::string ("-4") }).applied == 1);
+        }
+
+        const std::string first = "M3D7A5XZ";
+        const std::string second = "N4E8B6YZ";
+        const std::string third = "P5F9C7ZZ";
+        const std::string memo = "B3N8R5TW";
+        std::string mainBus, foldback;
+    };
+
+    const model::SendStrip& stripInto (const std::vector<model::SendStrip>& strips, const std::string& bus)
+    {
+        const auto found = std::find_if (strips.begin(), strips.end(),
+                                         [&bus] (const model::SendStrip& strip) { return strip.busId == bus; });
+        REQUIRE (found != strips.end());
+        return *found;
+    }
+}
+
+TEST_CASE ("client: over several picked cues the send mixer reads every cue's send, draws the anchor's, and says how many")
+{
+    ManyRig rig;
+    const auto snapshot = rig.publish (5);
+
+    REQUIRE (model::text (*snapshot, "/godot/cue/" + rig.memo + "/kind") == "memo");
+
+    /*  THE CUES A PANEL ACTS ON: the anchor first, then the rest in the order
+        picked, the memo passed over - and nothing for a panel that is one
+        cue's, or for one cue picked. */
+    const std::vector<std::string> picked { rig.first, rig.memo, rig.second, rig.third };
+
+    CHECK (model::footCues (*snapshot, model::Subject::Kind::sends, rig.second, picked)
+             == std::vector<std::string> { rig.second, rig.first, rig.third });
+    CHECK (model::footCues (*snapshot, model::Subject::Kind::eq, rig.second, picked).size() == 3u);
+    CHECK (model::footCues (*snapshot, model::Subject::Kind::waveform, rig.second, picked).empty());
+    CHECK (model::footCues (*snapshot, model::Subject::Kind::fx, rig.second, picked).empty());
+    CHECK (model::footCues (*snapshot, model::Subject::Kind::sends, rig.second, { rig.second }).empty());
+
+    //  An anchor the panel does not serve leads with the first that it does.
+    CHECK (model::footCues (*snapshot, model::Subject::Kind::sends, rig.memo, picked).front() == rig.first);
+
+    const auto reading = model::readFoot (*snapshot, { model::Subject::Kind::sends, rig.second }, picked);
+
+    REQUIRE (reading.many());
+    CHECK (reading.cues == std::vector<std::string> { rig.second, rig.first, rig.third });
+    CHECK (reading.picked == 4u);
+    CHECK (reading.subject.objectId == rig.second);
+    CHECK (reading.cueName == "3 of 4 cues");
+    CHECK (reading.notice.empty());
+
+    //  Every cue's own level, in the reading's order: the master's band.
+    REQUIRE (reading.cueLevels.size() == 3u);
+    CHECK (reading.cueLevels[0] == doctest::Approx (0.0));
+    CHECK (reading.cueLevels[1] == doctest::Approx (-4.0));
+
+    /*  THE FOLDBACK: the anchor's send drawn, every cue's part of it, the
+        spread, and one of three with none. */
+    const auto& foldback = stripInto (reading.sends, rig.foldback);
+
+    CHECK (foldback.sendId == "SND0000B");
+    CHECK (foldback.levelDb == doctest::Approx (-12.0));
+    REQUIRE (foldback.each.size() == 3u);
+    CHECK (foldback.each[0].cueId == rig.second);
+    CHECK (foldback.each[1].sendId == "SND0000A");
+    CHECK_FALSE (foldback.each[2].present());
+    CHECK (foldback.having() == 2u);
+    CHECK (foldback.onCount() == 2u);
+    CHECK (foldback.lowestDb == doctest::Approx (-12.0));
+    CHECK (foldback.loudestDb == doctest::Approx (-6.0));
+    CHECK (foldback.mixed());
+
+    //  The main: two at one level is not mixed.
+    const auto& toMain = stripInto (reading.sends, rig.mainBus);
+    CHECK (toMain.having() == 2u);
+    CHECK_FALSE (toMain.mixed());
+
+    //  Picked whole, the head says how many and no more.
+    CHECK (model::readFoot (*snapshot, { model::Subject::Kind::sends, rig.second },
+                            { rig.first, rig.second, rig.third }).cueName == "3 cues");
+
+    //  The EQ over the same: every cue's, the lead's drawn.
+    const auto eq = model::readFoot (*snapshot, { model::Subject::Kind::eq, rig.second }, picked);
+    CHECK (eq.eqs.size() == 3u);
+    CHECK (eq.eq.present);
+
+    //  A waveform stays one cue's, the selection notwithstanding.
+    const auto wave = model::readFoot (*snapshot, { model::Subject::Kind::waveform, rig.second }, picked);
+    CHECK_FALSE (wave.many());
+    CHECK (wave.cueName == "Rain " + rig.second);
+
+    //  And over one cue nothing about several is filled.
+    const auto one = model::readFoot (*snapshot, { model::Subject::Kind::sends, rig.second });
+    CHECK_FALSE (one.many());
+    CHECK (stripInto (one.sends, rig.foldback).each.empty());
+
+    SUBCASE ("a drag over the three is one write that the engine takes whole, each send moved by the same")
+    {
+        //  The foldback's two sends, held where they stood, moved up three decibels.
+        std::vector<std::pair<std::string, double>> held;
+
+        for (const auto& share : foldback.each)
+            if (share.present())
+                held.emplace_back ("/godot/send/" + share.sendId + "/level", share.levelDb);
+
+        const auto event = gesture::setNodes (model::levelsMovedBy (held, 3.0));
+        CHECK (event.command == "node.setMany");
+        REQUIRE (rig.apply (6, event.origin, event.command, event.args).applied == 1);
+
+        const auto after = model::readFoot (*rig.publish (7), { model::Subject::Kind::sends, rig.second }, picked);
+        const auto& moved = stripInto (after.sends, rig.foldback);
+
+        CHECK (moved.levelDb == doctest::Approx (-9.0));
+        CHECK (moved.each[1].levelDb == doctest::Approx (-3.0));
+        CHECK (moved.loudestDb - moved.lowestDb == doctest::Approx (6.0));
+    }
+
+    SUBCASE ("a field typed over the three is one write too")
+    {
+        const auto event = gesture::setAll ({ "/godot/cue/" + rig.first + "/level", "/godot/cue/" + rig.second + "/level",
+                                              "/godot/cue/" + rig.third + "/level" }, "-6");
+        CHECK (event.command == "node.setMany");
+        REQUIRE (rig.apply (6, event.origin, event.command, event.args).applied == 1);
+
+        const auto after = model::readFoot (*rig.publish (7), { model::Subject::Kind::sends, rig.second }, picked);
+
+        for (const auto level : after.cueLevels)
+            CHECK (level == doctest::Approx (-6.0));
+    }
+}
+
+TEST_CASE ("client: a fader over several cues moves each by the same decibels, held in its own range, and a typed number sets them all")
+{
+    /*  RA's arithmetic, apart from any window: measured from the grab, so a
+        level the bottom held comes back to its place when the hand does. */
+    const std::vector<std::pair<std::string, double>> grabbed { { "a", -6.0 }, { "b", -12.0 }, { "c", -118.0 } };
+
+    const auto texts = [] (const std::vector<std::pair<std::string, std::string>>& writes)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& write : writes)
+            out.push_back (write.second);
+
+        return out;
+    };
+
+    CHECK (texts (model::levelsMovedBy (grabbed, -5.0)) == std::vector<std::string> { "-11", "-17", "-120" });
+    CHECK (texts (model::levelsMovedBy (grabbed, 20.0)) == std::vector<std::string> { "12", "8", "-98" });
+    CHECK (texts (model::levelsMovedBy (grabbed, 0.0)) == std::vector<std::string> { "-6", "-12", "-118" });
+    CHECK (texts (model::levelsMovedBy (grabbed, 1.5)) == std::vector<std::string> { "-4.5", "-10.5", "-116.5" });
+    CHECK (model::levelsMovedBy (grabbed, 0.0).front().first == "a");
+
+    //  Typed, or reset: every one to the one number, clamped and rounded alike.
+    CHECK (texts (model::levelsSetTo ({ "a", "b" }, -3.04)) == std::vector<std::string> { "-3", "-3" });
+    CHECK (texts (model::levelsSetTo ({ "a" }, 40.0)) == std::vector<std::string> { "12" });
+    CHECK (texts (model::levelsSetTo ({ "a" }, -400.0)) == std::vector<std::string> { "-120" });
+
+    //  In the locale-free spelling, French included.
+    CHECK (model::levelText (-6.25) == "-6.3");
+
+    /*  AN EQ BAND'S GAIN DRAGGED OVER SEVERAL (TL): the lead's move added to
+        each one's own, within the field's range; its frequency and width the
+        same for all, as any row typed. */
+    CHECK (model::eqGainMoved (3.0, 0.0, 6.0, 24.0) == doctest::Approx (9.0));
+    CHECK (model::eqGainMoved (20.0, 0.0, 10.0, 24.0) == doctest::Approx (24.0));
+    CHECK (model::eqGainMoved (-20.0, 2.0, -8.0, 24.0) == doctest::Approx (-24.0));
+
+    const auto rows = model::eqRowForAll ({ "M3D7A5XZ", "N4E8B6YZ" }, "eqB2Freq", "800");
+    REQUIRE (rows.size() == 2u);
+    CHECK (rows[1].first == "/godot/cue/N4E8B6YZ/eqB2Freq");
+    CHECK (rows[1].second == "800");
+}
+
+TEST_CASE ("client: the panel bar over several cues is the EQ and the sends, opening on the anchor, and says how many")
+{
+    const auto all = model::openersForMany ({ "media", "mic", "media" }, "N4E8B6YZ");
+
+    REQUIRE (all.size() == 2u);
+    CHECK (all[0].value == "eq");
+    CHECK (all[1].value == "sends");
+    CHECK (all[0].control == model::Control::opener);
+    CHECK (all[0].address == "N4E8B6YZ");
+    CHECK (all[0].label == "EQ, four bands and two filters, on all 3 cues at once");
+    CHECK (all[1].label == "Sends, levels into the show's mix channels, on all 3 cues at once");
+
+    const auto some = model::openersForMany ({ "media", "memo", "fade", "media" }, "N4E8B6YZ");
+    REQUIRE (some.size() == 2u);
+    CHECK (some[1].label == "Sends, levels into the show's mix channels, on 2 of the 4 cues picked - the media and mic cues");
+
+    const auto alone = model::openersForMany ({ "memo", "media" }, "N4E8B6YZ");
+    REQUIRE (alone.size() == 2u);
+    CHECK (alone[0].label == "EQ, four bands and two filters, on 1 of the 2 cues picked - the media or mic cue");
+
+    //  Nothing to act on, nothing offered: no waveform, chain or take over several.
+    CHECK (model::openersForMany ({ "memo", "fade", "group" }, "N4E8B6YZ").empty());
+
+    //  On a real selection the bar opens on the anchor, or the first cue when the anchor is not picked.
+    ManyRig rig;
+    const auto snapshot = rig.publish (5);
+
+    const auto anchored = model::inspectMany (*snapshot, { rig.first, rig.second, rig.memo }, rig.second);
+    CHECK (anchored.panelCue == rig.second);
+    REQUIRE (anchored.panels.size() == 2u);
+    CHECK (anchored.panels[0].address == rig.second);
+    CHECK (anchored.panels[1].label.find ("2 of the 3 cues picked") != std::string::npos);
+
+    CHECK (model::inspectMany (*snapshot, { rig.first, rig.second }, "ZZZZZZZZ").panelCue == rig.first);
+    CHECK (model::inspect (*snapshot, rig.third).panelCue == rig.third);
+
+    //  And the words the head says in place of a name.
+    CHECK (model::manyCuesWords (6, 6) == "6 cues");
+    CHECK (model::manyCuesWords (6, 8) == "6 of 8 cues");
 }
 
 //==============================================================================

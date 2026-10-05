@@ -174,6 +174,8 @@ namespace wfg::client::model
 
         /*  tick, sequence, origin, reason, command - and the command may carry
             no spaces, so five fields is exactly what a well-formed record has.
+            A sixth is where a refusal happened when the reason cannot say: the
+            address a `node.setMany` was refused at (namespace draft §30.11).
             Anything else is shown as it came. */
         const auto fields = words (lastError);
 
@@ -182,11 +184,16 @@ namespace wfg::client::model
             stopped are the first thing anybody at the desk will ask about -
             and a refusal from before it is older news. */
         if (! rateMoved.empty()
-              && (lastError.empty() || (fields.size() == 5 && tickOf (fields[0]) <= tickOf (rateMovedTick))))
+              && (lastError.empty() || (fields.size() >= 5 && tickOf (fields[0]) <= tickOf (rateMovedTick))))
             return rateMoved;
 
         if (lastError.empty())
             return {};
+
+        /*  SEVERAL VALUES AS ONE EDIT, refused at one of them (§30.11): which
+            one is the news, since none of the others was written either. */
+        if (fields.size() == 6 && fields[4] == "node.setMany")
+            return "node.setMany refused: " + fields[3] + " at " + fields[5] + " - none of its values was written";
 
         if (fields.size() != 5)
             return lastError;
@@ -333,7 +340,7 @@ namespace wfg::client::model
 
         /*  A REFUSAL NEWER THAN THE REPORT TAKES THE LINE (the design's D4): the
             operator pressed something since, and what it said is the news now. */
-        if (const auto fields = words (lastError); fields.size() == 5)
+        if (const auto fields = words (lastError); fields.size() >= 5)
             if (const auto reportedAt = tickOf (std::string_view (dohReport).substr (first + 1, second - first - 1));
                 reportedAt >= 0 && tickOf (fields[0]) > reportedAt)
                 return {};

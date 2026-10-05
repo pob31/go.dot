@@ -43,6 +43,7 @@
     enforces it).
 */
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -77,6 +78,23 @@ namespace wfg::client::model
     /** Whether a subject of this kind re-points itself when the pick moves. */
     bool followsPick (Subject::Kind);
 
+    /*  WHETHER A PANEL OF THIS KIND EDITS EVERY PICKED CUE AT ONCE (namespace
+        draft §30.11): the sends and the EQ do, over the media and mic cues
+        picked. Every other panel is one cue's - a waveform, a chain, a take, a
+        timeline, a fade - and stays on the one it opened on. */
+    bool servesMany (Subject::Kind);
+
+    /*  THE CUES SUCH A PANEL ACTS ON: of `picked`, the media and mic cues,
+        `anchor` first when it is one of them, then the others in the order
+        they were picked. Empty when the panel is one cue's, or when fewer than
+        two cues are picked. */
+    std::vector<std::string> footCues (const tree::TreeSnapshot&, Subject::Kind, const std::string& anchor,
+                                       const std::vector<std::string>& picked);
+
+    /*  WHAT THE HEAD SAYS IN PLACE OF ONE CUE'S NAME: "6 cues" when the panel
+        acts on every cue picked, "6 of 8 cues" when some were passed over. */
+    std::string manyCuesWords (std::size_t acting, std::size_t picked);
+
     /*  THE WORD A SUBJECT GOES BY - "waveform", "sends", "eq" - which is what
         an inspector's panel button carries and what `model::iconForPanel`
         reads, and the way back from it. Empty and `none` for each other. */
@@ -101,6 +119,17 @@ namespace wfg::client::model
     struct FootReading
     {
         Subject subject;
+
+        /*  SEVERAL CUES AT ONCE (namespace draft §30.11): the cues a send mixer
+            or an EQ panel acts on, the lead first - the anchor, when it is one
+            of them - whose values are the ones drawn; `subject` then names the
+            lead. Empty when the panel is on one cue, which is every other
+            panel, and these two when fewer than two cues are picked. `picked`
+            is how many cues are picked in all, for "6 of 8". */
+        std::vector<std::string> cues;
+        std::size_t picked = 0;
+
+        bool many() const noexcept { return cues.size() > 1; }
 
         std::string cueName;     ///< what the title says it is showing
         std::string cueKind;
@@ -140,6 +169,10 @@ namespace wfg::client::model
         std::vector<SendStrip> sends;
         double cueLevel = 0.0;
 
+        /*  And every picked cue's own level, in `cues`' order, over several
+            (§30.11): the master strip's band, and where each starts a drag. */
+        std::vector<double> cueLevels;
+
         /*  A GROUP'S MEMBERS IN TIME, filled only when the timeline is what is
             open. It carries its own notice, which the panel shows in place of
             the reading's - a group with no members and a cue that is not a
@@ -160,6 +193,11 @@ namespace wfg::client::model
             the twenty-three rows as one value, the same value the voice is
             given, with its own notice for a cue that has none. */
         EqReading eq;
+
+        /*  And every picked cue's, in `cues`' order, over several (§30.11):
+            the lead's is `eq`, drawn; the rest are what a gain moved by hand
+            moves each from. */
+        std::vector<EqReading> eqs;
 
         /*  THE CUE'S SIGNAL CHAIN, filled only when the FX panel is what is
             open (author, 2026-09-25): the show's plugins in the order the
@@ -190,7 +228,10 @@ namespace wfg::client::model
         std::string notice;
     };
 
-    FootReading readFoot (const tree::TreeSnapshot&, const Subject&);
+    /*  `picked` is the list's selection, for the panels that serve several
+        cues at once (`servesMany`); a panel on one cue ignores it. */
+    FootReading readFoot (const tree::TreeSnapshot&, const Subject&,
+                          const std::vector<std::string>& picked = {});
 
     /*  WHERE THE FOOT GOES WHILE A SURFACE SHOWS A PAGE OF A CUE (author,
         2026-09-25: "When adjusting either EQ or send levels display the

@@ -301,6 +301,7 @@ to the node invokes the command; the same names are what the CLI and the event l
 | `cue.delete` | `/godot/cmd/cue/delete` | `s` id | |
 | `cue.move` | `/godot/cmd/cue/move` | `s` id `s` newParent `i` newIndex | also moves groups |
 | `node.set` | *the node's own address* | the node's type | a value write **is** this command; it has no `/cmd` node because its signature is the target's |
+| `node.setMany` | `/godot/cmd/node/setMany` | `s` address `*` value `[s address * value …]` | *(2026-10-05, §30.11)* several values as one edit: each pair through `node.set`'s doors, all or none, one record, one undo step; the same set of addresses from the same origin within the window joins, as one address does |
 | `node.touch` | `/godot/cmd/node/touch` | `s` address | per origin (question D) |
 | `node.release` | `/godot/cmd/node/release` | `s` address | |
 | `standby.set` | `/godot/cmd/standby/set` | `s` cue id | on the focused list; the cue must be one of its top-level children |
@@ -7784,10 +7785,12 @@ the drawn order with bands skipped, ctrl/⌘ toggles one in or out, ctrl/⌘-A p
 the show loses is dropped from it each pass. **The inspector over N** is the intersection of the rows
 every picked cue has and may write, in the first cue's order, with the value they agree on or
 *(mixed)* in the box - typing over it writes the one value to all, and leaving it writes nothing; the
-reported rows are left out, since a run position is one cue's. **A commit is N `node.set`s**, one per
+reported rows are left out, since a run position is one cue's. **A commit was N `node.set`s**, one per
 cue's own address, which is what §4.11 makes a batch edit: N decisions and N records, and N presses of
-undo. Delete acts on the whole selection the same way, and the menu says how many. A new cue still
-lands after the ANCHOR, the cue somebody clicked last on purpose.
+undo. *Since 2026-10-05 it is one `node.setMany` naming every cue's row - one record, one step of
+undo, all or none (§30.11, the author's RA).* Delete acts on the whole selection the same way, and
+the menu says how many. A new cue still lands after the ANCHOR, the cue somebody clicked last on
+purpose.
 
 **COPY AND PASTE, BETWEEN WINDOWS (2026-09-18).** *"Copy and paste of a selection of cues from one
 project to another should be possible."* Two engine commands, drawn so that neither client has to know
@@ -19434,7 +19437,8 @@ Tests:
   and the document joins only repeated writes to one address into one step. So Ctrl-Z takes back
   the DCA first and the role second. Merging them would need an engine change (a command that
   writes both, or a joining rule), which is out of scope on a window-side stage. If one step
-  matters, it is the engine's to give.
+  matters, it is the engine's to give. *Given by S9: the choice is now one `node.setMany`, the
+  role first, so one press of Ctrl-Z takes back both (§30.11).*
 - **TB - A fader's surface is named the way the strip menu names it, "Asparion D700 · fader 5".**
   The brief suggested "Surface 2, fader 5". The middle dot is how a sampler member's strip menu
   and the level lane's taken fader already name a fader on a surface, and one fader should not
@@ -19699,3 +19703,163 @@ Known limits of Replace, left as they are:
 
 Not built, for the author: a "Remove unused media…" command. It would clear what an unsaved
 session strands in `media/`, as it stranded MUT C2-C3.wav and MUT C3-C4.wav.
+
+### 30.11 What was built: S9 - several cues at once
+
+Item 5, on the engine and in the window. The triage held on every point: `inspectMany` filled no
+panel bar; a send is never an inspector row; every foot panel wrote one cue, the selection's anchor
+(the first cue clicked, with shift); and a commit over a selection was one `node.set` a cue, so one
+gesture cost as many presses of Undo as cues - while a fader dragged over six cues would have opened
+a step on nearly every write, since a run joins only one address.
+
+**One gesture over several addresses is one command.** `node.setMany <address> <value> [<address>
+<value> …]`, the pairs in the order given, beside `node.set` in `DocumentCommands`:
+
+| Command | Node | Params | Notes |
+|---|---|---|---|
+| `node.setMany` | `/godot/cmd/node/setMany` | `s` address `*` value `[s address * value …]` | every pair through `node.set`'s own doors; all or none; one record, one transaction |
+
+- *The same doors, not a copy of them.* `node.set`'s handler became one shared function,
+  `writeOne` - the mount door, the live doors (`liveWriteFor`, `liveEditFor`, the FX door, a fade's
+  moves) and the document's `setAttribute` - and `node.setMany` writes each pair through it. So a
+  locked show's EQ and sends still ride live in the layer, unsaved (AJ-AP), a send made live included,
+  and everything the document takes goes through its one write door.
+- *One record, one step.* The transaction hook already opens one step per applied command; a set is
+  one command. `ShowDocument::beginTransaction` keys a set's coalescing on its addresses sorted, one to
+  a line, so consecutive `node.setMany`s naming the same addresses (in any order), from the same
+  origin, within the 25 ticks, join - as one address does for `node.set` - and a set of one address
+  is that address, joining a `node.set` to it. `cue::isLiveEdit` answers for a set when every pair
+  rides live, so a drag over six sends under the lock opens no step at all.
+- *All or none.* Every pair is looked at before any is written: a string address, a value it can
+  be, no address twice (`bad-value`), none that is not Go.dot's or is a hand's ride (`bad-address`).
+  Then each is written in order, and if a door refuses one, what the pairs before it wrote is put
+  back: the document's values by `ShowDocument::ScopedKeep`, which `setAttribute` tells what a value
+  held before it changes it, and which puts each back through the history it went on - a frame that
+  joined a drag's step leaves that step exactly as the drag had made it, and a set that opened its own
+  step takes the step off whole (`undoCurrentTransactionOnly`) and lets nothing join what JUCE leaves
+  open behind it; the live layer by a copy taken before the first pair (`cue::liveSideFor`, passed to
+  `registerDocumentCommands` as `doc::LiveSide`, `LiveEdits::putBack`).
+- *The address refused is said.* A refusal carries the door's own reason, and `Outcome::detail`
+  carries the address it was refused at to `/godot/engine/lastError` as a sixth word, after the
+  command; the window reads it as "node.setMany refused: locked at /godot/cue/…/level - none of its
+  values was written". The log's line is unchanged: a refused record already carries every pair, and
+  a replay refuses it at the same address for the same reason.
+
+**The foot follows the selection.** `model::servesMany`: the send mixer and the EQ act on every
+picked cue they serve, media and mic (`model::footCues`, the anchor first, then the rest in the order
+picked). `readFoot` takes the selection: `FootReading::cues` (the lead first - the anchor, or the
+first served cue when the anchor is a memo or a fade), `picked`, every cue's own level
+(`cueLevels`) and EQ (`eqs`), and the subject named for the lead, whose values are the ones drawn.
+The head says "6 cues", or "6 of 8 cues" when some were passed over (`model::manyCuesWords`). While a
+surface's page holds the foot, the panel is the aimed cue's alone, as before (§30.5). The inspector's
+bar over a selection is `model::openersForMany`: EQ and Sends, opening on the anchor
+(`Inspection::panelCue`), each label saying how many it acts on.
+
+**The send mixer over several cues** (`readSendsMany`, one scan of the tree whatever the count): each
+strip carries every cue's send into its mix (`SendStrip::each`), how many have one (`having`), how
+many of those are on (`onCount`), and the quietest and loudest (`mixed` when they differ). The cap is
+the anchor's; behind it a band from the quietest to the loudest, and "mixed" under the throw. A drag
+moves every cue that sends there by the same number of decibels from where it stood at the grab, each
+held between silence and +12 (`model::levelsMovedBy`) - one `node.setMany` a frame, one step in all; a
+number typed, a double click and the wheel set or step them alike (`levelsSetTo`); the switch sets
+every send there is to one state; the master strip does the same with every cue's own level.
+
+**The EQ over several cues.** A band dragged writes, each frame, its frequency the same for every
+cue and its gain moved by what the anchor's has moved, from where each cue's stood at the grab, held
+to ±24 dB (`model::eqGainMoved`) - one `node.setMany`. A switch, a shape, a width turned and a number
+typed are the same for all (`model::eqRowForAll`). The curve drawn is the anchor's. Flat is one
+`eq.reset` a cue.
+
+**Two gestures that cost several steps, now one each.** The Surfaces tab's Role choice sends its
+`role` and `dca` as one `node.setMany`, the role first (TA, §30.7, amended). The inspector commits a
+field over several cues as one (`InspectorComponent::Actions::setAll`, `gesture::setAll`), a field
+naming a cue as well (`setCueRef`, now given every address). The sentence in the 2026-09-18 note that
+counted "N presses of undo" points here.
+
+Tests:
+- UndoTests, both locales: `undo: one gesture over several cues is one command, one record and one
+  step`; `undo: a drag over several cues is one step, and joins only the same set from the same hand
+  in time` (ten frames listing the cues in turn either way round; another set; two origins and a
+  pause; a set of one joining a `node.set`); `undo: a set refused at one address writes none of them,
+  says where, and leaves no step` (an odd count, a repeat, a mount's address; refused by the door after
+  two pairs were written - put back, no step, Undo's top still the last create, and the next set
+  opening a named step; refused inside a drag - the drag keeps its frames and is still one step;
+  the lock).
+- DocumentTests, both locales: `replay: a set of values over several cues reproduces itself, its
+  refusals and its document`, and `node.setMany` among the named commands.
+- GoTests, both locales: `live: a set of values rides live under the lock, is put back whole when one
+  pair is refused, and is one step unlocked` - through the doors serve installs: two sends ridden, the
+  show and the history untouched; a set with the cue's name refused `locked` at that address and the
+  ride put back; a run's trim refused; unlocked, one step and one Undo.
+- ClientTests, both locales: `client: over several picked cues the send mixer reads every cue's send,
+  draws the anchor's, and says how many` (on `minimal` with three media cues and two mixes: the cues
+  a panel acts on, "3 of 4 cues", every cue's part and the spread, the EQ's readings, a waveform left
+  one cue's, and a drag frame and a typed field each applied through the engine as one
+  `node.setMany`); `client: a fader over several cues moves each by the same decibels, held in its
+  own range, and a typed number sets them all`; `client: the panel bar over several cues is the EQ and
+  the sends, opening on the anchor, and says how many`; the gestures `setNodes` and `setAll` among the
+  real commands; the refusal's sentence. The case that pinned "several cues have no bar" is turned
+  round.
+- wfg_audio_ui_tests, both locales: `send mixer: over several cues a drag moves every one by the same
+  decibels as one write, a number typed sets them all` (through the strip's own mouse handlers: one
+  write a frame, the cue with no send not given one by a drag, the hand back at the grab putting them
+  back; typed - two set and the third given a send born at the level; the master; the switch); `eq
+  panel: over several cues a band dragged is one write a frame - its frequency for all, its gain moved
+  from each one's own`; `inspector UI: over several cues a field is one write to all of them, and the
+  bar opens the EQ and sends on the anchor`. The Role case in `show settings UI` now finds one
+  `node.setMany`.
+
+The three engine cases that put values back were seen failing (eight assertions) with the put-back
+switched off.
+
+**Counts.** `wfg_tests` whole but `AudioTests` - 1659 cases - green under C and `fr-FR` (run before
+the refusal's sentence and the last client cases were added; those, with every client, undo, replay,
+document, live, tree and schema case - 238 - green under both after). `wfg_audio_ui_tests` whole, 66
+cases, 1466 assertions, green under both. `ctest -R "replay|client|undo"` 65 of 65, every
+`wfg.replay.*` fixture replaying record for record, and `-R "schema|^ui\.|live|surface|document|lock"`
+14 of 14. `check-client-boundary.py`, `check-comments.py` and `check-claude-md.py` pass; clang-tidy
+with the GCC warnings finds nothing new in the changed sources and tests (the one shadow it names in
+`DocumentCommands.cpp`'s new handler is the init-capture `many = std::move (many)`, the shape
+`node.set` and `send.create` already had, which GCC does not warn about).
+
+- **TG - A mounted device's node is not part of a set.** It leaves the machine the moment it is
+  written, and a set that is all or none cannot take it back. `node.set` still writes it.
+- **TH - Nor is a hand's ride.** A fader's trim, a loop point, the lane's ride: no decision, no step of
+  the history, and nothing a set could put back. Both are refused `bad-address`, before anything is
+  written.
+- **TI - The address refused is a sixth word of `lastError`, never of the log.** The reason codes are
+  one word and a contract; the record already carries every pair. `Outcome::detail` and
+  `LogRecord::detail` carry it to the one place a person reads a refusal, and nowhere else.
+- **TJ - Over several cues the bar offers the EQ and the sends, and nothing else.** A chain, a
+  waveform, a take and a timeline are one cue's, and a button that opened one of them from a selection
+  of six would edit one where the hand meant six - so the FX button is absent rather than saying
+  "anchor only". A one-cue panel already open stays on the anchor, named in the head, as before.
+  Copying a chain to the selection is a later round.
+- **TK - No cross over several cues.** Taking six sends away is six `object.delete`s, six steps of
+  Undo for one press; a drag to the bottom, or the switch, is the gesture over a selection.
+- **TL - An EQ band's gain is moved, its frequency and width are set.** The gain is a level and keeps
+  its difference as a fader does (RA); two bands an octave apart do not keep a difference an ear
+  follows, so a frequency, a width, a switch and a shape are the same answer for every cue.
+- **TM - A number typed gives the cues with no send one; a drag and the switch do not.** Typed (and a
+  double click to unity), each missing send is made, born at the level asked for - one `send.create`
+  each, **so each is its own step of Undo**: a send is an object, and making one is not a value a set
+  can carry. A drag moves only the sends that exist, unless none does, when it makes them all at the
+  hand's level, as one cue's silent strip always has. The switch makes none: a send made by a switch
+  would be born at the row's nought, full level, on a cue nobody raised.
+- **TN - The lead is the anchor when it is served, else the first served cue picked.** A memo clicked
+  last does not leave the mixer saying "only a media or a mic cue has send levels" over five media
+  cues.
+
+**For the author:** the words in quotation marks are the implementer's - "6 cues" and "6 of 8 cues" in
+the head; the bar's "EQ, four bands and two filters, on all 6 cues at once" and "…, on 6 of the 8
+cues picked - the media and mic cues" ("the media or mic cue" for one), with the tooltip "Opens at the
+foot of the window: …"; the mixer's "mixed", "4 of 6 cues" on a mix only some cues send to, and "on
+3 of 4" on a switch that is split; and the refusal "node.setMany refused: <reason> at <address> -
+none of its values was written". Named limits: a typed level's new sends and a Flat over several are
+a step of Undo each; the master dial, from a strip or a box over several cues, turns the anchor's
+number only; one cue's EQ band dragged is still two `node.set`s a frame on two addresses, so a step
+on nearly every frame, as it was before this stage - `node.setMany` would make it one, and it was left
+for being outside the item; the import's `channels` and `directOut` after its create are two more; the
+console page (RC) still writes a selection one `node.set` a cue. Owed to the bench: a drag over six
+picked media cues' sends into one mix, and one Ctrl-Z taking it back; the same under the lock, heard
+and not saved; the band and "mixed" read across the booth.

@@ -63,6 +63,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::client::ui
@@ -74,6 +75,10 @@ namespace wfg::client::ui
         {
             /** One `node.set` on one of the cue's EQ rows. */
             std::function<void (const std::string& address, const std::string& text)> set;
+
+            /*  OVER SEVERAL PICKED CUES (namespace draft §30.11): a row of every
+                one of them, or a frame of a band dragged, as one `node.setMany`. */
+            std::function<void (const std::vector<std::pair<std::string, std::string>>& writes)> setMany;
 
             /** `eq.reset` on the cue: every row back, one transaction. */
             std::function<void (const std::string& cueId)> reset;
@@ -227,6 +232,11 @@ namespace wfg::client::ui
         void markDial();
 
         audio::EqSettings held;
+
+        /*  Over several cues, each one's EQ when the hand went down, in the
+            reading's order - what a band's gain is moved from (§30.11). */
+        std::vector<audio::EqSettings> grabbed;
+
         bool dragging = false;
         int dragged = noHandle;
         int hovered = noHandle;

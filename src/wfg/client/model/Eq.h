@@ -35,6 +35,7 @@
 
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::tree { class TreeSnapshot; }
@@ -85,6 +86,20 @@ namespace wfg::client::model
 
     /** `/godot/cue/<id>/<row>`, the address a hand writes. */
     std::string eqAddress (const std::string& cueId, const std::string& row);
+
+    /*  ONE ROW OF EVERY PICKED CUE'S EQ (namespace draft §30.11): a switch, a
+        shape or a number typed is the same answer for all of them, written as
+        one gesture. */
+    std::vector<std::pair<std::string, std::string>> eqRowForAll (const std::vector<std::string>& cueIds,
+                                                                  const std::string& row, const std::string& text);
+
+    /*  A BAND'S GAIN DRAGGED OVER SEVERAL CUES (namespace draft §30.11, TL):
+        the lead's move in decibels added to where each cue's own gain stood
+        when the hand went down, kept within plus or minus `range` - the
+        author's rule for a fader (RA) on the one EQ number that is a level.
+        Its frequency and its width are set the same on every cue: two bands an
+        octave apart do not keep their difference in any sense an ear follows. */
+    double eqGainMoved (double ownAtGrab, double leadAtGrab, double leadNow, double range);
 
     /*  The row names in the table's own spelling, so the panel and the
         reader never disagree about a letter: `eqB2Gain`, `eqHpfFreq`. */

@@ -26,12 +26,31 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace wfg::client::model
 {
     std::string eqAddress (const std::string& cueId, const std::string& row)
     {
         return "/godot/cue/" + cueId + "/" + row;
+    }
+
+    std::vector<std::pair<std::string, std::string>> eqRowForAll (const std::vector<std::string>& cueIds,
+                                                                  const std::string& row, const std::string& text)
+    {
+        std::vector<std::pair<std::string, std::string>> out;
+        out.reserve (cueIds.size());
+
+        for (const auto& cueId : cueIds)
+            out.emplace_back (eqAddress (cueId, row), text);
+
+        return out;
+    }
+
+    double eqGainMoved (double ownAtGrab, double leadAtGrab, double leadNow, double range)
+    {
+        return std::clamp (ownAtGrab + (leadNow - leadAtGrab), -range, range);
     }
 
     std::string eqBandRow (int band, const char* suffix)

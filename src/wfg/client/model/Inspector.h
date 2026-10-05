@@ -256,9 +256,14 @@ namespace wfg::client::model
 
         /*  THE PANELS THIS CUE HAS AT THE FOOT, as `openersFor` offers them -
             drawn as a bar at the head of the inspector rather than as rows
-            (author, 2026-09-30), and empty for several cues at once, since a
-            panel is about one cue. */
+            (author, 2026-09-30). Over several cues, the panels that act on
+            all of them at once (`openersForMany`, namespace draft §30.11). */
         std::vector<Field> panels;
+
+        /*  THE CUE A PANEL OPENED FROM HERE OPENS ON: this cue, or over
+            several the anchor - the cue clicked last on purpose - whose
+            values the panel draws, the others' around them. */
+        std::string panelCue;
 
         /** How many cues this is about: 0, 1, or several. */
         std::size_t count = 0;
@@ -275,6 +280,17 @@ namespace wfg::client::model
         broken rather than absent. Each is added here on the day its editor
         lands, and that one line is the whole of the change. */
     std::vector<Field> openersFor (const std::string& kind, const std::string& cueId);
+
+    /*  AND OVER SEVERAL CUES (namespace draft §30.11): the panels that edit
+        every picked cue they serve at once - the EQ and the sends, for media
+        and mic cues - opening on `anchor`. `kinds` is each picked cue's kind.
+        The rest are one cue's - a waveform, a chain, a take, a timeline - and
+        are not offered over several: a button that opened one cue's panel from
+        a selection of six would edit one where the hand meant six. Each label
+        says how many it acts on: "on all 6 cues at once", or "on 6 of the 8
+        cues picked" and which. Empty when none of the picked cues has either
+        panel. */
+    std::vector<Field> openersForMany (const std::vector<std::string>& kinds, const std::string& anchor);
 
     /** Everything published under one cue, sorted into blocks. Empty for no cue. */
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId);
@@ -302,6 +318,8 @@ namespace wfg::client::model
         has, by name, with the value they agree on or `mixed`; the reported
         rows are left out, since a run position is one cue's. One cue is
         `inspect`; none is empty. The blocks are ordered by the first cue's
-        kind, and the heading says how many and which kinds. */
-    Inspection inspectMany (const tree::TreeSnapshot& snapshot, const std::vector<std::string>& cueIds);
+        kind, and the heading says how many and which kinds. `anchor` is the
+        cue the panels open on, the first cue when it is not one of them. */
+    Inspection inspectMany (const tree::TreeSnapshot& snapshot, const std::vector<std::string>& cueIds,
+                            const std::string& anchor = {});
 }

@@ -32,6 +32,7 @@
 #include <iterator>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::client::model
@@ -956,6 +957,40 @@ namespace wfg::client::model
         return out;
     }
 
+    std::vector<Field> openersForMany (const std::vector<std::string>& kinds, const std::string& anchor)
+    {
+        /*  THE CUES THE TWO PANELS SERVE, media and mic, which both have an EQ
+            and sends; a memo, a fade or a group in the selection is passed
+            over, and the label says how many are left. */
+        const auto served = static_cast<std::size_t> (std::count_if (kinds.begin(), kinds.end(),
+                                                                     [] (const std::string& kind)
+                                                                     { return kind == "media" || kind == "mic"; }));
+
+        if (served == 0)
+            return {};
+
+        const auto onHowMany = served == kinds.size()
+                                 ? ", on all " + std::to_string (served) + " cues at once"
+                                 : ", on " + std::to_string (served) + " of the " + std::to_string (kinds.size())
+                                     + " cues picked - " + (served == 1 ? "the media or mic cue" : "the media and mic cues");
+
+        std::vector<Field> out;
+
+        for (const auto& [label, subject] : { std::pair { "EQ, four bands and two filters", "eq" },
+                                              std::pair { "Sends, levels into the show's mix channels", "sends" } })
+        {
+            Field field;
+            field.name = subject;
+            field.label = label + onHowMany;
+            field.control = Control::opener;
+            field.value = subject;
+            field.address = anchor;
+            out.push_back (std::move (field));
+        }
+
+        return out;
+    }
+
     bool mayDial (const Field& field)
     {
         return field.writable && field.applies && ! field.boolean
@@ -1272,6 +1307,7 @@ namespace wfg::client::model
             sampler group most of all - and a door is quickest where the eye
             lands first. */
         out.panels = openersFor (out.kind, cueId);
+        out.panelCue = cueId;
 
         for (auto* block : { &isBlock, &whenBlock, &doesBlock, &samplerBlock, &listBlock })
             if (! block->fields.empty())
@@ -1284,7 +1320,8 @@ namespace wfg::client::model
         return out;
     }
 
-    Inspection inspectMany (const tree::TreeSnapshot& snapshot, const std::vector<std::string>& cueIds)
+    Inspection inspectMany (const tree::TreeSnapshot& snapshot, const std::vector<std::string>& cueIds,
+                            const std::string& anchor)
     {
         if (cueIds.empty())
             return {};
@@ -1319,6 +1356,18 @@ namespace wfg::client::model
 
         for (std::size_t at = 0; at < kinds.size(); ++at)
             out.kind += (at == 0 ? "" : " + ") + kinds[at];
+
+        /*  AND THE PANELS THAT ACT ON ALL OF THEM AT ONCE (namespace draft
+            §30.11), opening on the anchor - the cue clicked last on purpose,
+            whose values the panel draws. */
+        out.panelCue = std::find (cueIds.begin(), cueIds.end(), anchor) != cueIds.end() ? anchor : cueIds.front();
+
+        std::vector<std::string> eachKind;
+
+        for (const auto& one : each)
+            eachKind.push_back (one.kind);
+
+        out.panels = openersForMany (eachKind, out.panelCue);
 
         const auto findField = [] (const Inspection& in, const std::string& name) -> const Field*
         {
