@@ -2169,8 +2169,18 @@ namespace wfg::client::ui
             THREE BUTTONS, THREE DIFFERENT WORDS. A person scanning a tab reads
             the word on a button, and so does a test - which takes the first
             button it finds with a given word, and would never reach a second
-            ADD. */
-        class SurfacesPage final : public juce::Component
+            ADD.
+
+            THE BUG ROUND OF 2026-10-05 (namespace draft §30, S4): "adding some
+            DCA ... did not show the DCA anywhere and there is no way to
+            rearrange the order". A strip's Role is now one menu that also
+            names the DCA - one choice, a `node.set` of the role and then one
+            of the DCA - and the DCA column that hid behind it is gone; each
+            DCA says which faders ride it, "no fader" in words; and a strip is
+            dragged to a new place on its surface, one `object.move`. */
+        class SurfacesPage final : public juce::Component,
+                                   public juce::DragAndDropContainer,
+                                   public juce::DragAndDropTarget
         {
         public:
             SurfacesPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
@@ -2189,6 +2199,12 @@ namespace wfg::client::ui
                 stripList.setModel (&stripLister);
                 dcaList.setModel (&dcaLister);
 
+                /*  A STRIP ROW IS DRAGGED AND CLICKED BOTH (namespace draft
+                    §30, S4), so its click waits for the hand to come up: a
+                    press that turns into a drag is a move, and must not also
+                    have opened the Role menu under it on the way down. */
+                stripList.setRowSelectedOnMouseDown (false);
+
                 for (auto* button : { &addSurfaceButton, &addStripButton, &addDcaButton })
                     addAndMakeVisible (*button);
 
@@ -2198,7 +2214,8 @@ namespace wfg::client::ui
                                              " with it.");
                 addStripButton.setTooltip ("One more strip at the end of the surface picked above.");
                 addDcaButton.setTooltip ("Declare a DCA: a trim that the cues and groups marked"
-                                         " with it follow, ridden from a dca strip.");
+                                         " with it follow. A fader rides it once a strip's Role,"
+                                         " above, names it.");
 
                 /*  WHICH KIND OF SURFACE IS ASKED FIRST, in a popup of the
                     four profiles - the one chooser this page moves about,
@@ -2277,6 +2294,10 @@ namespace wfg::client::ui
                     choosing = Choice::none;
                     choosingId.clear();
                     chooser.setVisible (false);
+
+                    //  And a strip in the air lands nowhere: the drop is refused under the lock.
+                    dropRow = -1;
+                    repaint();
                 }
 
                 /*  A POPUP DISMISSED WITHOUT A CHOICE says nothing to the
@@ -2354,16 +2375,32 @@ namespace wfg::client::ui
                     g.drawText (surfaceNames[at], surfaceHeads[at], juce::Justification::centredLeft);
 
                 const auto stripHeads = stripCells (headings[1].withWidth (rowWidth (stripList)));
-                const char* stripNames[] { "Strip", "Role", "DCA", "State" };
+                const char* stripNames[] { "Strip", "Role", "State" };
 
-                for (std::size_t at = 0; at < 4; ++at)
+                for (std::size_t at = 0; at < 3; ++at)
                     g.drawText (stripNames[at], stripHeads[at], juce::Justification::centredLeft);
 
                 const auto dcaHeads = dcaCells (headings[2].withWidth (rowWidth (dcaList)));
-                const char* dcaNames[] { "Name", "Short name", "Inside" };
+                const char* dcaNames[] { "Name", "Short name", "Fader", "Inside" };
 
-                for (std::size_t at = 0; at < 3; ++at)
+                for (std::size_t at = 0; at < 4; ++at)
                     g.drawText (dcaNames[at], dcaHeads[at], juce::Justification::centredLeft);
+            }
+
+            /*  WHERE A DRAGGED STRIP WOULD LAND, drawn between two rows rather
+                than on one, as the output list draws it: the gap is what a
+                move names, and a lit row would read as "replace this". */
+            void paintOverChildren (juce::Graphics& g) override
+            {
+                if (dropRow < 0)
+                    return;
+
+                const auto* viewport = stripList.getViewport();
+                const auto y = stripList.getY() + dropRow * stripList.getRowHeight()
+                                 - (viewport != nullptr ? viewport->getViewPositionY() : 0);
+
+                g.setColour (Look::colour (theme, "picked"));
+                g.fillRect (stripList.getX(), y - 1, stripList.getWidth(), 2);
             }
 
         private:
@@ -2396,6 +2433,11 @@ namespace wfg::client::ui
                 //  One click opens the editor; a second lands in it (the output list's reason).
                 void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
 
+                juce::var getDragSourceDescription (const juce::SparseSet<int>& selected) override
+                {
+                    return owner.dragOf (which, selected);
+                }
+
                 SurfacesPage& owner;
                 Which which;
             };
@@ -2404,11 +2446,11 @@ namespace wfg::client::ui
                 choosing - named rather than numbered, so a new column breaks a
                 compile and not a gesture. */
             enum class Field { none, surfaceName, surfacePreset, dcaName, dcaShort };
-            enum class Choice { none, addSurface, profile, bank1, bank2, role, stripDca, dcaParent };
+            enum class Choice { none, addSurface, profile, bank1, bank2, role, dcaParent };
 
             enum class SurfaceCell { name, profile, bank1, bank2, preset, enabled, state, cross };
-            enum class StripCell { index, role, dca, word, cross };
-            enum class DcaCell { name, shortName, inside, cross, none };
+            enum class StripCell { index, role, word, cross };
+            enum class DcaCell { name, shortName, faders, inside, cross, none };
 
             /*  ONE CARVE PER LIST, used by the painter, the hit test and the
                 headings, so a click cannot land somewhere the eye says is
@@ -2429,27 +2471,36 @@ namespace wfg::client::ui
                 return { area, profile, bank1, bank2, preset, enabled, state, cross };
             }
 
-            static std::array<juce::Rectangle<int>, 5> stripCells (juce::Rectangle<int> row)
+            /*  THE ROLE CELL HAS THE OLD DCA CELL'S ROOM TOO (namespace draft
+                §30, S4): it says "DCA: <name>" now, and the DCA column it
+                replaces is gone - one cell, one menu. The strip's number keeps
+                a grip at its left, drawn while a row can be dragged. */
+            static constexpr int gripWidth = 18;
+
+            static std::array<juce::Rectangle<int>, 4> stripCells (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
                 const auto cross = area.removeFromRight (24);
                 const auto number = area.removeFromLeft (56);
-                const auto role = area.removeFromLeft (120);
-                const auto dca = area.removeFromLeft (juce::jmin (240, area.getWidth() / 2));
+                const auto role = area.removeFromLeft (juce::jmin (360, area.getWidth() / 2));
 
-                return { number, role, dca, area, cross };
+                return { number, role, area, cross };
             }
 
-            static std::array<juce::Rectangle<int>, 4> dcaCells (juce::Rectangle<int> row)
+            static std::array<juce::Rectangle<int>, 5> dcaCells (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
+                /*  THE FADERS TAKE UP TO HALF OF WHAT IS LEFT: with two surfaces
+                    each is named ("Asparion D700 · faders 3 and 7; Virtual
+                    panel · fader 2"), and a DCA's name is short. */
                 const auto cross = area.removeFromRight (24);
                 const auto inside = area.removeFromRight (220);
+                const auto faders = area.removeFromRight (juce::jmin (440, area.getWidth() / 2));
                 const auto shortName = area.removeFromRight (140);
 
-                return { area, shortName, inside, cross };
+                return { area, shortName, faders, inside, cross };
             }
 
             static SurfaceCell surfaceCellAt (int x, int width)
@@ -2469,8 +2520,7 @@ namespace wfg::client::ui
             static StripCell stripCellAt (int x, int width)
             {
                 const auto cells = stripCells (juce::Rectangle<int> (0, 0, width, rowHeight));
-                const StripCell order[] { StripCell::index, StripCell::role, StripCell::dca,
-                                          StripCell::word, StripCell::cross };
+                const StripCell order[] { StripCell::index, StripCell::role, StripCell::word, StripCell::cross };
 
                 for (std::size_t at = 0; at < cells.size(); ++at)
                     if (x >= cells[at].getX() && x < cells[at].getRight())
@@ -2482,7 +2532,8 @@ namespace wfg::client::ui
             static DcaCell dcaCellAt (int x, int width)
             {
                 const auto cells = dcaCells (juce::Rectangle<int> (0, 0, width, rowHeight));
-                const DcaCell order[] { DcaCell::name, DcaCell::shortName, DcaCell::inside, DcaCell::cross };
+                const DcaCell order[] { DcaCell::name, DcaCell::shortName, DcaCell::faders, DcaCell::inside,
+                                        DcaCell::cross };
 
                 for (std::size_t at = 0; at < cells.size(); ++at)
                     if (x >= cells[at].getX() && x < cells[at].getRight())
@@ -2510,11 +2561,6 @@ namespace wfg::client::ui
                         return choice.second;
 
                 return profile;
-            }
-
-            static std::vector<std::pair<std::string, std::string>> roleChoices()
-            {
-                return { { "sampler", "sampler" }, { "dca", "DCA" } };
             }
 
             static std::string joined (const std::vector<std::string>& parts)
@@ -2587,9 +2633,16 @@ namespace wfg::client::ui
             {
                 std::string key;
 
+                /*  AND WHICH FADERS RIDE EACH, which changes with a strip's
+                    role, a strip moved and a surface renamed - none of them a
+                    change to the DCA itself. */
                 for (const auto& entry : dcas)
+                {
                     for (const auto* part : { &entry.id, &entry.name, &entry.shortName, &entry.parent })
                         addTo (key, *part);
+
+                    addTo (key, model::fadersRiding (entry.id, allStrips, surfaces));
+                }
 
                 return key;
             }
@@ -2837,45 +2890,48 @@ namespace wfg::client::ui
                 const auto& entry = strips[static_cast<std::size_t> (row)];
                 const auto cells = stripCells (juce::Rectangle<int> (0, 0, width, height));
 
+                /*  THE GRIP FIRST, because a row that can be dragged has to look
+                    like one (the output list's rule), and left out under the
+                    lock, which takes the move away with the rest of the
+                    structure. Its room is kept either way, so the number does
+                    not jump when the show is locked. */
+                auto number = cells[0];
+                const auto grip = number.removeFromLeft (gripWidth);
+
+                if (! locked)
+                {
+                    g.setFont (Look::font (theme, 13.0f));
+                    g.setColour (Look::colour (theme, "ink-off"));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x89\xa1"), grip, juce::Justification::centredLeft);
+                }
+
                 //  Fader one is strip one: the index is from nought, the drawing is not.
                 g.setFont (Look::font (theme, 12.0f));
                 g.setColour (Look::colour (theme, "ink-dim"));
-                g.drawText (juce::String (entry.index + 1), cells[0], juce::Justification::centredLeft);
+                g.drawText (juce::String (entry.index + 1), number, juce::Justification::centredLeft);
+
+                /*  THE ROLE AND ITS DCA IN ONE CELL, in the words its menu
+                    offers (namespace draft §30, S4): "Sampler", "DCA: Band". A
+                    DCA strip riding none is drawn dimmer, and one naming a DCA
+                    the show no longer declares in the failure tone - and the
+                    words say both, never the colour alone (§4.8). */
+                const auto riding = entry.role == "dca";
+                const auto colour = ! riding                      ? "ink"
+                                  : entry.dca.empty()             ? "ink-off"
+                                  : dcaLabel (entry.dca) == nullptr ? "failed"
+                                                                    : "ink";
 
                 g.setFont (Look::font (theme, 13.0f));
-                g.setColour (Look::colour (theme, "ink"));
-                g.drawText (entry.role == "dca" ? "DCA" : "sampler", cells[1], juce::Justification::centredLeft);
-
-                /*  THE DCA ONLY MEANS SOMETHING ON A DCA STRIP. A sampler strip
-                    may still carry one set before its role changed, and the
-                    engine reads it only on a dca strip - so on a sampler strip
-                    the cell is a dash and takes no click. */
-                g.setFont (Look::font (theme, 12.0f));
-
-                if (entry.role != "dca")
-                    drawDash (g, cells[2]);
-                else if (entry.dca.empty())
-                {
-                    g.setColour (Look::colour (theme, "ink-off"));
-                    g.drawText ("(none)", cells[2], juce::Justification::centredLeft);
-                }
-                else if (const auto* named = dcaLabel (entry.dca))
-                {
-                    g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String (*named), cells[2], juce::Justification::centredLeft, true);
-                }
-                else
-                {
-                    g.setColour (Look::colour (theme, "failed"));
-                    g.drawText (juce::String (entry.dca) + "  (not declared)", cells[2],
-                                juce::Justification::centredLeft, true);
-                }
+                g.setColour (Look::colour (theme, colour));
+                g.drawText (juce::String (model::roleWords (entry, dcas)), cells[1],
+                            juce::Justification::centredLeft, true);
 
                 //  What it is doing, in the engine's word (§4.8).
+                g.setFont (Look::font (theme, 12.0f));
                 g.setColour (Look::colour (theme, "ink-dim"));
-                g.drawText (juce::String (entry.word), cells[3], juce::Justification::centredLeft, true);
+                g.drawText (juce::String (entry.word), cells[2], juce::Justification::centredLeft, true);
 
-                drawCross (g, cells[4]);
+                drawCross (g, cells[3]);
             }
 
             void paintDca (int row, juce::Graphics& g, int width, int height)
@@ -2909,21 +2965,34 @@ namespace wfg::client::ui
                     g.drawText (juce::String (entry.shortName), cells[1], juce::Justification::centredLeft, true);
                 }
 
+                /*  WHICH FADERS RIDE IT, read and never edited here (namespace
+                    draft §30, S4): a DCA no fader rides says "no fader" in
+                    words, so one made with ADD DCA and never put on a strip
+                    is seen at once. A fader is given its DCA in its own row's
+                    Role, above. */
+                const auto riders = model::fadersRiding (entry.id, allStrips, surfaces);
+                const auto ridden = std::any_of (allStrips.begin(), allStrips.end(),
+                                                 [&entry] (const model::StripRow& strip)
+                                                 { return strip.role == "dca" && strip.dca == entry.id; });
+
+                g.setColour (Look::colour (theme, ridden ? "ink-dim" : "ink-off"));
+                g.drawText (juce::String (riders), cells[2], juce::Justification::centredLeft, true);
+
                 if (entry.parent.empty())
-                    drawDash (g, cells[2]);
+                    drawDash (g, cells[3]);
                 else if (const auto* named = dcaLabel (entry.parent))
                 {
                     g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String (*named), cells[2], juce::Justification::centredLeft, true);
+                    g.drawText (juce::String (*named), cells[3], juce::Justification::centredLeft, true);
                 }
                 else
                 {
                     g.setColour (Look::colour (theme, "failed"));
-                    g.drawText (juce::String (entry.parent) + "  (not declared)", cells[2],
+                    g.drawText (juce::String (entry.parent) + "  (not declared)", cells[3],
                                 juce::Justification::centredLeft, true);
                 }
 
-                drawCross (g, cells[3]);
+                drawCross (g, cells[4]);
             }
 
             juce::ListBox& listFor (Which which)
@@ -3035,15 +3104,39 @@ namespace wfg::client::ui
                 switch (stripCellAt (x, width))
                 {
                     case StripCell::cross: send (gesture::deleteObject (entry.id)); return;
-                    case StripCell::role:  openChooser (cells[1], Choice::role, entry.id, roleChoices(),
-                                                        entry.role); return;
-                    case StripCell::dca:
-                        if (entry.role == "dca")
-                            openChooser (cells[2], Choice::stripDca, entry.id, dcaMenu, entry.dca);
-                        return;
+                    case StripCell::role:  chooseRole (cells[1], entry); return;
                     case StripCell::index:
                     case StripCell::word:  return;
                 }
+            }
+
+            /*  THE ROLE MENU (namespace draft §30, S4): Sampler, then a DCA
+                for each the show declares, greyed "no DCA yet" when there is
+                none. The page's one chooser carries it like any other, keyed by
+                the item's place in `roleMenu`, which `commitChoice` reads back:
+                a choice is two words, a role and a DCA, and a chooser value is
+                one. */
+            void chooseRole (juce::Rectangle<int> cell, const model::StripRow& entry)
+            {
+                roleMenu = model::roleChoices (entry, dcas);
+
+                std::vector<std::pair<std::string, std::string>> items;
+                std::string current;
+
+                for (std::size_t at = 0; at < roleMenu.size(); ++at)
+                {
+                    items.push_back ({ std::to_string (at), roleMenu[at].label });
+
+                    if (roleMenu[at].now)
+                        current = items.back().first;
+                }
+
+                openChooser (cell, Choice::role, entry.id, items, current);
+
+                //  The chooser numbers its items from one, in the order they were given.
+                for (std::size_t at = 0; at < roleMenu.size(); ++at)
+                    if (! roleMenu[at].enabled)
+                        chooser.setItemEnabled (static_cast<int> (at) + 1, false);
             }
 
             void clickDca (int row, int x, int width)
@@ -3070,10 +3163,11 @@ namespace wfg::client::ui
                                                        { return choice.first == entry.id; }),
                                        choices.end());
 
-                        openChooser (cells[2], Choice::dcaParent, entry.id, choices, entry.parent);
+                        openChooser (cells[3], Choice::dcaParent, entry.id, choices, entry.parent);
                         return;
                     }
 
+                    case DcaCell::faders:   //  a read-out: a fader is given its DCA in its own row
                     case DcaCell::none:
                         return;
                 }
@@ -3263,14 +3357,26 @@ namespace wfg::client::ui
                         return;
 
                     case Choice::role:
-                        if (const auto* entry = stripOf (id); entry != nullptr && entry->role != value)
-                            send (gesture::setNode ("/godot/slot/" + id + "/role", value));
-                        return;
+                    {
+                        /*  THE ROLE, THEN THE DCA, as one choice (namespace
+                            draft §30, S4) - and worked out against the strip
+                            as it is now rather than as it was when the menu
+                            opened, so nothing already so is written again.
+                            Gathered before the first is sent: a write may
+                            refresh the rows under `entry`. */
+                        const auto* entry = stripOf (id);
+                        const auto chosen = static_cast<std::size_t> (at);
 
-                    case Choice::stripDca:
-                        if (const auto* entry = stripOf (id); entry != nullptr && entry->dca != value)
-                            send (gesture::setNode ("/godot/slot/" + id + "/dca", value));
+                        if (entry == nullptr || chosen >= roleMenu.size())
+                            return;
+
+                        const auto writes = model::roleWrites (*entry, roleMenu[chosen]);
+
+                        for (const auto& write : writes)
+                            send (gesture::setNode (write.first, write.second));
+
                         return;
+                    }
 
                     case Choice::dcaParent:
                         if (const auto* entry = dcaOf (id); entry != nullptr && entry->parent != value)
@@ -3305,6 +3411,92 @@ namespace wfg::client::ui
 
                 if (line != joined (entry.ports))
                     send (gesture::setNode ("/godot/surface/" + entry.id + "/ports", line));
+            }
+
+            //==========================================================================
+            /*  STRIPS ARE REORDERED BY DRAGGING (namespace draft §30, S4: "there
+                is no way to rearrange the order"), as the outputs, the inputs
+                and a rack chain are. A strip's place on its surface IS its
+                fader number (§16.2) and the order a sampler group fills them
+                in, so the move is the one `object.move` into the strip's own
+                surface, and the engine renumbers the rest.
+
+                THE IDENTIFIER, never the row number, tagged so nothing else
+                dropped here is mistaken for a strip: a drag that carried a
+                position would name a row that may have moved by the time it
+                lands. Only the strips' list drags, and not under the lock. */
+            juce::var dragOf (Which which, const juce::SparseSet<int>& selected) const
+            {
+                if (which != Which::strips || locked || ! send || selected.isEmpty())
+                    return {};
+
+                const auto row = selected[0];
+
+                if (row < 0 || static_cast<std::size_t> (row) >= strips.size())
+                    return {};
+
+                return juce::var ("strip:" + juce::String (strips[static_cast<std::size_t> (row)].id));
+            }
+
+            bool isInterestedInDragSource (const SourceDetails& details) override
+            {
+                return ! locked && details.description.toString().startsWith ("strip:");
+            }
+
+            void itemDragMove (const SourceDetails& details) override
+            {
+                const auto gap = dropRowAt (details.localPosition);
+
+                if (gap != dropRow)
+                {
+                    dropRow = gap;
+                    repaint();
+                }
+            }
+
+            void itemDragExit (const SourceDetails&) override
+            {
+                dropRow = -1;
+                repaint();
+            }
+
+            void itemDropped (const SourceDetails& details) override
+            {
+                const auto gap = dropRowAt (details.localPosition);
+                const auto id = details.description.toString()
+                                  .fromFirstOccurrenceOf ("strip:", false, false).toStdString();
+
+                dropRow = -1;
+                repaint();
+
+                if (locked || ! send || id.empty())
+                    return;
+
+                auto from = -1;
+
+                for (std::size_t at = 0; at < strips.size(); ++at)
+                    if (strips[at].id == id)
+                        from = static_cast<int> (at);
+
+                //  Nothing when it lands where it was, or off the list (model::stripMovePosition).
+                if (const auto to = model::stripMovePosition (from, gap, rowsIn (Which::strips)))
+                    send (gesture::moveObject (id, strips[static_cast<std::size_t> (from)].surface, *to));
+            }
+
+            /*  Which gap between the strips a point on this page is nearest:
+                0 above the first and the count below the last, half a row down
+                being what turns "on this row" into "after it". -1 off the list. */
+            int dropRowAt (juce::Point<int> where) const
+            {
+                if (! stripList.getBounds().expanded (0, rowHeight / 2).contains (where))
+                    return -1;
+
+                const auto* viewport = stripList.getViewport();
+                const auto inList = where.y - stripList.getY()
+                                      + (viewport != nullptr ? viewport->getViewPositionY() : 0);
+                const auto height = juce::jmax (1, stripList.getRowHeight());
+
+                return juce::jlimit (0, rowsIn (Which::strips), (inList + height / 2) / height);
             }
 
             /*  A name nothing else is using, so ADD DCA always makes a DCA
@@ -3344,6 +3536,7 @@ namespace wfg::client::ui
             Choice choosing = Choice::none;
             std::string choosingId;
             std::vector<std::string> choiceValues;
+            std::vector<model::RoleChoice> roleMenu;   // what the role chooser offers, by item
             bool popupPending = false;
             int popupTicket = 0;
 
@@ -3354,6 +3547,7 @@ namespace wfg::client::ui
             std::vector<std::pair<std::string, std::string>> dcaMenu;
             std::string picked;
             bool locked = false;
+            int dropRow = -1;                          // the gap a dragged strip would land in
         };
         /*  THE PLUGINS TAB (Phase 9a, PR 9a.9). Two lists: what this machine's
             scan found, and the show's set - each entry with what became of it

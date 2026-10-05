@@ -25,7 +25,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -602,6 +604,196 @@ namespace wfg::client::model
             choices.push_back ({ dca.id, dca.name.empty() ? dca.label() : dca.name });
 
         return choices;
+    }
+
+    std::vector<RoleChoice> roleChoices (const StripRow& strip, const std::vector<DcaRow>& dcas)
+    {
+        /*  THE ROLE DECIDES, as it does for the engine: anything but a dca
+            strip is a sampler strip, whatever `dca` it may still carry from
+            before - the engine reads `dca` on a dca strip only. */
+        const auto riding = strip.role == "dca";
+
+        std::vector<RoleChoice> choices;
+        choices.reserve (dcas.size() + 2);
+
+        RoleChoice sampler;
+        sampler.role = "sampler";
+        sampler.label = "Sampler";
+        sampler.now = ! riding;
+        choices.push_back (sampler);
+
+        auto found = ! riding;
+
+        /*  EACH DCA BY ITS WHOLE NAME, as `dcaChoices` names it: a menu has
+            the room a scribble strip does not, and the key is the identifier,
+            so renaming a DCA never takes it off its fader. */
+        for (const auto& dca : dcas)
+        {
+            RoleChoice choice;
+            choice.role = "dca";
+            choice.dca = dca.id;
+            choice.label = "DCA: " + (dca.name.empty() ? dca.label() : dca.name);
+            choice.now = riding && strip.dca == dca.id;
+
+            found = found || choice.now;
+            choices.push_back (choice);
+        }
+
+        /*  NO DCA TO OFFER IS SAID, AND SAYS WHERE ONE COMES FROM: ADD DCA, in
+            the bar of the DCA list under this one. Greyed, because there is
+            nothing to choose - a DCA strip with no DCA rides nothing. */
+        if (dcas.empty())
+        {
+            RoleChoice none;
+            none.label = "No DCA yet: ADD DCA below makes one";
+            none.enabled = false;
+            choices.push_back (none);
+        }
+
+        /*  WHAT IT IS NOW, WHEN NO ITEM ABOVE IS: a DCA strip riding none, or
+            one naming a DCA the show no longer declares - shown in the words
+            the cell draws, so choosing anything else reads as a change. */
+        if (! found)
+        {
+            RoleChoice current;
+            current.role = "dca";
+            current.dca = strip.dca;
+            current.label = strip.dca.empty() ? std::string ("DCA: none chosen")
+                                              : "DCA: " + strip.dca + "  (not declared)";
+            current.now = true;
+            choices.push_back (current);
+        }
+
+        return choices;
+    }
+
+    std::string roleWords (const StripRow& strip, const std::vector<DcaRow>& dcas)
+    {
+        for (const auto& choice : roleChoices (strip, dcas))
+            if (choice.now)
+                return choice.label;
+
+        return strip.role;
+    }
+
+    std::vector<std::pair<std::string, std::string>> roleWrites (const StripRow& strip,
+                                                                 const RoleChoice& choice)
+    {
+        std::vector<std::pair<std::string, std::string>> writes;
+
+        if (! choice.enabled || choice.role.empty() || strip.id.empty())
+            return writes;
+
+        const auto base = std::string (slotPrefix) + strip.id + "/";
+
+        /*  THE ROLE FIRST. A strip made a DCA strip rides its DCA from the
+            write that names it; the other way round, `dca` would be written on
+            a sampler strip, where it means nothing, and the role would land on
+            a row already riding - two states, one of them wrong, either way.
+            Role first leaves a moment of "unassigned", which is what it is. */
+        if (strip.role != choice.role)
+            writes.push_back ({ base + "role", choice.role });
+
+        //  Sampler clears the DCA: `choice.dca` is empty for it.
+        if (strip.dca != choice.dca)
+            writes.push_back ({ base + "dca", choice.dca });
+
+        return writes;
+    }
+
+    std::string fadersRiding (const std::string& dcaId, const std::vector<StripRow>& strips,
+                              const std::vector<SurfaceRow>& surfaces)
+    {
+        /*  ONE SURFACE AT A TIME, in the order the strips come - surface
+            order, then index, as `readStrips` gives them - and each strip
+            counted from one, as it is printed on the desk. */
+        struct Riders
+        {
+            std::string surface;
+            bool pads = false;
+            std::vector<int> numbers;
+        };
+
+        std::vector<Riders> riders;
+
+        for (const auto& strip : strips)
+        {
+            if (dcaId.empty() || strip.role != "dca" || strip.dca != dcaId)
+                continue;
+
+            auto on = std::find_if (riders.begin(), riders.end(),
+                                    [&strip] (const Riders& entry) { return entry.surface == strip.surface; });
+
+            if (on == riders.end())
+            {
+                riders.push_back ({ strip.surface, strip.endpoint == "gate", {} });
+                on = std::prev (riders.end());
+            }
+
+            on->numbers.push_back (strip.index + 1);
+        }
+
+        if (riders.empty())
+            return "no fader";
+
+        //  "3", "3 and 7", "3, 5 and 7".
+        const auto numbered = [] (const std::vector<int>& numbers)
+        {
+            std::string line;
+
+            for (std::size_t at = 0; at < numbers.size(); ++at)
+            {
+                if (at > 0)
+                    line += at + 1 == numbers.size() ? " and " : ", ";
+
+                line += std::to_string (numbers[at]);
+            }
+
+            return line;
+        };
+
+        /*  THE SURFACE IS NAMED ONLY WHEN THERE IS ANOTHER to tell it from:
+            with one, "fader 3" can only be on it, and a name in front of every
+            entry is noise. */
+        const auto named = surfaces.size() > 1;
+        std::string out;
+
+        for (const auto& entry : riders)
+        {
+            const auto several = entry.numbers.size() > 1;
+            std::string phrase;
+
+            if (named)
+            {
+                auto surfaceLabel = entry.surface;
+
+                for (const auto& surface : surfaces)
+                    if (surface.id == entry.surface)
+                        surfaceLabel = surface.label();
+
+                phrase = surfaceLabel + " · " + (entry.pads ? (several ? "pads" : "pad")
+                                                            : (several ? "faders" : "fader"));
+            }
+            else
+                phrase = entry.pads ? (several ? "Pads" : "Pad") : (several ? "Faders" : "Fader");
+
+            out += (out.empty() ? "" : "; ") + phrase + " " + numbered (entry.numbers);
+        }
+
+        return out;
+    }
+
+    std::optional<int> stripMovePosition (int from, int gap, int count)
+    {
+        if (from < 0 || from >= count || gap < 0 || gap > count)
+            return std::nullopt;
+
+        const auto to = gap > from ? gap - 1 : gap;
+
+        if (to == from)
+            return std::nullopt;
+
+        return to;
     }
 
     std::vector<std::pair<std::string, std::string>> stripChoices (const tree::TreeSnapshot& snapshot,

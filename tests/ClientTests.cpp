@@ -7283,6 +7283,312 @@ TEST_CASE ("client: the DCAs are read in the show's order, and a menu of them st
     CHECK (model::dcaChoices ({}).size() == 1u);
 }
 
+namespace
+{
+    using Writes = std::vector<std::pair<std::string, std::string>>;
+
+    /*  THE WRITES A CHOICE MAKES, SENT AS THE WINDOW SENDS THEM: one
+        `node.set` each, in order, through the registry and the engine's own
+        door, applied in one tick. */
+    void sendWrites (Rig& rig, const Writes& writes, std::int64_t tick)
+    {
+        for (const auto& write : writes)
+        {
+            const auto event = gesture::setNode (write.first, write.second);
+            const auto* command = rig.engine.commands().find (event.command);
+
+            REQUIRE (command != nullptr);
+            CHECK (CommandRegistry::checkArgs (*command, event.args).ok);
+            REQUIRE (rig.engine.submit (event));
+        }
+
+        const auto outcome = rig.engine.processTick (tick);
+        CHECK (outcome.applied == writes.size());
+        CHECK (outcome.rejected == 0u);
+        rig.parameters.markStale();
+    }
+
+    const model::StripRow* stripIn (const std::vector<model::StripRow>& strips, const std::string& id)
+    {
+        for (const auto& strip : strips)
+            if (strip.id == id)
+                return &strip;
+
+        return nullptr;
+    }
+}
+
+TEST_CASE ("client: a strip's Role is one menu, Sampler then each DCA, and a choice sends the role before the DCA")
+{
+    /*  Namespace draft §30, S4. The author, 2026-10-05: "adding some DCA in
+        the surface parameters did not show the DCA anywhere". A DCA reached a
+        fader only through a second cell that took no click until the first
+        said DCA; now one menu says both. */
+    Rig rig;
+    const auto desk = declareADesk (rig);
+
+    const auto strips = model::readStrips (*rig.publish (1));
+    const auto dcas = model::readDcas (*rig.publish (1));
+    REQUIRE (strips.size() == 16u);
+    REQUIRE (dcas.size() == 2u);
+
+    const auto slot = [] (const std::string& strip) { return "/godot/slot/" + strip + "/"; };
+
+    /*  A SAMPLER STRIP: Sampler, and it is what the strip is now; then each
+        DCA in the show's order, by its WHOLE name - "Band", not the "BND" a
+        scribble strip shows. */
+    const auto sampler = *stripIn (strips, desk.mcuStrips[0]);
+    auto choices = model::roleChoices (sampler, dcas);
+
+    REQUIRE (choices.size() == 3u);
+    CHECK (choices[0].role == "sampler");
+    CHECK (choices[0].dca.empty());
+    CHECK (choices[0].label == "Sampler");
+    CHECK (choices[0].now);
+    CHECK (choices[1].role == "dca");
+    CHECK (choices[1].dca == desk.everything);
+    CHECK (choices[1].label == "DCA: Everything");
+    CHECK_FALSE (choices[1].now);
+    CHECK (choices[2].dca == desk.band);
+    CHECK (choices[2].label == "DCA: Band");
+
+    for (const auto& choice : choices)
+        CHECK (choice.enabled);
+
+    CHECK (model::roleWords (sampler, dcas) == "Sampler");
+
+    //  A DCA strip riding Band: that item is now, and the cell says it.
+    const auto riding = *stripIn (strips, desk.panelStrips[1]);
+    choices = model::roleChoices (riding, dcas);
+
+    REQUIRE (choices.size() == 3u);
+    CHECK_FALSE (choices[0].now);
+    CHECK (choices[2].now);
+    CHECK (model::roleWords (riding, dcas) == "DCA: Band");
+
+    /*  WHAT IT IS NOW, WHEN NO ITEM IS: a DCA strip riding none, and one
+        naming a DCA the show no longer declares - at the end, so the menu
+        never opens on nothing picked. */
+    const auto unassigned = *stripIn (strips, desk.panelStrips[2]);
+    choices = model::roleChoices (unassigned, dcas);
+
+    REQUIRE (choices.size() == 4u);
+    CHECK (choices[3].now);
+    CHECK (choices[3].role == "dca");
+    CHECK (choices[3].dca.empty());
+    CHECK (choices[3].label == "DCA: none chosen");
+    CHECK (model::roleWords (unassigned, dcas) == "DCA: none chosen");
+
+    auto stale = riding;
+    stale.dca = "DQQQ0001";
+    choices = model::roleChoices (stale, dcas);
+
+    REQUIRE (choices.size() == 4u);
+    CHECK (choices.back().now);
+    CHECK (choices.back().dca == "DQQQ0001");
+    CHECK (choices.back().label == "DCA: DQQQ0001  (not declared)");
+
+    /*  A SHOW WITH NO DCA: one greyed item, which says where a DCA comes from
+        and writes nothing. */
+    choices = model::roleChoices (sampler, {});
+
+    REQUIRE (choices.size() == 2u);
+    CHECK (choices[0].now);
+    CHECK_FALSE (choices[1].enabled);
+    CHECK (choices[1].role.empty());
+    CHECK (choices[1].label == "No DCA yet: ADD DCA below makes one");
+    CHECK (model::roleWrites (sampler, choices[1]).empty());
+
+    /*  THE WRITES: the role first, then the DCA; Sampler clears the DCA; and
+        what is already so is not written. */
+    choices = model::roleChoices (sampler, dcas);
+    CHECK (model::roleWrites (sampler, choices[2])
+           == Writes { { slot (sampler.id) + "role", "dca" }, { slot (sampler.id) + "dca", desk.band } });
+    CHECK (model::roleWrites (sampler, choices[0]).empty());
+
+    choices = model::roleChoices (riding, dcas);
+    CHECK (model::roleWrites (riding, choices[1]) == Writes { { slot (riding.id) + "dca", desk.everything } });
+    CHECK (model::roleWrites (riding, choices[2]).empty());
+    CHECK (model::roleWrites (riding, choices[0])
+           == Writes { { slot (riding.id) + "role", "sampler" }, { slot (riding.id) + "dca", "" } });
+
+    //  A sampler strip still carrying a DCA from before: Sampler takes it off.
+    auto carrying = sampler;
+    carrying.dca = desk.band;
+    CHECK (model::roleWrites (carrying, model::roleChoices (carrying, dcas)[0])
+           == Writes { { slot (sampler.id) + "dca", "" } });
+
+    /*  AGAINST THE REAL REGISTRY AND THE REAL DOCUMENT: a sampler strip made
+        to ride Band rides its trim, in the engine's word, from that tick. */
+    sendWrites (rig, model::roleWrites (sampler, model::roleChoices (sampler, dcas)[2]), 2);
+
+    auto now = model::readStrips (*rig.publish (2));
+    REQUIRE (stripIn (now, sampler.id) != nullptr);
+    CHECK (stripIn (now, sampler.id)->role == "dca");
+    CHECK (stripIn (now, sampler.id)->dca == desk.band);
+    CHECK (stripIn (now, sampler.id)->word == "dca");
+    CHECK (stripIn (now, sampler.id)->target == "/godot/dca/" + desk.band + "/trim");
+    CHECK (model::roleWords (*stripIn (now, sampler.id), dcas) == "DCA: Band");
+
+    //  And the one that rode Band, made a sampler strip again, carries no DCA.
+    sendWrites (rig, model::roleWrites (riding, model::roleChoices (riding, dcas)[0]), 3);
+
+    now = model::readStrips (*rig.publish (3));
+    REQUIRE (stripIn (now, riding.id) != nullptr);
+    CHECK (stripIn (now, riding.id)->role == "sampler");
+    CHECK (stripIn (now, riding.id)->dca.empty());
+    CHECK (stripIn (now, riding.id)->target.empty());
+    CHECK (model::roleWords (*stripIn (now, riding.id), dcas) == "Sampler");
+}
+
+TEST_CASE ("client: each DCA says which faders ride it, in words, and no fader when none does")
+{
+    /*  Namespace draft §30, S4: a DCA made with ADD DCA and never put on a
+        strip was invisible, so the DCA list says it. Two surfaces here - the
+        desk and the virtual panel - so each fader is named with its own. */
+    Rig rig;
+    const auto desk = declareADesk (rig);
+
+    auto snapshot = rig.publish (1);
+    auto surfaces = model::readSurfaces (*snapshot);
+    REQUIRE (surfaces.size() == 2u);
+
+    CHECK (model::fadersRiding (desk.band, model::readStrips (*snapshot), surfaces) == "Virtual panel · fader 2");
+    CHECK (model::fadersRiding (desk.everything, model::readStrips (*snapshot), surfaces) == "no fader");
+
+    //  A DCA strip riding none is not riding "nothing called nothing".
+    CHECK (model::fadersRiding ("", model::readStrips (*snapshot), surfaces) == "no fader");
+
+    /*  TWO MORE ON THE DESK, made in the wrong order: surface order, then
+        index, and one surface after another. A sampler strip still carrying
+        Band from before rides nothing, and is not counted. */
+    const auto slot = [] (const std::string& strip) { return "/godot/slot/" + strip + "/"; };
+
+    for (const auto& strip : { desk.mcuStrips[4], desk.mcuStrips[2] })
+    {
+        REQUIRE (rig.document.setAttribute (slot (strip) + "role", "dca").ok);
+        REQUIRE (rig.document.setAttribute (slot (strip) + "dca", desk.band).ok);
+    }
+
+    REQUIRE (rig.document.setAttribute (slot (desk.mcuStrips[6]) + "dca", desk.band).ok);
+
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+    CHECK (model::fadersRiding (desk.band, model::readStrips (*snapshot), model::readSurfaces (*snapshot))
+           == "Desk · faders 3 and 5; Virtual panel · fader 2");
+
+    /*  ONE SURFACE: nothing to tell it from, so no name in front - and three
+        or more are a list with "and" before the last. */
+    REQUIRE (rig.document.remove (desk.mcu).ok);
+    REQUIRE (rig.document.setAttribute (slot (desk.panelStrips[3]) + "role", "dca").ok);
+    REQUIRE (rig.document.setAttribute (slot (desk.panelStrips[3]) + "dca", desk.band).ok);
+
+    rig.parameters.markStale();
+    snapshot = rig.publish (3);
+    surfaces = model::readSurfaces (*snapshot);
+    REQUIRE (surfaces.size() == 1u);
+    CHECK (model::fadersRiding (desk.band, model::readStrips (*snapshot), surfaces) == "Faders 2 and 4");
+
+    REQUIRE (rig.document.setAttribute (slot (desk.panelStrips[5]) + "role", "dca").ok);
+    REQUIRE (rig.document.setAttribute (slot (desk.panelStrips[5]) + "dca", desk.band).ok);
+
+    rig.parameters.markStale();
+    snapshot = rig.publish (4);
+    CHECK (model::fadersRiding (desk.band, model::readStrips (*snapshot), surfaces) == "Faders 2, 4 and 6");
+
+    //  A pad is a pad, with one surface and with two.
+    model::StripRow pad;
+    pad.id = "PADS0001";
+    pad.surface = "SPAD0001";
+    pad.index = 2;
+    pad.role = "dca";
+    pad.dca = desk.band;
+    pad.endpoint = "gate";
+
+    CHECK (model::fadersRiding (desk.band, { pad }, {}) == "Pad 3");
+
+    model::SurfaceRow pads;
+    pads.id = "SPAD0001";
+    pads.profile = "midiPads";
+
+    CHECK (model::fadersRiding (desk.band, { pad }, { surfaces[0], pads }) == "Pads · pad 3");
+}
+
+TEST_CASE ("client: a strip dragged in the Surfaces tab lands where its line was, and the engine renumbers the surface")
+{
+    /*  Namespace draft §30, S4: "there is no way to rearrange the order". The
+        position is `object.move`'s, in the list as it stands with the dragged
+        strip still counted (model/Reorder.h's rule): four strips A B C D, the
+        gaps 0 to 4 between them. */
+    CHECK_FALSE (model::stripMovePosition (0, 0, 4).has_value());   // A above itself
+    CHECK_FALSE (model::stripMovePosition (0, 1, 4).has_value());   // A below itself
+    CHECK (model::stripMovePosition (0, 2, 4) == 1);                // A after B: B's place
+    CHECK (model::stripMovePosition (0, 3, 4) == 2);                // A after C
+    CHECK (model::stripMovePosition (0, 4, 4) == 3);                // A to the end
+    CHECK (model::stripMovePosition (3, 0, 4) == 0);                // D to the top
+    CHECK (model::stripMovePosition (3, 1, 4) == 1);                // D after A
+    CHECK_FALSE (model::stripMovePosition (3, 3, 4).has_value());
+    CHECK_FALSE (model::stripMovePosition (3, 4, 4).has_value());
+    CHECK (model::stripMovePosition (1, 3, 4) == 2);                // B after C
+
+    //  Off the list either way: nothing.
+    CHECK_FALSE (model::stripMovePosition (-1, 2, 4).has_value());
+    CHECK_FALSE (model::stripMovePosition (4, 2, 4).has_value());
+    CHECK_FALSE (model::stripMovePosition (2, -1, 4).has_value());
+    CHECK_FALSE (model::stripMovePosition (2, 5, 4).has_value());
+
+    /*  AGAINST THE REAL ENGINE: the panel's first strip let go under its
+        fourth is the fourth fader, and the DCA strip that was fader 2 is
+        fader 1 - which the DCA list says. */
+    Rig rig;
+    const auto desk = declareADesk (rig);
+
+    const auto to = model::stripMovePosition (0, 4, 8);
+    REQUIRE (to.has_value());
+    CHECK (*to == 3);
+
+    const auto move = gesture::moveObject (desk.panelStrips[0], desk.panel, *to);
+    const auto* command = rig.engine.commands().find (move.command);
+    REQUIRE (command != nullptr);
+    CHECK (CommandRegistry::checkArgs (*command, move.args).ok);
+
+    REQUIRE (rig.engine.submit (move));
+    CHECK (rig.engine.processTick (2).applied == 1u);
+    rig.parameters.markStale();
+
+    auto snapshot = rig.publish (2);
+    auto panel = model::stripsOf (model::readStrips (*snapshot), desk.panel);
+    REQUIRE (panel.size() == 8u);
+
+    const std::vector<std::string> moved { desk.panelStrips[1], desk.panelStrips[2], desk.panelStrips[3],
+                                           desk.panelStrips[0], desk.panelStrips[4], desk.panelStrips[5],
+                                           desk.panelStrips[6], desk.panelStrips[7] };
+
+    for (std::size_t at = 0; at < panel.size(); ++at)
+    {
+        INFO ("fader " << at + 1);
+        CHECK (panel[at].id == moved[at]);
+        CHECK (panel[at].index == static_cast<int> (at));
+    }
+
+    CHECK (model::fadersRiding (desk.band, model::readStrips (*snapshot), model::readSurfaces (*snapshot))
+           == "Virtual panel · fader 1");
+
+    //  And back to the top: the gap above the first.
+    const auto back = model::stripMovePosition (3, 0, 8);
+    REQUIRE (back.has_value());
+
+    REQUIRE (rig.engine.submit (gesture::moveObject (desk.panelStrips[0], desk.panel, *back)));
+    CHECK (rig.engine.processTick (3).applied == 1u);
+    rig.parameters.markStale();
+
+    panel = model::stripsOf (model::readStrips (*rig.publish (3)), desk.panel);
+    REQUIRE (panel.size() == 8u);
+
+    for (std::size_t at = 0; at < panel.size(); ++at)
+        CHECK (panel[at].id == desk.panelStrips[at]);
+}
+
 TEST_CASE ("client: a fade's two switches, each before what it moves, and what a switch leaves alone is greyed")
 {
     /*  Namespace draft §22.7: the Level switch before the level, the Speed

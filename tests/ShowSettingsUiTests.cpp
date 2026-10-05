@@ -1310,3 +1310,184 @@ TEST_CASE ("show settings UI: a MIDI port says whether it plays sound and what D
     clickAt (*list, midiDohAt (*list));
     CHECK (rig.sent.empty());
 }
+
+namespace
+{
+    /*  THE SURFACES TAB'S STRIP ROW, by the page's own carve (`stripCells`),
+        from the left: the row's 8 px of padding, the number's 56 (its grip
+        inside it), then the Role cell, at least 120 wide on any window this
+        size (namespace draft §30, S4). */
+    int stripRoleAt (const juce::ListBox&) { return 8 + 56 + 40; }
+
+    //  A point over the gap above strip row `gap`, on the page that holds the list.
+    juce::Point<int> stripGap (const juce::ListBox& list, int gap)
+    {
+        return { list.getX() + 40, list.getY() + gap * list.getRowHeight() };
+    }
+
+    /*  The chooser's item that reads `text`, by its id; 0 when none does. */
+    int itemReading (const juce::ComboBox& chooser, const juce::String& text)
+    {
+        for (auto item = 0; item < chooser.getNumItems(); ++item)
+            if (chooser.getItemText (item) == text)
+                return chooser.getItemId (item);
+
+        return 0;
+    }
+}
+
+TEST_CASE ("show settings UI: a strip's Role is one menu of Sampler and the DCAs, and a strip dragged to a new place is moved")
+{
+    /*  Namespace draft §30, S4: "Removing sampler faders and adding some DCA in
+        the surface parameters did not show the DCA anywhere and there is no
+        way to rearrange the order." */
+    Rig rig;
+
+    std::vector<std::string> made;
+    const auto desk = rig.document.createSurface ("virtual", "Desk", {}, {}, made);
+    REQUIRE (desk.ok);
+    REQUIRE (made.size() == 8u);
+
+    const auto band = rig.document.createDca ("Band");
+    const auto keys = rig.document.createDca ("Keys");
+    REQUIRE (band.ok);
+    REQUIRE (keys.ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setSize (1400, 800);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Surfaces"));
+
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    std::vector<juce::ListBox*> lists;
+
+    for (auto* child : page->getChildren())
+        if (auto* list = dynamic_cast<juce::ListBox*> (child))
+            lists.push_back (list);
+
+    REQUIRE (lists.size() == 3u);
+    auto& strips = *lists[1];
+    REQUIRE (strips.getListBoxModel()->getNumRows() == 8);
+
+    /*  ONE MENU IN THE ROLE CELL: Sampler - what the strip is now - then a
+        DCA for each the show declares. */
+    clickAt (strips, stripRoleAt (strips));
+
+    auto* chooser = component<juce::ComboBox> (*page);
+    REQUIRE (chooser != nullptr);
+    CHECK (chooser->isVisible());
+    REQUIRE (chooser->getNumItems() == 3);
+    CHECK (chooser->getItemText (0) == "Sampler");
+    CHECK (chooser->getItemText (1) == "DCA: Band");
+    CHECK (chooser->getItemText (2) == "DCA: Keys");
+    CHECK (chooser->getSelectedId() == itemReading (*chooser, "Sampler"));
+    CHECK (rig.sent.empty());
+
+    //  Choosing a DCA sends the role, then the DCA: one choice, both writes.
+    chooser->setSelectedId (itemReading (*chooser, "DCA: Keys"), juce::dontSendNotification);
+    REQUIRE (chooser->onChange != nullptr);
+    chooser->onChange();
+
+    const auto base = "/godot/slot/" + made[0] + "/";
+
+    REQUIRE (rig.sent.size() == 2u);
+    CHECK (rig.sent[0].command == "node.set");
+    CHECK (rig.sent[0].args[0].getString() == base + "role");
+    CHECK (rig.sent[0].args[1].getString() == "dca");
+    CHECK (rig.sent[1].command == "node.set");
+    CHECK (rig.sent[1].args[0].getString() == base + "dca");
+    CHECK (rig.sent[1].args[1].getString() == keys.id);
+    CHECK_FALSE (chooser->isVisible());
+
+    //  Landed, the menu opens on it - and choosing it again writes nothing.
+    for (const auto& event : rig.sent)
+        REQUIRE (rig.document.setAttribute (event.args[0].getString(), event.args[1].getString()).ok);
+
+    panel.refresh (*rig.publish());
+    rig.sent.clear();
+
+    clickAt (strips, stripRoleAt (strips));
+    CHECK (chooser->getSelectedId() == itemReading (*chooser, "DCA: Keys"));
+    chooser->onChange();
+    CHECK (rig.sent.empty());
+
+    //  Sampler: the role, and the DCA cleared.
+    clickAt (strips, stripRoleAt (strips));
+    chooser->setSelectedId (itemReading (*chooser, "Sampler"), juce::dontSendNotification);
+    chooser->onChange();
+
+    REQUIRE (rig.sent.size() == 2u);
+    CHECK (rig.sent[0].args[0].getString() == base + "role");
+    CHECK (rig.sent[0].args[1].getString() == "sampler");
+    CHECK (rig.sent[1].args[0].getString() == base + "dca");
+    CHECK (rig.sent[1].args[1].getString().empty());
+
+    for (const auto& event : rig.sent)
+        REQUIRE (rig.document.setAttribute (event.args[0].getString(), event.args[1].getString()).ok);
+
+    rig.sent.clear();
+
+    /*  DRAGGED: the strip's identifier rides the drag, and letting go under
+        the fourth strip moves the first to the fourth place - one
+        `object.move` into its own surface. */
+    const auto description = strips.getListBoxModel()->getDragSourceDescription (juce::SparseSet<int> {});
+    CHECK (description.isVoid());
+
+    juce::SparseSet<int> first;
+    first.addRange ({ 0, 1 });
+    const auto dragged = strips.getListBoxModel()->getDragSourceDescription (first);
+    CHECK (dragged.toString() == juce::String ("strip:" + made[0]));
+
+    auto* target = dynamic_cast<juce::DragAndDropTarget*> (page);
+    REQUIRE (target != nullptr);
+
+    const juce::DragAndDropTarget::SourceDetails toFourth { dragged, &strips, stripGap (strips, 4) };
+    CHECK (target->isInterestedInDragSource (toFourth));
+
+    target->itemDropped (toFourth);
+
+    REQUIRE (rig.sent.size() == 1u);
+    CHECK (rig.sent[0].command == "object.move");
+    REQUIRE (rig.sent[0].args.size() == 3u);
+    CHECK (rig.sent[0].args[0].getString() == made[0]);
+    CHECK (rig.sent[0].args[1].getString() == desk.id);
+    CHECK (rig.sent[0].args[2].getInt32() == 3);
+
+    //  Let go either side of itself, it has not moved, and nothing is sent.
+    rig.sent.clear();
+    target->itemDropped ({ dragged, &strips, stripGap (strips, 0) });
+    target->itemDropped ({ dragged, &strips, stripGap (strips, 1) });
+    CHECK (rig.sent.empty());
+
+    //  Anything else dropped here is not a strip.
+    CHECK_FALSE (target->isInterestedInDragSource ({ juce::var ("plugin:PG7N0001"), &strips, stripGap (strips, 2) }));
+
+    /*  A SHOW WITH NO DCA: the menu says so in a greyed item that points at
+        ADD DCA, and offers no DCA strip that would ride nothing. */
+    REQUIRE (rig.document.remove (band.id).ok);
+    REQUIRE (rig.document.remove (keys.id).ok);
+    panel.refresh (*rig.publish());
+
+    clickAt (strips, stripRoleAt (strips));
+    REQUIRE (chooser->getNumItems() == 2);
+    CHECK (chooser->getItemText (0) == "Sampler");
+    CHECK (chooser->getItemText (1) == "No DCA yet: ADD DCA below makes one");
+    CHECK (chooser->isItemEnabled (chooser->getItemId (0)));
+    CHECK_FALSE (chooser->isItemEnabled (chooser->getItemId (1)));
+
+    //  Locked: no drag, and nothing dropped is taken.
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+
+    CHECK (strips.getListBoxModel()->getDragSourceDescription (first).isVoid());
+    CHECK_FALSE (target->isInterestedInDragSource (toFourth));
+
+    rig.sent.clear();
+    target->itemDropped (toFourth);
+    CHECK (rig.sent.empty());
+}

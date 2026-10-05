@@ -46,6 +46,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -182,6 +183,65 @@ namespace wfg::client::model
         The label is the DCA's whole name, which a menu has room for, and
         `DcaRow::label()` only when it has none. */
     std::vector<std::pair<std::string, std::string>> dcaChoices (const std::vector<DcaRow>&);
+
+    /*  THE ROLE CELL'S ONE MENU (namespace draft §30, S4). The author,
+        2026-10-05: "Removing sampler faders and adding some DCA in the
+        surface parameters did not show the DCA anywhere". A DCA reached a
+        fader only through two cells, the Role and then the DCA, and the
+        second was a dash that took no click until the first said DCA - so
+        the one way to do it was hidden behind a step nobody could see.
+
+        Now one menu says both: "Sampler", then "DCA: <name>" for every DCA
+        the show declares, in the show's order. A show with no DCA has one
+        greyed item instead, pointing at ADD DCA, rather than offering a DCA
+        strip that would ride nothing. And what the strip is NOW is always one
+        of the items (`now`): a DCA strip riding none, or naming a DCA the show
+        no longer declares, is shown as what it is, at the end, so the menu
+        never opens with nothing picked - which would read as a strip with no
+        role at all. */
+    struct RoleChoice
+    {
+        std::string role;        ///< sampler | dca; empty for the greyed "no DCA yet"
+        std::string dca;         ///< the DCA a dca choice rides, by identifier; empty for sampler
+        std::string label;
+        bool enabled = true;
+        bool now = false;        ///< what the strip is now
+    };
+
+    std::vector<RoleChoice> roleChoices (const StripRow& strip, const std::vector<DcaRow>& dcas);
+
+    /** What the Role cell shows: the label of the `roleChoices` item that is `now`. */
+    std::string roleWords (const StripRow& strip, const std::vector<DcaRow>& dcas);
+
+    /*  THE WRITES ONE CHOICE MAKES, {address, value}, in the order they are
+        sent: the role first, then the DCA. A DCA chosen is `role dca` and
+        `dca <id>`; Sampler is `role sampler` and `dca` cleared, so a sampler
+        strip carries no DCA that nothing shows. What is already so is not
+        written, because each write is an undo step and a line in the log; a
+        greyed item writes nothing. */
+    std::vector<std::pair<std::string, std::string>> roleWrites (const StripRow& strip,
+                                                                 const RoleChoice& choice);
+
+    /*  WHICH FADERS RIDE A DCA, IN WORDS (namespace draft §30, S4): the DCA
+        list's read-out, so a DCA no fader rides is seen at once rather than
+        found out at the desk. "Fader 3", "Faders 3 and 7"; with more than one
+        surface in the show each is named as the strip menu names it,
+        "Asparion D700 · fader 5", one surface after another with "; "
+        between. A pad is a pad. "no fader" when none does. Only a strip whose
+        role is dca counts: the engine reads `dca` on no other. */
+    std::string fadersRiding (const std::string& dcaId, const std::vector<StripRow>& strips,
+                              const std::vector<SurfaceRow>& surfaces);
+
+    /*  WHERE A STRIP DRAGGED IN THE SURFACES TAB LANDS (namespace draft §30,
+        S4). `gap` is the gap between rows the hand let go in - 0 above the
+        first strip, `count` below the last - and `from` the dragged strip's
+        row. The answer is `object.move`'s member position, in the list AS IT
+        STANDS with the dragged strip still counted (model/Reorder.h's rule,
+        and `bus.move`'s): let go below itself, it takes the position of the
+        strip it lands after, and above itself the position of the one it
+        lands before. Nothing when letting go there leaves it where it is - in
+        the gap either side of itself - or when either number is off the list. */
+    std::optional<int> stripMovePosition (int from, int gap, int count);
 
     /*  THE STRIP MENU OF ONE SAMPLER MEMBER, {id, label} (author, 2026-09-25:
         "There should be a drop down menu to assign the strip. Like for the
