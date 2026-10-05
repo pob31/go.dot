@@ -101,6 +101,7 @@ add_executable(wfg_tests
     SendLaneTests.cpp
     AlsReaderTests.cpp
     AlsWalkTests.cpp
+    AlsImportTests.cpp
     LaneRecordTests.cpp
     RateClockTests.cpp
     AnalysisTests.cpp
@@ -1301,6 +1302,22 @@ add_test(NAME blackbox.lane-send.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_send.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.lane-send.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# AN ABLETON LIVE SET IMPORTED BY THE SHIPPED BINARY (namespace draft §29.3):
+# `wfg import-als` on the session fixture, the bundle it writes accepted by
+# `wfg validate` and by validate-show.py's RELAX NG, the same bytes twice, a
+# folder holding a show refused untouched, and the report saying what did not
+# come over.
+add_test(NAME blackbox.import-als.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/import_als.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.import-als.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.import-als.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/import_als.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.import-als.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # A MEDIA CUE'S SPEED, HEARD (namespace draft §22): four cues at twice and half

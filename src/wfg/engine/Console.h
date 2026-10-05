@@ -38,6 +38,7 @@
     the loop; nothing it is not.
 */
 
+#include <wfg/engine/ImportChanges.h>
 #include <wfg/engine/TemplateChanges.h>
 
 #include <functional>
@@ -171,6 +172,17 @@ namespace wfg
         std::function<TemplateComparison()> compareWithTemplate {};
         std::function<TemplateUpdate (const std::vector<TemplatePick>&, bool copySounds)> updateTemplate {};
         std::function<TemplateUpdate()> makeTemplate {};
+
+        /*  AN ABLETON LIVE SET IMPORTED (namespace draft §29): the scenes of the
+            sets picked, read for the window's list - the template's, the
+            newest set's unless one is named - and the import itself, the
+            window's form of `wfg import-als` (§4.11). Both read files and the
+            import writes a new folder; neither touches this window's show, so
+            either may run on whichever thread asks, and the import is asked
+            off the message thread, saying where it has got to as it goes. */
+        std::function<ImportScenes (const std::vector<std::string>& sets)> readImportScenes {};
+        std::function<ImportResult (const ImportRequest&, const std::function<void (const std::string&)>& progress)>
+            importSets {};
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

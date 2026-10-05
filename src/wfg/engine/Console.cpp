@@ -24,6 +24,7 @@
 #include <wfg/engine/app/WindowApplication.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/Template.h>
+#include <wfg/engine/import/AlsImport.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
@@ -1437,6 +1438,215 @@ namespace
         const auto updated = wfg::doc::Template::update (performance, picks, args.containsOption ("--copy-sounds"));
         (updated.ok ? std::cout : std::cerr) << "wfg template: " << updated.said << std::endl;
         return updated.ok ? 0 : 2;
+    }
+
+    /*  THE WINDOW'S IMPORT (namespace draft §29): the scenes of the template
+        set - the newest of those picked - for its list, each ticked as
+        `defaultScenes` ticks it, and the import, one set as a show and several
+        as a tour. */
+    wfg::ImportScenes readImportScenes (const std::vector<std::string>& sets)
+    {
+        wfg::ImportScenes out;
+
+        if (sets.empty())
+        {
+            out.error = "no set";
+            return out;
+        }
+
+        auto newest = juce::File (juce::String::fromUTF8 (sets.front().c_str()));
+
+        for (const auto& path : sets)
+        {
+            const juce::File file { juce::String::fromUTF8 (path.c_str()) };
+
+            if (file.getLastModificationTime() > newest.getLastModificationTime())
+                newest = file;
+        }
+
+        const auto read = wfg::import::als::readSet (newest);
+
+        if (! read.set.has_value())
+        {
+            out.error = newest.getFileName().toStdString() + ": " + read.error;
+            return out;
+        }
+
+        const auto& set = *read.set;
+        const auto ticked = wfg::import::als::defaultScenes (set);
+        out.creator = set.creator;
+
+        for (std::size_t at = 0; at < set.scenes.size(); ++at)
+        {
+            const auto index = static_cast<int> (at);
+            const auto& scene = set.scenes[at];
+
+            wfg::ImportScene row;
+            row.index = index;
+            row.name = scene.name;
+            row.firstLine = juce::String::fromUTF8 (scene.annotation.c_str())
+                              .upToFirstOccurrenceOf ("\n", false, false).trim().substring (0, 90).toStdString();
+            row.doesSomething = wfg::import::als::sceneDoesSomething (set, index);
+            row.ticked = ticked.count (index) != 0;
+            out.scenes.push_back (std::move (row));
+        }
+
+        return out;
+    }
+
+    wfg::ImportResult importSets (const wfg::ImportRequest& request,
+                                  const std::function<void (const std::string&)>& progress)
+    {
+        wfg::ImportResult result;
+
+        wfg::import::als::ImportOptions options;
+        options.into = juce::File (juce::String::fromUTF8 (request.into.c_str()));
+        options.scenes = std::set<int> (request.scenes.begin(), request.scenes.end());
+        options.progress = progress;
+
+        /*  NO SCENE TICKED IS NO SHOW, said rather than made: an empty
+            selection would otherwise mean "the defaults" to the importer. */
+        if (options.scenes.empty())
+        {
+            result.said = "no scene was ticked, so there is nothing to import";
+            return result;
+        }
+
+        std::vector<juce::File> sets;
+
+        for (const auto& path : request.sets)
+            sets.push_back (juce::File (juce::String::fromUTF8 (path.c_str())));
+
+        const auto told = [&result] (const wfg::import::als::ImportOutcome& outcome)
+        {
+            result.ok = true;
+            result.show = outcome.show.getFullPathName().toStdString();
+            result.report = outcome.report.getFullPathName().toStdString();
+            result.said = "imported " + std::to_string (outcome.gos) + " GO(s) into " + outcome.show.getFileName().toStdString()
+                          + (outcome.approximated + outcome.dropped > 0 || ! outcome.missingMedia.empty()
+                               ? " - the report beside it says what did not come over as it was"
+                               : "");
+        };
+
+        if (sets.size() == 1)
+        {
+            const auto outcome = wfg::import::als::importSet (sets.front(), options);
+
+            if (! outcome.ok)
+                result.said = "the set was not imported: " + outcome.error;
+            else
+                told (outcome);
+
+            return result;
+        }
+
+        const auto tour = wfg::import::als::importTour (sets, juce::File (juce::String::fromUTF8 (request.templateSet.c_str())),
+                                                         options);
+
+        if (! tour.show.ok)
+        {
+            result.said = "the sets were not imported: " + tour.show.error;
+            return result;
+        }
+
+        told (tour.show);
+
+        for (const auto& performance : tour.performances)
+            result.performances += performance.ok ? 1 : 0;
+
+        result.said += ", with " + std::to_string (result.performances) + " performance(s)";
+        return result;
+    }
+
+    /*  AN ABLETON LIVE SET IMPORTED INTO A NEW SHOW (namespace draft §29.3).
+        Exit codes: 0 imported with nothing to report, 1 imported with
+        approximations or something not imported - the report says which - and
+        2 a set that could not be read or a show that could not be written. */
+    int runImportAls (const juce::ArgumentList& args)
+    {
+        const auto cwd = juce::File::getCurrentWorkingDirectory();
+        std::vector<juce::File> sets;
+
+        for (int at = 1; at < args.size(); ++at)
+            if (! args.arguments[at].text.startsWith ("-"))
+                sets.push_back (cwd.getChildFile (args.arguments[at].text));
+
+        if (sets.empty() || ! args.containsOption ("--into"))
+        {
+            std::cerr << "wfg import-als: <set.als>... --into=<folder> [--template=<set.als>] [--scenes=1-14,16]"
+                         " [--no-media]" << std::endl;
+            return 2;
+        }
+
+        wfg::import::als::ImportOptions options;
+        options.into = cwd.getChildFile (args.getValueForOption ("--into"));
+        options.copyMedia = ! args.containsOption ("--no-media");
+        options.progress = [] (const std::string& sentence) { std::cout << "wfg import-als: " << sentence << std::endl; };
+
+        if (args.containsOption ("--scenes"))
+        {
+            const auto scenes = wfg::import::als::parseScenes (args.getValueForOption ("--scenes").toStdString());
+
+            if (! scenes.has_value())
+            {
+                std::cerr << "wfg import-als: --scenes takes scene numbers and ranges, such as 1-14,16" << std::endl;
+                return 2;
+            }
+
+            options.scenes = *scenes;
+        }
+
+        const auto told = [] (const wfg::import::als::ImportOutcome& outcome)
+        {
+            std::cout << "wfg import-als: " << outcome.gos << " GO(s), " << outcome.sounds << " sound(s) into "
+                      << outcome.show.getFullPathName() << "; " << outcome.approximated << " approximated, "
+                      << outcome.dropped << " not imported, " << outcome.missingMedia.size()
+                      << " sound(s) not found - see " << outcome.report.getFullPathName() << std::endl;
+
+            return outcome.approximated + outcome.dropped > 0 || ! outcome.missingMedia.empty();
+        };
+
+        /*  ONE SET IS A SHOW; SEVERAL ARE A TOUR - a show with a performance
+            per set, the template the newest unless one is named (QF). */
+        if (sets.size() == 1)
+        {
+            const auto outcome = wfg::import::als::importSet (sets.front(), options);
+
+            if (! outcome.ok)
+            {
+                std::cerr << "wfg import-als: " << outcome.error << std::endl;
+                return 2;
+            }
+
+            return told (outcome) ? 1 : 0;
+        }
+
+        const auto templateSet = args.containsOption ("--template")
+                                   ? cwd.getChildFile (args.getValueForOption ("--template")) : juce::File();
+
+        const auto tour = wfg::import::als::importTour (sets, templateSet, options);
+
+        if (! tour.show.ok)
+        {
+            std::cerr << "wfg import-als: " << tour.show.error << std::endl;
+            return 2;
+        }
+
+        auto anything = told (tour.show);
+
+        for (const auto& performance : tour.performances)
+        {
+            if (! performance.ok)
+            {
+                std::cerr << "wfg import-als: a performance was not written: " << performance.error << std::endl;
+                anything = true;
+                continue;
+            }
+
+            anything = told (performance) || anything;
+        }
+
+        return anything ? 1 : 0;
     }
 
     int runAssociate (const juce::ArgumentList& args)
@@ -5136,6 +5346,14 @@ namespace
                 };
                 clientHost.makeTemplate = [&target] { return wfg::doc::Template::makeTemplate (target); };
 
+                //  An Ableton Live set, imported into a new show (§29).
+                clientHost.readImportScenes = [] (const std::vector<std::string>& sets) { return readImportScenes (sets); };
+                clientHost.importSets = [] (const wfg::ImportRequest& request,
+                                            const std::function<void (const std::string&)>& progress)
+                {
+                    return importSets (request, progress);
+                };
+
                #if JUCE_LINUX
                 /*  Not once the .deb is installed: it has told the desktop
                     for everybody (scripts/package-linux-deb.sh), and a copy
@@ -5392,6 +5610,17 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       [] (const juce::ArgumentList& args)
                       {
                           if (const auto code = runTemplate (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
+    app.addCommand ({ "import-als",
+                      "import-als <set.als>... --into=<folder> [--template=<set.als>] [--scenes=1-14,16] [--no-media]",
+                      "Ableton Live sets imported into a new show: one GO per scene, its sounds copied into media/;"
+                      " several sets are a tour, a performance each",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runImportAls (args); code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 

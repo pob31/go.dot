@@ -18,6 +18,7 @@
 #include <wfg/client/ui/NewCueMenu.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/NetworkMonitorWindow.h>
+#include <wfg/client/ui/ImportWindow.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/NewCueMenus.h>
 
@@ -3526,4 +3527,66 @@ TEST_CASE ("transport: a long Doh report is cut on the row at a whole character,
     CHECK (notice->getText().endsWith ("..."));
     CHECK (notice->getText().startsWith ("Doh!: " + desk));
     CHECK (notice->getTooltip() == "Doh!: " + sentence);
+}
+
+TEST_CASE ("import window: the named scenes that do something are ticked, and Import hands back the ticks")
+{
+    /*  Namespace draft §29, QS: a scene a tick box, the ones the host ticked
+        ticked to start, one that does nothing listed and greyed; Import hands
+        back what is ticked and the folder the show is made in - a new folder of
+        the name typed, in the folder shown. */
+    wfg::ImportScenes scenes;
+    scenes.scenes = { { 0, "top d\xc3\xa9" "but spec", "MISE : Fader 1", true, true },
+                      { 1, "", "", true, false },
+                      { 2, "rien", "", false, false } };
+
+    std::vector<int> handed;
+    juce::File into;
+
+    ui::ImportWindow::Actions actions;
+    actions.import = [&] (const std::vector<int>& ticked, const juce::File& where)
+    {
+        handed = ticked;
+        into = where;
+    };
+
+    const auto parent = juce::File::getSpecialLocation (juce::File::tempDirectory);
+    ui::ImportWindow window (model::Theme {}, juce::StringArray { juce::String::fromUTF8 ("Lazzi r\xc3\xa9gie Pau") },
+                             scenes, parent,
+                             "Lazzi", actions);
+
+    std::vector<juce::ToggleButton*> boxes;
+    juce::TextButton* importButton = nullptr;
+
+    std::function<void (juce::Component&)> find = [&] (juce::Component& component)
+    {
+        for (auto* child : component.getChildren())
+        {
+            if (auto* box = dynamic_cast<juce::ToggleButton*> (child))
+                boxes.push_back (box);
+
+            if (auto* button = dynamic_cast<juce::TextButton*> (child); button != nullptr && button->getButtonText() == "Import")
+                importButton = button;
+
+            find (*child);
+        }
+    };
+
+    find (window);
+
+    REQUIRE (boxes.size() == 3u);
+    CHECK (boxes[0]->getToggleState());
+    CHECK_FALSE (boxes[1]->getToggleState());   // no name: not ticked to start
+    CHECK (boxes[1]->isEnabled());
+    CHECK_FALSE (boxes[2]->isEnabled());        // does nothing: listed, greyed
+    CHECK (boxes[0]->getButtonText().startsWith ("1 "));
+
+    /*  The unnamed scene ticked by hand comes back with the first. */
+    boxes[1]->setToggleState (true, juce::dontSendNotification);
+    REQUIRE (importButton != nullptr);
+    REQUIRE (importButton->onClick != nullptr);
+    importButton->onClick();
+
+    CHECK (handed == std::vector<int> { 0, 1 });
+    CHECK (into == parent.getChildFile ("Lazzi"));
 }

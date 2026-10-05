@@ -68,6 +68,7 @@
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/NetworkMonitorWindow.h>
+#include <wfg/client/ui/ImportWindow.h>
 #include <wfg/client/ui/TemplateReviewWindow.h>
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
@@ -89,6 +90,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -106,7 +108,8 @@ namespace wfg::client
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
-            menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance, menuUpdateTemplate
+            menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance, menuUpdateTemplate,
+            menuImportAls
         };
 
         class Window final : public wfg::Client,
@@ -698,7 +701,8 @@ namespace wfg::client
                     case menuNetworkMonitor:
                     case menuAssociate:
                     case menuNewPerformance:
-                    case menuUpdateTemplate: break;
+                    case menuUpdateTemplate:
+                    case menuImportAls: break;
                     
                 }
 
@@ -732,6 +736,10 @@ namespace wfg::client
 
                     //  From the show, or from a performance used as a template.
                     case menuNewPerformance: return host.openWindow != nullptr && documentFolder().isDirectory();
+
+                    //  A new show from an Ableton Live set (§29): nothing of this one is touched.
+                    case menuImportAls: return host.importSets != nullptr && host.readImportScenes != nullptr
+                                                 && host.openWindow != nullptr && ! importing;
 
                     //  A performance of a show - with its template, or to be its first.
                     case menuUpdateTemplate: return host.compareWithTemplate != nullptr
@@ -803,6 +811,7 @@ namespace wfg::client
                     addMenuItem (menu, menuUpdateTemplate, templateAroundThisDocument() ? "Update the show's template..."
                                                                                        : "Make this the show's template");
                     addMenuItem (menu, menuOpen, "Open show...");
+                    addMenuItem (menu, menuImportAls, "Import Ableton Live set...");
                     menu.addSeparator();
                     addMenuItem (menu, menuSave, "Save");
                     addMenuItem (menu, menuSaveAs, "Save as...");
@@ -889,6 +898,7 @@ namespace wfg::client
                 {
                     case menuNew:       chooseShowFolder (true); break;
                     case menuNewPerformance: askForANewPerformance(); break;
+                    case menuImportAls: chooseLiveSets(); break;
                     case menuUpdateTemplate:
                         if (templateAroundThisDocument())
                             reviewTemplate ({});
@@ -2361,6 +2371,153 @@ namespace wfg::client
                 and a place. The copy is one `document.saveAs`, the copy the
                 engine already makes, followed from the timer as the empty
                 show's save is (followTheNewPerformance). */
+            //======================================================================
+            /*  AN ABLETON LIVE SET, IMPORTED INTO A NEW SHOW (namespace draft §29):
+                the sets picked - several are a tour, a performance each - then
+                the scenes ticked and where the show goes (QS), then the import,
+                off the message thread, saying where it has got to in the foot;
+                and the new show opened in a window of its own, with its report. */
+            void chooseLiveSets()
+            {
+                if (! host.readImportScenes || ! host.importSets || importing)
+                    return;
+
+                chooser = std::make_unique<juce::FileChooser> ("Choose an Ableton Live set - several for a tour, "
+                                                               "a performance each",
+                                                               showsFolder(), "*.als");
+
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                        | juce::FileBrowserComponent::canSelectMultipleItems,
+                                      [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()), this]
+                                      (const juce::FileChooser& answered)
+                                      {
+                                          const auto files = answered.getResults();
+
+                                          if (safe == nullptr || files.isEmpty())
+                                              return;
+
+                                          offerScenes (files);
+                                      });
+            }
+
+            void offerScenes (const juce::Array<juce::File>& files)
+            {
+                std::vector<std::string> sets;
+                juce::StringArray names;
+
+                for (const auto& file : files)
+                {
+                    sets.push_back (file.getFullPathName().toStdString());
+                    names.add (file.getFileNameWithoutExtension());
+                }
+
+                const auto scenes = host.readImportScenes (sets);
+
+                if (! scenes.error.empty())
+                {
+                    shell->transport.setNotice (juce::String::fromUTF8 (scenes.error.c_str()));
+                    return;
+                }
+
+                /*  THE SHOW'S NAME TO START: the set's, or what a tour's sets
+                    share - "Lazzi régie" for "Lazzi régie Pau" and the rest. */
+                auto name = names[0];
+
+                if (names.size() > 1)
+                {
+                    auto shared = names[0];
+
+                    for (const auto& other : names)
+                        while (shared.isNotEmpty() && ! other.startsWith (shared))
+                            shared = shared.dropLastCharacters (1);
+
+                    if (shared.trim().isNotEmpty())
+                        name = shared.trim();
+                }
+
+                ui::ImportWindow::Actions actions;
+                actions.import = [this, sets] (const std::vector<int>& ticked, const juce::File& into)
+                {
+                    startImport (sets, ticked, into);
+                };
+                actions.cancel = [this] { closeImportWindow(); };
+
+                importWindow = std::make_unique<ui::ImportWindow> (theme, names, scenes, showsFolder(), name,
+                                                                   std::move (actions));
+                importWindow->setVisible (true);
+                importWindow->toFront (true);
+            }
+
+            /*  Deferred, because the window asking is the one going. */
+            void closeImportWindow()
+            {
+                juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<ui::MainWindow> (window.get()), this]
+                {
+                    if (safe != nullptr)
+                        importWindow.reset();
+                });
+            }
+
+            void startImport (const std::vector<std::string>& sets, const std::vector<int>& ticked, const juce::File& into)
+            {
+                if (importing || ! host.importSets)
+                    return;
+
+                if (into.exists())
+                {
+                    shell->transport.setNotice (into.getFileName() + " is already there - choose another name");
+                    return;
+                }
+
+                importing = true;
+                closeImportWindow();
+                shell->transport.setNotice ("importing into " + into.getFileName() + "...");
+
+                wfg::ImportRequest request;
+                request.sets = sets;
+                request.scenes = ticked;
+                request.into = into.getFullPathName().toStdString();
+
+                /*  OFF THE MESSAGE THREAD: a tour copies a gigabyte of sound. Every
+                    word back is posted to it, and nothing is touched once this
+                    window has gone. */
+                const auto importer = host.importSets;
+                const juce::Component::SafePointer<ui::MainWindow> safe (window.get());
+
+                std::thread ([this, importer, request, safe]
+                {
+                    const auto result = importer (request, [this, safe] (const std::string& sentence)
+                    {
+                        juce::MessageManager::callAsync ([this, safe, sentence]
+                        {
+                            if (safe != nullptr)
+                                shell->transport.setNotice ("import: " + juce::String::fromUTF8 (sentence.c_str()));
+                        });
+                    });
+
+                    juce::MessageManager::callAsync ([this, safe, result]
+                    {
+                        if (safe == nullptr)
+                            return;
+
+                        importing = false;
+                        shell->transport.setNotice (juce::String::fromUTF8 (result.said.c_str()));
+
+                        if (! result.ok || ! host.openWindow)
+                            return;
+
+                        const auto refused = host.openWindow (result.show, false);
+
+                        if (! refused.empty())
+                            shell->transport.setNotice (juce::String::fromUTF8 (refused.c_str()));
+
+                        //  The report, in whatever reads Markdown here.
+                        if (const juce::File report { juce::String::fromUTF8 (result.report.c_str()) }; report.existsAsFile())
+                            report.startAsProcess();
+                    });
+                }).detach();
+            }
+
             void askForANewPerformance()
             {
                 const auto document = documentFolder();
@@ -3293,6 +3450,11 @@ namespace wfg::client
 
             std::optional<ReviewAfterSave> reviewAfterSave;
             std::unique_ptr<ui::TemplateReviewWindow> templateReview;
+
+            /*  AN IMPORT UNDER WAY (§29): the scene list while it is open, and
+                whether the import itself is running, which greys the menu. */
+            std::unique_ptr<ui::ImportWindow> importWindow;
+            bool importing = false;
         };
     }
 

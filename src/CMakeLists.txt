@@ -292,6 +292,8 @@ add_library(wfg_engine STATIC
     wfg/engine/command/EventQueue.h
     wfg/engine/json/JsonValue.cpp
     wfg/engine/json/JsonValue.h
+    wfg/engine/import/AlsImport.cpp
+    wfg/engine/import/AlsImport.h
     wfg/engine/import/AlsReader.cpp
     wfg/engine/import/AlsReader.h
     wfg/engine/import/AlsWalk.cpp
@@ -531,6 +533,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/InspectorComponent.cpp
     wfg/client/ui/NetworkMonitorWindow.h
     wfg/client/ui/NetworkMonitorWindow.cpp
+    wfg/client/ui/ImportWindow.cpp
+    wfg/client/ui/ImportWindow.h
     wfg/client/ui/TemplateReviewWindow.cpp
     wfg/client/ui/TemplateReviewWindow.h
     wfg/client/ui/HistoryPanelComponent.h

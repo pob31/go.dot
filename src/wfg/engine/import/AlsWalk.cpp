@@ -768,6 +768,23 @@ namespace wfg::import::als
                                                     "set's tempo, which the probe set is to confirm");
                 }
 
+                /*  WHAT THE CLIP MOVES THAT THE IMPORT DOES NOT READ, said once. */
+                {
+                    int unread = 0;
+
+                    for (const auto& envelope : clip.envelopes)
+                        if (moves (envelope)
+                              && (envelope.target.what == Parameter::unknown || envelope.target.what == Parameter::otherModulation
+                                    || envelope.target.what == Parameter::pan
+                                    || (envelope.target.relative && envelope.target.what != Parameter::modulation)))
+                            ++unread;
+
+                    if (unread > 0)
+                        note (Note::Kind::dropped, std::to_string (unread) + " envelope(s) on the clip move something "
+                                                   "the import does not read - a pan, a modulation other than the "
+                                                   "volume's, or a parameter the set does not name");
+                }
+
                 if (clip.pitchCoarse != 0 || std::abs (clip.pitchFine) > 0.01)
                     note (Note::Kind::dropped, "transposed " + std::to_string (clip.pitchCoarse) + " semitones in Live; "
                                                "Go.dot moves pitch only with speed, so it plays untransposed");
