@@ -271,8 +271,11 @@ namespace wfg::client::gesture
                    osc::Value::int32 (index == -1 ? std::numeric_limits<std::int32_t>::max() : index) } };
     }
 
-    Event saveAs (const std::string& folder)
+    Event saveAs (const std::string& folder, bool withMedia)
     {
+        if (withMedia)
+            return { origin::window, "document.saveAs", { osc::Value::string (folder), osc::Value::boolean (true) } };
+
         return { origin::window, "document.saveAs", { osc::Value::string (folder) } };
     }
 

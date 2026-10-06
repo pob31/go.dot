@@ -418,6 +418,35 @@ namespace wfg::doc
         ReadResult saveCopy (const juce::File& destination, const Snapshot& snapshot,
                              const juce::File& source);
 
+        /*  THE SOUNDS A COPY WOULD NOT FIND, CARRIED WITH IT - what `document.saveAs`
+            does when it is asked to (namespace draft §32). `saveCopy` leaves
+            `media/` behind, and a copy saved outside its show's folder then
+            finds none of its sounds: neither its own, which stayed behind, nor
+            the show's, which a performance finds in the folder around it and
+            the copy no longer has around it.
+
+            Two kinds are carried into `<destination>/media/`: every file in
+            `source`'s own `media/`, at the same place under it - imports, and
+            the takes recorded there; and each of `named` - the `file` of every
+            media cue - from wherever `audio::resolveMediaPath` finds it for
+            `source`, which is how a performance's copy takes the show's sounds
+            it plays and none it does not.
+
+            WHAT THE COPY WOULD FIND IS NOT CARRIED: a file already at its place
+            in the copy's `media/`, or in the `media/` of the folder around the
+            copy - a copy saved as a performance of the same show finds the
+            show's sounds there, as its original did. Not the colours' cache
+            (`.timbre/`), which the copy builds again, and no `*.tmp-*` left by
+            a write that did not finish. A sound already missing is missing in
+            the copy too, without a word: the copy plays what the original did.
+
+            EACH FILE WHOLE OR NOT AT ALL, through a sibling temp as every write
+            here is. Returns what could not be copied, one sentence each - the
+            caller reports them without withholding the show, as `saveCopy`
+            reports a `namespaces/` that would not follow. */
+        std::vector<std::string> carryMedia (const juce::File& destination, const juce::File& source,
+                                             const std::vector<std::string>& named);
+
         //======================================================================
         /*  A SHA-256 over everything a session READ: show.xml, state.xml and
             every file in namespaces/.

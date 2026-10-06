@@ -126,6 +126,12 @@ namespace wfg::doc
         /*  `saveAs` only: the bundle whose `namespaces/` the copy carries. */
         juce::File source;
 
+        /*  `saveAs` only: carry the sounds the copy would not find
+            (`Bundle::carryMedia`), and the `file` every media cue names - read
+            off the document on the tick thread, where reading it is safe. */
+        bool withMedia = false;
+        std::vector<std::string> named;
+
         Bundle::Snapshot snapshot;
 
         /*  The tick the command was applied at, so that a failure can name the

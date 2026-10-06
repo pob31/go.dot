@@ -16,6 +16,7 @@
 
 #include <wfg/engine/document/Bundle.h>
 
+#include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/EphemeralState.h>
 #include <wfg/engine/document/Schema.h>
@@ -1292,6 +1293,71 @@ namespace wfg::doc
         return result;
     }
 
+    std::vector<std::string> Bundle::carryMedia (const juce::File& destination, const juce::File& source,
+                                                 const std::vector<std::string>& named)
+    {
+        std::vector<std::string> problems;
+
+        const auto own = source.getChildFile ("media");
+        const auto into = destination.getChildFile ("media");
+        const auto aroundCopy = destination.getParentDirectory().getChildFile ("media");
+
+        //  Where the copy will look for `relative`: its own media/, then around it.
+        const auto copyFinds = [&] (const juce::String& relative)
+        {
+            return into.getChildFile (relative).existsAsFile()
+                     || (aroundCopy != into && aroundCopy.getChildFile (relative).existsAsFile());
+        };
+
+        const auto carry = [&] (const juce::File& from, const juce::String& relative)
+        {
+            const auto to = into.getChildFile (relative);
+            const auto temp = temporaryFor (to);
+
+            if (to.getParentDirectory().createDirectory().wasOk() && from.copyFileTo (temp) && temp.moveFileTo (to))
+                return;
+
+            temp.deleteFile();
+            problems.push_back ("could not copy " + from.getFullPathName().toStdString()
+                                + " into " + into.getFullPathName().toStdString());
+        };
+
+        /*  ITS OWN media/, LISTED BEFORE ANYTHING IS COPIED, so that a copy
+            somebody saved inside that very folder cannot walk into what it is
+            writing. */
+        if (own.isDirectory())
+        {
+            std::vector<std::pair<juce::File, juce::String>> files;
+
+            for (const auto& entry : juce::RangedDirectoryIterator (own, true, "*", juce::File::findFiles))
+            {
+                const auto relative = entry.getFile().getRelativePathFrom (own).replaceCharacter ('\\', '/');
+
+                if (relative.startsWith (".timbre/") || relative.contains (".tmp-"))
+                    continue;
+
+                files.emplace_back (entry.getFile(), relative);
+            }
+
+            for (const auto& [file, relative] : files)
+                if (! copyFinds (relative))
+                    carry (file, relative);
+        }
+
+        /*  THE SOUNDS IT PLAYS FROM AROUND IT, found as the runner finds them.
+            A name that would leave media/ resolves to no file and is passed by. */
+        for (const auto& name : named)
+        {
+            const juce::File from { juce::String (audio::resolveMediaPath (own.getFullPathName().toStdString(), name)) };
+            const auto relative = juce::String (name);
+
+            if (from.existsAsFile() && ! copyFinds (relative))
+                carry (from, relative);
+        }
+
+        return problems;
+    }
+
     //==============================================================================
     namespace
     {
@@ -1714,10 +1780,18 @@ namespace wfg::doc
             silently makes the archive the live document is a trap with a delay
             fuse: the operator's next Ctrl-S goes somewhere they did not name,
             and they find out at the next load. A client that wants to work in
-            the copy opens it, and opening is a restart. */
+            the copy opens it, and opening is a restart.
+
+            `media`, OPTIONAL AND FALSE UNLESS SAID (namespace draft §32): the
+            copy also carries the sounds it would not find where it lands
+            (`Bundle::carryMedia`). Never by default, for the reason `saveCopy`
+            leaves media/ behind - a copy that silently duplicated gigabytes is
+            a gesture nobody uses twice - so the window asks when the copy
+            leaves the show's folder, and a script says so. */
         registry.add ({ "document.saveAs",
-                        "Writes the show into another folder, as a copy. The session keeps its own.",
-                        { { "path", 's', false } },
+                        "Writes the show into another folder, as a copy. The session keeps its own. "
+                        "With media, the copy carries the sounds it would not find there.",
+                        { { "path", 's', false }, { "media", 'T', true } },
                         true,
                         [&document, &session, &writer, copiesFolder] (CommandContext& context,
                                                                       const std::vector<osc::Value>& args)
@@ -1774,6 +1848,12 @@ namespace wfg::doc
                             job.source = session.folder;
                             job.snapshot = Bundle::snapshotOf (document);
                             job.tick = context.tick;
+
+                            if (args.size() > 1 && args[1].getBool())
+                            {
+                                job.withMedia = true;
+                                job.named = audio::mediaFilesNamedBy (document);
+                            }
 
                             writer.submit (std::move (job));
                             return Outcome::ok (args);

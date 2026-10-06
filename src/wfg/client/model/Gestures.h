@@ -86,9 +86,10 @@ namespace wfg::client::gesture
     Event save();
 
     /*  Writes a COPY of the show into another folder - manifest, show, state
-        and namespaces, not media - and keeps working on this one: the menu's
-        Save as, and ctrl/⌘-shift-S. The engine's `document.saveAs`. */
-    Event saveAs (const std::string& folder);
+        and namespaces - and keeps working on this one: the menu's Save as, and
+        ctrl/⌘-shift-S. The engine's `document.saveAs`. `withMedia` carries the
+        sounds the copy would not find where it lands (namespace draft §32). */
+    Event saveAs (const std::string& folder, bool withMedia = false);
 
     /** Reloads the show from disk, throwing away everything since the last save. Asks first. */
     Event revert();

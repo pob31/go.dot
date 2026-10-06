@@ -1708,6 +1708,7 @@ namespace wfg::client
                 followTheEmptyShowsSave();
                 followTheNewPerformance();
                 followTheSaveBeforeReview();
+                followTheCopy();
             }
 
             /*  THE ONE WAY OUT OF THIS CLIENT INTO THE SHOW (§14.16, rule 1).
@@ -2825,10 +2826,18 @@ namespace wfg::client
                                           if (safe == nullptr || folder == juce::File())
                                               return;
 
-                                          send (gesture::saveAs (folder.getFullPathName().toStdString()));
+                                          /*  ITS SOUNDS GO WITH IT, unasked (namespace draft
+                                              §32): the empty show lives in Go.dot's own folder
+                                              and is put back to empty once saved, so a sound
+                                              left there would belong to no show at all. */
+                                          const auto carrying = holdsSounds (mediaFolder());
+
+                                          send (gesture::saveAs (folder.getFullPathName().toStdString(), true));
                                           savingTheEmptyShow = EmptyShowSave { folder, juce::Time::getCurrentTime(),
-                                                                               last.writeError, false };
-                                          shell->transport.setNotice ("saving the show to " + folder.getFileName());
+                                                                               last.writeError, false, carrying };
+                                          shell->transport.setNotice ((carrying ? "saving the show and its sounds to "
+                                                                                : "saving the show to ")
+                                                                        + folder.getFileName());
                                       });
             }
 
@@ -2843,10 +2852,16 @@ namespace wfg::client
 
                 if (! saving.reverting)
                 {
-                    //  A new sentence from the writer is this copy failing.
+                    /*  A new sentence from the writer is this copy failing - or,
+                        with the show on the disk, some of its sounds not
+                        following, when the empty show is left as it is: it
+                        still has them, and Save may be tried again. */
                     if (! last.writeError.empty() && last.writeError != saving.errorBefore)
                     {
-                        shell->transport.setNotice ("the show was not saved: " + juce::String (last.writeError));
+                        shell->transport.setNotice (copyLanded (saving.folder, saving.since)
+                                                      ? "the show was saved to " + saving.folder.getFileName()
+                                                          + ", but not all its sounds: " + juce::String (last.writeError)
+                                                      : "the show was not saved: " + juce::String (last.writeError));
                         savingTheEmptyShow.reset();
                         return;
                     }
@@ -2873,7 +2888,8 @@ namespace wfg::client
                     return;
                 }
 
-                if (waited.inSeconds() > 20.0)
+                //  Sounds being copied take what they take; the revert does not.
+                if (waited.inSeconds() > 20.0 && (saving.reverting || ! saving.carrying))
                 {
                     shell->transport.setNotice (saving.reverting
                                                   ? "saved to " + saving.folder.getFileName()
@@ -2903,7 +2919,8 @@ namespace wfg::client
             /*  SAVE AS: a folder, and one `document.saveAs` on it. The engine
                 writes the copy and keeps this session on the show it opened,
                 which is what the command was drawn to do (§14.10); the foot
-                says where the copy went. */
+                says where the copy went. A copy leaving the show's folder with
+                sounds behind it is asked about first (namespace draft §32). */
             void chooseSaveAsFolder()
             {
                 chooser = std::make_unique<juce::FileChooser> (
@@ -2921,10 +2938,119 @@ namespace wfg::client
                                           if (safe == nullptr || folder == juce::File())
                                               return;
 
-                                          send (gesture::saveAs (folder.getFullPathName().toStdString()));
-                                          shell->transport.setNotice ("copy of the show written to "
-                                                                        + folder.getFileName());
+                                          if (leavesSoundsBehind (folder))
+                                              askAboutTheSounds (folder);
+                                          else
+                                              copyTheShow (folder, false);
                                       });
+            }
+
+            /*  THE SHOW'S FOLDER: this document's, or - for a performance - the
+                one around it, which holds the sounds the performances share. */
+            juce::File showFolderOfThisDocument() const
+            {
+                const auto document = documentFolder();
+                return showAroundThisDocument().isNotEmpty() ? document.getParentDirectory() : document;
+            }
+
+            //  Any file in a media/ folder, below it too (takes), but the colours' cache.
+            static bool holdsSounds (const juce::File& media)
+            {
+                if (! media.isDirectory())
+                    return false;
+
+                for (const auto& entry : juce::RangedDirectoryIterator (media, true, "*", juce::File::findFiles))
+                    if (! entry.getFile().isAChildOf (media.getChildFile (".timbre")))
+                        return true;
+
+                return false;
+            }
+
+            /*  WHETHER A COPY AT `folder` WOULD LEAVE SOUNDS BEHIND (author,
+                2026-10-06: "When saving outside the workfolder (show) warn the
+                user and ask if they need to move the bundled media too"). A
+                copy finds its sounds in its own media/, which Save as does not
+                fill, then in the media/ of the folder around it - so one saved
+                straight inside the show's folder, as a performance is, still
+                finds the show's; anywhere else it finds neither the show's nor
+                this document's own. Asked only when there are sounds to lose. */
+            bool leavesSoundsBehind (const juce::File& folder) const
+            {
+                const auto document = documentFolder();
+                const auto showFolder = showFolderOfThisDocument();
+
+                if (! document.isDirectory() || folder.getParentDirectory() == showFolder)
+                    return false;
+
+                return holdsSounds (document.getChildFile ("media"))
+                         || (showFolder != document && holdsSounds (showFolder.getChildFile ("media")));
+            }
+
+            void askAboutTheSounds (const juce::File& folder)
+            {
+                const auto showName = showFolderOfThisDocument().getFileName();
+                const auto performance = showAroundThisDocument().isNotEmpty();
+
+                auto* box = new juce::AlertWindow (
+                    "Outside the show's folder",
+                    "\"" + folder.getFileName() + "\" is not in " + showName + "'s folder, so the copy will not find "
+                      "the sounds kept there.\n\n"
+                      "Copy the sounds with it? That is "
+                      + (performance ? juce::String ("this performance's own media - imports and recordings - and the "
+                                                     "sounds of ") + showName + " its cues play."
+                                     : juce::String ("the show's media - imports and recordings."))
+                      + " A large show takes a while; this one goes on playing meanwhile.",
+                    juce::MessageBoxIconType::WarningIcon);
+                box->addButton ("Copy the sounds too", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                box->addButton ("Copy without them", 2);
+                box->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                box->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, folder, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                    {
+                        if (answer != 0 && safe != nullptr)
+                            copyTheShow (folder, answer == 1);
+                    }), true);
+            }
+
+            void copyTheShow (const juce::File& folder, bool withSounds)
+            {
+                send (gesture::saveAs (folder.getFullPathName().toStdString(), withSounds));
+
+                if (! withSounds)
+                {
+                    shell->transport.setNotice ("copy of the show written to " + folder.getFileName());
+                    return;
+                }
+
+                copyingTheShow = ShowCopy { folder, juce::Time::getCurrentTime(), last.writeError };
+                shell->transport.setNotice ("copying the show and its sounds to " + folder.getFileName() + "...");
+            }
+
+            /*  On every pass while a copy carries its sounds: the writer copies
+                them before the show's three files, so those landing is the
+                whole copy landing. No time limit - a gigabyte takes what it
+                takes, and a copy that fails says so through the writer. */
+            void followTheCopy()
+            {
+                if (! copyingTheShow.has_value())
+                    return;
+
+                const auto copy = *copyingTheShow;
+                const auto failed = ! last.writeError.empty() && last.writeError != copy.errorBefore;
+
+                if (! failed && ! copyLanded (copy.folder, copy.since))
+                    return;
+
+                copyingTheShow.reset();
+
+                if (! failed)
+                    shell->transport.setNotice ("the show and its sounds were copied to " + copy.folder.getFileName());
+                else if (copyLanded (copy.folder, copy.since))
+                    shell->transport.setNotice ("the show was copied to " + copy.folder.getFileName()
+                                                  + ", but not all of it: " + juce::String (last.writeError));
+                else
+                    shell->transport.setNotice ("the copy was not made: " + juce::String (last.writeError));
             }
 
             /*  A CLIENT DOES NOT OFFER A GESTURE IT COULD HAVE KNOWN WOULD BE
@@ -3595,14 +3721,16 @@ namespace wfg::client
 
             /*  The launcher's empty show on its way to where it was saved
                 (chooseWhereTheEmptyShowLives): the folder, since when, what the
-                writer had already said before, and whether the copy has landed
-                and the empty show is being put back. */
+                writer had already said before, whether the copy has landed
+                and the empty show is being put back, and whether it carries
+                sounds - which lifts the time limit on the copy. */
             struct EmptyShowSave
             {
                 juce::File folder;
                 juce::Time since;
                 std::string errorBefore;
                 bool reverting = false;
+                bool carrying = false;
             };
 
             std::optional<EmptyShowSave> savingTheEmptyShow;
@@ -3619,6 +3747,16 @@ namespace wfg::client
             };
 
             std::optional<NewPerformance> makingAPerformance;
+
+            //  A Save as carrying its sounds (copyTheShow): where, since when, what the writer had said before.
+            struct ShowCopy
+            {
+                juce::File folder;
+                juce::Time since;
+                std::string errorBefore;
+            };
+
+            std::optional<ShowCopy> copyingTheShow;
 
             //  A save asked for so the template review reads it, and what runs after the review.
             struct ReviewAfterSave

@@ -1070,6 +1070,114 @@ TEST_CASE ("document.saveAs under a replay lands inside --out, whatever the path
     CHECK (temp.parent.findChildFiles (juce::File::findDirectories, false).size() == 2);
 }
 
+TEST_CASE ("Bundle::carryMedia: a copy outside the show takes its own media and the show's sounds its cues play, and no more")
+{
+    /*  Namespace draft §32 (author, 2026-10-06: "When saving outside the
+        workfolder (show) warn the user and ask if they need to move the bundled
+        media too"). A performance saved away from its show finds neither its
+        own media/, which Save as leaves behind, nor the show's around it. */
+    TempBundle temp { "Hamlet" };
+    const auto show = temp.folder;
+    const auto paris = show.getChildFile ("Paris");
+
+    writeBytes (show.getChildFile ("media").getChildFile ("storm.wav"), "the show's storm\n");
+    writeBytes (show.getChildFile ("media").getChildFile ("unused.wav"), "another performance's\n");
+    writeBytes (paris.getChildFile ("media").getChildFile ("announce.wav"), "Paris's announcement\n");
+    writeBytes (paris.getChildFile ("media").getChildFile ("takes").getChildFile ("Looper take 1.wav"), "a take\n");
+    writeBytes (paris.getChildFile ("media").getChildFile (".timbre").getChildFile ("cache.bin"), "colours\n");
+    writeBytes (paris.getChildFile ("media").getChildFile ("half.wav.tmp-42"), "a write cut short\n");
+    writeBytes (paris.getChildFile ("escape.wav"), "outside media/\n");
+
+    const auto archive = temp.parent.getChildFile ("Archive").getChildFile ("Paris");
+    const auto media = archive.getChildFile ("media");
+
+    const auto problems = Bundle::carryMedia (archive, paris, { "storm.wav", "announce.wav", "gone.wav", "../escape.wav" });
+
+    for (const auto& problem : problems)
+        INFO ("problem: " << problem);
+
+    CHECK (problems.empty());
+
+    //  Its own, whole and where they were - imports and takes alike.
+    CHECK (readBytes (media.getChildFile ("announce.wav")) == "Paris's announcement\n");
+    CHECK (readBytes (media.getChildFile ("takes").getChildFile ("Looper take 1.wav")) == "a take\n");
+
+    //  The show's sound a cue plays; not the one only another performance uses.
+    CHECK (readBytes (media.getChildFile ("storm.wav")) == "the show's storm\n");
+    CHECK_FALSE (media.getChildFile ("unused.wav").exists());
+
+    //  Not the cache, not a half write, not a name that leaves media/, not a sound already missing.
+    CHECK_FALSE (media.getChildFile (".timbre").exists());
+    CHECK_FALSE (media.getChildFile ("half.wav.tmp-42").exists());
+    CHECK_FALSE (archive.getChildFile ("escape.wav").exists());
+    CHECK_FALSE (media.getChildFile ("gone.wav").exists());
+    CHECK (tempsIn (media).empty());
+}
+
+TEST_CASE ("Bundle::carryMedia: a copy straight inside the show's folder carries only what it would not find around it")
+{
+    TempBundle temp { "Hamlet" };
+    const auto show = temp.folder;
+    const auto paris = show.getChildFile ("Paris");
+
+    writeBytes (show.getChildFile ("media").getChildFile ("storm.wav"), "the show's storm\n");
+    writeBytes (paris.getChildFile ("media").getChildFile ("announce.wav"), "Paris's announcement\n");
+
+    //  The show copied as a performance of itself finds every sound of its own around it.
+    const auto lyon = show.getChildFile ("Lyon");
+    CHECK (Bundle::carryMedia (lyon, show, { "storm.wav" }).empty());
+    CHECK_FALSE (lyon.getChildFile ("media").exists());
+
+    //  A performance copied beside itself finds the show's, and takes its own.
+    const auto lille = show.getChildFile ("Lille");
+    CHECK (Bundle::carryMedia (lille, paris, { "storm.wav", "announce.wav" }).empty());
+    CHECK (readBytes (lille.getChildFile ("media").getChildFile ("announce.wav")) == "Paris's announcement\n");
+    CHECK_FALSE (lille.getChildFile ("media").getChildFile ("storm.wav").exists());
+}
+
+TEST_CASE ("document.saveAs with media: the copy carries the sounds, the record says so, and the session stays put")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    //  phase3 names `segments.wav` from three cues.
+    TempBundle temp { "phase3" };
+    REQUIRE (juce::File (juce::String (std::string (WFG_TEST_FIXTURES_DIR)) + "/bundles/phase3").copyDirectoryTo (temp.folder));
+    writeBytes (temp.folder.getChildFile ("media").getChildFile ("segments.wav"), "not really a wav\n");
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+
+    const auto archive = temp.parent.getChildFile ("elsewhere").getChildFile ("archive");
+    const auto path = archive.getFullPathName().toStdString();
+
+    const auto outcome = invokeBundleCommand (document, session, "document.saveAs",
+                                              { osc::Value::string (path), osc::Value::boolean (true) });
+
+    CHECK (outcome.applied);
+    REQUIRE (outcome.appliedArgs.size() == 2u);
+    CHECK (outcome.appliedArgs[1].getBool());
+    CHECK (session.writeError.empty());
+    CHECK (session.folder == temp.folder);
+
+    ShowDocument copied;
+    CHECK (Bundle::open (archive, copied).ok);
+    CHECK (readBytes (archive.getChildFile ("media").getChildFile ("segments.wav")) == "not really a wav\n");
+
+    /*  A SOUND THAT CANNOT FOLLOW IS SAID, AND THE SHOW STILL LANDS: a file
+        stands where the copy's media/ would go. */
+    const auto blocked = temp.parent.getChildFile ("blocked");
+    writeBytes (blocked.getChildFile ("media"), "a file, not a folder\n");
+
+    CHECK (invokeBundleCommand (document, session, "document.saveAs",
+                                { osc::Value::string (blocked.getFullPathName().toStdString()),
+                                  osc::Value::boolean (true) }, 7).applied);
+    CHECK (session.writeError.rfind ("document.saveAs at tick 7: ", 0) == 0);
+    CHECK (session.writeError.find ("could not copy") != std::string::npos);
+    CHECK (Bundle::manifestFile (blocked).existsAsFile());
+}
+
 TEST_CASE ("document.autosave: a bundle that has gone is refused, and no twin is made where it was")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));

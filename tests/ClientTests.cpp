@@ -671,7 +671,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::groupRole ("B3N8R5TW", "footer"),
         gesture::listPersistent ("7K2QM9X4"),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
-        gesture::saveAs ("C:/shows/copy"),
+        gesture::saveAs ("C:/shows/copy"), gesture::saveAs ("C:/shows/copy", true),
         gesture::copyCues ({ "B3N8R5TW", "F7HR8TVD" }),
         gesture::pasteCues ("7K2QM9X4", 0, "<Fragment/>"),
         gesture::recover(), gesture::discardRecovery(),

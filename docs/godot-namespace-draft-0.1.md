@@ -293,7 +293,7 @@ to the node invokes the command; the same names are what the CLI and the event l
 | `noop` | `/godot/cmd/noop` | — | the skeleton's first command; a heartbeat in a log |
 | `document.load` | `/godot/cmd/document/load` | `s` bundle path | logs the loaded bundle's SHA-256 |
 | `document.save` | `/godot/cmd/document/save` | — | |
-| `document.saveAs` | `/godot/cmd/document/saveAs` | `s` bundle path | |
+| `document.saveAs` | `/godot/cmd/document/saveAs` | `s` bundle path, optional `T` media (§32) | |
 | `document.copy` | `/godot/cmd/document/copy` | `s` ids, space-separated | *(2026-09-18)* a read: copies of the cues as one canonical `<Fragment>`, published at `document/clipboard` |
 | `document.paste` | `/godot/cmd/document/paste` | `s` parent, `i` member index, `s` fragment, `[s ids]` | *(2026-09-18)* the fragment's cues enter under NEW ids, intra-fragment references re-pointed, one undo step; the record carries the ids drawn so a replay draws none |
 | `list.create` | `/godot/cmd/list/create` | `s` name `[s id]` | the id is optional; the engine generates one and **logs the event with it** |
@@ -5189,7 +5189,7 @@ survive the lock.
 | `document.revert` | — | that the bundle on disk wins: `Bundle::open` into the same object through `adopt`, history cleared, `markStale` | `locked`; `bad-address` when the folder the session names is no longer a readable bundle | no — and it clears the history, so nothing before it is either | **no**. The pointer does change, to whatever `state.xml` says, because loading a document is the whole of what this command does rather than a side effect of something else |
 | `document.recover` | — | that `recovery/show.xml` wins: the same `adopt`, history cleared, and the document left **dirty** on purpose (§14.10) | `no-recovery` when there is nothing there; `locked` | no, as above | **no**, as above |
 | `document.discardRecovery` | — | that the recovery folder is stale and goes | `no-recovery`; `write-failed` if the folder will not delete | not a document change at all | **no** |
-| `document.saveAs` | `s` path | that these bytes are also written somewhere else; the session keeps pointing at the folder it opened (plan decision 7, here to be overruled early rather than late). §14.10 says why the copy is save-plus-a-copy rather than one act | `write-failed` | not a document change | **no** |
+| `document.saveAs` | `s` path, optional `T` media | that these bytes are also written somewhere else - with media true, and the sounds the copy would not find where it lands (§32); the session keeps pointing at the folder it opened (plan decision 7, here to be overruled early rather than late). §14.10 says why the copy is save-plus-a-copy rather than one act | `write-failed` | not a document change | **no** |
 | *the lock* — `node.set` | `s /godot/document/locked`, `T` | show mode on or off (decision W) | `type-mismatch` for anything but `T`/`F`/`"true"`/`"false"` (§14.2); never `locked`, since the row is `persist=state` | no — plan decision 3, here to be overruled early rather than late, keeps state rows off the stack | **no** |
 
 **The lock is not a command, and that is the design rather than an omission.**
@@ -20059,3 +20059,71 @@ on the desk - a driver resync, or a USB error - is below Go.dot, and §31.3's no
 The ports stay bound and open, but nothing is painted and nothing is read (`SurfaceBridge::afterTick`).
 If the gaps go on, the device or its USB path is the cause. If they stop, Go.dot's traffic to the desk
 is, and the next measurement is how long `Output::sendNow` takes in `MidiSender::deliver`.
+
+## 32. A copy saved outside its show's folder
+
+Written 2026-10-06, when the author asked: *"When saving outside the workfolder (show) warn the user
+and ask if they need to move the bundled media too."* PRD §3.20 carries the decided sentence; this
+section is how it is built.
+
+### 32.1 What was there
+
+Save as - `document.saveAs` - wrote the manifest, `show.xml`, `state.xml` and `namespaces/`, and
+never `media/`: "a gesture that silently duplicated gigabytes is a gesture nobody uses twice"
+(`Bundle.h`, `saveCopy`). A copy saved straight inside the show's folder still found the show's
+sounds around it (§25, JK). Saved anywhere else, it found neither the show's sounds nor the
+document's own, and nothing said so: the copy opened with its cues reporting missing sounds.
+
+### 32.2 Decisions
+
+The author's: warn and ask. The rest are the implementer's, and open to overruling.
+
+- **TV - Asked when sounds would be lost.** Save as asks when the folder chosen is not straight
+  inside the show's folder - the document's own, or for a performance the folder around it - and
+  there are sounds to lose: a file in the document's own `media/`, or for a performance in the
+  show's. The question, headed "Outside the show's folder", names the folder and the show and
+  says which sounds it means. Its buttons are "Copy the sounds too" (Return), "Copy without them"
+  and "Cancel" (Esc). *Mine:* the wording, and reading "workfolder" as the show's folder. A copy
+  saved straight inside it is not asked about, since it finds the show's sounds there.
+- **TW - What "the sounds" are.** The document's own `media/`, whole: imports, and takes - including
+  a take no cue names yet, which is still that performance's recording. Then each sound a cue names
+  that is found around the document, such as the show's sounds a performance plays. The show's whole
+  library is not copied, because most of it belongs to other performances. Nothing the copy would
+  already find in its own `media/` or around it is copied. The colours' cache (`.timbre/`) is not
+  copied either, nor a `*.tmp-*` left by a write cut short. A sound already missing stays missing,
+  without a word: the copy plays what the original played. *Mine.*
+- **TX - One command, with an optional flag.** `document.saveAs <s path> [T media]` (§4.11: the
+  gesture is a named command, and a script asks with `T`). When the flag is left out it is false,
+  so every recorded log replays as before.
+  - The sounds are copied on the document writer, before the show's three files. So the manifest
+    landing means everything landed, and the window follows the copy by it, with no time limit.
+  - Each file goes through a sibling temp and a rename.
+  - A sound that cannot be copied is reported at `/godot/document/writeError`, and the show is
+    written anyway (`saveCopy`'s asymmetry).
+  - While the writer copies, a Ctrl-S waits behind it. GO never shares that thread.
+
+  *Mine.*
+- **TY - The empty show carries its sounds unasked.** The empty show lives in Go.dot's own folder
+  and is put back to empty once saved, so a sound left there would belong to no show. Its 20-second
+  limit is lifted while sounds are copied. A copy that lands with sounds missing leaves the empty
+  show as it was and says so in the foot, so Save can be tried again. *Mine.*
+
+### 32.3 Where it is, and what it was tried on
+
+- `Bundle::carryMedia` (`document/Bundle.h`) decides what goes, through `audio::resolveMediaPath`,
+  the one resolver. `WriteJob::withMedia` and `named` carry the request to the writer. The cue
+  names are read off the document on the tick thread by `audio::mediaFilesNamedBy`.
+- Window: `leavesSoundsBehind`, `askAboutTheSounds`, `copyTheShow` and `followTheCopy` in
+  `client/ui/Client.cpp`. `gesture::saveAs (folder, withMedia)`.
+- Tested by `BundleTests`:
+  - "a copy outside the show takes its own media and the show's sounds its cues play, and no more"
+  - "a copy straight inside the show's folder carries only what it would not find around it"
+  - "document.saveAs with media: the copy carries the sounds, the record says so, and the session
+    stays put", which includes a sound that cannot follow being reported while the show still
+    lands
+
+  `ClientTests` checks the new gesture's signature. Both run in C and `fr_FR`.
+- The question on screen is the author's to try.
+- **Left as it was, and asked:** Save as from a performance into another folder straight inside
+  the same show still leaves that performance's own `media/` behind, as before. New performance
+  copies a template's own sounds; Save as there does not.

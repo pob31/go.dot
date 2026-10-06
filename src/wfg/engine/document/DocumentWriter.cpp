@@ -584,7 +584,15 @@ namespace wfg::doc
 
             case WriteJob::Kind::saveAs:
             {
-                const auto written = Bundle::saveCopy (job.folder, job.snapshot, job.source);
+                /*  THE SOUNDS FIRST, for the reason `saveCopy` copies the
+                    descriptions first: the manifest is what makes the folder a
+                    show, and once it is there everything else must be. A
+                    window following the copy waits for the manifest. */
+                const auto mediaProblems = job.withMedia ? Bundle::carryMedia (job.folder, job.source, job.named)
+                                                         : std::vector<std::string>();
+
+                auto written = Bundle::saveCopy (job.folder, job.snapshot, job.source);
+                written.problems.insert (written.problems.end(), mediaProblems.begin(), mediaProblems.end());
 
                 done.landed = written.ok;
                 done.problem = describe (written);
