@@ -12272,7 +12272,7 @@ Asked with a recommendation each; three of the four answered otherwise.
 
 | | Decision | Whose |
 |---|---|---|
-| **DF** | **The fader is taken by touch**: Rec in the waveform arms the cue's lane, and the first fader touched on any surface is taken for it; that touch does nothing else | the author's - the recommendation was a menu of faders |
+| **DF** | **The fader is taken by touch**: Rec in the waveform arms the cue's lane, and the first fader touched on any surface is taken for it; that touch does nothing else | the author's - the recommendation was a menu of faders. *Retired 2026-10-06 by UI, the author's: the faders flip to the cue and each strip's REC arms its lane (§34)* |
 | **DG** | **The initial value is the curve's start value**: once taken, the fader flies to what the lane says where playback starts, nought with no lane; nothing is written until it is touched during a pass | the author's - the recommendation was wherever the hand left the fader |
 | **DH** | **Latch**: from the first touch in a pass, the ride is written until the pass stops, the last value held after the hand lets go | the author's - the recommendation was touch, returning to the curve at let-go |
 | **DI** | **The D700's transport Rec** starts and stops a pass while a lane's fader is taken, and its light shows the pass; otherwise it records a sampling take, as §19.7 says | the author's |
@@ -18718,7 +18718,7 @@ a time, as a send fade's do.
 
 ### 28.5 What it does not build
 
-Recording a send lane from a fader or a rotary (§20.9 records the level only); lanes on pan, EQ or a
+Recording a send lane from a fader or a rotary (§20.9 records the level only) - *from a fader, built by §34 (2026-10-06)*; lanes on pan, EQ or a
 plugin's parameter; a lane on a group or a live take.
 
 ### 28.6 What was built, against what §28 drew
@@ -20255,3 +20255,119 @@ open to overruling.
 
   All run in C and `fr_FR`.
 - Dragging a loop end in the waveform editor while the bed plays is the author's to try.
+
+## 34. The faders flipped to one cue: its level and its sends recorded in one pass
+
+Written 2026-10-06, before any of it is built; §34.7 at close-out will say what won where the text
+and the code disagree. The author asked: *"Could we expand the level lane automation writing using
+faders to the sends too?"* Offered one lane per pass (recommended) or several in one pass, the
+author chose **several**, and answered the question about the Rec button's words with the design
+itself: *"Flip the faders on the control surface to show the same level and send faders enable for
+each level/send independently by pressing the fader's Rec button."*
+
+### 34.1 What it is, before its names
+
+The waveform's automation button **flips** every fader surface - the D700, a Mackie, the window's
+virtual panel - to one media cue's mixer: the same strips as the foot's send mixer, the cue's level
+first and then one fader per mix the show declares. Each fader sits where that number is heard: the
+level or the send as written, plus what its lane says. A strip's own **REC** button arms that one
+lane, and its light says so. Rec in the window, or the D700's transport Rec, starts a **pass**: the
+cue plays, every fader follows its lane, and every armed fader is written from its first touch,
+latched, until the pass stops. A REC pressed during the pass joins it, and records from that
+fader's next touch. At the end, every lane ridden is written together, in one step anybody can
+undo, and the faders stay flipped for the next pass, until the window flips them back.
+
+What there was: §20.9 recorded the level lane alone, on one fader taken by touch; §28.5 said a send
+lane could not be recorded.
+
+### 34.2 Decisions
+
+The author's, with the options and their wording the implementer's:
+
+- **UI - Several lanes in one pass, on faders flipped to the cue, armed by each strip's REC** - the
+  author's own design, quoted above. It retires §20.9's DF: no fader is taken by touch any more.
+- **UJ - The flip is started and ended from the window only** (offered as "Window only"). No key of
+  the D700 changes meaning; its transport Rec starts and ends a pass while the faders are flipped,
+  as DI said of a taken fader.
+- **UK - A flipped fader sits at what is heard** (offered as "What you hear"): the cue's written
+  level plus its lane, a send's written level plus its lane, the bottom for a mix the cue does not
+  send to. The hand's level is written into the lane as the difference from the written number, so
+  a lane stays an offset (CZ, PY) and nothing written beside it moves.
+- **UL - A fader whose REC is off plays back during a pass, and its REC can join it** (offered as
+  "Plays back, REC joins"): its motor follows its lane and a hand on it changes nothing heard;
+  pressed during the pass, its REC arms it, and it is written from its next touch - a punch-in.
+- **UM - The faders stay flipped after a pass** (offered as "Stay flipped"), with their REC choices,
+  until the window flips them back, the show is locked, or a double Esc. For the flip, this
+  replaces QX's "the end gives the fader back" (§30.4).
+
+The implementer's, open to overruling:
+
+- **UN - Strip k is lane k.** On each fader surface - a pad surface has none - the strips in order,
+  a D700's two banks counted on from one another: the first is the level, then the show's mixes in
+  `/godot/audio/mixes` order, the order the rotaries' Send page walks. A strip past the last mix is
+  dark. Every flipped surface shows the same lanes on the same strips.
+- **UO - A ride node per lane.** The level keeps `/godot/surface/laneRide`; a send rides
+  `/godot/bus/<mix>/laneRide`, the flipped cue's send into that mix. A lane is named by its key:
+  `level`, or the mix's identifier.
+- **UP - A REC pressed off during a pass is a punch-out.** What that fader rode is kept; from then on
+  the lane plays as written.
+- **UQ - A mix the cue does not send to can be ridden.** During the pass it is heard as a send of the
+  run alone, as a fade brings a mix in from silence (§26, PB). At the end a send is made, at nought,
+  holding a lane that is silence outside the ride - the convention the importer writes a moving send
+  in (§29). The sends made and every lane written are one step of undo.
+- **UR - The strip's REC light**: steady when armed, blinking while it writes (armed and touched in a
+  pass). The transport Rec's light shows the pass, as DI.
+- **US - A send's switch is not the ride's.** A send switched off is shown and ridden at its level,
+  and its strip says `off`; what it rides is written, and not heard until the send is switched on.
+- **UT - The commands.** `lane.take` is retired with DF. `lane.arm <cue>` now flips the faders to a
+  cue, with its old refusals; `lane.free` flips them back; `lane.rec <lane> <on>` arms or disarms one
+  lane; `lane.record` and `lane.stop` keep their shapes, and `lane.stop kept` says which lanes it
+  wrote.
+
+### 34.3 The rows
+
+Owner `surfaces` and `bus`, all `persist=none` - a flip and a pass are tonight's (§4.10), and the
+lanes they end in are the decision:
+
+| Node | Type | Access | Meaning |
+|---|---|---|---|
+| `/godot/surface/lane` | `s` | r | the media cue the faders are flipped to, or empty |
+| `/godot/surface/laneRec` | `s` | r | the armed lanes, by key, space-separated: `level` and mix identifiers |
+| `/godot/surface/laneRecording` | `T` | r | a pass is running |
+| `/godot/surface/laneRide` | `d`, -120..12 dB | rw | what the level's fader rides: the cue's level and its lane, where the file is |
+| `/godot/bus/<mix>/laneRide` | `d`, -120..12 dB | rw | what that mix's fader rides: the cue's send into it and its lane |
+| `/godot/surface/lanePass` | `s` | r | what the last pass ended in (§30.4), `kept` naming its lanes |
+
+`/godot/surface/laneFader` is gone with DF. A strip's `word` gains `rec`, for a flipped strip whose
+lane is armed; `lane` is a flipped strip whose lane is not, and `recording` one written in a pass.
+
+### 34.4 The pass
+
+The Runner's hook between `applyLanes` and `applyLevels`, as §20.9's, run once for each lane:
+
+- **Outside a pass** each ride is the written number plus its lane at the cue's start (DG).
+- **In a pass**, a lane not armed, or armed and not yet touched, rides where the voice is; the
+  motor follows it.
+- **From an armed lane's first touch** it is latched (DH): the hand's level, less the written
+  number, is that lane's term - the run's level term for the level, its send's offset for a send,
+  a send of the run alone for a mix with none - heard at once, and sampled each tick where the
+  voice is now. A send's term reaches the voice over its coefficient's 50 ms glide (PZ).
+- `applyLanes` leaves alone the lanes a hand holds, so a ride does not rebuild the routing on every
+  tick.
+- **At the end**, each lane touched is spliced as §20.9's is (DL), judged by `doc::readLevelLane`,
+  and all are written in one step (UQ); ended by Rec again, the window's stop, the run ending or
+  Esc, and dropped by a kill or Doh!, as DM and §30.4 say.
+
+### 34.5 Fixtures and the measurement
+
+- **Unit.** `LaneRecordTests`: the flip, the REC of each lane, two lanes in one pass, a punch-in, a
+  punch-out, a mix with no send made into a send, one undo for all, Esc, double Esc, Doh!, the lock.
+  `GoTests`: a ridden send heard. `SurfaceBridgeTests`: REC, its light, the strip's screen.
+- **Replay and driver.** `logs/lane-record.wfglog`, recorded again: its `lane.take` is retired.
+  `blackbox/lane_record.py` rides the level and a send in one pass, and a mix with no send.
+
+### 34.6 What it does not build
+
+Touch and write modes; flipping from the D700; more lanes than a surface has strips (the rest are
+not on the faders); lanes on pan, EQ or a plugin's parameter; a fader's REC choices kept after the
+faders are flipped back.

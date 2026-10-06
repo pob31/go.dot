@@ -942,6 +942,15 @@ between the mixes while it plays and come back the same way on every pass of a
 loop. Media cues only, one lane drawn at a time in the waveform editor.
 Recording one from a fader is not built.
 
+*Added in 0.8, at the author's direction (2026-10-06).* **The faders flip to
+one cue, and its level and its sends are recorded in one pass.** The waveform's
+automation button flips every fader surface to the cue's mixer - its level,
+then one fader per mix - each sitting where that number is heard; a strip's own
+REC arms its lane, before or during the pass; one pass writes every lane ridden,
+latched from its first touch, in one step of undo, and the faders stay flipped
+until the window flips them back. It replaces taking one fader by touch
+(namespace draft §34).
+
 **Curve editor:** breakpoint lists with numeric entry, not only draggable
 pixels.
 
@@ -3496,7 +3505,8 @@ Added 2026-09-26 *(proposed)*, with §3.18 and §3.31:
 Added 2026-09-27 *(proposed)*, with §3.10's level lane:
 
 - ~~**A lane recorded from a fader**~~ — *decided 2026-09-28*: latch, from a fader taken by touch
-  (§3.10, namespace draft §20.9). Touch and write modes stay proposed.
+  (§3.10, namespace draft §20.9). Touch and write modes stay proposed. *2026-10-06:* the faders flip to a cue
+  and record its level and its sends in one pass (namespace draft §34).
 - **The master dial on a lane point's level**, which §17.18's rule against a handle's two numbers
   keeps out today.
 - **Lanes on other numbers** — pan, a send, a plugin's parameter — each a row beside the number it

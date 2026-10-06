@@ -829,6 +829,27 @@ show with eleven performances of fourteen GOs. A fresh document's `<Audio>` orde
 mended on the way. A hand and a drawing on one fader: the drawing is imported (the author, QW).
 Waiting: the probe set (AL.1) and AL.7's render against Live's export.
 
+### Level and sends recorded from flipped faders · S
+
+*Added on 2026-10-06*, at the author's direction: the faders flip to one media cue's level and
+sends, each strip's REC arms its lane, and one pass records them all (namespace draft §34). The
+author's decisions are UI-UM; UN-UT are the implementer's, the author's to overrule. Not a phase:
+it follows the send lanes, and no later phase is renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| F.0 | Docs: namespace §34, PRD §3.10, this; the rows `surfaces,laneRec`, `bus,laneRide` and the strip's `rec`, `laneFader` removed, the schema regenerated | - |
+| F.1 | The pick: `LaneTable` of one flipped cue and its armed lanes, `lane.arm` as the flip, `lane.rec`, `lane.take` retired; the tree's strips by UN; the live door for every ride | F.0 |
+| F.2 | The pass: the Runner's hook for every lane - the level's term, a send's offset, a send of the run alone - and the end written in one step | F.1 |
+| F.3 | The bridge: a strip's REC arms its lane, its light, the strip's screen, the transport Rec | F.1 |
+| F.4 | The window: the automation button, the trail of the picked lane, the virtual panel's REC | F.2, F.3 |
+| F.5 | `blackbox/lane_record.py` and its log recorded again, and the close-out | F.4 |
+
+**Done when:** a cue's level and one of its sends are ridden in one pass and both written, one
+undo takes both back, a mix with no send becomes one, and CI is green.
+
+**Needs from the author:** the flip on the D700, its REC lights and screens, and the window's words.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M
