@@ -101,15 +101,25 @@ trap 'rm -rf "$work"' EXIT
 ditto "$stage" "$work/Go.dot"
 ln -s /Applications "$work/Go.dot/Applications"
 
+# THE VOLUME'S SIZE IS OURS, not hdiutil's guess from -srcfolder: the guess can
+# come out a few megabytes short of the app, and the copy then fails with "No
+# space left on device" on the image's own volume (2026-10-06, a dispatch of
+# a5eff5b: the morning's build fitted, the afternoon's slightly larger one did
+# not). The folder's size, a fifth more and 32 MB, in megabytes; UDZO
+# compresses the empty space away, so the download is no bigger for it.
+size_mb=$(( $(du -sm "$work/Go.dot" | cut -f1) * 12 / 10 + 32 ))
+
 rm -f "$dmg"
 attempt=0
-until hdiutil create -volname "Go.dot" -srcfolder "$work/Go.dot" -ov -format UDZO "$dmg" >/dev/null 2>&1; do
+until hdiutil create -volname "Go.dot" -srcfolder "$work/Go.dot" -size "${size_mb}m" \
+        -ov -format UDZO "$dmg" >"$work/hdiutil.log" 2>&1; do
     attempt=$((attempt + 1))
     if [ "$attempt" -ge 5 ]; then
-        hdiutil create -volname "Go.dot" -srcfolder "$work/Go.dot" -ov -format UDZO "$dmg" >&2
+        cat "$work/hdiutil.log" >&2
         exit 1
     fi
-    echo "    hdiutil busy - detach and retry $attempt/5"
+    # Say what it said: a full volume reported as "busy" cost a release run.
+    echo "    hdiutil failed ($(tail -n 1 "$work/hdiutil.log")) - detach and retry $attempt/5"
     hdiutil detach "/Volumes/Go.dot" >/dev/null 2>&1 || true
     sleep 5
 done
