@@ -194,6 +194,16 @@ namespace wfg::video
                 continue;
             }
 
+            /*  THE GRADE, on a picture's and a movie's colour (VW, VU). */
+            if (layer->source != region::Source::fill && ! layer->grade.isIdentity())
+            {
+                double gr = r / 255.0, gg = g / 255.0, gb = b / 255.0;
+                applyGrade (layer->grade, gr, gg, gb);
+                r = gr * 255.0;
+                g = gg * 255.0;
+                b = gb * 255.0;
+            }
+
             const auto a = opacity * std::clamp (alpha, 0.0, 1.0);
 
             red = red * (1.0 - a) + r * a;

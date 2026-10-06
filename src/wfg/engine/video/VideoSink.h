@@ -41,6 +41,8 @@
     a region another process reads, or into a vector a test reads.
 */
 
+#include <wfg/engine/video/Grade.h>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -90,6 +92,10 @@ namespace wfg::video
         double rotation = 0.0;
         bool flipH = false;
         bool flipV = false;
+
+        /*  ITS GRADE (§36, VP, VU): a picture's and a movie's, the curves
+            already baked. Does not move (VV). */
+        Grade grade;
     };
 
     /*  Where a value is at one sample of Go.dot's own clock. A sample below

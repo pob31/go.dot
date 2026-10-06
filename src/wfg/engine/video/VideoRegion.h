@@ -65,7 +65,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 3;
+    constexpr std::uint32_t version = 4;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -191,6 +191,15 @@ namespace wfg::video::region
         std::atomic<double> rotation;
         std::atomic<std::uint32_t> flipH;
         std::atomic<std::uint32_t> flipV;
+
+        /*  Its grade, written with what it is: four numbers and the three
+            baked tables (Grade.h). */
+        std::atomic<double> contrast;
+        std::atomic<double> saturation;
+        std::atomic<double> gamma;
+        std::atomic<double> hue;
+        std::atomic<std::uint32_t> hasCurves;
+        std::uint8_t tables[3][256];
 
         PointRing rings[propertyCount];
         std::atomic<std::int64_t> removeAt;
@@ -446,6 +455,7 @@ namespace wfg::video::region
         double rotation = 0.0;
         bool flipH = false;
         bool flipV = false;
+        Grade grade;
         std::int64_t removeAt = notRemoved;
         RingReading rings[propertyCount];
 
@@ -481,6 +491,14 @@ namespace wfg::video::region
             out.rotation = slot.rotation.load (std::memory_order_relaxed);
             out.flipH = slot.flipH.load (std::memory_order_relaxed) != 0;
             out.flipV = slot.flipV.load (std::memory_order_relaxed) != 0;
+            out.grade.contrast = slot.contrast.load (std::memory_order_relaxed);
+            out.grade.saturation = slot.saturation.load (std::memory_order_relaxed);
+            out.grade.gamma = slot.gamma.load (std::memory_order_relaxed);
+            out.grade.hue = slot.hue.load (std::memory_order_relaxed);
+            out.grade.hasCurves = slot.hasCurves.load (std::memory_order_relaxed) != 0;
+
+            for (std::size_t channel = 0; channel < 3; ++channel)
+                std::memcpy (out.grade.tables[channel].data(), slot.tables[channel], 256);
         });
 
         if (! consistent || ! used)

@@ -1240,6 +1240,55 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="contrast">
+          <a:documentation>A picture&apos;s or a movie&apos;s contrast about mid-grey, in % (namespace draft 36, VP, VU): 100 changes nothing, nought is flat grey. Applied after the gamma.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">400</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="curveBlue">
+          <a:documentation>The blue channel&apos;s curve, as (in, out) pairs 0..1.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="curveGreen">
+          <a:documentation>The green channel&apos;s curve, as (in, out) pairs 0..1.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="curveLuma">
+          <a:documentation>The luminosity curve, on all three channels, as (in, out) pairs 0..1, straight between; empty is no curve (VU). Applied after the saturation, before each colour&apos;s own.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="curveRed">
+          <a:documentation>The red channel&apos;s curve, after the luminosity curve, as (in, out) pairs 0..1.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="enabled">
           <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>
@@ -1288,6 +1337,24 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="gamma">
+          <a:documentation>Its gamma: above one brightens the middle tones, below one darkens them; the ends stay where they are. Applied first.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="hue">
+          <a:documentation>Its colours turned round the colour wheel, in degrees; nought changes nothing.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-180</param>
+            <param name="maxInclusive">180</param>
+          </data>
         </attribute>
       </optional>
       <optional>
@@ -1395,6 +1462,15 @@
           <data type="double">
             <param name="minInclusive">-3600</param>
             <param name="maxInclusive">3600</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="saturation">
+          <a:documentation>How far its colours stand from grey, in %: 100 changes nothing, nought is black and white.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">400</param>
           </data>
         </attribute>
       </optional>

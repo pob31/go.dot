@@ -816,3 +816,95 @@ TEST_CASE ("video host: a HAP movie read by a renderer with no window, its frame
 
     folder.deleteRecursively();
 }
+
+//==============================================================================
+TEST_CASE ("video grade: contrast, saturation, gamma, hue and the curves, in their order")
+{
+    video::Grade grade;
+    video::bakeCurves (grade, {}, {});
+    CHECK (grade.isIdentity());
+
+    double r = 0.8, g = 0.4, b = 0.2;
+    video::applyGrade (grade, r, g, b);
+    CHECK (r == doctest::Approx (0.8));
+    CHECK (g == doctest::Approx (0.4));
+    CHECK (b == doctest::Approx (0.2));
+
+    /*  NO SATURATION IS GREY at the colour's luma; NO CONTRAST is mid-grey. */
+    grade.saturation = 0.0;
+    r = 1.0; g = 0.0; b = 0.0;
+    video::applyGrade (grade, r, g, b);
+    CHECK (r == doctest::Approx (0.2126));
+    CHECK (g == doctest::Approx (0.2126));
+
+    grade.saturation = 100.0;
+    grade.contrast = 0.0;
+    r = 0.9; g = 0.1; b = 0.3;
+    video::applyGrade (grade, r, g, b);
+    CHECK (r == doctest::Approx (0.5));
+    CHECK (b == doctest::Approx (0.5));
+
+    /*  GAMMA TWO lifts a quarter to a half; the ends stay. */
+    grade.contrast = 100.0;
+    grade.gamma = 2.0;
+    r = 0.25; g = 0.0; b = 1.0;
+    video::applyGrade (grade, r, g, b);
+    CHECK (r == doctest::Approx (0.5));
+    CHECK (g == doctest::Approx (0.0));
+    CHECK (b == doctest::Approx (1.0));
+
+    /*  A THIRD OF A TURN takes a grey-balanced red round to green. */
+    grade.gamma = 1.0;
+    grade.hue = 120.0;
+    r = 1.0; g = 0.0; b = 0.0;
+    video::applyGrade (grade, r, g, b);
+    CHECK (g > r);
+    CHECK (g > b);
+
+    /*  THE CURVES: the luminosity curve inverts, the red curve then halves -
+        black in comes out red at half. */
+    grade.hue = 0.0;
+    video::bakeCurves (grade, video::curveFrom ({ 0.0, 1.0, 1.0, 0.0 }),
+                       { video::curveFrom ({ 0.0, 0.0, 1.0, 0.5 }), {}, {} });
+    CHECK (grade.hasCurves);
+    r = 0.0; g = 0.0; b = 1.0;
+    video::applyGrade (grade, r, g, b);
+    CHECK (r == doctest::Approx (0.5).epsilon (0.01));
+    CHECK (g == doctest::Approx (1.0));
+    CHECK (b == doctest::Approx (0.0));
+}
+
+TEST_CASE ("video compositor: a picture's grade applied where it is sampled, and never a fill's")
+{
+    Memory memory;
+    video::RegionSink sink { *memory.region };
+    const TwoHalves sampler;
+
+    auto layer = picture ("RUN00001", 1);
+    layer.grade.saturation = 0.0;
+    video::bakeCurves (layer.grade, {}, {});
+    sink.show (layer);
+    sink.opacity ("RUN00001", { 0, 1.0 });
+
+    auto layers = layersOf (*memory.region);
+    REQUIRE (layers.size() == 1);
+    CHECK (layers[0].grade.saturation == doctest::Approx (0.0));
+
+    /*  THE RED HALF, IN BLACK AND WHITE: grey at red's luma. */
+    const auto grey = video::colourAt (video::stackOf (layers, "C1"), 10, 1920.0, 1080.0, -400.0, 0.0, &sampler);
+    CHECK ((grey >> 16) == ((grey >> 8) & 0xffu));
+    CHECK ((grey >> 16) == doctest::Approx (54.0).epsilon (0.05));
+
+    video::LayerSpec fill;
+    fill.id = "RUN00002";
+    fill.canvas = "C2";
+    fill.order = 2;
+    fill.source = "fill";
+    fill.paint = 0xFF0000;
+    fill.grade.saturation = 0.0;
+    sink.show (fill);
+    sink.opacity ("RUN00002", { 0, 1.0 });
+
+    layers = layersOf (*memory.region);
+    CHECK (video::colourAt (video::stackOf (layers, "C2"), 10, 1920.0, 1080.0, 0.0, 0.0, nullptr) == 0xFF0000u);
+}

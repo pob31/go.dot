@@ -4328,6 +4328,27 @@ namespace wfg::cue
             job.spec.flipH = textOf (cue, "flipH") == "true";
             job.spec.flipV = textOf (cue, "flipV") == "true";
 
+            /*  THE GRADE (§36, VP, VU), the curves baked here, once, so the
+                far side reads tables and never text (VM). */
+            job.spec.grade.contrast = numberOf (cue, "contrast");
+            job.spec.grade.saturation = numberOf (cue, "saturation");
+            job.spec.grade.gamma = numberOf (cue, "gamma");
+            job.spec.grade.hue = numberOf (cue, "hue");
+
+            const auto curveOf = [this, &cue] (const char* row)
+            {
+                std::vector<double> numbers;
+
+                for (const auto& word : juce::StringArray::fromTokens (juce::String (textOf (cue, row)), " ", ""))
+                    if (const auto value = osc::parseDouble (word.toStdString()); value.has_value())
+                        numbers.push_back (*value);
+
+                return video::curveFrom (numbers);
+            };
+
+            video::bakeCurves (job.spec.grade, curveOf ("curveLuma"),
+                               { curveOf ("curveRed"), curveOf ("curveGreen"), curveOf ("curveBlue") });
+
             /*  IN %, the author's unit (VR): the renderer's opacity is 0..1. */
             job.opacity = std::clamp (numberOf (cue, "opacity") / 100.0, 0.0, 1.0);
             job.fadeInSeconds = std::max (0.0, numberOf (cue, "fadeIn"));

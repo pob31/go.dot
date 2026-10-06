@@ -91,7 +91,9 @@ namespace wfg::client::model
                     in. */
                 { "video",   { "source", "canvas", "file", "fit", "layer", "opacity", "paint", "fadeIn",
                                "startOffset", "rate", "loops",
-                               "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV" } },
+                               "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
+                               "contrast", "saturation", "gamma", "hue",
+                               "curveLuma", "curveRed", "curveGreen", "curveBlue" } },
 
                 /*  What it moves - a cue, or a DCA instead - then where to and
                     how. Each thing a fade can move is a switch and then where it
@@ -154,6 +156,10 @@ namespace wfg::client::model
                 { "offsetY", "offset up" },
                 { "flipH", "flip horizontally" },
                 { "flipV", "flip vertically" },
+                { "curveLuma", "luminosity curve" },
+                { "curveRed", "red curve" },
+                { "curveGreen", "green curve" },
+                { "curveBlue", "blue curve" },
                 { "doh", "on Doh!" },
                 { "dohRollback", "rollback" },
             };

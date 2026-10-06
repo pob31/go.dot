@@ -763,3 +763,27 @@ TEST_CASE ("video: a movie's playhead moves at its speed, wraps for its loops, a
     const auto playedFor = static_cast<double> (rig.sink.removed.front().second - times.front().sample) / 48000.0;
     CHECK (playedFor == doctest::Approx (1.75).epsilon (0.03));
 }
+
+TEST_CASE ("video: a cue's grade reaches the picture side, its curves baked")
+{
+    VideoRig rig;
+
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/saturation"),
+                                              osc::Value::float64 (50.0) }).applied >= 1);
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/hue"),
+                                              osc::Value::float64 (30.0) }).applied >= 1);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000002/curveRed", "0 0 1 0.5").ok);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (3);
+
+    REQUIRE (rig.sink.shown.size() == 1);
+    const auto& grade = rig.sink.shown.front().grade;
+    CHECK (grade.saturation == doctest::Approx (50.0));
+    CHECK (grade.hue == doctest::Approx (30.0));
+    CHECK (grade.contrast == doctest::Approx (100.0));
+    CHECK (grade.gamma == doctest::Approx (1.0));
+    CHECK (grade.hasCurves);
+    CHECK (grade.tables[0][255] == 128);
+    CHECK (grade.tables[1][255] == 255);
+}

@@ -20801,6 +20801,25 @@ Owner `video`, at `/godot/cue/<id>`:
 - **Not built**: greying a row a source does not read (a fill's file, a picture's colour); dragging
   a picture on a canvas view; the grade (V.4).
 
+### 36.6 What V.4 built: the grade
+
+*Written 2026-10-07, early.* The grade is a cue's, on pictures and movies (VW), in VU's order, worked
+out once in `Grade.h` and repeated line for line in the shaders:
+
+- **Rows**: `contrast` and `saturation` 0..400 %, `gamma` 0.1..10, `hue` -180..180°, and four curves,
+  `curveLuma`, `curveRed`, `curveGreen`, `curveBlue`, as (in, out) pairs 0..1, straight between.
+- **The curves are baked by the engine** when the cue goes up - the luminosity curve folded into each
+  colour's - into three tables of 256 steps, carried in the region with the layer (version 4); the
+  renderer reads tables, never text (VM). A window uploads a layer's tables once, as a 256-by-1
+  texture, since a grade does not move (VV).
+- **Hue** turns the colour about the grey axis (Rodrigues' rotation about (1, 1, 1)); **saturation**
+  scales its distance from grey, luma weighed as Rec. 709 does. A picture is graded on its straight
+  colour - unpremultiplied first - and a movie's HapQ after its YCoCg is turned back.
+- **Each shader program fails alone**: a driver that will not compile the grade's GLSL still draws
+  the fills. Nothing on this machine has compiled the shaders - CI has no screen - so the first
+  projector is where a typo in GLSL would show; the CPU reference is what the tests hold.
+- **The curves are typed** in the inspector as pairs; the curve editor §36.4 drew is owed.
+
 ## 37. Movies: Phase 8b's first part
 
 Written 2026-10-06, late, before any of it is built. The author, going to bed: *"If you're finished

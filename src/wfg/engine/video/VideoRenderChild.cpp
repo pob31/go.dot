@@ -465,6 +465,33 @@ namespace wfg::video
             return nullptr;
         }
 
+        /*  THE GRADE IN GLSL (Grade.h, line for line): gamma, contrast about
+            mid-grey, the hue turned about the grey axis, the saturation, then
+            the baked tables - one texel a step, red, green and blue. */
+        constexpr const char* gradeGlsl =
+            "uniform float gradeGamma;\n"
+            "uniform float gradeContrast;\n"
+            "uniform float gradeSaturation;\n"
+            "uniform vec2 gradeHue;\n"
+            "uniform float gradeCurves;\n"
+            "uniform sampler2D gradeTables;\n"
+            "vec3 grade (vec3 c) {\n"
+            "  c = pow (clamp (c, 0.0, 1.0), vec3 (1.0 / gradeGamma));\n"
+            "  c = (c - 0.5) * gradeContrast + 0.5;\n"
+            "  float luma = dot (c, vec3 (0.2126, 0.7152, 0.0722));\n"
+            "  vec3 colour = c - luma;\n"
+            "  vec3 axis = vec3 (0.57735026918963);\n"
+            "  colour = colour * gradeHue.x + cross (axis, colour) * gradeHue.y + axis * dot (axis, colour) * (1.0 - gradeHue.x);\n"
+            "  c = clamp (luma + colour * gradeSaturation, 0.0, 1.0);\n"
+            "  if (gradeCurves > 0.5) {\n"
+            "    vec3 at = (c * 255.0 + 0.5) / 256.0;\n"
+            "    c = vec3 (texture2D (gradeTables, vec2 (at.r, 0.5)).r,\n"
+            "              texture2D (gradeTables, vec2 (at.g, 0.5)).g,\n"
+            "              texture2D (gradeTables, vec2 (at.b, 0.5)).b);\n"
+            "  }\n"
+            "  return c;\n"
+            "}\n";
+
         //==============================================================================
         /*  ONE OUTPUT: a borderless window covering its display, drawn by
             OpenGL every vsync. The canvas fills the window; each layer is a
@@ -535,10 +562,15 @@ namespace wfg::video
 
                 const auto pictureOk = pictureProgram->addVertexShader (vertex)
                                     && pictureProgram->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
+                                           juce::String (gradeGlsl) +
                                            "uniform sampler2D picture;\n"
                                            "uniform float opacity;\n"
                                            "varying vec2 at;\n"
-                                           "void main() { gl_FragColor = texture2D (picture, at) * opacity; }\n"))
+                                           "void main() {\n"
+                                           "  vec4 p = texture2D (picture, at);\n"
+                                           "  vec3 rgb = p.a > 0.0 ? grade (p.rgb / p.a) : vec3 (0.0);\n"
+                                           "  gl_FragColor = vec4 (rgb * p.a, p.a) * opacity;\n"
+                                           "}\n"))
                                     && pictureProgram->link();
 
                 /*  A MOVIE'S TWO: DXT's colour premultiplied by its own alpha -
@@ -549,14 +581,16 @@ namespace wfg::video
 
                 const auto movieOk = movieProgram->addVertexShader (vertex)
                                   && movieProgram->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
+                                         juce::String (gradeGlsl) +
                                          "uniform sampler2D picture;\n"
                                          "uniform float opacity;\n"
                                          "varying vec2 at;\n"
-                                         "void main() { vec4 c = texture2D (picture, at); gl_FragColor = vec4 (c.rgb * c.a, c.a) * opacity; }\n"))
+                                         "void main() { vec4 c = texture2D (picture, at); gl_FragColor = vec4 (grade (c.rgb) * c.a, c.a) * opacity; }\n"))
                                   && movieProgram->link();
 
                 const auto movieQOk = movieQProgram->addVertexShader (vertex)
                                    && movieQProgram->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
+                                          juce::String (gradeGlsl) +
                                           "uniform sampler2D picture;\n"
                                           "uniform float opacity;\n"
                                           "varying vec2 at;\n"
@@ -566,11 +600,15 @@ namespace wfg::video
                                           "  float co = (q.r - 0.50196078431373) / scale;\n"
                                           "  float cg = (q.g - 0.50196078431373) / scale;\n"
                                           "  vec3 rgb = vec3 (q.a + co - cg, q.a + cg, q.a - co - cg);\n"
-                                          "  gl_FragColor = vec4 (clamp (rgb, 0.0, 1.0), 1.0) * opacity;\n"
+                                          "  gl_FragColor = vec4 (grade (clamp (rgb, 0.0, 1.0)), 1.0) * opacity;\n"
                                           "}\n"))
                                    && movieQProgram->link();
 
-                if (! fillOk || ! pictureOk || ! movieOk || ! movieQOk)
+                /*  EACH PROGRAM FAILS ALONE: a driver that will not compile the
+                    picture's shader still draws the fills, and says nothing
+                    worse than a picture not shown. Without the fill's there is
+                    nothing to draw with at all. */
+                if (! fillOk)
                 {
                     fillProgram.reset();
                     pictureProgram.reset();
@@ -579,14 +617,34 @@ namespace wfg::video
                     return;
                 }
 
-                movieUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieProgram, "picture");
-                movieOpacity = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieProgram, "opacity");
-                movieQUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieQProgram, "picture");
-                movieQOpacity = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieQProgram, "opacity");
+                if (! pictureOk)  pictureProgram.reset();
+                if (! movieOk)    movieProgram.reset();
+                if (! movieQOk)   movieQProgram.reset();
+
+                if (pictureProgram != nullptr)
+                    pictureGrade.make (*pictureProgram);
+
+                if (movieProgram != nullptr)
+                {
+                    movieGrade.make (*movieProgram);
+                    movieUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieProgram, "picture");
+                    movieOpacity = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieProgram, "opacity");
+                }
+
+                if (movieQProgram != nullptr)
+                {
+                    movieQGrade.make (*movieQProgram);
+                    movieQUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieQProgram, "picture");
+                    movieQOpacity = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieQProgram, "opacity");
+                }
 
                 colour = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*fillProgram, "colour");
-                pictureUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*pictureProgram, "picture");
-                opacityUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*pictureProgram, "opacity");
+
+                if (pictureProgram != nullptr)
+                {
+                    pictureUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*pictureProgram, "picture");
+                    opacityUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*pictureProgram, "opacity");
+                }
 
                 glGenVertexArrays (1, &vertexArray);
                 glGenBuffers (1, &vertexBuffer);
@@ -598,6 +656,9 @@ namespace wfg::video
                     location each program gave them. */
                 for (auto* program : { fillProgram.get(), pictureProgram.get(), movieProgram.get(), movieQProgram.get() })
                 {
+                    if (program == nullptr)
+                        continue;
+
                     const auto position = juce::OpenGLShaderProgram::Attribute (*program, "position").attributeID;
                     const auto texel = juce::OpenGLShaderProgram::Attribute (*program, "texel").attributeID;
 
@@ -742,6 +803,9 @@ namespace wfg::video
                         }
                         else if (layer->source == region::Source::picture)
                         {
+                            if (pictureProgram == nullptr)
+                                continue;
+
                             auto* texture = textureFor (layer->file);
 
                             if (texture == nullptr)
@@ -758,6 +822,7 @@ namespace wfg::video
                             glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
                             pictureUniform->set (0);
                             opacityUniform->set (static_cast<GLfloat> (a));
+                            setGrade (pictureGrade, *layer);
                             drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight,
                                                    static_cast<double> (held.width), static_cast<double> (held.height)),
                                       uMax, vMin);
@@ -778,6 +843,19 @@ namespace wfg::video
                 for (auto at = textures.begin(); at != textures.end();)
                     at = at->second.used ? std::next (at) : textures.erase (at);
 
+                for (auto at = gradeTables.begin(); at != gradeTables.end();)
+                {
+                    if (at->second.used)
+                    {
+                        at->second.used = false;
+                        ++at;
+                        continue;
+                    }
+
+                    juce::gl::glDeleteTextures (1, &at->second.id);
+                    at = gradeTables.erase (at);
+                }
+
                 for (auto at = movieTextures.begin(); at != movieTextures.end();)
                 {
                     if (at->second.used)
@@ -792,6 +870,75 @@ namespace wfg::video
 
                 if (testPattern)
                     drawTestPattern (width, height);
+            }
+
+            /*  A PROGRAM'S GRADE UNIFORMS, and setting them for one layer: its
+                numbers, and its baked tables on texture unit one - made once a
+                layer, since a layer's grade does not move (VV). */
+            struct GradeUniforms
+            {
+                void make (juce::OpenGLShaderProgram& program)
+                {
+                    gamma = std::make_unique<juce::OpenGLShaderProgram::Uniform> (program, "gradeGamma");
+                    contrast = std::make_unique<juce::OpenGLShaderProgram::Uniform> (program, "gradeContrast");
+                    saturation = std::make_unique<juce::OpenGLShaderProgram::Uniform> (program, "gradeSaturation");
+                    hue = std::make_unique<juce::OpenGLShaderProgram::Uniform> (program, "gradeHue");
+                    curves = std::make_unique<juce::OpenGLShaderProgram::Uniform> (program, "gradeCurves");
+                    tables = std::make_unique<juce::OpenGLShaderProgram::Uniform> (program, "gradeTables");
+                }
+
+                void reset()
+                {
+                    gamma.reset(); contrast.reset(); saturation.reset(); hue.reset(); curves.reset(); tables.reset();
+                }
+
+                std::unique_ptr<juce::OpenGLShaderProgram::Uniform> gamma, contrast, saturation, hue, curves, tables;
+            };
+
+            void setGrade (GradeUniforms& uniforms, const region::LayerReading& layer)
+            {
+                using namespace juce::gl;
+
+                if (uniforms.gamma == nullptr)
+                    return;
+
+                const auto& grade = layer.grade;
+                const auto turn = grade.hue * 3.14159265358979323846 / 180.0;
+
+                uniforms.gamma->set (static_cast<GLfloat> (std::max (0.01, grade.gamma)));
+                uniforms.contrast->set (static_cast<GLfloat> (grade.contrast / 100.0));
+                uniforms.saturation->set (static_cast<GLfloat> (grade.saturation / 100.0));
+                uniforms.hue->set (static_cast<GLfloat> (std::cos (turn)), static_cast<GLfloat> (std::sin (turn)));
+                uniforms.curves->set (grade.hasCurves ? 1.0f : 0.0f);
+                uniforms.tables->set (1);
+
+                if (! grade.hasCurves)
+                    return;
+
+                auto& held = gradeTables[layer.id];
+                held.used = true;
+
+                if (held.id == 0)
+                {
+                    std::uint8_t texels[256 * 3];
+
+                    for (std::size_t step = 0; step < 256; ++step)
+                        for (std::size_t channel = 0; channel < 3; ++channel)
+                            texels[step * 3 + channel] = grade.tables[channel][step];
+
+                    glGenTextures (1, &held.id);
+                    glBindTexture (GL_TEXTURE_2D, held.id);
+                    glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
+                    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGB8, 256, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, texels);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                }
+
+                glActiveTexture (GL_TEXTURE1);
+                glBindTexture (GL_TEXTURE_2D, held.id);
+                glActiveTexture (GL_TEXTURE0);
             }
 
             /*  A MOVIE'S FRAME AT THIS SAMPLE, uploaded still compressed when it
@@ -837,9 +984,17 @@ namespace wfg::video
                 }
 
                 const auto q = frame->texture == hap::Texture::ycocgDxt5;
+
+                if ((q ? movieQProgram : movieProgram) == nullptr)
+                {
+                    glBindTexture (GL_TEXTURE_2D, 0);
+                    return;
+                }
+
                 (q ? movieQProgram : movieProgram)->use();
                 (q ? movieQUniform : movieUniform)->set (0);
                 (q ? movieQOpacity : movieOpacity)->set (static_cast<GLfloat> (a));
+                setGrade (q ? movieQGrade : movieGrade, layer);
 
                 /*  THE BLOCKS RUN FROM THE TOP ROW: the picture's top is the
                     texture's first row, its bottom `height` rows down. */
@@ -862,6 +1017,15 @@ namespace wfg::video
                         glDeleteTextures (1, &held.second.id);
 
                 movieTextures.clear();
+
+                for (auto& held : gradeTables)
+                    if (held.second.id != 0)
+                        glDeleteTextures (1, &held.second.id);
+
+                gradeTables.clear();
+                pictureGrade.reset();
+                movieGrade.reset();
+                movieQGrade.reset();
                 movieUniform.reset();
                 movieOpacity.reset();
                 movieQUniform.reset();
@@ -968,6 +1132,16 @@ namespace wfg::video
             };
 
             std::map<std::string, MovieTexture> movieTextures;
+
+            GradeUniforms pictureGrade, movieGrade, movieQGrade;
+
+            struct GradeTable
+            {
+                GLuint id = 0;
+                bool used = false;
+            };
+
+            std::map<std::string, GradeTable> gradeTables;
 
             ClockReader clock;
             std::int64_t lastFrame = 0;

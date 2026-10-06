@@ -512,7 +512,7 @@ a projector.
 built (namespace draft §36.5). 8b drawn as §37 - movies, HAP first, a playhead
 with speed and loops - every decision there proposed and waiting for the
 author; its reader (M.1) built. *2026-10-07, early:* M.1-M.4 built (§37.4) - a
-HAP movie plays, loops and keeps time; the bench and the author's yes owed.
+HAP movie plays, loops and keeps time; the bench and the author's yes owed. V.4 (the grade on a cue) built the same morning (§36.6).
 
 **Done when:** a scene of fills, masks and pictures runs from the cue list onto
 two outputs, one mapped onto a wall that is not flat, with Esc, double Esc and

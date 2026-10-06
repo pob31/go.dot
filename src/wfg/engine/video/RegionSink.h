@@ -80,6 +80,14 @@ namespace wfg::video
             slot.rotation.store (spec.rotation, std::memory_order_relaxed);
             slot.flipH.store (spec.flipH ? 1u : 0u, std::memory_order_relaxed);
             slot.flipV.store (spec.flipV ? 1u : 0u, std::memory_order_relaxed);
+            slot.contrast.store (spec.grade.contrast, std::memory_order_relaxed);
+            slot.saturation.store (spec.grade.saturation, std::memory_order_relaxed);
+            slot.gamma.store (spec.grade.gamma, std::memory_order_relaxed);
+            slot.hue.store (spec.grade.hue, std::memory_order_relaxed);
+            slot.hasCurves.store (spec.grade.hasCurves ? 1u : 0u, std::memory_order_relaxed);
+
+            for (std::size_t channel = 0; channel < 3; ++channel)
+                std::memcpy (slot.tables[channel], spec.grade.tables[channel].data(), 256);
             for (auto& ring : slot.rings)
                 ring.written.store (0, std::memory_order_relaxed);
             slot.removeAt.store (region::notRemoved, std::memory_order_relaxed);
