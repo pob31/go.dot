@@ -787,3 +787,28 @@ TEST_CASE ("video: a cue's grade reaches the picture side, its curves baked")
     CHECK (grade.tables[0][255] == 128);
     CHECK (grade.tables[1][255] == 255);
 }
+
+TEST_CASE ("video: a mask cue's outline, feather and inversion reach the picture side")
+{
+    VideoRig rig;
+
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/source"),
+                                              osc::Value::string ("mask") }).applied >= 1);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000002/shape", "0.1 0.2 0.9 0.2 0.5 0.8").ok);
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/feather"),
+                                              osc::Value::float64 (12.0) }).applied >= 1);
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/invert"),
+                                              osc::Value::string ("true") }).applied >= 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (3);
+
+    REQUIRE (rig.sink.shown.size() == 1);
+    const auto& spec = rig.sink.shown.front();
+    CHECK (spec.source == "mask");
+    REQUIRE (spec.shape.count == 3);
+    CHECK (spec.shape.x[1] == doctest::Approx (0.9f));
+    CHECK (spec.shape.y[2] == doctest::Approx (0.8f));
+    CHECK (spec.shape.feather == doctest::Approx (12.0f));
+    CHECK (spec.shape.invert);
+}

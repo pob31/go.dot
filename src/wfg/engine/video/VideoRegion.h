@@ -65,7 +65,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 4;
+    constexpr std::uint32_t version = 6;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -97,6 +97,16 @@ namespace wfg::video::region
         if (word == "picture") return Source::picture;
         if (word == "movie")   return Source::movie;
         return Source::fill;
+    }
+
+    enum class Blend : std::uint32_t { normal = 0, add = 1, screen = 2, multiply = 3 };
+
+    inline Blend blendFrom (std::string_view word) noexcept
+    {
+        if (word == "add")      return Blend::add;
+        if (word == "screen")   return Blend::screen;
+        if (word == "multiply") return Blend::multiply;
+        return Blend::normal;
     }
 
     enum class Fit : std::uint32_t { fit = 0, fill = 1, stretch = 2 };
@@ -180,6 +190,7 @@ namespace wfg::video::region
         std::atomic<std::uint64_t> order;
         std::atomic<std::uint32_t> source;
         std::atomic<std::uint32_t> paint;
+        std::atomic<std::uint32_t> blend;
 
         /*  A picture's whole path and its fit, and the geometry as the cue is
             written: where each moving value starts (§36). */
@@ -200,6 +211,13 @@ namespace wfg::video::region
         std::atomic<double> hue;
         std::atomic<std::uint32_t> hasCurves;
         std::uint8_t tables[3][256];
+
+        /*  A mask's outline (Mask.h), written with what it is. */
+        std::atomic<std::int32_t> shapeCount;
+        std::atomic<float> shapeFeather;
+        std::atomic<std::uint32_t> shapeInvert;
+        float shapeX[mask::maxPoints];
+        float shapeY[mask::maxPoints];
 
         PointRing rings[propertyCount];
         std::atomic<std::int64_t> removeAt;
@@ -447,6 +465,7 @@ namespace wfg::video::region
         std::uint64_t order = 0;
         Source source = Source::fill;
         std::uint32_t paint = 0;
+        Blend blend = Blend::normal;
         std::string file;
         Fit fit = Fit::fit;
         double scale = 100.0;
@@ -456,6 +475,7 @@ namespace wfg::video::region
         bool flipH = false;
         bool flipV = false;
         Grade grade;
+        mask::Shape shape;
         std::int64_t removeAt = notRemoved;
         RingReading rings[propertyCount];
 
@@ -483,6 +503,7 @@ namespace wfg::video::region
             out.order = slot.order.load (std::memory_order_relaxed);
             out.source = static_cast<Source> (slot.source.load (std::memory_order_relaxed));
             out.paint = slot.paint.load (std::memory_order_relaxed);
+            out.blend = static_cast<Blend> (slot.blend.load (std::memory_order_relaxed));
             out.file = readText (slot.file);
             out.fit = static_cast<Fit> (slot.fit.load (std::memory_order_relaxed));
             out.scale = slot.scale.load (std::memory_order_relaxed);
@@ -499,6 +520,12 @@ namespace wfg::video::region
 
             for (std::size_t channel = 0; channel < 3; ++channel)
                 std::memcpy (out.grade.tables[channel].data(), slot.tables[channel], 256);
+
+            out.shape.count = std::clamp (slot.shapeCount.load (std::memory_order_relaxed), 0, mask::maxPoints);
+            out.shape.feather = slot.shapeFeather.load (std::memory_order_relaxed);
+            out.shape.invert = slot.shapeInvert.load (std::memory_order_relaxed) != 0;
+            std::memcpy (out.shape.x, slot.shapeX, sizeof (slot.shapeX));
+            std::memcpy (out.shape.y, slot.shapeY, sizeof (slot.shapeY));
         });
 
         if (! consistent || ! used)

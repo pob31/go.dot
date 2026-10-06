@@ -257,6 +257,10 @@ namespace wfg::client::model
             choices.push_back ({ "Fill", "one colour over the whole canvas, behind", "video",
                                  { { "source", "fill" }, { "canvas", canvas.id } },
                                  "On " + canvas.label(), false, false });
+            choices.push_back ({ "Mask", "a shape laid over, in black", "video",
+                                 { { "source", "mask" }, { "canvas", canvas.id }, { "layer", "100" },
+                                   { "shape", "0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75" } },
+                                 "On " + canvas.label(), false, false });
         }
 
         choices.push_back ({ "Fill, on no canvas yet", "set it in the inspector", "video",

@@ -908,3 +908,122 @@ TEST_CASE ("video compositor: a picture's grade applied where it is sampled, and
     layers = layersOf (*memory.region);
     CHECK (video::colourAt (video::stackOf (layers, "C2"), 10, 1920.0, 1080.0, 0.0, 0.0, nullptr) == 0xFF0000u);
 }
+
+TEST_CASE ("video compositor: normal, add, screen and multiply, in display space")
+{
+    /*  GREY (128) UNDER, AND A HALF-RED LAYER OVER IT AT FULL OPACITY, each
+        blend on its own canvas - the numbers the GPU's equations give. */
+    Memory memory;
+    video::RegionSink sink { *memory.region };
+
+    const auto put = [&sink] (const char* id, const char* canvas, std::uint64_t order, std::uint32_t paint,
+                              const char* blend)
+    {
+        video::LayerSpec spec;
+        spec.id = id;
+        spec.canvas = canvas;
+        spec.order = order;
+        spec.source = "fill";
+        spec.paint = paint;
+        spec.blend = blend;
+        sink.show (spec);
+        sink.opacity (id, { 0, 1.0 });
+    };
+
+    const char* blends[] { "normal", "add", "screen", "multiply" };
+    const char* canvases[] { "N", "A", "S", "M" };
+
+    for (int n = 0; n < 4; ++n)
+    {
+        put ((std::string ("GREY000") + std::to_string (n)).c_str(), canvases[n], 1, 0x808080, "normal");
+        put ((std::string ("OVER000") + std::to_string (n)).c_str(), canvases[n], 2, 0x800000, blends[n]);
+    }
+
+    const auto layers = layersOf (*memory.region);
+    const auto at = [&layers] (const char* canvas) { return video::fillsAt (video::stackOf (layers, canvas), 10); };
+
+    CHECK (at ("N") == 0x800000u);      // normal: covered
+    CHECK (at ("A") == 0xFF8080u);      // add: 128 + 128, clamped
+    CHECK (at ("S") == 0xC08080u);      // screen: 1 - (1 - .5)(1 - .5) = .75
+    CHECK (at ("M") == 0x400000u);      // multiply: .5 x .5, and nought where red has none
+}
+
+TEST_CASE ("video mask: a shape filled even-odd, its edge feathered, turned inside out")
+{
+    video::mask::Shape square;
+    const float xs[] { 0.25f, 0.75f, 0.75f, 0.25f }, ys[] { 0.25f, 0.25f, 0.75f, 0.75f };
+
+    for (int n = 0; n < 4; ++n)
+    {
+        square.x[n] = xs[n];
+        square.y[n] = ys[n];
+    }
+
+    square.count = 4;
+
+    /*  (u, v) as a texture is addressed, v from the bottom. */
+    CHECK (video::mask::coverAt (square, 0.5, 0.5, 1920.0, 1080.0) == doctest::Approx (1.0));
+    CHECK (video::mask::coverAt (square, 0.1, 0.5, 1920.0, 1080.0) == doctest::Approx (0.0));
+    CHECK (video::mask::coverAt (square, 0.5, 0.9, 1920.0, 1080.0) == doctest::Approx (0.0));
+
+    /*  FEATHERED 100 PIXELS: half at the edge, full fifty inside it. */
+    square.feather = 100.0f;
+    CHECK (video::mask::coverAt (square, 0.25, 0.5, 1920.0, 1080.0) == doctest::Approx (0.5).epsilon (0.01));
+    CHECK (video::mask::coverAt (square, (480.0 + 50.0) / 1920.0, 0.5, 1920.0, 1080.0) == doctest::Approx (1.0));
+    CHECK (video::mask::coverAt (square, (480.0 - 25.0) / 1920.0, 0.5, 1920.0, 1080.0) == doctest::Approx (0.25).epsilon (0.01));
+
+    square.feather = 0.0f;
+    square.invert = true;
+    CHECK (video::mask::coverAt (square, 0.5, 0.5, 1920.0, 1080.0) == doctest::Approx (0.0));
+    CHECK (video::mask::coverAt (square, 0.1, 0.5, 1920.0, 1080.0) == doctest::Approx (1.0));
+
+    /*  NO SHAPE covers nothing - everything, inverted. */
+    video::mask::Shape none;
+    CHECK (video::mask::coverAt (none, 0.5, 0.5, 1920.0, 1080.0) == doctest::Approx (0.0));
+    none.invert = true;
+    CHECK (video::mask::coverAt (none, 0.5, 0.5, 1920.0, 1080.0) == doctest::Approx (1.0));
+}
+
+TEST_CASE ("video compositor: a black mask laid over a white fill blacks out its shape and nothing else")
+{
+    Memory memory;
+    video::RegionSink sink { *memory.region };
+
+    video::LayerSpec white;
+    white.id = "RUN00001";
+    white.canvas = "C1";
+    white.order = 1;
+    white.source = "fill";
+    white.paint = 0xFFFFFF;
+    sink.show (white);
+    sink.opacity ("RUN00001", { 0, 1.0 });
+
+    video::LayerSpec door;
+    door.id = "RUN00002";
+    door.canvas = "C1";
+    door.layer = 5;
+    door.order = 2;
+    door.source = "mask";
+    door.paint = 0x000000;
+
+    const float xs[] { 0.4f, 0.6f, 0.6f, 0.4f }, ys[] { 0.2f, 0.2f, 1.0f, 1.0f };
+
+    for (int n = 0; n < 4; ++n)
+    {
+        door.shape.x[n] = xs[n];
+        door.shape.y[n] = ys[n];
+    }
+
+    door.shape.count = 4;
+    sink.show (door);
+    sink.opacity ("RUN00002", { 0, 1.0 });
+
+    const auto layers = layersOf (*memory.region);
+    const auto stack = video::stackOf (layers, "C1");
+
+    /*  THE DOOR'S MIDDLE IS BLACK; beside it, and above its top, still white.
+        (x, y) from the canvas's middle, y up. */
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 0.0, -200.0, nullptr) == 0x000000u);
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 400.0, -200.0, nullptr) == 0xFFFFFFu);
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 0.0, 400.0, nullptr) == 0xFFFFFFu);
+}

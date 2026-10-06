@@ -20820,6 +20820,25 @@ out once in `Grade.h` and repeated line for line in the shaders:
   projector is where a typo in GLSL would show; the CPU reference is what the tests hold.
 - **The curves are typed** in the inspector as pairs; the curve editor §36.4 drew is owed.
 
+### 36.7 What V.5 built: blends and masks
+
+*Written 2026-10-07, early.* §35.6's V.2 and V.4, built after the pictures as §36.4 restaged them:
+
+- **`blend`**: normal, add, screen, multiply, in display space (VD), at the layer's opacity - the GPU's
+  premultiplied blend equations and the CPU reference's formulas, the one checked against the other
+  on a grey canvas. Every source blends: a fill on screen is a wash of light.
+- **A mask cue** (`source=mask`, UY, VF): `shape` as (x, y) corners in 0..1 of the canvas from its
+  top-left corner - x right, y down, the way a picture's pixels run and the way somebody measuring a
+  door off a photograph reads them - at most 64, filled even-odd; `feather` in canvas pixels across
+  the edge; `invert` for the outside. Laid in its colour, black by default, by its blend, and moved by
+  the geometry like any layer. "+ video" offers a Mask on each canvas, born a square in the middle on
+  layer 100, so it is on top of what is there and visibly something.
+- **One gap, said**: an inverted mask that the geometry has shrunk covers outside its outline only
+  within the canvas-sized quad the geometry moved - the CPU reference covers the whole canvas. Masks
+  are rarely scaled; this is where to look if one is.
+- **The outline is typed** as pairs in the inspector; drawing it on a picture of the canvas, and
+  bezier corners, are owed - with the mesh panel, which wants the same canvas view.
+
 ## 37. Movies: Phase 8b's first part
 
 Written 2026-10-06, late, before any of it is built. The author, going to bed: *"If you're finished

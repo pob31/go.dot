@@ -89,11 +89,12 @@ namespace wfg::client::model
                 /*  A VIDEO CUE (Phase 8a): what it shows, where, how high in
                     the stack, how solid and in what colour, then how it comes
                     in. */
-                { "video",   { "source", "canvas", "file", "fit", "layer", "opacity", "paint", "fadeIn",
+                { "video",   { "source", "canvas", "file", "fit", "layer", "blend", "opacity", "paint", "fadeIn",
                                "startOffset", "rate", "loops",
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
                                "contrast", "saturation", "gamma", "hue",
-                               "curveLuma", "curveRed", "curveGreen", "curveBlue" } },
+                               "curveLuma", "curveRed", "curveGreen", "curveBlue",
+                               "shape", "feather", "invert" } },
 
                 /*  What it moves - a cue, or a DCA instead - then where to and
                     how. Each thing a fade can move is a switch and then where it

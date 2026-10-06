@@ -149,12 +149,26 @@ namespace wfg::video
             double r = 0.0, g = 0.0, b = 0.0, alpha = 1.0;
             double u = 0.0, v = 0.0;
 
-            if (layer->source == region::Source::fill)
+            if (layer->source == region::Source::fill || layer->source == region::Source::mask)
             {
                 const auto place = placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight);
 
-                if (! place.toTexture (x, y, u, v))
+                /*  A MASK is a fill of the canvas's size, covering only where
+                    its shape does - the shape on the canvas the geometry moved. */
+                const auto onCanvas = place.toTexture (x, y, u, v);
+
+                if (layer->source == region::Source::mask)
+                {
+                    if (! onCanvas)
+                        u = v = -1.0;
+
+                    alpha = onCanvas ? mask::coverAt (layer->shape, u, v, canvasWidth, canvasHeight)
+                                     : (layer->shape.invert ? 1.0 : 0.0);
+                }
+                else if (! onCanvas)
+                {
                     continue;
+                }
 
                 r = static_cast<double> ((layer->paint >> 16) & 0xffu);
                 g = static_cast<double> ((layer->paint >> 8) & 0xffu);
@@ -195,7 +209,8 @@ namespace wfg::video
             }
 
             /*  THE GRADE, on a picture's and a movie's colour (VW, VU). */
-            if (layer->source != region::Source::fill && ! layer->grade.isIdentity())
+            if ((layer->source == region::Source::picture || layer->source == region::Source::movie)
+                  && ! layer->grade.isIdentity())
             {
                 double gr = r / 255.0, gg = g / 255.0, gb = b / 255.0;
                 applyGrade (layer->grade, gr, gg, gb);
@@ -206,9 +221,28 @@ namespace wfg::video
 
             const auto a = opacity * std::clamp (alpha, 0.0, 1.0);
 
-            red = red * (1.0 - a) + r * a;
-            green = green * (1.0 - a) + g * a;
-            blue = blue * (1.0 - a) + b * a;
+            /*  THE BLEND (VD), on display-space numbers, premultiplied - the
+                GPU's blend equations exactly: normal covers by `a`; add adds
+                the light; screen is 1 - (1 - under)(1 - colour); multiply
+                darkens as a gel does. */
+            const auto lay = [a, blend = layer->blend] (double under, double over)
+            {
+                const auto premultiplied = over * a;
+
+                switch (blend)
+                {
+                    case region::Blend::add:      return std::min (255.0, under + premultiplied);
+                    case region::Blend::screen:   return under * (1.0 - premultiplied / 255.0) + premultiplied;
+                    case region::Blend::multiply: return under * (1.0 - a) + under * premultiplied / 255.0;
+                    case region::Blend::normal:   break;
+                }
+
+                return under * (1.0 - a) + premultiplied;
+            };
+
+            red = lay (red, r);
+            green = lay (green, g);
+            blue = lay (blue, b);
         }
 
         const auto channel = [] (double value)

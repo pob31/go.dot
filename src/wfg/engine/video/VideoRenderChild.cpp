@@ -621,6 +621,49 @@ namespace wfg::video
                 if (! movieOk)    movieProgram.reset();
                 if (! movieQOk)   movieQProgram.reset();
 
+                /*  A MASK'S (Mask.h, line for line): its shape filled even-odd
+                    and feathered, over the canvas-sized quad the geometry put. */
+                maskProgram = std::make_unique<juce::OpenGLShaderProgram> (context);
+
+                const auto maskOk = maskProgram->addVertexShader (vertex)
+                                 && maskProgram->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
+                                        "uniform vec4 colour;\n"
+                                        "uniform vec2 canvas;\n"
+                                        "uniform float feather;\n"
+                                        "uniform float invert;\n"
+                                        "uniform int count;\n"
+                                        "uniform vec2 corners[64];\n"
+                                        "varying vec2 at;\n"
+                                        "void main() {\n"
+                                        "  vec2 p = vec2 (at.x * canvas.x, (1.0 - at.y) * canvas.y);\n"
+                                        "  bool inside = false;\n"
+                                        "  float nearest = 1.0e30;\n"
+                                        "  int previous = count - 1;\n"
+                                        "  for (int n = 0; n < 64; ++n) {\n"
+                                        "    if (n >= count) break;\n"
+                                        "    vec2 a = corners[previous] * canvas;\n"
+                                        "    vec2 b = corners[n] * canvas;\n"
+                                        "    if (((b.y > p.y) != (a.y > p.y)) && (p.x < (a.x - b.x) * (p.y - b.y) / (a.y - b.y) + b.x)) inside = ! inside;\n"
+                                        "    vec2 e = a - b;\n"
+                                        "    float span = dot (e, e);\n"
+                                        "    float t = span > 0.0 ? clamp (dot (p - b, e) / span, 0.0, 1.0) : 0.0;\n"
+                                        "    nearest = min (nearest, length (p - (b + t * e)));\n"
+                                        "    previous = n;\n"
+                                        "  }\n"
+                                        "  float cover = count < 3 ? 0.0 : (feather > 0.0 ? clamp (0.5 + (inside ? nearest : -nearest) / feather, 0.0, 1.0)\n"
+                                        "                                                  : (inside ? 1.0 : 0.0));\n"
+                                        "  if (invert > 0.5) cover = 1.0 - cover;\n"
+                                        "  float a = colour.a * cover;\n"
+                                        "  gl_FragColor = vec4 (colour.rgb * a, a);\n"
+                                        "}\n"))
+                                 && maskProgram->link();
+
+                if (! maskOk)
+                    maskProgram.reset();
+                else
+                    for (const auto* name : { "colour", "canvas", "feather", "invert", "count", "corners" })
+                        maskUniforms[name] = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*maskProgram, name);
+
                 if (pictureProgram != nullptr)
                     pictureGrade.make (*pictureProgram);
 
@@ -654,7 +697,8 @@ namespace wfg::video
 
                 /*  THE SAME TWO ATTRIBUTES IN BOTH PROGRAMS, bound by the
                     location each program gave them. */
-                for (auto* program : { fillProgram.get(), pictureProgram.get(), movieProgram.get(), movieQProgram.get() })
+                for (auto* program : { fillProgram.get(), pictureProgram.get(), movieProgram.get(), movieQProgram.get(),
+                                       maskProgram.get() })
                 {
                     if (program == nullptr)
                         continue;
@@ -779,7 +823,6 @@ namespace wfg::video
                     const auto layers = readLayers (r);
 
                     glEnable (GL_BLEND);
-                    glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
                     glBindVertexArray (vertexArray);
 
                     /*  THE COMPOSITOR'S ORDER AND ITS BLEND (Compositor.h), on the
@@ -790,6 +833,16 @@ namespace wfg::video
 
                         if (! (a > 0.0))
                             continue;
+
+                        /*  THE LAYER'S BLEND (VD), on premultiplied colour - the
+                            compositor's formulas (Compositor.h) as equations. */
+                        switch (layer->blend)
+                        {
+                            case region::Blend::add:      glBlendFunc (GL_ONE, GL_ONE); break;
+                            case region::Blend::screen:   glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
+                            case region::Blend::multiply: glBlendFunc (GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA); break;
+                            case region::Blend::normal:   glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
+                        }
 
                         if (layer->source == region::Source::fill)
                         {
@@ -831,6 +884,29 @@ namespace wfg::video
                         else if (layer->source == region::Source::movie)
                         {
                             drawMovie (*layer, sample, canvasWidth, canvasHeight, a);
+                        }
+                        else if (layer->source == region::Source::mask && maskProgram != nullptr)
+                        {
+                            GLfloat corners[2 * mask::maxPoints] {};
+
+                            for (int n = 0; n < layer->shape.count; ++n)
+                            {
+                                corners[2 * n] = layer->shape.x[n];
+                                corners[2 * n + 1] = layer->shape.y[n];
+                            }
+
+                            maskProgram->use();
+                            maskUniforms["colour"]->set (static_cast<GLfloat> ((layer->paint >> 16) & 0xffu) / 255.0f,
+                                                         static_cast<GLfloat> ((layer->paint >> 8) & 0xffu) / 255.0f,
+                                                         static_cast<GLfloat> (layer->paint & 0xffu) / 255.0f,
+                                                         static_cast<GLfloat> (a));
+                            maskUniforms["canvas"]->set (static_cast<GLfloat> (canvasWidth), static_cast<GLfloat> (canvasHeight));
+                            maskUniforms["feather"]->set (layer->shape.feather);
+                            maskUniforms["invert"]->set (layer->shape.invert ? 1.0f : 0.0f);
+                            maskUniforms["count"]->set (static_cast<GLint> (layer->shape.count));
+                            glUniform2fv (maskUniforms["corners"]->uniformID, mask::maxPoints, corners);
+                            drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
+                                      1.0, 0.0);
                         }
                     }
 
@@ -1017,6 +1093,8 @@ namespace wfg::video
                         glDeleteTextures (1, &held.second.id);
 
                 movieTextures.clear();
+                maskUniforms.clear();
+                maskProgram.reset();
 
                 for (auto& held : gradeTables)
                     if (held.second.id != 0)
@@ -1134,6 +1212,9 @@ namespace wfg::video
             std::map<std::string, MovieTexture> movieTextures;
 
             GradeUniforms pictureGrade, movieGrade, movieQGrade;
+
+            std::unique_ptr<juce::OpenGLShaderProgram> maskProgram;
+            std::map<std::string, std::unique_ptr<juce::OpenGLShaderProgram::Uniform>> maskUniforms;
 
             struct GradeTable
             {

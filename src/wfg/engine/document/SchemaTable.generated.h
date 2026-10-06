@@ -82,6 +82,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_plugin_side[] = { "before", "after" };
     inline constexpr std::string_view enum_plugin_state[] = { "unloaded", "loading", "loaded", "missing", "failed" };
     inline constexpr std::string_view enum_video_source[] = { "fill", "mask", "picture", "movie" };
+    inline constexpr std::string_view enum_video_blend[] = { "normal", "add", "screen", "multiply" };
     inline constexpr std::string_view enum_video_fit[] = { "fit", "fill", "stretch" };
     inline constexpr std::string_view enum_videoOutputs_renderer[] = { "stopped", "starting", "running", "failed" };
 
@@ -3495,6 +3496,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Where it lies in the canvas's stack: higher is on top, and of two on the same layer the one brought up later (VI). An integer per cue and never the list's order, which changes all through a technical rehearsal and would silently restack the picture (PRD 3.19b)." },
+        { "video", "blend",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "normal",
+          false, 0.0, false, 0.0,
+          enum_video_blend, 4,
+          "", 50.0, false, "park",
+          "",
+          "How it lies on what is under it, in display space (namespace draft 35, VD): normal covers it by its opacity; add adds its light; screen lightens as two projectors on one wall do, never past white; multiply darkens, as a gel does. Each at the layer's opacity." },
         { "video", "opacity",
           ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
           true, "100",
@@ -3671,6 +3680,30 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "The blue channel's curve, as (in, out) pairs 0..1." },
+        { "video", "shape",
+          ValueType::number, 'd', true, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "A mask's outline, as (x, y) corners in 0..1 of the canvas from its top-left corner - x to the right, y down - at most 64, filled even-odd (namespace draft 35, UY, VF). Fewer than three is no shape: nothing is covered, or everything when inverted." },
+        { "video", "feather",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "px", 50.0, false, "park",
+          "",
+          "How soft a mask's edge is, in canvas pixels across it; nought is a hard edge." },
+        { "video", "invert",
+          ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show,
+          true, "false",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "Whether a mask covers what is outside its outline rather than inside - the spill round a set, with the set left clear." },
         { "canvases", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

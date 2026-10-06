@@ -72,6 +72,7 @@ namespace wfg::video
             slot.order.store (spec.order, std::memory_order_relaxed);
             slot.source.store (static_cast<std::uint32_t> (region::sourceFrom (spec.source)), std::memory_order_relaxed);
             slot.paint.store (spec.paint, std::memory_order_relaxed);
+            slot.blend.store (static_cast<std::uint32_t> (region::blendFrom (spec.blend)), std::memory_order_relaxed);
             region::writeText (slot.file, spec.file);
             slot.fit.store (static_cast<std::uint32_t> (region::fitFrom (spec.fit)), std::memory_order_relaxed);
             slot.scale.store (spec.scale, std::memory_order_relaxed);
@@ -88,6 +89,12 @@ namespace wfg::video
 
             for (std::size_t channel = 0; channel < 3; ++channel)
                 std::memcpy (slot.tables[channel], spec.grade.tables[channel].data(), 256);
+
+            slot.shapeCount.store (spec.shape.count, std::memory_order_relaxed);
+            slot.shapeFeather.store (spec.shape.feather, std::memory_order_relaxed);
+            slot.shapeInvert.store (spec.shape.invert ? 1u : 0u, std::memory_order_relaxed);
+            std::memcpy (slot.shapeX, spec.shape.x, sizeof (slot.shapeX));
+            std::memcpy (slot.shapeY, spec.shape.y, sizeof (slot.shapeY));
             for (auto& ring : slot.rings)
                 ring.written.store (0, std::memory_order_relaxed);
             slot.removeAt.store (region::notRemoved, std::memory_order_relaxed);

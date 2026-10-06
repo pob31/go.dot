@@ -1228,6 +1228,17 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="blend">
+          <a:documentation>How it lies on what is under it, in display space (namespace draft 35, VD): normal covers it by its opacity; add adds its light; screen lightens as two projectors on one wall do, never past white; multiply darkens, as a gel does. Each at the layer&apos;s opacity.</a:documentation>
+          <choice>
+            <value>normal</value>
+            <value>add</value>
+            <value>screen</value>
+            <value>multiply</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="canvas">
           <a:documentation>The canvas it is laid onto, by identifier. Empty puts it nowhere: the cue runs and shows nothing, and wfg validate says so before the show.</a:documentation>
           <data type="string"/>
@@ -1306,6 +1317,14 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="feather">
+          <a:documentation>How soft a mask&apos;s edge is, in canvas pixels across it; nought is a hard edge.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="file">
           <a:documentation>A picture&apos;s file, as a path relative to the bundle&apos;s media/ folder, as a sound&apos;s is. Read by the renderer as soon as its cue is the standby; GO only shows it, and a picture not read yet stays black until it is (namespace draft 36, VX). A file that is missing is said when the show loads and leaves the picture black, never the show unopened.</a:documentation>
           <data type="string"/>
@@ -1355,6 +1374,15 @@
             <param name="minInclusive">-180</param>
             <param name="maxInclusive">180</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="invert">
+          <a:documentation>Whether a mask covers what is outside its outline rather than inside - the spill round a set, with the set left clear.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -1481,6 +1509,16 @@
             <param name="minInclusive">0</param>
             <param name="maxInclusive">1000</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shape">
+          <a:documentation>A mask&apos;s outline, as (x, y) corners in 0..1 of the canvas from its top-left corner - x to the right, y down - at most 64, filled even-odd (namespace draft 35, UY, VF). Fewer than three is no shape: nothing is covered, or everything when inverted.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
         </attribute>
       </optional>
       <optional>

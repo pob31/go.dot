@@ -4300,6 +4300,7 @@ namespace wfg::cue
             job.spec.layer = static_cast<int> (std::lround (numberOf (cue, "layer")));
             job.spec.order = ++videoOrder;
             job.spec.source = textOf (cue, "source");
+            job.spec.blend = textOf (cue, "blend");
 
             const auto paint = textOf (cue, "paint");
             job.spec.paint = video::paintFromText (paint.data(), paint.size());
@@ -4348,6 +4349,27 @@ namespace wfg::cue
 
             video::bakeCurves (job.spec.grade, curveOf ("curveLuma"),
                                { curveOf ("curveRed"), curveOf ("curveGreen"), curveOf ("curveBlue") });
+
+            /*  A MASK'S OUTLINE (UY, VF): x, y pairs, at most `maxPoints`. */
+            {
+                std::vector<double> corners;
+
+                for (const auto& word : juce::StringArray::fromTokens (juce::String (textOf (cue, "shape")), " ", ""))
+                    if (const auto value = osc::parseDouble (word.toStdString()); value.has_value())
+                        corners.push_back (*value);
+
+                const auto count = std::min<std::size_t> (corners.size() / 2, video::mask::maxPoints);
+
+                for (std::size_t n = 0; n < count; ++n)
+                {
+                    job.spec.shape.x[n] = static_cast<float> (std::clamp (corners[2 * n], -1.0, 2.0));
+                    job.spec.shape.y[n] = static_cast<float> (std::clamp (corners[2 * n + 1], -1.0, 2.0));
+                }
+
+                job.spec.shape.count = static_cast<int> (count);
+                job.spec.shape.feather = static_cast<float> (std::max (0.0, numberOf (cue, "feather")));
+                job.spec.shape.invert = textOf (cue, "invert") == "true";
+            }
 
             /*  IN %, the author's unit (VR): the renderer's opacity is 0..1. */
             job.opacity = std::clamp (numberOf (cue, "opacity") / 100.0, 0.0, 1.0);

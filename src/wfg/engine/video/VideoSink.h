@@ -42,6 +42,7 @@
 */
 
 #include <wfg/engine/video/Grade.h>
+#include <wfg/engine/video/Mask.h>
 
 #include <cstdint>
 #include <string>
@@ -72,7 +73,8 @@ namespace wfg::video
         std::string canvas;         ///< the canvas it lies on, by identifier
         int layer = 0;              ///< higher is on top (VI)
         std::uint64_t order = 0;    ///< which came up later, for two on one layer
-        std::string source;         ///< fill, mask or picture
+        std::string source;         ///< fill, mask, picture or movie
+        std::string blend = "normal";   ///< normal, add, screen or multiply (VD)
 
         /*  The fill's or the mask's colour as 0xRRGGBB - the cue's `paint`,
             parsed once here so nothing on the far side reads document text
@@ -96,6 +98,10 @@ namespace wfg::video
         /*  ITS GRADE (§36, VP, VU): a picture's and a movie's, the curves
             already baked. Does not move (VV). */
         Grade grade;
+
+        /*  A MASK'S OUTLINE, its feather and whether it is turned inside out
+            (UY, VF), parsed once here. */
+        mask::Shape shape;
     };
 
     /*  Where a value is at one sample of Go.dot's own clock. A sample below
