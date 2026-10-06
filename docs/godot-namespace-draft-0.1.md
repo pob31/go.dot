@@ -20679,3 +20679,94 @@ drawn again from the region (VC).
 on it; the renderer killed in the Task Manager mid-fill; frames, lateness and jitter
 (`WFG_VIDEO_BENCH=1 WFG_VIDEO_BENCH_DISPLAY=<name> wfg_tests --test-case="video bench*"`); the Video
 tab's words; "colour on canvas".
+
+## 36. A picture's geometry and its grade
+
+Written 2026-10-06, before any of it is built, the same evening V.1 landed. The author asked:
+*"Can we add some geometry adjustments for the picture: opacity (%) - can be automated with a fade;
+fill canvas; fit to canvas (keep the aspect ratio); scale (%) - can be automated with a fade; offset
+left-right/down-up - can be automated with a fade; rotate around picture center - can be automated
+with a fade; flip H/V. Can we also add some colour grading: contrast, saturation, gamma, hue and
+curves (luminosity, R, G, B). These will also be applied to video (motion picture)."*
+
+### 36.1 What it is, before its names
+
+A picture is placed on its canvas in three steps. It is **fitted** - the whole picture shown with its
+shape kept, the canvas covered with its shape kept and the overflow cropped, or stretched to the
+canvas - then **scaled**, **moved** and **turned about its own centre**, and **flipped** if asked. A fade
+cue moves the opacity, the scale, the offset and the turn, as it moves a sound's level. Before it is
+laid on the canvas, its colour is **graded**: contrast, saturation, gamma, hue, and four curves -
+luminosity, red, green, blue. A movie (8b) is a picture that moves, and takes all of it unchanged:
+the geometry and the grade are the layer's, not the file's.
+
+### 36.2 Decisions
+
+The author's, with the options and their wording the implementer's unless quoted:
+
+- **VN - The geometry and the grade are the author's list**, quoted above, on every picture and every
+  movie.
+- **VO - Three fits** (offered as "Three choices"): **fit** (the whole picture, its aspect kept, bars
+  where it does not reach), **fill** (the canvas covered, its aspect kept, the overflow cropped) and
+  **stretch** (the canvas covered, the picture distorted). §35.3's `native` is dropped: scale 100 % of
+  a fitted picture is what a person means by "as it is", and a picture at its pixel size is a scale
+  away.
+- **VP - The author's controls on cues, ASC CDL on outputs** (offered as "Yours on cues, CDL on
+  outputs"). A cue's grade is contrast, saturation, gamma, hue and the four curves; ASC CDL stays for
+  an output's calibration, where a video department sends numbers. PRD §3.19b amended.
+- **VQ - Offset and scale in % of the canvas** (offered as "% of the canvas"): an offset of 100 % moves
+  a picture one canvas width or height; a scale of 100 % is the fitted size. Rotation in degrees.
+
+The implementer's, open to overruling:
+
+- **VR - Opacity in %** as the author wrote it, 0 to 100, which replaces §35.3's 0..1 before any show
+  holds one.
+- **VS - A fade moves a picture through one row of pairs**, `fade/video` - `opacity:0 scale:150
+  offsetX:10 rotation:90` - as a fade moves a sound's EQ (§26). It replaces §35.2's VH
+  (`opacityOn`/`opacity`), which nothing had built. Straight or S-shaped along the fade's curve;
+  `stopWhenDone` takes the picture away where the fade arrives.
+- **VT - The turn is clockwise**, as a dial turns, about the picture's centre after it is moved; **up
+  is up**: a positive vertical offset moves it up the canvas ("down-up"). Flips are about the
+  picture's own centre, before the turn.
+- **VU - The grade's order**: gamma, then contrast about mid-grey, then saturation and hue, then the
+  luminosity curve on all three channels, then each colour's curve - in display space (VD). 100 %
+  contrast and saturation, gamma 1, hue 0 and empty curves change nothing.
+- **VV - The grade does not fade, in this pass**: the author asked fades of the geometry and the
+  opacity. A fade of the numbers is the same work again; a fade of curves blends two curves, and is
+  drawn when somebody wants it.
+- **VW - The geometry applies to every source**: a fill scaled is a coloured panel, a mask moved is
+  a mask moved. The grade applies to pictures and movies; a fill's colour is chosen as it is.
+- **VX - A picture is read by the renderer**, from the file the cue names under the bundle's
+  `media/`, handed over as a whole path through the region: the engine resolves it, the renderer
+  reads it. It is read as soon as its cue is the standby, and GO only shows it; a picture not read
+  yet stays black until it is, and GO never waits (§35.4).
+
+### 36.3 The rows
+
+Owner `video`, at `/godot/cue/<id>`:
+
+| Row | Type | Default | Stage | Meaning |
+|---|---|---|---|---|
+| `opacity` | `d` 0..100 % | 100 | V.2 | (was 0..1, VR) |
+| `file` | `s` | | V.2 | the picture, under `media/` |
+| `fit` | `s` fit\|fill\|stretch | fit | V.2 | VO |
+| `scale` | `d` 0..1000 % | 100 | V.3 | of the fitted size |
+| `offsetX`, `offsetY` | `d` -1000..1000 % | 0 | V.3 | of the canvas's width and height; up is positive |
+| `rotation` | `d` -3600..3600 ° | 0 | V.3 | clockwise, about the picture's centre |
+| `flipH`, `flipV` | `T` | false | V.3 | about the picture's own centre |
+| `contrast`, `saturation` | `d` 0..400 % | 100 | V.4 | |
+| `gamma` | `d` 0.1..10 | 1 | V.4 | |
+| `hue` | `d` -180..180 ° | 0 | V.4 | |
+| `curveLuma`, `curveRed`, `curveGreen`, `curveBlue` | `d*` | | V.4 | (in, out) pairs 0..1, straight between; empty is no curve |
+
+`fade/video` (`s`): the pairs a fade moves a picture to, sorted, space-separated (VS).
+
+### 36.4 The stages, again
+
+- **V.2 - Pictures**: `source=picture`, `file`, `fit`; opacity in %; read by the renderer at standby;
+  the bundle and Save as carry pictures as they carry sounds; a picture dropped on the list is a
+  picture cue.
+- **V.3 - Geometry and its fades**: scale, offset, rotation, flips; `fade/video` moving them and the
+  opacity; the stack's order and two pictures crossfading.
+- **V.4 - The grade**: the four numbers and the four curves, with a curve editor that takes typed
+  points.
+- Then masks, blends, the mesh, the outputs' CDL, as §35.6 drew.

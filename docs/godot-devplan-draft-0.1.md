@@ -496,11 +496,11 @@ by an output sink — a window now, a DeckLink card later.
 |---|---|---|
 | V.0 | Docs first: namespace draft §35, the PRD amended, this section | — |
 | V.1 | A black fullscreen output on the chosen display; a fill comes up on GO, fades on Esc over the panic fade, cuts on double Esc; the renderer killed comes back in a second with the picture, the sound untouched. The Video tab, "+ video", the child and its region | V.0 |
-| V.2 | Layers and blends: two fills crossfading, add and screen side by side; a fade cue moves opacity | V.1 |
-| V.3 | Pictures: decoded at standby in the child, GO only reveals; carried by the bundle and Save as | V.2 |
-| V.4 | Masks: a shape in canvas coordinates, feathered or inverted, points typed in | V.2 |
-| V.5 | The mesh: bezier patches per output, a panel with typed control points | V.1 |
-| V.6 | Grades: ASC CDL per cue and per output; 3D LUT after | V.2 |
+| V.2 | Pictures: fit, fill or stretch; opacity in %; read at standby in the child, GO only reveals; carried by the bundle and Save as (restaged 2026-10-06, namespace draft §36) | V.1 |
+| V.3 | Geometry and its fades: scale, offset, rotation, flips; a fade cue moves them and the opacity; the stack's order | V.2 |
+| V.4 | The grade on a cue: contrast, saturation, gamma, hue, four curves | V.2 |
+| V.5 | Masks and blends: a shape in canvas coordinates, feathered or inverted; add, screen, multiply | V.3 |
+| V.6 | The mesh: bezier patches per output, a panel with typed control points; an output's ASC CDL; 3D LUT after | V.1 |
 | V.7 | Video members on sampler strips; a DCA multiplies opacity | V.2 |
 
 *Status, 2026-10-06:* V.0 and V.1 built (namespace draft §35.9): the video cue,

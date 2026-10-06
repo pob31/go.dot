@@ -1628,6 +1628,12 @@ source / capture
 Compositing happens in **undistorted space**; the whole canvas is warped once.
 Faster and correct.
 
+*Amended 2026-10-06, at the author's direction* (namespace draft §36, VN-VQ): a cue's grade is
+**contrast, saturation, gamma, hue and four curves** (luminosity, red, green, blue); **ASC CDL stays for
+an output's calibration**. A picture is **fitted** (fit, fill or stretch), **scaled**, **offset** and
+**turned** about its centre, and **flipped** - offset and scale in % of the canvas - and a fade moves its
+opacity, scale, offset and turn. A movie takes the same.
+
 The two grades sit at different points for different reasons: per-cue is
 creative; per-display is calibration — matching a second projector, compensating
 a coloured or grey wall. **ASC CDL** (slope / offset / power + saturation) is the
