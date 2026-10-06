@@ -251,6 +251,42 @@ namespace wfg::cue
             return static_cast<std::int64_t> (
                 std::llround (seconds * static_cast<double> (rate)));
         }
+
+        /*  THE SECOND OF THE FILE A SLICE'S CLOCK IS AT, `played` samples after
+            the slice's start (namespace draft §33): its first pass from
+            `firstFrom`, `first` samples long, then pass after pass of `pass`
+            from the in-point `origin`. A slice nobody moved has a first pass
+            that is an ordinary one from the in-point, and these are then the
+            same integers the playhead always used - `(e - pass) % pass` is
+            `e % pass`. Nought `pass` is a run that does not wrap. */
+        double secondInSlice (std::int64_t played, double origin, double firstFrom,
+                              std::int64_t first, std::int64_t pass, double rate) noexcept
+        {
+            if (pass > 0 && played >= first)
+                return origin + static_cast<double> ((played - first) % pass) / rate;
+
+            return (played < first ? firstFrom : origin) + static_cast<double> (played) / rate;
+        }
+
+        //  The same, on the file's samples at a speed, where `played` is a fraction.
+        double secondInSlice (double played, double origin, double firstFrom,
+                              double first, double pass, double rate) noexcept
+        {
+            if (pass > 0.0 && played >= first)
+                return origin + std::fmod (played - first, pass) / rate;
+
+            return (played < first ? firstFrom : origin) + played / rate;
+        }
+
+        /*  How many passes a slice's clock has finished, `played` samples after
+            its start: none during the first, one more at every pass after. */
+        std::int64_t passesDoneIn (double played, double first, double pass) noexcept
+        {
+            if (played < first || ! (pass > 0.0))
+                return 0;
+
+            return 1 + static_cast<std::int64_t> (std::floor ((played - first) / pass));
+        }
     }
 
     std::vector<RangeSpec> Runner::rangesOf (const juce::ValueTree& cue) const
@@ -274,6 +310,7 @@ namespace wfg::cue
             };
 
             RangeSpec range;
+            range.id = id;
             range.in = osc::parseDouble (value ("in")).value_or (0.0);
             range.out = osc::parseDouble (value ("out")).value_or (0.0);
 
@@ -3387,6 +3424,22 @@ namespace wfg::cue
         request.ranges = rangesOf (cue);
         request.stretch = run.stretch;
 
+        /*  WHAT THE SLOTS WILL HOLD, kept on the run (namespace draft §33): the
+            clips are written with these and never again while the cue sounds,
+            so a move of a slice is measured from them and the playhead reads
+            what the voice plays rather than what the document says now. */
+        run.armedSlices.clear();
+
+        for (const auto& range : request.ranges)
+            run.armedSlices.push_back ({ range.in, range.out });
+
+        run.playingSlices = run.armedSlices;
+        run.slicesRevision = document.showRevision();
+        run.rearmEditedAt = -1;
+        run.loopMove = 0;
+        run.firstPassSamples = 0;
+        run.passesBefore = 0;
+
         /*  THE CUE'S EQ RIDES THE ARM (Phase 9a), read through the schema
             here and applied on the far side while the voice is silent, as
             the routing is; and the run keeps the copy so `applyEq` can say
@@ -3425,6 +3478,7 @@ namespace wfg::cue
             it with the range's `in`, the document refusing an offset beside a
             range list for exactly that reason. */
         run.positionOrigin = request.startOffset;
+        run.armedStartOffset = request.startOffset;
 
         /*  NO SLOT, and it is a refusal rather than a truncation. The graph is
             built with as many launcher slots as the show's widest cue has
@@ -15048,6 +15102,12 @@ namespace wfg::cue
         /*  AFTER THE LAUNCH AND BEFORE THE RANGES: a launch starts its run's
             clock, and a range's boundary is read off it (§22.4). */
         applyRates();
+
+        /*  AFTER THE SPEED AND BEFORE THE BOUNDARIES (namespace draft §33): a
+            slice's in or out moved while it sounds moves the slice's clock,
+            which the boundary is read off, and is placed on the run's clock
+            as it stands after this tick's speed. */
+        applySlices (engine, tick);
         advanceRanges (engine);
 
         /*  AFTER THE RANGES AND BEFORE THE EDGES, which is the only place it
@@ -15245,12 +15305,30 @@ namespace wfg::cue
                     const auto at = std::min (static_cast<std::size_t> (std::max (slot, 0)),
                                               ranges.size() - 1);
 
+                    /*  THE POINTS THE SLOT HOLDS, which are the arm's and can
+                        be behind the document by an edit the arm has not caught
+                        up with - `applySlices` moves them once the launch is
+                        crossed (namespace draft §33). The loop count is the
+                        document's, as it is at every boundary (decision L). */
+                    auto slice = ranges[at];
+
+                    if (at < run->playingSlices.size())
+                    {
+                        slice.in = run->playingSlices[at].in;
+                        slice.out = run->playingSlices[at].out;
+                    }
+
                     run->rangeStartedAtSample = target;
-                    run->positionOrigin = ranges[at].in;   // and the playhead starts at its in-point
-                    run->passesWanted = ranges[at].loops;
-                    run->passSamples = samplesForRange (ranges[at], audio->sampleRate());
+                    run->positionOrigin = slice.in;   // and the playhead starts at its in-point
+                    run->passesWanted = slice.loops;
+                    run->passSamples = samplesForRange (slice, audio->sampleRate());
                     run->boundaryPlacedAt = -1;
                     run->rangesFinished = false;
+                    run->firstPassSamples = 0;
+                    run->passesBefore = 0;
+                    run->loopMove = 0;
+                    run->readerAtSliceStart = at < run->armedSlices.size() ? run->armedSlices[at].in : slice.in;
+                    run->soundingSlice = slice.id;
 
                     /*  A BED CARRIED ON INSIDE ITS SLICE (K8's review): the clip
                         was armed that far into its loop, and the slice's start
@@ -15275,6 +15353,13 @@ namespace wfg::cue
                         {
                             run->rangeStartedAtSample = target - back;
                             run->rangeSource = run->launchSource - static_cast<double> (back);
+
+                            /*  The slot's reader starts part-way into the loop,
+                                at the in-point and the arm's offset, which is
+                                not where the dated-back start would put it. */
+                            if (const auto length = slice.out - slice.in; length > 0.0)
+                                run->readerAtSliceStart += std::fmod (run->sliceFrom, length)
+                                                             - static_cast<double> (back) / rate;
                         }
                     }
 
@@ -15375,14 +15460,23 @@ namespace wfg::cue
             const auto played = atSpeed ? std::max (0.0, run->rateClock.sourceAt (static_cast<double> (heardTo)) - run->rangeSource)
                                         : 0.0;
 
+            /*  A SLICE MOVED UNDER ITSELF (namespace draft §33) counts its
+                first pass from where the move landed, and the passes it had
+                played before the move still count. Unmoved, the first pass is
+                an ordinary one and these are the integers they always were. */
+            const auto moved = run->firstPassSamples > 0;
+            const auto first = static_cast<double> (run->firstPass());
+
             if (atSpeed)
             {
-                run->rangeIteration = static_cast<int> (played / pass) + 1;
+                run->rangeIteration = moved ? run->passesBefore + static_cast<int> (passesDoneIn (played, first, pass)) + 1
+                                            : static_cast<int> (played / pass) + 1;
             }
             else
             {
                 const auto elapsed = std::max<std::int64_t> (0, heardTo - run->rangeStartedAtSample);
-                run->rangeIteration = static_cast<int> (elapsed / run->passSamples) + 1;
+                run->rangeIteration = moved ? run->passesBefore + static_cast<int> (passesDoneIn (static_cast<double> (elapsed), first, pass)) + 1
+                                            : static_cast<int> (elapsed / run->passSamples) + 1;
             }
 
             /*  The sample at which the file will have played `passes` of the
@@ -15391,7 +15485,8 @@ namespace wfg::cue
                 is not placed. */
             const auto sampleAfterPasses = [&] (double passes) -> std::optional<std::int64_t>
             {
-                const auto when = run->rateClock.whenSourceReaches (run->rangeSource + passes * pass);
+                const auto when = run->rateClock.whenSourceReaches (moved ? run->rangeSource + first + (passes - 1.0) * pass
+                                                                          : run->rangeSource + passes * pass);
 
                 if (! when.has_value())
                     return std::nullopt;
@@ -15414,10 +15509,11 @@ namespace wfg::cue
 
             /*  RE-READ AT EVERY BOUNDARY, which is decision L: a `loops` an
                 operator changed while the range played is honoured from here,
-                and a range deleted while it played is not entered again. What
-                is NOT re-read is the pass length of the range playing now - it
-                is what the clip was armed with, and changing it would need the
-                message thread to re-arm the slot, which is PR 3.10's. */
+                and a range deleted while it played is not entered again. The
+                pass length of the range playing now is the run's own clock -
+                an in or out moved while it plays is heard at once, moved by
+                `applySlices` (namespace draft §33, the author's ruling of
+                2026-10-06), and never by a re-arm. */
             const auto cue = document.findById (run->cue);
             const auto ranges = rangesOf (cue);
             const auto count = static_cast<int> (ranges.size());
@@ -15452,12 +15548,19 @@ namespace wfg::cue
                     is what `run.late` is for. */
                 if (atSpeed)
                 {
-                    const auto when = sampleAfterPasses (std::floor (played / pass) + 1.0);
+                    const auto when = sampleAfterPasses (moved ? static_cast<double> (passesDoneIn (played, first, pass)) + 1.0
+                                                               : std::floor (played / pass) + 1.0);
 
                     if (! when.has_value())
                         continue;               // held at nought: the advance waits for the file to move
 
                     endsAt = *when;
+                }
+                else if (moved)
+                {
+                    const auto gone = passesDoneIn (static_cast<double> (heardTo - run->rangeStartedAtSample), first, pass);
+
+                    endsAt = run->rangeStartedAtSample + run->firstPassSamples + gone * run->passSamples;
                 }
                 else
                 {
@@ -15468,14 +15571,24 @@ namespace wfg::cue
             }
             else if (wanted > 0)
             {
+                /*  A moved slice owes what is left of its count after the
+                    passes it played before the move - at least the one it is
+                    on, which is the pass a count already reached ends with. */
+                const auto passesOwed = moved ? std::max (1, wanted - run->passesBefore) : wanted;
+
                 if (atSpeed)
                 {
-                    const auto when = sampleAfterPasses (static_cast<double> (wanted));
+                    const auto when = sampleAfterPasses (static_cast<double> (passesOwed));
 
                     if (! when.has_value())
                         continue;
 
                     endsAt = *when;
+                }
+                else if (moved)
+                {
+                    endsAt = run->rangeStartedAtSample + run->firstPassSamples
+                               + static_cast<std::int64_t> (passesOwed - 1) * run->passSamples;
                 }
                 else
                 {
@@ -15561,6 +15674,8 @@ namespace wfg::cue
             run->laneOutgoingAt = run->rangeStartedAtSample;
             run->laneOutgoingPass = run->passSamples;
             run->laneOutgoingSource = run->rangeSource;
+            run->laneOutgoingFirst = run->firstPassSamples;
+            run->laneOutgoingFirstFrom = run->firstPassFrom;
 
             /*  The next range's clock starts at the boundary, so its first pass
                 is measured from where it will actually begin rather than from
@@ -15576,9 +15691,49 @@ namespace wfg::cue
                 by the placement horizon is the same lateness `rangeIteration`
                 already carries here, and it reads as the playhead waiting at
                 the incoming range's in-point until the sound reaches it. */
-            run->positionOrigin = ranges[static_cast<std::size_t> (next)].in;
-            run->passesWanted = ranges[static_cast<std::size_t> (next)].loops;
-            run->passSamples = samplesForRange (ranges[static_cast<std::size_t> (next)], rate);
+            /*  THE INCOMING SLICE AS ITS SLOT PLAYS IT (namespace draft §33):
+                the clip's own points, or where an edit since the arm has put
+                them - placed on its slot now, before its launch, as a move from
+                the clip's first frame, so the slot reads the new points from
+                its first sample and nothing is rebuilt. */
+            auto incoming = ranges[static_cast<std::size_t> (next)];
+            const auto nextSlot = static_cast<std::size_t> (next);
+
+            if (nextSlot < run->playingSlices.size() && nextSlot < run->armedSlices.size())
+            {
+                auto& playing = run->playingSlices[nextSlot];
+                const auto& armed = run->armedSlices[nextSlot];
+
+                if (incoming.out > incoming.in && incoming.in >= 0.0)
+                    playing = { incoming.in, incoming.out };
+
+                incoming.in = playing.in;
+                incoming.out = playing.out;
+
+                /*  EVERY TIME, and not only when the points differ from the
+                    arm's: a slot entered before and moved then still holds
+                    that move, read against a reader that starts again at the
+                    clip's first frame. Placed from that frame, this one is in
+                    force from the launch on. Never on the slot sounding now -
+                    a transport cue naming the slice it is in - whose reader is
+                    still reading. */
+                if (next != run->range)
+                    audio->placeLoop (run->track, next, { armed.in, playing.in, playing.in, playing.out, 0.0 });
+
+                run->readerAtSliceStart = armed.in;
+            }
+            else
+            {
+                run->readerAtSliceStart = incoming.in;
+            }
+
+            run->soundingSlice = incoming.id;
+            run->positionOrigin = incoming.in;
+            run->passesWanted = incoming.loops;
+            run->passSamples = samplesForRange (incoming, rate);
+            run->firstPassSamples = 0;
+            run->passesBefore = 0;
+            run->loopMove = 0;
 
             engine.submit (origin::engine, "run.range",
                            { osc::Value::string (run->id),
@@ -15706,6 +15861,20 @@ namespace wfg::cue
                 const auto origin = inRange ? run->rangeSource : run->launchSource;
                 auto played = std::max (0.0, run->rateClock.sourceAt (static_cast<double> (heardTo)) - origin);
 
+                /*  A SLICE MOVED UNDER ITSELF (namespace draft §33): its first
+                    pass from where the move landed. */
+                if (inRange && run->firstPassSamples > 0)
+                {
+                    const auto first = static_cast<double> (run->firstPassSamples);
+                    const auto pass = static_cast<double> (run->passSamples);
+
+                    run->position = secondInSlice (played, run->positionOrigin, run->firstPassFrom, first, pass, rate);
+                    run->slicePlayed = static_cast<double> (run->passesBefore + passesDoneIn (played, first, pass))
+                                         * pass / rate
+                                       + std::max (0.0, run->position - run->positionOrigin);
+                    continue;
+                }
+
                 /*  HOW FAR THE SLICE HAS GOT, passes and all (K8's review): what
                     an Esc pausing a looping bed carries on from. */
                 run->slicePlayed = inRange ? played / rate : 0.0;
@@ -15735,6 +15904,21 @@ namespace wfg::cue
                     the remainder rather than the total. */
                 elapsed = std::max<std::int64_t> (0, heardTo - run->rangeStartedAtSample);
                 run->slicePlayed = static_cast<double> (elapsed) / rate;
+
+                /*  A SLICE MOVED UNDER ITSELF (namespace draft §33): its first
+                    pass from where the move landed, then the loop. */
+                if (run->firstPassSamples > 0)
+                {
+                    run->position = secondInSlice (elapsed, run->positionOrigin, run->firstPassFrom,
+                                                   run->firstPassSamples, run->passSamples, rate);
+                    run->slicePlayed = static_cast<double> (run->passesBefore
+                                                            + passesDoneIn (static_cast<double> (elapsed),
+                                                                            static_cast<double> (run->firstPassSamples),
+                                                                            static_cast<double> (run->passSamples)))
+                                         * static_cast<double> (run->passSamples) / rate
+                                       + std::max (0.0, run->position - run->positionOrigin);
+                    continue;
+                }
 
                 if (run->passSamples > 0)
                     elapsed %= run->passSamples;
@@ -15778,6 +15962,15 @@ namespace wfg::cue
 
                 auto played = std::max (0.0, source - originSource);
 
+                /*  A slice moved under itself (§33): its first pass from where
+                    the move landed. */
+                const auto movedFirst = outgoing ? run.laneOutgoingFirst : (inSlice ? run.firstPassSamples : 0);
+
+                if (movedFirst > 0)
+                    return secondInSlice (played, secondOrigin,
+                                          outgoing ? run.laneOutgoingFirstFrom : run.firstPassFrom,
+                                          static_cast<double> (movedFirst), pass, rate);
+
                 if ((outgoing || inSlice) && pass > 0.0)
                     played = std::fmod (played, pass);
 
@@ -15787,6 +15980,10 @@ namespace wfg::cue
             if (run.range >= 0 && run.laneOutgoingAt > 0 && sample < run.rangeStartedAtSample)
             {
                 auto elapsed = std::max<std::int64_t> (0, sample - run.laneOutgoingAt);
+
+                if (run.laneOutgoingFirst > 0)
+                    return secondInSlice (elapsed, run.laneOutgoingOrigin, run.laneOutgoingFirstFrom,
+                                          run.laneOutgoingFirst, run.laneOutgoingPass, rate);
 
                 if (run.laneOutgoingPass > 0)
                     elapsed %= run.laneOutgoingPass;
@@ -15802,6 +15999,10 @@ namespace wfg::cue
             if (run.range >= 0 && run.rangeStartedAtSample > 0)
             {
                 elapsed = std::max<std::int64_t> (0, sample - run.rangeStartedAtSample);
+
+                if (run.firstPassSamples > 0)
+                    return secondInSlice (elapsed, run.positionOrigin, run.firstPassFrom,
+                                          run.firstPassSamples, run.passSamples, rate);
 
                 if (run.passSamples > 0)
                     elapsed %= run.passSamples;
@@ -15985,6 +16186,248 @@ namespace wfg::cue
             run->rateClock.forgetBefore (static_cast<double> (now) - static_cast<double> (samplesPerTick));
             run->rateNow = run->rateClock.rateAt (static_cast<double> (now));
         }
+    }
+
+    void Runner::applySlices (Engine& engine, std::int64_t tick)
+    {
+        /*  A SLICE MOVED WHILE IT SOUNDS IS HEARD AT ONCE (namespace draft §33,
+            the author's ruling of 2026-10-06). It used to be heard only at the
+            next fire: a slice's in and out are its clip's loop range, which is
+            on Tracktion's restart list, and nothing re-read them while the cue
+            played. Now the points are moved under the clip rather than in it -
+            a move placed on the slot's reader (Player::placeLoop) - and the
+            run's clock moves with it, so the playhead, the lane, the pass count
+            and the boundary all read what the voice plays.
+
+            Gated per run on the show's revision, as the other passes are on the
+            Runner's: a tick with nobody editing compares one number a run. */
+        if (audio == nullptr || samplesPerTick <= 0)
+            return;
+
+        const auto rate = static_cast<double> (audio->sampleRate());
+
+        if (! (rate > 0.0))
+            return;
+
+        const auto revision = document.showRevision();
+        const auto now = audio->samplesElapsed();
+        const auto lead = static_cast<std::int64_t> (latencyTicks()) * samplesPerTick;
+
+        /*  HOW LONG AN ARMED CUE'S EDITS MUST STOP BEFORE IT IS ARMED AGAIN: a
+            drag is a write a frame, and an arm is a graph rebuild. A fifth of a
+            second, so a hand that lets go is heard by the time it reaches GO. */
+        constexpr std::int64_t rearmSettleTicks = TickClock::rateHz / 5;
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.isFinished() || snapshot.kind != "media" || snapshot.track < 0)
+                continue;
+
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr)
+                continue;
+
+            /*  THE READER'S WORD ON THE LAST MOVE. A reader that met it after it
+                had read past its start - the horizon shorter than how far ahead
+                a stretcher reads - applied it from where it was, and the clock
+                starts there instead. A second after the move with no word, the
+                reader took it where it was placed. */
+            if (run->loopMove != 0 && run->range >= 0)
+            {
+                const auto took = audio->loopTaken (run->track, run->range);
+
+                if (took.has_value() && took->move == run->loopMove)
+                {
+                    const auto late = took->from - run->loopMoveFrom;
+
+                    if (late > 0.0 && static_cast<std::size_t> (run->range) < run->playingSlices.size())
+                    {
+                        const auto lateSamples = late * rate;
+                        const auto atSpeed = ! run->rateClock.isIdentityFrom (static_cast<double> (run->launchedAtSample));
+
+                        run->rangeSource += lateSamples;
+
+                        if (atSpeed)
+                        {
+                            if (const auto when = run->rateClock.whenSourceReaches (run->rangeSource))
+                                run->rangeStartedAtSample = static_cast<std::int64_t> (std::llround (*when));
+                        }
+                        else
+                        {
+                            run->rangeStartedAtSample += static_cast<std::int64_t> (std::llround (lateSamples));
+                        }
+
+                        const auto& playing = run->playingSlices[static_cast<std::size_t> (run->range)];
+
+                        run->readerAtSliceStart = took->from;
+                        run->firstPassFrom = took->fileAt;
+                        run->firstPassSamples = std::max<std::int64_t> (1, std::llround ((playing.out - took->fileAt) * rate));
+                    }
+
+                    run->loopMove = 0;
+                }
+                else if (now > run->loopMovePlacedAt + static_cast<std::int64_t> (rate))
+                {
+                    run->loopMove = 0;
+                }
+            }
+
+            /*  AN ARMED CUE NOT YET LAUNCHED holds its slots' clips, written at
+                its arm: an edit to its points, or to its start offset, is heard
+                by arming it again, which with nothing sounding costs nothing
+                but a rebuild. Once the edits stop, so a drag is one arm. A GO
+                in the meantime launches what was armed and the pass below moves
+                it on the next tick, which is a move like any other. */
+            if (run->launchedAtSample <= 0)
+            {
+                if (run->state != runState::armed || run->launchRequested || ! run->armConfirmed)
+                    continue;
+
+                const auto cue = document.findById (run->cue);
+
+                if (! cue.isValid())
+                    continue;
+
+                if (run->slicesRevision != revision)
+                {
+                    run->slicesRevision = revision;
+
+                    const auto ranges = rangesOf (cue);
+                    auto differs = ranges.size() != run->armedSlices.size();
+
+                    for (std::size_t i = 0; ! differs && i < ranges.size(); ++i)
+                        differs = ! juce::exactlyEqual (ranges[i].in, run->armedSlices[i].in)
+                                  || ! juce::exactlyEqual (ranges[i].out, run->armedSlices[i].out);
+
+                    /*  The offset only where the run's own does not win: a
+                        seek's is a decision about this run (§4.10). */
+                    if (! differs && run->startOffset <= 0.0 && ranges.empty())
+                        differs = ! juce::exactlyEqual (numberOf (cue, "startOffset"), run->armedStartOffset);
+
+                    if (differs)
+                        run->rearmEditedAt = tick;
+                }
+
+                if (run->rearmEditedAt >= 0 && tick - run->rearmEditedAt >= rearmSettleTicks)
+                {
+                    run->rearmEditedAt = -1;
+                    run->armConfirmed = false;
+                    requestArmOn (engine, cue, *run, run->ownLevel);
+                }
+
+                continue;
+            }
+
+            if (run->slicesRevision == revision)
+                continue;
+
+            /*  A SLICE ON ITS WAY IN - a launch or a boundary placed and not yet
+                crossed, or the last move not yet reached - is left until it is
+                there: the clock it would be measured on is not the sound's yet.
+                The revision is not marked, so the edit is read when it is. */
+            if (run->range < 0 || run->rangeStartedAtSample <= 0 || now < run->rangeStartedAtSample)
+                continue;
+
+            run->slicesRevision = revision;
+
+            if (run->stopIssued || run->rangesFinished)
+                continue;
+
+            const auto cue = document.findById (run->cue);
+
+            if (! cue.isValid())
+                continue;
+
+            const auto ranges = rangesOf (cue);
+            const auto slot = static_cast<std::size_t> (run->range);
+
+            /*  The slices not sounding take their new points when they are
+                entered (`advanceRanges`). Only the one sounding moves now, and
+                it is found by its identifier: deleted, it finishes its pass and
+                is not entered again (decision L); and an edit elsewhere in the
+                list that renumbers it does not make it another range. */
+            if (slot >= run->playingSlices.size())
+                continue;
+
+            const auto found = std::find_if (ranges.begin(), ranges.end(), [run] (const RangeSpec& range)
+                                             { return ! range.id.empty() && range.id == run->soundingSlice; });
+
+            if (found == ranges.end())
+                continue;
+
+            const auto& wanted = *found;
+            const auto& playing = run->playingSlices[slot];
+
+            if (juce::exactlyEqual (wanted.in, playing.in) && juce::exactlyEqual (wanted.out, playing.out))
+                continue;
+
+            if (! (wanted.out > wanted.in) || wanted.in < 0.0)
+                continue;
+
+            moveSoundingSlice (*run, wanted, now + lead);
+        }
+    }
+
+    void Runner::moveSoundingSlice (Run& run, const RangeSpec& wanted, std::int64_t at)
+    {
+        /*  WHERE THE MOVE LANDS: one launch horizon ahead, as a boundary is
+            placed, so the slot's reader has it before it gets there. The file
+            is wherever the slice's clock has it at that sample. */
+        const auto rate = static_cast<double> (audio->sampleRate());
+        const auto atSpeed = ! run.rateClock.isIdentityFrom (static_cast<double> (run.launchedAtSample));
+        const auto played = atSpeed ? run.rateClock.sourceAt (static_cast<double> (at)) - run.rangeSource
+                                    : static_cast<double> (at - run.rangeStartedAtSample);
+
+        const auto first = static_cast<double> (run.firstPass());
+        const auto pass = static_cast<double> (run.passSamples);
+        const auto fileThere = secondInSlice (played, run.positionOrigin, run.firstFrom(), first, pass, rate);
+        const auto passesDone = passesDoneIn (played, first, pass);
+
+        /*  THE THREE CASES. Inside the new loop, the file carries on and the
+            next wrap is at the new out. Past the new out, there is nothing of
+            the new loop ahead of it: it jumps to the new in-point now, over the
+            looper's ten milliseconds of equal-power fade (decision CD). Before
+            the new in-point, it plays on into it and loops from there. */
+        const auto jump = fileThere >= wanted.out - 0.5 / rate;
+        const auto fileAt = jump ? wanted.in : fileThere;
+        const auto readerAt = run.readerAtSliceStart + played / rate;
+
+        const auto move = audio->placeLoop (run.track, run.range,
+                                            { readerAt, fileAt, wanted.in, wanted.out, jump ? 0.010 : 0.0 });
+
+        /*  A player that does not move loops - a replay's, a test's - leaves
+            the voice where it was, and the clock stays with the voice. */
+        if (move == 0)
+            return;
+
+        /*  THE OUTGOING CLOCK, kept for the lane until the move is reached, as
+            a boundary keeps it (§20.4). */
+        run.laneOutgoingOrigin = run.positionOrigin;
+        run.laneOutgoingAt = run.rangeStartedAtSample;
+        run.laneOutgoingPass = run.passSamples;
+        run.laneOutgoingSource = run.rangeSource;
+        run.laneOutgoingFirst = run.firstPassSamples;
+        run.laneOutgoingFirstFrom = run.firstPassFrom;
+
+        /*  AND THE NEW ONE, from the sample the move lands on: its first pass
+            from where the file is to the new out, then the new loop. The passes
+            already played still count towards `loops`, and a jump begins one. */
+        run.rangeStartedAtSample = at;
+        run.rangeSource = run.rateClock.sourceAt (static_cast<double> (at));
+        run.positionOrigin = wanted.in;
+        run.passSamples = samplesForRange (wanted, audio->sampleRate());
+        run.firstPassFrom = fileAt;
+        run.firstPassSamples = std::max<std::int64_t> (1, std::llround ((wanted.out - fileAt) * rate));
+        run.passesBefore += static_cast<int> (passesDone) + (jump ? 1 : 0);
+        run.readerAtSliceStart = readerAt;
+        run.boundaryPlacedAt = -1;
+
+        run.loopMove = move;
+        run.loopMoveFrom = readerAt;
+        run.loopMovePlacedAt = at;
+
+        run.playingSlices[static_cast<std::size_t> (run.range)] = { wanted.in, wanted.out };
     }
 
     void Runner::freeLane() noexcept

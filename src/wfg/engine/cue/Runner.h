@@ -161,6 +161,12 @@ namespace wfg::cue
 
         /** Passes before playback moves on. Zero is for ever. */
         int loops = 1;
+
+        /*  Which range it is, by its identifier: a slice moved while it sounds
+            is followed by this rather than by its place in the list, which an
+            edit elsewhere in the list can change under it (namespace draft
+            §33). Empty where a range is made up rather than read. */
+        std::string id;
     };
 
     /*  Everything the audio side needs to make one cue ready.
@@ -308,6 +314,37 @@ namespace wfg::cue
             The default does nothing, which is a voice at one: a replay, and
             every rig that plays no speed. */
         virtual bool placeRate (int, std::int64_t, double) { return true; }
+
+        /*  A SLICE'S LOOP POINTS MOVED UNDER IT (namespace draft §33): from the
+            slot's reader position `from` on - seconds of the file, counted on
+            through every pass - the file is at `fileAt`, plays to `loopOut` and
+            loops `loopIn`..`loopOut`; a `crossfade` is a jump, faded. The Runner
+            places it a launch horizon ahead, as it places a boundary. Returns
+            the move's number, or nought for a player that does not move loops -
+            a replay's, a test's - and then the Runner's clock stays where the
+            voice is. Tick thread, never blocking for long. */
+        struct LoopMove
+        {
+            double from = 0.0;
+            double fileAt = 0.0;
+            double loopIn = 0.0;
+            double loopOut = 0.0;
+            double crossfade = 0.0;
+        };
+
+        virtual std::uint64_t placeLoop (int, int, const LoopMove&) { return 0; }
+
+        /*  And a move the slot's reader met only after it had read past its
+            `from`, applied from where the reader was instead: which move, from
+            where, and the file's second there. Nothing by default. */
+        struct LoopTaken
+        {
+            std::uint64_t move = 0;
+            double from = 0.0;
+            double fileAt = 0.0;
+        };
+
+        virtual std::optional<LoopTaken> loopTaken (int, int) { return std::nullopt; }
 
         /*  The fastest a time-stretched cue can play at this graph's rate:
             the stretcher's buffer is its latency long, and it takes 256 x
@@ -1483,6 +1520,19 @@ namespace wfg::cue
             launch and the range boundaries, which read that clock. `rateNow` is
             the readout. */
         void applyRates();
+
+        /*  A SLICE'S IN OR OUT EDITED WHILE IT SOUNDS (namespace draft §33,
+            the author's ruling of 2026-10-06): heard at once. On a revision
+            change each sounding ranged run's slices are compared with what its
+            slots play; a move of the one sounding is placed on its slot a
+            launch horizon ahead - the file carries on where it is if it is
+            inside the new loop, or jumps to the new in-point, faded, if the new
+            out is behind it - and the run's clock moves with it. A slice not
+            sounding takes its new points when it is entered. An armed cue not
+            yet launched is armed again once its edits stop. Tick thread, after
+            the speed and before the boundaries. */
+        void applySlices (Engine& engine, std::int64_t tick);
+        void moveSoundingSlice (Run& run, const RangeSpec& wanted, std::int64_t now);
 
         /*  THE PASS (§20.9), just after `applyLanes` and before the sum: the
             ride's value while nobody holds it, the hand's level as the voice's

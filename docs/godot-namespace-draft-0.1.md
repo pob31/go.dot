@@ -2128,10 +2128,10 @@ A media cue with no ranges plays as today. With ranges, the list is what plays a
 is refused beside it. **Ranges may be discontiguous and in any file order** (decision L) — a media
 cue is then a playlist over one file. **Edits take effect at the next iteration** (decision L): a
 running ranged cue does *not* copy its ranges at launch; at every boundary the job re-reads them —
-a changed `loops` is honoured then; a changed `in`/`out` re-arms that range's slot on the message
-thread (a rebuild on playing audio, which M4 measured bit-identical) and the *next* pass uses the
-new length; a range removed while playing finishes its pass and is not entered again. A boundary
-whose re-arm has not confirmed is placed late and `run.late` says so.
+a changed `loops` is honoured then; a range removed while playing finishes its pass and is not
+entered again. *Amended 2026-10-06 (§33, TZ):* a changed `in`/`out` of the range sounding is heard
+at once, moved under its slot's reader with no re-arm, and a range not sounding takes its new points
+when it is entered. The re-arm for the next pass this paragraph first described was never built.
 
 **Slots.** Every track gets **S slots**, S = the largest range count of any media cue in the show
 (at least 1) — a property of the show, like `tracks`, fixed at load so the graph's shape never
@@ -20138,3 +20138,120 @@ rest are the implementer's, and open to overruling.
 
   `ClientTests` checks the new gesture's signature. Both run in C and `fr_FR`.
 - The question on screen is the author's to try.
+
+## 33. A loop moved while it plays
+
+Written 2026-10-06, when the author asked: *"One thing that's annoying is having to relaunch
+everything to edit a loop end, a start point... Is there a way to avoid having to stop and rebuild
+and eventually use temporary slots for edits?"* Offered "at the next wrap, by a spare slot"
+(recommended) or "immediately", the author chose **immediately**. PRD §3.24 carries the decided
+sentence; this section is how it is built.
+
+### 33.1 What was there
+
+A slice's in and out are its clip's loop range. They were written into the clip once, at the arm
+(`Runner::requestArmOn` to `AudioHost::setTrackRanges`), and nothing read them again while the cue
+played:
+
+- A clip's loop range is on Tracktion's restart list: a change rebuilds the graph and starts the
+  clip's reader again.
+- §12.9 promised that a changed `in`/`out` would re-arm the slot for its next pass. That re-arm was
+  never built: `advanceRanges` said so, pointing at a PR 3.10 that was dropped.
+- The cue at standby was armed once per move of the pointer, so even an edit made before GO was not
+  heard.
+- Go.dot's own arithmetic re-read the document at the launch and at each boundary while the clip
+  kept the old points. After an edit, the playhead, the pass count and the boundaries could disagree
+  with the sound.
+
+So an edit was heard only by stopping the cue and firing it again.
+
+### 33.2 Decisions
+
+The author's: heard at once, and still refused under the lock. The rest are the implementer's, and
+open to overruling.
+
+- **TZ - Heard at once** - the author's ruling. The slice sounding moves under the playhead without
+  a relaunch. This amends decision L for `in` and `out` only: a changed `loops`, and a range removed,
+  still take effect at the next iteration. *Mine:* the recommendation it overruled (the next wrap,
+  through a spare slot per voice).
+- **UA - Still refused under the lock** - the author took the recommendation. Range rows are not in
+  `cue/LiveEdits`; trimming a loop is for building the show.
+- **UB - Three cases, by where the file is when the move lands.**
+  - Inside the new loop: the file carries on, and the next wrap is at the new out.
+  - At or past the new out: nothing of the new loop is ahead of it, so it jumps to the new in-point
+    at once, over the looper's ten milliseconds of equal-power fade (decision CD).
+  - Before a new in-point pushed past it: it plays on into the loop and wraps there.
+
+  *Mine.*
+- **UC - Moved under the clip, never in it.**
+  - The clip is not rewritten until its next arm, and nothing is rebuilt.
+  - The slot's reader - patch 0002's loop below the resampler and the stretcher - asks a
+    `LaunchHandle::LoopSource` at every read where the loop is. It is the shape of the speed's
+    `SpeedSource`.
+  - It is in patch 0002 rather than a new patch, because a file belongs to one patch and the
+    reader's file is 0002's.
+  - Every arm of a voice clears its slots' moves.
+
+  *Mine.*
+- **UD - Placed one launch horizon ahead, as a boundary is.** The Runner decides the reader position
+  and the file's second the move lands at, and moves its own clock to match. A stretcher reads ahead
+  of what is heard by its latency, so a reader can meet a move after it has read past its start. It
+  then applies the move from where it is, never re-reading what it read, and says so. The Runner
+  moves its clock to where the reader applied it. *Mine.*
+- **UE - The passes played before a move still count towards `loops`, and a jump begins a pass.**
+  The first pass after a move runs from where the file is to the new out; every pass after it is
+  the loop's length. *Mine.*
+- **UF - The sounding slice is followed by its identifier, not its place in the list.**
+  - Deleted, it finishes its pass and is not entered again (decision L).
+  - An edit elsewhere that renumbers it does not make it another range.
+  - A slice not sounding is placed, just before it is entered, at the points of the playlist entry
+    whose slot it is, from its clip's first frame. Before, a slot left behind by a deleted range
+    played the deleted range's points under the next one's clock.
+
+  *Mine.*
+- **UG - An armed cue not yet launched is armed again a fifth of a second after its edits stop.**
+  That includes the `startOffset` of a cue without ranges. Nothing is sounding, so the rebuild costs
+  nothing heard, and a drag is one arm. A GO in that fifth of a second launches what was armed, and
+  the move follows on the next tick. *Mine.*
+- **UH - A sounding cue without ranges keeps its start offset until its next run** (§4.10,
+  `armedOrigin`). A start point changes where a run begins, and this one has begun. *Mine.*
+
+### 33.3 Where it is, and what it was tried on
+
+- **Tracktion**, in patch 0002:
+  - `LaunchHandle::LoopSource` (`tracktion_LaunchHandle.h`).
+  - `UnrolledLoopReader` (`tracktion_WaveNode.cpp`) reads the clip's own loop until a move. After
+    one, a position is shifted and read through the moved loop by the same arithmetic. A jump is
+    blended from a scratch buffer sized when the graph is built. With no source, every frame is
+    read as before.
+- **The audio side:**
+  - `audio::LoopVoice` (`audio/LoopVoice.h`) holds the latest two moves of one slot. Its writers
+    share a mutex; its readers take a seqlock and never wait.
+  - `SlotLoop`, `placeTrackLoop`, `trackLoopAdoption` and `clearTrackLoops` are in `AudioHost.cpp`.
+  - `Player::placeLoop` and `Player::loopTaken` are no-ops by default, so a replay and a test's
+    player are complete.
+- **The Runner:**
+  - `applySlices` and `moveSoundingSlice`, between the speed and the boundaries.
+  - The run keeps `armedSlices`, `playingSlices` and `soundingSlice`. A moved clock is
+    `firstPassSamples`, `firstPassFrom`, `passesBefore` and `readerAtSliceStart`.
+  - `secondInSlice` and `passesDoneIn` are the arithmetic the playhead, the lane and the boundary
+    share. An unmoved slice gives the integers it always did.
+- **Tested by `AudioTests`**, on a ramp whose every sample says which frame it came from:
+  - an out pulled in ahead of the playhead;
+  - an out pulled in behind it, then the fade;
+  - an in pushed past it;
+  - three quarters speed;
+  - a graph rebuilt after the move;
+  - an arm forgetting the moves;
+  - a stretched loop moved with no gap and no click.
+- **Tested by `RangeTests`**, the arithmetic:
+  - the placement and the playhead;
+  - the jump, and the pass it begins;
+  - `loops` counted across a move;
+  - a slice not yet entered;
+  - the sounding slice deleted;
+  - the standby armed again once a drag stops;
+  - a move the reader met late.
+
+  All run in C and `fr_FR`.
+- Dragging a loop end in the waveform editor while the bed plays is the author's to try.

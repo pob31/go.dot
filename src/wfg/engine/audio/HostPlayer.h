@@ -84,6 +84,8 @@ namespace wfg::audio
         bool stopAtSample (int track, int slot, std::int64_t sample) override;
         void setLevelDb (int track, double levelDb) override;
         bool placeRate (int track, std::int64_t sample, double rate) override;
+        std::uint64_t placeLoop (int track, int slot, const LoopMove& move) override;
+        std::optional<LoopTaken> loopTaken (int track, int slot) override;
         double stretchSpeedLimit() const override;
         void setRouting (int track, const std::vector<cue::Coefficient>&) override;
         void setEq (int track, const EqSettings&) override;

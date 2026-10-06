@@ -220,6 +220,7 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/TakeWriter.cpp
     wfg/engine/audio/ProxyPlugin.h
     wfg/engine/audio/ProxyPlugin.cpp
+    wfg/engine/audio/LoopVoice.h
     wfg/engine/audio/RateVoice.h
     wfg/engine/audio/DeviceLayer.h
     wfg/engine/audio/DeviceLayer.cpp

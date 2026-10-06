@@ -498,6 +498,12 @@ namespace wfg::cue
         std::int64_t laneOutgoingAt = 0;
         std::int64_t laneOutgoingPass = 0;
 
+        /*  And, when the outgoing clock is a slice moved under itself (§33),
+            its first pass and the file's second that pass began at; nought
+            for an unmoved one. Kept for the same crossing. */
+        std::int64_t laneOutgoingFirst = 0;
+        double laneOutgoingFirstFrom = 0.0;
+
         /*  THE SPEED (namespace draft §22), a media run's only; one, and the
             identity, for every other kind.
 
@@ -692,6 +698,71 @@ namespace wfg::cue
             that, so a poll can fall between and see neither playing. The run
             would report itself done with two ranges still to play. */
         bool rangesFinished = false;
+
+        /*  THE SLICES AS THE VOICE PLAYS THEM (namespace draft §33, the
+            author's ruling of 2026-10-06: a loop end moved while the loop
+            sounds is heard at once).
+
+            `armedSlices` is each slot's clip as the arm wrote it, which is
+            never written again while the cue sounds - a clip's loop range is
+            on Tracktion's restart list. `playingSlices` is what each slot
+            plays now: the clip's, or where a move has put it. Every piece of
+            arithmetic that says where the sound is reads these, never the
+            document, which can be ahead of the voice by a tick or by an arm.
+            Both filled at the arm; a media run's only. */
+        struct SlicePoints
+        {
+            double in = 0.0;
+            double out = 0.0;
+        };
+
+        std::vector<SlicePoints> armedSlices;
+        std::vector<SlicePoints> playingSlices;
+
+        /*  The range sounding now, by its identifier: an edit to it moves the
+            slot under it; deleting it lets it finish its pass (decision L). */
+        std::string soundingSlice;
+
+        /*  THE CLOCK OF A SLICE THAT WAS MOVED UNDER ITSELF. A move lands
+            wherever the file is - part-way into a pass - so the first pass of
+            the moved loop runs from there to its new out, and only the passes
+            after it are the loop's length. `firstPassSamples` is that first
+            run, in samples, from `rangeStartedAtSample`, beginning at the
+            file's second `firstPassFrom`; nought is "no move", and the first
+            pass is then an ordinary one from the in-point - which is every
+            slice that nobody moved. `passesBefore` are the passes of the slice
+            played before the move, still counted towards its `loops`. */
+        std::int64_t firstPassSamples = 0;
+        double firstPassFrom = 0.0;
+        int passesBefore = 0;
+
+        /*  WHERE THE SLOT'S READER COUNTS from, at `rangeStartedAtSample`: in
+            seconds of the file, counted on through every pass as patch 0002's
+            loop reader counts - the clip's in-point when a slice is entered,
+            and where a move landed after one. A move is placed in those terms. */
+        double readerAtSliceStart = 0.0;
+
+        /*  The last move placed on the sounding slot, and the reader position
+            it was placed at, until the reader's word on it is in: a move the
+            reader met late moves the clock to where it applied it. */
+        std::uint64_t loopMove = 0;
+        double loopMoveFrom = 0.0;
+        std::int64_t loopMovePlacedAt = 0;
+
+        /*  The show's revision this run's slices were last compared at. */
+        std::uint64_t slicesRevision = 0;
+
+        /*  AN ARMED CUE WHOSE POINTS WERE EDITED before its GO: armed again
+            once the edits stop (namespace draft §33), from the tick they last
+            moved. -1 for none. */
+        std::int64_t rearmEditedAt = -1;
+        double armedStartOffset = 0.0;
+
+        /*  The first pass of the slice playing now, in samples, and the file's
+            second it starts at: a moved slice's own, an unmoved one's the
+            ordinary pass from the in-point. */
+        std::int64_t firstPass() const noexcept         { return firstPassSamples > 0 ? firstPassSamples : passSamples; }
+        double firstFrom() const noexcept               { return firstPassSamples > 0 ? firstPassFrom : positionOrigin; }
 
         //======================================================================
         /*  THE TREE. A group run is the live instance of a group, and its

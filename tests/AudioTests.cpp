@@ -43,6 +43,7 @@
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/MediaInfo.h>
 
+#include <functional>
 #include <tuple>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -7577,4 +7578,294 @@ TEST_CASE ("audio host: varispeed above one filters out what the speed would lif
             CHECK (decibels (level) < (c.speed > 10.0 ? -60.0 : -25.0));
         }
     }
+}
+
+//==============================================================================
+/*  A SLICE MOVED WHILE IT SOUNDS (namespace draft §33, the author's ruling of
+    2026-10-06). The move is placed on the slot's reader (patch 0002's loop
+    source) and nothing in the graph is rebuilt; these hear it.
+
+    The file is a RAMP: every frame holds where it is, so every sample of the
+    render says which frame of the file it came from, and a test can read the
+    whole path of the playhead off it rather than a click now and then.
+*/
+namespace
+{
+    /*  The second of the file a sample of `writeRamp`'s render came from:
+        the ramp climbs to 0.8 over the whole file. */
+    double rampSecond (float value, int seconds)
+    {
+        return static_cast<double> (value) / 0.8 * static_cast<double> (seconds);
+    }
+
+    /*  How many samples of a render, from `from`, sit more than `frames` of
+        the file away from where `expected` says - skipping `guard` samples
+        either side of every place `expected` wraps, where a resampler's
+        neighbours straddle the join. */
+    int offPath (const juce::AudioBuffer<float>& heard, int rate, int seconds, std::int64_t startedAt,
+                 std::int64_t launch, const std::function<double (double)>& expected,
+                 double frames, int from = 0, int guard = 8)
+    {
+        const auto* x = heard.getReadPointer (0);
+        auto off = 0;
+        auto first = -1;
+
+        for (int n = from; n < heard.getNumSamples(); ++n)
+        {
+            const auto t = static_cast<double> (startedAt + n - launch) / rate;
+            const auto want = expected (t);
+
+            //  Near a wrap of the expectation, either side of it.
+            const auto before = expected (t - static_cast<double> (guard) / rate);
+            const auto after = expected (t + static_cast<double> (guard) / rate);
+
+            if (std::abs (after - before) > 4.0 * guard / static_cast<double> (rate))
+                continue;
+
+            const auto got = rampSecond (x[n], seconds);
+
+            if (std::abs (got - want) * rate > frames)
+            {
+                if (first < 0)
+                    first = n;
+
+                ++off;
+            }
+        }
+
+        if (first >= 0)
+        {
+            const auto t = static_cast<double> (startedAt + first - launch) / rate;
+            MESSAGE ("first sample off the path at " << t << " s after the launch: heard "
+                     << rampSecond (x[first], seconds) << ", expected " << expected (t));
+        }
+
+        return off;
+    }
+}
+
+TEST_CASE ("slice move: an out pulled in under a sounding loop is where it wraps from then on")
+{
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 4);
+    REQUIRE (ramp.existsAsFile());
+    REQUIRE (voice.open (ramp, false, { { 0.0, 2.0, 0 } }));
+    REQUIRE (voice.go (1.0));
+
+    /*  Half a second in, the out is pulled in from two seconds to one: the
+        playhead is inside the new loop, so it carries on to one and wraps. */
+    voice.runTo (voice.at (0.5));
+
+    const auto lands = voice.rig.host.clock().samplesElapsed() + 4 * voice.block;
+    const auto readerAt = static_cast<double> (lands - voice.launch) / voice.rate;
+
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, readerAt, readerAt, 0.0, 1.0, 0.0 }) != 0);
+
+    const auto heard = voice.record (0.2, 3.0);
+
+    const auto path = [] (double t) { return t < 1.0 ? t : std::fmod (t - 1.0, 1.0); };
+    CHECK (offPath (heard, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0) == 0);
+
+    /*  Nothing rebuilt, so nothing late: the reader had it before it got there. */
+    CHECK_FALSE (voice.rig.host.trackLoopAdoption (0, 0).has_value());
+}
+
+TEST_CASE ("slice move: an out pulled in behind the playhead jumps to the in-point at the move, over the fade")
+{
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 4);
+    REQUIRE (ramp.existsAsFile());
+    REQUIRE (voice.open (ramp, false, { { 0.0, 2.0, 0 } }));
+    REQUIRE (voice.go (1.0));
+
+    /*  A second and a half in, the loop becomes a quarter to one: nothing of
+        it is ahead, so the file goes back to a quarter at once. */
+    voice.runTo (voice.at (1.5));
+
+    const auto lands = voice.rig.host.clock().samplesElapsed() + 4 * voice.block;
+    const auto landsAt = static_cast<double> (lands - voice.launch) / voice.rate;
+
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, landsAt, 0.25, 0.25, 1.0, 0.010 }) != 0);
+
+    const auto heard = voice.record (1.0, 2.5);
+    const auto fade = 0.010;
+
+    const auto path = [landsAt] (double t)
+    {
+        return t < landsAt ? t : 0.25 + std::fmod (t - landsAt, 0.75);
+    };
+
+    //  Before the move and after its fade, exactly the path.
+    const auto fadeEnds = static_cast<int> ((landsAt + fade) * voice.rate) - static_cast<int> (voice.startedAt - voice.launch);
+    const auto fadeStarts = static_cast<int> (landsAt * voice.rate) - static_cast<int> (voice.startedAt - voice.launch);
+
+    REQUIRE (fadeStarts > 0);
+    CHECK (offPath (heard, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0, fadeEnds + 2) == 0);
+
+    juce::AudioBuffer<float> before { 1, fadeStarts - 2 };
+    before.copyFrom (0, 0, heard, 0, 0, fadeStarts - 2);
+    CHECK (offPath (before, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0) == 0);
+
+    /*  Inside the fade, the two streams blended: never outside them. */
+    const auto* x = heard.getReadPointer (0);
+
+    for (int n = fadeStarts + 1; n < fadeEnds - 1; ++n)
+    {
+        const auto got = rampSecond (x[n], 4);
+        const auto t = static_cast<double> (voice.startedAt + n - voice.launch) / voice.rate;
+        const auto gone = t;
+        const auto come = 0.25 + (t - landsAt);
+
+        //  Equal power sums to more than one in the middle - up to the square root of two.
+        CHECK (got <= std::sqrt (2.0) * std::max (gone, come) + 1.0e-3);
+        CHECK (got >= std::min (gone, come) * 0.9);
+    }
+}
+
+TEST_CASE ("slice move: an in pushed past the playhead plays on into it, and loops from there")
+{
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 4);
+    REQUIRE (ramp.existsAsFile());
+    REQUIRE (voice.open (ramp, false, { { 0.0, 2.0, 0 } }));
+    REQUIRE (voice.go (1.0));
+
+    voice.runTo (voice.at (0.5));
+
+    const auto lands = voice.rig.host.clock().samplesElapsed() + 4 * voice.block;
+    const auto readerAt = static_cast<double> (lands - voice.launch) / voice.rate;
+
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, readerAt, readerAt, 1.2, 2.0, 0.0 }) != 0);
+
+    const auto heard = voice.record (0.2, 3.5);
+
+    const auto path = [] (double t) { return t < 2.0 ? t : 1.2 + std::fmod (t - 2.0, 0.8); };
+    CHECK (offPath (heard, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0) == 0);
+}
+
+TEST_CASE ("slice move: at three quarters speed, the move is in the file's time and the wraps follow it")
+{
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 4);
+    REQUIRE (ramp.existsAsFile());
+    REQUIRE (voice.open (ramp, false, { { 0.0, 2.0, 0 } }));
+    REQUIRE (voice.go (0.75));
+
+    voice.runTo (voice.at (0.6));
+
+    /*  The reader counts the FILE's seconds: three quarters of the time. */
+    const auto lands = voice.rig.host.clock().samplesElapsed() + 4 * voice.block;
+    const auto readerAt = 0.75 * static_cast<double> (lands - voice.launch) / voice.rate;
+
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, readerAt, readerAt, 0.0, 1.0, 0.0 }) != 0);
+
+    const auto heard = voice.record (0.3, 3.0);
+
+    const auto path = [] (double t)
+    {
+        const auto file = 0.75 * t;
+        return file < 1.0 ? file : std::fmod (file - 1.0, 1.0);
+    };
+
+    CHECK (offPath (heard, voice.rate, 4, voice.startedAt, voice.launch, path, 3.0, 0, 12) == 0);
+}
+
+TEST_CASE ("slice move: a graph rebuilt after the move plays on in the moved loop")
+{
+    /*  Arming another cue rebuilds the graph. The loop's points live in the
+        slot's source, not in the reader, so a reader carried over - or one
+        built new - reads the move all the same. */
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 4);
+    REQUIRE (ramp.existsAsFile());
+    REQUIRE (voice.open (ramp, false, { { 0.0, 2.0, 0 } }, 2));
+    REQUIRE (voice.go (1.0));
+
+    voice.runTo (voice.at (0.5));
+
+    const auto lands = voice.rig.host.clock().samplesElapsed() + 4 * voice.block;
+    const auto readerAt = static_cast<double> (lands - voice.launch) / voice.rate;
+
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, readerAt, readerAt, 0.0, 1.0, 0.0 }) != 0);
+
+    voice.runTo (voice.at (0.8));
+    const std::vector<audio::AudioHost::RangeSpec> other { { 3.0, 4.0, 1 } };
+    REQUIRE (voice.rig.host.setTrackRanges (1, ramp.getFullPathName().toStdString(), other));
+
+    const auto heard = voice.record (0.9, 2.5);
+
+    const auto path = [] (double t) { return t < 1.0 ? t : std::fmod (t - 1.0, 1.0); };
+    CHECK (offPath (heard, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0) == 0);
+}
+
+TEST_CASE ("slice move: arming the voice again forgets the moves - the next cue plays its own loop")
+{
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 4);
+    REQUIRE (ramp.existsAsFile());
+    REQUIRE (voice.open (ramp, false, { { 0.0, 2.0, 0 } }));
+    REQUIRE (voice.go (1.0));
+
+    voice.runTo (voice.at (0.5));
+
+    const auto lands = voice.rig.host.clock().samplesElapsed() + 4 * voice.block;
+    const auto readerAt = static_cast<double> (lands - voice.launch) / voice.rate;
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, readerAt, readerAt, 0.0, 1.0, 0.0 }) != 0);
+
+    voice.runTo (voice.at (1.2));
+    REQUIRE (voice.rig.host.stopTrack (0));
+
+    for (int i = 0; i < 8; ++i)
+        voice.rig.host.processBlock();
+
+    const std::vector<audio::AudioHost::RangeSpec> again { { 0.0, 2.0, 0 } };
+    REQUIRE (voice.rig.host.setTrackRanges (0, ramp.getFullPathName().toStdString(), again));
+    REQUIRE (voice.rig.host.waitForTrackSourceReady (0, 10000));
+    REQUIRE (voice.go (1.0));
+
+    //  Past where the moved loop would have wrapped: the clip's own two seconds.
+    const auto heard = voice.record (0.2, 2.5);
+
+    const auto path = [] (double t) { return std::fmod (t, 2.0); };
+    CHECK (offPath (heard, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0) == 0);
+}
+
+TEST_CASE ("slice move: a stretched loop moved while it plays goes on with no gap and no click")
+{
+    /*  The second of a 500 Hz tone to the third, looped in timestretch; its out
+        pulled in to two and a half, where the tone is whole periods too. A move
+        that started the stretcher again would leave a gap of one of its chunks.
+        The stretcher reads ahead of what is heard, so this move is also one
+        the reader meets late - and says so. */
+    constexpr float amplitude = 0.25f;
+    const ScopedStorage media;
+    const auto tone = writeSineTone (media.folder, 48000, 500.0, amplitude, 4);
+    REQUIRE (tone.existsAsFile());
+
+    const auto ownStep = static_cast<float> (2.0 * juce::MathConstants<double>::pi * 500.0 / 48000.0 * amplitude);
+
+    SpeedRig voice;
+    REQUIRE (voice.open (tone, true, { { 1.0, 3.0, 0 } }));
+    REQUIRE (voice.go (1.0));
+
+    voice.runTo (voice.at (0.5));
+
+    const auto lands = voice.rig.host.clock().samplesElapsed() + 4 * voice.block;
+    const auto readerAt = 1.0 + static_cast<double> (lands - voice.launch) / voice.rate;
+
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, readerAt, readerAt, 1.0, 2.5, 0.0 }) != 0);
+
+    const auto heard = voice.record (0.3, 3.5);
+    auto quietest = 1.0f;
+
+    for (int from = 0; from + 256 <= heard.getNumSamples(); from += 64)
+        quietest = std::min (quietest, rmsOver (heard, from, from + 256));
+
+    const auto quietestDb = 20.0 * std::log10 (std::max (1.0e-9, static_cast<double> (quietest) / (amplitude / std::sqrt (2.0))));
+    const auto step = largestStep (heard);
+
+    INFO ("the quietest 256 samples at " << quietestDb << " dB re the tone; the largest step "
+          << step << " against the tone's own " << ownStep);
+    CHECK (quietestDb > -3.0);
+    CHECK (step < 1.5f * ownStep);
 }

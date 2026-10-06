@@ -23,6 +23,7 @@
 #include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/audio/LooperPlugin.h>
 #include <wfg/engine/audio/ProxyPlugin.h>
+#include <wfg/engine/audio/LoopVoice.h>
 #include <wfg/engine/audio/RateVoice.h>
 #include <wfg/engine/clock/AudioClockSource.h>
 
@@ -229,6 +230,39 @@ namespace wfg::audio
             double sourceSeen = 0.0;
         };
 
+        /*  A SLOT'S LOOP POINTS, MOVED WHILE IT PLAYS (namespace draft §33):
+            the adaptor patch 0002's loop reader asks, every read, onto the
+            slot's LoopVoice, where the Runner posts each move. Asked on the
+            audio thread - and by a reader built on the message thread priming
+            itself, which the voice's seqlock allows. */
+        struct SlotLoop final : te::LaunchHandle::LoopSource
+        {
+            explicit SlotLoop (LoopVoice& voiceToRead) noexcept : voice (voiceToRead) {}
+
+            int segments (Segment* two) noexcept WFG_AUDIO_THREAD override
+            {
+                const rt::ScopedRealtimeCheck goDotsOwn { rt::Region::ours };
+
+                LoopVoice::Segment held[2];
+                const auto count = voice.read (held);
+
+                for (int i = 0; i < count; ++i)
+                    two[i] = { held[i].generation, held[i].from, held[i].fileAt,
+                               held[i].loopIn, held[i].loopOut, held[i].crossfade };
+
+                return count;
+            }
+
+            void adopted (std::uint64_t generation, double from, double fileAt) noexcept WFG_AUDIO_THREAD override
+            {
+                const rt::ScopedRealtimeCheck goDotsOwn { rt::Region::ours };
+                voice.adopt (generation, from, fileAt);
+            }
+
+        private:
+            LoopVoice& voice;
+        };
+
         /*  Where Tracktion keeps its preferences and cache.
 
             Tracktion writes both whether or not anyone asked, so the only
@@ -400,6 +434,8 @@ namespace wfg::audio
             handles.clear();
             slotSpeeds.clear();
             rateVoices.clear();
+            slotLoops.clear();
+            loopVoices.clear();
             context = nullptr;
 
             /*  THE TAKES, with no graph left to reach them (Phase 9c, §19.2). */
@@ -719,6 +755,21 @@ namespace wfg::audio
 
                 if (handles[at] != nullptr)
                     handles[at]->setSpeedSource (slotSpeeds.back().get());
+            }
+
+            /*  AND LOOP POINTS FOR EVERY SLOT (namespace draft §33), set on the
+                handles here for the speed's reason. Empty, a slot plays its
+                clip's own loop, as it always has. */
+            loopVoices.reserve (handles.size());
+            slotLoops.reserve (handles.size());
+
+            for (std::size_t at = 0; at < handles.size(); ++at)
+            {
+                loopVoices.push_back (std::make_unique<LoopVoice>());
+                slotLoops.push_back (std::make_unique<SlotLoop> (*loopVoices.back()));
+
+                if (handles[at] != nullptr)
+                    handles[at]->setLoopSource (slotLoops.back().get());
             }
 
             /*  THE FASTEST A STRETCHED CUE CAN GO at this graph's rate: the
@@ -1248,6 +1299,8 @@ namespace wfg::audio
                 speed while it was torn down. */
             slotSpeeds.clear();
             rateVoices.clear();
+            slotLoops.clear();
+            loopVoices.clear();
             stretchLimit.store (0.0, std::memory_order_relaxed);
             context = nullptr;
 
@@ -1722,6 +1775,11 @@ namespace wfg::audio
 
             const auto placeholder = ensureSilentPlaceholder (editChannels);
 
+            /*  THE LOOP POINTS MOVED UNDER THE LAST CUE ARE ITS OWN (namespace
+                draft §33): this cue's readers start again at its in-points, and
+                a move posted against the last one's would be read against them. */
+            clearTrackLoops (trackIndex);
+
             /*  ONE REBUILD FOR THE LOT, and it is the dispatch at the end that
                 does it rather than any scoped object.
 
@@ -1929,6 +1987,38 @@ namespace wfg::audio
                 return 0;
 
             return rateVoices[static_cast<std::size_t> (trackIndex)]->lateCount();
+        }
+
+        LoopVoice* loopVoiceOf (int trackIndex, int slotIndex) const noexcept
+        {
+            if (trackIndex < 0 || slotIndex < 0 || slotIndex >= editSlots)
+                return nullptr;
+
+            const auto at = static_cast<std::size_t> (trackIndex) * static_cast<std::size_t> (editSlots)
+                              + static_cast<std::size_t> (slotIndex);
+
+            return at < loopVoices.size() ? loopVoices[at].get() : nullptr;
+        }
+
+        /*  A move of one slot's loop points (namespace draft §33). Tick thread;
+            a mutex shared with the arm's clear and nothing else. */
+        std::uint64_t placeTrackLoop (int trackIndex, int slotIndex, const LoopVoice::Segment& segment)
+        {
+            auto* voice = loopVoiceOf (trackIndex, slotIndex);
+            return voice != nullptr ? voice->post (segment) : 0;
+        }
+
+        std::optional<LoopVoice::Adoption> trackLoopAdoption (int trackIndex, int slotIndex) const noexcept
+        {
+            const auto* voice = loopVoiceOf (trackIndex, slotIndex);
+            return voice != nullptr ? voice->adoption() : std::nullopt;
+        }
+
+        void clearTrackLoops (int trackIndex)
+        {
+            for (int slot = 0; slot < editSlots; ++slot)
+                if (auto* voice = loopVoiceOf (trackIndex, slot))
+                    voice->clear();
         }
 
         bool launchTrackAt (int trackIndex, int slotIndex, double monotonicBeat) noexcept
@@ -2230,6 +2320,11 @@ namespace wfg::audio
         std::vector<std::unique_ptr<RateVoice>> rateVoices;
         std::vector<std::unique_ptr<SlotSpeed>> slotSpeeds;
         std::atomic<double> stretchLimit { 0.0 };
+
+        /*  AND EVERY SLOT'S LOOP POINTS (namespace draft §33), in `handles`'
+            order, destroyed after the Edit for the same reason. */
+        std::vector<std::unique_ptr<LoopVoice>> loopVoices;
+        std::vector<std::unique_ptr<SlotLoop>> slotLoops;
 
         std::unique_ptr<te::Edit> edit;
         std::vector<CueMatrix*> matrices;
@@ -2834,6 +2929,16 @@ namespace wfg::audio
     std::uint32_t AudioHost::trackRateLateCount (int trackIndex) const noexcept
     {
         return impl->trackRateLateCount (trackIndex);
+    }
+
+    std::uint64_t AudioHost::placeTrackLoop (int trackIndex, int slotIndex, const LoopVoice::Segment& segment)
+    {
+        return impl->placeTrackLoop (trackIndex, slotIndex, segment);
+    }
+
+    std::optional<LoopVoice::Adoption> AudioHost::trackLoopAdoption (int trackIndex, int slotIndex) const noexcept
+    {
+        return impl->trackLoopAdoption (trackIndex, slotIndex);
     }
 
     double AudioHost::stretchSpeedLimit() const noexcept

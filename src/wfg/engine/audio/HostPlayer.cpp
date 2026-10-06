@@ -359,6 +359,23 @@ namespace wfg::audio
         return audioHost.placeTrackRate (track, sample, rate);
     }
 
+    std::uint64_t HostPlayer::placeLoop (int track, int slot, const LoopMove& move)
+    {
+        /*  The tick thread, on an edit of a sounding slice's in or out
+            (namespace draft §33). A seqlock's write, under a mutex only the
+            arm's clear shares. */
+        return audioHost.placeTrackLoop (track, slot, { 0, move.from, move.fileAt,
+                                                        move.loopIn, move.loopOut, move.crossfade });
+    }
+
+    std::optional<cue::Player::LoopTaken> HostPlayer::loopTaken (int track, int slot)
+    {
+        if (const auto took = audioHost.trackLoopAdoption (track, slot))
+            return LoopTaken { took->generation, took->from, took->fileAt };
+
+        return std::nullopt;
+    }
+
     double HostPlayer::stretchSpeedLimit() const
     {
         return audioHost.stretchSpeedLimit();

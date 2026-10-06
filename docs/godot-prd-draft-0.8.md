@@ -1887,8 +1887,12 @@ name. Playback walks the list.
 
 - **Entry points and out-points are user-editable and exposed as nodes** —
   accessible over OSC like any other parameter.
-- Edits made during playback take effect **at the next iteration**, never
-  retroactively (decision L, `docs/godot-namespace-draft-0.1.md` §9, 2026-09-06).
+- A range's in- and out-points edited during playback are heard **at once**: the
+  range sounding moves under the playhead with no relaunch, and jumps to its
+  in-point, faded, only when the new out-point is already behind it (the author,
+  2026-10-06; `docs/godot-namespace-draft-0.1.md` §33). A changed loop count, and a
+  range removed, take effect **at the next iteration**, never retroactively
+  (decision L, `docs/godot-namespace-draft-0.1.md` §9, 2026-09-06).
 - Ranges need not be contiguous nor in file order (decision L) — a media cue is
   then a playlist over one file, which covers alternate takes and versioned
   sections without duplicating media.

@@ -45,8 +45,12 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <cmath>
+#include <cstdint>
+#include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 using namespace wfg;
 
@@ -479,6 +483,26 @@ namespace
         void setRouting (int, const std::vector<cue::Coefficient>&) override {}
         bool isPlaying (int track) const override  { return playing.count (track) > 0; }
         bool isArmReady (int) const override       { return armsReady; }
+
+        /*  A slice's points moved under it (namespace draft §33), written down
+            and numbered from one, as the real player numbers them. */
+        std::uint64_t placeLoop (int track, int slot, const LoopMove& move) override
+        {
+            moves.push_back ({ track, slot, move });
+            return moves.size();
+        }
+
+        std::optional<LoopTaken> loopTaken (int, int) override { return taken; }
+
+        struct Moved
+        {
+            int track = 0;
+            int slot = 0;
+            LoopMove move;
+        };
+
+        std::vector<Moved> moves;
+        std::optional<LoopTaken> taken;
 
         /** The disk answers: every outstanding arm is reported as ready. */
         void completeArms (Engine& engine)
@@ -1016,4 +1040,237 @@ TEST_CASE ("go.doh: an advance the GO asked for is withdrawn while its boundary 
     rig.ticks (120);
     CHECK (rig.audio.stops.empty());
     CHECK (rig.run (id)->range == 0);
+}
+
+//==============================================================================
+/*  A SLICE MOVED WHILE IT SOUNDS (namespace draft §33, the author's ruling of
+    2026-10-06: "immediately"). An in or out edited under a sounding slice is
+    placed on its slot a launch horizon ahead, and the run's clock moves with
+    it - so the playhead, the pass count and the boundary say what the voice
+    plays. The render half is in AudioTests; this is the arithmetic.
+*/
+namespace
+{
+    /*  Where the run's clock says the voice is, `ticksAgo` ticks before the
+        last one ran: the sample counter it read is the one before the
+        tick's increment. */
+    double secondsSinceLaunch (const SchedulerRig& rig, std::int64_t launchedAt)
+    {
+        return secondsOf (rig.audio.samples - 960 - launchedAt);
+    }
+}
+
+TEST_CASE ("slice move: an out pulled in ahead of the playhead is placed at once, and the playhead wraps at it")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 2.0, 0);            // a bed that loops for ever
+
+    const auto id = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    rig.ticks (50);                                         // about a second in
+    REQUIRE (rig.run (id)->range == 0);
+    REQUIRE (rig.audio.moves.empty());
+
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/out", "1.5").ok);
+    rig.tickOnce();
+
+    /*  ONE MOVE, on the sounding slot, and not a jump: the file is still
+        inside the new loop, so it carries on where it is. */
+    REQUIRE (rig.audio.moves.size() == 1u);
+
+    const auto& moved = rig.audio.moves.front();
+    CHECK (moved.track == rig.run (id)->track);
+    CHECK (moved.slot == 0);
+    CHECK (moved.move.loopIn == doctest::Approx (0.0));
+    CHECK (moved.move.loopOut == doctest::Approx (1.5));
+    CHECK (moved.move.crossfade == doctest::Approx (0.0));
+    CHECK (moved.move.fileAt == doctest::Approx (moved.move.from));
+    CHECK (moved.move.from > 1.0);
+    CHECK (moved.move.from < 1.5);
+
+    /*  Past the new out, the playhead is back at the in-point and counting:
+        the second of the file is the time since the launch less one pass of
+        the new loop. */
+    rig.ticks (40);
+
+    const auto t = secondsSinceLaunch (rig, launchedAt);
+    REQUIRE (t > 1.5);
+    CHECK (rig.run (id)->position == doctest::Approx (t - 1.5).epsilon (1.0e-4));
+    CHECK (rig.run (id)->rangeIteration == 2);
+
+    /*  The same edit read again places nothing more. */
+    rig.ticks (10);
+    CHECK (rig.audio.moves.size() == 1u);
+}
+
+TEST_CASE ("slice move: an out pulled in behind the playhead jumps to the in-point, faded")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 2.0, 0);
+
+    const auto id = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    rig.ticks (60);                                         // about 1.2 s into a 2 s loop
+
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/out", "1.0").ok);
+    rig.tickOnce();
+
+    REQUIRE (rig.audio.moves.size() == 1u);
+
+    const auto& moved = rig.audio.moves.front();
+    CHECK (moved.move.fileAt == doctest::Approx (0.0));    // the new in-point
+    CHECK (moved.move.loopOut == doctest::Approx (1.0));
+    CHECK (moved.move.crossfade == doctest::Approx (0.010));
+
+    /*  A jump begins a pass: the one it left was the first. */
+    rig.ticks (10);
+    CHECK (rig.run (id)->rangeIteration == 2);
+
+    /*  And the playhead counts the new loop from where the jump landed. */
+    const auto landedAt = moved.move.from;                  // seconds since the launch, at speed one
+    const auto t = secondsSinceLaunch (rig, launchedAt);
+    CHECK (rig.run (id)->position == doctest::Approx (std::fmod (t - landedAt, 1.0)).epsilon (1.0e-4));
+}
+
+TEST_CASE ("slice move: the passes played before a move still count towards its loops")
+{
+    /*  Three passes of the first second; at one and a half seconds - the
+        second pass, half a second in - its out is pulled in to 0.8. One pass
+        is behind it and two are owed: the rest of this one, to 0.8, and one
+        whole pass of 0.8 after it. The boundary is at 1.8 + 0.8 seconds. */
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 1.0, 3);
+    rig.addRange (1.0, 2.0, 1);
+
+    rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    rig.ticks (55);
+
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/out", "0.8").ok);
+    rig.ticks (120);
+
+    REQUIRE (rig.audio.moves.size() >= 1u);
+    CHECK (rig.audio.moves.front().move.crossfade == doctest::Approx (0.0));
+    REQUIRE_FALSE (rig.audio.stops.empty());
+
+    INFO ("boundary at " << secondsOf (rig.audio.stops.front().sample - launchedAt) << " s");
+    CHECK (std::llabs (rig.audio.stops.front().sample - launchedAt - 124800) <= 1);
+}
+
+TEST_CASE ("slice move: a slice not yet entered takes its new points when it is")
+{
+    SchedulerRig rig;
+    rig.addRange (0.0, 1.0, 1);
+    const auto second = rig.addRange (1.0, 2.0, 1);
+
+    const auto id = rig.goAndLaunch();
+
+    rig.ticks (10);
+
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + second + "/out", "3.0").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + second + "/in", "2.5").ok);
+
+    /*  Nothing moves under the slice sounding: it is not the one edited. */
+    rig.ticks (5);
+    CHECK (rig.audio.moves.empty());
+
+    rig.ticks (60);
+    REQUIRE (rig.run (id)->range == 1);
+
+    /*  At the boundary, the second slot is told before its launch: from its
+        clip's first frame, the file is at the new in-point. */
+    REQUIRE (rig.audio.moves.size() == 1u);
+
+    const auto& moved = rig.audio.moves.front();
+    CHECK (moved.slot == 1);
+    CHECK (moved.move.from == doctest::Approx (1.0));
+    CHECK (moved.move.fileAt == doctest::Approx (2.5));
+    CHECK (moved.move.loopIn == doctest::Approx (2.5));
+    CHECK (moved.move.loopOut == doctest::Approx (3.0));
+
+    rig.ticks (5);
+    CHECK (rig.run (id)->position >= 2.5);
+    CHECK (rig.run (id)->position < 3.0);
+}
+
+TEST_CASE ("slice move: deleting the slice that sounds moves nothing - it finishes its pass")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 2.0, 1);
+    rig.addRange (2.0, 3.0, 1);
+
+    rig.goAndLaunch();
+    rig.ticks (20);
+
+    /*  The list is now the second range alone, at the first place. Read by
+        its place, the sounding slot would have been moved onto it. */
+    REQUIRE (rig.document.remove (bed).ok);
+    rig.ticks (10);
+
+    CHECK (rig.audio.moves.empty());
+}
+
+TEST_CASE ("slice move: a cue armed at standby is armed again once its edits stop")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 2.0, 0);
+
+    rig.ticks (5);
+    REQUIRE (rig.audio.arms.size() == 1u);
+    rig.audio.completeArms (rig.engine);
+    rig.ticks (2);
+
+    /*  A drag: a write a tick for a while. No arm while it goes on. */
+    for (const auto* out : { "1.9", "1.8", "1.7", "1.6", "1.5" })
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/out", out).ok);
+        rig.tickOnce();
+    }
+
+    CHECK (rig.audio.arms.empty());
+
+    /*  A fifth of a second after the last, one arm with where it ended. */
+    rig.ticks (12);
+
+    REQUIRE (rig.audio.arms.size() == 1u);
+    REQUIRE (rig.audio.arms.front().ranges.size() == 1u);
+    CHECK (rig.audio.arms.front().ranges.front().out == doctest::Approx (1.5));
+
+    /*  And the run waits on that arm before a GO can launch it. */
+    rig.ticks (12);
+    CHECK (rig.audio.arms.size() == 1u);
+}
+
+TEST_CASE ("slice move: a move the reader met late puts the clock where the reader applied it")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 2.0, 0);
+
+    const auto id = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    rig.ticks (50);
+
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/out", "1.5").ok);
+    rig.tickOnce();
+    REQUIRE (rig.audio.moves.size() == 1u);
+
+    /*  The reader applied it 30 ms after where it was placed, the file
+        carrying on from there. */
+    const auto placed = rig.audio.moves.front().move.from;
+    rig.audio.taken = cue::Player::LoopTaken { 1, placed + 0.030, placed + 0.030 };
+    rig.tickOnce();
+
+    /*  Past the new out the playhead is back at the in-point - by the
+        reader's account, not the placement's: the first pass ran to 1.5 from
+        where the reader took it, so it ends at 1.5 seconds of the file all the
+        same, at speed one the same instant. */
+    rig.ticks (30);
+
+    const auto t = secondsSinceLaunch (rig, launchedAt);
+    REQUIRE (t > 1.5);
+    CHECK (rig.run (id)->position == doctest::Approx (t - 1.5).epsilon (1.0e-4));
 }

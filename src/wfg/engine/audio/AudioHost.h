@@ -17,6 +17,7 @@
 
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/audio/LoopVoice.h>
 #include <wfg/engine/audio/TakeWriter.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
@@ -527,6 +528,20 @@ namespace wfg::audio
             for had played, and were placed at the block instead - the horizon
             exists so that this stays nought. Any thread. */
         std::uint32_t trackRateLateCount (int trackIndex) const noexcept;
+
+        /*  A SLOT'S LOOP POINTS MOVED WHILE IT PLAYS (namespace draft §33): from
+            the segment's reader position on, the slot's clip reads the file
+            from `fileAt` and loops the new in and out, with no rebuild - its
+            own loop range is on Tracktion's restart list, so it is never
+            written. Returns the move's generation, or nought when the track or
+            slot does not exist. Tick thread; every arm of the track clears its
+            slots' moves.
+
+            And what the slot's reader did with a move it met late - after it
+            had read past the segment's start - which the Runner reads to put
+            its clock where the sound is. Any thread. */
+        std::uint64_t placeTrackLoop (int trackIndex, int slotIndex, const LoopVoice::Segment& segment);
+        std::optional<LoopVoice::Adoption> trackLoopAdoption (int trackIndex, int slotIndex) const noexcept;
 
         /*  The fastest a time-stretched cue can play at this graph's rate:
             the stretcher takes 256 x speed frames a chunk, into a buffer as
