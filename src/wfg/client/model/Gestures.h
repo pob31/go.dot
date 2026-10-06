@@ -349,6 +349,14 @@ namespace wfg::client::gesture
         afterwards with `setNode`, like every other row a person edits. */
     Event createDca (const std::string& name);
 
+    /*  PHASE 8a: a canvas, and a video output showing one (the canvas may be
+        empty). Their sizes, displays and names are `setNode`s after. */
+    Event createCanvas (const std::string& name);
+    Event createVideoOutput (const std::string& name, const std::string& canvasId);
+
+    /** An output's test pattern on or off, to find which projector is which: tonight's. */
+    Event identifyVideoOutput (const std::string& outputId, bool on);
+
     /*  A HAND ON A SAMPLER STRIP, AND THE HAND LIFTED (PRD §3.27): a pad of
         the virtual panel clicked, a number key held. `velocity` is 1 to 127,
         from where on the pad the click landed; below 1 the argument is left

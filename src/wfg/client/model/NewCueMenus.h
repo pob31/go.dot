@@ -87,6 +87,10 @@ namespace wfg::client::model
         and a last line that makes a mic cue with neither, as the button did. */
     std::vector<Choice> micChoices (const tree::TreeSnapshot&);
 
+    /*  Phase 8a: a fill on each canvas the show has, and a last line on no
+        canvas. A mask and a picture join the list when they draw. */
+    std::vector<Choice> videoChoices (const tree::TreeSnapshot&);
+
     /*  WHETHER THE PICKED CUES CAN BE PUT IN A NEW GROUP, and how many the
         group would hold: a picked group carries its picked members along, so
         they count once. `why` is the sentence the list shows in place of the
@@ -133,6 +137,11 @@ namespace wfg::client::model
         none - the list is never only the last line with no word why. */
     std::vector<MenuLine> micMenu (const tree::TreeSnapshot&, const std::vector<Choice>& choices,
                                    const std::string& destination);
+
+    /*  And for `videoChoices`, saying where a canvas is made when the show
+        has none. */
+    std::vector<MenuLine> videoMenu (const tree::TreeSnapshot&, const std::vector<Choice>& choices,
+                                     const std::string& destination);
 
     /*  The word a transport row shows in the list's kind column, as a group
         row shows its mode (the author, 2026-09-27): stop, fade out, member,

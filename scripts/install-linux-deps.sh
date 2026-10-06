@@ -93,7 +93,8 @@ $SUDO apt-get install -y --no-install-recommends \
     libxext-dev \
     libxinerama-dev \
     libxrandr-dev \
-    libxrender-dev
+    libxrender-dev \
+    libgl-dev
 
 # Per-package reasons, kept next to the list rather than inline so the list
 # stays copy-pasteable into a terminal:
@@ -131,6 +132,8 @@ $SUDO apt-get install -y --no-install-recommends \
 #   libxinerama-dev      juce_gui_basics
 #   libxrandr-dev        juce_gui_basics
 #   libxrender-dev       juce_gui_basics
+#   libgl-dev            juce_opengl (Phase 8a): the video renderer's windows,
+#                        drawn by `wfg video-render` (namespace draft 35)
 #
 # cmake itself is NOT in the list: the runner images and most desktops ship one,
 # and the version we need (3.22+) is older than every supported distro's. If

@@ -120,6 +120,17 @@ namespace wfg::client::ui
                     line (l, 8.5f, 21.0f, 15.5f, 21.0f);
                     break;
 
+                case model::Icon::video:
+                    //  A picture in its frame: a hill and the sun over it (Phase 8a).
+                    l.addRoundedRectangle (3.0f, 5.0f, 18.0f, 14.0f, 1.5f);
+                    l.startNewSubPath (5.0f, 17.0f);
+                    l.lineTo (10.0f, 11.0f);
+                    l.lineTo (13.5f, 14.5f);
+                    l.lineTo (15.5f, 12.5f);
+                    l.lineTo (19.0f, 17.0f);
+                    ring (f, 16.0f, 8.5f, 1.6f);
+                    break;
+
                 case model::Icon::fade:
                     //  A level going somewhere else, with a dot where it starts and where it lands.
                     l.startNewSubPath (4.0f, 6.0f);

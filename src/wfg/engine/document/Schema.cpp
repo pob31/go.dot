@@ -117,17 +117,18 @@ namespace wfg::doc
         {
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts", "Network",
-                                     "Surfaces", "Dcas" },                { "document" } },
+                                     "Surfaces", "Dcas", "Canvases", "VideoOutputs" },
+                                                                          { "document" } },
                 /*  THE CONTAINER CARRIES A VALUE, which is why it is no
                     longer an empty pair of brackets. `focus` is a fact about
                     the collection of lists rather than about any list in it -
                     exactly as `Audio` carries the track count, which is a fact
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
-                { "List",   true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
+                { "List",   true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Persistent" }, { "list" } },
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
-                { "Group",  true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
+                { "Group",  true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Header", "Footer", "Trigger" },
                                                                           { "cue", "group" } },
 
@@ -150,9 +151,9 @@ namespace wfg::doc
                     content models to express a rule that fits in one line of
                     validate() would be paying a great deal for a smaller
                     diagnostic. */
-                { "Header", true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
+                { "Header", true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
                                      "Midi", "Start" }, {} },
-                { "Footer", true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
+                { "Footer", true,  { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
                                      "Midi", "Start" }, {} },
 
                 /*  THE PERSISTENT SECTION IS A LIST'S, not a group's (§3.29,
@@ -162,7 +163,7 @@ namespace wfg::doc
                     validate() - and the same children, so that a fade or a stop
                     put there is a validate WARNING that the section ignores
                     rather than a file that refuses to open. */
-                { "Persistent", true, { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
+                { "Persistent", true, { "Cue", "Group", "Media", "Mic", "Video", "Fade", "Transport", "Osc",
                                         "Midi", "Start" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
@@ -195,6 +196,16 @@ namespace wfg::doc
                     whose claim a mic cue's channel IS (namespace draft 18.2). */
                 { "Mic",    true,  { "Route", "Send", "Feed", "Fx", "Trigger" },
                                                           { "cue", "sound", "mic" } },
+
+                /*  A PICTURE PUT ON A CANVAS (Phase 8a, namespace draft 35,
+                    decision VE): a cue first, a video second - its source (a
+                    fill, a mask, a picture), the canvas and the layer it lies
+                    on, its opacity, its colour and its fade-in. ONE element
+                    for every source, because what the cue list cares about is
+                    the same whatever it shows; a kind per source would be
+                    added again to every list above. Not a sound: no Route, no
+                    Send, nothing of a voice. */
+                { "Video",  true,  { "Trigger" },         { "cue", "video" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,
@@ -398,6 +409,23 @@ namespace wfg::doc
                     `inputs` for its `order`, as `Plugins` carries `plugins`. */
                 { "Inputs",   false, { "Input" },          { "inputs" } },
                 { "Input",    true,  {},                   { "input" } },
+
+                /*  PHASE 8a'S CANVASES AND OUTPUTS (PRD §3.19, namespace draft
+                    35), in the author's words: "Canvas (surfaces in QLab
+                    lingo) render to Outputs with their mapping." A canvas is
+                    the flat picture video cues are laid onto; an output is a
+                    display on this machine showing one canvas through its own
+                    mapping, and several may show the same one (VA). Two
+                    containers beside the DCAs, made on demand at a fixed place
+                    by their first create, so no show written before them gains
+                    a line. NAMED `VideoOutputs` and not `Outputs`: in this
+                    program an output is a sound's until it says otherwise
+                    (VB). Each container carries its owner for its `order`, as
+                    `Dcas` does; the outputs' also say what the machine has. */
+                { "Canvases",     false, { "Canvas" },      { "canvases" } },
+                { "Canvas",       true,  {},                { "canvas" } },
+                { "VideoOutputs", false, { "VideoOutput" }, { "videoOutputs" } },
+                { "VideoOutput",  true,  {},                { "videoOutput" } },
             };
 
             return table;

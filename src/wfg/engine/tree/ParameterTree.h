@@ -82,6 +82,8 @@ namespace wfg::surface { class SurfaceTable; }
 
 namespace wfg::cue { class DcaTable; class LaneTable; class LiveEdits; class TakeTable; }
 
+namespace wfg::video { class VideoHost; }
+
 namespace wfg::tree
 {
     /*  The engine's own numbers, handed to the tree each tick because the tree
@@ -315,6 +317,11 @@ namespace wfg::tree
             dump - no lane is armed, which is the truth. */
         void setLanes (const cue::LaneTable* lanesToRead) noexcept { lanes = lanesToRead; }
 
+        /*  WHAT THE RENDERER FOUND (Phase 8a): the displays, whether each video
+            output is bound, how its frames are going. Absent - a replay, a tree
+            dump - and the outputs read unbound, the renderer stopped. */
+        void setVideo (const video::VideoHost* hostToRead) noexcept { videoHost = hostToRead; }
+
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
             four `none` rows under /godot/plugin/<id>. The surface table's
@@ -441,6 +448,7 @@ namespace wfg::tree
         const cue::DcaTable* dcas = nullptr;
         const cue::TakeTable* takes = nullptr;
         const cue::LaneTable* lanes = nullptr;
+        const video::VideoHost* videoHost = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;
@@ -502,6 +510,11 @@ namespace wfg::tree
             published against from the runtime half, because a trim is what a
             fader is doing tonight and the document half is a cache. */
         std::vector<std::string> declaredDcas;
+
+        /*  Every canvas and every video output, in document order (Phase 8a):
+            the rosters the renderer's readouts are published against. */
+        std::vector<std::string> declaredCanvases;
+        std::vector<std::string> declaredVideoOutputs;
 
         /** Every plugin of the set, in document order - the chain's order. */
         std::vector<std::string> declaredPlugins;

@@ -19,6 +19,7 @@
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/Video.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -117,7 +118,8 @@ namespace wfg::client::model
 
     bool opensList (const std::string& kind)
     {
-        return kind == "group" || kind == "transport" || kind == "midi" || kind == "mic";
+        return kind == "group" || kind == "transport" || kind == "midi" || kind == "mic"
+            || kind == "video";
     }
 
     //==============================================================================
@@ -235,6 +237,25 @@ namespace wfg::client::model
         return choices;
     }
 
+    std::vector<Choice> videoChoices (const tree::TreeSnapshot& snapshot)
+    {
+        /*  WHAT IT SHOWS, ON WHICH CANVAS (Phase 8a, the author's words: a fill
+            is a background, a mask an overlay). One part per canvas, born on
+            it, and a last line on none when the show has several - or only
+            the lines on none when it has no canvas yet. What is offered grows
+            with what is built: a mask and a picture join when they draw. */
+        std::vector<Choice> choices;
+
+        for (const auto& canvas : readCanvases (snapshot))
+            choices.push_back ({ "Fill", "one colour over the whole canvas, behind", "video",
+                                 { { "source", "fill" }, { "canvas", canvas.id } },
+                                 "On " + canvas.label(), false, false });
+
+        choices.push_back ({ "Fill, on no canvas yet", "set it in the inspector", "video",
+                             { { "source", "fill" } }, {}, false, false });
+        return choices;
+    }
+
     //==============================================================================
     Wrap wrapOf (const tree::TreeSnapshot& snapshot, const std::vector<std::string>& picked)
     {
@@ -348,6 +369,43 @@ namespace wfg::client::model
         else if (readRack (snapshot).channels.empty())
             lines.push_back ({ MenuLine::Kind::note,
                                "No rack channels yet: add one in Show settings, on the Rack tab.", -1, false });
+
+        std::vector<Choice> placed;
+        std::vector<int> indices;
+
+        for (std::size_t at = 0; at < choices.size(); ++at)
+            if (! choices[at].section.empty())
+            {
+                placed.push_back (choices[at]);
+                indices.push_back (static_cast<int> (at));
+            }
+
+        const auto before = lines.size();
+        appendChoices (lines, placed, true);
+
+        for (auto at = before; at < lines.size(); ++at)
+            if (lines[at].kind == MenuLine::Kind::item)
+                lines[at].choice = indices[static_cast<std::size_t> (lines[at].choice)];
+
+        lines.push_back ({ MenuLine::Kind::separator, {}, -1, false });
+
+        for (std::size_t at = 0; at < choices.size(); ++at)
+            if (choices[at].section.empty())
+                lines.push_back ({ MenuLine::Kind::item, lineText (choices[at]), static_cast<int> (at), false });
+
+        return lines;
+    }
+
+    std::vector<MenuLine> videoMenu (const tree::TreeSnapshot& snapshot, const std::vector<Choice>& choices,
+                                     const std::string& destination)
+    {
+        std::vector<MenuLine> lines;
+        lines.push_back ({ MenuLine::Kind::note, "A new video cue, " + destination, -1, false });
+
+        /*  NEVER ONLY THE LAST LINE WITH NO WORD WHY, as for a mic cue. */
+        if (readCanvases (snapshot).empty())
+            lines.push_back ({ MenuLine::Kind::note,
+                               "No canvas yet: make one in Show settings, on the Video tab.", -1, false });
 
         std::vector<Choice> placed;
         std::vector<int> indices;

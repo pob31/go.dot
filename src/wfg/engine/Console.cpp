@@ -47,6 +47,9 @@
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/ScanJob.h>
+#include <wfg/engine/video/VideoCommands.h>
+#include <wfg/engine/video/VideoHost.h>
+#include <wfg/engine/video/VideoRenderChild.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/midi/MidiSender.h>
@@ -360,6 +363,7 @@ namespace
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
+        wfg::video::registerVideoCommands (engine.commands(), nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -651,6 +655,7 @@ namespace
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
+        wfg::video::registerVideoCommands (engine.commands(), nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -1262,6 +1267,7 @@ namespace
         wfg::cue::registerTakeCommands (engine.commands(), takes, runs, document);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
+        wfg::video::registerVideoCommands (engine.commands(), nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -3868,6 +3874,28 @@ namespace
         parameters.setSurfaces (&surfaceTable);
         parameters.setLanes (&lanes);
 
+        /*  THE PICTURES (Phase 8a, namespace draft 35.4): the region the scene
+            lives in, made now and held for the session, and a renderer kept
+            running beside the engine while the show has an output switched on.
+            `--no-video-window` runs it with no window - a machine with no
+            screen, and the black-box driver - which still reads the scene and
+            says what each canvas shows. */
+        wfg::video::HostSpec videoSpec;
+        videoSpec.workFolder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                   .getChildFile ("godot-video").getFullPathName().toStdString();
+        videoSpec.headless = args.containsOption ("--no-video-window");
+
+        wfg::video::VideoHost videoHost { std::move (videoSpec) };
+        wfg::video::registerVideoCommands (engine.commands(), &videoHost);
+        runner.setVideo (&videoHost.sink());
+        parameters.setVideo (&videoHost);
+        videoHost.configure (document);
+
+        /*  The show's revision the video configuration was last read at: the
+            canvases and outputs are read again when the show changes, and
+            only then. */
+        std::uint64_t videoRevisionSeen = document.showRevision();
+
         /*  WHAT THE SHOW DECLARES ABOUT ITS SURFACES, read off the document -
             at start and whenever the show changes - and what this machine has
             behind each port they name. */
@@ -4389,6 +4417,20 @@ namespace
 
                                  if (audioState.settingsStatus != "applying")
                                      runner.beforeTick (engine, tickIndex);
+
+                                 /*  THE RENDERER'S CLOCK, every tick and
+                                     whatever the audio settings are doing - the
+                                     clock the points were placed on - and the
+                                     show's canvases and outputs when they
+                                     changed. Stores into the region; nothing
+                                     waits. */
+                                 videoHost.tick (runner.videoClockNow(), runner.videoSampleRate());
+
+                                 if (const auto revision = document.showRevision(); revision != videoRevisionSeen)
+                                 {
+                                     videoRevisionSeen = revision;
+                                     videoHost.configure (document);
+                                 }
 
                                  const auto now = juce::Time::getCurrentTime();
                                  const auto second = now.getHours() * 3600
@@ -5702,6 +5744,13 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
     if (int childExit = 0; wfg::plugin::runPluginEditorIfAsked (argc, argv, childExit))
         return childExit;
 
+    /*  AND `wfg video-render …` is the pictures, in a process of their own so a
+        graphics driver's fault takes away a picture and never the show (Phase
+        8a, namespace draft 35.4). Before the locale too: it reads the region's
+        numbers as numbers and no document text. */
+    if (int childExit = 0; wfg::video::runVideoRenderIfAsked (argc, argv, childExit))
+        return childExit;
+
     if (const auto localeFailure = applyLocaleAndStrip (argc, argv); localeFailure != 0)
         return localeFailure;
 
@@ -5852,7 +5901,8 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--hosted [--render=<wav>] [--input-wav=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
-                      " [--window [--theme=<file>] [--show-settings] [--yield-to-opened]] [--engine-folder=<dir>]",
+                      " [--window [--theme=<file>] [--show-settings] [--yield-to-opened]] [--engine-folder=<dir>]"
+                      " [--no-video-window]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [&makeClient] (const juce::ArgumentList& args)

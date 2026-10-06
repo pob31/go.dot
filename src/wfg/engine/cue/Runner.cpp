@@ -37,6 +37,7 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/clock/TickClock.h>
+#include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/osc/OscValue.h>
 
 /*  For `juce::Decibels` alone, which turns a send's level into a coefficient.
@@ -90,6 +91,7 @@ namespace wfg::cue
             if (element == "Group") return "group";
             if (element == "Media") return "media";
             if (element == "Mic")   return "mic";
+            if (element == "Video") return "video";
             if (element == "Fade")  return "fade";
             if (element == "Transport") return "transport";
             if (element == "Osc")   return "osc";
@@ -4283,6 +4285,33 @@ namespace wfg::cue
             return;
         }
 
+        /*  A VIDEO CUE (Phase 8a, namespace draft 35): a layer on a canvas,
+            brought up by the hook a launch horizon ahead, as a media cue's
+            clip is launched - and then it HOLDS until something stops it, as a
+            mic cue does (VJ): Esc, a stop cue, a kill. What it is, read here
+            at GO and carried as a value: the far side never reads the
+            document (VM). */
+        if (kind == "video")
+        {
+            VideoJob job;
+            job.self = runId;
+            job.spec.id = runId;
+            job.spec.canvas = textOf (cue, "canvas");
+            job.spec.layer = static_cast<int> (std::lround (numberOf (cue, "layer")));
+            job.spec.order = ++videoOrder;
+            job.spec.source = textOf (cue, "source");
+
+            const auto paint = textOf (cue, "paint");
+            job.spec.paint = video::paintFromText (paint.data(), paint.size());
+
+            job.opacity = std::clamp (numberOf (cue, "opacity"), 0.0, 1.0);
+            job.fadeInSeconds = std::max (0.0, numberOf (cue, "fadeIn"));
+
+            std::erase_if (showing, [&runId] (const VideoJob& held) { return held.self == runId; });
+            showing.push_back (std::move (job));
+            return;
+        }
+
         if (kind == "memo")
         {
             /*  A MEMO IS A LINE IN THE BOOK, and now it is a line with a run.
@@ -6779,6 +6808,24 @@ namespace wfg::cue
 
         const auto stopsAt = tick + ticks;
 
+        /*  AND WHAT IS SHOWING (Phase 8a, namespace draft 35.5): a picture is
+            taken down to black over the same second, from wherever its
+            opacity is, then stopped - its footers run, as a sound's do. The
+            job owns the run's ending until then, so the sweep in
+            `advanceWaits` does not end it on the spot; the hook places the
+            points. A layer still to come up comes up and goes down with it. */
+        for (const auto& job : showing)
+        {
+            auto* run = runs.find (job.self);
+
+            if (run == nullptr || run->isFinished() || run->stopIssued || job.removed)
+                continue;
+
+            fadeOutVideo (job.self, tick, ticks);
+            run->askStop (0);
+            run->stopEndsWait = true;
+        }
+
         /*  WHAT IS SOUNDING, collected before anything is changed, since a fade
             begun here takes over the jobs the next one would be asked about. */
         std::vector<std::string> sounding;
@@ -6982,6 +7029,22 @@ namespace wfg::cue
 
             if (auto* dropped = runs.find (snapshot.id))
                 dropped->sendDropped = true;
+        }
+
+        /*  EVERY PICTURE, AT ONCE (Phase 8a, namespace draft 35.5): the canvases
+            black and the outputs left open on black - what Go.dot originates
+            is the picture, not the projector (PRD §4.4). Every job lets go of
+            its run, so the sweep ends the killed runs as it ends the rest; a
+            fade-out Esc began is cut with them. A replay has no sink and
+            drops the same jobs. */
+        if (videoSink != nullptr && ! showing.empty())
+            videoSink->clear();
+
+        for (auto& job : showing)
+        {
+            job.removed = true;
+            job.fadeOutTicks = -1;
+            job.endsAtTick = -1;
         }
 
         /*  THE NETWORK SENDER'S QUEUE, a value a rate cap holds back included,
@@ -7283,6 +7346,12 @@ namespace wfg::cue
         const auto heard = [this] (const Run& run)
         {
             if ((run.kind == "media" || run.kind == "mic") && run.startedAtTick >= 0)
+                return true;
+
+            /*  SEEN COUNTS AS HEARD (Phase 8a, namespace draft 35, VK): a
+                picture up on a canvas has reached the room as surely as a
+                sound has. */
+            if (run.kind == "video" && run.startedAtTick >= 0)
                 return true;
 
             return run.kind == "midi" && hasLaunchEvidence (run) && playsSound (document, run.cue);
@@ -9851,6 +9920,17 @@ namespace wfg::cue
                     if (! soonerStop)
                         panicShapedFade (id, tick, ticks, seconds);
 
+                    continue;
+                }
+
+                /*  A PICTURE SEEN, brought down the way Esc brings it down
+                    (VK): to black over the panic fade, then gone. The corrected
+                    GO puts it up again from its fade-in. */
+                if (run->kind == "video" && run->startedAtTick >= 0)
+                {
+                    run->takenBack = true;
+                    run->askStop (0);
+                    fadeOutVideo (id, tick, ticks);
                     continue;
                 }
 
@@ -12773,7 +12853,12 @@ namespace wfg::cue
                     one, had killed a single member. The group would have read
                     `done` with its whole scene still playing underneath it. */
                 || std::any_of (scheduled.begin(), scheduled.end(),
-                                [&snapshot] (const GroupJob& job) { return job.run == snapshot.id; });
+                                [&snapshot] (const GroupJob& job) { return job.run == snapshot.id; })
+                /*  A PICTURE ESC IS TAKING DOWN (Phase 8a): ended when it is
+                    black, not on the press. */
+                || std::any_of (showing.begin(), showing.end(),
+                                [&snapshot, tick] (const VideoJob& job)
+                                { return job.self == snapshot.id && job.endsAtTick > tick; });
 
             if (! owned)
                 engine.submit (origin::engine, "run.ended", one (snapshot.id));
@@ -15111,6 +15196,9 @@ namespace wfg::cue
             meters say so rather than holding the last numbers a player left. */
         takeInputMeters();
 
+        /*  And the pictures, which a show with no player still has. */
+        advanceVideo (engine, tick);
+
         if (audio == nullptr)
             return;
 
@@ -15141,6 +15229,154 @@ namespace wfg::cue
         updatePositions (tick);
         enforceStops();
         observeEdges (engine);
+    }
+
+    std::int64_t Runner::videoClockNow() const noexcept
+    {
+        if (samplesPerTick <= 0)
+            return -1;
+
+        return audio != nullptr ? audio->samplesElapsed()
+                                : currentTick * static_cast<std::int64_t> (samplesPerTick);
+    }
+
+    int Runner::videoSampleRate() const noexcept
+    {
+        return samplesPerTick * TickClock::rateHz;
+    }
+
+    std::int64_t Runner::videoSampleAhead() const noexcept
+    {
+        /*  THE AUDIO'S CLOCK WHEN THERE IS ONE, which is the clock the picture
+            is presented against (PRD §3.19d); the tick's own when the show has
+            no player, which is the clock the renderer is then told. */
+        const auto now = videoClockNow();
+
+        if (now < 0)
+            return -1;
+
+        return now + static_cast<std::int64_t> (videoLeadTicks()) * samplesPerTick;
+    }
+
+    int Runner::videoLeadTicks() const noexcept
+    {
+        /*  A LAUNCH HORIZON, as a clip's launch is placed - and two ticks with
+            no player, which is the time the region takes to reach the
+            renderer and the renderer a frame. */
+        return std::max (latencyTicks(), 2);
+    }
+
+    std::int64_t Runner::videoSamplesFor (double seconds) const noexcept
+    {
+        if (! (seconds > 0.0) || samplesPerTick <= 0)
+            return 0;
+
+        return std::llround (seconds * static_cast<double> (samplesPerTick)
+                               * static_cast<double> (TickClock::rateHz));
+    }
+
+    void Runner::fadeOutVideo (const std::string& runId, std::int64_t tick, int ticks)
+    {
+        /*  THE JOB OWNS THE RUN'S ENDING until the picture is black - its
+            fade-out a horizon ahead, as every point is - and the hook places
+            the points. */
+        for (auto& job : showing)
+            if (job.self == runId && ! job.removed)
+            {
+                job.fadeOutTicks = std::max (0, ticks);
+                job.endsAtTick = tick + std::max (0, ticks) + videoLeadTicks();
+            }
+    }
+
+    void Runner::advanceVideo (Engine& engine, std::int64_t tick)
+    {
+        juce::ignoreUnused (tick);
+
+        for (auto& job : showing)
+        {
+            const auto* run = runs.find (job.self);
+
+            /*  ENDED, HOWEVER IT ENDED - a stop cue, a kill, Doh! taking it
+                back, Esc's fade run out - and the layer goes now, unless a
+                fade-out already placed its going. */
+            if (run == nullptr || run->isFinished())
+            {
+                if (job.placed && ! job.removed && videoSink != nullptr)
+                    videoSink->remove (job.self, -1);
+
+                job.removed = true;
+                continue;
+            }
+
+            /*  TAKEN BACK BEFORE IT CAME UP - Doh! in the tick it was fired -
+                and never seen at all. */
+            if (! job.placed && run->takenBack)
+            {
+                job.removed = true;
+                continue;
+            }
+
+            /*  UP, A HORIZON AHEAD: from nothing to the cue's opacity over its
+                fade-in, or straight there. Reported started on the tick it is
+                placed, as a clip's launch is - the record a replay reads. */
+            if (! job.placed)
+            {
+                const auto at = videoSampleAhead();
+                const auto rise = videoSamplesFor (job.fadeInSeconds);
+
+                job.points.clear();
+
+                if (rise > 0 && at >= 0)
+                {
+                    job.points.push_back ({ at, 0.0 });
+                    job.points.push_back ({ at + rise, job.opacity });
+                }
+                else
+                {
+                    job.points.push_back ({ at, job.opacity });
+                }
+
+                if (videoSink != nullptr)
+                {
+                    videoSink->show (job.spec);
+
+                    for (const auto& point : job.points)
+                        videoSink->opacity (job.self, point);
+                }
+
+                job.placed = true;
+                engine.submit (origin::engine, "run.started", one (job.self));
+            }
+
+            /*  DOWN, AS ESC ASKED: from where it is at the horizon to black over
+                the panic fade, and gone on the frame it gets there. */
+            if (job.fadeOutTicks >= 0 && ! job.removed)
+            {
+                const auto at = videoSampleAhead();
+                const auto from = at >= 0 ? video::opacityAt (job.points, at) : job.opacity;
+                const auto end = at >= 0 ? at + static_cast<std::int64_t> (job.fadeOutTicks) * samplesPerTick
+                                         : -1;
+
+                job.points.push_back ({ at, from });
+                job.points.push_back ({ end, 0.0 });
+
+                if (videoSink != nullptr)
+                {
+                    videoSink->opacity (job.self, job.points[job.points.size() - 2]);
+                    videoSink->opacity (job.self, job.points.back());
+                    videoSink->remove (job.self, end);
+                }
+
+                job.fadeOutTicks = -1;
+                job.removed = true;
+            }
+        }
+
+        std::erase_if (showing, [this] (const VideoJob& job)
+                       {
+                           const auto* run = runs.find (job.self);
+                           return job.removed && (run == nullptr || run->isFinished());
+                       });
     }
 
     void Runner::takeInputMeters()

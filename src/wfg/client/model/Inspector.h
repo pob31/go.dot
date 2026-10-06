@@ -151,6 +151,11 @@ namespace wfg::client::model
             fit. */
         channelRef,
 
+        /*  A MENU OF THE SHOW'S CANVASES (Phase 8a): it writes a canvas's
+            IDENTIFIER to a video cue's `canvas` row, and each item says the
+            canvas's name and its size. */
+        canvasRef,
+
         /*  A MENU OF THE GROUPS AROUND THIS CUE, for its `preset` (namespace
             draft §30, decision QZ): which group's header gets the cue ready
             when the pointer parks there. The author looked for "a header/

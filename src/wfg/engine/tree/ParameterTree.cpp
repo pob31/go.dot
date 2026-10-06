@@ -40,6 +40,7 @@
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/audio/Timbre.h>
+#include <wfg/engine/video/VideoHost.h>
 
 #include <algorithm>
 #include <cmath>
@@ -872,6 +873,7 @@ namespace wfg::tree
             const auto isGroup = element == "Group";
             const auto isMedia = element == "Media";
             const auto isMic = element == "Mic";
+            const auto isVideo = element == "Video";
             const auto isFade = element == "Fade";
             const auto isStop = element == "Transport";
             const auto isOsc = element == "Osc";
@@ -930,6 +932,13 @@ namespace wfg::tree
                     rows.push_back (row);
             }
 
+            /*  A VIDEO CUE IS A CUE, THEN A PICTURE (Phase 8a): its source,
+                its canvas and layer, its opacity, colour and fade-in. Not a
+                sound - no `sound` rows. */
+            if (isVideo)
+                for (auto* row : doc::Schema::rowsForOwner ("video"))
+                    rows.push_back (row);
+
             if (isFade)
                 for (auto* row : doc::Schema::rowsForOwner ("fade"))
                     rows.push_back (row);
@@ -983,6 +992,7 @@ namespace wfg::tree
                 if (name == "kind")        text = isGroup ? "group"
                                                   : isMedia ? "media"
                                                   : isMic   ? "mic"
+                                                  : isVideo ? "video"
                                                   : isFade  ? "fade"
                                                   : isStop  ? "transport"
                                                   : isOsc   ? "osc"
@@ -1370,6 +1380,8 @@ namespace wfg::tree
         /*  And every DCA, for its `trim` - what a fader is doing tonight, which
             the runtime half publishes. */
         std::vector<std::string> dcaOrder;
+        std::vector<std::string> canvasOrder;
+        std::vector<std::string> videoOutputOrder;
         std::vector<std::string> pluginOrder;
         std::vector<DeclaredInput> inputOrder;
 
@@ -1791,6 +1803,45 @@ namespace wfg::tree
                     }
 
                     dcaOrder.push_back (id);
+                }
+            }
+            else if (containerName == "Canvases" || containerName == "VideoOutputs")
+            {
+                /*  PHASE 8a'S CANVASES AND OUTPUTS (namespace draft 35): what
+                    the show decided - names, sizes, which canvas an output
+                    shows and on which display. What the machine found tonight -
+                    the displays it has, the renderer, whether an output is
+                    bound and how its frames are going - is the runtime half's,
+                    as a DCA's trim is: this half is a cache. */
+                const auto isCanvases = containerName == "Canvases";
+                const auto segment = std::string (isCanvases ? "canvas" : "videoOutput");
+                const char* const element = isCanvases ? "Canvas" : "VideoOutput";
+
+                for (const auto* row : doc::Schema::rowsForOwner (isCanvases ? "canvases" : "videoOutputs"))
+                    if (row->name == "order")
+                        nodes.push_back (makeLeaf (std::string (godot) + "/" + segment + "/order", *row,
+                                                   orderOf (container, element)));
+
+                for (const auto& object : container)
+                {
+                    const auto id = object[idProperty].toString().toStdString();
+
+                    if (id.empty())
+                        continue;
+
+                    const auto base = std::string (godot) + "/" + segment + "/" + id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner (isCanvases ? "canvas" : "videoOutput"))
+                    {
+                        if (row->persist == doc::Persist::none)
+                            continue;
+
+                        const doc::Attribute attribute { element, row };
+                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
+                                                   storedText (attribute, object)));
+                    }
+
+                    (isCanvases ? canvasOrder : videoOutputOrder).push_back (id);
                 }
             }
             else if (containerName == "Audio")
@@ -2296,6 +2347,8 @@ namespace wfg::tree
         declaredMedia = std::move (mediaOrder);
         declaredLists = std::move (listOrder);
         declaredDcas = std::move (dcaOrder);
+        declaredCanvases = std::move (canvasOrder);
+        declaredVideoOutputs = std::move (videoOutputOrder);
         declaredPlugins = std::move (pluginOrder);
         declaredInputs = std::move (inputOrder);
         declaredStrips = std::move (stripOrder);
@@ -3364,6 +3417,70 @@ namespace wfg::tree
             }
         }
 
+        /*  WHAT THE RENDERER FOUND TONIGHT (Phase 8a, namespace draft 35.3):
+            the displays this machine has, how the renderer is, and per video
+            output whether a display is behind it and how its frames are
+            going. From this half because none of it is anything somebody
+            decided, and all of it moves while the show does not. */
+        {
+            const auto found = videoHost != nullptr ? videoHost->readouts() : video::Readouts {};
+
+            if (! declaredVideoOutputs.empty() || videoHost != nullptr)
+                for (const auto* row : doc::Schema::rowsForOwner ("videoOutputs"))
+                {
+                    const auto name = std::string (row->name);
+                    std::string text;
+
+                    if (name == "displays")
+                    {
+                        for (const auto& display : found.displays)
+                            text += (text.empty() ? "" : "\n") + display.name;
+                    }
+                    else if (name == "renderer")
+                        text = found.renderer;
+                    else if (name == "rendererProblem")
+                        text = found.rendererProblem;
+                    else
+                        continue;
+
+                    runtime.push_back (makeLeaf (std::string (godot) + "/videoOutput/" + name, *row, text));
+                }
+
+            for (const auto& outputId : declaredVideoOutputs)
+            {
+                const auto* entry = found.output (outputId);
+                const auto base = std::string (godot) + "/videoOutput/" + outputId + "/";
+
+                for (const auto* row : doc::Schema::rowsForOwner ("videoOutput"))
+                {
+                    if (row->persist != doc::Persist::none)
+                        continue;
+
+                    const auto name = std::string (row->name);
+                    std::string text;
+
+                    if (name == "bound")
+                        text = entry != nullptr && entry->bound ? "true" : "false";
+                    else if (name == "problem")
+                        text = entry != nullptr ? entry->problem
+                                                : (found.renderer == "running" ? std::string ("the renderer has not reached it yet")
+                                                                               : std::string ("the renderer is not running"));
+                    else if (name == "testPattern")
+                        text = videoHost != nullptr && videoHost->identifying (outputId) ? "true" : "false";
+                    else if (name == "framesPresented")
+                        text = std::to_string (entry != nullptr ? entry->framesPresented : 0);
+                    else if (name == "framesLate")
+                        text = std::to_string (entry != nullptr ? entry->framesLate : 0);
+                    else if (name == "presentJitter")
+                        text = osc::formatDouble (entry != nullptr ? entry->jitterMs : 0.0);
+                    else
+                        continue;
+
+                    runtime.push_back (makeLeaf (base + name, *row, text));
+                }
+            }
+        }
+
         /*  WHAT EACH DCA IS TRIMMING BY TONIGHT (PRD §3.28), against the
             roster the document half left behind. From this half because a trim
             is what a fader is doing - it moves fifty times a second while a
@@ -3509,10 +3626,20 @@ namespace wfg::tree
 
             /*  `/godot/plugin` for the same reason: the set's rows from the
                 show, and later the catalogue and the known list beside them. */
-            std::string (godot) + "/plugin" };
+            std::string (godot) + "/plugin",
+
+            /*  And `/godot/videoOutput` (Phase 8a): an output's name from the
+                show, whether it is bound from the renderer. */
+            std::string (godot) + "/videoOutput" };
 
         for (const auto& id : declaredDcas)
             ownedByTheDocument.push_back (std::string (godot) + "/dca/" + id);
+
+        for (const auto& id : declaredCanvases)
+            ownedByTheDocument.push_back (std::string (godot) + "/canvas/" + id);
+
+        for (const auto& id : declaredVideoOutputs)
+            ownedByTheDocument.push_back (std::string (godot) + "/videoOutput/" + id);
 
         for (const auto& id : declaredPlugins)
             ownedByTheDocument.push_back (std::string (godot) + "/plugin/" + id);

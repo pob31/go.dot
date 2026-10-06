@@ -119,7 +119,14 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # INPUTS, the other side of the interface from the buses:
                 # `inputs` is a CONTAINER token like `plugins`, addressed
                 # /godot/input/order beside /godot/input/<id>.
-                "inputs", "input")
+                "inputs", "input",
+                # Phase 8a (2026-10-06, namespace draft 35). A VIDEO cue, and
+                # what it is laid onto and shown through: a CANVAS is the flat
+                # picture cues are laid onto, an OUTPUT a display showing one
+                # canvas through its mapping (the author's words). `canvases`
+                # and `videoOutputs` are CONTAINER tokens like `dcas`,
+                # addressed /godot/canvas/order beside /godot/canvas/<id>.
+                "video", "canvases", "canvas", "videoOutputs", "videoOutput")
 
 VALUE_TYPES = {
     "s": "string",

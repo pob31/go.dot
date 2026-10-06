@@ -251,6 +251,7 @@ target_compile_definitions(wfg_deps INTERFACE
     JUCE_MODULE_AVAILABLE_juce_graphics=1
     JUCE_MODULE_AVAILABLE_juce_gui_basics=1
     JUCE_MODULE_AVAILABLE_juce_gui_extra=1
+    JUCE_MODULE_AVAILABLE_juce_opengl=1
     JUCE_MODULE_AVAILABLE_tracktion_core=1
     JUCE_MODULE_AVAILABLE_tracktion_engine=1
     JUCE_MODULE_AVAILABLE_tracktion_graph=1
@@ -578,6 +579,10 @@ target_link_libraries(wfg_thirdparty
         juce::juce_audio_utils          # required by tracktion_engine
         juce::juce_dsp                  # required by tracktion_engine
         juce::juce_osc                  # required by tracktion_engine; PRD 3.17 OSCQuery
+        juce::juce_opengl               # Phase 8a (namespace draft 35, UX): the video
+                                        # renderer's windows, drawn in a child process
+                                        # (`wfg video-render`); the engine itself draws
+                                        # nothing with it.
         juce::juce_cryptography         # SHA256, for the event log's bundle hash. The log
                                         # header records a hash over show.xml, state.xml and
                                         # namespaces/*, so a replay can refuse a log that was

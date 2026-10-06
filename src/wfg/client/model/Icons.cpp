@@ -58,6 +58,7 @@ namespace wfg::client::model
         if (kind == "memo")    return Icon::memo;
         if (kind == "media")   return Icon::media;
         if (kind == "mic")     return Icon::mic;
+        if (kind == "video")   return Icon::video;
         if (kind == "fade")    return Icon::fade;
         if (kind == "start")   return Icon::start;
         if (kind == "osc")     return Icon::osc;
@@ -73,7 +74,7 @@ namespace wfg::client::model
         /*  ONE TOKEN PER KIND THAT HAS ONE, named after it, so a kind's accent
             is found in the theme file under the kind's own word. A start cue
             is one of the cues that act on a cue, and shares the transport's. */
-        if (kind == "memo" || kind == "media" || kind == "mic" || kind == "fade"
+        if (kind == "memo" || kind == "media" || kind == "mic" || kind == "video" || kind == "fade"
               || kind == "transport" || kind == "osc" || kind == "midi" || kind == "group")
             return "kind-" + kind;
 

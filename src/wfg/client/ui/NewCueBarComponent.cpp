@@ -104,6 +104,7 @@ namespace wfg::client::ui
         if (kind == "transport")  return "a cue that stops, advances or starts another: choose which";
         if (kind == "midi")       return "a new MIDI cue, " + destination + ": choose what it sends";
         if (kind == "mic")        return "a new mic cue, " + destination + ": choose its input";
+        if (kind == "video")      return "a new video cue, " + destination + ": choose its canvas";
 
         return "a new " + juce::String (kind) + " cue, " + destination;
     }

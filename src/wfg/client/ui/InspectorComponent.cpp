@@ -607,6 +607,7 @@ namespace wfg::client::ui
                 case model::Control::stripRef:
                 case model::Control::inputRef:
                 case model::Control::channelRef:
+                case model::Control::canvasRef:
                 case model::Control::groupRef:
                     /*  THE ITEMS THEMSELVES CAN HAVE MOVED, which no other
                         control here has to think about: a `choice`'s options
@@ -966,6 +967,7 @@ namespace wfg::client::ui
                         || field.control == model::Control::stripRef
                         || field.control == model::Control::inputRef
                         || field.control == model::Control::channelRef
+                        || field.control == model::Control::canvasRef
                         || field.control == model::Control::groupRef)
                        && field.writable)
             {
@@ -1288,6 +1290,7 @@ namespace wfg::client::ui
                                   || line->field.control == model::Control::stripRef
                                   || line->field.control == model::Control::inputRef
                                   || line->field.control == model::Control::channelRef
+                                  || line->field.control == model::Control::canvasRef
                                   || line->field.control == model::Control::groupRef;
 
             line->box.setVisible (! hidden && ! line->isHeading

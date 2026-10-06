@@ -26,7 +26,7 @@ namespace wfg::client::model
             "+ transport" list, among the other cues that act on a cue. The
             kind is unchanged; only its button went. */
         static const std::vector<std::string> kinds {
-            "memo", "media", "mic", "fade", "transport", "osc", "midi", "group"
+            "memo", "media", "mic", "video", "fade", "transport", "osc", "midi", "group"
         };
 
         return kinds;

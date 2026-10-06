@@ -340,7 +340,21 @@ add_library(wfg_engine STATIC
     wfg/engine/tree/TreeCommands.cpp
     wfg/engine/tree/TreeCommands.h
     wfg/engine/tree/TreeSnapshot.cpp
-    wfg/engine/tree/TreeSnapshot.h)
+    wfg/engine/tree/TreeSnapshot.h
+    wfg/engine/video/Compositor.h
+    wfg/engine/video/Displays.cpp
+    wfg/engine/video/Displays.h
+    wfg/engine/video/RegionSink.h
+    wfg/engine/video/VideoClock.h
+    wfg/engine/video/VideoCommands.cpp
+    wfg/engine/video/VideoCommands.h
+    wfg/engine/video/VideoHost.cpp
+    wfg/engine/video/VideoHost.h
+    wfg/engine/video/VideoRamp.h
+    wfg/engine/video/VideoRegion.h
+    wfg/engine/video/VideoRenderChild.cpp
+    wfg/engine/video/VideoRenderChild.h
+    wfg/engine/video/VideoSink.h)
 add_library(wfg::engine ALIAS wfg_engine)
 
 # PUBLIC, and pointed at src/ rather than at src/wfg/ — consumers therefore
@@ -393,7 +407,8 @@ if(APPLE)
     target_sources(wfg_engine PRIVATE
         wfg/engine/app/FolderIcon_mac.mm
         wfg/engine/app/Raise_mac.mm
-        wfg/engine/app/WindowApplication_mac.mm)
+        wfg/engine/app/WindowApplication_mac.mm
+        wfg/engine/video/Displays_mac.mm)
 endif()
 
 # wfg::thirdparty is PUBLIC on purpose. The engine's own public headers name no
@@ -503,6 +518,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Theme.cpp
     wfg/client/model/Transport.h
     wfg/client/model/Transport.cpp
+    wfg/client/model/Video.h
+    wfg/client/model/Video.cpp
     wfg/client/model/Waveform.h
     wfg/client/model/Waveform.cpp)
 add_library(wfg::client_model ALIAS wfg_client_model)

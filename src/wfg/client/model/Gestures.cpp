@@ -412,6 +412,21 @@ namespace wfg::client::gesture
         return { origin::window, "dca.create", { osc::Value::string (name) } };
     }
 
+    Event createCanvas (const std::string& name)
+    {
+        return { origin::window, "canvas.create", { osc::Value::string (name) } };
+    }
+
+    Event createVideoOutput (const std::string& name, const std::string& canvasId)
+    {
+        return { origin::window, "videoOutput.create", { osc::Value::string (name), osc::Value::string (canvasId) } };
+    }
+
+    Event identifyVideoOutput (const std::string& outputId, bool on)
+    {
+        return { origin::window, "videoOutput.identify", { osc::Value::string (outputId), osc::Value::boolean (on) } };
+    }
+
     Event pressStrip (const std::string& stripId, int velocity)
     {
         /*  A HAND WITH NO VELOCITY SAYS NONE. The argument is optional because

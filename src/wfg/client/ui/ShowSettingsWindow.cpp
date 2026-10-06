@@ -11,6 +11,8 @@
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/Video.h>
+#include <wfg/engine/video/Displays.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 #include <spatcore/ui/patch/PatchMatrixComponent.h>
 #include <spatcore/io/TestSignalGenerator.h>
@@ -4893,6 +4895,555 @@ namespace wfg::client::ui
             DOH!'S WINDOW SITS BETWEEN THE OTHER TWO (the author, 2026-09-30;
             PRD §3.32): how long after a GO it can still be taken back, the
             third level beside the other two. */
+        /*  THE PICTURES' SIDE OF THE SHOW (Phase 8a, namespace draft 35, the
+            author's words): the CANVASES cues are laid onto, and the OUTPUTS -
+            displays on this machine - that show them, each through its own
+            mapping. One tab for both (VB), canvases first: an output names a
+            canvas, so the canvas is made first.
+
+            EVERY CELL IS A `node.set` AND NOTHING IS APPLIED, as on the MIDI
+            tab: a renamed canvas, a resized one, an output moved to another
+            display, all land at once and are undoable; the renderer follows on
+            the next tick. A display is named by the system's own name and
+            remembered by the identifier this machine gave it (VL), which is
+            cleared when the name is chosen again - the port's rule.
+
+            CHOOSING THE DISPLAY THIS WINDOW IS ON ASKS FIRST: an output there
+            covers Go.dot itself, GO button and all, until it is moved off. */
+        class VideoPage final : public juce::Component
+        {
+        public:
+            VideoPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch)),
+                  canvasModel (*this), outputModel (*this)
+            {
+                for (auto* list : { &canvasList, &outputList })
+                {
+                    list->setRowHeight (34);
+                    list->setOutlineThickness (0);
+                    list->setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                    addAndMakeVisible (*list);
+                }
+
+                canvasList.setModel (&canvasModel);
+                outputList.setModel (&outputModel);
+
+                addAndMakeVisible (addCanvas);
+                addAndMakeVisible (addOutput);
+                addCanvas.setTooltip ("A canvas: the flat picture video cues are laid onto, 1920 by 1080 until"
+                                      " you say otherwise. Name it for where it is seen - Stage, Cyclo.");
+                addOutput.setTooltip ("An output: a display on this machine - a projector, a monitor - showing"
+                                      " one canvas. Several outputs may show the same canvas.");
+
+                addCanvas.onClick = [this] { if (send) send (gesture::createCanvas (freeName (canvases, "Canvas"))); };
+                addOutput.onClick = [this]
+                {
+                    if (send)
+                        send (gesture::createVideoOutput (freeName (outputs, "Output"),
+                                                          canvases.empty() ? std::string {} : canvases.front().id));
+                };
+
+                addChildComponent (cellEditor);
+                cellEditor.setEditable (false, true, false);
+                cellEditor.setColour (juce::Label::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                cellEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                cellEditor.onEditorHide = [this] { commitCell(); };
+
+                addChildComponent (chooser);
+                chooser.onChange = [this] { commitChoice(); };
+
+                addAndMakeVisible (summary);
+                summary.setJustificationType (juce::Justification::topLeft);
+            }
+
+            void show (std::vector<model::CanvasRow> canvasRows, std::vector<model::VideoOutputRow> outputRows,
+                       std::vector<std::string> displaysNow, std::string renderer, std::string rendererProblem,
+                       bool editable)
+            {
+                const auto sameCanvases = canvasRows.size() == canvases.size()
+                                            && std::equal (canvasRows.begin(), canvasRows.end(), canvases.begin(),
+                                                           [] (const model::CanvasRow& a, const model::CanvasRow& b)
+                                                           { return a.id == b.id && a.name == b.name && a.width == b.width
+                                                                      && a.height == b.height; });
+
+                const auto sameOutputs = outputRows.size() == outputs.size()
+                                           && std::equal (outputRows.begin(), outputRows.end(), outputs.begin(),
+                                                          [] (const model::VideoOutputRow& a, const model::VideoOutputRow& b)
+                                                          { return a.id == b.id && a.name == b.name && a.canvas == b.canvas
+                                                                     && a.display == b.display && a.enabled == b.enabled
+                                                                     && a.bound == b.bound && a.problem == b.problem
+                                                                     && a.testPattern == b.testPattern; });
+
+                const auto sameLock = locked == ! editable;
+
+                canvases = std::move (canvasRows);
+                outputs = std::move (outputRows);
+                displays = std::move (displaysNow);
+                locked = ! editable;
+
+                addCanvas.setVisible (editable);
+                addOutput.setVisible (editable);
+
+                /*  THE RENDERER IN WORDS, and what this machine has: what
+                    somebody looking at a black projector needs first. */
+                juce::String said;
+
+                if (renderer == "running")
+                    said = "The renderer is running.";
+                else if (renderer == "starting")
+                    said = "The renderer is starting.";
+                else if (renderer == "failed")
+                    said = "The renderer stopped: " + juce::String (rendererProblem);
+                else
+                    said = outputs.empty() ? "No output yet: the renderer starts when the show has one switched on."
+                                           : "The renderer is not running: every output is switched off.";
+
+                said << "  " << (displays.empty() ? juce::String ("No display found yet.")
+                                                  : juce::String (static_cast<int> (displays.size()))
+                                                      + (displays.size() == 1 ? " display" : " displays")
+                                                      + " on this machine.");
+
+                summary.setText (said, juce::dontSendNotification);
+
+                if (! sameCanvases)
+                    canvasList.updateContent();
+
+                if (! sameOutputs)
+                    outputList.updateContent();
+
+                if (! sameCanvases || ! sameLock)
+                    canvasList.repaint();
+
+                if (! sameOutputs || ! sameLock || ! sameCanvases)
+                    outputList.repaint();
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+                auto bar = area.removeFromTop (30);
+
+                addCanvas.setBounds (bar.removeFromLeft (128).reduced (3, 0));
+                addOutput.setBounds (bar.removeFromLeft (128).reduced (3, 0));
+
+                summary.setBounds (area.removeFromBottom (40));
+
+                area.removeFromTop (6);
+                canvasHeading = area.removeFromTop (20);
+                canvasList.setBounds (area.removeFromTop (juce::jmax (80, area.getHeight() / 3)));
+                area.removeFromTop (10);
+                outputHeading = area.removeFromTop (20);
+                outputList.setBounds (area);
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                g.setFont (Look::font (theme, 11.0f));
+                g.setColour (Look::colour (theme, "ink-off"));
+
+                const auto canvasCells = canvasCellsFor (canvasHeading.withWidth (canvasList.getWidth()));
+                const char* canvasNames[] { "Canvas", "Width", "Height" };
+
+                for (auto at = 0; at < 3; ++at)
+                    g.drawText (canvasNames[at], canvasCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
+
+                const auto outputCells = outputCellsFor (outputHeading.withWidth (outputList.getWidth()));
+                const char* outputNames[] { "Output", "Shows", "Display", "On", "Identify", "State" };
+
+                for (auto at = 0; at < 6; ++at)
+                    g.drawText (outputNames[at], outputCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
+            }
+
+        private:
+            /*  ONE CARVE PER LIST, for the painter and the click alike. */
+            static std::array<juce::Rectangle<int>, 4> canvasCellsFor (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+                const auto cross = area.removeFromRight (24);
+                const auto height = area.removeFromRight (90);
+                const auto width = area.removeFromRight (90);
+                return { area, width, height, cross };
+            }
+
+            static std::array<juce::Rectangle<int>, 7> outputCellsFor (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+                const auto cross = area.removeFromRight (24);
+                const auto state = area.removeFromRight (240);
+                const auto identify = area.removeFromRight (72);
+                const auto on = area.removeFromRight (48);
+                const auto display = area.removeFromRight (240);
+                const auto shows = area.removeFromRight (180);
+                return { area, shows, display, on, identify, state, cross };
+            }
+
+            static int cellIndexAt (const juce::Rectangle<int>* cells, int count, int x)
+            {
+                for (auto at = 0; at < count; ++at)
+                    if (x >= cells[at].getX() && x < cells[at].getRight())
+                        return at;
+
+                return -1;
+            }
+
+            //==============================================================================
+            struct CanvasModel final : juce::ListBoxModel
+            {
+                explicit CanvasModel (VideoPage& pageToServe) : page (pageToServe) {}
+
+                int getNumRows() override { return static_cast<int> (page.canvases.size()); }
+
+                void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+                {
+                    if (row < 0 || static_cast<std::size_t> (row) >= page.canvases.size())
+                        return;
+
+                    const auto& entry = page.canvases[static_cast<std::size_t> (row)];
+                    const auto cells = canvasCellsFor ({ 0, 0, width, height });
+
+                    g.setColour (Look::colour (page.theme, row % 2 == 0 ? "panel" : "panel-in"));
+                    g.fillRect (0, 0, width, height - 1);
+
+                    g.setFont (Look::font (page.theme, 13.0f));
+                    g.setColour (Look::colour (page.theme, "ink"));
+                    g.drawText (juce::String (entry.label()), cells[0], juce::Justification::centredLeft, true);
+
+                    g.setFont (Look::font (page.theme, 12.0f));
+                    g.setColour (Look::colour (page.theme, "ink-dim"));
+                    g.drawText (juce::String (entry.width) + " px", cells[1], juce::Justification::centredLeft);
+                    g.drawText (juce::String (entry.height) + " px", cells[2], juce::Justification::centredLeft);
+
+                    if (! page.locked)
+                        g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[3], juce::Justification::centred);
+                }
+
+                void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+                {
+                    if (page.locked || row < 0 || static_cast<std::size_t> (row) >= page.canvases.size() || ! page.send)
+                        return;
+
+                    const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                       : page.canvasList.getWidth();
+                    const auto cells = canvasCellsFor ({ 0, 0, width, page.canvasList.getRowHeight() });
+                    const auto& entry = page.canvases[static_cast<std::size_t> (row)];
+
+                    switch (cellIndexAt (cells.data(), 4, event.x))
+                    {
+                        case 0: page.editCell (page.canvasList, row, cells[0], "/godot/canvas/" + entry.id + "/name", entry.name); return;
+                        case 1: page.editCell (page.canvasList, row, cells[1], "/godot/canvas/" + entry.id + "/width", std::to_string (entry.width)); return;
+                        case 2: page.editCell (page.canvasList, row, cells[2], "/godot/canvas/" + entry.id + "/height", std::to_string (entry.height)); return;
+                        case 3: page.send (gesture::deleteObject (entry.id)); return;
+                        default: return;
+                    }
+                }
+
+                VideoPage& page;
+            };
+
+            struct OutputModel final : juce::ListBoxModel
+            {
+                explicit OutputModel (VideoPage& pageToServe) : page (pageToServe) {}
+
+                int getNumRows() override { return static_cast<int> (page.outputs.size()); }
+
+                void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+                {
+                    if (row < 0 || static_cast<std::size_t> (row) >= page.outputs.size())
+                        return;
+
+                    const auto& entry = page.outputs[static_cast<std::size_t> (row)];
+                    const auto cells = outputCellsFor ({ 0, 0, width, height });
+
+                    g.setColour (Look::colour (page.theme, row % 2 == 0 ? "panel" : "panel-in"));
+                    g.fillRect (0, 0, width, height - 1);
+
+                    g.setFont (Look::font (page.theme, 13.0f));
+                    g.setColour (Look::colour (page.theme, "ink"));
+                    g.drawText (juce::String (entry.label()), cells[0], juce::Justification::centredLeft, true);
+
+                    /*  A DASH AND NOT A BLANK for what nobody has chosen, as on
+                        the MIDI tab. */
+                    const auto dash = juce::String::fromUTF8 ("\xe2\x80\x93");
+
+                    g.setFont (Look::font (page.theme, 12.0f));
+                    g.setColour (Look::colour (page.theme, entry.canvas.empty() ? "ink-off" : "ink-dim"));
+                    g.drawText (entry.canvas.empty() ? dash : juce::String (page.canvasLabel (entry.canvas)),
+                                cells[1], juce::Justification::centredLeft, true);
+
+                    g.setColour (Look::colour (page.theme, entry.display.empty() ? "ink-off" : "ink-dim"));
+                    g.drawText (entry.display.empty() ? dash : juce::String (entry.display),
+                                cells[2], juce::Justification::centredLeft, true);
+
+                    g.setColour (Look::colour (page.theme, entry.enabled ? "ink" : "ink-off"));
+                    g.drawText (entry.enabled ? "ON" : "OFF", cells[3], juce::Justification::centredLeft);
+
+                    /*  IDENTIFY: the white frame and cross on that wall, said
+                        in words while it is up - tonight's, and never locked. */
+                    g.setColour (Look::colour (page.theme, entry.testPattern ? "ink" : "ink-off"));
+                    g.drawText (entry.testPattern ? "ON" : "OFF", cells[4], juce::Justification::centredLeft);
+
+                    /*  THE STATE IN WORDS, never a colour alone (§4.8): showing,
+                        or why not. */
+                    const auto showing = entry.bound && entry.problem.empty();
+                    g.setColour (Look::colour (page.theme, showing || ! entry.enabled ? "ink-dim" : "failed"));
+                    g.drawText (showing ? juce::String ("showing")
+                                        : juce::String (entry.problem.empty() ? std::string ("not showing") : entry.problem),
+                                cells[5], juce::Justification::centredLeft, true);
+
+                    if (! page.locked)
+                    {
+                        g.setColour (Look::colour (page.theme, "ink-dim"));
+                        g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[6], juce::Justification::centred);
+                    }
+                }
+
+                void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+                {
+                    if (row < 0 || static_cast<std::size_t> (row) >= page.outputs.size() || ! page.send)
+                        return;
+
+                    const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                       : page.outputList.getWidth();
+                    const auto cells = outputCellsFor ({ 0, 0, width, page.outputList.getRowHeight() });
+                    const auto& entry = page.outputs[static_cast<std::size_t> (row)];
+                    const auto base = "/godot/videoOutput/" + entry.id + "/";
+                    const auto cell = cellIndexAt (cells.data(), 7, event.x);
+
+                    /*  IDENTIFY IS TONIGHT'S, and is answered under the lock
+                        too: finding a projector is not editing the show. */
+                    if (cell == 4)
+                    {
+                        page.send (gesture::identifyVideoOutput (entry.id, ! entry.testPattern));
+                        return;
+                    }
+
+                    if (page.locked)
+                        return;
+
+                    switch (cell)
+                    {
+                        case 0: page.editCell (page.outputList, row, cells[0], base + "name", entry.name); return;
+                        case 1: page.chooseCanvas (row, cells[1]); return;
+                        case 2: page.chooseDisplay (row, cells[2]); return;
+                        case 3: page.send (gesture::setNode (base + "enabled", entry.enabled ? "false" : "true")); return;
+                        case 6: page.send (gesture::deleteObject (entry.id)); return;
+                        default: return;
+                    }
+                }
+
+                VideoPage& page;
+            };
+
+            //==============================================================================
+            std::string canvasLabel (const std::string& id) const
+            {
+                for (const auto& canvas : canvases)
+                    if (canvas.id == id)
+                        return canvas.label();
+
+                return id + " (not a canvas)";
+            }
+
+            void editCell (juce::ListBox& list, int row, juce::Rectangle<int> cell, std::string address, const std::string& now)
+            {
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                editingAddress = std::move (address);
+                editingWas = now;
+                cellEditor.setBounds (cell.withY (place.getY()).withHeight (place.getHeight()).translated (list.getX(), 0));
+                cellEditor.setText (juce::String (now), juce::dontSendNotification);
+                cellEditor.setVisible (true);
+                cellEditor.showEditor();
+            }
+
+            void commitCell()
+            {
+                const auto address = editingAddress;
+                editingAddress.clear();
+                cellEditor.setVisible (false);
+
+                const auto typed = cellEditor.getText().trim().toStdString();
+
+                if (address.empty() || typed.empty() || typed == editingWas || ! send)
+                    return;
+
+                send (gesture::setNode (address, typed));
+            }
+
+            void chooseCanvas (int row, juce::Rectangle<int> cell)
+            {
+                const auto& entry = outputs[static_cast<std::size_t> (row)];
+
+                choosingOutput = entry.id;
+                choosingDisplay = false;
+                chooser.clear (juce::dontSendNotification);
+                chooser.addItem ("(none)", 1);
+
+                auto selected = 1;
+
+                for (std::size_t at = 0; at < canvases.size(); ++at)
+                {
+                    chooser.addItem (juce::String (canvases[at].label()) + juce::String::fromUTF8 ("  \xc2\xb7  ")
+                                       + juce::String (canvases[at].sizeWord()),
+                                     static_cast<int> (at) + 2);
+
+                    if (canvases[at].id == entry.canvas)
+                        selected = static_cast<int> (at) + 2;
+                }
+
+                openChooser (outputList, row, cell, selected);
+            }
+
+            void chooseDisplay (int row, juce::Rectangle<int> cell)
+            {
+                const auto& entry = outputs[static_cast<std::size_t> (row)];
+
+                choosingOutput = entry.id;
+                choosingDisplay = true;
+                chooser.clear (juce::dontSendNotification);
+                chooser.addItem ("(none)", 1);
+
+                auto selected = 1;
+
+                for (std::size_t at = 0; at < displays.size(); ++at)
+                {
+                    chooser.addItem (juce::String (displays[at]), static_cast<int> (at) + 2);
+
+                    if (displays[at] == entry.display)
+                        selected = static_cast<int> (at) + 2;
+                }
+
+                /*  A DISPLAY THE SHOW NAMES AND THIS MACHINE LACKS stays in the
+                    menu, marked, as a MIDI device does: the show travelled. */
+                if (selected == 1 && ! entry.display.empty())
+                {
+                    const auto at = static_cast<int> (displays.size()) + 2;
+                    chooser.addItem (juce::String (entry.display) + "  (not on this machine)", at);
+                    selected = at;
+                }
+
+                openChooser (outputList, row, cell, selected);
+            }
+
+            void openChooser (juce::ListBox& list, int row, juce::Rectangle<int> cell, int selected)
+            {
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                chooser.setSelectedId (selected, juce::dontSendNotification);
+                chooser.setBounds (cell.withY (place.getY()).withHeight (place.getHeight()).translated (list.getX(), 0));
+                chooser.setVisible (true);
+                chooser.showPopup();
+            }
+
+            void commitChoice()
+            {
+                const auto id = choosingOutput;
+
+                if (id.empty() || ! send)
+                    return;
+
+                const auto at = chooser.getSelectedId() - 2;
+                const auto base = "/godot/videoOutput/" + id + "/";
+
+                if (! choosingDisplay)
+                {
+                    if (at >= static_cast<int> (canvases.size()))
+                        return;
+
+                    send (gesture::setNode (base + "canvas", at >= 0 ? canvases[static_cast<std::size_t> (at)].id
+                                                                    : std::string {}));
+                    return;
+                }
+
+                if (at >= static_cast<int> (displays.size()))
+                    return;   // the "not on this machine" entry: nothing changed
+
+                const auto chosen = at >= 0 ? displays[static_cast<std::size_t> (at)] : std::string {};
+
+                const auto choose = [this, base, chosen]
+                {
+                    send (gesture::setNode (base + "display", chosen));
+
+                    /*  AND THE REMEMBERED IDENTIFIER GOES, as a port's does: it
+                        names the display that was there before. */
+                    send (gesture::setNode (base + "displayId", {}));
+                };
+
+                if (! chosen.empty() && chosen == displayUnderThisWindow())
+                {
+                    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon,
+                                                        "This display shows Go.dot",
+                                                        juce::String ("An output on ") + juce::String (chosen)
+                                                          + " covers this window - the GO button with it - for as"
+                                                            " long as the output is switched on. Choose it anyway?",
+                                                        "Choose it", "Cancel", this,
+                                                        juce::ModalCallbackFunction::create ([choose] (int result)
+                                                        {
+                                                            if (result != 0)
+                                                                choose();
+                                                        }));
+                    return;
+                }
+
+                choose();
+            }
+
+            /*  THE DISPLAY GO.DOT'S OWN WINDOW IS ON, by the name the renderer
+                would give it - asked of the same lister, here, in the same
+                process. */
+            std::string displayUnderThisWindow() const
+            {
+                const auto* top = getTopLevelComponent();
+
+                if (top == nullptr)
+                    return {};
+
+                const auto centre = top->getScreenBounds().getCentre();
+
+                for (const auto& display : video::listDisplays())
+                    if (juce::Rectangle<int> (display.x, display.y, display.width, display.height).contains (centre))
+                        return display.name;
+
+                return {};
+            }
+
+            template <typename Row>
+            static std::string freeName (const std::vector<Row>& rows, const char* stem)
+            {
+                for (auto at = 1; at < 1000; ++at)
+                {
+                    const auto candidate = std::string (stem) + " " + std::to_string (at);
+
+                    if (std::none_of (rows.begin(), rows.end(), [&candidate] (const Row& row) { return row.name == candidate; }))
+                        return candidate;
+                }
+
+                return stem;
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+
+            CanvasModel canvasModel;
+            OutputModel outputModel;
+            juce::ListBox canvasList, outputList;
+            juce::TextButton addCanvas { "+ canvas" }, addOutput { "+ output" };
+            juce::Label summary;
+            juce::Rectangle<int> canvasHeading, outputHeading;
+
+            juce::Label cellEditor;
+            juce::ComboBox chooser;
+            std::string editingAddress, editingWas, choosingOutput;
+            bool choosingDisplay = false;
+
+            std::vector<model::CanvasRow> canvases;
+            std::vector<model::VideoOutputRow> outputs;
+            std::vector<std::string> displays;
+            bool locked = false;
+        };
+
         class PlaybackPage final : public juce::Component
         {
         public:
@@ -5049,6 +5600,9 @@ namespace wfg::client::ui
                     { "Plugins",      "Scanning this machine for plugins, and the set a cue's FX can switch in." },
                     { "Rack",         "Rack channels: chains of plugins that mic cues play through, and the"
                                       " ones that sample." },
+                    { "Video",        "Canvases - the pictures video cues are laid onto - and the outputs that"
+                                      " show them on this machine's displays. Nothing to do for a show with"
+                                      " no picture." },
                     { "Playback",     "How GO, Doh! and Esc behave: the least time between two GOs, how"
                                       " long after a GO it can be taken back, and how long the panic fade"
                                       " takes." },
@@ -5195,6 +5749,7 @@ namespace wfg::client::ui
             surfaces = std::make_unique<SurfacesPage> (theme, send);
             plugins = std::make_unique<PluginsPage> (theme, send);
             rackPage = std::make_unique<RackPage> (theme, send);
+            video = std::make_unique<VideoPage> (theme, send);
             playback = std::make_unique<PlaybackPage> (theme, send);
 
             /*  A tab named in the list is found by its name, so the list and
@@ -5276,6 +5831,9 @@ namespace wfg::client::ui
             /*  AFTER PLUGINS: a channel's chain is made of what the machine's
                 scan found, and the scan is on the tab before (Phase 9b). */
             tabs.addTab ("Rack", background, rackPage.get(), false);
+            /*  AFTER THE RACK, the pictures' side of the show (Phase 8a,
+                decision VB): one tab for the canvases and the outputs. */
+            tabs.addTab ("Video", background, video.get(), false);
 
             /*  AFTER THE RACK: the two numbers that say how GO and Esc behave,
                 set once a show is otherwise ready to run (2026-09-28). */
@@ -5404,6 +5962,15 @@ namespace wfg::client::ui
                             model::readKnownPlugins (snapshot), model::text (snapshot, "/godot/document/path"),
                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
                             model::readSetChanged (snapshot), model::busyWords (snapshot));
+
+            /*  THE CANVASES AND OUTPUTS, the document's, and the displays and
+                the renderer's state, the engine's - re-read every pass, since
+                every cell lands at once and a projector plugged in has to reach
+                the menu without the show being edited (Phase 8a). */
+            video->show (model::readCanvases (snapshot), model::readVideoOutputs (snapshot),
+                         model::readDisplays (snapshot), model::text (snapshot, "/godot/videoOutput/renderer"),
+                         model::text (snapshot, "/godot/videoOutput/rendererProblem"),
+                         ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 
             /*  GO AND ESC: the document's, re-read every pass like the outputs,
                 since each lands at once as a `node.set`. */
@@ -5603,6 +6170,7 @@ namespace wfg::client::ui
         std::unique_ptr<PatchPage> inputs, outputs;
         std::unique_ptr<OutputPage> outputList;
         std::unique_ptr<InputPage> inputList;
+        std::unique_ptr<VideoPage> video;
         std::unique_ptr<NetworkPage> network;
         std::unique_ptr<MidiPage> midi;
         std::unique_ptr<SurfacesPage> surfaces;

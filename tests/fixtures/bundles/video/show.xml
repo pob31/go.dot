@@ -1,0 +1,22 @@
+<Show>
+  <Lists>
+    <List id="VD000001" name="Pictures">
+      <Video id="VD000002" canvas="VD000011" fadeIn="1" name="Blue wash" number="1" paint="#2040A0"/>
+      <Cue id="VD000003" name="Clear" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="VD000004" name="Main L/R" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+  <Canvases>
+    <Canvas id="VD000011" name="Stage"/>
+  </Canvases>
+  <VideoOutputs>
+    <VideoOutput id="VD000021" canvas="VD000011" name="Face"/>
+  </VideoOutputs>
+</Show>

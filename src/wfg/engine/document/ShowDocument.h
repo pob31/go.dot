@@ -441,6 +441,16 @@ namespace wfg::doc
         /** A DCA (PRD §3.28), at the end of the show's DCAs. */
         EditResult createDca (const std::string& name, const std::string& id = {});
 
+        /** PHASE 8a: a canvas - the flat picture video cues are laid onto - at
+            the end of the show's canvases, 1920 by 1080 until somebody says. */
+        EditResult createCanvas (const std::string& name, const std::string& id = {});
+
+        /** And an output showing one, at the end of the show's video outputs.
+            `canvasId` may be empty (it shows black); one that is not a canvas
+            is refused. Its display is chosen afterwards, by `node.set`. */
+        EditResult createVideoOutput (const std::string& name, const std::string& canvasId,
+                                      const std::string& id = {});
+
         /*  PHASE 9a: an entry in the show's plugin set - name, the scan's
             identifier, format and path, all four explicit so a replay on a
             machine that has never scanned needs no known list. <Plugins> is
@@ -918,6 +928,10 @@ namespace wfg::doc
             depend on whether the inputs or the plugin set were asked for first
             (`createPlugin` places its own after the last bus and after this). */
         juce::ValueTree inputsContainer (bool make);
+
+        /*  `<Canvases>` or `<VideoOutputs>`, made when `make` asks and there is
+            none: the canvases after the DCAs, the outputs after the canvases. */
+        juce::ValueTree videoContainer (std::string_view element, bool make);
 
         /*  WHICH LIST A LAYOUT EDIT IS ABOUT. The arithmetic is one; what the
             two sides differ in is the element, where it lives, the patch kept

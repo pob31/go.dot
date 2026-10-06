@@ -269,6 +269,7 @@ namespace wfg::doc::Template
                 { "Audio", "audio: outputs, buses and rack" }, { "Mounts", "devices on the network" },
                 { "MidiPorts", "MIDI ports" }, { "Network", "network" }, { "Surfaces", "control surfaces" },
                 { "Dcas", "DCAs" }, { "Lists", "list settings" }, { "Show", "show settings" },
+                { "Canvases", "video canvases" }, { "VideoOutputs", "video outputs and their mapping" },
             };
 
             const auto known = words.find (container);

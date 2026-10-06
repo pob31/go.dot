@@ -20530,13 +20530,15 @@ The implementer's, open to overruling:
 | `enabled` | `T` | rw | show | off, the output is not opened: a rehearsal room without the projector |
 | `bound` | `T` | r | none | a display is behind it tonight |
 | `problem` | `s` | r | none | why not, in a sentence |
-| `testPattern` | `T` | rw | none | a grid and the output's name, over whatever is up |
+| `testPattern` | `T` | r | none | a white frame and a cross over whatever is up; `videoOutput.identify` switches it (§35.9) |
 | `framesPresented`, `framesLate` | `h` | r | none | the child's own count, so pacing is measured, not judged by eye |
 | `presentJitter` | `d` ms | r | none | how far presentation strays from its due time |
 | `meshColumns`, `meshRows`, `mesh` | `i`, `i`, `d*` | rw | show | V.5: the bezier mesh in canvas coordinates 0..1 |
 
-`/godot/video/displays` (`s`, r, newline-separated, as `ports/outputs`) lists what this machine has;
-`/godot/video/renderer` (`s`, r) says how the child is: `running`, `starting`, `failed` and why.
+`/godot/videoOutput/displays` (`s`, r, newline-separated, as `ports/outputs`) lists what this machine
+has; `/godot/videoOutput/renderer` (`s`, r) says how the child is - `stopped`, `starting`, `running`,
+`failed` - and `/godot/videoOutput/rendererProblem` why. (Drawn first as `/godot/video/...`; a container's
+rows sit at its singular segment, as `/godot/dca/order` does.)
 
 **`<Video>`**, a cue, owners `cue` and `video`, at `/godot/cue/<id>`:
 
@@ -20631,3 +20633,49 @@ The implementer's, open to overruling:
 Movies, capture, DeckLink, a latency offset and the clock-skew readout (8b); edge blending and
 calibration masks before the mesh is on a wall; 3D LUTs before CDL; linear-light blending; images
 deeper than eight bits; a still with a duration; editing a mesh from the tablet.
+
+### 35.9 What V.1 built, against what §35 drew
+
+*Written 2026-10-06, when V.1 landed.* Where the build departs from the drawing, or says more:
+
+- **The clock pair is the tick thread's**, not the device callback's: each tick the host writes Go.dot's
+  sample - the audio's `samplesElapsed()` with a player, the tick's own without - and the machine's
+  steady time. A pair is up to a block and a wake-up late; the renderer's estimate (`VideoClock.h`) is
+  a slow loop that averages that out and follows a real drift, held within half a percent of the rate
+  it was told and started again on a jump of a quarter second. A device-stamped pair is the refinement
+  if the bench ever shows the picture a frame off the sound.
+- **A video run reports `run.started` when its layer is placed**, a horizon ahead, as a clip's launch
+  does; Esc's fade-out is the job's (`fadeOutVideo`), which owns the run's ending until it is black, so
+  the run's footers run when the picture has gone, not on the press.
+- **Doh! (VK)**: a picture seen is brought down over the panic fade as Esc brings it down; the corrected
+  GO puts it up again **from its fade-in**, not over the 0.1 s de-click VK drew - a still has no
+  playhead to carry on from, and its fade-in is what somebody wrote. A picture caught before it came up
+  is never shown.
+- **The persistent section does not put up a video cue yet**: `wfg validate` says so, and the cue is
+  fired from the list. An always-on matte waits for this.
+- **The window is the output sink**: the canvas is drawn straight into each output's window, in
+  8-bit, with no offscreen canvas yet. The offscreen canvas - half-float, dithered - arrives with the
+  mesh (V.5), which is the first thing that needs one.
+- **Displays**: Windows names a monitor by what it calls itself, through the display-configuration API,
+  and remembers its device path; macOS by `NSScreen.localizedName` and the display's vendor, model and
+  serial; Linux, for now, "Display 2", and its position. A laptop's own panel has no name on Windows
+  and reads "Main display 1". `displayId` is not yet written back when the renderer binds by name.
+- **Identify is a command of its own**, `videoOutput.identify <output> <on>`, and `testPattern` is
+  read-only: the test pattern is tonight's (§4.10), held by the host and never in the show, so it is no
+  edit of the document and is taken under the show lock - finding a projector is not editing the show.
+  The pattern is a white frame and a cross, with no text; the output's name is on the Video tab beside
+  the switch. A replay applies the record and draws nothing.
+- **The inspector calls `paint` "colour on canvas"** - the implementer's words, since the cue's own
+  "colour", its tint in the list, is on the same panel.
+- **`--no-video-window`** runs the renderer with no window, for a machine with no screen and the
+  driver, publishing what the middle of each canvas shows.
+
+**Measured:** nothing on a projector yet. On the author's laptop the renderer found one display, the
+panel, as "Main display 1". `VideoHostTests` runs the whole loop with no window in CI - a fill
+published, read back as its colour, the renderer told to leave and started again, the same picture
+drawn again from the region (VC).
+
+**Waiting for the author and the bench:** a fill on a projector and its fade; Esc and a double Esc
+on it; the renderer killed in the Task Manager mid-fill; frames, lateness and jitter
+(`WFG_VIDEO_BENCH=1 WFG_VIDEO_BENCH_DISPLAY=<name> wfg_tests --test-case="video bench*"`); the Video
+tab's words; "colour on canvas".

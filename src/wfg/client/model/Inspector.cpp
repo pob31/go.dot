@@ -24,6 +24,7 @@
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/Video.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -85,6 +86,11 @@ namespace wfg::client::model
                 { "mic",     { "input", "channel", "fadeIn", "stereoToMono", "directOut",
                                "level", "dca" } },
 
+                /*  A VIDEO CUE (Phase 8a): what it shows, where, how high in
+                    the stack, how solid and in what colour, then how it comes
+                    in. */
+                { "video",   { "source", "canvas", "layer", "opacity", "paint", "fadeIn" } },
+
                 /*  What it moves - a cue, or a DCA instead - then where to and
                     how. Each thing a fade can move is a switch and then where it
                     goes, level then speed (namespace draft §22.7); the curve is
@@ -137,6 +143,9 @@ namespace wfg::client::model
                 { "rateMode", "speed mode" },
                 { "levelOn", "moves level" },
                 { "rateOn", "moves speed" },
+                /*  NOT "colour", which is the cue's tint in the list and is on
+                    the same panel (namespace draft 35, VG). */
+                { "paint", "colour on canvas" },
                 { "doh", "on Doh!" },
                 { "dohRollback", "rollback" },
             };
@@ -668,6 +677,23 @@ namespace wfg::client::model
             a channel's class - since a mono channel cannot take a stereo line
             and the run would fail saying so. Always menus, even before the
             show has any, when "(none)" alone says what is true. */
+        /*  WHICH CANVAS A VIDEO CUE IS LAID ONTO (Phase 8a), as a menu of the
+            show's canvases with their sizes, for the DCA's reason: the row
+            stores the identifier and a person reads the name. Always a menu,
+            "(none)" alone before the show has a canvas. */
+        void offerTheCanvases (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
+        {
+            for (auto& field : decided)
+            {
+                if (field.name != "canvas" || ! field.writable)
+                    continue;
+
+                field.control = Control::canvasRef;
+                field.choices = canvasChoices (readCanvases (snapshot));
+                return;
+            }
+        }
+
         void offerTheInputsAndChannels (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
         {
             for (auto& field : decided)
@@ -1177,6 +1203,10 @@ namespace wfg::client::model
             fitToTheRig (snapshot, cueId, decided);
             offerTheStrips (snapshot, cueId, decided);
         }
+
+        /*  A VIDEO CUE'S CANVAS is a menu of the show's (Phase 8a). */
+        if (out.kind == "video")
+            offerTheCanvases (snapshot, decided);
 
         /*  A MIC CUE'S OUTPUTS are a media cue's, and its source is two menus
             of its own (Phase 9b). */

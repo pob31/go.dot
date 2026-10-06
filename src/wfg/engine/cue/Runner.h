@@ -64,6 +64,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/video/VideoSink.h>
 
 #include <cstdint>
 #include <functional>
@@ -518,6 +519,18 @@ namespace wfg::cue
 
         /** Null is legal and means a show with no audio side. */
         void setPlayer (Player* player) noexcept { audio = player; }
+
+        /*  THE PICTURE SIDE (Phase 8a, namespace draft 35): null is legal and
+            means a show that draws nothing - a replay, a rig - as a null
+            Player is one that plays nothing. */
+        void setVideo (video::Sink* sink) noexcept { videoSink = sink; }
+
+        /*  THE CLOCK A VIDEO POINT IS PLACED ON, now: the audio's samples when
+            there is a player, the tick's otherwise, -1 with no tick schedule -
+            what the renderer is told, so it reads the points on their own
+            clock. And that clock's rate. Tick thread. */
+        std::int64_t videoClockNow() const noexcept;
+        int videoSampleRate() const noexcept;
 
         /*  THE TAKES' ACCOUNT (Phase 9c), which the take verbs move too: a
             transport cue's press, a mic cue's GO and its channel let go move it
@@ -1489,6 +1502,24 @@ namespace wfg::cue
             `rangeIteration`, which is §3.15: a readout is not an event. */
         void updatePositions (std::int64_t tick);
 
+        /*  THE PICTURES (Phase 8a, namespace draft 35.4): every video run's
+            layer brought up a launch horizon ahead, the points of its fade-in
+            placed with it, its fade-out placed when Esc asks for one, and its
+            layer taken off when the run ends. Above the audio gate: a show
+            with no player still shows pictures, on the tick's own clock. */
+        void advanceVideo (Engine& engine, std::int64_t tick);
+
+        /*  A video run taken to black over `ticks` and then ended: Esc's, and
+            Doh!'s for a picture seen (VK). */
+        void fadeOutVideo (const std::string& runId, std::int64_t tick, int ticks);
+
+        /*  Where a video point lands: Go.dot's sample now, plus a launch
+            horizon - the audio clock when there is one, the tick's otherwise
+            - and -1 when there is no clock to place it on at all. */
+        std::int64_t videoSampleAhead() const noexcept;
+        int videoLeadTicks() const noexcept;
+        std::int64_t videoSamplesFor (double seconds) const noexcept;
+
         /*  The inputs' peaks, taken once a tick into `inputMeters`. */
         void takeInputMeters();
         std::vector<double> inputMeters;
@@ -2081,6 +2112,7 @@ namespace wfg::cue
         Focus& focus;
 
         Player* audio = nullptr;
+        video::Sink* videoSink = nullptr;
         TakeTable* takes = nullptr;
         int samplesPerTick = 0;
         std::string mediaFolder;
@@ -2183,6 +2215,27 @@ namespace wfg::cue
         std::int64_t lastGoTick = -1;
 
         std::vector<OscJob> sending;
+
+        /*  ONE PER VIDEO RUN that is up or coming up (Phase 8a): its layer,
+            the points placed for it, and - while Esc takes it down - the tick
+            its fade-out ends, until which the job owns the run's ending, as a
+            fade job owns its own. The sweep in `advanceWaits` reads that. */
+        struct VideoJob
+        {
+            std::string self;
+            video::LayerSpec spec;
+            double opacity = 1.0;           // the cue's own, read at GO
+            double fadeInSeconds = 0.0;
+            bool placed = false;            // brought up on the picture side
+            std::vector<video::Point> points;
+
+            int fadeOutTicks = -1;          // asked by Esc, not yet placed
+            std::int64_t endsAtTick = -1;   // the fade-out's last tick
+            bool removed = false;
+        };
+
+        std::vector<VideoJob> showing;
+        std::uint64_t videoOrder = 0;
 
         tree::MountTable* mounts = nullptr;
         tree::MountSender* sender_ = nullptr;

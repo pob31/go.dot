@@ -503,6 +503,11 @@ by an output sink — a window now, a DeckLink card later.
 | V.6 | Grades: ASC CDL per cue and per output; 3D LUT after | V.2 |
 | V.7 | Video members on sampler strips; a DCA multiplies opacity | V.2 |
 
+*Status, 2026-10-06:* V.0 and V.1 built (namespace draft §35.9): the video cue,
+canvases and outputs in the document, the Runner's video jobs, the renderer as
+`wfg video-render`, the Video tab and Identify. Waiting for the bench: a fill on
+a projector.
+
 **Done when:** a scene of fills, masks and pictures runs from the cue list onto
 two outputs, one mapped onto a wall that is not flat, with Esc, double Esc and
 Doh! doing to the picture what they do to the sound.

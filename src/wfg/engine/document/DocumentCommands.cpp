@@ -737,6 +737,49 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  PHASE 8a'S CANVASES AND OUTPUTS (namespace draft 35): what video
+            cues are laid onto, and the displays that show it. The drawn
+            identifier rides last, as dca.create's does, so a replay makes the
+            same object. */
+        registry.add ({ "canvas.create",
+                        "Declares a canvas: the flat picture video cues are laid onto, 1920 by 1080"
+                        " until its size is set.",
+                        { { "name", 's', true }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto name = args.empty() ? std::string {} : args[0].getString();
+                            const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto edit = document.createCanvas (name, id);
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok ({ osc::Value::string (name),
+                                                  osc::Value::string (edit.id) });
+                        } });
+
+        registry.add ({ "videoOutput.create",
+                        "Declares a video output: a display on this machine showing one canvas"
+                        " through its own mapping. The canvas may be empty, and shows black.",
+                        { { "name", 's', true }, { "canvas", 's', true }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto name = args.empty() ? std::string {} : args[0].getString();
+                            const auto canvas = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+                            const auto edit = document.createVideoOutput (name, canvas, id);
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok ({ osc::Value::string (name),
+                                                  osc::Value::string (canvas),
+                                                  osc::Value::string (edit.id) });
+                        } });
+
+        //----------------------------------------------------------------------
         /*  PHASE 9a'S PLUGIN SET (decision AE): the processors every voice
             carries, declared once as the tracks are. All four words are
             explicit on the record, so a replay on a machine that has never

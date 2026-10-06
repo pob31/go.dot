@@ -3199,6 +3199,11 @@ namespace wfg::client
                     offered = model::micChoices (*latest);
                     lines = model::micMenu (*latest, offered, where);
                 }
+                else if (kind == "video")
+                {
+                    offered = model::videoChoices (*latest);
+                    lines = model::videoMenu (*latest, offered, where);
+                }
                 else
                 {
                     createCue (kind);

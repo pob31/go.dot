@@ -320,6 +320,7 @@ namespace wfg::doc
         if (kind == "group") return "Group";
         if (kind == "media") return "Media";
         if (kind == "mic")   return "Mic";
+        if (kind == "video") return "Video";
         if (kind == "fade")  return "Fade";
         if (kind == "transport") return "Transport";
         if (kind == "osc")   return "Osc";
@@ -366,6 +367,11 @@ namespace wfg::doc
 
         /*  And Phase 9b's: `/godot/input/order` beside `/godot/input/<id>/name`. */
         if (element == "Inputs")   return "input";
+
+        /*  And Phase 8a's: `/godot/canvas/order` beside `/godot/canvas/<id>/name`,
+            `/godot/videoOutput/displays` beside `/godot/videoOutput/<id>/canvas`. */
+        if (element == "Canvases")     return "canvas";
+        if (element == "VideoOutputs") return "videoOutput";
         return {};
     }
 
@@ -375,8 +381,8 @@ namespace wfg::doc
             client that has an identifier does not have to know which it got,
             and a cue that becomes a group keeps its address. */
         if (element == "Cue" || element == "Group" || element == "Media"
-              || element == "Mic" || element == "Fade" || element == "Transport"
-              || element == "Osc" || element == "Midi"
+              || element == "Mic" || element == "Video" || element == "Fade"
+              || element == "Transport" || element == "Osc" || element == "Midi"
               || element == "Start")                                return "cue";
         if (element == "Lists")                     return "lists";
         /*  A header and a footer are addressed by nothing: they carry no
@@ -438,6 +444,12 @@ namespace wfg::doc
         /*  PHASE 9b. The named inputs and their container, under Audio. */
         if (element == "Inputs")                    return "inputs";
         if (element == "Input")                     return "input";
+
+        /*  PHASE 8a. The canvases, the video outputs and their containers. */
+        if (element == "Canvases")                  return "canvases";
+        if (element == "Canvas")                    return "canvas";
+        if (element == "VideoOutputs")              return "videoOutputs";
+        if (element == "VideoOutput")               return "videoOutput";
 
         return {};
     }
@@ -724,6 +736,8 @@ namespace wfg::doc
         if (segment == "port")     return showNode.getChildWithName ("MidiPorts");
         if (segment == "surface")  return showNode.getChildWithName ("Surfaces");
         if (segment == "dca")      return showNode.getChildWithName ("Dcas");
+        if (segment == "canvas")   return showNode.getChildWithName ("Canvases");
+        if (segment == "videoOutput") return showNode.getChildWithName ("VideoOutputs");
         return {};
     }
 
@@ -2616,6 +2630,85 @@ namespace wfg::doc
                              attributes);
     }
 
+    juce::ValueTree ShowDocument::videoContainer (std::string_view element, bool make)
+    {
+        auto container = showNode.getChildWithName (juce::Identifier (juce::String (std::string (element))));
+
+        if (! container.isValid() && make)
+        {
+            /*  AT A FIXED PLACE - the canvases after the DCAs, the outputs
+                after the canvases - whichever was asked for first, so the
+                canonical bytes of a show do not depend on the order two creates
+                happened in, and a show that has no picture gains no line.
+                Outside the history, as the named inputs' container is: it
+                carries nothing, and the object that made it is the step Undo
+                takes back. */
+            int at = 0;
+
+            for (int i = 0; i < showNode.getNumChildren(); ++i)
+            {
+                const auto type = showNode.getChild (i).getType().toString();
+
+                if (type == "Dcas" || (element == "VideoOutputs" && type == "Canvases"))
+                    at = i + 1;
+            }
+
+            container = juce::ValueTree (juce::Identifier (juce::String (std::string (element))));
+            showNode.addChild (container, at, nullptr);
+        }
+
+        return container;
+    }
+
+    EditResult ShowDocument::createCanvas (const std::string& name, const std::string& id)
+    {
+        /*  ASKED HERE AS WELL AS AT THE DOOR, for createPlugin's reason: the
+            container is made on demand before the door is reached, and a
+            locked show must not gain an empty one from a refusal. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        return insertObject (videoContainer ("Canvases", true), endOfSequence, "Canvas", id,
+                             attributes);
+    }
+
+    EditResult ShowDocument::createVideoOutput (const std::string& name, const std::string& canvasId,
+                                                const std::string& id)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        /*  A CANVAS NAMED IS A CANVAS THAT EXISTS: an output made pointing at
+            nothing would be the `refers` warning a moment after it was made.
+            Empty is allowed, and shows black. */
+        if (! canvasId.empty())
+        {
+            const auto canvas = findById (canvasId);
+
+            if (! canvas.isValid())
+                return EditResult::failed (reason::unknownId);
+
+            if (! canvas.hasType ("Canvas"))
+                return EditResult::failed (reason::typeMismatch);
+        }
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        if (! canvasId.empty())
+            attributes.push_back ({ "canvas", canvasId });
+
+        return insertObject (videoContainer ("VideoOutputs", true), endOfSequence, "VideoOutput", id,
+                             attributes);
+    }
+
     EditResult ShowDocument::createPlugin (const std::string& name, const std::string& identifier,
                                           const std::string& format, const std::string& path,
                                           const std::string& id)
@@ -3770,6 +3863,19 @@ namespace wfg::doc
                     {
                         const auto element = child.getType().toString().toStdString();
 
+                        /*  A VIDEO CUE WILL BE ASSERTED (namespace draft 35.5:
+                            an always-on matte is a mask cue here) and is not
+                            yet: said, so nobody waits for a picture that the
+                            section does not put up. */
+                        if (element == "Video")
+                        {
+                            problems.push_back ("/Show/.../Persistent/Video["
+                                                  + child[idProperty].toString().toStdString()
+                                                  + "]: a persistent section does not put up a video cue yet,"
+                                                    " so this one is ignored - fire it from the list instead");
+                            continue;
+                        }
+
                         if (element != "Fade" && element != "Transport" && element != "Group"
                              && element != "Start")
                             continue;
@@ -4034,6 +4140,28 @@ namespace wfg::doc
         };
 
         Mics { problems, *this }.visit (showNode);
+
+        /*  A VIDEO CUE ON NO CANVAS (Phase 8a, namespace draft 35): it runs and
+            shows nothing, which is what an empty canvas row means and not what
+            anybody wrote it for. A canvas that is not in the show, or is not a
+            canvas, is the `refers` check's above. A warning, as every one here
+            is: the repair is picking a canvas from a menu. */
+        struct Videos
+        {
+            std::vector<std::string>& problems;
+
+            void visit (const juce::ValueTree& node) const
+            {
+                if (node.hasType ("Video") && node["canvas"].toString().isEmpty())
+                    problems.push_back ("/Show/.../Video[" + node[idProperty].toString().toStdString()
+                                          + "]: is laid onto no canvas - pick one, or it shows nothing");
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        Videos { problems }.visit (showNode);
 
         /*  A FADE ON A SPEED THAT HAS NO SPEED TO MOVE (namespace draft §22.6,
             EC), and a fade that moves nothing at all.

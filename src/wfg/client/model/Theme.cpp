@@ -200,6 +200,7 @@ namespace wfg::client::model
                 { "kind-memo",      0xFFA9A49C },
                 { "kind-media",     0xFF6CB4EE },
                 { "kind-mic",       0xFFD98FC0 },
+                { "kind-video",     0xFF8CCB7E },   // Phase 8a: a picture's green, no other kind's
                 { "kind-fade",      0xFF5FB8C9 },
                 { "kind-transport", 0xFFE08A6E },
                 { "kind-osc",       0xFFD8C26A },

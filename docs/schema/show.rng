@@ -58,6 +58,12 @@
       <optional>
         <ref name="Dcas"/>
       </optional>
+      <optional>
+        <ref name="Canvases"/>
+      </optional>
+      <optional>
+        <ref name="VideoOutputs"/>
+      </optional>
     </element>
   </define>
 
@@ -104,6 +110,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Mic"/>
+          <ref name="Video"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -326,6 +333,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Mic"/>
+          <ref name="Video"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -350,6 +358,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Mic"/>
+          <ref name="Video"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -371,6 +380,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Mic"/>
+          <ref name="Video"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -392,6 +402,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Mic"/>
+          <ref name="Video"/>
           <ref name="Fade"/>
           <ref name="Transport"/>
           <ref name="Osc"/>
@@ -1207,6 +1218,126 @@
           <ref name="Fx"/>
           <ref name="Trigger"/>
         </choice>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Video">
+    <element name="Video">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="canvas">
+          <a:documentation>The canvas it is laid onto, by identifier. Empty puts it nowhere: the cue runs and shows nothing, and wfg validate says so before the show.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fadeIn">
+          <a:documentation>How long GO takes to bring it from nothing to its opacity. Nought puts it up on the frame it is due.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="layer">
+          <a:documentation>Where it lies in the canvas&apos;s stack: higher is on top, and of two on the same layer the one brought up later (VI). An integer per cue and never the list&apos;s order, which changes all through a technical rehearsal and would silently restack the picture (PRD 3.19b).</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">999</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="opacity">
+          <a:documentation>How solid it is, as decided: one covers what is under it, nought is not there. Not what it is doing - a fade writes run/&lt;id&gt;/opacity and leaves this alone, as a cue&apos;s level is left alone (VH).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">1</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="paint">
+          <a:documentation>The colour of a fill or a mask, as #RRGGBB, which the inspector calls Colour (VG): cue/colour is the cue&apos;s tint in the list, and every row of a cue shares its address. Black by default - a mask&apos;s usual colour, and a fill of black is the plate that covers what is under it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="source">
+          <a:documentation>What the cue puts on its canvas (namespace draft 35, the author&apos;s words): a fill, one flat colour over the whole canvas, sitting behind; a mask, a shape laid over what is under it; a picture, an image file. Later a movie and a capture. One element for every source (VE), because the canvas, the layer, the opacity and the blend are the same whatever it shows.</a:documentation>
+          <choice>
+            <value>fill</value>
+            <value>mask</value>
+            <value>picture</value>
+          </choice>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <ref name="Trigger"/>
       </zeroOrMore>
     </element>
   </define>
@@ -2855,6 +2986,89 @@
     </element>
   </define>
 
+  <define name="Canvases">
+    <element name="Canvases">
+      <zeroOrMore>
+        <ref name="Canvas"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Canvas">
+    <element name="Canvas">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="height">
+          <a:documentation>How high the canvas is, in pixels.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">16</param>
+            <param name="maxInclusive">16384</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the canvas is called - Stage, Cyclo - in every menu that offers one. A canvas is the flat picture video cues are laid onto (namespace draft 35, the author&apos;s word; a surface in QLab&apos;s).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="width">
+          <a:documentation>How wide the canvas is, in pixels. The pictures are laid out on it and each output&apos;s mapping picks the part it shows.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">16</param>
+            <param name="maxInclusive">16384</param>
+          </data>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="VideoOutputs">
+    <element name="VideoOutputs">
+      <zeroOrMore>
+        <ref name="VideoOutput"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="VideoOutput">
+    <element name="VideoOutput">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="canvas">
+          <a:documentation>The canvas it shows, by identifier. Several outputs may show one canvas, each through its own mapping (VA). Empty shows black.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="display">
+          <a:documentation>The display on this machine it opens on, by the name the system gives it (VL). What somebody decided and what reads sensibly at the next venue, which is why it is in the show: displayId is what this machine called it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the output is opened. Off, the cues still run and this output shows nothing, so a rehearsal in a room without the projector plays the show instead of failing it.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the show calls this output - Face, Wings monitor. An output is a display on this machine showing one canvas through its own mapping (namespace draft 35, the author&apos;s word).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
   <define name="State">
     <element name="State">
       <attribute name="formatVersion">
@@ -2868,6 +3082,7 @@
           <ref name="State.Group"/>
           <ref name="State.Port"/>
           <ref name="State.Audio"/>
+          <ref name="State.VideoOutput"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -3003,6 +3218,20 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.VideoOutput">
+    <element name="VideoOutput">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="displayId">
+          <a:documentation>The identifier that display had when this machine last found it, tried BEFORE the name - the MIDI port&apos;s twin rows exactly (port/outputDeviceId).</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
     </element>

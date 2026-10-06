@@ -56,7 +56,7 @@ namespace wfg::client::model
         none,
 
         //  What a cue is.
-        memo, media, mic, fade, start, osc, midi, group, range, trigger,
+        memo, media, mic, video, fade, start, osc, midi, group, range, trigger,
 
         //  What a transport cue does, by its verb.
         stop, stopFade, stopAfter, advance, record, loop, overdub, clear, enable, jump,

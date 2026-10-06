@@ -77,8 +77,9 @@ namespace wfg::cue
     inline bool isCueElement (const juce::String& element) noexcept
     {
         return element == "Cue"  || element == "Group" || element == "Media"
-            || element == "Mic"  || element == "Fade" || element == "Transport"
-            || element == "Osc"  || element == "Midi" || element == "Start";
+            || element == "Mic"  || element == "Video" || element == "Fade"
+            || element == "Transport" || element == "Osc" || element == "Midi"
+            || element == "Start";
     }
 
     //======================================================================

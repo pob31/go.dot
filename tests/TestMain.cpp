@@ -37,6 +37,7 @@
 #include <wfg/engine/plugin/PluginEditorChild.h>
 #include <wfg/engine/plugin/PluginHostChild.h>
 #include <wfg/engine/plugin/PluginScan.h>
+#include <wfg/engine/video/VideoRenderChild.h>
 
 #include <juce_events/juce_events.h>
 
@@ -76,6 +77,11 @@ int main (int argc, char** argv)
 
     //  And a plugin's editing helper, which the editor tests launch the same way.
     if (int childExit = 0; wfg::plugin::runPluginEditorIfAsked (argc, argv, childExit))
+        return childExit;
+
+    /*  And the video renderer (Phase 8a), started by VideoHostTests as the
+        engine starts it. */
+    if (int childExit = 0; wfg::video::runVideoRenderIfAsked (argc, argv, childExit))
         return childExit;
 
     /*  JUCE IS INITIALISED ONCE, FOR THE WHOLE PROCESS, and this is a fix
