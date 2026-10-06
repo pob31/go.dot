@@ -347,6 +347,7 @@ add_library(wfg_engine STATIC
     wfg/engine/video/Geometry.h
     wfg/engine/video/Grade.h
     wfg/engine/video/Hap.h
+    wfg/engine/video/Mapping.h
     wfg/engine/video/Mask.h
     wfg/engine/video/Movie.cpp
     wfg/engine/video/Movie.h

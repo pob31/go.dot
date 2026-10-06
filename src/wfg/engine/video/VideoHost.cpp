@@ -54,9 +54,21 @@ namespace wfg::video
             return std::equal (a.begin(), a.end(), b.begin(), b.end(),
                                [] (const region::OutputReading& x, const region::OutputReading& y)
                                {
+                                   const auto sameCdl = [] (const Cdl& a, const Cdl& b)
+                                   {
+                                       for (int n = 0; n < 3; ++n)
+                                           if (std::abs (a.slope[n] - b.slope[n]) > 1e-12 || std::abs (a.offset[n] - b.offset[n]) > 1e-12
+                                                 || std::abs (a.power[n] - b.power[n]) > 1e-12)
+                                               return false;
+
+                                       return std::abs (a.saturation - b.saturation) < 1e-12;
+                                   };
+
                                    return x.id == y.id && x.canvas == y.canvas && x.name == y.name
                                        && x.display == y.display && x.displayId == y.displayId
-                                       && x.enabled == y.enabled && x.testPattern == y.testPattern;
+                                       && x.enabled == y.enabled && x.testPattern == y.testPattern
+                                       && x.mesh.columns == y.mesh.columns && x.mesh.rows == y.mesh.rows
+                                       && x.mesh.x == y.mesh.x && x.mesh.y == y.mesh.y && sameCdl (x.cdl, y.cdl);
                                });
         }
     }
@@ -456,6 +468,35 @@ namespace wfg::video
             entry.displayId = text (base + "displayId");
             entry.enabled = text (base + "enabled") != "false";
             entry.testPattern = impl->identified.count (id) > 0;
+
+            /*  ITS MAPPING: the mesh as the show says it - a grid the wrong
+                size for its columns and rows is the identity - and the CDL. */
+            const auto numbers = [&text] (const std::string& address)
+            {
+                std::vector<double> out;
+
+                for (const auto& word : juce::StringArray::fromTokens (juce::String (text (address)), " ", ""))
+                    if (const auto value = osc::parseDouble (word.toStdString()); value.has_value())
+                        out.push_back (*value);
+
+                return out;
+            };
+
+            entry.mesh.columns = std::clamp (whole (base + "meshColumns", 2), 2, Mesh::maxPoints);
+            entry.mesh.rows = std::clamp (whole (base + "meshRows", 2), 2, Mesh::maxPoints);
+
+            const auto points = numbers (base + "mesh");
+
+            if (points.size() == static_cast<std::size_t> (2 * entry.mesh.columns * entry.mesh.rows))
+                for (std::size_t n = 0; n + 1 < points.size(); n += 2)
+                {
+                    entry.mesh.x.push_back (static_cast<float> (points[n]));
+                    entry.mesh.y.push_back (static_cast<float> (points[n + 1]));
+                }
+            else
+                entry.mesh = Mesh::identity (entry.mesh.columns, entry.mesh.rows);
+
+            entry.cdl = Cdl::from (numbers (base + "cdl"));
 
             anyEnabled = anyEnabled || entry.enabled;
             outputs.push_back (std::move (entry));

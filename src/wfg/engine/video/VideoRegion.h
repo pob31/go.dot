@@ -47,6 +47,7 @@
     number to parse (VM).
 */
 
+#include <wfg/engine/video/Mapping.h>
 #include <wfg/engine/video/VideoSink.h>
 
 #include <algorithm>
@@ -65,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 6;
+    constexpr std::uint32_t version = 7;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -148,6 +149,14 @@ namespace wfg::video::region
         char displayId[nameChars];
         std::atomic<std::uint32_t> enabled;
         std::atomic<std::uint32_t> testPattern;
+
+        /*  ITS MAPPING (Mapping.h): the mesh's size and points, and the
+            calibration's ten numbers. */
+        std::atomic<std::int32_t> meshColumns;
+        std::atomic<std::int32_t> meshRows;
+        float meshX[Mesh::maxPoints * Mesh::maxPoints];
+        float meshY[Mesh::maxPoints * Mesh::maxPoints];
+        double cdl[10];
     };
 
     /*  THE SHOW'S CANVASES AND OUTPUTS, rewritten whole when the show changes,
@@ -574,6 +583,8 @@ namespace wfg::video::region
         std::string displayId;
         bool enabled = true;
         bool testPattern = false;
+        Mesh mesh;
+        Cdl cdl;
     };
 
     struct ConfigReading
@@ -636,10 +647,18 @@ namespace wfg::video::region
             for (std::uint32_t n = 0; n < outputs; ++n)
             {
                 const auto& o = r.config.outputs[n];
-                out.outputs.push_back ({ readText (o.id), readText (o.canvas), readText (o.name),
-                                         readText (o.display), readText (o.displayId),
-                                         o.enabled.load (std::memory_order_relaxed) != 0,
-                                         o.testPattern.load (std::memory_order_relaxed) != 0 });
+                OutputReading entry { readText (o.id), readText (o.canvas), readText (o.name),
+                                      readText (o.display), readText (o.displayId),
+                                      o.enabled.load (std::memory_order_relaxed) != 0,
+                                      o.testPattern.load (std::memory_order_relaxed) != 0, {}, {} };
+
+                entry.mesh.columns = std::clamp (static_cast<int> (o.meshColumns.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
+                entry.mesh.rows = std::clamp (static_cast<int> (o.meshRows.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
+                const auto points = static_cast<std::size_t> (entry.mesh.columns * entry.mesh.rows);
+                entry.mesh.x.assign (o.meshX, o.meshX + points);
+                entry.mesh.y.assign (o.meshY, o.meshY + points);
+                entry.cdl = Cdl::from (std::vector<double> (o.cdl, o.cdl + 10));
+                out.outputs.push_back (std::move (entry));
             }
         });
     }
@@ -674,6 +693,24 @@ namespace wfg::video::region
             writeText (o.displayId, outputs[n].displayId);
             o.enabled.store (outputs[n].enabled ? 1u : 0u, std::memory_order_relaxed);
             o.testPattern.store (outputs[n].testPattern ? 1u : 0u, std::memory_order_relaxed);
+
+            /*  THE MESH, the identity when the show's is not a full grid. */
+            const auto mesh = outputs[n].mesh.isValid() ? outputs[n].mesh : Mesh::identity();
+            o.meshColumns.store (mesh.columns, std::memory_order_relaxed);
+            o.meshRows.store (mesh.rows, std::memory_order_relaxed);
+            std::copy (mesh.x.begin(), mesh.x.end(), o.meshX);
+            std::copy (mesh.y.begin(), mesh.y.end(), o.meshY);
+
+            const auto& cdl = outputs[n].cdl;
+
+            for (int c = 0; c < 3; ++c)
+            {
+                o.cdl[c] = cdl.slope[c];
+                o.cdl[3 + c] = cdl.offset[c];
+                o.cdl[6 + c] = cdl.power[c];
+            }
+
+            o.cdl[9] = cdl.saturation;
         }
 
         r.config.outputCount.store (static_cast<std::uint32_t> (outputCount), std::memory_order_relaxed);

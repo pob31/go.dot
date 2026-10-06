@@ -3262,6 +3262,16 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="cdl">
+          <a:documentation>The output&apos;s calibration, ASC CDL (VP): slope red green blue, offset red green blue, power red green blue, saturation - ten numbers, in the order a .cdl file lists them. Empty changes nothing. What matches a second projector, or a grey wall, to the first.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="display">
           <a:documentation>The display on this machine it opens on, by the name the system gives it (VL). What somebody decided and what reads sensibly at the next venue, which is why it is in the show: displayId is what this machine called it.</a:documentation>
           <data type="string"/>
@@ -3274,6 +3284,34 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="mesh">
+          <a:documentation>Where each control point of the canvas lands on the display, as (x, y) pairs in 0..1 of the display - x right, y down - row by row from the top-left, meshColumns by meshRows of them. A smooth surface runs through them. Empty, or the wrong count, is the canvas filling the display.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="meshColumns">
+          <a:documentation>How many control points the output&apos;s mesh has across (namespace draft 35, PRD 3.19a): two by two is a corner-pin keystone, more bend the canvas round what is not flat.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">2</param>
+            <param name="maxInclusive">16</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="meshRows">
+          <a:documentation>How many it has down.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">2</param>
+            <param name="maxInclusive">16</param>
+          </data>
         </attribute>
       </optional>
       <optional>

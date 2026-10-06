@@ -20839,6 +20839,31 @@ out once in `Grade.h` and repeated line for line in the shaders:
 - **The outline is typed** as pairs in the inspector; drawing it on a picture of the canvas, and
   bezier corners, are owed - with the mesh panel, which wants the same canvas view.
 
+### 36.8 What V.6 built: an output's mapping
+
+*Written 2026-10-07, early.* PRD §3.19a's mesh and §3.19b's per-display grade, on each output (VA,
+VP):
+
+- **Rows**: `meshColumns` and `meshRows` (2..16, two by two by default), `mesh` - where each control
+  point of the canvas lands on the display, (x, y) in 0..1 of the display, x right and y down, row by
+  row from the top-left - and `cdl`, ASC CDL's ten numbers in a .cdl file's order. A mesh the wrong
+  size for its grid, or none, is the canvas filling the display.
+- **The surface** through the points is bicubic Catmull-Rom, a phantom row and column beyond each
+  edge extrapolated straight, so a grid nobody moved is exactly the identity (Mapping.h, tested at
+  three sizes), two by two is a corner-pin keystone, and a raised middle point bows the picture
+  smoothly round it. PRD §3.19a said "Bezier mesh": this one has no handles - more points are how it
+  bends further - which is a departure for the author to accept or overrule.
+- **Only a mapped output changes how it is drawn**: an output whose mesh and CDL are both untouched
+  draws straight onto the display as before. A mapped one draws its canvas into a half-float
+  offscreen canvas at the canvas's size, then onto the display through a 64-by-64 grid the mesh
+  bends, its CDL applied and a dither on the way down to eight bits - so it is also where the slow
+  fade to black stops banding. A driver that will not give the offscreen canvas draws the output
+  unmapped rather than not at all. This is §35.4's output sink, built as drawn: a DeckLink card is
+  the same offscreen canvas read back.
+- **No editor yet**: the mesh and the CDL are rows a client writes - the console, OSC, a script. The
+  mesh panel with typed control points and dragging on a view of the canvas is the next thing the
+  author will want to look at, and it is not built.
+
 ## 37. Movies: Phase 8b's first part
 
 Written 2026-10-06, late, before any of it is built. The author, going to bed: *"If you're finished

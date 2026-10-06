@@ -39,6 +39,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/Compositor.h>
 #include <wfg/engine/video/Geometry.h>
+#include <wfg/engine/video/Mapping.h>
 #include <wfg/engine/video/RegionSink.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoHost.h>
@@ -1026,4 +1027,130 @@ TEST_CASE ("video compositor: a black mask laid over a white fill blacks out its
     CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 0.0, -200.0, nullptr) == 0x000000u);
     CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 400.0, -200.0, nullptr) == 0xFFFFFFu);
     CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 0.0, 400.0, nullptr) == 0xFFFFFFu);
+}
+
+//==============================================================================
+TEST_CASE ("video mapping: the mesh nobody moved fills the display, a corner pinned moves, the surface runs through its points")
+{
+    /*  THE IDENTITY, at every size. */
+    for (const auto& size : { std::pair { 2, 2 }, std::pair { 3, 3 }, std::pair { 5, 4 } })
+    {
+        const auto mesh = video::Mesh::identity (size.first, size.second);
+        CHECK (mesh.isIdentity());
+
+        for (const auto& [s, t] : { std::pair { 0.0, 0.0 }, std::pair { 0.37, 0.81 }, std::pair { 1.0, 0.5 } })
+        {
+            double x = 0.0, y = 0.0;
+            video::meshAt (mesh, s, t, x, y);
+            CHECK (x == doctest::Approx (s));
+            CHECK (y == doctest::Approx (t));
+        }
+    }
+
+    /*  A KEYSTONE: the top-right corner pulled in. The corner lands where it
+        was put; the opposite one does not move. */
+    auto keystone = video::Mesh::identity();
+    keystone.x[1] = 0.8f;
+    keystone.y[1] = 0.1f;
+    CHECK_FALSE (keystone.isIdentity());
+
+    double x = 0.0, y = 0.0;
+    video::meshAt (keystone, 1.0, 0.0, x, y);
+    CHECK (x == doctest::Approx (0.8));
+    CHECK (y == doctest::Approx (0.1));
+
+    video::meshAt (keystone, 0.0, 1.0, x, y);
+    CHECK (x == doctest::Approx (0.0));
+    CHECK (y == doctest::Approx (1.0));
+
+    /*  A 3 x 3 GRID with its middle point raised: the surface passes through
+        it, and moves smoothly on either side. */
+    auto bowed = video::Mesh::identity (3, 3);
+    bowed.y[4] = 0.4f;
+
+    video::meshAt (bowed, 0.5, 0.5, x, y);
+    CHECK (x == doctest::Approx (0.5));
+    CHECK (y == doctest::Approx (0.4));
+
+    double yLeft = 0.0, yRight = 0.0;
+    video::meshAt (bowed, 0.45, 0.5, x, yLeft);
+    video::meshAt (bowed, 0.55, 0.5, x, yRight);
+    CHECK (yLeft == doctest::Approx (yRight));
+    CHECK (yLeft > 0.4);
+    CHECK (yLeft < 0.5);
+
+    /*  A GRID THE WRONG SIZE is the identity. */
+    video::Mesh broken;
+    broken.columns = 3;
+    broken.rows = 3;
+    broken.x = { 0.0f };
+    broken.y = { 0.0f };
+    video::meshAt (broken, 0.3, 0.6, x, y);
+    CHECK (x == doctest::Approx (0.3));
+    CHECK (y == doctest::Approx (0.6));
+}
+
+TEST_CASE ("video mapping: an output's ASC CDL, and the identity when it is not set")
+{
+    const auto none = video::Cdl::from ({});
+    CHECK (none.isIdentity());
+
+    /*  SLOPE HALF ON RED, OFFSET A TENTH ON GREEN, POWER TWO ON BLUE. */
+    const auto cdl = video::Cdl::from ({ 0.5, 1.0, 1.0, 0.0, 0.1, 0.0, 1.0, 1.0, 2.0, 1.0 });
+    CHECK_FALSE (cdl.isIdentity());
+
+    double r = 0.8, g = 0.5, b = 0.5;
+    video::applyCdl (cdl, r, g, b);
+    CHECK (r == doctest::Approx (0.4));
+    CHECK (g == doctest::Approx (0.6));
+    CHECK (b == doctest::Approx (0.25));
+
+    /*  SATURATION NOUGHT is grey at luma. */
+    const auto grey = video::Cdl::from ({ 1, 1, 1, 0, 0, 0, 1, 1, 1, 0 });
+    r = 1.0; g = 0.0; b = 0.0;
+    video::applyCdl (grey, r, g, b);
+    CHECK (r == doctest::Approx (0.2126));
+    CHECK (g == doctest::Approx (0.2126));
+}
+
+TEST_CASE ("video host: an output's mesh and CDL reach the region with its configuration")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-mapping-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = "no renderer is started by this test";
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/mesh", "0 0 0.9 0.1 0 1 1 1").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/cdl", "1 1 1 0 0 0 1 1 1 0.5").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/enabled", "false").ok);
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+
+        video::region::ConfigReading config;
+        REQUIRE (video::region::readConfig (*host.regionForTests(), config));
+        REQUIRE (config.outputs.size() == 1);
+
+        const auto& output = config.outputs.front();
+        CHECK (output.mesh.columns == 2);
+        CHECK (output.mesh.rows == 2);
+        REQUIRE (output.mesh.x.size() == 4);
+        CHECK (output.mesh.x[1] == doctest::Approx (0.9f));
+        CHECK (output.mesh.y[1] == doctest::Approx (0.1f));
+        CHECK_FALSE (output.mesh.isIdentity());
+        CHECK (output.cdl.saturation == doctest::Approx (0.5));
+
+        /*  A MESH THE WRONG SIZE for its grid is the identity. */
+        REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/mesh", "0 0 1 1").ok);
+        host.configure (document);
+        REQUIRE (video::region::readConfig (*host.regionForTests(), config));
+        CHECK (config.outputs.front().mesh.isIdentity());
+    }
+
+    folder.deleteRecursively();
 }

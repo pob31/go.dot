@@ -660,7 +660,39 @@ namespace wfg::video
 
                 if (! maskOk)
                     maskProgram.reset();
+
+                /*  THE WARP'S (Mapping.h): the offscreen canvas onto the display
+                    through the mesh, the output's CDL on the way, and a dither
+                    from half-float down to the display's eight bits, so a slow
+                    fade to black does not band. */
+                warpProgram = std::make_unique<juce::OpenGLShaderProgram> (context);
+
+                const auto warpOk = warpProgram->addVertexShader (vertex)
+                                 && warpProgram->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
+                                        "uniform sampler2D canvas;\n"
+                                        "uniform vec3 slope;\n"
+                                        "uniform vec3 offset;\n"
+                                        "uniform vec3 power;\n"
+                                        "uniform float saturation;\n"
+                                        "varying vec2 at;\n"
+                                        "float noise (vec2 p) { return fract (sin (dot (p, vec2 (12.9898, 78.233))) * 43758.5453); }\n"
+                                        "void main() {\n"
+                                        "  vec3 c = texture2D (canvas, at).rgb;\n"
+                                        "  c = pow (clamp (c * slope + offset, 0.0, 1.0), power);\n"
+                                        "  float luma = dot (c, vec3 (0.2126, 0.7152, 0.0722));\n"
+                                        "  c = clamp (luma + saturation * (c - luma), 0.0, 1.0);\n"
+                                        "  c += (noise (gl_FragCoord.xy) - 0.5) / 255.0;\n"
+                                        "  gl_FragColor = vec4 (c, 1.0);\n"
+                                        "}\n"))
+                                 && warpProgram->link();
+
+                if (! warpOk)
+                    warpProgram.reset();
                 else
+                    for (const auto* name : { "canvas", "slope", "offset", "power", "saturation" })
+                        warpUniforms[name] = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*warpProgram, name);
+
+                if (maskProgram != nullptr)
                     for (const auto* name : { "colour", "canvas", "feather", "invert", "count", "corners" })
                         maskUniforms[name] = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*maskProgram, name);
 
@@ -803,15 +835,24 @@ namespace wfg::video
 
                 std::string canvasId;
                 bool testPattern = false;
+                const region::OutputReading* mine = nullptr;
 
                 for (const auto& output : config.outputs)
                     if (output.id == outputId)
                     {
                         canvasId = output.canvas;
                         testPattern = output.testPattern;
+                        mine = &output;
                     }
 
                 const auto* canvas = canvasIn (config, canvasId);
+
+                /*  A MAPPED OUTPUT draws its canvas offscreen first, at the
+                    canvas's own size, and bends it onto the display after; one
+                    nobody mapped draws straight onto the display, as ever. */
+                const auto mapped = mine != nullptr && canvas != nullptr && fillProgram != nullptr && warpProgram != nullptr
+                                      && (! mine->mesh.isIdentity() || ! mine->cdl.isIdentity())
+                                      && bindCanvasTarget (std::max (1, canvas->width), std::max (1, canvas->height));
 
                 for (auto& held : textures)
                     held.second.used = false;
@@ -914,6 +955,9 @@ namespace wfg::video
                     glDisable (GL_BLEND);
                 }
 
+                if (mapped)
+                    warpOnto (width, height, *mine);
+
                 /*  A PICTURE NO LAYER DREW THIS FRAME is let go from this
                     context; the store keeps it while it is wanted. */
                 for (auto at = textures.begin(); at != textures.end();)
@@ -946,6 +990,157 @@ namespace wfg::video
 
                 if (testPattern)
                     drawTestPattern (width, height);
+            }
+
+            /*  THE OFFSCREEN CANVAS: a half-float texture of the canvas's size
+                and its framebuffer, made or made again when the size changes,
+                bound, and cleared to black. False when the driver will not
+                give one - and the output is then drawn unmapped. */
+            bool bindCanvasTarget (int canvasWidth, int canvasHeight)
+            {
+                using namespace juce::gl;
+
+                if (canvasFrame == 0 || targetWidth != canvasWidth || targetHeight != canvasHeight)
+                {
+                    releaseCanvasTarget();
+
+                    glGenTextures (1, &canvasTexture);
+                    glBindTexture (GL_TEXTURE_2D, canvasTexture);
+                    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA16F, canvasWidth, canvasHeight, 0, GL_RGBA, GL_FLOAT, nullptr);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                    glBindTexture (GL_TEXTURE_2D, 0);
+
+                    glGenFramebuffers (1, &canvasFrame);
+                    glBindFramebuffer (GL_FRAMEBUFFER, canvasFrame);
+                    glFramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, canvasTexture, 0);
+
+                    const auto complete = glCheckFramebufferStatus (GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+                    glBindFramebuffer (GL_FRAMEBUFFER, context.getFrameBufferID());
+
+                    if (! complete)
+                    {
+                        releaseCanvasTarget();
+                        return false;
+                    }
+
+                    targetWidth = canvasWidth;
+                    targetHeight = canvasHeight;
+                }
+
+                glBindFramebuffer (GL_FRAMEBUFFER, canvasFrame);
+                glViewport (0, 0, canvasWidth, canvasHeight);
+                glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
+                glClear (GL_COLOR_BUFFER_BIT);
+                return true;
+            }
+
+            void releaseCanvasTarget()
+            {
+                using namespace juce::gl;
+
+                if (canvasFrame != 0)
+                    glDeleteFramebuffers (1, &canvasFrame);
+
+                if (canvasTexture != 0)
+                    glDeleteTextures (1, &canvasTexture);
+
+                canvasFrame = 0;
+                canvasTexture = 0;
+                targetWidth = targetHeight = 0;
+            }
+
+            /*  THE CANVAS ONTO THE DISPLAY THROUGH THE MESH: a grid of 64 by 64
+                quads, each corner where the mesh sends that point of the canvas
+                (Mapping.h), made again when the mesh changes. */
+            void warpOnto (int width, int height, const region::OutputReading& output)
+            {
+                using namespace juce::gl;
+
+                constexpr int steps = 64;
+
+                glBindFramebuffer (GL_FRAMEBUFFER, context.getFrameBufferID());
+                glViewport (0, 0, width, height);
+                glDisable (GL_BLEND);
+                glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
+                glClear (GL_COLOR_BUFFER_BIT);
+
+                if (warpArray == 0)
+                {
+                    glGenVertexArrays (1, &warpArray);
+                    glGenBuffers (1, &warpBuffer);
+                    glGenBuffers (1, &warpIndices);
+                    glBindVertexArray (warpArray);
+                    glBindBuffer (GL_ARRAY_BUFFER, warpBuffer);
+                    glBufferData (GL_ARRAY_BUFFER, sizeof (GLfloat) * 4 * (steps + 1) * (steps + 1), nullptr, GL_DYNAMIC_DRAW);
+
+                    const auto position = juce::OpenGLShaderProgram::Attribute (*warpProgram, "position").attributeID;
+                    const auto texel = juce::OpenGLShaderProgram::Attribute (*warpProgram, "texel").attributeID;
+                    glEnableVertexAttribArray (position);
+                    glVertexAttribPointer (position, 2, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 4, nullptr);
+                    glEnableVertexAttribArray (texel);
+                    glVertexAttribPointer (texel, 2, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 4,
+                                           reinterpret_cast<const void*> (sizeof (GLfloat) * 2));
+
+                    std::vector<GLuint> indices;
+
+                    constexpr GLuint across = static_cast<GLuint> (steps) + 1u;
+
+                    for (GLuint row = 0; row + 1u < across; ++row)
+                        for (GLuint column = 0; column + 1u < across; ++column)
+                        {
+                            const auto at = row * across + column;
+                            indices.insert (indices.end(), { at, at + 1u, at + across, at + 1u, at + across + 1u, at + across });
+                        }
+
+                    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, warpIndices);
+                    glBufferData (GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr> (indices.size() * sizeof (GLuint)),
+                                  indices.data(), GL_STATIC_DRAW);
+                    glBindVertexArray (0);
+                    meshDrawn = Mesh {};
+                }
+
+                if (meshDrawn.columns != output.mesh.columns || meshDrawn.rows != output.mesh.rows
+                      || meshDrawn.x != output.mesh.x || meshDrawn.y != output.mesh.y)
+                {
+                    std::vector<GLfloat> vertices;
+                    vertices.reserve (4 * (steps + 1) * (steps + 1));
+
+                    for (int row = 0; row <= steps; ++row)
+                        for (int column = 0; column <= steps; ++column)
+                        {
+                            const auto s = static_cast<double> (column) / steps;
+                            const auto t = static_cast<double> (row) / steps;
+                            double x = 0.0, y = 0.0;
+                            meshAt (output.mesh, s, t, x, y);
+
+                            vertices.push_back (static_cast<GLfloat> (2.0 * x - 1.0));
+                            vertices.push_back (static_cast<GLfloat> (1.0 - 2.0 * y));
+                            vertices.push_back (static_cast<GLfloat> (s));
+                            vertices.push_back (static_cast<GLfloat> (1.0 - t));
+                        }
+
+                    glBindBuffer (GL_ARRAY_BUFFER, warpBuffer);
+                    glBufferSubData (GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr> (vertices.size() * sizeof (GLfloat)), vertices.data());
+                    meshDrawn = output.mesh;
+                }
+
+                const auto& cdl = output.cdl;
+                warpProgram->use();
+                glActiveTexture (GL_TEXTURE0);
+                glBindTexture (GL_TEXTURE_2D, canvasTexture);
+                warpUniforms["canvas"]->set (0);
+                warpUniforms["slope"]->set (static_cast<GLfloat> (cdl.slope[0]), static_cast<GLfloat> (cdl.slope[1]), static_cast<GLfloat> (cdl.slope[2]));
+                warpUniforms["offset"]->set (static_cast<GLfloat> (cdl.offset[0]), static_cast<GLfloat> (cdl.offset[1]), static_cast<GLfloat> (cdl.offset[2]));
+                warpUniforms["power"]->set (static_cast<GLfloat> (cdl.power[0]), static_cast<GLfloat> (cdl.power[1]), static_cast<GLfloat> (cdl.power[2]));
+                warpUniforms["saturation"]->set (static_cast<GLfloat> (cdl.saturation));
+
+                glBindVertexArray (warpArray);
+                glDrawElements (GL_TRIANGLES, steps * steps * 6, GL_UNSIGNED_INT, nullptr);
+                glBindVertexArray (0);
+                glBindTexture (GL_TEXTURE_2D, 0);
             }
 
             /*  A PROGRAM'S GRADE UNIFORMS, and setting them for one layer: its
@@ -1095,6 +1290,18 @@ namespace wfg::video
                 movieTextures.clear();
                 maskUniforms.clear();
                 maskProgram.reset();
+                releaseCanvasTarget();
+
+                if (warpArray != 0)
+                {
+                    glDeleteBuffers (1, &warpBuffer);
+                    glDeleteBuffers (1, &warpIndices);
+                    glDeleteVertexArrays (1, &warpArray);
+                }
+
+                warpArray = warpBuffer = warpIndices = 0;
+                warpUniforms.clear();
+                warpProgram.reset();
 
                 for (auto& held : gradeTables)
                     if (held.second.id != 0)
@@ -1215,6 +1422,13 @@ namespace wfg::video
 
             std::unique_ptr<juce::OpenGLShaderProgram> maskProgram;
             std::map<std::string, std::unique_ptr<juce::OpenGLShaderProgram::Uniform>> maskUniforms;
+
+            std::unique_ptr<juce::OpenGLShaderProgram> warpProgram;
+            std::map<std::string, std::unique_ptr<juce::OpenGLShaderProgram::Uniform>> warpUniforms;
+            GLuint canvasFrame = 0, canvasTexture = 0;
+            int targetWidth = 0, targetHeight = 0;
+            GLuint warpArray = 0, warpBuffer = 0, warpIndices = 0;
+            Mesh meshDrawn;
 
             struct GradeTable
             {
