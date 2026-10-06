@@ -25,7 +25,6 @@
 
 #include <algorithm>
 #include <optional>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1294,51 +1293,6 @@ namespace wfg::doc
         return result;
     }
 
-    std::vector<Bundle::MediaToCarry> Bundle::mediaTheCopyWouldNotFind (const juce::File& destination,
-                                                                        const juce::File& source,
-                                                                        const std::vector<std::string>& named)
-    {
-        std::vector<MediaToCarry> missing;
-        std::set<juce::String> listed;
-
-        const auto own = source.getChildFile ("media");
-        const auto into = destination.getChildFile ("media");
-        const auto aroundCopy = destination.getParentDirectory().getChildFile ("media");
-
-        //  Where the copy will look for `relative`: its own media/, then around it.
-        const auto consider = [&] (const juce::File& from, const juce::String& relative)
-        {
-            if (into.getChildFile (relative).existsAsFile()
-                  || (aroundCopy != into && aroundCopy.getChildFile (relative).existsAsFile())
-                  || ! listed.insert (relative).second)
-                return;
-
-            missing.push_back ({ from, relative });
-        };
-
-        //  Its own media/, whole.
-        if (own.isDirectory())
-            for (const auto& entry : juce::RangedDirectoryIterator (own, true, "*", juce::File::findFiles))
-            {
-                const auto relative = entry.getFile().getRelativePathFrom (own).replaceCharacter ('\\', '/');
-
-                if (! relative.startsWith (".timbre/") && ! relative.contains (".tmp-"))
-                    consider (entry.getFile(), relative);
-            }
-
-        /*  The sounds its cues play, found as the runner finds them. A name
-            that would leave media/ resolves to no file and is passed by. */
-        for (const auto& name : named)
-        {
-            const juce::File from { juce::String (audio::resolveMediaPath (own.getFullPathName().toStdString(), name)) };
-
-            if (from.existsAsFile())
-                consider (from, juce::String (name));
-        }
-
-        return missing;
-    }
-
     std::vector<std::string> Bundle::carryMedia (const juce::File& destination, const juce::File& source,
                                                  const std::vector<std::string>& named)
     {
@@ -1347,17 +1301,18 @@ namespace wfg::doc
 
         /*  LISTED BEFORE ANYTHING IS COPIED, so that a copy somebody saved
             inside the very media/ it reads cannot walk into what it writes. */
-        for (const auto& [from, relative] : mediaTheCopyWouldNotFind (destination, source, named))
+        for (const auto& sound : audio::mediaACopyWouldNotFind (destination.getFullPathName().toStdString(),
+                                                                source.getFullPathName().toStdString(), named))
         {
-            const auto to = into.getChildFile (relative);
+            const juce::File from { juce::String (sound.from) };
+            const auto to = into.getChildFile (juce::String (sound.relative));
             const auto temp = temporaryFor (to);
 
             if (to.getParentDirectory().createDirectory().wasOk() && from.copyFileTo (temp) && temp.moveFileTo (to))
                 continue;
 
             temp.deleteFile();
-            problems.push_back ("could not copy " + from.getFullPathName().toStdString()
-                                + " into " + into.getFullPathName().toStdString());
+            problems.push_back ("could not copy " + sound.from + " into " + into.getFullPathName().toStdString());
         }
 
         return problems;

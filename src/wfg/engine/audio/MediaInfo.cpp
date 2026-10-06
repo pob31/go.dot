@@ -121,6 +121,51 @@ namespace wfg::audio
                    .getFullPathName().toStdString();
     }
 
+    std::vector<MediaToCarry> mediaACopyWouldNotFind (const std::string& destination, const std::string& source,
+                                                      const std::vector<std::string>& named)
+    {
+        std::vector<MediaToCarry> missing;
+        std::set<std::string> listed;
+
+        const auto own = juce::File (juce::String (source)).getChildFile ("media");
+        const auto copy = juce::File (juce::String (destination));
+        const auto into = copy.getChildFile ("media");
+        const auto aroundCopy = copy.getParentDirectory().getChildFile ("media");
+
+        //  Where the copy will look for `relative`: its own media/, then around it.
+        const auto consider = [&] (const juce::File& from, const juce::String& relative)
+        {
+            if (into.getChildFile (relative).existsAsFile()
+                  || (aroundCopy != into && aroundCopy.getChildFile (relative).existsAsFile())
+                  || ! listed.insert (relative.toStdString()).second)
+                return;
+
+            missing.push_back ({ from.getFullPathName().toStdString(), relative.toStdString() });
+        };
+
+        //  Its own media/, whole.
+        if (own.isDirectory())
+            for (const auto& entry : juce::RangedDirectoryIterator (own, true, "*", juce::File::findFiles))
+            {
+                const auto relative = entry.getFile().getRelativePathFrom (own).replaceCharacter ('\\', '/');
+
+                if (! relative.startsWith (".timbre/") && ! relative.contains (".tmp-"))
+                    consider (entry.getFile(), relative);
+            }
+
+        /*  The sounds its cues play, found as the runner finds them. A name
+            that would leave media/ resolves to no file and is passed by. */
+        for (const auto& name : named)
+        {
+            const juce::File from { juce::String (resolveMediaPath (own.getFullPathName().toStdString(), name)) };
+
+            if (from.existsAsFile())
+                consider (from, juce::String (name));
+        }
+
+        return missing;
+    }
+
     std::vector<std::string> mediaFilesNamedBy (const doc::ShowDocument& document)
     {
         std::vector<std::string> named;

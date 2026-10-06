@@ -418,41 +418,11 @@ namespace wfg::doc
         ReadResult saveCopy (const juce::File& destination, const Snapshot& snapshot,
                              const juce::File& source);
 
-        /*  THE SOUNDS A COPY AT `destination` WOULD NOT FIND STRAIGHT AWAY
-            (namespace draft §32). `saveCopy` leaves `media/` behind, and a copy
-            finds a sound in its own `media/`, then in the `media/` of the
-            folder around it - so saved as a performance of the same show it
-            still finds the show's sounds, and saved anywhere else, or beside a
-            performance whose own sounds stayed behind, it may find none.
-
-            WHAT THE COPY NEEDS is two kinds of file: every file in `source`'s
-            own `media/` - imports, and the takes recorded there, a cue made of
-            them or not - and each of `named`, the `file` of every media cue,
-            from wherever `audio::resolveMediaPath` finds it for `source`, which
-            is how a performance's copy takes the show's sounds it plays and
-            none it does not. Not the colours' cache (`.timbre/`), which the
-            copy builds again, and no `*.tmp-*` left by a write that did not
-            finish. A sound already missing is not listed: the copy plays what
-            the original did.
-
-            OF THOSE, what is not at its place in the copy's `media/` nor in the
-            `media/` around the copy, each once, in that order. ONE RULE FOR THE
-            QUESTION AND THE COPY: the window asks only when this is not empty
-            (author, 2026-10-06: "Saving within the same folder, or anywhere it
-            will find its media straightaway is fine"), and `carryMedia` copies
-            exactly this. Reads the disk; never on the tick thread. */
-        struct MediaToCarry
-        {
-            juce::File from;
-            juce::String relative;    ///< under media/, with forward slashes
-        };
-
-        std::vector<MediaToCarry> mediaTheCopyWouldNotFind (const juce::File& destination, const juce::File& source,
-                                                            const std::vector<std::string>& named);
-
-        /*  AND CARRIED WITH IT - what `document.saveAs` does when it is asked
-            to: each of `mediaTheCopyWouldNotFind` into `<destination>/media/`,
-            at the same place under it.
+        /*  THE SOUNDS A COPY WOULD NOT FIND, CARRIED WITH IT - what
+            `document.saveAs` does when it is asked to (namespace draft §32):
+            each of `audio::mediaACopyWouldNotFind` - the one rule, which the
+            window's question follows too - into `<destination>/media/`, at the
+            same place under it.
 
             EACH FILE WHOLE OR NOT AT ALL, through a sibling temp as every write
             here is. Returns what could not be copied, one sentence each - the

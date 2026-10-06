@@ -20117,9 +20117,10 @@ rest are the implementer's, and open to overruling.
 
 ### 32.3 Where it is, and what it was tried on
 
-- `Bundle::mediaTheCopyWouldNotFind` (`document/Bundle.h`) is the one rule, through
-  `audio::resolveMediaPath`, the one resolver. The window asks only when it is not empty, and
-  `Bundle::carryMedia` copies exactly it. `WriteJob::withMedia` and `named` carry the request to
+- `audio::mediaACopyWouldNotFind` (`audio/MediaInfo.h`) is the one rule, beside
+  `audio::resolveMediaPath`, the one resolver - there and not in the bundle because the window may
+  not name `doc::` (`scripts/check-client-boundary.py`, rule b). The window asks only when it is
+  not empty, and `Bundle::carryMedia` copies exactly it. `WriteJob::withMedia` and `named` carry the request to
   the writer. The engine reads the cue names off the document on the tick thread
   (`audio::mediaFilesNamedBy`); the window reads them off the tree (`/godot/cue/<id>/file`) in one
   pass when the folder is chosen.

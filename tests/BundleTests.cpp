@@ -32,6 +32,7 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/app/FolderIcon.h>
+#include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/Bundle.h>
@@ -1135,7 +1136,7 @@ TEST_CASE ("Bundle::carryMedia: a copy straight inside the show's folder carries
     CHECK_FALSE (lille.getChildFile ("media").getChildFile ("storm.wav").exists());
 }
 
-TEST_CASE ("Bundle::mediaTheCopyWouldNotFind: nothing to ask where the copy finds its sounds straight away")
+TEST_CASE ("audio::mediaACopyWouldNotFind: nothing to ask where the copy finds its sounds straight away")
 {
     /*  Author, 2026-10-06: "Saving within the same folder, or anywhere it will
         find its media straightaway is fine." The window asks only when this
@@ -1146,36 +1147,38 @@ TEST_CASE ("Bundle::mediaTheCopyWouldNotFind: nothing to ask where the copy find
 
     writeBytes (show.getChildFile ("media").getChildFile ("storm.wav"), "the show's storm\n");
 
-    const auto relativesOf = [] (const std::vector<Bundle::MediaToCarry>& sounds)
+    const auto path = [] (const juce::File& f) { return f.getFullPathName().toStdString(); };
+
+    const auto relativesOf = [] (const std::vector<audio::MediaToCarry>& sounds)
     {
         std::vector<std::string> names;
 
         for (const auto& sound : sounds)
-            names.push_back (sound.relative.toStdString());
+            names.push_back (sound.relative);
 
         return names;
     };
 
     //  A performance with no sounds of its own, saved beside itself: it finds the show's.
     paris.createDirectory();
-    CHECK (Bundle::mediaTheCopyWouldNotFind (show.getChildFile ("Lyon"), paris, { "storm.wav" }).empty());
+    CHECK (audio::mediaACopyWouldNotFind (path (show.getChildFile ("Lyon")), path (paris), { "storm.wav" }).empty());
 
     //  Anywhere else whose folder around holds the same sounds: found too.
     const auto tour = temp.parent.getChildFile ("Tour");
     writeBytes (tour.getChildFile ("media").getChildFile ("storm.wav"), "the tour's storm\n");
-    CHECK (Bundle::mediaTheCopyWouldNotFind (tour.getChildFile ("Lyon"), paris, { "storm.wav" }).empty());
+    CHECK (audio::mediaACopyWouldNotFind (path (tour.getChildFile ("Lyon")), path (paris), { "storm.wav" }).empty());
 
     //  Elsewhere with nothing around it: the show's sound is missing.
-    CHECK (relativesOf (Bundle::mediaTheCopyWouldNotFind (temp.parent.getChildFile ("Archive").getChildFile ("Lyon"),
-                                                          paris, { "storm.wav" }))
+    CHECK (relativesOf (audio::mediaACopyWouldNotFind (path (temp.parent.getChildFile ("Archive").getChildFile ("Lyon")),
+                                                       path (paris), { "storm.wav" }))
              == std::vector<std::string> { "storm.wav" });
 
     /*  A performance WITH sounds of its own, saved beside itself: those stay
         behind, so it is asked about - and a sound both kept and named is one
         sound, listed once. */
     writeBytes (paris.getChildFile ("media").getChildFile ("announce.wav"), "Paris's announcement\n");
-    CHECK (relativesOf (Bundle::mediaTheCopyWouldNotFind (show.getChildFile ("Lyon"), paris,
-                                                          { "announce.wav", "storm.wav" }))
+    CHECK (relativesOf (audio::mediaACopyWouldNotFind (path (show.getChildFile ("Lyon")), path (paris),
+                                                       { "announce.wav", "storm.wav" }))
              == std::vector<std::string> { "announce.wav" });
 }
 

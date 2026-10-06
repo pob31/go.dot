@@ -80,7 +80,6 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/TakePictures.h>
-#include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -2951,10 +2950,10 @@ namespace wfg::client
                 user and ask if they need to move the bundled media too", then
                 "Saving within the same folder, or anywhere it will find its
                 media straightaway is fine"). The engine's own rule, which its
-                copy then follows (`Bundle::mediaTheCopyWouldNotFind`), handed
+                copy then follows (`audio::mediaACopyWouldNotFind`), handed
                 the sound each cue names - read in one pass over the tree, once,
                 when the folder is chosen. */
-            std::vector<doc::Bundle::MediaToCarry> soundsTheCopyWouldNotFind (const juce::File& folder) const
+            std::vector<audio::MediaToCarry> soundsTheCopyWouldNotFind (const juce::File& folder) const
             {
                 const auto document = documentFolder();
 
@@ -2975,17 +2974,18 @@ namespace wfg::client
                             named.push_back (std::move (sound));
                 }
 
-                return doc::Bundle::mediaTheCopyWouldNotFind (folder, document, named);
+                return audio::mediaACopyWouldNotFind (folder.getFullPathName().toStdString(),
+                                                     document.getFullPathName().toStdString(), named);
             }
 
             //  A few of the names, then how many more.
-            static juce::String someOf (const std::vector<doc::Bundle::MediaToCarry>& sounds)
+            static juce::String someOf (const std::vector<audio::MediaToCarry>& sounds)
             {
                 constexpr std::size_t shown = 3;
                 juce::StringArray names;
 
                 for (std::size_t i = 0; i < sounds.size() && i < shown; ++i)
-                    names.add (sounds[i].relative);
+                    names.add (juce::String::fromUTF8 (sounds[i].relative.c_str()));
 
                 auto text = names.joinIntoString (", ");
 
@@ -2995,7 +2995,7 @@ namespace wfg::client
                 return text;
             }
 
-            void askAboutTheSounds (const juce::File& folder, const std::vector<doc::Bundle::MediaToCarry>& missing)
+            void askAboutTheSounds (const juce::File& folder, const std::vector<audio::MediaToCarry>& missing)
             {
                 const auto count = missing.size() == 1 ? juce::String ("1 sound")
                                                        : juce::String (missing.size()) + " sounds";

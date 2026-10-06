@@ -143,6 +143,40 @@ namespace wfg::audio
         performances share is analysed once, in the show's folder. */
     std::string mediaRootOf (const std::string& mediaFolder, const std::string& named);
 
+    /*  THE SOUNDS A COPY OF A SHOW WOULD NOT FIND STRAIGHT AWAY (namespace
+        draft §32): the copy of the show in folder `source` saved as folder
+        `destination`. Save as leaves `media/` behind, and a copy finds a sound
+        by the rule above - its own `media/`, then the `media/` around it - so
+        saved as a performance of the same show it still finds the show's
+        sounds, and saved anywhere else, or beside a performance whose own
+        sounds stayed behind, it may find none.
+
+        WHAT THE COPY NEEDS is two kinds of file: every file in `source`'s own
+        `media/` - imports, and the takes recorded there, a cue made of them or
+        not - and each of `named`, the `file` of every media cue, from wherever
+        `resolveMediaPath` finds it for `source`, which is how a performance's
+        copy takes the show's sounds it plays and none it does not. Not the
+        colours' cache (`.timbre/`), which the copy builds again, and no
+        `*.tmp-*` left by a write that did not finish. A sound already missing
+        is not listed: the copy plays what the original did.
+
+        OF THOSE, what is not at its place in the copy's `media/` nor in the
+        `media/` around the copy, each once, in that order. ONE RULE FOR THE
+        QUESTION AND THE COPY: the window asks only when this is not empty
+        (author, 2026-10-06: "Saving within the same folder, or anywhere it
+        will find its media straightaway is fine"), and `doc::Bundle::carryMedia`
+        copies exactly this. Here and not in the bundle because the window may
+        not name the document's namespace, and this reads the disk alone. Never
+        on the tick thread. */
+    struct MediaToCarry
+    {
+        std::string from;        ///< the file, absolute
+        std::string relative;    ///< where it goes under the copy's media/, forward slashes
+    };
+
+    std::vector<MediaToCarry> mediaACopyWouldNotFind (const std::string& destination, const std::string& source,
+                                                      const std::vector<std::string>& named);
+
     /*  EVERY DISTINCT `file` A MEDIA CUE IN THIS SHOW NAMES, in the order the
         show first names it, and never an empty one. Reads the document and
         nothing else - no file is opened - so the tick thread may ask it after
