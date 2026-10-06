@@ -80,6 +80,7 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/TakePictures.h>
+#include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -2830,7 +2831,7 @@ namespace wfg::client
                                               §32): the empty show lives in Go.dot's own folder
                                               and is put back to empty once saved, so a sound
                                               left there would belong to no show at all. */
-                                          const auto carrying = holdsSounds (mediaFolder());
+                                          const auto carrying = ! soundsTheCopyWouldNotFind (folder).empty();
 
                                           send (gesture::saveAs (folder.getFullPathName().toStdString(), true));
                                           savingTheEmptyShow = EmptyShowSave { folder, juce::Time::getCurrentTime(),
@@ -2938,68 +2939,72 @@ namespace wfg::client
                                           if (safe == nullptr || folder == juce::File())
                                               return;
 
-                                          if (leavesSoundsBehind (folder))
-                                              askAboutTheSounds (folder);
+                                          if (const auto missing = soundsTheCopyWouldNotFind (folder); ! missing.empty())
+                                              askAboutTheSounds (folder, missing);
                                           else
                                               copyTheShow (folder, false);
                                       });
             }
 
-            /*  THE SHOW'S FOLDER: this document's, or - for a performance - the
-                one around it, which holds the sounds the performances share. */
-            juce::File showFolderOfThisDocument() const
-            {
-                const auto document = documentFolder();
-                return showAroundThisDocument().isNotEmpty() ? document.getParentDirectory() : document;
-            }
-
-            //  Any file in a media/ folder, below it too (takes), but the colours' cache.
-            static bool holdsSounds (const juce::File& media)
-            {
-                if (! media.isDirectory())
-                    return false;
-
-                for (const auto& entry : juce::RangedDirectoryIterator (media, true, "*", juce::File::findFiles))
-                    if (! entry.getFile().isAChildOf (media.getChildFile (".timbre")))
-                        return true;
-
-                return false;
-            }
-
-            /*  WHETHER A COPY AT `folder` WOULD LEAVE SOUNDS BEHIND (author,
+            /*  THE SOUNDS A COPY AT `folder` WOULD NOT FIND STRAIGHT AWAY (author,
                 2026-10-06: "When saving outside the workfolder (show) warn the
-                user and ask if they need to move the bundled media too"). A
-                copy finds its sounds in its own media/, which Save as does not
-                fill, then in the media/ of the folder around it - so one saved
-                straight inside the show's folder, as a performance is, still
-                finds the show's; anywhere else it finds neither the show's nor
-                this document's own. Asked only when there are sounds to lose. */
-            bool leavesSoundsBehind (const juce::File& folder) const
+                user and ask if they need to move the bundled media too", then
+                "Saving within the same folder, or anywhere it will find its
+                media straightaway is fine"). The engine's own rule, which its
+                copy then follows (`Bundle::mediaTheCopyWouldNotFind`), handed
+                the sound each cue names - read in one pass over the tree, once,
+                when the folder is chosen. */
+            std::vector<doc::Bundle::MediaToCarry> soundsTheCopyWouldNotFind (const juce::File& folder) const
             {
                 const auto document = documentFolder();
-                const auto showFolder = showFolderOfThisDocument();
 
-                if (! document.isDirectory() || folder.getParentDirectory() == showFolder)
-                    return false;
+                if (latest == nullptr || ! document.isDirectory())
+                    return {};
 
-                return holdsSounds (document.getChildFile ("media"))
-                         || (showFolder != document && holdsSounds (showFolder.getChildFile ("media")));
+                std::vector<std::string> named;
+                const std::string cues = "/godot/cue/", file = "/file";
+
+                for (const auto* node : latest->all())
+                {
+                    const auto& address = node->address;
+
+                    if (address.size() > cues.size() + file.size() && address.rfind (cues, 0) == 0
+                          && address.compare (address.size() - file.size(), file.size(), file) == 0
+                          && address.find ('/', cues.size()) == address.size() - file.size())
+                        if (auto sound = model::text (*latest, address); ! sound.empty())
+                            named.push_back (std::move (sound));
+                }
+
+                return doc::Bundle::mediaTheCopyWouldNotFind (folder, document, named);
             }
 
-            void askAboutTheSounds (const juce::File& folder)
+            //  A few of the names, then how many more.
+            static juce::String someOf (const std::vector<doc::Bundle::MediaToCarry>& sounds)
             {
-                const auto showName = showFolderOfThisDocument().getFileName();
-                const auto performance = showAroundThisDocument().isNotEmpty();
+                constexpr std::size_t shown = 3;
+                juce::StringArray names;
+
+                for (std::size_t i = 0; i < sounds.size() && i < shown; ++i)
+                    names.add (sounds[i].relative);
+
+                auto text = names.joinIntoString (", ");
+
+                if (sounds.size() > shown)
+                    text << " and " << juce::String (sounds.size() - shown) << " more";
+
+                return text;
+            }
+
+            void askAboutTheSounds (const juce::File& folder, const std::vector<doc::Bundle::MediaToCarry>& missing)
+            {
+                const auto count = missing.size() == 1 ? juce::String ("1 sound")
+                                                       : juce::String (missing.size()) + " sounds";
 
                 auto* box = new juce::AlertWindow (
-                    "Outside the show's folder",
-                    "\"" + folder.getFileName() + "\" is not in " + showName + "'s folder, so the copy will not find "
-                      "the sounds kept there.\n\n"
-                      "Copy the sounds with it? That is "
-                      + (performance ? juce::String ("this performance's own media - imports and recordings - and the "
-                                                     "sounds of ") + showName + " its cues play."
-                                     : juce::String ("the show's media - imports and recordings."))
-                      + " A large show takes a while; this one goes on playing meanwhile.",
+                    "The copy would not find its sounds",
+                    "Saved in \"" + folder.getFileName() + "\", the copy would not find " + count
+                      + " this show uses: " + someOf (missing) + ".\n\n"
+                      "Copy them with it? A large show takes a while; this one goes on playing meanwhile.",
                     juce::MessageBoxIconType::WarningIcon);
                 box->addButton ("Copy the sounds too", 1, juce::KeyPress (juce::KeyPress::returnKey));
                 box->addButton ("Copy without them", 2);

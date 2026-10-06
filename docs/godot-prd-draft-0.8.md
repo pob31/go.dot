@@ -1722,9 +1722,10 @@ cues, levels, the room and its own sounds. A performance finds a sound in its ow
 `media/` first, then in the show's; nothing names a file outside `media/`. Closing a
 performance that differs from the template - or asking - lists what differs, cue by
 cue and field by field, matched by cue ID, and brings what is ticked back into the
-template. A copy saved outside the show's folder finds none of the sounds kept there, so
-Save as warns and asks whether the sounds go with it *(added in 0.8, at the author's
-direction, 2026-10-06 - namespace draft §32)*.
+template. A copy that would not find its sounds straight away - saved away from the show's
+folder, or leaving a performance's own sounds behind - is warned about, and Save as asks
+whether the sounds go with it *(added in 0.8, at the author's direction, 2026-10-06 -
+namespace draft §32)*.
 
 **RELAX NG schema** shipped → validation as a pre-commit hook. **XPath** gives
 the projections nearly for free.

@@ -20060,11 +20060,12 @@ The ports stay bound and open, but nothing is painted and nothing is read (`Surf
 If the gaps go on, the device or its USB path is the cause. If they stop, Go.dot's traffic to the desk
 is, and the next measurement is how long `Output::sendNow` takes in `MidiSender::deliver`.
 
-## 32. A copy saved outside its show's folder
+## 32. A copy that would not find its sounds
 
 Written 2026-10-06, when the author asked: *"When saving outside the workfolder (show) warn the user
-and ask if they need to move the bundled media too."* PRD §3.20 carries the decided sentence; this
-section is how it is built.
+and ask if they need to move the bundled media too"*, then, on the first build: *"Saving within the
+same folder, or anywhere it will find its media straightaway is fine."* PRD §3.20 carries the
+decided sentence; this section is how it is built.
 
 ### 32.1 What was there
 
@@ -20076,22 +20077,28 @@ document's own, and nothing said so: the copy opened with its cues reporting mis
 
 ### 32.2 Decisions
 
-The author's: warn and ask. The rest are the implementer's, and open to overruling.
+The author's: warn and ask, and only where the copy would not find its sounds straight away. The
+rest are the implementer's, and open to overruling.
 
-- **TV - Asked when sounds would be lost.** Save as asks when the folder chosen is not straight
-  inside the show's folder - the document's own, or for a performance the folder around it - and
-  there are sounds to lose: a file in the document's own `media/`, or for a performance in the
-  show's. The question, headed "Outside the show's folder", names the folder and the show and
-  says which sounds it means. Its buttons are "Copy the sounds too" (Return), "Copy without them"
-  and "Cancel" (Esc). *Mine:* the wording, and reading "workfolder" as the show's folder. A copy
-  saved straight inside it is not asked about, since it finds the show's sounds there.
+- **TV - Asked when the copy would not find its sounds straight away** - the author's rule. Save as
+  lists what the copy needs (TW) and asks only when some of it is neither in the copy's own
+  `media/` nor in the `media/` of the folder around it. So a performance saved as another of the
+  same show is not asked about when it has no sounds of its own, and is when it has: those stay
+  behind. Nor is a copy asked about anywhere else whose folder around already holds the same
+  sounds. The question, headed "The copy would not find its sounds", names the folder, how many
+  sounds and the first three. Its buttons are "Copy the sounds too" (Return), "Copy without them"
+  and "Cancel" (Esc). *Mine:* the wording. *Corrected the same day:* the first build asked by
+  place - "not straight inside the show's folder" - which asked where nothing was missing and kept
+  quiet when a performance's own sounds stayed behind.
 - **TW - What "the sounds" are.** The document's own `media/`, whole: imports, and takes - including
   a take no cue names yet, which is still that performance's recording. Then each sound a cue names
   that is found around the document, such as the show's sounds a performance plays. The show's whole
   library is not copied, because most of it belongs to other performances. Nothing the copy would
   already find in its own `media/` or around it is copied. The colours' cache (`.timbre/`) is not
   copied either, nor a `*.tmp-*` left by a write cut short. A sound already missing stays missing,
-  without a word: the copy plays what the original played. *Mine.*
+  without a word: the copy plays what the original played. A name is checked by the place it would
+  have, not by its bytes: a different file of the same name where the copy looks counts as found.
+  *Mine.*
 - **TX - One command, with an optional flag.** `document.saveAs <s path> [T media]` (§4.11: the
   gesture is a named command, and a script asks with `T`). When the flag is left out it is false,
   so every recorded log replays as before.
@@ -20110,20 +20117,23 @@ The author's: warn and ask. The rest are the implementer's, and open to overruli
 
 ### 32.3 Where it is, and what it was tried on
 
-- `Bundle::carryMedia` (`document/Bundle.h`) decides what goes, through `audio::resolveMediaPath`,
-  the one resolver. `WriteJob::withMedia` and `named` carry the request to the writer. The cue
-  names are read off the document on the tick thread by `audio::mediaFilesNamedBy`.
-- Window: `leavesSoundsBehind`, `askAboutTheSounds`, `copyTheShow` and `followTheCopy` in
+- `Bundle::mediaTheCopyWouldNotFind` (`document/Bundle.h`) is the one rule, through
+  `audio::resolveMediaPath`, the one resolver. The window asks only when it is not empty, and
+  `Bundle::carryMedia` copies exactly it. `WriteJob::withMedia` and `named` carry the request to
+  the writer. The engine reads the cue names off the document on the tick thread
+  (`audio::mediaFilesNamedBy`); the window reads them off the tree (`/godot/cue/<id>/file`) in one
+  pass when the folder is chosen.
+- Window: `soundsTheCopyWouldNotFind`, `askAboutTheSounds`, `copyTheShow` and `followTheCopy` in
   `client/ui/Client.cpp`. `gesture::saveAs (folder, withMedia)`.
 - Tested by `BundleTests`:
   - "a copy outside the show takes its own media and the show's sounds its cues play, and no more"
   - "a copy straight inside the show's folder carries only what it would not find around it"
+  - "nothing to ask where the copy finds its sounds straight away": beside itself with no sounds
+    of its own, in another folder with the same sounds around it, and a performance's own sounds
+    left behind, listed once
   - "document.saveAs with media: the copy carries the sounds, the record says so, and the session
     stays put", which includes a sound that cannot follow being reported while the show still
     lands
 
   `ClientTests` checks the new gesture's signature. Both run in C and `fr_FR`.
 - The question on screen is the author's to try.
-- **Left as it was, and asked:** Save as from a performance into another folder straight inside
-  the same show still leaves that performance's own `media/` behind, as before. New performance
-  copies a template's own sounds; Save as there does not.
