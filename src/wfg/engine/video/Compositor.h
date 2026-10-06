@@ -30,10 +30,12 @@
         under it as `under * (1 - a) + colour * a`, on the 0..255 numbers the
         colour is written in, from a canvas that starts black.
 
-    Fills only in V.1: a fill covers the whole canvas, so the middle of it is
-    every pixel of it. Masks and pictures join this file as they draw.
+    A fill is the canvas's own size, placed by the same geometry as a picture
+    (§36, VW): scaled down it is a panel. A picture is sampled from what the
+    renderer has read. Masks join this file when they draw.
 */
 
+#include <wfg/engine/video/Geometry.h>
 #include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/video/VideoRegion.h>
 
@@ -68,43 +70,107 @@ namespace wfg::video
         return stack;
     }
 
+    /*  One moving value of a layer at `sample`: its points of that property,
+        and before the first the cue's own number (`before`). */
+    inline double valueOf (const region::LayerReading& layer, Property property, std::int64_t sample,
+                           double before) noexcept
+    {
+        return valueAt (layer.ring (property), sample, before, [] (const Point&) { return true; });
+    }
+
     /*  How solid one layer is at `sample`: nothing once its removal has come,
-        else what its points say. */
+        else what its opacity's points say. */
     inline double opacityOf (const region::LayerReading& layer, std::int64_t sample) noexcept
     {
         if (sample >= layer.removeAt)
             return 0.0;
 
-        struct View
-        {
-            const Point* first;
-            const Point* last;
-            const Point* begin() const noexcept { return first; }
-            const Point* end() const noexcept   { return last; }
-        };
-
-        return std::clamp (opacityAt (View { layer.points, layer.points + layer.pointCount }, sample), 0.0, 1.0);
+        return std::clamp (valueOf (layer, Property::opacity, sample, 0.0), 0.0, 1.0);
     }
 
-    /*  THE CANVAS'S COLOUR where every fill covers it, as 0xRRGGBB: what the
-        middle of it shows. */
-    inline std::uint32_t fillsAt (const std::vector<const region::LayerReading*>& stack, std::int64_t sample) noexcept
+    /*  Where the layer lies at `sample`, on a canvas of this size, for a
+        picture of that size - a fill's is the canvas's (Geometry.h). */
+    inline Placement placementOf (const region::LayerReading& layer, std::int64_t sample,
+                                  double canvasWidth, double canvasHeight,
+                                  double pictureWidth, double pictureHeight) noexcept
+    {
+        Placement place;
+        place.canvasWidth = canvasWidth;
+        place.canvasHeight = canvasHeight;
+        place.pictureWidth = pictureWidth;
+        place.pictureHeight = pictureHeight;
+        place.fit = static_cast<int> (layer.fit);
+        place.scale = valueOf (layer, Property::scale, sample, layer.scale);
+        place.offsetX = valueOf (layer, Property::offsetX, sample, layer.offsetX);
+        place.offsetY = valueOf (layer, Property::offsetY, sample, layer.offsetY);
+        place.rotation = valueOf (layer, Property::rotation, sample, layer.rotation);
+        place.flipH = layer.flipH;
+        place.flipV = layer.flipV;
+        return place;
+    }
+
+    /*  WHAT A PICTURE IS, for the CPU: its size, and its colour at one point of
+        it - (0, 0) the bottom-left, (1, 1) the top-right - as 0..255 straight
+        colour and 0..1 alpha. The renderer answers from the pictures it has
+        read; a test from one it made up. A picture it has not read is not
+        there yet, and shows nothing. */
+    struct PictureSampler
+    {
+        virtual ~PictureSampler() = default;
+        virtual bool sizeOf (const std::string& path, int& width, int& height) const = 0;
+        virtual bool colourAt (const std::string& path, double u, double v,
+                               double& red, double& green, double& blue, double& alpha) const = 0;
+    };
+
+    /*  THE CANVAS'S COLOUR AT ONE POINT, as 0xRRGGBB: (x, y) on its pixels
+        from its middle, y up. Every layer of the stack laid over the last,
+        normal blending in display space (VD), from black. */
+    inline std::uint32_t colourAt (const std::vector<const region::LayerReading*>& stack, std::int64_t sample,
+                                   double canvasWidth, double canvasHeight, double x, double y,
+                                   const PictureSampler* pictures) noexcept
     {
         double red = 0.0, green = 0.0, blue = 0.0;
 
         for (const auto* layer : stack)
         {
-            if (layer->source != region::Source::fill)
+            const auto opacity = opacityOf (*layer, sample);
+
+            if (! (opacity > 0.0))
                 continue;
 
-            const auto a = opacityOf (*layer, sample);
+            double r = 0.0, g = 0.0, b = 0.0, alpha = 1.0;
+            double u = 0.0, v = 0.0;
 
-            if (! (a > 0.0))
+            if (layer->source == region::Source::fill)
+            {
+                const auto place = placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight);
+
+                if (! place.toTexture (x, y, u, v))
+                    continue;
+
+                r = static_cast<double> ((layer->paint >> 16) & 0xffu);
+                g = static_cast<double> ((layer->paint >> 8) & 0xffu);
+                b = static_cast<double> (layer->paint & 0xffu);
+            }
+            else if (layer->source == region::Source::picture)
+            {
+                int width = 0, height = 0;
+
+                if (pictures == nullptr || ! pictures->sizeOf (layer->file, width, height))
+                    continue;
+
+                const auto place = placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                                static_cast<double> (width), static_cast<double> (height));
+
+                if (! place.toTexture (x, y, u, v) || ! pictures->colourAt (layer->file, u, v, r, g, b, alpha))
+                    continue;
+            }
+            else
+            {
                 continue;
+            }
 
-            const auto r = static_cast<double> ((layer->paint >> 16) & 0xffu);
-            const auto g = static_cast<double> ((layer->paint >> 8) & 0xffu);
-            const auto b = static_cast<double> (layer->paint & 0xffu);
+            const auto a = opacity * std::clamp (alpha, 0.0, 1.0);
 
             red = red * (1.0 - a) + r * a;
             green = green * (1.0 - a) + g * a;
@@ -117,5 +183,12 @@ namespace wfg::video
         };
 
         return (channel (red) << 16) | (channel (green) << 8) | channel (blue);
+    }
+
+    /*  The middle of a 1920 by 1080 canvas with no picture read: what a fill
+        alone shows there. */
+    inline std::uint32_t fillsAt (const std::vector<const region::LayerReading*>& stack, std::int64_t sample) noexcept
+    {
+        return colourAt (stack, sample, 1920.0, 1080.0, 0.0, 0.0, nullptr);
     }
 }

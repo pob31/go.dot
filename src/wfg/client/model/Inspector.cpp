@@ -89,13 +89,14 @@ namespace wfg::client::model
                 /*  A VIDEO CUE (Phase 8a): what it shows, where, how high in
                     the stack, how solid and in what colour, then how it comes
                     in. */
-                { "video",   { "source", "canvas", "layer", "opacity", "paint", "fadeIn" } },
+                { "video",   { "source", "canvas", "file", "fit", "layer", "opacity", "paint", "fadeIn",
+                               "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV" } },
 
                 /*  What it moves - a cue, or a DCA instead - then where to and
                     how. Each thing a fade can move is a switch and then where it
                     goes, level then speed (namespace draft §22.7); the curve is
                     both's shape, so it comes after both. */
-                { "fade",    { "target", "dca", "levelOn", "level", "rateOn", "rate", "curve", "points",
+                { "fade",    { "target", "dca", "levelOn", "level", "rateOn", "rate", "curve", "points", "video",
                                "stopWhenDone" } },
                 { "transport", { "target", "verb", "andGo", "range", "curve" } },
                 { "start",   { "target" } },
@@ -146,6 +147,12 @@ namespace wfg::client::model
                 /*  NOT "colour", which is the cue's tint in the list and is on
                     the same panel (namespace draft 35, VG). */
                 { "paint", "colour on canvas" },
+                /*  A FADE ON A PICTURE (§36, VS): the values it moves, as pairs. */
+                { "video", "moves picture" },
+                { "offsetX", "offset right" },
+                { "offsetY", "offset up" },
+                { "flipH", "flip horizontally" },
+                { "flipV", "flip vertically" },
                 { "doh", "on Doh!" },
                 { "dohRollback", "rollback" },
             };

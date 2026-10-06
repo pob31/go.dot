@@ -4304,7 +4304,21 @@ namespace wfg::cue
             const auto paint = textOf (cue, "paint");
             job.spec.paint = video::paintFromText (paint.data(), paint.size());
 
-            job.opacity = std::clamp (numberOf (cue, "opacity"), 0.0, 1.0);
+            /*  A PICTURE'S FILE AS A WHOLE PATH, resolved here as a sound's is
+                (VX), and the geometry as the cue is written (§36.3). */
+            if (job.spec.source == "picture")
+                job.spec.file = mediaPathOf (textOf (cue, "file"));
+
+            job.spec.fit = textOf (cue, "fit");
+            job.spec.scale = numberOf (cue, "scale");
+            job.spec.offsetX = numberOf (cue, "offsetX");
+            job.spec.offsetY = numberOf (cue, "offsetY");
+            job.spec.rotation = numberOf (cue, "rotation");
+            job.spec.flipH = textOf (cue, "flipH") == "true";
+            job.spec.flipV = textOf (cue, "flipV") == "true";
+
+            /*  IN %, the author's unit (VR): the renderer's opacity is 0..1. */
+            job.opacity = std::clamp (numberOf (cue, "opacity") / 100.0, 0.0, 1.0);
             job.fadeInSeconds = std::max (0.0, numberOf (cue, "fadeIn"));
 
             std::erase_if (showing, [&runId] (const VideoJob& held) { return held.self == runId; });
@@ -5340,6 +5354,11 @@ namespace wfg::cue
     //==============================================================================
     void Runner::fireFade (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick)
     {
+        /*  A FADE ON A PICTURE (Phase 8a, namespace draft 36, VS) moves what
+            its `video` pairs name, and nothing of a sound's. */
+        if (fireVideoFade (cue, runId, tick))
+            return;
+
         /*  A DRAWN CURVE, when there is one, is the whole of the shape: its last
             breakpoint is where the fade ends, and `level` and `curve` are not
             read (§14.6). Not combined - two shapes multiplied together are a
@@ -15288,9 +15307,55 @@ namespace wfg::cue
             }
     }
 
+    void Runner::prepareStandbyPictures()
+    {
+        /*  THE STANDBY'S PICTURE, READ BEFORE GO (VX): every list's standby
+            that is a picture cue, as whole paths - a short list, said again
+            only when it changed. */
+        std::vector<std::string> standbys;
+
+        for (const auto& list : document.root().getChildWithName ("Lists"))
+            if (const auto listId = list[idProperty].toString().toStdString(); ! listId.empty())
+                standbys.push_back (document.getAttribute ("/godot/list/" + listId + "/standby").value_or (std::string {}));
+
+        /*  ONLY WHEN SOMETHING MOVED - a standby, or the show - since finding a
+            cue walks the show, and this is the tick thread. */
+        if (standbys == standbysPrepared && document.revision() == revisionPrepared)
+            return;
+
+        standbysPrepared = standbys;
+        revisionPrepared = document.revision();
+
+        std::vector<std::string> wanted;
+
+        for (const auto& standby : standbys)
+        {
+            if (standby.empty())
+                continue;
+
+            const auto cue = document.findById (standby);
+
+            if (! cue.isValid() || ! cue.hasType ("Video") || textOf (cue, "source") != "picture")
+                continue;
+
+            if (const auto path = mediaPathOf (textOf (cue, "file")); ! path.empty())
+                wanted.push_back (path);
+        }
+
+        if (wanted != picturesPrepared)
+        {
+            picturesPrepared = wanted;
+
+            if (videoSink != nullptr)
+                videoSink->prepare (wanted);
+        }
+    }
+
     void Runner::advanceVideo (Engine& engine, std::int64_t tick)
     {
         juce::ignoreUnused (tick);
+
+        prepareStandbyPictures();
 
         for (auto& job : showing)
         {
@@ -15372,11 +15437,169 @@ namespace wfg::cue
             }
         }
 
+        advanceVideoFades (engine, tick);
+
         std::erase_if (showing, [this] (const VideoJob& job)
                        {
                            const auto* run = runs.find (job.self);
                            return job.removed && (run == nullptr || run->isFinished());
                        });
+    }
+
+    double Runner::videoValueOf (const VideoJob& job, video::Property property, std::int64_t sample) const noexcept
+    {
+        if (property == video::Property::opacity)
+            return video::opacityAt (job.points, sample);
+
+        const auto base = property == video::Property::scale    ? job.spec.scale
+                        : property == video::Property::offsetX  ? job.spec.offsetX
+                        : property == video::Property::offsetY  ? job.spec.offsetY
+                                                                : job.spec.rotation;
+
+        return video::valueAt (job.moved[static_cast<std::size_t> (property)], sample, base,
+                               [] (const video::Point&) { return true; });
+    }
+
+    void Runner::placeVideoPoint (VideoJob& job, video::Property property, const video::Point& point)
+    {
+        auto& points = property == video::Property::opacity ? job.points
+                                                            : job.moved[static_cast<std::size_t> (property)];
+
+        /*  KEPT SHORT: a long fade places fifty a second, and only the last
+            few say where the value is now. */
+        if (points.size() > 256)
+            points.erase (points.begin(), points.begin() + 128);
+
+        points.push_back (point);
+
+        if (videoSink != nullptr)
+            videoSink->move (job.self, property, point);
+    }
+
+    bool Runner::fireVideoFade (const juce::ValueTree& fade, const std::string& runId, std::int64_t tick)
+    {
+        const auto targetCue = document.findById (textOf (fade, "target"));
+
+        if (! targetCue.isValid() || ! targetCue.hasType ("Video"))
+            return false;
+
+        if (auto* selfRun = runs.find (runId))
+            selfRun->state = runState::playing;
+
+        /*  WHAT IT MOVES AND WHERE TO, in the rows' own units - the opacity in
+            % (VR), which the picture side takes as 0..1. An entry it does not
+            know, or a number that will not read, is passed over. */
+        VideoFade job;
+        job.self = runId;
+        job.startTick = tick;
+        job.ticks = ticksFor (numberOf (fade, "duration"));
+        job.sCurve = fadeCurveFrom (textOf (fade, "curve")) == FadeCurve::sCurve;
+        job.stopWhenDone = textOf (fade, "stopWhenDone") == "true";
+
+        for (const auto& word : juce::StringArray::fromTokens (juce::String (textOf (fade, "video")), " ", ""))
+        {
+            const auto name = word.upToFirstOccurrenceOf (":", false, false).toStdString();
+            const auto value = osc::parseDouble (word.fromFirstOccurrenceOf (":", false, false).toStdString());
+
+            if (! value.has_value())
+                continue;
+
+            if (name == "opacity")       job.to.push_back ({ video::Property::opacity, std::clamp (*value / 100.0, 0.0, 1.0) });
+            else if (name == "scale")    job.to.push_back ({ video::Property::scale, *value });
+            else if (name == "offsetX")  job.to.push_back ({ video::Property::offsetX, *value });
+            else if (name == "offsetY")  job.to.push_back ({ video::Property::offsetY, *value });
+            else if (name == "rotation") job.to.push_back ({ video::Property::rotation, *value });
+        }
+
+        /*  THE RUN IT MOVES is the target cue's live one, found when the fade
+            fires, as a sound's fade finds its run. None, or nothing to move,
+            and the fade ends at once - the shape of a sound's fade that moves
+            nothing. */
+        const auto* live = runs.liveRunOf (targetCue[idProperty].toString().toStdString());
+
+        if (live == nullptr || job.to.empty())
+        {
+            FadeJob nothing;
+            nothing.self = runId;
+            running.push_back (nothing);
+            return true;
+        }
+
+        job.target = live->id;
+        videoFades.push_back (std::move (job));
+        return true;
+    }
+
+    void Runner::advanceVideoFades (Engine& engine, std::int64_t tick)
+    {
+        for (auto& fade : videoFades)
+        {
+            if (fade.done)
+                continue;
+
+            const auto* self = runs.find (fade.self);
+
+            /*  THE FADE'S OWN RUN STOPPED - Esc, a kill, Doh! - and the values
+                stay where the fade had taken them. */
+            if (self == nullptr || self->isFinished())
+            {
+                fade.done = true;
+                continue;
+            }
+
+            auto job = std::find_if (showing.begin(), showing.end(),
+                                     [&fade] (const VideoJob& held) { return held.self == fade.target; });
+            auto* target = runs.find (fade.target);
+
+            if (job == showing.end() || job->removed || target == nullptr || target->isFinished())
+            {
+                engine.submit (origin::engine, "run.ended", one (fade.self));
+                fade.done = true;
+                continue;
+            }
+
+            /*  A LAYER STILL TO COME UP is waited for: its first points are
+                placed by `advanceVideo` before this. */
+            if (! job->placed)
+                continue;
+
+            const auto at = videoSampleAhead();
+
+            if (! fade.begun)
+            {
+                for (const auto& [property, value] : fade.to)
+                    fade.from[static_cast<std::size_t> (property)] = videoValueOf (*job, property, at);
+
+                fade.begun = true;
+            }
+
+            const auto progress = fade.ticks <= 0 ? 1.0
+                                                  : std::clamp (static_cast<double> (tick - fade.startTick)
+                                                                  / static_cast<double> (fade.ticks), 0.0, 1.0);
+
+            for (const auto& [property, value] : fade.to)
+                placeVideoPoint (*job, property, { at, moveValueAt (fade.from[static_cast<std::size_t> (property)],
+                                                                   value, progress, fade.sCurve, MoveDomain::linear) });
+
+            if (progress < 1.0)
+                continue;
+
+            /*  ARRIVED. Stopping, if it says so, takes the picture away where it
+                arrived, and stops its run - its footers run then. */
+            if (fade.stopWhenDone)
+            {
+                if (videoSink != nullptr)
+                    videoSink->remove (job->self, at);
+
+                job->removed = true;
+                target->askStop (0);
+            }
+
+            engine.submit (origin::engine, "run.ended", one (fade.self));
+            fade.done = true;
+        }
+
+        std::erase_if (videoFades, [] (const VideoFade& fade) { return fade.done; });
     }
 
     void Runner::takeInputMeters()

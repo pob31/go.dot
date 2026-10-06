@@ -37,6 +37,7 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/Compositor.h>
+#include <wfg/engine/video/Geometry.h>
 #include <wfg/engine/video/RegionSink.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoHost.h>
@@ -44,8 +45,10 @@
 #include <wfg/engine/video/VideoRegion.h>
 
 #include <juce_core/juce_core.h>
+#include <juce_graphics/juce_graphics.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <new>
@@ -119,8 +122,8 @@ TEST_CASE ("video region: a layer shown, pointed, removed and let go, as the ren
     CHECK (layers[0].order == 7u);
     CHECK (layers[0].source == video::region::Source::fill);
     CHECK (layers[0].paint == 0x2040A0u);
-    REQUIRE (layers[0].pointCount == 2);
-    CHECK (layers[0].points[1].sample == 49000);
+    REQUIRE (layers[0].ring (video::Property::opacity).count == 2);
+    CHECK (layers[0].ring (video::Property::opacity).points[1].sample == 49000);
     CHECK (layers[0].removeAt == video::region::notRemoved);
     CHECK (video::opacityOf (layers[0], 25000) == doctest::Approx (0.5));
 
@@ -159,9 +162,26 @@ TEST_CASE ("video region: a layer shown, pointed, removed and let go, as the ren
 
     layers = layersOf (r);
     REQUIRE (layers.size() == 1);
-    CHECK (layers[0].pointCount == video::region::pointsPerLayer);
-    CHECK (layers[0].points[0].sample == (300 - static_cast<int> (video::region::pointsPerLayer)) * 960);
-    CHECK (layers[0].points[video::region::pointsPerLayer - 1].sample == 299 * 960);
+    const auto& opacities = layers[0].ring (video::Property::opacity);
+    CHECK (opacities.count == video::region::pointsPerLayer);
+    CHECK (opacities.points[0].sample == (300 - static_cast<int> (video::region::pointsPerLayer)) * 960);
+    CHECK (opacities.points[video::region::pointsPerLayer - 1].sample == 299 * 960);
+
+    /*  A RING PER VALUE: three hundred points of a scale fade push out no
+        opacity point - the picture stays where its own last point left it. */
+    sink.show (fill ("RUN00005", "CANVAS01", 0, 11, 0xFFFFFF));
+    sink.opacity ("RUN00005", { 0, 0.75 });
+
+    for (int n = 0; n < 300; ++n)
+        sink.move ("RUN00005", video::Property::scale, { n * 960, 100.0 + n });
+
+    for (const auto& layer : layersOf (r))
+        if (layer.id == "RUN00005")
+        {
+            CHECK (layer.ring (video::Property::opacity).count == 1);
+            CHECK (video::opacityOf (layer, 1000000) == doctest::Approx (0.75));
+            CHECK (video::valueOf (layer, video::Property::scale, 299 * 960, 100.0) == doctest::Approx (399.0));
+        }
 }
 
 TEST_CASE ("video region: the configuration written whole and read back, and text cut to its field")
@@ -490,4 +510,250 @@ TEST_CASE ("video bench: a real window on a real display, its frames counted")
 
     host.sink().remove ("RUN00001", clock.now() + 48000);
     tickUntil (host, clock, [] { return false; }, 1500);
+}
+
+//==============================================================================
+/*  PICTURES AND THEIR GEOMETRY (namespace draft 36): where a picture lies -
+    fitted, scaled, turned, moved, flipped - and what the canvas shows there,
+    worked out by the same function the GPU draws by. */
+namespace
+{
+    /*  A PICTURE OF THE TEST'S OWN, 400 by 200: its left half red, its right
+        half blue, with a green square at its very middle. */
+    struct TwoHalves final : video::PictureSampler
+    {
+        bool sizeOf (const std::string& path, int& width, int& height) const override
+        {
+            if (path != "two-halves.png")
+                return false;
+
+            width = 400;
+            height = 200;
+            return true;
+        }
+
+        bool colourAt (const std::string& path, double u, double v,
+                       double& red, double& green, double& blue, double& alpha) const override
+        {
+            if (path != "two-halves.png")
+                return false;
+
+            red = green = blue = 0.0;
+            alpha = 1.0;
+
+            if (std::abs (u - 0.5) < 0.02 && std::abs (v - 0.5) < 0.04)
+                green = 255.0;
+            else if (u < 0.5)
+                red = 255.0;
+            else
+                blue = 255.0;
+
+            return true;
+        }
+    };
+
+    video::LayerSpec picture (const char* id, std::uint64_t order)
+    {
+        video::LayerSpec spec;
+        spec.id = id;
+        spec.canvas = "C1";
+        spec.order = order;
+        spec.source = "picture";
+        spec.file = "two-halves.png";
+        return spec;
+    }
+}
+
+TEST_CASE ("video geometry: fit, fill and stretch; scale, offset, a clockwise turn and the flips")
+{
+    video::Placement place;
+    place.canvasWidth = 1920.0;
+    place.canvasHeight = 1080.0;
+    place.pictureWidth = 1000.0;
+    place.pictureHeight = 1000.0;
+
+    double halfWidth = 0.0, halfHeight = 0.0;
+
+    /*  FIT: the whole square, its shape kept - as high as the canvas. FILL:
+        the canvas covered - as wide. STRETCH: the canvas exactly (VO). */
+    place.fit = 0;
+    place.halfSize (halfWidth, halfHeight);
+    CHECK (halfWidth == doctest::Approx (540.0));
+    CHECK (halfHeight == doctest::Approx (540.0));
+
+    place.fit = 1;
+    place.halfSize (halfWidth, halfHeight);
+    CHECK (halfWidth == doctest::Approx (960.0));
+    CHECK (halfHeight == doctest::Approx (960.0));
+
+    place.fit = 2;
+    place.halfSize (halfWidth, halfHeight);
+    CHECK (halfWidth == doctest::Approx (960.0));
+    CHECK (halfHeight == doctest::Approx (540.0));
+
+    /*  SCALE in % of the fitted size, OFFSET in % of the canvas, up is up
+        (VQ, VT). */
+    place.fit = 0;
+    place.scale = 50.0;
+    place.offsetX = 25.0;
+    place.offsetY = 10.0;
+
+    double x = 0.0, y = 0.0;
+    place.toCanvas (1.0, 1.0, x, y);
+    CHECK (x == doctest::Approx (270.0 + 480.0));
+    CHECK (y == doctest::Approx (270.0 + 108.0));
+
+    /*  A QUARTER TURN CLOCKWISE takes the picture's top edge to its right. */
+    place.scale = 100.0;
+    place.offsetX = 0.0;
+    place.offsetY = 0.0;
+    place.rotation = 90.0;
+    place.toCanvas (0.0, 1.0, x, y);
+    CHECK (x == doctest::Approx (540.0));
+    CHECK (y == doctest::Approx (0.0).epsilon (1e-9));
+
+    /*  AND BACK: every point of the canvas to the texture, the flips mirroring
+        the texture and not the place. */
+    double u = 0.0, v = 0.0;
+    REQUIRE (place.toTexture (540.0 - 1.0, 0.0, u, v));
+    CHECK (u == doctest::Approx (0.5).epsilon (0.01));
+    CHECK (v > 0.99);
+
+    place.flipV = true;
+    REQUIRE (place.toTexture (540.0 - 1.0, 0.0, u, v));
+    CHECK (v < 0.01);
+
+    CHECK_FALSE (place.toTexture (900.0, 0.0, u, v));
+}
+
+TEST_CASE ("video compositor: a picture sampled where it lies, and a fill scaled to a panel")
+{
+    Memory memory;
+    video::RegionSink sink { *memory.region };
+    const TwoHalves sampler;
+
+    /*  FIT ON A 1920 BY 1080 CANVAS: 400 by 200 becomes 1920 by 960; its
+        middle is green, left of it red, right blue, above it black (bars). */
+    sink.show (picture ("RUN00001", 1));
+    sink.opacity ("RUN00001", { 0, 1.0 });
+
+    auto layers = layersOf (*memory.region);
+    auto stack = video::stackOf (layers, "C1");
+
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 0.0, 0.0, &sampler) == 0x00FF00u);
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, -400.0, 0.0, &sampler) == 0xFF0000u);
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 400.0, 0.0, &sampler) == 0x0000FFu);
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 0.0, 500.0, &sampler) == 0x000000u);
+
+    /*  MOVED A QUARTER OF THE CANVAS LEFT by a fade's points: the middle of
+        the canvas now shows the picture's right half (VS - the value read off
+        its own points). */
+    sink.move ("RUN00001", video::Property::offsetX, { 100, 0.0 });
+    sink.move ("RUN00001", video::Property::offsetX, { 200, -25.0 });
+
+    layers = layersOf (*memory.region);
+    stack = video::stackOf (layers, "C1");
+    CHECK (video::colourAt (stack, 150, 1920.0, 1080.0, 0.0, 0.0, &sampler) == 0x0000FFu);
+    CHECK (video::colourAt (stack, 250, 1920.0, 1080.0, 0.0, 0.0, &sampler) == 0x0000FFu);
+    CHECK (video::colourAt (stack, 50, 1920.0, 1080.0, 0.0, 0.0, &sampler) == 0x00FF00u);
+
+    /*  FLIPPED, the halves trade places. */
+    auto flipped = picture ("RUN00002", 2);
+    flipped.flipH = true;
+    sink.clear();
+    sink.show (flipped);
+    sink.opacity ("RUN00002", { 0, 1.0 });
+
+    layers = layersOf (*memory.region);
+    stack = video::stackOf (layers, "C1");
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, -400.0, 0.0, &sampler) == 0x0000FFu);
+
+    /*  A FILL AT HALF ITS SCALE IS A PANEL (VW): the middle painted, a corner
+        not. A picture not read yet shows nothing. */
+    video::LayerSpec panel;
+    panel.id = "RUN00003";
+    panel.canvas = "C2";
+    panel.order = 3;
+    panel.source = "fill";
+    panel.paint = 0xFFFFFF;
+    panel.scale = 50.0;
+    sink.show (panel);
+    sink.opacity ("RUN00003", { 0, 1.0 });
+
+    layers = layersOf (*memory.region);
+    stack = video::stackOf (layers, "C2");
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 0.0, 0.0, nullptr) == 0xFFFFFFu);
+    CHECK (video::colourAt (stack, 10, 1920.0, 1080.0, 700.0, 400.0, nullptr) == 0x000000u);
+
+    auto unread = picture ("RUN00004", 4);
+    unread.file = "nowhere.png";
+    sink.show (unread);
+    sink.opacity ("RUN00004", { 0, 1.0 });
+    layers = layersOf (*memory.region);
+    /*  The flipped picture under it still shows its middle. */
+    CHECK (video::colourAt (video::stackOf (layers, "C1"), 10, 1920.0, 1080.0, 0.0, 0.0, &sampler) == 0x00FF00u);
+}
+
+TEST_CASE ("video host: a picture read off the disk by a renderer with no window, and shown where its geometry puts it")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-picture-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    /*  A REAL PNG: left half red, right half blue. */
+    const auto png = folder.getChildFile ("halves.png");
+    {
+        juce::Image image (juce::Image::ARGB, 64, 32, true, juce::SoftwareImageType());
+        juce::Graphics g (image);
+        g.fillAll (juce::Colours::red);
+        g.setColour (juce::Colour (0xFF0000FF));
+        g.fillRect (32, 0, 32, 32);
+
+        juce::FileOutputStream out (png);
+        REQUIRE (out.openedOk());
+        REQUIRE (juce::PNGImageFormat().writeImageToStream (image, out));
+    }
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        /*  READ AHEAD, then shown: the middle of the canvas is the picture's
+            middle - and a quarter canvas to the left, its right half. */
+        host.sink().prepare ({ png.getFullPathName().toStdString() });
+
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "picture";
+        layer.file = png.getFullPathName().toStdString();
+        layer.offsetX = -10.0;
+
+        const auto at = clock.now();
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { at, 1.0 });
+
+        std::int64_t seen = -1;
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x0000FFu; }));
+
+        host.sink().move ("RUN00001", video::Property::offsetX, { clock.now(), 10.0 });
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
+    }
+
+    folder.deleteRecursively();
 }

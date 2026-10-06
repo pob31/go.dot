@@ -196,6 +196,34 @@ namespace wfg::audio
         return named;
     }
 
+    std::vector<std::string> pictureFilesNamedBy (const doc::ShowDocument& document)
+    {
+        std::vector<std::string> named;
+        std::set<std::string> seen;
+
+        /*  THE PICTURES A SHOW SHOWS (Phase 8a, namespace draft 36): what a
+            copy carries beside its sounds. Never handed to the analyser - a
+            picture has no waveform. */
+        const std::function<void (const juce::ValueTree&)> visit =
+            [&] (const juce::ValueTree& node)
+        {
+            for (const auto& child : node)
+                visit (child);
+
+            if (node.getType().toString() != "Video")
+                return;
+
+            auto file = node[juce::Identifier ("file")].toString().toStdString();
+
+            if (! file.empty() && seen.insert (file).second)
+                named.push_back (std::move (file));
+        };
+
+        visit (document.root());
+
+        return named;
+    }
+
     std::map<std::string, double> mediaDurations (const doc::ShowDocument& document,
                                                  const std::string& mediaFolder)
     {

@@ -25,14 +25,17 @@
     no sink still creates its runs, moves its standby and writes the same log;
     it just shows nothing.
 
-    WHAT CROSSES IS A LAYER AND ITS OPACITY, placed in time. A video run is one
-    layer on one canvas; the Runner says what it is when it comes up, and then
-    only where its opacity goes: a point is "straight from wherever the last
-    point left it, to this opacity at this sample", and two at one sample are a
-    step - `Player::placeRate`'s shape exactly. The Runner places each point a
-    launch horizon ahead, as it places a launch, so the picture side always
-    knows what the next frames show before it has to show them, and a fade is
-    drawn on the frame it is due and never in fifty steps a second (§35.4).
+    WHAT CROSSES IS A LAYER AND WHAT MOVES ON IT, placed in time. A video run is
+    one layer on one canvas; the Runner says what it is when it comes up - its
+    source, its picture and the geometry it is written with (§36) - and then
+    only where a moving value goes: its opacity, its scale, its offset, its
+    turn. A point is "straight from wherever the last point of this value left
+    it, to here at this sample", and two at one sample are a step -
+    `Player::placeRate`'s shape exactly. The Runner places each point a launch
+    horizon ahead, as it places a launch, so the picture side always knows what
+    the next frames show before it has to show them, and a fade is drawn on the
+    frame it is due and never in fifty steps a second (§35.4). A value with no
+    point stays as the layer was written.
 
     Tick thread, all of it, and never blocking: an implementation writes into
     a region another process reads, or into a vector a test reads.
@@ -40,9 +43,23 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace wfg::video
 {
+    /*  What moves on a layer: the opacity since V.1, and the geometry a fade
+        moves since §36 (VS). The numbers are the region's too. */
+    enum class Property : std::uint32_t
+    {
+        opacity = 0,    ///< 0..1 - the row's % over a hundred
+        scale = 1,      ///< % of the fitted size
+        offsetX = 2,    ///< % of the canvas's width, right positive
+        offsetY = 3,    ///< % of the canvas's height, up positive
+        rotation = 4    ///< degrees, clockwise
+    };
+
+    constexpr int propertyCount = 5;
+
     /*  One layer: what a video run puts on a canvas. A VALUE, carrying no
         document reference, for `ArmRequest`'s reason - it is read on the other
         side of a boundary. */
@@ -58,14 +75,28 @@ namespace wfg::video
             parsed once here so nothing on the far side reads document text
             (VM). */
         std::uint32_t paint = 0x000000;
+
+        /*  A picture's file, as a whole path the engine resolved (VX), and how
+            it meets the canvas (VO). */
+        std::string file;
+        std::string fit = "fit";
+
+        /*  The geometry as the cue is written (§36.3): where each moving value
+            starts, and the flips. */
+        double scale = 100.0;
+        double offsetX = 0.0;
+        double offsetY = 0.0;
+        double rotation = 0.0;
+        bool flipH = false;
+        bool flipV = false;
     };
 
-    /*  Where the opacity is at one sample of Go.dot's own clock. A sample below
+    /*  Where a value is at one sample of Go.dot's own clock. A sample below
         nought is "now": a show with no clock to place it on (§35.4). */
     struct Point
     {
         std::int64_t sample = -1;
-        double opacity = 0.0;
+        double value = 0.0;         ///< whichever property it is
     };
 
     class Sink
@@ -78,8 +109,11 @@ namespace wfg::video
             and then pointed at is never seen for a frame at full. */
         virtual void show (const LayerSpec&) = 0;
 
-        /** From the last point the layer holds, straight to this one. */
-        virtual void opacity (const std::string& id, const Point&) = 0;
+        /** From the last point of this value the layer holds, straight to this one. */
+        virtual void move (const std::string& id, Property, const Point&) = 0;
+
+        /** The opacity's, which every layer has. */
+        void opacity (const std::string& id, const Point& point)  { move (id, Property::opacity, point); }
 
         /*  The layer goes, at a sample - the end of a fade-out, placed with
             its last point, so the picture is gone on the frame it reaches
@@ -90,5 +124,10 @@ namespace wfg::video
             open and black - what Go.dot originates is the picture, not the
             projector. */
         virtual void clear() = 0;
+
+        /*  THE PICTURES TO HAVE READY, as whole paths: the standby's, read
+            before GO so GO only shows them (VX). Replaces the last list. A sink
+            that reads no picture has nothing to do. */
+        virtual void prepare (const std::vector<std::string>&) {}
     };
 }

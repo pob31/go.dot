@@ -113,6 +113,7 @@ add_executable(wfg_tests
     MicTests.cpp
     VideoTests.cpp
     VideoHostTests.cpp
+    MovieTests.cpp
     TakeTests.cpp
     PluginCatalogueTests.cpp
     PluginScanTests.cpp

@@ -66,6 +66,7 @@
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/video/VideoSink.h>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -1513,6 +1514,13 @@ namespace wfg::cue
             Doh!'s for a picture seen (VK). */
         void fadeOutVideo (const std::string& runId, std::int64_t tick, int ticks);
 
+        /*  The standby's pictures, handed to the picture side to read ahead of
+            GO (§36, VX), when they changed. */
+        void prepareStandbyPictures();
+        std::vector<std::string> picturesPrepared;
+        std::vector<std::string> standbysPrepared;
+        std::uint64_t revisionPrepared = 0;
+
         /*  Where a video point lands: Go.dot's sample now, plus a launch
             horizon - the audio clock when there is one, the tick's otherwise
             - and -1 when there is no clock to place it on at all. */
@@ -2232,9 +2240,45 @@ namespace wfg::cue
             int fadeOutTicks = -1;          // asked by Esc, not yet placed
             std::int64_t endsAtTick = -1;   // the fade-out's last tick
             bool removed = false;
+
+            /*  THE GEOMETRY'S POINTS, a vector per value (§36, VS) - the
+                opacity's are `points` above - so a fade starts from where the
+                picture is. */
+            std::array<std::vector<video::Point>, video::propertyCount> moved;
         };
 
         std::vector<VideoJob> showing;
+
+        /*  A FADE CUE MOVING A PICTURE (§36, VS): the values it moves and
+            where to, from where they were when it began, over its ticks and
+            along its curve - a point a tick, a horizon ahead. */
+        struct VideoFade
+        {
+            std::string self;               // the fade cue's run
+            std::string target;             // the video run it moves
+            std::vector<std::pair<video::Property, double>> to;
+            std::array<double, video::propertyCount> from {};
+            std::int64_t startTick = 0;
+            int ticks = 0;
+            bool sCurve = false;
+            bool stopWhenDone = false;
+            bool begun = false;
+            bool done = false;
+        };
+
+        std::vector<VideoFade> videoFades;
+
+        /*  A video run's value of one property at `sample`, as the points the
+            Runner placed say: the cue's own number before any. */
+        double videoValueOf (const VideoJob& job, video::Property property, std::int64_t sample) const noexcept;
+
+        /*  A point placed for a video run, on the job and on the picture side. */
+        void placeVideoPoint (VideoJob& job, video::Property property, const video::Point& point);
+
+        /*  A fade cue aimed at a video cue: true when it was one, and handled. */
+        bool fireVideoFade (const juce::ValueTree& fade, const std::string& runId, std::int64_t tick);
+
+        void advanceVideoFades (Engine& engine, std::int64_t tick);
         std::uint64_t videoOrder = 0;
 
         tree::MountTable* mounts = nullptr;

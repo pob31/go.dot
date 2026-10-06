@@ -187,6 +187,10 @@ namespace wfg::audio
         90's, which is the order an operator will reach them in. */
     std::vector<std::string> mediaFilesNamedBy (const doc::ShowDocument& document);
 
+    /*  And the pictures its video cues name (Phase 8a), under the same media/:
+        what a copy carries beside the sounds, and never what the analyser reads. */
+    std::vector<std::string> pictureFilesNamedBy (const doc::ShowDocument& document);
+
     /*  Every distinct `file` a media cue in this show names, mapped to its
         length in seconds.
 

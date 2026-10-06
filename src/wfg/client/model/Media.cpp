@@ -15,6 +15,7 @@
 */
 
 #include <wfg/client/model/Media.h>
+#include <wfg/client/model/Video.h>
 
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -162,7 +163,10 @@ namespace wfg::client::model
     bool madeByImport (const Import& job, const std::string& kind,
                        const std::string& name, const std::string& file)
     {
-        return kind == "media" && name == job.cueName && file.empty();
+        /*  A PICTURE'S CUE IS A VIDEO CUE (Phase 8a, namespace draft 36): the
+            same three things, with that kind. */
+        const auto wanted = isPictureFile (job.mediaName) ? "video" : "media";
+        return kind == wanted && name == job.cueName && file.empty();
     }
 
     bool outOfPatience (const Import& job, std::int64_t tickNow)

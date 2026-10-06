@@ -508,6 +508,11 @@ canvases and outputs in the document, the Runner's video jobs, the renderer as
 `wfg video-render`, the Video tab and Identify. Waiting for the bench: a fill on
 a projector.
 
+*Status, 2026-10-06, late:* V.2 (pictures) and V.3 (geometry and its fades)
+built (namespace draft §36.5). 8b drawn as §37 - movies, HAP first, a playhead
+with speed and loops - every decision there proposed and waiting for the
+author; its reader (M.1) built.
+
 **Done when:** a scene of fills, masks and pictures runs from the cue list onto
 two outputs, one mapped onto a wall that is not flat, with Esc, double Esc and
 Doh! doing to the picture what they do to the sound.

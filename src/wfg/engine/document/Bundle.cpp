@@ -1813,6 +1813,11 @@ namespace wfg::doc
                             {
                                 job.withMedia = true;
                                 job.named = audio::mediaFilesNamedBy (document);
+
+                                /*  AND THE PICTURES, which live beside the
+                                    sounds under media/ (Phase 8a). */
+                                for (auto& picture : audio::pictureFilesNamedBy (document))
+                                    job.named.push_back (std::move (picture));
                             }
 
                             writer.submit (std::move (job));

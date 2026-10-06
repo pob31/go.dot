@@ -20770,3 +20770,89 @@ Owner `video`, at `/godot/cue/<id>`:
 - **V.4 - The grade**: the four numbers and the four curves, with a curve editor that takes typed
   points.
 - Then masks, blends, the mesh, the outputs' CDL, as §35.6 drew.
+
+### 36.5 What V.2 and V.3 built, against what §36 drew
+
+*Written 2026-10-06, late.* Where the build departs from the drawing, or says more:
+
+- **Every moving value has a ring of its own** in the region (64 points each), not one ring a layer:
+  a fade placing a point a tick on the scale would otherwise push out the opacity's last point, and
+  the picture would drop to nought. The renderer reads each value off its own ring; a value with no
+  point is the cue's written number.
+- **A fill is placed by the same geometry** (VW): scaled down it is a panel, turned it is a turned
+  panel. Blending is premultiplied on the GPU - JUCE holds images premultiplied - which is the CPU
+  reference's `under * (1 - a) + colour * a` exactly.
+- **A fade on a video cue moves only its `video` pairs**: `levelOn` and `level` are not read for a
+  picture. Each pair moves from where the picture is when the fade begins - read off the points the
+  Runner placed - along the fade's curve, straight or S-shaped, a point a tick, a horizon ahead. A
+  fade's own run stopped (Esc, a kill, Doh!) leaves the values where it had taken them.
+  `stopWhenDone` takes the picture away where it arrives and stops its run. The pairs are typed in the
+  inspector's "moves picture" row for now; a fade panel for pictures is owed.
+- **Pictures are read by the renderer on a thread of its own** and held as software images: JUCE 8's
+  own image type on Windows lives on the graphics card (Direct2D), and reading one back from another
+  thread gave transparent black - found by the tests, whose own PNG came out empty that way. A picture
+  is held while a layer shows it or the engine names it at standby.
+- **A dropped picture is a picture cue** on the show's first canvas, its file copied into `media/` as
+  a sound's is; Save as carries pictures beside sounds (`pictureFilesNamedBy`), never through the
+  analyser. "+ video" offers a Picture on each canvas; the inspector's Browse offers pictures for a
+  video cue.
+- **The inspector's words**: "offset right", "offset up", "flip horizontally", "flip vertically",
+  "moves picture" - the implementer's, for the author to keep or change.
+- **Not built**: greying a row a source does not read (a fill's file, a picture's colour); dragging
+  a picture on a canvas view; the grade (V.4).
+
+## 37. Movies: Phase 8b's first part
+
+Written 2026-10-06, late, before any of it is built. The author, going to bed: *"If you're finished
+with this before the morning, you can move on to motion picture files in a stable format as we
+discussed, with the same possibilities as the still pictures and the looping, speed like for sound.
+We will add a DCA for opacity for still and moving images. The DCA can also affect the audio level of
+motion pictures (we might have to adjust the curve of the image vs the audio)."* Everything below that
+is not quoted is the implementer's, built overnight and **waiting for the author's yes**.
+
+### 37.1 What it is, before its names
+
+A **movie** is a picture that moves: a video cue whose source is a file of frames. Everything §36
+gave a picture is a movie's too - fit, scale, offset, turn, flips, opacity, the fades that move them,
+and the grade when it comes - because they are the layer's. What a movie adds is a **playhead**: where
+in the file it is, moving at the cue's **speed** and **looping** as a sound does, presented against
+Go.dot's audio clock (PRD §3.19d) so it cannot slide away from the sound beside it.
+
+### 37.2 Decisions, all proposed
+
+- **VY - HAP first** (PRD §3.19, "HAP family as the primary playback format"): `Hap1` (DXT1, no
+  alpha), `Hap5` (DXT5, alpha) and `HapY` (Hap Q, scaled YCoCg in DXT5), in a QuickTime `.mov`, each
+  frame's chunk uncompressed or Snappy-compressed. The frames go to the graphics card compressed and
+  are drawn from there, which is why HAP is what show software plays: a frame costs a disk read and a
+  copy, not a decode. Hap R (BC7) and Hap Q Alpha wait. The reader is Go.dot's own, written from the
+  published HAP specification - the QuickTime boxes it needs, Snappy's format, the texture formats -
+  with no library added. **The fallbacks PRD §3.19 leaves "to be chosen" stay unchosen.**
+- **VZ - The playhead is a moving value like the others**: `time`, seconds of the file, placed by the
+  Runner a horizon ahead from the run's own clock - the media cue's `RateClock`, the same arithmetic -
+  and read by the renderer at the sample each frame is seen at. A loop's wrap is two points at one
+  sample, a step. So speed, a speed fade, a pause at nought, and a loop all reach the picture without
+  the renderer knowing what any of them is.
+- **WA - Rows as a sound's**: `rate` (0..20, the file's own speed at one; nought holds the frame) and
+  `loops` (how many passes, nought for ever, one by default) and `startOffset`; a fade's `video` pairs
+  gain `rate`. A movie's slices and its in and out points (a media cue's Ranges) come later.
+- **WB - The end**: a movie that has played its passes holds its last frame for one frame and ends -
+  its run ends, its footers run, as a sound's run ends when the file does; `stopWhenDone` is not
+  needed for it.
+- **WC - A movie's sound is not built yet**: a HAP file's audio track is not read. The usual practice
+  - the sound as its own file beside the movie, a media cue in the same group - works today, and
+  stays in step by the shared clock. The author's DCA on a movie's audio level waits for the movie's
+  own sound.
+- **WD - The DCA on opacity is drawn, not built**: the author's "a DCA for opacity for still and moving
+  images", and the curve between a DCA's dB and a picture's opacity the author expects to adjust, want a
+  conversation before a curve is chosen.
+
+### 37.3 Stages
+
+- **M.1 - The reader**: QuickTime boxes to frames, Snappy, the three HAP formats to their textures;
+  a CPU decode of DXT1 and DXT5 for the probe and the tests.
+- **M.2 - The playhead**: `source=movie`, `rate`, `loops`, `startOffset`; the Runner's `time` points
+  from the run's clock; the end.
+- **M.3 - The renderer**: a reading thread a few frames ahead of the playhead, the frames uploaded
+  compressed, drawn by the same quad as a picture; Hap Q's colour turned back in the shader.
+- **M.4 - The window**: a movie dropped on the list is a movie cue; the inspector's rows; a fade's
+  `rate`.

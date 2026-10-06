@@ -35,6 +35,8 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -112,14 +114,167 @@ namespace wfg::video
         };
 
         //==============================================================================
+        /*  THE PICTURES THE RENDERER HAS READ (§36, VX): decoded on a thread of
+            their own - never a window's drawing thread, whose next frame must
+            not wait for a disk - and held while somebody wants them: a layer
+            showing one, or the engine's standby list. A file that will not read
+            is remembered as such, and its layer stays black. */
+        class PictureStore final : private juce::Thread
+        {
+        public:
+            PictureStore() : juce::Thread ("video pictures")  { startThread(); }
+            ~PictureStore() override                            { stopThread (4000); }
+
+            /*  The paths wanted now; any other picture is let go. */
+            void want (const std::set<std::string>& paths)
+            {
+                {
+                    const std::lock_guard<std::mutex> hold (lock);
+                    wanted = paths;
+
+                    for (auto at = held.begin(); at != held.end();)
+                        at = wanted.count (at->first) > 0 ? std::next (at) : held.erase (at);
+                }
+
+                notify();
+            }
+
+            /*  The picture at `path`, or an invalid image while it is being
+                read - and its version, which moves when it is read again. */
+            juce::Image get (const std::string& path, std::uint64_t& version) const
+            {
+                const std::lock_guard<std::mutex> hold (lock);
+                const auto found = held.find (path);
+
+                if (found == held.end())
+                    return {};
+
+                version = found->second.version;
+                return found->second.image;
+            }
+
+        private:
+            struct Held
+            {
+                juce::Image image;
+                std::uint64_t version = 0;
+                bool failed = false;
+            };
+
+            void run() override
+            {
+                while (! threadShouldExit())
+                {
+                    std::string next;
+
+                    {
+                        const std::lock_guard<std::mutex> hold (lock);
+
+                        for (const auto& path : wanted)
+                            if (held.count (path) == 0)
+                            {
+                                next = path;
+                                break;
+                            }
+                    }
+
+                    if (next.empty())
+                    {
+                        wait (100);
+                        continue;
+                    }
+
+                    /*  READ OUTSIDE THE LOCK: a large picture takes a while, and
+                        the windows ask for the others meanwhile. */
+                    auto image = juce::ImageFileFormat::loadFrom (juce::File (juce::String::fromUTF8 (next.c_str())));
+
+                    /*  HELD AS A SOFTWARE IMAGE, in ARGB: JUCE 8's own type on
+                        Windows lives on the GPU (Direct2D), and is read back
+                        from a thread like this one, or a window's drawing
+                        thread, at its peril. */
+                    if (image.isValid())
+                        image = juce::SoftwareImageType().convert (image.convertedToFormat (juce::Image::ARGB));
+
+                    const std::lock_guard<std::mutex> hold (lock);
+
+                    if (wanted.count (next) > 0)
+                        held[next] = Held { image, ++versions, ! image.isValid() };
+                }
+            }
+
+            mutable std::mutex lock;
+            std::set<std::string> wanted;
+            std::map<std::string, Held> held;
+            std::uint64_t versions = 0;
+        };
+
+        /*  THE CPU'S VIEW OF THE STORE (Compositor.h): a picture's size and
+            its colour at one point, nearest pixel, straight colour. */
+        struct StoreSampler final : PictureSampler
+        {
+            explicit StoreSampler (const PictureStore& storeToRead) : store (storeToRead) {}
+
+            bool sizeOf (const std::string& path, int& width, int& height) const override
+            {
+                std::uint64_t version = 0;
+                const auto image = store.get (path, version);
+
+                if (! image.isValid())
+                    return false;
+
+                width = image.getWidth();
+                height = image.getHeight();
+                return true;
+            }
+
+            bool colourAt (const std::string& path, double u, double v,
+                           double& red, double& green, double& blue, double& alpha) const override
+            {
+                std::uint64_t version = 0;
+                const auto image = store.get (path, version);
+
+                if (! image.isValid())
+                    return false;
+
+                /*  (0, 0) is the picture's bottom-left; an image's rows run
+                    down from its top. */
+                const auto x = std::clamp (static_cast<int> (u * image.getWidth()), 0, image.getWidth() - 1);
+                const auto y = std::clamp (static_cast<int> ((1.0 - v) * image.getHeight()), 0, image.getHeight() - 1);
+                const auto colour = image.getPixelAt (x, y);
+
+                red = colour.getRed();
+                green = colour.getGreen();
+                blue = colour.getBlue();
+                alpha = colour.getFloatAlpha();
+                return true;
+            }
+
+            const PictureStore& store;
+        };
+
+        /*  The canvases the configuration holds, by identifier, with their
+            sizes. */
+        const region::CanvasReading* canvasIn (const region::ConfigReading& config, const std::string& id)
+        {
+            for (const auto& canvas : config.canvases)
+                if (canvas.id == id)
+                    return &canvas;
+
+            return nullptr;
+        }
+
+        //==============================================================================
         /*  ONE OUTPUT: a borderless window covering its display, drawn by
-            OpenGL every vsync. */
+            OpenGL every vsync. The canvas fills the window; each layer is a
+            quad placed by the shared geometry (Geometry.h) and blended over
+            what is under it, premultiplied, which is the compositor's
+            `under * (1 - a) + colour * a` (VD). */
         class OutputWindow final : public juce::Component, private juce::OpenGLRenderer
         {
         public:
-            OutputWindow (region::Region& regionToRead, std::string outputIdToShow, int stateSlot,
-                          const DisplayInfo& display)
-                : r (regionToRead), outputId (std::move (outputIdToShow)), slot (stateSlot),
+            OutputWindow (region::Region& regionToRead, const PictureStore& picturesToDraw,
+                          std::string outputIdToShow, int stateSlot, const DisplayInfo& display)
+                : r (regionToRead), pictures (picturesToDraw), outputId (std::move (outputIdToShow)), slot (stateSlot),
                   periodNanos (1.0e9 / std::max (24.0, static_cast<double> (display.refreshHz)))
             {
                 setOpaque (true);
@@ -158,36 +313,118 @@ namespace wfg::video
             {
                 using namespace juce::gl;
 
-                program = std::make_unique<juce::OpenGLShaderProgram> (context);
+                /*  TWO PROGRAMS: a colour, for a fill; a picture, for a picture -
+                    each premultiplied by the layer's opacity. */
+                const auto vertex = juce::OpenGLHelpers::translateVertexShaderToV3 (
+                    "attribute vec2 position;\n"
+                    "attribute vec2 texel;\n"
+                    "varying vec2 at;\n"
+                    "void main() { at = texel; gl_Position = vec4 (position, 0.0, 1.0); }\n");
 
-                const auto ok = program->addVertexShader (juce::OpenGLHelpers::translateVertexShaderToV3 (
-                                    "attribute vec2 position;\n"
-                                    "void main() { gl_Position = vec4 (position, 0.0, 1.0); }\n"))
-                             && program->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
-                                    "uniform vec4 colour;\n"
-                                    "void main() { gl_FragColor = colour; }\n"))
-                             && program->link();
+                fillProgram = std::make_unique<juce::OpenGLShaderProgram> (context);
+                pictureProgram = std::make_unique<juce::OpenGLShaderProgram> (context);
 
-                if (! ok)
+                const auto fillOk = fillProgram->addVertexShader (vertex)
+                                 && fillProgram->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
+                                        "uniform vec4 colour;\n"
+                                        "varying vec2 at;\n"
+                                        "void main() { gl_FragColor = vec4 (colour.rgb * colour.a, colour.a); }\n"))
+                                 && fillProgram->link();
+
+                const auto pictureOk = pictureProgram->addVertexShader (vertex)
+                                    && pictureProgram->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
+                                           "uniform sampler2D picture;\n"
+                                           "uniform float opacity;\n"
+                                           "varying vec2 at;\n"
+                                           "void main() { gl_FragColor = texture2D (picture, at) * opacity; }\n"))
+                                    && pictureProgram->link();
+
+                if (! fillOk || ! pictureOk)
                 {
-                    program.reset();
+                    fillProgram.reset();
+                    pictureProgram.reset();
                     return;
                 }
 
-                colour = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*program, "colour");
-                position = juce::OpenGLShaderProgram::Attribute (*program, "position").attributeID;
-
-                /*  THE WHOLE CANVAS AS TWO TRIANGLES: a fill covers all of it. */
-                const GLfloat corners[] = { -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f };
+                colour = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*fillProgram, "colour");
+                pictureUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*pictureProgram, "picture");
+                opacityUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*pictureProgram, "opacity");
 
                 glGenVertexArrays (1, &vertexArray);
-                glBindVertexArray (vertexArray);
                 glGenBuffers (1, &vertexBuffer);
+                glBindVertexArray (vertexArray);
                 glBindBuffer (GL_ARRAY_BUFFER, vertexBuffer);
-                glBufferData (GL_ARRAY_BUFFER, sizeof (corners), corners, GL_STATIC_DRAW);
-                glEnableVertexAttribArray (position);
-                glVertexAttribPointer (position, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+                glBufferData (GL_ARRAY_BUFFER, sizeof (GLfloat) * 16, nullptr, GL_DYNAMIC_DRAW);
+
+                /*  THE SAME TWO ATTRIBUTES IN BOTH PROGRAMS, bound by the
+                    location each program gave them. */
+                for (auto* program : { fillProgram.get(), pictureProgram.get() })
+                {
+                    const auto position = juce::OpenGLShaderProgram::Attribute (*program, "position").attributeID;
+                    const auto texel = juce::OpenGLShaderProgram::Attribute (*program, "texel").attributeID;
+
+                    glEnableVertexAttribArray (position);
+                    glVertexAttribPointer (position, 2, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 4, nullptr);
+                    glEnableVertexAttribArray (texel);
+                    glVertexAttribPointer (texel, 2, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 4,
+                                           reinterpret_cast<const void*> (sizeof (GLfloat) * 2));
+                }
+
                 glBindVertexArray (0);
+            }
+
+            /*  A LAYER'S QUAD: its four corners on the canvas, as the window's
+                coordinates, with the texture's corners - `uMax` and `vMin`
+                when the texture is larger than the picture it holds. */
+            void drawQuad (const Placement& place, double uMax, double vMin)
+            {
+                using namespace juce::gl;
+
+                GLfloat vertices[16];
+                const double corners[4][2] { { -1.0, -1.0 }, { 1.0, -1.0 }, { -1.0, 1.0 }, { 1.0, 1.0 } };
+
+                for (int n = 0; n < 4; ++n)
+                {
+                    double x = 0.0, y = 0.0;
+                    place.toCanvas (corners[n][0], corners[n][1], x, y);
+
+                    const auto u = (place.flipH ? -corners[n][0] : corners[n][0]) * 0.5 + 0.5;
+                    const auto v = (place.flipV ? -corners[n][1] : corners[n][1]) * 0.5 + 0.5;
+
+                    vertices[n * 4 + 0] = static_cast<GLfloat> (x / (0.5 * place.canvasWidth));
+                    vertices[n * 4 + 1] = static_cast<GLfloat> (y / (0.5 * place.canvasHeight));
+                    vertices[n * 4 + 2] = static_cast<GLfloat> (u * uMax);
+                    vertices[n * 4 + 3] = static_cast<GLfloat> (vMin + v * (1.0 - vMin));
+                }
+
+                glBindBuffer (GL_ARRAY_BUFFER, vertexBuffer);
+                glBufferSubData (GL_ARRAY_BUFFER, 0, sizeof (vertices), vertices);
+                glDrawArrays (GL_TRIANGLE_STRIP, 0, 4);
+            }
+
+            /*  The texture for a picture, made or made again on this window's
+                context when the store has a newer reading. */
+            juce::OpenGLTexture* textureFor (const std::string& path)
+            {
+                std::uint64_t version = 0;
+                const auto image = pictures.get (path, version);
+
+                if (! image.isValid())
+                    return nullptr;
+
+                auto& held = textures[path];
+
+                if (held.texture == nullptr || held.version != version)
+                {
+                    held.texture = std::make_unique<juce::OpenGLTexture>();
+                    held.texture->loadImage (image);
+                    held.version = version;
+                    held.width = image.getWidth();
+                    held.height = image.getHeight();
+                }
+
+                held.used = true;
+                return held.texture.get();
             }
 
             void renderOpenGL() override
@@ -213,48 +450,83 @@ namespace wfg::video
                 region::ConfigReading config;
                 region::readConfig (r, config);
 
-                std::string canvas;
+                std::string canvasId;
                 bool testPattern = false;
 
                 for (const auto& output : config.outputs)
                     if (output.id == outputId)
                     {
-                        canvas = output.canvas;
+                        canvasId = output.canvas;
                         testPattern = output.testPattern;
                     }
 
-                if (program != nullptr && sample >= 0 && ! canvas.empty())
+                const auto* canvas = canvasIn (config, canvasId);
+
+                for (auto& held : textures)
+                    held.second.used = false;
+
+                if (fillProgram != nullptr && sample >= 0 && canvas != nullptr)
                 {
+                    const auto canvasWidth = static_cast<double> (std::max (1, canvas->width));
+                    const auto canvasHeight = static_cast<double> (std::max (1, canvas->height));
                     const auto layers = readLayers (r);
-                    const auto stack = stackOf (layers, canvas);
 
                     glEnable (GL_BLEND);
-                    glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                    program->use();
+                    glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
                     glBindVertexArray (vertexArray);
 
                     /*  THE COMPOSITOR'S ORDER AND ITS BLEND (Compositor.h), on the
                         GPU: bottom first, each laid over what is under it. */
-                    for (const auto* layer : stack)
+                    for (const auto* layer : stackOf (layers, canvasId))
                     {
-                        if (layer->source != region::Source::fill)
-                            continue;
-
                         const auto a = opacityOf (*layer, sample);
 
                         if (! (a > 0.0))
                             continue;
 
-                        colour->set (static_cast<GLfloat> ((layer->paint >> 16) & 0xffu) / 255.0f,
-                                     static_cast<GLfloat> ((layer->paint >> 8) & 0xffu) / 255.0f,
-                                     static_cast<GLfloat> (layer->paint & 0xffu) / 255.0f,
-                                     static_cast<GLfloat> (a));
-                        glDrawArrays (GL_TRIANGLE_STRIP, 0, 4);
+                        if (layer->source == region::Source::fill)
+                        {
+                            fillProgram->use();
+                            colour->set (static_cast<GLfloat> ((layer->paint >> 16) & 0xffu) / 255.0f,
+                                         static_cast<GLfloat> ((layer->paint >> 8) & 0xffu) / 255.0f,
+                                         static_cast<GLfloat> (layer->paint & 0xffu) / 255.0f,
+                                         static_cast<GLfloat> (a));
+                            drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
+                                      1.0, 0.0);
+                        }
+                        else if (layer->source == region::Source::picture)
+                        {
+                            auto* texture = textureFor (layer->file);
+
+                            if (texture == nullptr)
+                                continue;
+
+                            const auto& held = textures[layer->file];
+                            const auto uMax = static_cast<double> (held.width) / std::max (1, texture->getWidth());
+                            const auto vMin = 1.0 - static_cast<double> (held.height) / std::max (1, texture->getHeight());
+
+                            pictureProgram->use();
+                            glActiveTexture (GL_TEXTURE0);
+                            texture->bind();
+                            glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                            glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                            pictureUniform->set (0);
+                            opacityUniform->set (static_cast<GLfloat> (a));
+                            drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                                   static_cast<double> (held.width), static_cast<double> (held.height)),
+                                      uMax, vMin);
+                            texture->unbind();
+                        }
                     }
 
                     glBindVertexArray (0);
                     glDisable (GL_BLEND);
                 }
+
+                /*  A PICTURE NO LAYER DREW THIS FRAME is let go from this
+                    context; the store keeps it while it is wanted. */
+                for (auto at = textures.begin(); at != textures.end();)
+                    at = at->second.used ? std::next (at) : textures.erase (at);
 
                 if (testPattern)
                     drawTestPattern (width, height);
@@ -263,6 +535,8 @@ namespace wfg::video
             void openGLContextClosing() override
             {
                 using namespace juce::gl;
+
+                textures.clear();
 
                 if (vertexBuffer != 0)
                     glDeleteBuffers (1, &vertexBuffer);
@@ -273,7 +547,10 @@ namespace wfg::video
                 vertexBuffer = 0;
                 vertexArray = 0;
                 colour.reset();
-                program.reset();
+                pictureUniform.reset();
+                opacityUniform.reset();
+                fillProgram.reset();
+                pictureProgram.reset();
             }
 
             /*  WHICH PROJECTOR IS WHICH: a white frame round the edge and a
@@ -325,16 +602,27 @@ namespace wfg::video
             }
 
             region::Region& r;
+            const PictureStore& pictures;
             std::string outputId;
             int slot = 0;
             double periodNanos = 1.0e9 / 60.0;
 
             juce::OpenGLContext context;
-            std::unique_ptr<juce::OpenGLShaderProgram> program;
-            std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colour;
-            GLuint position = 0;
+            std::unique_ptr<juce::OpenGLShaderProgram> fillProgram, pictureProgram;
+            std::unique_ptr<juce::OpenGLShaderProgram::Uniform> colour, pictureUniform, opacityUniform;
             GLuint vertexArray = 0;
             GLuint vertexBuffer = 0;
+
+            struct HeldTexture
+            {
+                std::unique_ptr<juce::OpenGLTexture> texture;
+                std::uint64_t version = 0;
+                int width = 0;
+                int height = 0;
+                bool used = false;
+            };
+
+            std::map<std::string, HeldTexture> textures;
 
             ClockReader clock;
             std::int64_t lastFrame = 0;
@@ -351,7 +639,7 @@ namespace wfg::video
         {
         public:
             Session (region::Region& regionToServe, std::int64_t parentPidToWatch, bool windowedToUse)
-                : r (regionToServe), parentPid (parentPidToWatch), windowed (windowedToUse)
+                : r (regionToServe), parentPid (parentPidToWatch), windowed (windowedToUse), sampler (pictures)
             {
                 followDisplays (true);
                 startTimer (10);
@@ -387,8 +675,27 @@ namespace wfg::video
                     bind (config);
                 }
 
+                /*  THE PICTURES WANTED: every layer's, and the standby's the
+                    engine named - read before GO, so GO only shows them (VX). */
+                const auto layers = readLayers (r);
+                auto wanted = std::set<std::string> {};
+
+                for (const auto& layer : layers)
+                    if (layer.source == region::Source::picture && ! layer.file.empty())
+                        wanted.insert (layer.file);
+
+                for (const auto& path : region::readPrepared (r))
+                    if (! path.empty())
+                        wanted.insert (path);
+
+                if (wanted != lastWanted)
+                {
+                    lastWanted = wanted;
+                    pictures.want (wanted);
+                }
+
                 if (! windowed)
-                    probe (config);
+                    probe (config, layers);
             }
 
             /*  THE DISPLAYS, published when they change: at the start, and
@@ -461,7 +768,7 @@ namespace wfg::video
                     region::endWrite (state.seq);
 
                     if (display >= 0)
-                        windows.push_back (std::make_unique<OutputWindow> (r, output.id, static_cast<int> (n),
+                        windows.push_back (std::make_unique<OutputWindow> (r, pictures, output.id, static_cast<int> (n),
                                                                            displays[static_cast<std::size_t> (display)]));
                 }
 
@@ -477,23 +784,30 @@ namespace wfg::video
 
             /*  WITH NO WINDOW, WHAT EACH CANVAS WOULD SHOW, at the middle, now -
                 through the same compositor the windows are held to. */
-            void probe (const region::ConfigReading& config)
+            void probe (const region::ConfigReading& config, const std::vector<region::LayerReading>& layers)
             {
                 const auto now = clock.sampleAt (r, steadyNanos());
 
                 if (now < 0)
                     return;
 
-                const auto layers = readLayers (r);
                 const auto count = std::min<std::size_t> (config.canvases.size(), region::maxCanvases);
 
                 region::beginWrite (r.probeSeq);
 
                 for (std::size_t n = 0; n < count; ++n)
-                    r.probe[n].store (fillsAt (stackOf (layers, config.canvases[n].id), now), std::memory_order_relaxed);
+                {
+                    const auto& canvas = config.canvases[n];
+                    r.probe[n].store (colourAt (stackOf (layers, canvas.id), now,
+                                                static_cast<double> (std::max (1, canvas.width)),
+                                                static_cast<double> (std::max (1, canvas.height)),
+                                                0.0, 0.0, &sampler),
+                                      std::memory_order_relaxed);
+                }
 
                 r.probeSample.store (now, std::memory_order_relaxed);
                 region::endWrite (r.probeSeq);
+
             }
 
             region::Region& r;
@@ -503,6 +817,9 @@ namespace wfg::video
             std::uint32_t boundSeq = 0xffffffffu;
 
             std::vector<DisplayInfo> displays;
+            PictureStore pictures;
+            StoreSampler sampler;
+            std::set<std::string> lastWanted;
             std::vector<std::unique_ptr<OutputWindow>> windows;
             ClockReader clock;
         };

@@ -39,40 +39,55 @@ namespace wfg::video
 {
     /*  `points` in the order they were placed, which is the order of their
         samples: the Runner never places one behind another. A point whose
-        sample is below nought is "now", and counts as the first instant. */
-    template <typename Points>
-    double opacityAt (const Points& points, std::int64_t sample) noexcept
+        sample is below nought is "now", and counts as the first instant.
+
+        BEFORE THE FIRST POINT the value is `before`: nought for an opacity -
+        a layer is not there until it is placed - and the cue's own number for
+        a value that moves only when a fade moves it (§36). `keep` says which
+        points count: every one, or one property's among a layer's. */
+    template <typename Points, typename Keep>
+    double valueAt (const Points& points, std::int64_t sample, double before, Keep keep) noexcept
     {
-        double value = 0.0;
+        double value = before;
         std::int64_t from = -1;
         bool started = false;
 
         for (const auto& point : points)
         {
+            if (! keep (point))
+                continue;
+
             const auto at = std::max<std::int64_t> (point.sample, 0);
 
             if (at > sample)
             {
                 /*  THE SEGMENT WE ARE IN: from the last point reached to this
-                    one, straight. Before any point, nothing is up. */
+                    one, straight. Before any point, `before`. */
                 if (! started)
-                    return 0.0;
+                    return before;
 
                 const auto span = at - from;
 
                 if (span <= 0)
-                    return point.opacity;
+                    return point.value;
 
                 const auto t = static_cast<double> (sample - from) / static_cast<double> (span);
-                return value + (point.opacity - value) * std::clamp (t, 0.0, 1.0);
+                return value + (point.value - value) * std::clamp (t, 0.0, 1.0);
             }
 
-            value = point.opacity;
+            value = point.value;
             from = at;
             started = true;
         }
 
-        return started ? value : 0.0;
+        return started ? value : before;
+    }
+
+    /*  A layer's opacity from points that are all its opacity's. */
+    template <typename Points>
+    double opacityAt (const Points& points, std::int64_t sample) noexcept
+    {
+        return valueAt (points, sample, 0.0, [] (const auto&) { return true; });
     }
 
     /*  The sample of the last point, or -1 with none: where a layer's opacity

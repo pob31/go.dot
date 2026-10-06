@@ -76,4 +76,12 @@ namespace wfg::client::model
         nothing, then every canvas by name with its size. The key is the
         identifier, so a canvas renamed leaves every cue on it where it was. */
     std::vector<std::pair<std::string, std::string>> canvasChoices (const std::vector<CanvasRow>&);
+
+    /*  WHETHER A FILE IS A PICTURE the renderer reads (namespace draft 36): by
+        its extension, the ones JUCE's image readers take - PNG, JPEG, GIF.
+        What makes a dropped file a picture cue rather than a sound. */
+    bool isPictureFile (const std::string& name);
+
+    /*  The wildcard a file chooser offers for a picture. */
+    const char* pictureWildcard();
 }

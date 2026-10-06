@@ -169,11 +169,11 @@ TEST_CASE ("video: a video cue is a cue, then a picture - and nothing of a sound
     CHECK (rig.at (cue + "source") == "fill");
     CHECK (rig.at (cue + "canvas") == "VD000011");
     CHECK (rig.at (cue + "layer") == "0");
-    CHECK (rig.at (cue + "opacity") == "1");
+    CHECK (rig.at (cue + "opacity") == "100");
     CHECK (rig.at (cue + "paint") == "#2040A0");
     CHECK (rig.at (cue + "fadeIn") == "1");
 
-    for (const auto* soundRow : { "level", "file", "directOut", "sends", "eqB1Freq", "input", "strip" })
+    for (const auto* soundRow : { "level", "directOut", "sends", "eqB1Freq", "input", "strip" })
     {
         INFO (soundRow);
         CHECK_FALSE (rig.exists (cue + soundRow));
@@ -190,14 +190,14 @@ TEST_CASE ("video: a video cue is a cue, then a picture - and nothing of a sound
     CHECK (rig.at (made + "kind") == "video");
     CHECK (rig.at (made + "canvas") == "VD000011");
     CHECK (rig.at (made + "paint") == "#000000");
-    CHECK (rig.at (made + "opacity") == "1");
+    CHECK (rig.at (made + "opacity") == "100");
     CHECK (rig.at (made + "fadeIn") == "0");
 
     REQUIRE (rig.applied ("node.set", { text (made + "layer"), osc::Value::int32 (3) }));
-    REQUIRE (rig.applied ("node.set", { text (made + "opacity"), osc::Value::float64 (0.5) }));
+    REQUIRE (rig.applied ("node.set", { text (made + "opacity"), osc::Value::float64 (50.0) }));
     REQUIRE (rig.applied ("node.set", { text (made + "paint"), text ("#FFFFFF") }));
     CHECK (rig.at (made + "layer") == "3");
-    CHECK (rig.at (made + "opacity") == "0.5");
+    CHECK (rig.at (made + "opacity") == "50");
     CHECK (rig.at (made + "paint") == "#FFFFFF");
 
     /*  NOT A SOUND: no destination, no send, no range. A trigger, as every
@@ -321,10 +321,17 @@ namespace
     {
         void show (const video::LayerSpec& spec) override  { shown.push_back (spec); }
 
-        void opacity (const std::string& id, const video::Point& point) override
+        /*  THE OPACITY'S POINTS by layer, and every other value's by layer and
+            property: what a fade of the geometry is checked against. */
+        void move (const std::string& id, video::Property property, const video::Point& point) override
         {
-            points[id].push_back (point);
+            if (property == video::Property::opacity)
+                points[id].push_back (point);
+            else
+                geometry[id][property].push_back (point);
         }
+
+        void prepare (const std::vector<std::string>& paths) override  { prepared = paths; }
 
         void remove (const std::string& id, std::int64_t sample) override
         {
@@ -335,6 +342,8 @@ namespace
 
         std::vector<video::LayerSpec> shown;
         std::map<std::string, std::vector<video::Point>> points;
+        std::map<std::string, std::map<video::Property, std::vector<video::Point>>> geometry;
+        std::vector<std::string> prepared;
         std::vector<std::pair<std::string, std::int64_t>> removed;
         int clears = 0;
     };
@@ -449,8 +458,8 @@ TEST_CASE ("video: GO brings the layer up a horizon ahead over its fade-in, and 
         of the tick that placed it - the horizon with no player. */
     const auto& points = rig.sink.points[run->id];
     REQUIRE (points.size() == 2);
-    CHECK (points[0].opacity == doctest::Approx (0.0));
-    CHECK (points[1].opacity == doctest::Approx (1.0));
+    CHECK (points[0].value == doctest::Approx (0.0));
+    CHECK (points[1].value == doctest::Approx (1.0));
     CHECK (points[1].sample - points[0].sample == 48000);
     CHECK (points[0].sample % 960 == 0);
 
@@ -480,8 +489,8 @@ TEST_CASE ("video: Esc takes the picture down to black over the panic fade, and 
         it gets there. */
     const auto& points = rig.sink.points[runId];
     REQUIRE (points.size() == 4);
-    CHECK (points[2].opacity == doctest::Approx (1.0));
-    CHECK (points[3].opacity == doctest::Approx (0.0));
+    CHECK (points[2].value == doctest::Approx (1.0));
+    CHECK (points[3].value == doctest::Approx (0.0));
     CHECK (points[3].sample - points[2].sample == 48000);
 
     REQUIRE (rig.sink.removed.size() == 1);
@@ -573,7 +582,7 @@ TEST_CASE ("video: Doh! takes a picture seen down as Esc does, and the corrected
 
     const auto& points = rig.sink.points[firstId];
     REQUIRE (points.size() == 4);
-    CHECK (points[3].opacity == doctest::Approx (0.0));
+    CHECK (points[3].value == doctest::Approx (0.0));
     REQUIRE (rig.sink.removed.size() == 1);
     CHECK (rig.sink.removed.front().first == firstId);
 
@@ -589,4 +598,100 @@ TEST_CASE ("video: Doh! takes a picture seen down as Esc does, and the corrected
     REQUIRE (again != nullptr);
     CHECK (again->id != firstId);
     CHECK_FALSE (again->isFinished());
+}
+
+TEST_CASE ("video: a picture cue at standby is named to the renderer to read, and GO shows it with its geometry")
+{
+    VideoRig rig;
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Portrait"),
+                                                osc::Value::string ("VD000040"),
+                                                osc::Value::string ("source"), osc::Value::string ("picture"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("portrait.png"),
+                                                osc::Value::string ("fit"), osc::Value::string ("fill"),
+                                                osc::Value::string ("scale"), osc::Value::string ("80"),
+                                                osc::Value::string ("rotation"), osc::Value::string ("15"),
+                                                osc::Value::string ("flipH"), osc::Value::string ("true"),
+                                                osc::Value::string ("opacity"), osc::Value::string ("50") }).applied >= 1);
+
+    /*  AT STANDBY, READ AHEAD (VX): its whole path handed to the picture side
+        before anybody presses GO. */
+    REQUIRE (rig.submitAndTick ("standby.set", { osc::Value::string ("VD000040") }).applied >= 1);
+    rig.ticks (2);
+
+    REQUIRE (rig.sink.prepared.size() == 1);
+    CHECK (juce::String (rig.sink.prepared.front()).endsWith ("portrait.png"));
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000040") });
+    rig.ticks (3);
+
+    REQUIRE (rig.sink.shown.size() == 1);
+    const auto& spec = rig.sink.shown.front();
+    CHECK (spec.source == "picture");
+    CHECK (juce::String (spec.file).endsWith ("portrait.png"));
+    CHECK (spec.fit == "fill");
+    CHECK (spec.scale == doctest::Approx (80.0));
+    CHECK (spec.rotation == doctest::Approx (15.0));
+    CHECK (spec.flipH);
+    CHECK_FALSE (spec.flipV);
+
+    /*  OPACITY IN % (VR): fifty of them is half. */
+    const auto& points = rig.sink.points[spec.id];
+    REQUIRE_FALSE (points.empty());
+    CHECK (points.back().value == doctest::Approx (0.5));
+}
+
+TEST_CASE ("video: a fade cue moves a picture's opacity, scale, offset and turn, and stops it when told")
+{
+    VideoRig rig;
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (2),
+                                                osc::Value::string ("fade"), osc::Value::string ("Drift"),
+                                                osc::Value::string ("VD000050"),
+                                                osc::Value::string ("target"), osc::Value::string ("VD000002"),
+                                                osc::Value::string ("duration"), osc::Value::string ("1"),
+                                                osc::Value::string ("video"),
+                                                osc::Value::string ("offsetX:10 opacity:50 rotation:90 scale:150") }).applied >= 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (80);
+
+    const auto picture = rig.runOf ("VD000002")->id;
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000050") });
+    rig.ticks (70);
+
+    /*  EACH VALUE FROM WHERE IT WAS TO WHERE THE FADE SAYS, a point a tick:
+        the scale from the cue's 100 % to 150, the opacity from full to half,
+        and the fade's own run ended when it arrived. */
+    const auto& scales = rig.sink.geometry[picture][video::Property::scale];
+    REQUIRE (scales.size() > 40);
+    CHECK (scales.front().value == doctest::Approx (100.0).epsilon (0.03));
+    CHECK (scales.back().value == doctest::Approx (150.0));
+    CHECK (rig.sink.geometry[picture][video::Property::offsetX].back().value == doctest::Approx (10.0));
+    CHECK (rig.sink.geometry[picture][video::Property::rotation].back().value == doctest::Approx (90.0));
+    CHECK (rig.sink.points[picture].back().value == doctest::Approx (0.5));
+
+    for (std::size_t n = 1; n < scales.size(); ++n)
+        CHECK (scales[n].sample >= scales[n - 1].sample);
+
+    CHECK (rig.runOf ("VD000050")->isFinished());
+    CHECK_FALSE (rig.runs.find (picture)->isFinished());
+    CHECK (rig.sink.removed.empty());
+
+    /*  AND A FADE THAT STOPS WHEN DONE takes the picture away where it
+        arrives, and its run ends. */
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000050/stopWhenDone"),
+                                              osc::Value::string ("true") }).applied >= 1);
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000050/video"),
+                                              osc::Value::string ("opacity:0") }).applied >= 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000050") });
+    rig.ticks (70);
+
+    REQUIRE (rig.sink.removed.size() == 1);
+    CHECK (rig.sink.removed.front().first == picture);
+    CHECK (rig.runs.find (picture)->isFinished());
 }

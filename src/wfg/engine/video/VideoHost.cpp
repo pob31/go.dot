@@ -381,7 +381,7 @@ namespace wfg::video
         struct Nowhere final : Sink
         {
             void show (const LayerSpec&) override {}
-            void opacity (const std::string&, const Point&) override {}
+            void move (const std::string&, Property, const Point&) override {}
             void remove (const std::string&, std::int64_t) override {}
             void clear() override {}
         };

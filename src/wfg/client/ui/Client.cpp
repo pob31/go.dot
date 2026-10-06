@@ -48,6 +48,7 @@
 
 #include <wfg/client/Client.h>
 
+#include <wfg/client/model/Video.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/LoadToTime.h>
@@ -1961,9 +1962,28 @@ namespace wfg::client
                 }
 
                 //  Sent in this pass: the model has recorded it as asked.
+                /*  A PICTURE MAKES A PICTURE CUE (namespace draft 36), on the
+                    show's first canvas; a sound a media cue, as ever. */
                 if (steps.create.has_value())
-                    send (gesture::createCue (steps.create->parent, steps.create->index, "media",
-                                              steps.create->cueName));
+                {
+                    if (model::isPictureFile (steps.create->mediaName))
+                    {
+                        const auto canvases = latest != nullptr ? model::readCanvases (*latest)
+                                                                : std::vector<model::CanvasRow> {};
+                        std::vector<std::pair<std::string, std::string>> bornWith { { "source", "picture" } };
+
+                        if (! canvases.empty())
+                            bornWith.push_back ({ "canvas", canvases.front().id });
+
+                        send (gesture::createCue (steps.create->parent, steps.create->index, "video",
+                                                  steps.create->cueName, bornWith));
+                    }
+                    else
+                    {
+                        send (gesture::createCue (steps.create->parent, steps.create->index, "media",
+                                                  steps.create->cueName));
+                    }
+                }
 
                 for (const auto& sentence : steps.said)
                 {
@@ -2255,13 +2275,17 @@ namespace wfg::client
                     return;
 
                 /*  THE SAME READERS THE ENGINE USES, so the chooser cannot
-                    offer a file the show would then fail on. */
+                    offer a file the show would then fail on - and a video
+                    cue's are the renderer's picture readers (Phase 8a). */
                 juce::AudioFormatManager formats;
                 formats.registerBasicFormats();
 
+                const auto picture = latest != nullptr && model::text (*latest, "/godot/cue/" + cueId + "/kind") == "video";
+
                 chooser = std::make_unique<juce::FileChooser> (
-                            "Choose the media this cue plays",
-                            mediaFolder(), formats.getWildcardForAllFormats());
+                            picture ? "Choose the picture this cue shows" : "Choose the media this cue plays",
+                            mediaFolder(), picture ? juce::String (model::pictureWildcard())
+                                                   : formats.getWildcardForAllFormats());
 
                 chooser->launchAsync (juce::FileBrowserComponent::openMode
                                         | juce::FileBrowserComponent::canSelectFiles,

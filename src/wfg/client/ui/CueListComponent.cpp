@@ -16,6 +16,7 @@
 
 #include <wfg/client/ui/CueListComponent.h>
 
+#include <wfg/client/model/Video.h>
 #include <wfg/client/model/Icons.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/NewCueMenus.h>
@@ -1222,7 +1223,8 @@ namespace wfg::client::ui
         formats.registerBasicFormats();
 
         for (const auto& path : files)
-            if (formats.findFormatForFileExtension (juce::File (path).getFileExtension()) != nullptr)
+            if (formats.findFormatForFileExtension (juce::File (path).getFileExtension()) != nullptr
+                  || model::isPictureFile (path.toStdString()))
                 return true;
 
         return false;

@@ -38,6 +38,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace wfg::video
 {
@@ -71,7 +72,16 @@ namespace wfg::video
             slot.order.store (spec.order, std::memory_order_relaxed);
             slot.source.store (static_cast<std::uint32_t> (region::sourceFrom (spec.source)), std::memory_order_relaxed);
             slot.paint.store (spec.paint, std::memory_order_relaxed);
-            slot.pointsWritten.store (0, std::memory_order_relaxed);
+            region::writeText (slot.file, spec.file);
+            slot.fit.store (static_cast<std::uint32_t> (region::fitFrom (spec.fit)), std::memory_order_relaxed);
+            slot.scale.store (spec.scale, std::memory_order_relaxed);
+            slot.offsetX.store (spec.offsetX, std::memory_order_relaxed);
+            slot.offsetY.store (spec.offsetY, std::memory_order_relaxed);
+            slot.rotation.store (spec.rotation, std::memory_order_relaxed);
+            slot.flipH.store (spec.flipH ? 1u : 0u, std::memory_order_relaxed);
+            slot.flipV.store (spec.flipV ? 1u : 0u, std::memory_order_relaxed);
+            for (auto& ring : slot.rings)
+                ring.written.store (0, std::memory_order_relaxed);
             slot.removeAt.store (region::notRemoved, std::memory_order_relaxed);
             region::endWrite (slot.seq);
 
@@ -79,20 +89,20 @@ namespace wfg::video
             removing[static_cast<std::size_t> (at)] = region::notRemoved;
         }
 
-        void opacity (const std::string& id, const Point& point) override
+        void move (const std::string& id, Property property, const Point& point) override
         {
             const auto at = slotOf (id);
 
             if (at < 0)
                 return;
 
-            auto& slot = r.layers[static_cast<std::size_t> (at)];
-            const auto written = slot.pointsWritten.load (std::memory_order_relaxed);
-            auto& into = slot.points[written & (region::pointsPerLayer - 1)];
+            auto& ring = r.layers[static_cast<std::size_t> (at)].rings[static_cast<std::size_t> (property)];
+            const auto written = ring.written.load (std::memory_order_relaxed);
+            auto& into = ring.points[written & (region::pointsPerLayer - 1)];
 
             into.sample.store (point.sample, std::memory_order_relaxed);
-            into.opacity.store (point.opacity, std::memory_order_relaxed);
-            slot.pointsWritten.store (written + 1, std::memory_order_release);
+            into.value.store (point.value, std::memory_order_relaxed);
+            ring.written.store (written + 1, std::memory_order_release);
         }
 
         void remove (const std::string& id, std::int64_t sample) override
@@ -117,6 +127,11 @@ namespace wfg::video
             for (int at = 0; at < region::maxLayers; ++at)
                 if (! ids[static_cast<std::size_t> (at)].empty())
                     letGo (at);
+        }
+
+        void prepare (const std::vector<std::string>& paths) override
+        {
+            region::writePrepared (r, paths);
         }
 
         /*  EVERY SLOT WHOSE REMOVAL THE CLOCK HAS PASSED, by `margin`, freed.

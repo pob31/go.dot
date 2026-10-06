@@ -219,6 +219,27 @@ namespace wfg::client::model
         return out;
     }
 
+    bool isPictureFile (const std::string& name)
+    {
+        const auto dot = name.find_last_of ('.');
+
+        if (dot == std::string::npos)
+            return false;
+
+        auto extension = name.substr (dot + 1);
+
+        for (auto& c : extension)
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char> (c - 'A' + 'a');
+
+        return extension == "png" || extension == "jpg" || extension == "jpeg" || extension == "gif";
+    }
+
+    const char* pictureWildcard()
+    {
+        return "*.png;*.jpg;*.jpeg;*.gif";
+    }
+
     std::vector<std::pair<std::string, std::string>> canvasChoices (const std::vector<CanvasRow>& canvases)
     {
         std::vector<std::pair<std::string, std::string>> choices;

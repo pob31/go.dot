@@ -65,19 +65,26 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 1;
+    constexpr std::uint32_t version = 2;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
     constexpr int textChars = 256;
+    constexpr int pathChars = 1024;
+
+    /** Pictures held ready ahead of GO, at most (VX). */
+    constexpr int maxPrepared = 8;
 
     constexpr int maxCanvases = 16;
     constexpr int maxOutputs = 16;
     constexpr int maxDisplays = 16;
     constexpr int maxLayers = 64;
 
-    /** A layer's opacity points, at most, held at once; a power of two. */
-    constexpr std::uint32_t pointsPerLayer = 128;
+    /*  ONE MOVING VALUE'S POINTS, at most, held at once; a power of two. A
+        ring per value, so a fade placing a point a tick on one never pushes
+        out the last point of another - which would drop that value back to
+        where the cue began. A second and more of a fade's ticks. */
+    constexpr std::uint32_t pointsPerLayer = 64;
 
     /** "Not going": a layer whose removal has not been placed. */
     constexpr std::int64_t notRemoved = std::numeric_limits<std::int64_t>::max();
@@ -89,6 +96,15 @@ namespace wfg::video::region
         if (word == "mask")    return Source::mask;
         if (word == "picture") return Source::picture;
         return Source::fill;
+    }
+
+    enum class Fit : std::uint32_t { fit = 0, fill = 1, stretch = 2 };
+
+    inline Fit fitFrom (std::string_view word) noexcept
+    {
+        if (word == "fill")    return Fit::fill;
+        if (word == "stretch") return Fit::stretch;
+        return Fit::fit;
     }
 
     //==============================================================================
@@ -137,7 +153,15 @@ namespace wfg::video::region
     struct PointSlot
     {
         std::atomic<std::int64_t> sample;
-        std::atomic<double> opacity;
+        std::atomic<double> value;
+    };
+
+    /*  A value's points: appended under no lock, each whole before the count
+        that publishes it. */
+    struct PointRing
+    {
+        std::atomic<std::uint32_t> written;
+        PointSlot points[pointsPerLayer];
     };
 
     /*  ONE VIDEO RUN. What it is - written under `seq` (odd while the engine
@@ -156,8 +180,18 @@ namespace wfg::video::region
         std::atomic<std::uint32_t> source;
         std::atomic<std::uint32_t> paint;
 
-        std::atomic<std::uint32_t> pointsWritten;
-        PointSlot points[pointsPerLayer];
+        /*  A picture's whole path and its fit, and the geometry as the cue is
+            written: where each moving value starts (§36). */
+        char file[pathChars];
+        std::atomic<std::uint32_t> fit;
+        std::atomic<double> scale;
+        std::atomic<double> offsetX;
+        std::atomic<double> offsetY;
+        std::atomic<double> rotation;
+        std::atomic<std::uint32_t> flipH;
+        std::atomic<std::uint32_t> flipV;
+
+        PointRing rings[propertyCount];
         std::atomic<std::int64_t> removeAt;
     };
 
@@ -196,6 +230,12 @@ namespace wfg::video::region
         Clock clock;
         Config config;
         Layer layers[maxLayers];
+
+        /*  Engine to renderer: the pictures to read ahead of GO - the
+            standby's - as whole paths, under `preparedSeq` (VX). */
+        std::atomic<std::uint32_t> preparedSeq;
+        std::atomic<std::uint32_t> preparedCount;
+        char prepared[maxPrepared][pathChars];
 
         //==============================================================================
         /** Renderer to engine: up, its windows made for the outputs it could bind. */
@@ -377,6 +417,16 @@ namespace wfg::video::region
     }
 
     //==============================================================================
+    /*  A VALUE'S POINTS AS THE RENDERER READS THEM, oldest first. */
+    struct RingReading
+    {
+        std::uint32_t count = 0;
+        Point points[pointsPerLayer];
+
+        const Point* begin() const noexcept  { return points; }
+        const Point* end() const noexcept    { return points + count; }
+    };
+
     /*  A LAYER AS THE RENDERER COPIES IT: what it is, its points in the order
         they were placed - the last `pointsPerLayer` of them - and when it goes. */
     struct LayerReading
@@ -387,9 +437,21 @@ namespace wfg::video::region
         std::uint64_t order = 0;
         Source source = Source::fill;
         std::uint32_t paint = 0;
+        std::string file;
+        Fit fit = Fit::fit;
+        double scale = 100.0;
+        double offsetX = 0.0;
+        double offsetY = 0.0;
+        double rotation = 0.0;
+        bool flipH = false;
+        bool flipV = false;
         std::int64_t removeAt = notRemoved;
-        std::uint32_t pointCount = 0;
-        Point points[pointsPerLayer];
+        RingReading rings[propertyCount];
+
+        const RingReading& ring (Property property) const noexcept
+        {
+            return rings[static_cast<std::size_t> (property)];
+        }
     };
 
     /*  False for a free slot, or one the engine was rewriting all the while. */
@@ -410,26 +472,40 @@ namespace wfg::video::region
             out.order = slot.order.load (std::memory_order_relaxed);
             out.source = static_cast<Source> (slot.source.load (std::memory_order_relaxed));
             out.paint = slot.paint.load (std::memory_order_relaxed);
+            out.file = readText (slot.file);
+            out.fit = static_cast<Fit> (slot.fit.load (std::memory_order_relaxed));
+            out.scale = slot.scale.load (std::memory_order_relaxed);
+            out.offsetX = slot.offsetX.load (std::memory_order_relaxed);
+            out.offsetY = slot.offsetY.load (std::memory_order_relaxed);
+            out.rotation = slot.rotation.load (std::memory_order_relaxed);
+            out.flipH = slot.flipH.load (std::memory_order_relaxed) != 0;
+            out.flipV = slot.flipV.load (std::memory_order_relaxed) != 0;
         });
 
         if (! consistent || ! used)
             return false;
 
-        /*  THE POINTS, AFTER WHAT IT IS: appended under no lock, each one
-            whole before the count that publishes it. The last ring's worth,
-            oldest first. */
-        const auto written = slot.pointsWritten.load (std::memory_order_acquire);
-        const auto count = std::min (written, pointsPerLayer);
-        const auto first = written - count;
-
-        for (std::uint32_t n = 0; n < count; ++n)
+        /*  THE POINTS, AFTER WHAT IT IS, a value at a time: each ring's last
+            worth, oldest first. */
+        for (int property = 0; property < propertyCount; ++property)
         {
-            const auto& point = slot.points[(first + n) & (pointsPerLayer - 1)];
-            out.points[n].sample = point.sample.load (std::memory_order_relaxed);
-            out.points[n].opacity = point.opacity.load (std::memory_order_relaxed);
+            const auto& ring = slot.rings[property];
+            auto& into = out.rings[property];
+
+            const auto written = ring.written.load (std::memory_order_acquire);
+            const auto count = std::min (written, pointsPerLayer);
+            const auto first = written - count;
+
+            for (std::uint32_t n = 0; n < count; ++n)
+            {
+                const auto& point = ring.points[(first + n) & (pointsPerLayer - 1)];
+                into.points[n].sample = point.sample.load (std::memory_order_relaxed);
+                into.points[n].value = point.value.load (std::memory_order_relaxed);
+            }
+
+            into.count = count;
         }
 
-        out.pointCount = count;
         out.removeAt = slot.removeAt.load (std::memory_order_acquire);
         return true;
     }
@@ -460,6 +536,35 @@ namespace wfg::video::region
         std::vector<CanvasReading> canvases;
         std::vector<OutputReading> outputs;
     };
+
+    /*  THE PICTURES TO HAVE READY, the engine's side and the renderer's. */
+    inline void writePrepared (Region& r, const std::vector<std::string>& paths) noexcept
+    {
+        beginWrite (r.preparedSeq);
+        const auto count = std::min<std::size_t> (paths.size(), maxPrepared);
+
+        for (std::size_t n = 0; n < count; ++n)
+            writeText (r.prepared[n], paths[n]);
+
+        r.preparedCount.store (static_cast<std::uint32_t> (count), std::memory_order_relaxed);
+        endWrite (r.preparedSeq);
+    }
+
+    inline std::vector<std::string> readPrepared (const Region& r)
+    {
+        std::vector<std::string> out;
+
+        readConsistent (r.preparedSeq, [&]
+        {
+            out.clear();
+            const auto count = std::min<std::uint32_t> (r.preparedCount.load (std::memory_order_relaxed), maxPrepared);
+
+            for (std::uint32_t n = 0; n < count; ++n)
+                out.push_back (readText (r.prepared[n]));
+        });
+
+        return out;
+    }
 
     inline bool readConfig (const Region& r, ConfigReading& out)
     {

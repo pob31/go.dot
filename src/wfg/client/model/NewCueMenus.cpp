@@ -247,9 +247,14 @@ namespace wfg::client::model
         std::vector<Choice> choices;
 
         for (const auto& canvas : readCanvases (snapshot))
+        {
+            choices.push_back ({ "Picture", "a picture file, chosen in the inspector", "video",
+                                 { { "source", "picture" }, { "canvas", canvas.id } },
+                                 "On " + canvas.label(), false, false });
             choices.push_back ({ "Fill", "one colour over the whole canvas, behind", "video",
                                  { { "source", "fill" }, { "canvas", canvas.id } },
                                  "On " + canvas.label(), false, false });
+        }
 
         choices.push_back ({ "Fill, on no canvas yet", "set it in the inspector", "video",
                              { { "source", "fill" } }, {}, false, false });
