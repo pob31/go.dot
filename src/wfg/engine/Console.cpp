@@ -95,6 +95,7 @@
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
 #include <tracktion_engine/tracktion_engine.h>
+#include <spatcore/rt/AudioWorkgroupCoordinator.h>
 
 #include <algorithm>
 #include <clocale>
@@ -114,6 +115,23 @@
 
 namespace
 {
+    //==============================================================================
+    /*  WHERE A WINDOW'S ENGINE LOG GOES: the user's Go.dot/logs folder, named
+        for the show and the second the session began. A window opened beside
+        another passes it as `--log`; since 2026-10-06 the first window keeps
+        one too, so a session the operator lived through leaves a record of it
+        whoever started it (the author's morning of a clock that stopped and
+        went had none). */
+    juce::File sessionLogFor (const juce::File& show)
+    {
+        const auto logs = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                            .getChildFile ("Go.dot").getChildFile ("logs");
+        logs.createDirectory();
+
+        const auto stamp = juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
+        return logs.getChildFile (show.getFileName() + "-" + stamp + ".wfglog");
+    }
+
     //==============================================================================
     /*  THE LENGTHS A LOG'S HEADER RECORDS, read back: `media <name> <bytes>
         <seconds>`, written by `serve` for every file the show references.
@@ -3434,6 +3452,11 @@ namespace
             stops. */
         auto selectedAudio = wfg::audio::audioSettingsOf (document);
         const auto onDevice = args.containsOption ("--device") || (selectedAudio.enabled && ! hosted);
+        /*  THE INTERFACE'S AUDIO WORKGROUP, held for the session and handed to
+            every device driver this session opens and to the tick thread, which
+            joins whatever the running device published (macOS; empty
+            elsewhere; 2026-10-06). Declared before both, so it outlives them. */
+        spatcore::rt::AudioWorkgroupCoordinator workgroups;
         std::unique_ptr<wfg::audio::DeviceAudioDriver> deviceDriver;
         audioState.sendTest = [&deviceDriver] (const wfg::audio::OutputTestSettings& settings)
         { if (deviceDriver) deviceDriver->setOutputTest (settings); };
@@ -3460,6 +3483,7 @@ namespace
             deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
                 engineCacheFolder().getFullPathName().toStdString());
             deviceDriver->host().setProxyServices (proxyServices);
+            deviceDriver->setWorkgroups (&workgroups);
             restartPlugin = [&deviceDriver] (const std::string& id, std::string& problem)
             {
                 if (deviceDriver == nullptr)
@@ -3514,9 +3538,15 @@ namespace
         auto previous = parameters.publish (0, state);
 
         //  --- the log ------------------------------------------------------
+        /*  A WINDOW WITH NO `--log` KEEPS ONE ANYWAY (2026-10-06): the
+            launchers start the first window without one, and that is the
+            session an operator reports from. A headless serve with none still
+            keeps its log in memory, as every driver expects. */
+        const auto windowLog = wantWindow && ! args.containsOption ("--log");
         const auto logPath = args.containsOption ("--log")
                                ? args.getValueForOption ("--log").toStdString()
-                               : std::string();
+                               : windowLog ? sessionLogFor (target).getFullPathName().toStdString()
+                                           : std::string();
 
         /*  THE HEADER THE DOCUMENTS DRAW, which until now was one line.
 
@@ -3568,16 +3598,26 @@ namespace
                                      + " " + juce::String (seconds, 3).toStdString());
         }
 
-        if (! logPath.empty())
+        if (! logPath.empty() && engine.log().open (logPath, headerLines))
         {
-            if (! engine.log().open (logPath, headerLines))
-            {
-                std::cerr << "wfg serve: cannot write the log at " << logPath << std::endl;
-                return 2;
-            }
+            if (windowLog)
+                std::cerr << "wfg: log " << logPath << std::endl;
+        }
+        else if (! logPath.empty() && ! windowLog)
+        {
+            std::cerr << "wfg serve: cannot write the log at " << logPath << std::endl;
+            return 2;
         }
         else
         {
+            /*  A log the window chose and could not write - a full disk, a
+                profile it may not write to - is said and the show goes on: the
+                operator did not ask for it, and a show that will not open for
+                want of its own diary is the worse night. */
+            if (windowLog)
+                std::cerr << "wfg: cannot write the log at " << logPath << "; this session keeps it in memory"
+                          << std::endl;
+
             engine.log().openInMemory (headerLines);
         }
 
@@ -4301,6 +4341,13 @@ namespace
 
         wfg::audio::SessionAudioClock sessionClock (*blockSource);
         wfg::TickThread ticks { engine, sessionClock, *schedule };
+        ticks.setWorkgroups (&workgroups);
+
+        /*  THE INTERFACE'S CALLS, AS MEASURED (2026-10-06): kept by the
+            settings pump's maintenance on the message thread from what the
+            device driver counted, and read into `/godot/engine` by the tick
+            thread below. Since the engine started, in samples. */
+        std::atomic<std::int64_t> audioGapsSeen { 0 }, audioGapMaxSeen { 0 }, audioCallbackMaxSeen { 0 };
 
         /*  Publish then flush, on the tick thread, once per tick, in that
             order. The snapshot has to be the finished answer to the tick that
@@ -4464,6 +4511,11 @@ namespace
 
                                 state.lateness = ticks.lateness();
                                 state.latenessMax = ticks.latenessMax();
+                                state.tickRealtime = ticks.hasElevatedPriority();
+                                state.audioGaps = audioGapsSeen.load (std::memory_order_relaxed);
+                                state.audioGapMax = audioGapMaxSeen.load (std::memory_order_relaxed);
+                                state.audioCallbackMax = audioCallbackMaxSeen.load (std::memory_order_relaxed);
+                                state.logPending = engine.log().pending();
 
                                 /*  THE REFUSAL ITSELF, and not only the count
                                     of them.
@@ -4795,6 +4847,7 @@ namespace
                     deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
                         engineCacheFolder().getFullPathName().toStdString());
                 deviceDriver->host().setProxyServices (proxyServices);
+                deviceDriver->setWorkgroups (&workgroups);
                 if (! shape.problem.empty()) error = shape.problem;
                 else if (! deviceDriver->open (wanted)) error = deviceDriver->lastError();
                 else if (! wfg::TickClock::create (deviceDriver->settings().sampleRate))
@@ -5099,8 +5152,107 @@ namespace
             ticks.setSuspended (false);
             return true;
         };
+        /*  WHAT THE MAINTENANCE BELOW HAS SEEN AND NOT YET NOTED: the worst
+            late tick and the interface's gaps since the last note, held so a
+            burst is one line a second rather than one every 40 ms. The message
+            thread's only. */
+        std::int64_t lateHeld = 0, gapsHeld = 0;
+        double gapLongestHeldMs = 0.0, answerLongestHeldMs = 0.0, notedAt = 0.0;
+
         settingsPump.maintenance = [&]
         {
+            /*  WHAT THE MACHINE DID THAT NOBODY DECIDED, noted in the engine
+                log (2026-10-06, after a morning of a clock that stopped and
+                went with no record of it anywhere): a tick two or more late,
+                an interface that left a gap between its calls for sound, and
+                the device stopping and starting. The first two tell apart a
+                show's clock held up on its own thread - the cursors stall, the
+                sound plays on - from one stopped because the sound stopped.
+
+                THE LOG ONLY, NEVER STDERR. A pipe nobody reads fills, and a
+                write to a full one waits for ever - on this thread, which
+                Tracktion needs to start a sound: the black-box drivers read a
+                server's stderr only when they stop it, and a Debug build late
+                every few ticks stopped its runs dead within seconds. The log's
+                writer never makes its caller wait. */
+            {
+                const auto rate = std::max (1, ticks.sampleRate());
+                const auto ms = [] (double value) { return juce::String (value, 1).toStdString(); };
+                const auto say = [&engine] (const std::string& text) { engine.log().note (text); };
+                const auto atTick = [&ticks] { return ", by tick " + std::to_string (ticks.lastTick()); };
+
+                lateHeld = std::max (lateHeld, ticks.takeWorstLateness());
+
+                if (deviceDriver)
+                {
+                    const auto timing = deviceDriver->takeCallbackTiming();
+                    const auto samplesOf = [rate] (double milliseconds)
+                    {
+                        return static_cast<std::int64_t> (std::llround (milliseconds * rate / 1000.0));
+                    };
+
+                    if (const auto answer = samplesOf (timing.longestCallbackMs);
+                        answer > audioCallbackMaxSeen.load (std::memory_order_relaxed))
+                        audioCallbackMaxSeen.store (answer, std::memory_order_relaxed);
+
+                    if (timing.gaps > 0)
+                    {
+                        /*  The longest answer in the same 40 ms as the gap: what
+                            says whether Go.dot held the interface up. */
+                        answerLongestHeldMs = std::max (answerLongestHeldMs, timing.longestCallbackMs);
+                        audioGapsSeen.fetch_add (timing.gaps, std::memory_order_relaxed);
+
+                        if (const auto gap = samplesOf (timing.longestGapMs);
+                            gap > audioGapMaxSeen.load (std::memory_order_relaxed))
+                            audioGapMaxSeen.store (gap, std::memory_order_relaxed);
+
+                        gapsHeld += timing.gaps;
+                        gapLongestHeldMs = std::max (gapLongestHeldMs, timing.longestGapMs);
+                    }
+
+                    /*  THE DEVICE STOPPED OR STARTED, whoever did it - its
+                        driver's own reset, an outage's reopen, an Apply - with
+                        the rate and block it came back at; rare, so said when
+                        seen. The session's first start is noted too, which
+                        dates the log's clock. */
+                    if (timing.stops > 0 || timing.errors > 0)
+                        say ("audio interface stopped" + std::string (timing.errors > 0 ? " with an error" : "")
+                             + (timing.stops + timing.errors > 1
+                                  ? " (" + std::to_string (timing.stops + timing.errors) + " times)" : std::string())
+                             + atTick());
+
+                    if (timing.starts > 0)
+                        say ("audio interface started at " + std::to_string (deviceDriver->settings().sampleRate)
+                             + " Hz, " + std::to_string (deviceDriver->settings().blockSize) + " samples"
+                             + (timing.starts > 1 ? " (" + std::to_string (timing.starts) + " times)" : std::string())
+                             + atTick());
+                }
+
+                const auto now = juce::Time::getMillisecondCounterHiRes();
+                const auto lateEnough = lateHeld >= 2 * ticks.samplesPerTick();
+
+                if ((lateEnough || gapsHeld > 0) && now - notedAt >= 1000.0)
+                {
+                    notedAt = now;
+
+                    if (lateEnough)
+                        say ("tick thread up to " + ms (1000.0 * static_cast<double> (lateHeld) / rate) + " ms late"
+                             + atTick());
+
+                    if (gapsHeld > 0)
+                        say ("audio interface quiet for up to " + ms (gapLongestHeldMs) + " ms"
+                             + (gapsHeld > 1 ? " (" + std::to_string (gapsHeld) + " gaps)" : std::string())
+                             + "; Go.dot's longest answer " + ms (answerLongestHeldMs) + " ms against a block of "
+                             + ms (deviceDriver ? 1000.0 * deviceDriver->settings().blockSize / rate : 0.0) + " ms"
+                             + atTick());
+
+                    lateHeld = 0;
+                    gapsHeld = 0;
+                    gapLongestHeldMs = 0.0;
+                    answerLongestHeldMs = 0.0;
+                }
+            }
+
             if (! deviceDriver) return;
             if (reconnectRequested.exchange (false)) deviceDriver->reconnect();
             const auto recovery = deviceDriver->serviceRecovery();
@@ -5262,12 +5414,7 @@ namespace
                 if (httpPort <= 0 || oscPort <= 0)
                     return std::string ("could not find free ports for another window");
 
-                const auto logs = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                                    .getChildFile ("Go.dot").getChildFile ("logs");
-                logs.createDirectory();
-
-                const auto stamp = juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
-                const auto log = logs.getChildFile (folder.getFileName() + "-" + stamp + ".wfglog");
+                const auto log = sessionLogFor (folder);
 
                 juce::StringArray command;
                 command.add (juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName());

@@ -62,6 +62,11 @@ namespace juce
     class AudioIODeviceType;
 }
 
+namespace spatcore::rt
+{
+    class AudioWorkgroupCoordinator;
+}
+
 namespace wfg::audio
 {
     /*  One thing this machine could play through.
@@ -212,6 +217,36 @@ namespace wfg::audio
         /*  The sample at which the device's clock took over, for the tick
             clock's rebase. Zero before the first callback. */
         std::int64_t switchSample() const noexcept;
+
+        /*  THE INTERFACE'S AUDIO WORKGROUP (macOS; 2026-10-06), published into
+            `coordinator` each time the device starts and emptied when it stops,
+            so the tick thread joins the workgroup of the device that is
+            actually running (TickThread::setWorkgroups). Elsewhere the handle
+            is empty. Message thread, before `open`; the coordinator must
+            outlive this driver. */
+        void setWorkgroups (spatcore::rt::AudioWorkgroupCoordinator* coordinator) noexcept;
+
+        /*  HOW STEADILY THE INTERFACE ASKED FOR SOUND, since the last time
+            this was asked (2026-10-06). Go.dot's clock is counted from the
+            interface's calls, so a call that comes late is silence AND a clock
+            standing still - what a frozen cursor over a quiet room is. A gap is
+            an interval between two calls longer than three blocks and at least
+            10 ms. `longestCallbackMs` is the longest Go.dot took to answer one
+            call: beside a gap, it says whether the interface went quiet or
+            Go.dot kept it waiting. And how many times the device stopped,
+            failed and started again: a driver's own reset - JUCE answers an
+            ASIO resync request by closing the device and opening it again -
+            is a second of silence that is otherwise seen only as one.
+            Message thread. */
+        struct CallbackTiming
+        {
+            std::int64_t gaps = 0;
+            double longestGapMs = 0.0;
+            double longestCallbackMs = 0.0;
+            std::int64_t stops = 0, errors = 0, starts = 0;
+        };
+
+        CallbackTiming takeCallbackTiming() noexcept;
 
     private:
         struct Impl;

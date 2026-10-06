@@ -21,6 +21,7 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <spatcore/io/DeviceHost.h>
+#include <spatcore/rt/AudioWorkgroupCoordinator.h>
 
 #include <algorithm>
 #include <atomic>
@@ -157,7 +158,48 @@ namespace wfg::audio
             recovery.started (! sameInterface (*device) ? Verdict::foreign
                               : sameClock (*device)     ? Verdict::same
                                                         : Verdict::moved);
+
+            /*  A NEW START IS NOT A GAP: the interval from the last call of the
+                device that stopped to the first of this one is the reopen, not
+                the interface going quiet. Three blocks or 10 ms, whichever is
+                longer, is the most the next call may be late by before it
+                counts - a block late is a click, and the gaps worth a note are
+                the ones an operator hears as silence. */
+            lastCallbackAt.store (0, std::memory_order_relaxed);
+            starts.fetch_add (1, std::memory_order_relaxed);
+            const auto blockSeconds = device->getCurrentBufferSizeSamples()
+                                    / std::max (1.0, device->getCurrentSampleRate());
+            gapThreshold.store (juce::Time::secondsToHighResolutionTicks (std::max (0.010, 3.0 * blockSeconds)),
+                                std::memory_order_relaxed);
+
+            if (workgroups != nullptr)
+                workgroups->set (device->getWorkgroup());
         }
+
+        /*  The audio thread's: a value raised, never lowered, against a reader
+            that takes it back to nought. */
+        static void raiseTo (std::atomic<std::int64_t>& held, std::int64_t value) noexcept
+        {
+            auto seen = held.load (std::memory_order_relaxed);
+
+            while (value > seen && ! held.compare_exchange_weak (seen, value, std::memory_order_relaxed))
+            {
+            }
+        }
+
+        /*  How long this callback took, kept on every way out of it. A counter
+            read - QueryPerformanceCounter, mach_absolute_time, a vDSO
+            clock_gettime - at either end: no lock, no allocation. */
+        struct Answering
+        {
+            Impl& owner;
+            std::int64_t enteredAt;
+
+            ~Answering()
+            {
+                raiseTo (owner.callbackLongest, juce::Time::getHighResolutionTicks() - enteredAt);
+            }
+        };
 
         /*  THE SAME INTERFACE is its driver type and its name, and nothing
             more (decision DH): a Dante or MADI interface at double speed
@@ -181,8 +223,24 @@ namespace wfg::audio
                 && device.getActiveOutputChannels() == pinnedSetup.outputChannels;
         }
 
-        void audioDeviceStopped() override { recovery.stopped(); }
-        void audioDeviceError (const juce::String&) override { recovery.stopped(); }
+        void audioDeviceStopped() override
+        {
+            recovery.stopped();
+            stops.fetch_add (1, std::memory_order_relaxed);
+
+            /*  Left, so the tick thread is not kept in the workgroup of a
+                device that has gone. Not in audioDeviceError, which a driver
+                may call from its own audio thread: a stale workgroup is
+                harmless, a lock there is not. */
+            if (workgroups != nullptr)
+                workgroups->set ({});
+        }
+
+        void audioDeviceError (const juce::String&) override
+        {
+            recovery.stopped();
+            errors.fetch_add (1, std::memory_order_relaxed);
+        }
 
         void audioDeviceIOCallbackWithContext (const float* const* inputChannelData, int numInputChannels,
                                                float* const* outputChannelData,
@@ -194,6 +252,15 @@ namespace wfg::audio
                 block the graph did not fill, and a device buffer that is not
                 written is whatever was in it last time - which on a PA is a
                 loop of the last 3 ms, at full level, for as long as it lasts. */
+            const Answering answering { *this, juce::Time::getHighResolutionTicks() };
+
+            if (const auto previous = lastCallbackAt.exchange (answering.enteredAt, std::memory_order_relaxed);
+                previous != 0 && answering.enteredAt - previous > gapThreshold.load (std::memory_order_relaxed))
+            {
+                gaps.fetch_add (1, std::memory_order_relaxed);
+                raiseTo (gapLongest, answering.enteredAt - previous);
+            }
+
             for (int channel = 0; channel < numOutputChannels; ++channel)
                 if (outputChannelData[channel] != nullptr)
                     juce::FloatVectorOperations::clear (outputChannelData[channel], numSamples);
@@ -265,6 +332,16 @@ namespace wfg::audio
         std::atomic<std::int64_t> delivered { 0 };
         std::atomic<std::int64_t> switchAt { 0 };
         std::atomic<std::int64_t> mismatches { 0 };
+
+        /*  The calls' timing (2026-10-06), in high-resolution ticks: when the
+            last call came (nought when none has since a start), how late one
+            may be before it is a gap, and what `takeCallbackTiming` takes
+            back to nought - the gaps, the longest, the longest answer. */
+        std::atomic<std::int64_t> lastCallbackAt { 0 }, gapThreshold { 0 };
+        std::atomic<std::int64_t> gaps { 0 }, gapLongest { 0 }, callbackLongest { 0 };
+        std::atomic<std::int64_t> stops { 0 }, errors { 0 }, starts { 0 };
+        spatcore::rt::AudioWorkgroupCoordinator* workgroups = nullptr;
+
         bool running = false;
         RecoveryGate recovery;
         juce::AudioDeviceManager::AudioDeviceSetup pinnedSetup;
@@ -370,7 +447,35 @@ namespace wfg::audio
     {
     }
 
-    DeviceAudioDriver::~DeviceAudioDriver() = default;
+    DeviceAudioDriver::~DeviceAudioDriver()
+    {
+        /*  Whatever this driver published goes with it: the tick thread leaves
+            the workgroup at its next turn rather than staying in it. */
+        if (impl->workgroups != nullptr)
+            impl->workgroups->set ({});
+    }
+
+    void DeviceAudioDriver::setWorkgroups (spatcore::rt::AudioWorkgroupCoordinator* coordinator) noexcept
+    {
+        impl->workgroups = coordinator;
+    }
+
+    DeviceAudioDriver::CallbackTiming DeviceAudioDriver::takeCallbackTiming() noexcept
+    {
+        const auto ms = [] (std::int64_t ticks)
+        {
+            return 1000.0 * juce::Time::highResolutionTicksToSeconds (ticks);
+        };
+
+        CallbackTiming timing;
+        timing.gaps = impl->gaps.exchange (0, std::memory_order_relaxed);
+        timing.longestGapMs = ms (impl->gapLongest.exchange (0, std::memory_order_relaxed));
+        timing.longestCallbackMs = ms (impl->callbackLongest.exchange (0, std::memory_order_relaxed));
+        timing.stops = impl->stops.exchange (0, std::memory_order_relaxed);
+        timing.errors = impl->errors.exchange (0, std::memory_order_relaxed);
+        timing.starts = impl->starts.exchange (0, std::memory_order_relaxed);
+        return timing;
+    }
 
     bool DeviceAudioDriver::open (const Request& request)
     {

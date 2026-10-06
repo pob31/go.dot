@@ -64,6 +64,11 @@
 #include <mutex>
 #include <thread>
 
+namespace spatcore::rt
+{
+    class AudioWorkgroupCoordinator;
+}
+
 namespace wfg
 {
     class Engine;
@@ -100,18 +105,27 @@ namespace wfg
                                std::int64_t samplesNow) noexcept;
 
     //==============================================================================
-    /*  Raises the calling thread towards real-time scheduling.
+    /*  Raises the calling thread towards real-time scheduling, ABOVE THE WINDOW
+        AND BELOW THE SOUND (2026-10-06, the author: "raise the thread priority
+        on all OSes"). Until then this did nothing, and the show's clock ran at
+        the priority of every background task on the machine.
 
-        PHASE 1 DOES NOTHING AND RETURNS FALSE, which is the honest answer
-        rather than a convenient one. spatcore's rt/RtThreadPriority.h has the
-        real thing - MMCSS "Pro Audio" through a runtime-loaded avrt on Windows,
-        a mach time-constraint policy on macOS, SCHED_FIFO on Linux - and it
-        arrives with PR 1.D, which pins spatcore as a submodule.
+        - Windows: THREAD_PRIORITY_TIME_CRITICAL, the top of the ordinary
+          range - JUCE's own "realtime" on Windows. Not MMCSS "Pro Audio",
+          which spatcore gives an audio thread: that class sits at 23 to 26,
+          above an ASIO driver's TIME_CRITICAL callback, and a tick at work
+          could then hold the one thread that makes the sound off a core.
+        - macOS: the mach time-constraint policy, a 20 ms period with a 5 ms
+          budget (spatcore's rt/RtThreadPriority.h); the thread also joins the
+          interface's audio workgroup, see TickThread::setWorkgroups.
+        - Linux: SCHED_FIFO at the middle of its range (spatcore), under the
+          priorities JACK and PipeWire give their audio threads. A user without
+          real-time rights gets false and an unchanged thread.
 
-        A shim that returned true would be worse than no shim at all: the tick
-        thread would report a scheduling guarantee it does not have, and the
-        first person to investigate a late show would rule out the right cause
-        on the strength of it. */
+        TRUE ONLY FOR WHAT TOOK EFFECT. A shim that reported a guarantee it did
+        not have would let the first person investigating a late show rule out
+        the right cause on the strength of it - which is why Phase 1's stub
+        returned false rather than pretending. */
     bool elevateCurrentThreadForTicking() noexcept;
 
     //==============================================================================
@@ -167,6 +181,24 @@ namespace wfg
 
         void setAfterTick (AfterTick hook) { afterTick = std::move (hook); }
 
+        /*  THE INTERFACE'S AUDIO WORKGROUP, for macOS (2026-10-06, the
+            author: "use workgroups on macOS"). The device layer publishes the
+            open interface's workgroup into the coordinator whenever the device
+            starts or stops; this thread joins it at the top of its loop when it
+            changed - one atomic load otherwise - so a device reopened while the
+            thread runs (an outage, PRD §6.2) is followed rather than left on a
+            workgroup that has gone. Joining tells the scheduler the tick is part
+            of the work that keeps the sound on time, which on Apple silicon is
+            what keeps it on a performance core beside the IO thread.
+
+            Elsewhere the handle is empty and joining does nothing. Set before
+            start() and never while running, like the hooks above; the
+            coordinator must outlive the thread. Null means no workgroup. */
+        void setWorkgroups (spatcore::rt::AudioWorkgroupCoordinator* coordinator) noexcept
+        {
+            workgroups = coordinator;
+        }
+
         /** Starts at tick 0 and works forwards. Calling it twice does nothing
             the second time. */
         void start();
@@ -217,11 +249,19 @@ namespace wfg
             return maxLateness.load (std::memory_order_relaxed);
         }
 
+        /*  The worst since the last time this was asked, and nought again: a
+            stall noticed once, when it happened, rather than a maximum that
+            stops moving after the first (2026-10-06, the engine log's notes). */
+        std::int64_t takeWorstLateness() noexcept
+        {
+            return worstSince.exchange (0, std::memory_order_relaxed);
+        }
+
         int sampleRate() const noexcept     { return schedule.sampleRate(); }
         int samplesPerTick() const noexcept { return schedule.samplesPerTick(); }
 
-        /** What elevateCurrentThreadForTicking() actually managed. False in
-            Phase 1; see the comment on that function. */
+        /** What elevateCurrentThreadForTicking() actually managed on this
+            thread; see the comment on that function. */
         bool hasElevatedPriority() const noexcept
         {
             return elevated.load (std::memory_order_relaxed);
@@ -230,6 +270,7 @@ namespace wfg
     private:
         BeforeTick beforeTick;
         AfterTick afterTick;
+        spatcore::rt::AudioWorkgroupCoordinator* workgroups = nullptr;
 
         void run();
 
@@ -248,5 +289,6 @@ namespace wfg
         std::atomic<std::int64_t> processed { -1 };
         std::atomic<std::int64_t> lastLateness { 0 };
         std::atomic<std::int64_t> maxLateness { 0 };
+        std::atomic<std::int64_t> worstSince { 0 };
     };
 }

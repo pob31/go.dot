@@ -16,6 +16,9 @@
 
 #include <wfg/engine/log/EventLog.h>
 
+#include <juce_core/juce_core.h>
+
+#include <atomic>
 #include <charconv>
 #include <sstream>
 
@@ -205,6 +208,132 @@ namespace wfg
     }
 
     //==============================================================================
+    /*  THE LOW-PRIORITY WRITER (2026-10-06). Lines come in from any thread on
+        a lock-free queue - Dmitry Vyukov's intrusive multi-producer list: a
+        push is one exchange and one store, so neither the real-time tick
+        thread nor the message thread ever waits on this one, and a writer
+        starved by a busy machine cannot hold either of them. One thread takes
+        them off, writes them in order and flushes once a batch. */
+    class EventLog::Writer final : private juce::Thread
+    {
+    public:
+        explicit Writer (std::unique_ptr<std::ofstream> streamToUse)
+            : juce::Thread ("wfg log writer"), stream (std::move (streamToUse)),
+              head (new Node()), tail (head.load())
+        {
+        }
+
+        ~Writer() override
+        {
+            finish();
+
+            while (tail != nullptr)
+            {
+                auto* next = tail->next.load (std::memory_order_acquire);
+                delete tail;
+                tail = next;
+            }
+        }
+
+        bool start()    { return startThread (juce::Thread::Priority::low); }
+
+        /** Any thread. */
+        void push (std::string line)
+        {
+            auto* node = new Node();
+            node->line = std::move (line);
+
+            /*  Counted before it is visible, so `pending` can say one too many
+                for an instant and never one too few. */
+            queued.fetch_add (1, std::memory_order_relaxed);
+
+            auto* previous = head.exchange (node, std::memory_order_acq_rel);
+            previous->next.store (node, std::memory_order_release);
+            wake.signal();
+        }
+
+        std::int64_t pending() const noexcept
+        {
+            return queued.load (std::memory_order_relaxed) - written.load (std::memory_order_acquire);
+        }
+
+        /** The closing thread: what is queued goes down, then the file closes. */
+        void finish()
+        {
+            if (isThreadRunning())
+            {
+                signalThreadShouldExit();
+                wake.signal();
+                stopThread (-1);    // a drain, never a kill: a log cut mid-line is worse
+            }
+
+            drain();
+            stream.reset();
+        }
+
+    private:
+        struct Node
+        {
+            std::string line;
+            std::atomic<Node*> next { nullptr };
+        };
+
+        void run() override
+        {
+            while (! threadShouldExit())
+            {
+                wake.wait (250);
+                drain();
+            }
+
+            drain();
+        }
+
+        /** The writer thread, or the closing one once that has stopped. */
+        void drain()
+        {
+            if (stream == nullptr)
+                return;
+
+            std::int64_t count = 0;
+
+            for (auto* next = tail->next.load (std::memory_order_acquire); next != nullptr;
+                 next = tail->next.load (std::memory_order_acquire))
+            {
+                *stream << next->line << '\n';
+                next->line.clear();
+                delete tail;
+                tail = next;
+                ++count;
+            }
+
+            if (count > 0)
+            {
+                stream->flush();
+                written.fetch_add (count, std::memory_order_release);
+            }
+        }
+
+        std::unique_ptr<std::ofstream> stream;
+        juce::WaitableEvent wake;
+        std::atomic<Node*> head;
+        Node* tail;
+        std::atomic<std::int64_t> queued { 0 }, written { 0 };
+    };
+
+    //==============================================================================
+    EventLog::EventLog() = default;
+
+    EventLog::~EventLog()
+    {
+        close();
+    }
+
+    bool EventLog::isOpen() const noexcept
+    {
+        return writer != nullptr || inMemory;
+    }
+
     bool EventLog::open (const std::string& path, const std::vector<std::string>& headerLines)
     {
         close();
@@ -217,8 +346,15 @@ namespace wfg
         if (! stream->is_open())
             return false;
 
-        file = std::move (stream);
+        writer = std::make_unique<Writer> (std::move (stream));
         writeHeader (headerLines);
+
+        if (! writer->start())
+        {
+            writer.reset();
+            return false;
+        }
+
         return true;
     }
 
@@ -238,15 +374,11 @@ namespace wfg
             writeLine ("# " + h);
     }
 
-    void EventLog::writeLine (const std::string& line)
+    void EventLog::writeLine (std::string line)
     {
-        if (file != nullptr)
+        if (writer != nullptr)
         {
-            /*  Flushed after every line: a log whose last seconds are missing
-                after a crash is precisely the log nobody needed. One fflush per
-                event, at control rate, nowhere near the audio path. */
-            *file << line << '\n';
-            file->flush();
+            writer->push (std::move (line));
         }
         else if (inMemory)
         {
@@ -260,9 +392,25 @@ namespace wfg
         writeLine (record.toLine());
     }
 
+    void EventLog::note (const std::string& text)
+    {
+        if (writer != nullptr)
+            writer->push ("# note " + text);
+    }
+
+    std::int64_t EventLog::pending() const noexcept
+    {
+        return writer != nullptr ? writer->pending() : 0;
+    }
+
     void EventLog::close()
     {
-        file.reset();
+        if (writer != nullptr)
+        {
+            writer->finish();
+            writer.reset();
+        }
+
         inMemory = false;
     }
 

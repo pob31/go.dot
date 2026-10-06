@@ -100,6 +100,14 @@ namespace wfg::tree
         std::int64_t lateness = 0;
         std::int64_t latenessMax = 0;
 
+        /*  WHAT KEEPS THE SOUND AND THE CLOCK STEADY, measured (2026-10-06):
+            whether the tick thread got real-time priority, the interface's
+            gaps between calls for sound and the longest Go.dot took to answer
+            one (both in samples), and the engine log's lines not yet on disk. */
+        bool tickRealtime = false;
+        std::int64_t audioGaps = 0, audioGapMax = 0, audioCallbackMax = 0;
+        std::int64_t logPending = 0;
+
         /** `dummy` in Phase 1, `hosted` or `device` from Phase 2. */
         std::string clock = "dummy";
 

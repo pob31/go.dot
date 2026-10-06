@@ -29,7 +29,10 @@
 
 #include <wfg/engine/log/EventLog.h>
 
+#include <juce_core/juce_core.h>
+
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace wfg;
@@ -225,4 +228,65 @@ TEST_CASE ("event log: the writer emits its format header and one line per recor
     // No stray carriage returns, on any platform: a fixture that differs
     // between Windows and Linux is not a fixture.
     CHECK (log.contents().find ('\r') == std::string::npos);
+}
+
+//==============================================================================
+TEST_CASE ("event log: a file is written by its own thread, whole and in order, notes between")
+{
+    /*  2026-10-06: the tick thread runs at real-time priority, and the file is
+        put down by a low-priority writer instead. What it writes must be what
+        the synchronous writer wrote - every record, in order, nothing half - with
+        the remarks of another thread between them as `# note` lines a replay
+        reads as header and ignores; and once closed, nothing is still pending. */
+    juce::TemporaryFile temporary (".wfglog");
+    const auto path = temporary.getFile().getFullPathName().toStdString();
+
+    EventLog log;
+    REQUIRE (log.open (path, { "clock sampleRate=48000" }));
+    CHECK (log.isOpen());
+
+    constexpr int records = 500;
+
+    std::thread remarking { [&log]
+    {
+        for (int n = 0; n < 50; ++n)
+            log.note ("audio interface quiet for 12.5 ms");
+    } };
+
+    for (int n = 0; n < records; ++n)
+    {
+        LogRecord record;
+        record.tick = n;
+        record.seq = static_cast<std::uint64_t> (n);
+        record.origin = "cli";
+        record.command = "noop";
+        log.write (record);
+    }
+
+    remarking.join();
+    log.close();
+    CHECK (log.pending() == 0);
+    CHECK_FALSE (log.isOpen());
+
+    const auto read = LogFile::read (path);
+    REQUIRE (read.has_value());
+    CHECK (read->errors.empty());
+    REQUIRE (read->records.size() == static_cast<std::size_t> (records));
+
+    for (int n = 0; n < records; ++n)
+        CHECK (read->records[static_cast<std::size_t> (n)].tick == n);
+
+    REQUIRE (read->headerLines.size() == std::size_t { 2 + 50 });
+    CHECK (read->headerLines[0] == "wfg-log 1");
+    CHECK (read->headerLines[1] == "clock sampleRate=48000");
+    CHECK (read->headerLines[2] == "note audio interface quiet for 12.5 ms");
+}
+
+TEST_CASE ("event log: a log in memory takes no notes and has nothing pending")
+{
+    EventLog log;
+    log.openInMemory ({});
+    log.note ("nobody reads this");
+    CHECK (log.pending() == 0);
+    CHECK (log.contents() == "# wfg-log 1\n");
 }

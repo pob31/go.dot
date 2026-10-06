@@ -17,6 +17,8 @@
 
 #include <wfg/engine/clock/SampleTime.h>
 
+#include <spatcore/rt/RtThreadPriority.h>
+
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
@@ -309,6 +311,16 @@ namespace wfg::audio
     void HostedAudioDriver::run()
     {
         using Clock = std::chrono::steady_clock;
+
+        /*  THIS THREAD IS THE AUDIO THREAD when there is no card, and is given
+            what an audio thread is given (2026-10-06): MMCSS "Pro Audio" on
+            Windows, a time-constraint policy of one block on macOS, SCHED_FIFO
+            on Linux where the user may have it. A render's samples do not
+            depend on it - only how close to the wall clock they come. */
+        {
+            const auto blockMs = 1000.0 * current.blockSize / current.sampleRate;
+            spatcore::rt::setCurrentThreadAudioPriority (blockMs, blockMs * 0.5);
+        }
 
         const auto begin = Clock::now();
         std::int64_t delivered = 0;

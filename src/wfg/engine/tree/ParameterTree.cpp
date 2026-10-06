@@ -2697,6 +2697,12 @@ namespace wfg::tree
             else if (name == "lastError")      text = state.lastError;
             else if (name == "analysisRebuilds")
                                                text = std::to_string (analysis.rebuilds());
+            else if (name == "tickRealtime")   text = state.tickRealtime ? "true" : "false";
+            else if (name == "audioGaps")      text = std::to_string (state.audioGaps);
+            else if (name == "audioGapMax")    text = std::to_string (state.audioGapMax);
+            else if (name == "audioCallbackMax")
+                                               text = std::to_string (state.audioCallbackMax);
+            else if (name == "logPending")     text = std::to_string (state.logPending);
             else                               text = std::string (row->defaultText);
 
             engineValue (*row, "engine", text);

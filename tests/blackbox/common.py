@@ -620,6 +620,7 @@ class Server:
 
     def stop(self) -> None:
         if self.process.poll() is None:
+            self._let_the_log_catch_up()
             self.process.terminate()
             try:
                 self.process.wait(timeout=10)
@@ -643,6 +644,37 @@ class Server:
         if report:
             print(report, flush=True)
             raise HarnessError("serve printed a real-time sanitizer report (above)")
+
+
+    def _let_the_log_catch_up(self, timeout: float = 3.0) -> None:
+        """Waits until the engine log's lines are on disk, before a stop.
+
+        THE LOG IS WRITTEN BY A LOW-PRIORITY THREAD (2026-10-06), and on
+        Windows terminate() is TerminateProcess: no destructor runs and what
+        was still queued is lost. A driver that reads the log after the server
+        has gone would then find the last records missing. So: two ticks, for
+        whatever the driver sent just before stopping to be applied, then
+        `/godot/engine/logPending` at nought. Best effort and bounded - a server
+        that cannot answer, or an engine older than the node, is stopped as
+        before.
+        """
+        if self.http_port == 0 or not any(a.startswith("--log=") for a in self.argv):
+            return
+
+        def value(address):
+            reply = http_json(self.http_port, address + "?VALUE")
+            return int(reply["VALUE"][0])
+
+        try:
+            first = value("/godot/engine/tick")
+            deadline = time.monotonic() + timeout
+
+            while time.monotonic() < deadline:
+                if value("/godot/engine/tick") >= first + 2 and value("/godot/engine/logPending") == 0:
+                    return
+                time.sleep(0.02)
+        except Exception:
+            return
 
 
 def _rest_of(stream, timeout: float = 5.0) -> str:

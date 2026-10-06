@@ -466,12 +466,21 @@ TEST_CASE ("tick thread: it processes every tick in order, driven by the counter
     CHECK (thread.lateness() == 0);          // tick 10 landed on its own boundary
 }
 
-TEST_CASE ("tick thread: it says honestly that it has no priority guarantee")
+TEST_CASE ("tick thread: it reports the priority it actually got")
 {
-    /*  Phase 1's shim does nothing, and reports that it did nothing. A shim
-        that returned true would let the first person investigating a late show
-        rule out the right cause on the strength of it. */
-    CHECK_FALSE (elevateCurrentThreadForTicking());
+    /*  Real-time since 2026-10-06, and reported as what took effect, not as
+        what was asked: a report that said yes where the system said no would
+        let the first person investigating a late show rule out the right cause
+        on the strength of it. Asked on a thread of its own, so this test's
+        thread is left as it was. Windows and macOS grant it to anybody; Linux
+        only to a user with real-time rights, which a CI runner may not be. */
+    bool granted = false;
+    std::thread asking { [&granted] { granted = elevateCurrentThreadForTicking(); } };
+    asking.join();
+
+   #if defined (_WIN32) || defined (__APPLE__)
+    CHECK (granted);
+   #endif
 
     Engine engine;
     ManualClock counter;
@@ -482,7 +491,7 @@ TEST_CASE ("tick thread: it says honestly that it has no priority guarantee")
     thread.start();
     REQUIRE (waitUntil ([&thread] { return thread.lastTick() >= 0; }));
 
-    CHECK_FALSE (thread.hasElevatedPriority());
+    CHECK (thread.hasElevatedPriority() == granted);
     CHECK (thread.sampleRate() == 48000);
     CHECK (thread.samplesPerTick() == 960);
 
