@@ -79,6 +79,11 @@ commands `ACCESS 2`. Booleans are `T`/`F` nodes (an `i` 0/1 written to one is ac
 | `/godot/engine/samplesPerTick` | `i` | `sampleRate / 50` |
 | `/godot/engine/lateness` | `i` | last tick's lateness in samples |
 | `/godot/engine/latenessMax` | `i` | since start |
+| `/godot/engine/tickRealtime` | `T` | whether the tick thread got real-time priority (§31, TO) |
+| `/godot/engine/audioGaps` | `i` | gaps between the interface's calls for sound, since start (§31, TT) |
+| `/godot/engine/audioGapMax` | `i` | the longest, in samples |
+| `/godot/engine/audioCallbackMax` | `i` | the longest Go.dot took to answer one call, in samples |
+| `/godot/engine/logPending` | `i` | engine-log lines not yet on disk (§31, TR) |
 | `/godot/engine/clock` | `s` | `dummy` \| `device` |
 | `/godot/engine/errorCount` | `i` | rejected commands since start |
 | `/godot/engine/lastError` | `s` | `<tick> <seq> <origin> <command> <reason>` — the read-back a client uses to learn that a write was rejected, because OSC has no reply channel |
@@ -19911,3 +19916,146 @@ DocumentTests (the replay) pass unchanged. The new case failed on the first buil
 after a show was read back in among them. Counts after the mend: `wfg_tests` whole but `AudioTests`,
 1660 cases, green under C and `fr-FR`; `wfg_audio_ui_tests` whole, 67 cases, green under both; `ctest
 -R "replay|client|undo|schema|live|surface|document|lock"` 73 of 73.
+
+## 31. A steady sound and a steady clock
+
+Written 2026-10-06. The author installed the release build of `aa6e2fc` and reported: *"The clock
+stops and goes even on light loads ... I can see the cursors stall and the audio go quiet and pick up
+again over and over."* They added: *"The steady audio output is priority number one."* The interface
+was the RME Digiface Dante, on its "ASIO MADIface USB" driver at 48 kHz and 128 samples, with the D700
+on USB.
+
+### 31.1 What was found
+
+- **Not reproduced without the D700.** The author's show was played from a copy, on `aa6e2fc`, with
+  the window open. Hosted with a render, the tick was at most 5 ms late and the render had no hole.
+  On the same interface, made inaudible (every send at -120 dB, the outputs patched to channels
+  119-128), the sampler's pads and the sequence played at 50 ticks a second, at most 4 ms late, with
+  no `audio.connection`. The D700 was not on the desk for either run. The author then confirmed:
+  *"With the D700 disconnected I don't get the same issues now."* LatencyMon on the laptop showed
+  ACPI glitches that *"sound different from what I had before this morning which were real gaps."*
+- **The build that played well was older than thought.** The window's logs from 10-04 and 10-05
+  lack two lines `0bcd747` added on 09-30 (`nothing handed over at launch`, `show <path>`), so the
+  weekend build was `605e5eae` or older, not `0bffcf3`. Those sessions with the D700 also ran
+  elsewhere: on 10-05 the window gave its address as 192.168.195.158, the author's network at work,
+  and this morning as 10.68.11.71. The good runs and the bad one differ in the desk the D700 was
+  plugged into, not only in the build.
+- **What the symptom says.** Go.dot's clock counts the interface's calls for sound. The cursors and
+  the sound stopping together means the calls stopped coming, or Go.dot's answer to one was held up.
+  The tick thread's priority cannot cause that. But the tick thread ran at ordinary priority, and the
+  session left no record: the first window keeps no engine log, and nothing measured the calls.
+- **The machine that morning.** At 08:12 Windows installed a "Lenovo System Driver Update"
+  (26.8.0.29, Lenovo's Universal Device Client). Intel's Energy Server service crashed, and Windows
+  restarted the laptop at 08:13. That was the "clean restart". At 08:27 "Go.dot test1" was opened
+  in another window: a second engine on the same interface, for a show with no `media/` folder. Its
+  sampler's GO re-launched three missing members every 40 ms for the rest of the session. That is a
+  separate fault, left open.
+
+### 31.2 Decisions
+
+The author's, 2026-10-06: *"Yes raise the thread priority on all OSes, use workgroups on macOS ...
+Add the engine log as a low priority thread."* The rest are the implementer's.
+
+- **TO - The tick thread is raised above the window and kept below the sound.**
+  `elevateCurrentThreadForTicking` was Phase 1's stub returning false. It now does this:
+  - Windows: `THREAD_PRIORITY_TIME_CRITICAL`, JUCE's own "realtime" on Windows. Not MMCSS "Pro
+    Audio", which spatcore gives audio threads: that class sits at 23 to 26, above an ASIO driver's
+    TIME_CRITICAL callback, so a tick at work could hold the thread that makes the sound off a core.
+  - macOS: the mach time-constraint policy, a 20 ms period and a 5 ms budget.
+  - Linux: SCHED_FIFO at the middle of its range, under JACK's and PipeWire's audio threads. Without
+    real-time rights it gives false and the thread is unchanged.
+
+  `/godot/engine/tickRealtime` says what took effect.
+- **TP - On macOS the tick thread joins the interface's audio workgroup.** The device driver
+  publishes `AudioIODevice::getWorkgroup()` into a spatcore `AudioWorkgroupCoordinator` held for the
+  session. It publishes on each `audioDeviceAboutToStart`, empties it on `audioDeviceStopped` and on
+  its own destruction. The tick thread joins at the top of its loop when the generation moved: one
+  atomic load otherwise. A device reopened in an outage (§6.2) is followed rather than left behind.
+  On Windows and Linux the handle is empty and joining does nothing.
+- **TQ - The hosted block thread is the audio thread when there is no card**, and gets spatcore's
+  audio class: MMCSS "Pro Audio" on Windows, a time-constraint policy of one block on macOS,
+  SCHED_FIFO on Linux where allowed. A render's samples do not depend on it.
+- **TR - The engine log is written by a low-priority thread.** `EventLog::write` formats the line
+  on the tick thread and pushes it onto a lock-free multi-producer list (Vyukov's: one exchange, one
+  store). A `juce::Thread` at `Priority::low` takes off what is queued, writes it in order and
+  flushes once a batch. Neither the tick thread nor the message thread ever waits on it, so a
+  starved writer cannot hold either. A crash loses only what was queued in the moment before it. A
+  log in memory (tests, the replay, a headless serve) stays synchronous.
+- **TS - A window keeps a log without being asked.** `serve --window` with no `--log` writes
+  `Go.dot/logs/<show>-<stamp>.wfglog`, the folder a window opened beside another already used
+  (`sessionLogFor`), and prints `wfg: log <path>`. A log the window cannot write is said on stderr,
+  and the session keeps it in memory and goes on: a show that will not open for want of its own
+  diary is the worse night.
+- **TT - The interface's calls are measured, and what nobody decided is noted.** At the top of each
+  device callback the high-resolution counter is read. That is a counter read with no lock and no
+  allocation: QueryPerformanceCounter, `mach_absolute_time`, or `clock_gettime` through the vDSO.
+  - A gap is an interval between calls longer than three blocks and at least 10 ms. A new start
+    resets it, so a reopen is not a gap.
+  - The longest Go.dot took to answer a call is kept beside it.
+  - The settings pump's 40 ms maintenance takes both, and the tick thread's worst lateness since its
+    last look. It writes a `# note` line into the engine log when the interface was quiet longer
+    than the threshold, or a tick was two or more late. It writes at most one of each a second,
+    with the count and the worst in it, and ends the line with the tick it was written by.
+  - **The log only, never stderr.** The first build of this also wrote each note to stderr. Its
+    black-box run failed Doh! and phase 4 in both locales: runs stayed `armed` and scenes never
+    ended. A Debug build is a tick or two late often enough to write a line every 40 ms. The drivers
+    read a server's stderr only when they stop it, so the pipe filled in seconds. The next write
+    then waited for ever on the message thread, which Tracktion needs to start a sound. Written to
+    the log alone, both drivers pass, in 22 s rather than 98 to 139.
+  - Each time the device stopped, failed or started, whoever did it, is noted with the rate and
+    block it came back at. That covers the driver's own reset, an outage's reopen and an Apply. JUCE
+    answers an ASIO resync request by closing the device and opening it again 500 ms later. The
+    outage gate then reopens it on top of that. So one driver hiccup is about a second of silence,
+    otherwise seen only as one.
+  - Published as `/godot/engine/audioGaps`, `audioGapMax` and `audioCallbackMax` (samples, since
+    the engine started).
+  - A note is a header line to `LogFile::parse`. The replay compares records only and reads header
+    lines by prefix (`media `, the recovery mark), so a note changes neither.
+- **TU - The black-box harness waits for the log before it stops a server.** On Windows,
+  `terminate()` is TerminateProcess, and a line still queued would be lost to the driver that reads
+  the log afterwards. `Server.stop()` waits for two ticks, then for `/godot/engine/logPending` to
+  read nought, at most 3 s, then stops as before.
+
+### 31.3 Reading the next one
+
+The next session with the D700 leaves its account in `%APPDATA%\Go.dot\logs\<show>-<stamp>.wfglog`:
+
+- `# note audio interface quiet for up to 312.0 ms; Go.dot's longest answer 0.4 ms against a block
+  of 2.7 ms` means the interface stopped calling. That is the driver, USB or the system, not Go.dot.
+- The same line with a longest answer of hundreds of milliseconds means Go.dot held the interface
+  up, inside its own callback.
+- `# note tick thread up to 85.0 ms late` with no gap beside it means the clock's own thread was
+  held up. The cursors stalled and the sound played on.
+- An `audio.connection` record means the outage gate (§6.2) closed the device and opened it again.
+- `# note audio interface stopped` then `started` is the device closed and opened again. With no
+  `audio.connection` record before it, the driver did it.
+
+### 31.4 What the D700 path was found to do
+
+All of it was read on `aa6e2fc` against `605e5eae`, looking for anything that could hold up the
+tick thread or the callback, loop with the desk, or flood it. None was found:
+
+- **The MIDI sender.** `MidiSender::enqueue` takes the binding lock and the queue lock for a push
+  (`a2ae325` nested them). The sending thread holds the queue lock only to take an item. The
+  blocking `midiOutShortMsg` / `midiOutLongMsg` is outside every lock, and the lock order is the same
+  everywhere.
+- **Devices.** Opening and closing them happens outside the locks. Tracktion is given no MIDI
+  (`useMidiDevices = false`), so it scans and opens nothing. A device-list change reaches only its
+  wave-device rescan, which does nothing while the layout stands.
+- **Motor faders.** A fader report with no hand on the fader only updates the motor's cache. A
+  sampler strip rides the run's trim, not the lane, so a level lane does not move it. Vacant
+  positions answer nothing.
+- **Traffic.** Every send of a paint is behind a cache. Vacant strips are painted once, then their
+  dark colour is re-asserted every 2 s like any other. `87eaaff` lowered the traffic.
+- **Two notes for later.** `SendQueue` has no cap, so a desk that cannot keep up would see its
+  backlog grow; that delays the desk, not the show. `87eaaff` keeps the foot panel up whenever a page
+  is up and a cue is aimed, which is drawing on the message thread only.
+
+The only path that silences the sound and freezes the clock at once is the outage gate (§6.2) and
+the reopen that follows it. Neither has changed since `605e5eae`. What would set it off with the D700
+on the desk - a driver resync, or a USB error - is below Go.dot, and §31.3's notes will name it.
+
+**The A/B to run with the desk on the bench.** Set the surface's `enabled` to `false` in the show.
+The ports stay bound and open, but nothing is painted and nothing is read (`SurfaceBridge::afterTick`).
+If the gaps go on, the device or its USB path is the cause. If they stop, Go.dot's traffic to the desk
+is, and the next measurement is how long `Output::sendNow` takes in `MidiSender::deliver`.
