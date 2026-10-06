@@ -1574,7 +1574,24 @@ hatch for shows that outgrow this. Video must never sit in the GO path.
 **Codec:** **HAP** family as the primary playback format, with a few fallbacks for
 convenience (to be chosen). Not a general media player.
 
+*Amended 2026-10-06, at the author's direction — Phase 8 started* (`docs/godot-namespace-draft-0.1.md`
+§35, decisions UU–VM). **Stills first, movies second:** 8a builds flat colours, masks, pictures,
+blending and the mesh; HAP, capture and DeckLink are 8b. The words are the author's: *"Canvas
+(surfaces in QLab lingo) render to Outputs with their mapping. Fill (background) or Mask
+(overlay)."* A **canvas** is the flat picture cues are laid onto; an **output** is a display on this
+machine that shows one canvas through its own **mapping** (mesh warp, calibration grade, calibration
+masks); a video cue's source is a **fill**, a **mask** or a **picture** (later a movie or a capture).
+*Surface* stays the control surfaces' word (§3.16). The pictures are drawn by a **child process**
+Go.dot starts and watches, so a graphics driver's fault never reaches the sound or the GO path; a
+relaunched renderer draws again what was up. Everything below that says *surface* for video means
+canvas.
+
 #### 3.19a Surfaces and mapping
+
+*Amended 2026-10-06, at the author's direction:* **one canvas may feed several outputs**, each with
+its own mapping, which picks the part of the canvas it shows — two projectors taking half each, or
+the stage picture repeated on a monitor. This replaces the first bullet below. One output still
+shows one canvas.
 
 - **One display per internal surface** (v1). No surface spanning multiple
   outputs.
@@ -1625,7 +1642,10 @@ adjustment in practice)*:
 - **Blend space** — linear light vs display space gives visibly different results
   for add and screen. Millumin and Resolume composite in display space, so
   matching them is probably right for user expectations, but it is a *stated
-  choice*, not an accident of the shader.
+  choice*, not an accident of the shader. **Stated 2026-10-06, by the author:
+  display space** (namespace draft §35, VD). For the layer integer, higher is on
+  top, and of two on the same layer the one brought up later *(implementer's
+  call, VI)*.
 
 #### 3.19c Latency compensation — user-set, audio adjusted to video
 
@@ -1695,7 +1715,7 @@ gives ~72 ms. Therefore:
   clock-skew readout per device, so a technician *sees* divergence accumulating
   instead of hearing it in act two.
 
-**Open:** DeckLink I/O vs GPU output for latency and sync.
+~~**Open:** DeckLink I/O vs GPU output for latency and sync.~~ **Answered 2026-10-06** — §6.3.
 
 ### 3.20 Document format
 
@@ -3325,6 +3345,15 @@ audio thread. The interface's input and output delays are read when it opens and
 §3.18's budget is said against them.
 
 ### 6.3 Video — DeckLink vs GPU
+
+**Answered 2026-10-06, at the author's direction** (namespace draft §35, UW and UX): **GPU outputs
+in v1, DeckLink later.** The author asked which graphics API gives the best compatibility with
+DeckLink cards when they come; the answer, approved with the plan, is **OpenGL** with the output as
+a swappable part. A DeckLink card takes a finished frame in memory, whatever drew it, and
+Blackmagic's examples of fast GPU-to-card transfer are OpenGL on all three systems. So each canvas
+is drawn into an offscreen image against the audio clock, and an output sink sends it on — a
+fullscreen window now, a card later — and the compositor sits behind an interface of its own so a
+Metal back end can follow. Before any DeckLink code: the SDK's licence read against GPL-3.
 
 ### 6.4 Asparion — remaining asks
 

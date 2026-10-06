@@ -478,8 +478,42 @@ while the desktop shows the cue list.
 **Done when:** an audio+video scene plays in sync for a full act with the mesh
 aligned from the tablet.
 
-**Needs from the author:** DeckLink vs GPU output (PRD §6.3); fallback codec
-list; blend-space choice confirmation.
+**Needs from the author:** ~~DeckLink vs GPU output (PRD §6.3)~~ answered
+2026-10-06, GPU now and DeckLink later; fallback codec list; ~~blend-space choice
+confirmation~~ answered 2026-10-06, display space.
+
+*Started 2026-10-06 and split in two* (namespace draft §35, decisions UU–VM; PRD
+§3.19 and §6.3 amended). The author's order: stills first, movies second. The
+words are theirs — a **canvas** is what cues are laid onto, an **output** shows
+one canvas through its mapping, a cue is a **fill**, a **mask** or a
+**picture**. One canvas may feed several outputs. The pictures are drawn by a
+child process, `wfg video-render`, in OpenGL, each canvas offscreen and sent on
+by an output sink — a window now, a DeckLink card later.
+
+### Phase 8a — Stills: fills, masks, pictures, blending and the mesh · L
+
+| Stage | What the author sees | Depends on |
+|---|---|---|
+| V.0 | Docs first: namespace draft §35, the PRD amended, this section | — |
+| V.1 | A black fullscreen output on the chosen display; a fill comes up on GO, fades on Esc over the panic fade, cuts on double Esc; the renderer killed comes back in a second with the picture, the sound untouched. The Video tab, "+ video", the child and its region | V.0 |
+| V.2 | Layers and blends: two fills crossfading, add and screen side by side; a fade cue moves opacity | V.1 |
+| V.3 | Pictures: decoded at standby in the child, GO only reveals; carried by the bundle and Save as | V.2 |
+| V.4 | Masks: a shape in canvas coordinates, feathered or inverted, points typed in | V.2 |
+| V.5 | The mesh: bezier patches per output, a panel with typed control points | V.1 |
+| V.6 | Grades: ASC CDL per cue and per output; 3D LUT after | V.2 |
+| V.7 | Video members on sampler strips; a DCA multiplies opacity | V.2 |
+
+**Done when:** a scene of fills, masks and pictures runs from the cue list onto
+two outputs, one mapped onto a wall that is not flat, with Esc, double Esc and
+Doh! doing to the picture what they do to the sound.
+
+### Phase 8b — Movies, capture and DeckLink · L
+
+HAP in QuickTime (demux, snappy, compressed textures) presented against the audio
+position with the signed latency offset in machine config; capture inputs as
+allocator resources; the clock-skew readout; a DeckLink output sink once its
+SDK's licence has been read against GPL-3; the test clip. Drawn when 8a is on a
+projector.
 
 ---
 

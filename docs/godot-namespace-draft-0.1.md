@@ -20410,3 +20410,224 @@ faders are flipped back.
 
 **Waiting for the author and the bench:** the flip on the D700, its REC lights steady and
 blinking, the first and third rows, and the motors following the unarmed faders' curves.
+
+## 35. Pictures on a canvas: Phase 8a, the stills
+
+Written 2026-10-06, before any of it is built; a close-out section will say what won where the text
+and the code disagree. The author asked: *"Should we start on the video? We can build it feature by
+feature. Stills (colour masks and pictures) with layer fusion and surface warping for mapping. Then
+we can add actual video file from stable codec in a second step."* Phase 8 is therefore split: **8a**
+is this section, everything that does not move; **8b** is movies (HAP, PRD §3.19), capture and a
+DeckLink output, drawn when 8a is on a projector.
+
+### 35.1 What it is, before its names
+
+A **canvas** is a flat picture of a set size - 1920 by 1080, say - that cues are laid onto. A video
+cue puts something on one canvas, on a numbered layer, at an opacity, blended with what lies under
+it: a **fill** (one flat colour over the whole canvas, sitting behind), a **mask** (a shape laid over,
+blacking out what is under it - a door, the spill past the set's edge), or a **picture** (an image
+file). GO brings it up, over its fade-in; a fade cue moves its opacity; Esc takes it down to black
+over the panic fade; a double Esc cuts every canvas to black at once.
+
+An **output** is a monitor or a projector on this machine. It shows one canvas through its own
+**mapping**: a bezier mesh that picks out the part of the canvas it shows and bends it onto a wall
+that is not flat, then a calibration grade for that projector. One canvas can feed several outputs,
+each with its own mapping - two projectors taking half each, or the stage picture repeated on a
+monitor in the wings. The canvas is drawn once; each output warps it once.
+
+All of it is drawn by a second program, started by Go.dot and watched by it, so a graphics driver
+that crashes or hangs takes the pictures away for a second and never the sound or the GO button.
+When it comes back it draws again what was up.
+
+### 35.2 Decisions
+
+The author's, with the options and their wording the implementer's unless quoted:
+
+- **UU - Stills first, movies second** - the author's own ordering, quoted above. 8a builds fills,
+  masks, pictures, blending and the mesh; HAP waits for 8b.
+- **UV - The pictures are drawn in a child process** (offered as "Child process"): `wfg
+  video-render`, a hidden verb of the same program, as `plugin-host` and `plugin-editor` are (§17).
+  PRD §3.19 already said video never sits in the GO path; this makes a driver fault unable to reach
+  it either.
+- **UW - GPU outputs only in v1; DeckLink later** (offered as "GPU displays only"). PRD §6.3 is
+  answered by it.
+- **UX - OpenGL, with the output as a part that can be swapped.** The author asked what gives the
+  best compatibility with Blackmagic DeckLink cards at some point; the implementer's answer, approved
+  with the plan: a DeckLink card takes a finished frame in memory whatever drew it, and Blackmagic's
+  examples of fast GPU-to-card transfer are OpenGL on all three systems (the only other is D3D11,
+  Windows only). So each canvas is drawn into an offscreen image, and an **output sink** sends it on:
+  a fullscreen window now, a card later (read back, `ScheduleVideoFrame`). The compositor sits behind
+  an interface of its own, so a Metal back end can follow if Apple ever removes OpenGL.
+- **UY - "Colour masks" means both** (offered as "Both"): a flat colour, and a shape over what is
+  under it.
+- **UZ - The names are the author's**: *"Canvas (surfaces in QLab lingo) render to Outputs with their
+  mapping. Fill (background) or Mask (overlay)."* So: **Canvas**, **Output**, **Fill**, **Mask**, and
+  **Picture** for an image file (offered as "Fill / Mask / Picture"). The word *surface* stays the
+  control surfaces' (§16).
+- **VA - One canvas feeds any number of outputs, each with its own mapping** (offered as "Yes, one
+  canvas to many outputs"). This replaces PRD §3.19a's "one display per internal surface, no surface
+  spanning multiple outputs": an output's mesh picks the part of the canvas it shows. Edge blending
+  between two projectors comes with the calibration masks, after V.5.
+- **VB - One Show settings tab, Video**, listing the canvases and the outputs with each output's
+  mapping (offered as "One 'Video' tab"). In the document `<Canvases><Canvas>` and
+  `<VideoOutputs><VideoOutput>`, so the Outputs tab and the word *outputs* keep meaning sound.
+- **VC - A renderer relaunched after a crash draws again what was up** (offered as "Restore what was
+  up"). The audience sees black for about a second, not a picture missing for the rest of a scene.
+- **VD - Layers blend in display space** (offered as "Display space"): the numbers the pictures are
+  written in, as Millumin and Resolume do, so add and screen look as operators expect. Linear light
+  is not offered in 8a. PRD §3.19b asked for this to be a stated choice; it is stated here.
+
+The implementer's, open to overruling:
+
+- **VE - One cue element, `<Video>`, with a `source`**: `fill`, `mask` or `picture`, and later `movie`
+  and `capture`. The canvas, the layer, the opacity, the blend, the grade, being a fade's target,
+  standing on a sampler strip and a DCA are the same whatever the source; a kind per source would be
+  added again to every container list, the new-cue menus and every fade branch. Rows only one source
+  reads are warnings in `wfg validate`, as a mic cue's are (§18).
+- **VF - A mask is a cue**, not a property of a canvas: blacking out a door in scene three is
+  something somebody decided for scene three (PRD §4.10), and it describes output (§4.12). An
+  always-on matte is a mask cue in the persistent section (PRD §3.29). Only calibration masks -
+  projector spill, edge blend - belong to an output, beside its mesh.
+- **VG - The colour row is `paint`.** `cue,colour` is the cue's tint in the list and every cue's
+  rows share one address, so a video cue's colour needs another word; the inspector still says
+  **Colour**. `#RRGGBB`, black by default: a mask's usual colour, and a fill of black is the black
+  plate that covers what is under it.
+- **VH - Opacity is its own row, not the level**, and a fade moves it with `opacityOn`/`opacity`
+  beside `levelOn`/`level` (§26). A movie with sound (8b) has both, and a fade can move either.
+- **VI - A layer is an integer; higher is on top.** Two cues on the same layer of the same canvas:
+  the one brought up later is on top. List order never decides (PRD §3.19b).
+- **VJ - A still holds until something stops it**, as a mic cue does: Esc, a stop cue, a fade with
+  `stopWhenDone`, the end of its group's lifetime. A duration for a still is not in 8a.
+- **VK - Seen counts as heard for Doh!** (PRD §3.32). A video cue on screen is paused - brought down
+  over the panic fade and back at the corrected GO over the 0.1 s de-click; one not yet on screen (in
+  its pre-wait, its picture still loading) is handed back exactly.
+- **VL - A display is named by the operating system.** JUCE's display list carries neither a name
+  nor an identifier, so the child asks the system (the monitor's own name and its connector on
+  Windows, the display's identifier and product name on macOS, the output name on Linux) and keeps
+  the port pattern (§15): `display` by name in the show, `displayId` in state, tried first.
+- **VM - The child reads binary values only.** Child verbs are dispatched before the locale is fixed
+  (`Console.cpp`), so the region carries numbers as numbers and the document's text never reaches
+  the child. A mesh is hundreds of floats (PRD §3.19a): they cross as floats, and are written in the
+  show by `osc::formatDouble` as every `d*` row is.
+
+### 35.3 The objects and their rows
+
+**`<Canvases><Canvas>`** under `<Show>`, owner `canvas`, at `/godot/canvas/<id>`:
+
+| Row | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `name` | `s` | rw | show | what the show calls it: *Stage*, *Cyclo* |
+| `width`, `height` | `i` 16..16384 | rw | show | its size in pixels; 1920 by 1080 by default |
+
+**`<VideoOutputs><VideoOutput>`** under `<Show>`, owner `videoOutput`, at `/godot/videoOutput/<id>`:
+
+| Row | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `name` | `s` | rw | show | *Face*, *Wings monitor* |
+| `canvas` | `s` refers=canvas | rw | show | the canvas it shows |
+| `display` | `s` | rw | show | the display on this machine, by the name the system gives it (VL) |
+| `displayId` | `s` | rw | state | the identifier it had when last found, tried before the name |
+| `enabled` | `T` | rw | show | off, the output is not opened: a rehearsal room without the projector |
+| `bound` | `T` | r | none | a display is behind it tonight |
+| `problem` | `s` | r | none | why not, in a sentence |
+| `testPattern` | `T` | rw | none | a grid and the output's name, over whatever is up |
+| `framesPresented`, `framesLate` | `h` | r | none | the child's own count, so pacing is measured, not judged by eye |
+| `presentJitter` | `d` ms | r | none | how far presentation strays from its due time |
+| `meshColumns`, `meshRows`, `mesh` | `i`, `i`, `d*` | rw | show | V.5: the bezier mesh in canvas coordinates 0..1 |
+
+`/godot/video/displays` (`s`, r, newline-separated, as `ports/outputs`) lists what this machine has;
+`/godot/video/renderer` (`s`, r) says how the child is: `running`, `starting`, `failed` and why.
+
+**`<Video>`**, a cue, owners `cue` and `video`, at `/godot/cue/<id>`:
+
+| Row | Type | Access | Default | Stage | Meaning |
+|---|---|---|---|---|---|
+| `source` | `s` fill\|mask\|picture | rw | fill | V.1 | what it puts on the canvas |
+| `canvas` | `s` refers=canvas | rw | | V.1 | which canvas |
+| `layer` | `i` | rw | 0 | V.1 | higher is on top (VI) |
+| `opacity` | `d` 0..1 | rw | 1 | V.1 | as decided; the run's `opacity` says what is happening |
+| `paint` | `s` #RRGGBB | rw | #000000 | V.1 | the colour of a fill or a mask (VG) |
+| `fadeIn` | `d` s | rw | 0 | V.1 | how long GO takes to bring it from nothing to its opacity |
+| `blend` | `s` normal\|add\|screen\|multiply | rw | normal | V.2 | how it lies on what is under it, in display space (VD) |
+| `file`, `fit` | `s`, fit\|fill\|stretch\|native | rw | , fit | V.3 | the picture, under `media/`, and how it meets the canvas |
+| `shape`, `feather`, `invert` | `d*`, `d` px, `T` | rw | | V.4 | the mask's outline as bezier points in canvas 0..1 |
+| `cdl` | `d*` | rw | | V.6 | slope, offset, power (three each) and saturation |
+| `strip` and the sampler rows | | | | V.7 | as a media member's |
+
+`run/<id>/opacity` (`d`, r) is what the run is showing. `fade` gains `opacityOn` (`T`, false) and
+`opacity` (`d` 0..1, 0). `cue,kind` gains `video`. The persistent section takes a video cue.
+
+### 35.4 The renderer
+
+- **The child.** `wfg video-render --region=<name> --parent-pid=<pid>`, started through
+  `plugin/ChildLaunch` (no inherited handles, no console), dispatched beside the editor child in
+  `Console.cpp`. Its pattern is `PluginEditorChild` and `EditorRegion`, `--no-window` included: it
+  is how CI runs the whole path with no graphics card.
+- **The region.** A memory-mapped file the engine makes and owns: magic, version, layout hash; a
+  heartbeat each way; the clock pair; the outputs (display, canvas, mesh, enabled); the canvases;
+  and one slot per layer - source, paint, file, blend, shape - behind a sequence lock, each with a
+  short ring of `(sample, opacity)` targets. The engine holds the whole scene in it, so a relaunched
+  child reads what was up and draws it again (VC).
+- **The clock.** The child never asks the system what time it is for the show: it is told where the
+  audio is. The pair (samples played, the host time they played at) is published from the device
+  callback with one relaxed store, using the host time the device gives (JUCE's `hostTimeNs`) where
+  it gives one, and from the tick thread otherwise; settled in V.1 against what each system gives.
+  The child keeps a smoothed estimate of where the audio is, and at each frame predicts the sample
+  at the moment the frame is shown.
+- **Opacity is never stepped at 50 Hz.** The Runner stamps each opacity target at a tick's sample
+  position plus the launch horizon, as launches are placed; the child interpolates between the two
+  targets around the predicted sample and holds the last one rather than guessing past it.
+- **Pictures load at standby.** A picture cue arriving at standby tells the child to decode its
+  file; the child says through the region when it is ready. GO only makes the layer visible: a
+  picture not yet ready stays black until it is, and GO never waits for it. The child keeps standby
+  and the next few, forgets the least recently used, and publishes what it holds.
+- **The windows.** One per enabled output, fullscreen on its display, never taking the focus and
+  never showing a cursor; one render thread and context per output, sharing the pictures. Choosing
+  the display the Go.dot window is on asks first. An output whose display is missing says so in
+  `problem` and fails nothing: the show runs without it.
+- **The canvas** is drawn in half-float with a dither at the end, so a slow fade to black does not
+  band.
+
+### 35.5 Stops, Doh! and the persistent section
+
+- **Esc**: each video run fades to black over `/godot/audio/panicFade`, then stops, its footers run.
+  The Runner's panic fade, `dropOutputs` and the persistent pause see runs with an audio track only
+  today; a video run has none, and gets a branch of its own in each.
+- **Double Esc**: every layer gone at once, every output black. The windows stay open and black -
+  what Go.dot originates is the picture, not the projector (PRD §4.4).
+- **A persistent still**: Esc takes it like the rest; the next assertion brings it back from its
+  fade-in. PRD §3.29 already says so of a still: nothing to remember, the resume is a relaunch.
+- **Doh!**: VK.
+- **Revert of a GO** (when §4.5 is built): the layer is taken off.
+
+### 35.6 Stages
+
+| Stage | What the author sees | What it touches |
+|---|---|---|
+| V.0 | this section, PRD §3.19 and §6.3 amended, the devplan split | docs |
+| V.1 | a black fullscreen output on the chosen display; a fill comes up on GO, fades on Esc, cuts on double Esc; the child killed, the picture back in a second, the sound untouched | `juce_opengl` linked; the rows; `engine/video/` (region, sink, host, child); the Runner's branches; the Video tab; "+ video" |
+| V.2 | two fills crossfading; add and screen side by side | layers, blends, fade `opacityOn` |
+| V.3 | a picture crossfading to another on GO | `picture`, `fit`, preload, `MediaInfo` sizes, the bundle and Save as carrying images |
+| V.4 | a door-shaped blackout over a picture | `mask`, `shape`, `feather`, `invert`, typed points |
+| V.5 | a grid fitted to a wall that is not flat | the mesh, its panel with typed control points |
+| V.6 | a second projector matched to the first | CDL per cue and per output; 3D LUT `.cube` after |
+| V.7 | a fader brings a picture up | video members on sampler strips; a DCA multiplies opacity |
+
+### 35.7 Tests and the bench
+
+- **Without a graphics card**, as plain headers: the blend formulas, the mesh, the shape's coverage
+  and the CDL, each with a CPU version the shaders are checked against; the region's protocol; the
+  interpolation and the clock estimate on a made-up clock; `fr_FR` round trips of every `d*` row.
+- **The Runner** against a fake video sink, as the audio `Player` has one: GO, the fade-in, Esc, a
+  double Esc, Doh!, the persistent section, a fade's opacity.
+- **The real child, in CI**, with `--no-window`: a small CPU compositor publishes a few probe pixels
+  through the region, so a test can press GO and ask what colour the middle of a canvas is at a
+  given sample.
+- **On the author's bench only**: tearing, pacing across several displays, 50 and 60 Hz projectors
+  together, the mesh on a real wall. The child's counts make them numbers.
+
+### 35.8 What 8a does not build
+
+Movies, capture, DeckLink, a latency offset and the clock-skew readout (8b); edge blending and
+calibration masks before the mesh is on a wall; 3D LUTs before CDL; linear-light blending; images
+deeper than eight bits; a still with a duration; editing a mesh from the tablet.
