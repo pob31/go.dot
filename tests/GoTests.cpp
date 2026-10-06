@@ -12091,9 +12091,8 @@ TEST_CASE ("persistent: a bed whose lane pass the hand ends is stopped, not kill
     cue::registerLaneCommands (rig.engine.commands(), rig.engine, rig.runner, rig.document, lanes);
     rig.runner.setLanes (&lanes);
 
-    //  The table alone stands for the fader: a pass asks for nothing more.
-    lanes.arm (rig.bed);
-    lanes.take ("STRP0001");
+    //  The table alone stands for the faders: a pass asks for nothing more.
+    lanes.flip (rig.bed);
 
     REQUIRE (rig.submitAndTick ("lane.record").rejected == 0);
     const auto pass = lanes.run;

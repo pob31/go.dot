@@ -42,6 +42,7 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveRows.h>
+#include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
@@ -899,13 +900,15 @@ TEST_CASE ("surface bridge: a touch holds the strip's target, and reaches the qu
     CHECK (desk.submitted.empty());
 }
 
-TEST_CASE ("surface bridge: while a lane waits a touch takes the fader, and with it taken Rec runs the pass")
+TEST_CASE ("surface bridge: with the faders flipped a strip's REC arms its lane, a touch holds its ride, and Rec runs the pass")
 {
-    /*  Namespace draft §20.9. DF: the first fader touched while a lane waits
-        is taken for it, and that touch holds nothing. DI: with a fader taken
-        the transport Rec starts and stops the pass, its light shows it, and
-        the taken strip's own REC light is lit while it records. What the
-        bridge ASKS is asserted - the lane's commands are the engine's. */
+    /*  Namespace draft §34. UI: the faders flip to a cue, strip k riding lane
+        k, and a strip's own REC arms its lane - the author's "enable for each
+        level/send independently by pressing the fader's Rec button". UR: its
+        light is steady while armed and blinks while a pass writes it. DI: the
+        transport Rec starts and stops the pass while the faders are flipped,
+        its light shows it. What the bridge ASKS is asserted - the lanes'
+        commands are the engine's. */
     Desk desk;
     desk.forward = false;
 
@@ -920,48 +923,25 @@ TEST_CASE ("surface bridge: while a lane waits a touch takes the fader, and with
     desk.declare ({ desk.spec (mcu, "mcu", { "PORTMCU1" }) }, { { "PORTMCU1", plugged ("Desk port") } });
     desk.ticks (3);
 
-    //  A LANE WAITS: a finger on fader two takes it, and holds nothing.
-    lanes.arm (bed);
-    desk.tickOnce();
-    desk.clear();
+    //  FLIPPED: strip one rides the level's lane.
+    lanes.flip (bed);
+    desk.ticks (2);
+    REQUIRE (desk.published ("/godot/slot/" + strips[0] + "/target") == "/godot/surface/laneRide");
 
-    desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x7f });
-    desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x40 });
+    //  ITS REC ARMS THE LANE - and no starting level is set.
+    desk.clear();
+    desk.arrive ("PORTMCU1", { 0x90, 0x00, 0x7f });
+    desk.arrive ("PORTMCU1", { 0x90, 0x00, 0x00 });
     desk.tickOnce();
 
     REQUIRE_FALSE (desk.submitted.empty());
-    CHECK (desk.submitted[0].command == "lane.take");
-    REQUIRE (desk.submitted[0].args.size() == 1u);
-    CHECK (desk.submitted[0].args[0].getString() == strips[1]);
-    CHECK (desk.touches.empty());
+    CHECK (desk.submitted[0].command == "lane.rec");
+    REQUIRE (desk.submitted[0].args.size() == 2u);
+    CHECK (desk.submitted[0].args[0].getString() == "level");
+    CHECK (desk.submitted[0].args[1].getBool());
 
     for (const auto& event : desk.submitted)
-        CHECK (event.command != "node.touch");
-
-    //  TAKEN: the strip rides the lane's node, and the hand lets go of nothing it did not hold.
-    lanes.take (strips[1]);
-    desk.clear();
-    desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x00 });
-    desk.ticks (2);
-
-    CHECK (desk.published ("/godot/slot/" + strips[1] + "/target") == "/godot/surface/laneRide");
-
-    for (const auto& event : desk.submitted)
-        CHECK (event.command != "node.release");
-
-    //  REC STARTS THE PASS.
-    desk.clear();
-    desk.arrive ("PORTMCU1", { 0x90, 0x5f, 0x7f });
-    desk.arrive ("PORTMCU1", { 0x90, 0x5f, 0x00 });
-    desk.tickOnce();
-
-    REQUIRE_FALSE (desk.submitted.empty());
-    CHECK (desk.submitted[0].command == "lane.record");
-
-    //  THE PASS RUNNING: Rec's light and the strip's REC light are lit.
-    lanes.startPass ("RN000001");
-    desk.clear();
-    desk.ticks (2);
+        CHECK (event.command != "node.set");
 
     const auto lit = [&desk] (int note)
     {
@@ -973,8 +953,62 @@ TEST_CASE ("surface bridge: while a lane waits a touch takes the fader, and with
         return false;
     };
 
+    //  ARMED: its REC light is lit, and pressed again it asks to disarm.
+    lanes.setArmed ("level", true);
+    desk.clear();
+    desk.ticks (2);
+    CHECK (lit (0x00));
+
+    desk.clear();
+    desk.arrive ("PORTMCU1", { 0x90, 0x00, 0x7f });
+    desk.tickOnce();
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted[0].command == "lane.rec");
+    CHECK_FALSE (desk.submitted[0].args[1].getBool());
+    desk.arrive ("PORTMCU1", { 0x90, 0x00, 0x00 });
+    desk.tickOnce();
+
+    //  A TOUCH HOLDS THE RIDE, as any fader holds what it rides.
+    desk.clear();
+    desk.arrive ("PORTMCU1", { 0x90, 0x68, 0x7f });
+    desk.tickOnce();
+
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted[0].command == "node.touch");
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/surface/laneRide");
+
+    desk.arrive ("PORTMCU1", { 0x90, 0x68, 0x00 });
+    desk.ticks (2);
+
+    //  REC STARTS THE PASS.
+    desk.clear();
+    desk.arrive ("PORTMCU1", { 0x90, 0x5f, 0x7f });
+    desk.arrive ("PORTMCU1", { 0x90, 0x5f, 0x00 });
+    desk.tickOnce();
+
+    REQUIRE_FALSE (desk.submitted.empty());
+    CHECK (desk.submitted[0].command == "lane.record");
+
+    //  THE PASS RUNNING: Rec's light is lit; the strip writing, its REC blinks.
+    lanes.startPass ("RN000001");
+    lanes.rideOf ("level").touched = true;
+    desk.clear();
+    desk.ticks (40);
+
     CHECK (lit (0x5f));
-    CHECK (lit (0x01));     // strip two's REC
+    CHECK (lit (0x00));
+
+    const auto dark = [&desk] (int note)
+    {
+        for (const auto& message : desk.sink.sent)
+            if (message.bytes.size() == 3 && message.bytes[0] == 0x90 && message.bytes[1] == note
+                  && message.bytes[2] == 0x00)
+                return true;
+
+        return false;
+    };
+
+    CHECK (dark (0x00));
 
     //  AND REC AGAIN STOPS IT.
     desk.clear();
@@ -986,16 +1020,17 @@ TEST_CASE ("surface bridge: while a lane waits a touch takes the fader, and with
     CHECK (desk.submitted[0].command == "lane.stop");
 }
 
-TEST_CASE ("surface bridge: a hand on a lane's fader when a double Esc lets it go writes nothing to what the strip rides next, until it lifts")
+TEST_CASE ("surface bridge: a hand on a flipped fader when a double Esc flips the faders back writes nothing to what the strip rides next, until it lifts")
 {
     /*  THE HAND OUTLIVES THE ASSOCIATION (2026-10-02, the review of K4,
-        namespace draft §23.15). A double Esc frees the fader in its own drain
-        (KO), and the strip's target goes back to its DCA's trim from the next
-        snapshot. A hand still on the fader then was a hand moving the DCA: its
-        next position became a `node.set` on the trim, at the level it had been
-        riding the lane at - a DCA silently down for the next GO. So a strip
-        whose hand was on the lane's ride when the ride went is DEAF until the
-        hand lifts; touched again, it rides what it rides now. */
+        namespace draft §23.15, §34). A double Esc flips the faders back in its
+        own drain (KO), and the strip's target goes back to its DCA's trim
+        from the next snapshot. A hand still on the fader then was a hand
+        moving the DCA: its next position became a `node.set` on the trim, at
+        the level it had been riding the lane at - a DCA silently down for the
+        next GO. So a strip whose hand was on a lane's ride when the ride went
+        is DEAF until the hand lifts; touched again, it rides what it rides
+        now. */
     Desk desk;
 
     cue::LaneTable lanes;
@@ -1004,45 +1039,25 @@ TEST_CASE ("surface bridge: a hand on a lane's fader when a double Esc lets it g
     const auto mcu = desk.makeSurface ("mcu", "Desk");
     const auto band = desk.makeDca ("Band");
     const auto& strips = desk.strips[mcu];
-    desk.pin (strips[1], band);
+    desk.pin (strips[0], band);
 
     const auto list = desk.document.createList ("Sound").id;
     const auto bed = desk.document.createCue (list, 0, "media", "Bed").id;
     const auto trim = "/godot/dca/" + band + "/trim";
-    const auto target = "/godot/slot/" + strips[1] + "/target";
+    const auto target = "/godot/slot/" + strips[0] + "/target";
 
     desk.declare ({ desk.spec (mcu, "mcu", { "PORTMCU1" }) }, { { "PORTMCU1", plugged ("Desk port") } });
     desk.ticks (3);
     REQUIRE (desk.published (target) == trim);
 
-    lanes.arm (bed);
+    //  Flipped: strip one rides the level's lane, and a hand rides it.
+    lanes.flip (bed);
+    desk.ticks (2);
+    REQUIRE (desk.published (target) == "/godot/surface/laneRide");
 
-    SUBCASE ("the hand touched the ride")
-    {
-        lanes.take (strips[1]);
-        desk.ticks (2);
-        REQUIRE (desk.published (target) == "/godot/surface/laneRide");
-
-        desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x7f });
-        desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x30 });
-        desk.tickOnce();
-    }
-
-    SUBCASE ("the hand that took the fader never lifted")
-    {
-        desk.ticks (1);
-        desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x7f });         // the touch that takes it (DF)
-        lanes.take (strips[1]);                                 // what its `lane.take` does, in the drain
-        desk.tickOnce();
-
-        REQUIRE_FALSE (desk.submitted.empty());
-        CHECK (desk.submitted.back().command == "lane.take");
-        desk.ticks (2);
-        REQUIRE (desk.published (target) == "/godot/surface/laneRide");
-
-        desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x30 });
-        desk.tickOnce();
-    }
+    desk.arrive ("PORTMCU1", { 0x90, 0x68, 0x7f });
+    desk.arrive ("PORTMCU1", { 0xe0, 0x00, 0x30 });
+    desk.tickOnce();
 
     //  The double Esc's `freeLane`: the strip rides the trim again from the next snapshot.
     lanes.free();
@@ -1060,21 +1075,21 @@ TEST_CASE ("surface bridge: a hand on a lane's fader when a double Esc lets it g
     };
 
     //  The hand still down, moving: deaf.
-    desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x50 });
+    desk.arrive ("PORTMCU1", { 0xe0, 0x00, 0x50 });
     desk.tickOnce();
-    desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x20 });
+    desk.arrive ("PORTMCU1", { 0xe0, 0x00, 0x20 });
     desk.ticks (2);
 
     CHECK_FALSE (wroteTheTrim());
     CHECK (desk.dcas.trimOf (band) == doctest::Approx (0.0));
 
     //  Lifted, then touched and moved again: the trim follows the hand.
-    desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x00 });
+    desk.arrive ("PORTMCU1", { 0x90, 0x68, 0x00 });
     desk.ticks (2);
     CHECK_FALSE (wroteTheTrim());
 
-    desk.arrive ("PORTMCU1", { 0x90, 0x69, 0x7f });
-    desk.arrive ("PORTMCU1", { 0xe1, 0x00, 0x48 });
+    desk.arrive ("PORTMCU1", { 0x90, 0x68, 0x7f });
+    desk.arrive ("PORTMCU1", { 0xe0, 0x00, 0x48 });
     desk.ticks (2);
 
     CHECK (wroteTheTrim());
@@ -4094,13 +4109,13 @@ TEST_CASE ("surface bridge: a Mackie's jog wheel turns the dial's number, and it
     CHECK (desk.submitted.empty());
 }
 
-TEST_CASE ("surface bridge: a D700 strip taken for a lane says lane on its third row, and its role again once it is given back")
+TEST_CASE ("surface bridge: a D700 strip flipped to a lane says lane, rec or REC on its third row, and its role again once the faders flip back")
 {
-    /*  §20.9 drew it - "the strip's screen reads `lane`" - and the D700's own
-        third row never said it (namespace draft §30, item 2; built §30.4):
-        the strip taken read "sampler" while it rode the lane. It says "lane"
-        for as long as it is taken, and its role again from the moment the
-        pass gives it back (QX). */
+    /*  §20.9 drew it - "the strip's screen reads `lane`" - and §30.4 built it;
+        since §34 every fader flips. Strip one rides the level's lane: "lane",
+        "rec" while armed, "REC" while a pass writes it; past the last lane a
+        strip is dark - "free". The pass over, the faders stay flipped (UM),
+        and once flipped back the strip says its role again. */
     Stage stage { "d700" };
     cue::LaneTable lanes;
     stage.parameters.setLanes (&lanes);
@@ -4116,27 +4131,39 @@ TEST_CASE ("surface bridge: a D700 strip taken for a lane says lane on its third
 
     REQUIRE (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "sampler")));
 
-    //  Armed, waiting for a touch: nothing is taken yet, and the row says so.
-    lanes.arm (stage.members[0]);
-    stage.sink.sent.clear();
-    stage.ticks (2);
-    CHECK_FALSE (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "lane")));
+    const auto lanesShown = cue::flippedLanes (stage.document).size();
+    REQUIRE (lanesShown < 8u);
 
-    //  Taken: "lane", and only on that strip.
-    lanes.take (stage.strips[0]);
+    //  Flipped: "lane" on the level's strip, and the name row says "Level".
+    lanes.flip (stage.members[0]);
     stage.sink.sent.clear();
     stage.ticks (2);
     CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "lane")));
-    CHECK_FALSE (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (1, "lane")));
+    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Level")));
+    CHECK (contains (sentOn (stage.sink, "PORTBNK1"),
+                     surface::d700DisplayRow3 (static_cast<int> (lanesShown), "free")));
 
-    //  Recording: still "lane".
-    lanes.startPass ("RN000001");
+    //  Armed: "rec".
+    lanes.setArmed ("level", true);
     stage.sink.sent.clear();
     stage.ticks (2);
-    CHECK_FALSE (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "sampler")));
+    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "rec")));
 
-    //  The pass over, the fader given back: its role again.
+    //  Written in a pass: "REC".
+    lanes.startPass ("RN000001");
+    lanes.rideOf ("level").touched = true;
+    stage.sink.sent.clear();
+    stage.ticks (2);
+    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "REC")));
+
+    //  The pass over: still flipped, still armed.
     lanes.endPass ("12 " + stage.members[0] + " untouched");
+    stage.sink.sent.clear();
+    stage.ticks (2);
+    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "rec")));
+
+    //  Flipped back: its role again.
+    lanes.free();
     stage.sink.sent.clear();
     stage.ticks (2);
     CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "sampler")));

@@ -646,14 +646,14 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     cue::LiveEdits live;
     cue::registerLiveCommands (rig.engine.commands(), rig.document, live);
 
-    /*  And the lane recorded from a fader (namespace draft §20.9): the
-        waveform's Rec and ✕, and the virtual panel's press that takes a fader. */
+    /*  And the lanes recorded from the flipped faders (namespace draft §34):
+        the waveform's Rec and ✕, and the virtual panel's REC on a lane. */
     cue::LaneTable lanes;
     cue::registerLaneCommands (rig.engine.commands(), rig.engine, runner, rig.document, lanes);
 
     const std::vector<Event> gestures
     {
-        gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneTake ("STRP0001"),
+        gesture::laneArm ("B3N8R5TW"), gesture::laneArm (""), gesture::laneRec ("level", true),
         gesture::laneFree(), gesture::laneRecord (0.0), gesture::laneRecord (12.5), gesture::laneStop(),
 
         gesture::go(), gesture::doh(), gesture::standbyNext(), gesture::standbyPrevious(),
@@ -4739,40 +4739,48 @@ TEST_CASE ("client: the waveform's reading carries a lane for each send the cue 
     CHECK (model::readLaneAt (*snapshot, model::sendLaneAddress ("RV000006")).size() == 2u);
 }
 
-TEST_CASE ("client: a lane recorded from a fader reads as the tree says, and names its fader as a person would")
+TEST_CASE ("client: the faders flipped to a cue read as the tree says, a lane to each fader by the name a person reads")
 {
-    /*  Namespace draft §20.9: the lane's cue, whether it waits, the fader taken
-        and what it rides - and the waveform's reading carries it, whichever
-        cue it is for, so the panel can say when it is another's. */
+    /*  Namespace draft §34: the cue the faders show, whether a pass runs, and
+        a fader for each lane in strip order - the level, then the show's mixes
+        by name - armed or not, riding the number as heard. The waveform's
+        reading carries it, whichever cue it is for, so the panel can say when
+        it is another's. */
     Rig rig ("surfaces");
     cue::LaneTable lanes;
     rig.parameters.setLanes (&lanes);
 
     auto reading = model::readLaneRecord (*rig.publish (0));
     CHECK (reading.cue.empty());
-    CHECK_FALSE (reading.waiting);
-    CHECK_FALSE (reading.taken);
+    CHECK_FALSE (reading.flipped);
+    REQUIRE_FALSE (reading.faders.empty());
+    CHECK (reading.faders[0].key == "level");
+    CHECK_FALSE (reading.faders[0].hasRide);
 
-    lanes.arm ("SRF00005");
+    lanes.flip ("SRF00005");
+    lanes.rideOf ("level").rideDb = -12.0;
+    lanes.setArmed ("level", true);
     rig.parameters.markStale();
     reading = model::readLaneRecord (*rig.publish (1));
 
     CHECK (reading.cue == "SRF00005");
-    CHECK (reading.waiting);
-    CHECK_FALSE (reading.taken);
-    CHECK_FALSE (reading.hasRide);
+    CHECK (reading.flipped);
+    CHECK_FALSE (reading.recording);
 
-    lanes.take ("SRFT0003");
-    lanes.rideDb = -12.0;
-    rig.parameters.markStale();
-    reading = model::readLaneRecord (*rig.publish (2));
+    const auto* level = reading.faderOf ("level");
+    REQUIRE (level != nullptr);
+    CHECK (level->name == "Level");
+    CHECK (level->armed);
+    REQUIRE (level->hasRide);
+    CHECK (level->rideDb == doctest::Approx (-12.0));
+    CHECK (reading.armedNames() == std::vector<std::string> { "Level" });
 
-    CHECK (reading.taken);
-    CHECK_FALSE (reading.waiting);
-    CHECK (reading.strip == "SRFT0003");
-    CHECK (reading.faderLabel == "Panel \xc2\xb7 fader 3");
-    REQUIRE (reading.hasRide);
-    CHECK (reading.rideDb == doctest::Approx (-12.0));
+    //  Every mix of the show is a fader after it, by its name.
+    for (std::size_t k = 1; k < reading.faders.size(); ++k)
+    {
+        CHECK_FALSE (reading.faders[k].name.empty());
+        CHECK_FALSE (reading.faders[k].armed);
+    }
 
     lanes.startPass ("RN000001");
     rig.parameters.markStale();
@@ -4781,14 +4789,18 @@ TEST_CASE ("client: a lane recorded from a fader reads as the tree says, and nam
     const auto foot = model::readFoot (*rig.publish (3), { model::Subject::Kind::waveform, "SRF00005" });
     CHECK (foot.laneRecord.recording);
     CHECK (foot.laneRecord.cue == "SRF00005");
+
+    //  A ride's address says its lane; any other says none.
+    CHECK (model::laneKeyOfRide ("/godot/surface/laneRide") == std::optional<std::string> ("level"));
+    CHECK (model::laneKeyOfRide ("/godot/bus/SN000010/laneRide") == std::optional<std::string> ("SN000010"));
+    CHECK_FALSE (model::laneKeyOfRide ("/godot/dca/D1/trim").has_value());
 }
 
 TEST_CASE ("client: what a lane's last pass ended in is read from the tree and said in words, a full stop in every locale")
 {
-    /*  Namespace draft §30.4: the fader has gone back by the time a pass has
-        ended (QX), so `lanePass` is the one row left to say what the pass did
-        - the points it wrote and the seconds they span, or that nothing was
-        written and why - under the recorder's own name, the button's (QY). */
+    /*  Namespace draft §30.4, §34: `lanePass` says what the pass did - the
+        points it wrote, the seconds they span and the lanes, or that nothing
+        was written and why - under the recorder's own name, the button's. */
     Rig rig ("surfaces");
     cue::LaneTable lanes;
     rig.parameters.setLanes (&lanes);
@@ -4797,15 +4809,13 @@ TEST_CASE ("client: what a lane's last pass ended in is read from the tree and s
     CHECK (reading.pass.tick < 0);
     CHECK (model::lanePassWords (reading.pass).empty());
 
-    lanes.arm ("SRF00005");
-    lanes.take ("SRFT0003");
+    lanes.flip ("SRF00005");
     lanes.startPass ("RN000001");
-    lanes.endPass ("4242 SRF00005 kept 7 12 41.5");
+    lanes.endPass ("4242 SRF00005 kept 7 12 41.5 level");
     rig.parameters.markStale();
     reading = model::readLaneRecord (*rig.publish (1));
 
-    CHECK_FALSE (reading.taken);
-    CHECK (reading.cue.empty());
+    CHECK (reading.flipped);                    // UM: the faders stay on the cue
     CHECK (reading.pass.tick == 4242);
     CHECK (reading.pass.cue == "SRF00005");
     CHECK (reading.pass.how == "kept");
@@ -4813,60 +4823,65 @@ TEST_CASE ("client: what a lane's last pass ended in is read from the tree and s
     CHECK (reading.pass.points == 7);
     CHECK (reading.pass.from == doctest::Approx (12.0));
     CHECK (reading.pass.to == doctest::Approx (41.5));
-    CHECK (model::lanePassWords (reading.pass) == "Level autom.: 7 points, 12.0\xe2\x80\x93" "41.5 s");
+    CHECK (reading.pass.lanes == std::vector<std::string> { "Level" });
+    CHECK (model::lanePassWords (reading.pass) == "Autom.: Level - 7 points, 12.0\xe2\x80\x93" "41.5 s");
 
     model::LanePass pass;
     pass.tick = 10;
     pass.cue = "SRF00005";
 
-    //  Past a minute, as the ruler writes it; one point is a point.
+    //  Past a minute, as the ruler writes it; one point is a point; two lanes by name.
     pass.how = "kept";
     pass.spans = true;
     pass.points = 1;
     pass.from = 150.25;
     pass.to = 224.3;
-    CHECK (model::lanePassWords (pass) == "Level autom.: 1 point, 2:30.3\xe2\x80\x93" "3:44.3");
+    pass.lanes = { "Level", "Face" };
+    CHECK (model::lanePassWords (pass) == "Autom.: Level, Face - 1 point, 2:30.3\xe2\x80\x93" "3:44.3");
 
     //  A record from before the numbers were carried.
     pass.spans = false;
-    CHECK (model::lanePassWords (pass) == "Level autom.: written");
+    CHECK (model::lanePassWords (pass) == "Autom.: written");
 
     //  And every end that wrote nothing, saying why.
     pass.how = "untouched";
-    CHECK (model::lanePassWords (pass) == "Level autom.: nothing written - the fader was not touched while the cue played");
+    CHECK (model::lanePassWords (pass) == "Autom.: nothing written - no armed fader was touched while the cue played");
     pass.how = "locked";
-    CHECK (model::lanePassWords (pass) == "Level autom.: nothing written - the show is locked");
+    CHECK (model::lanePassWords (pass) == "Autom.: nothing written - the show is locked");
     pass.how = "dropped";
-    CHECK (model::lanePassWords (pass) == "Level autom.: nothing written - the pass was dropped");
+    CHECK (model::lanePassWords (pass) == "Autom.: nothing written - the pass was dropped");
 }
 
-TEST_CASE ("client: a level lane's refusals read as sentences under the recorder's name")
+TEST_CASE ("client: the lanes' refusals read as sentences under the recorder's name")
 {
-    /*  Namespace draft §30.4: a pass that does not start writes nothing, and
-        that is said in words rather than left to a code. */
+    /*  Namespace draft §30.4, §34: a pass that does not start writes nothing,
+        and that is said in words rather than left to a code. */
     model::TransportReading reading;
 
-    reading.lastError = "5411 26 window no-fader lane.record";
-    CHECK (reading.errorLine() == "Level autom. not recorded: no fader is taken - press Level autom., then touch a fader");
+    reading.lastError = "5411 26 window not-flipped lane.record";
+    CHECK (reading.errorLine() == "Autom. not recorded: the faders show no cue - press Autom. first");
 
     reading.lastError = "5411 26 window busy lane.record";
-    CHECK (reading.errorLine() == "Level autom.: a pass is running - stop it first");
+    CHECK (reading.errorLine() == "Autom.: a pass is running - stop it first");
 
     reading.lastError = "5411 26 window locked lane.record";
-    CHECK (reading.errorLine() == "Level autom. not recorded: the show is locked");
+    CHECK (reading.errorLine() == "Autom. not recorded: the show is locked");
 
     reading.lastError = "5411 26 window locked lane.arm";
-    CHECK (reading.errorLine() == "Level autom. not armed: the show is locked");
+    CHECK (reading.errorLine() == "Autom. not armed: the show is locked");
+
+    reading.lastError = "5411 26 window locked lane.rec";
+    CHECK (reading.errorLine() == "Autom. not armed: the show is locked");
 
     reading.lastError = "5411 26 window bad-value lane.arm";
-    CHECK (reading.errorLine() == "Level autom. records a media cue's level only");
+    CHECK (reading.errorLine() == "Autom. records a media cue's level and sends only");
 
     reading.lastError = "5411 26 window busy lane.free";
-    CHECK (reading.errorLine() == "Level autom.: a pass is running - stop it first");
+    CHECK (reading.errorLine() == "Autom.: a pass is running - stop it first");
 
-    //  Anything else on the lane is the engine's words, as before.
-    reading.lastError = "5411 26 window not-waiting lane.take";
-    CHECK (reading.errorLine() == "lane.take refused: not-waiting");
+    //  Anything else on the lanes is the engine's words, as before.
+    reading.lastError = "5411 26 window bad-value lane.rec";
+    CHECK (reading.errorLine() == "lane.rec refused: bad-value");
 }
 
 TEST_CASE ("client: a view follows a playhead at a readable scale, paging rather than scrolling, and frames a stretch")

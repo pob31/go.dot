@@ -242,21 +242,22 @@ namespace wfg::client::model
             that does not start writes nothing, and that is said rather than
             left to a code - under the recorder's own name, the button's (QY),
             and with what to do about it where there is something. */
-        if (fields[4] == "lane.record" || fields[4] == "lane.arm" || fields[4] == "lane.free")
+        if (fields[4] == "lane.record" || fields[4] == "lane.arm" || fields[4] == "lane.free"
+              || fields[4] == "lane.rec")
         {
             const std::string name = laneRecorderName;
 
-            if (fields[3] == "no-fader")
-                return name + " not recorded: no fader is taken - press " + name + ", then touch a fader";
+            if (fields[3] == "not-flipped")
+                return name + " not recorded: the faders show no cue - press " + name + " first";
 
             if (fields[3] == "busy")
                 return name + ": a pass is running - stop it first";
 
             if (fields[3] == "locked")
-                return name + " not " + (fields[4] == "lane.arm" ? "armed" : "recorded") + ": the show is locked";
+                return name + " not " + (fields[4] == "lane.record" ? "recorded" : "armed") + ": the show is locked";
 
             if (fields[4] == "lane.arm" && fields[3] == "bad-value")
-                return name + " records a media cue's level only";
+                return name + " records a media cue's level and sends only";
 
             if (fields[4] == "lane.record" && (fields[3] == "bad-value" || fields[3] == "unknown-id"))
                 return name + " not recorded: its cue cannot be played";

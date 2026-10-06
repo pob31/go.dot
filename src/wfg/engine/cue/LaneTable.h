@@ -17,115 +17,152 @@
 #pragma once
 
 /*
-    A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): which media
-    cue's level lane, which strip was taken for it, whether a pass is running,
-    and what the fader rides.
+    THE FADERS FLIPPED TO ONE CUE (namespace draft §34, which replaced §20.9's
+    one fader taken by touch): which media cue every fader surface shows, which
+    of its lanes are armed by their strip's REC, whether a pass is running, and
+    what each fader rides.
 
-    TONIGHT'S, NEVER THE SHOW'S (PRD §4.10): a pick and a pass are what the
-    hands are doing; the lane a pass ends in is the decision, and that is
-    written to the document as one `node.set` when it ends. So this is a table
-    beside the takes' and the DCAs', moved by named commands (`lane.*`, logged
-    and replayed) and by the Runner's hook, and published under
-    `/godot/surface/lane…` - never stored.
+    A LANE IS NAMED BY ITS KEY: `level` for the cue's own level lane, or the
+    identifier of a mix for the cue's send into it - whether or not the cue
+    sends there yet (UQ). Identifiers are Crockford base32 and never spell
+    `level`. Strip k of a flipped surface is lane k (UN): `flippedLanes` in
+    LaneCommands says which they are.
 
-    ONE LANE AT A TIME, which is what makes the ride ONE node
-    (`/godot/surface/laneRide`, decision DJ) rather than a row on every cue:
-    the strip taken for it is pointed at that node, and the bridge and the
-    virtual panel ride it the way they ride any strip's target.
+    TONIGHT'S, NEVER THE SHOW'S (PRD §4.10): a flip, the REC choices and a pass
+    are what the hands are doing; the lanes a pass ends in are the decision,
+    and those are written to the document as one `lane.write` when it ends. So
+    this is a table beside the takes' and the DCAs', moved by named commands
+    (`lane.*`, logged and replayed) and by the Runner's hook, and published
+    under `/godot/surface/lane…` and `/godot/bus/<mix>/laneRide` - never stored.
 
     Tick thread only, like every table the Runner and the tree share.
 */
 
+#include <map>
+#include <set>
 #include <string>
 
 namespace wfg::cue
 {
+    /** The key of a cue's own level lane; every other key is a mix's identifier. */
+    inline constexpr const char* levelLaneKey = "level";
+
     class LaneTable
     {
     public:
-        /** The media cue whose lane is armed or has a fader, or empty. */
+        /** The media cue the faders are flipped to, or empty. */
         const std::string& cue() const noexcept     { return lane; }
 
-        /** The strip taken for it, or empty while the lane waits for a touch. */
-        const std::string& strip() const noexcept   { return fader; }
-
-        /** Armed, with no fader yet: the next fader touched is taken (DF). */
-        bool waiting() const noexcept               { return ! lane.empty() && fader.empty(); }
-
-        /** A fader is taken: the lane can be recorded. */
-        bool taken() const noexcept                 { return ! lane.empty() && ! fader.empty(); }
+        /** The faders are flipped to a cue: its lanes can be armed and recorded. */
+        bool flipped() const noexcept               { return ! lane.empty(); }
 
         //==============================================================================
-        /*  Arms a cue's lane. A fader taken for another cue is let go, so the
-            next touch takes one for this; the same cue again keeps its fader. */
-        void arm (const std::string& cueId)
+        /*  Flips the faders to a cue. Another cue starts with nothing armed;
+            the same cue again keeps its REC choices. */
+        void flip (const std::string& cueId)
         {
             if (cueId != lane)
-                fader.clear();
+            {
+                armed.clear();
+                rides.clear();
+            }
 
             lane = cueId;
             clearPass();
         }
 
-        void take (const std::string& stripId)      { fader = stripId; }
-
-        /** Lets the fader go and forgets the lane, which is also what `lane.arm ""` does. */
+        /** Flips the faders back and forgets the cue, which is also what `lane.arm ""` does. */
         void free()
         {
             lane.clear();
-            fader.clear();
+            armed.clear();
+            rides.clear();
             clearPass();
         }
 
-        /*  THE PASS IS OVER, HOWEVER IT ENDED, AND THE FADER IS THE SAMPLE'S
-            AGAIN (2026-10-05, QX, the author's decision; namespace draft §30):
-            what the Runner's `lane.stop kept|untouched|locked|dropped` does.
-            It replaces DN's fader "taken for the session" and K4's single Esc
-            that "would keep the association" (§23.15) - a retake is a new arm
-            and a new touch. `said` is what the pass ended in, kept for the
-            window to say (`lastPass`). */
+        bool isArmed (const std::string& key) const { return armed.count (key) != 0; }
+
+        /*  A STRIP'S REC (UI), before a pass or during one (UL). Disarmed, its
+            fader is let go of: a touch later in the pass starts afresh, from
+            where the fader is (UP). */
+        void setArmed (const std::string& key, bool on)
+        {
+            if (on)
+            {
+                armed.insert (key);
+                return;
+            }
+
+            armed.erase (key);
+
+            if (const auto found = rides.find (key); found != rides.end())
+            {
+                found->second.touched = false;
+                found->second.handSeen = false;
+            }
+        }
+
+        const std::set<std::string>& armedKeys() const noexcept { return armed; }
+
+        /*  THE PASS IS OVER, HOWEVER IT ENDED - and the faders STAY FLIPPED,
+            with their REC choices (2026-10-06, UM, the author's decision): one
+            pass after another rides one lane after another. That replaces, for
+            the flip, QX's "the end gives the fader back". `said` is what the
+            pass ended in, kept for the window to say (`lastPass`). */
         void endPass (const std::string& said)
         {
             lastPass = said;
-            free();
+            clearPass();
         }
 
         /*  WHAT THE LAST PASS ENDED IN, published as `/godot/surface/lanePass`
-            so nothing ends in silence (namespace draft §30.4): the tick it
-            ended on, its cue, and `kept` with the points it wrote and the
-            seconds they span, `untouched` for a pass nobody rode, `locked` for
-            one the lock kept from being written, or `dropped` for one a kill
-            took. Empty until a pass has ended; never cleared by
-            `free`, since the fader going is exactly when it is read. */
+            so nothing ends in silence (namespace draft §30.4, §34): the tick it
+            ended on, its cue, and `kept` with the points it wrote, the seconds
+            they span and the lanes, `untouched` for a pass nobody rode,
+            `locked` for one the lock kept from being written, or `dropped` for
+            one a kill took. Empty until a pass has ended; never cleared by
+            `free`, since the flip ending is exactly when it is read. */
         std::string lastPass;
 
         //==============================================================================
+        /*  ONE LANE'S FADER. `rideDb` is what the ride node reads - the number
+            as it is heard (UK): the written level or send plus its lane, where
+            the file is (where it starts, outside a pass), until the lane is
+            armed and touched in a pass, and the hand's from then on. Set by
+            the Runner's hook each tick, published by the tree - the value a
+            motor or the panel follows while nobody holds it. */
+        struct Ride
+        {
+            double rideDb = 0.0;
+
+            /*  THE HAND'S LEVEL, as the last `node.set` on the ride left it -
+                held after the hand lets go, which is the latch. Written by the
+                live door; read by the Runner only once `touched`. */
+            double handDb = 0.0;
+
+            /*  Whether a hand has written the ride since the pass began, or
+                since the lane was armed again. A touch with no move yet has
+                written nothing, and the latch then starts from where the fader
+                was - the ride's own value. */
+            bool handSeen = false;
+
+            /** Latched at the lane's first touch while it is armed in a pass (DH). */
+            bool touched = false;
+        };
+
+        /** By key, every lane of the flipped cue the Runner has read. */
+        std::map<std::string, Ride> rides;
+
+        Ride& rideOf (const std::string& key) { return rides[key]; }
+
+        //==============================================================================
         /*  THE PASS (decision DH, latch): started by `lane.record`, asked to end
-            by `lane.stop`, ended by the Runner once it has written the lane - or
-            dropped, for a run killed under it - and the fader given back with
-            it (QX, `endPass`). `run` is the run the pass plays; `touched`
-            latches at the first touch of the ride in the pass. */
+            by `lane.stop`, ended by the Runner once it has written the lanes -
+            or dropped, for a run killed under it. `run` is the run the pass
+            plays. */
         bool recording = false;
         bool stopping = false;
         std::string run;
-        bool touched = false;
-
-        /*  THE HAND'S LEVEL, as the last `node.set` on the ride left it - held
-            after the hand lets go, which is the latch. Written by the live
-            door; read by the Runner only once `touched`. */
-        double handDb = 0.0;
-
-        /*  Whether a hand has written the ride since the pass began. A touch
-            with no move yet has written nothing, and the latch then starts
-            from where the fader was - the ride's own value - not from a level
-            left over from another pass. */
-        bool handSeen = false;
-
-        /*  WHAT THE RIDE NODE READS: the lane where the file is (where it
-            starts, outside a pass) until the first touch, the hand's from then
-            on. Set by the Runner's hook each tick, published by the tree - the
-            value a motor or the panel follows while nobody holds it. */
-        double rideDb = 0.0;
 
         void startPass (const std::string& runId)
         {
@@ -139,12 +176,16 @@ namespace wfg::cue
             recording = false;
             stopping = false;
             run.clear();
-            touched = false;
-            handSeen = false;
+
+            for (auto& [key, ride] : rides)
+            {
+                ride.touched = false;
+                ride.handSeen = false;
+            }
         }
 
     private:
         std::string lane;
-        std::string fader;
+        std::set<std::string> armed;
     };
 }

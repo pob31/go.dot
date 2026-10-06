@@ -525,11 +525,12 @@ namespace wfg::cue
             channel's takes are left alone. */
         void setTakes (TakeTable* table) noexcept { takes = table; }
 
-        /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9): the
+        /*  THE FADERS FLIPPED TO A CUE (namespace draft §34, after §20.9): the
             table `lane.*` moves, which the hook `recordLane` reads each tick -
-            the ride's value, and during a pass the hand sampled against the
-            file's clock. Absent - a replay, a tree dump - nothing is recorded,
-            and the lane a pass ended in arrives from the log instead. */
+            every lane's ride, and during a pass each armed hand sampled
+            against the file's clock. Absent - a replay, a tree dump - nothing
+            is recorded, and the lanes a pass ended in arrive from the log
+            instead. */
         void setLanes (LaneTable* table) noexcept { lanes = table; }
         void resetAudioPreparation() { armedStandby.clear(); }
 
@@ -1139,15 +1140,15 @@ namespace wfg::cue
             and the press's record is not changed. */
         void dropOutputs (std::int64_t tick);
 
-        /*  A DOUBLE ESC LETS THE LANE'S FADER GO (2026-10-02, K4, namespace
-            draft §23.15, the author: "double Esc would throw away the fader
-            association"). What `lane.free` does, from the press's handler: the
-            taken strip rides what it rode before, the lane is forgotten, and a
-            pass under way is dropped with its ride (DM) - nothing is written,
-            and no `lane.stop` follows, there being no pass left to end.
-            Handler state only, so a replay frees it in the same record. (Since
-            2026-10-05, QX, every other end of a pass gives the fader back too,
-            Esc's included: `lane.stop`'s handler, namespace draft §30.4.) */
+        /*  A DOUBLE ESC FLIPS THE FADERS BACK (2026-10-02, K4, namespace draft
+            §23.15, the author: "double Esc would throw away the fader
+            association"; §34). What `lane.free` does, from the press's
+            handler: every strip rides what it rode before, the cue and its REC
+            choices are forgotten, and a pass under way is dropped with its
+            rides (DM) - nothing is written, and no `lane.stop` follows, there
+            being no pass left to end. Handler state only, so a replay frees it
+            in the same record. Every other end of a pass leaves the faders
+            flipped (2026-10-06, UM). */
         void freeLane() noexcept;
 
         /*  WHETHER A DOUBLE ESC WAS APPLIED EARLIER IN THIS DRAIN (the review
@@ -2268,17 +2269,45 @@ namespace wfg::cue
         /** The show revision `applyRates` last read the speeds at; the same twin. */
         std::uint64_t rateRevision = 0;
 
-        /*  THE PASS'S OWN BOOKS (§20.9): the table `lane.*` moves; the ride so
-            far, a segment per stretch between a loop's wraps; the lane of the
-            cue being ridden, re-read when the show's revision moves; and the
-            run whose pass has been written, so the tick between the write and
-            its `lane.stop` landing does not write it twice. */
+        /*  THE PASS'S OWN BOOKS (§20.9, §34): the table `lane.*` moves; for
+            each lane of the flipped cue, the ride so far - a segment per
+            stretch between a loop's wraps or a punch-in's touches - the lane as
+            the show has it, which the ride is spliced into, the send it is on
+            and the number it is an offset on; the cue and show revision those
+            were read at; and the run whose pass has been written, so the tick
+            between the write and its `lane.stop` landing does not write it
+            twice. */
+        struct LaneBook
+        {
+            std::vector<RideSegment> ride;
+            std::vector<doc::LanePoint> lane;
+
+            /*  The send the lane is on, empty for the level's and for a mix the
+                cue does not send to - whose lane is silence (UQ). */
+            std::string sendId;
+            bool sends = false;
+
+            /*  What the lane is an offset on: the cue's written level, or the
+                send's; nought for a mix with no send, which is the level the
+                send it is given is made at. */
+            double written = 0.0;
+
+            /*  Latched, last tick: a touch that has just begun starts a new
+                segment, so a punch-in after a punch-out is not joined to it by
+                a straight line over the stretch between (UP). */
+            bool wasTouched = false;
+        };
+
         LaneTable* lanes = nullptr;
-        std::vector<RideSegment> ride;
-        std::vector<doc::LanePoint> rideLane;
+        std::map<std::string, LaneBook> laneBooks;
         std::string rideLaneCue;
         std::uint64_t rideLaneRevision = 0;
         std::string rideWritten;
+
+        /*  THE MIXES A HAND HOLDS in the pass's run (§34): `applyLanes` leaves
+            their offsets alone, so the hand's stays the one heard and the
+            routing is not rebuilt every tick by a lane and a hand taking turns. */
+        std::set<std::string> heldBuses;
 
         /*  And the live layer's, beside each: a turn under the lock moves the
             layer and not the show. */

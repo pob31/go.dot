@@ -15,6 +15,8 @@
 */
 
 #include <wfg/engine/cue/Runner.h>
+
+#include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/TakeCommands.h>
 #include <wfg/engine/cue/FxRows.h>
 
@@ -5260,6 +5262,27 @@ namespace wfg::cue
                     return {};
             }
         }
+
+        /*  AND A MIX RIDDEN IN A PASS THAT THE CUE DOES NOT SEND TO (namespace
+            draft §34, UQ): heard as the send the pass will give it - at nought,
+            its lane the hand's - a send of the run alone until then. Only a
+            hand puts a lane's term on a bus with no send. */
+        if (laneOffsets != nullptr)
+            for (const auto& [busId, offset] : *laneOffsets)
+            {
+                if (std::find (sentTo.begin(), sentTo.end(), busId) != sentTo.end())
+                    continue;
+
+                const auto bus = busNamed (busId);
+
+                if (! bus.isValid())
+                    continue;
+
+                sentTo.push_back (busId);
+
+                if (! sendInto (bus, std::clamp (offset, silenceDb, 12.0), true))
+                    return {};
+            }
 
         /*  AND THE MIXES A FADE BROUGHT IN FROM SILENCE (namespace draft §26,
             PB): a bus the cue has no send into, faded up tonight - a send of
@@ -16076,6 +16099,15 @@ namespace wfg::cue
                               + static_cast<std::int64_t> (sendLaneLeadSeconds * rate);
             auto offsets = sendLaneOffsets (run->sendLanes, lanePositionAt (*run, sendAt, rate));
 
+            /*  BUT NOT A MIX A HAND HOLDS in a pass (namespace draft §34): the
+                hand's term, set by `recordLane` after this, is the one heard,
+                and a lane and a hand taking turns would rebuild the routing on
+                every tick. */
+            if (lanes != nullptr && lanes->recording && run->id == lanes->run)
+                for (const auto& bus : heldBuses)
+                    if (const auto hand = run->sendLaneDb.find (bus); hand != run->sendLaneDb.end())
+                        offsets[bus] = hand->second;
+
             auto changed = offsets.size() != run->sendLaneDb.size();
 
             for (const auto& [bus, db] : offsets)
@@ -16436,7 +16468,8 @@ namespace wfg::cue
             return;
 
         lanes->free();
-        ride.clear();
+        laneBooks.clear();
+        heldBuses.clear();
     }
 
     void Runner::recordLane (Engine& engine)
@@ -16444,54 +16477,115 @@ namespace wfg::cue
         if (lanes == nullptr)
             return;
 
-        /*  THE LOCK FREES A FADER THAT IS ONLY WAITING (DN, which said so and
-            was never built; namespace draft §30.4). Under the lock a lane can
-            be neither armed nor recorded, so a fader taken for one - or a lane
-            still waiting for its touch - would be a fader that plays nothing
-            for as long as the show stays locked. Let go as `lane.free` lets
-            it go, by that command, so the log says why and a replay frees it
-            in the same record. A pass already running is left to end: its
-            stop gives the fader back (QX). */
-        if (document.isLocked() && ! lanes->recording && (lanes->waiting() || lanes->taken()))
+        /*  THE LOCK FLIPS THE FADERS BACK (DN, namespace draft §30.4, §34).
+            Under the lock no lane can be armed or recorded, so faders flipped
+            to a cue would be faders that play nothing for as long as the show
+            stays locked. Let go as `lane.free` lets them go, by that command,
+            so the log says why and a replay frees them in the same record. A
+            pass already running is left to end, and the faders with it. */
+        if (document.isLocked() && ! lanes->recording && lanes->flipped())
         {
-            ride.clear();
+            laneBooks.clear();
+            heldBuses.clear();
             engine.submit (origin::engine, "lane.free", {});
             return;
         }
 
-        if (! lanes->taken())
+        if (! lanes->flipped())
         {
-            ride.clear();
+            laneBooks.clear();
+            heldBuses.clear();
             return;
         }
 
         const auto cue = document.findById (lanes->cue());
-        const std::string rideAddress = "/godot/surface/laneRide";
 
-        /*  THE LANE AS THE SHOW HAS IT, re-read when the show's revision moves
-            or the lane changes hands - the curve the fader follows, and the one
-            a pass is spliced into. */
+        /*  EVERY LANE AS THE SHOW HAS IT, re-read when the show's revision moves
+            or the faders flip to another cue - the curves the faders follow, the
+            ones a pass is spliced into, and the numbers they are offsets on
+            (UK). A ride under way is kept: an edit beside a pass does not lose
+            it. A mix the cue does not send to has a lane of silence (UQ). */
         if (rideLaneCue != lanes->cue() || rideLaneRevision != document.showRevision())
         {
+            if (rideLaneCue != lanes->cue())
+                laneBooks.clear();
+
             rideLaneCue = lanes->cue();
             rideLaneRevision = document.showRevision();
-            rideLane = cue.isValid() ? doc::readLevelLane (textOf (cue, "levelLane")).points
-                                     : std::vector<doc::LanePoint> {};
+
+            std::map<std::string, LaneBook> read;
+
+            for (const auto& key : flippedLanes (document))
+            {
+                auto book = std::move (laneBooks[key]);
+
+                book.sendId.clear();
+                book.sends = false;
+                book.written = 0.0;
+                book.lane = { doc::LanePoint { 0.0, silenceDb } };
+
+                if (key == levelLaneKey)
+                {
+                    book.sends = true;
+
+                    if (cue.isValid())
+                    {
+                        book.written = numberOf (cue, "level");
+                        book.lane = doc::readLevelLane (textOf (cue, "levelLane")).points;
+                    }
+                }
+                else if (cue.isValid())
+                {
+                    for (const auto& child : cue)
+                    {
+                        if (! child.hasType ("Send") || child[juce::Identifier ("bus")].toString().toStdString() != key)
+                            continue;
+
+                        const auto base = "/godot/send/" + child[idProperty].toString().toStdString() + "/";
+
+                        book.sendId = child[idProperty].toString().toStdString();
+                        book.sends = true;
+                        book.written = osc::parseDouble (document.getAttribute (base + "level").value_or ("0"))
+                                           .value_or (0.0);
+                        book.lane = doc::readLevelLane (document.getAttribute (base + "levelLane")
+                                                            .value_or (std::string {})).points;
+                        break;
+                    }
+                }
+
+                read[key] = std::move (book);
+            }
+
+            laneBooks = std::move (read);
         }
 
-        /*  OUTSIDE A PASS, THE FADER SITS WHERE THE LANE STARTS (DG): at the
+        /*  WHAT A LANE SOUNDS AT, a second of the file: the number as written
+            and its lane on it, as a flipped fader shows it (UK). */
+        const auto heardAt = [] (const LaneBook& book, double seconds)
+        {
+            return std::clamp (book.written + doc::laneLevelDb (book.lane, seconds), silenceDb, 12.0);
+        };
+
+        /*  OUTSIDE A PASS, EACH FADER SITS WHERE ITS LANE STARTS (DG): at the
             cue's start offset, or at the in-point of its first slice. */
         if (! lanes->recording)
         {
-            ride.clear();
+            heldBuses.clear();
             rideWritten.clear();
+
+            auto start = 0.0;
 
             if (cue.isValid())
             {
                 const auto ranges = rangesOf (cue);
-                const auto start = ranges.empty() ? numberOf (cue, "startOffset") : ranges.front().in;
+                start = ranges.empty() ? numberOf (cue, "startOffset") : ranges.front().in;
+            }
 
-                lanes->rideDb = doc::laneLevelDb (rideLane, start);
+            for (auto& [key, book] : laneBooks)
+            {
+                book.ride.clear();
+                book.wasTouched = false;
+                lanes->rideOf (key).rideDb = heardAt (book, start);
             }
 
             return;
@@ -16504,15 +16598,15 @@ namespace wfg::cue
         auto* run = runs.find (lanes->run);
 
         /*  HOW THE PASS ENDS (DM). A hand asking - Rec again, the window's stop
-            - keeps the ride and stops the cue; the cue ending on its own, a stop
-            cue or Esc keeps it and leaves the stop to what started it; a KILL -
-            the pane's, or Doh!'s taking back - drops it. A double Esc never
-            reaches here since K4: its handler lets the fader go and the pass
-            with it (`freeLane`). Every one of these ends in `lane.stop`, whose
-            handler gives the fader back (QX, namespace draft §30.4). */
+            - keeps the rides and stops the cue; the cue ending on its own, a
+            stop cue or Esc keeps them and leaves the stop to what started it; a
+            KILL - the pane's, or Doh!'s taking back - drops them. A double Esc
+            never reaches here since K4: its handler flips the faders back and
+            drops the pass with them (`freeLane`). Every one of these ends in
+            `lane.stop`, and the faders stay flipped (UM). */
         const auto handAsked = lanes->stopping;
         const auto gone = run == nullptr || run->isFinished();
-        /*  AND A CUE DOH! TOOK BACK DROPS ITS RIDE as a kill does (§24): the
+        /*  AND A CUE DOH! TOOK BACK DROPS ITS RIDES as a kill does (§24): the
             pass belongs to a GO that did not happen. */
         const auto killed = run != nullptr && (run->skipFooter || run->takenBack);
         const auto stopped = run != nullptr && run->state == runState::stopping;
@@ -16520,45 +16614,82 @@ namespace wfg::cue
         if (handAsked || gone || stopped)
         {
             rideWritten = lanes->run;
+            heldBuses.clear();
+
+            const auto forget = [this]
+            {
+                for (auto& [key, book] : laneBooks)
+                {
+                    book.ride.clear();
+                    book.wasTouched = false;
+                }
+            };
 
             if (killed || ! cue.isValid())
             {
-                ride.clear();
+                forget();
                 engine.submit (origin::engine, "lane.stop", one ("dropped"));
                 return;
             }
 
-            /*  WHAT THE PASS ENDS IN, SAID (namespace draft §30.4): the points
-                it wrote and the seconds they span - the ride's own stretch,
-                its joins included, which is what the window frames - or that
-                nobody rode the fader while the cue sounded, or that the show
-                was locked under the pass and the lock keeps the lane as it
-                was (the write it would refuse is not sent). A pass that ends
-                in nothing says so rather than ending in silence. */
+            const auto rode = [] (const LaneBook& book)
+            {
+                return std::any_of (book.ride.begin(), book.ride.end(),
+                                    [] (const RideSegment& segment) { return ! segment.empty(); });
+            };
+
+            const auto anyRidden = std::any_of (laneBooks.begin(), laneBooks.end(),
+                                                [&rode] (const auto& entry) { return rode (entry.second); });
+
+            /*  WHAT THE PASS ENDS IN, SAID (namespace draft §30.4, §34): the
+                points it wrote, the seconds they span - the rides' own
+                stretches, their joins included, which is what the window
+                frames - and the lanes; or that nobody rode an armed fader
+                while the cue sounded; or that the show was locked under the
+                pass and the lock keeps the lanes as they were (the write it
+                would refuse is not sent). A pass that ends in nothing says so
+                rather than ending in silence. */
             std::vector<osc::Value> said { osc::Value::string ("untouched") };
 
-            if (lanes->touched && ! ride.empty() && document.isLocked())
+            if (anyRidden && document.isLocked())
             {
                 said = { osc::Value::string ("locked") };
             }
-            else if (lanes->touched && ! ride.empty())
+            else if (anyRidden)
             {
-                const auto text = laneText (spliceRide (rideLane, ride, 0.05, 0.1));
+                std::vector<osc::Value> write { osc::Value::string (lanes->cue()) };
+                std::string names;
+                std::int32_t points = 0;
+                auto from = std::numeric_limits<double>::max();
+                auto to = std::numeric_limits<double>::lowest();
+                auto judged = true;
 
-                /*  JUDGED BEFORE IT IS SENT: a lane the door would refuse is a
-                    ride lost with nothing to show for it, and the refusal is
-                    worth a record of its own rather than a surprise - the pass
-                    ends `dropped`, nothing written. */
-                if (const auto written = doc::readLevelLane (text); written.problem.empty())
+                for (const auto& key : flippedLanes (document))
                 {
-                    engine.submit (origin::engine, "node.set",
-                                   { osc::Value::string ("/godot/cue/" + lanes->cue() + "/levelLane"),
-                                     osc::Value::string (text) });
+                    const auto found = laneBooks.find (key);
+
+                    if (found == laneBooks.end() || ! rode (found->second))
+                        continue;
+
+                    const auto& book = found->second;
+                    const auto text = laneText (spliceRide (book.lane, book.ride, 0.05, 0.1));
+
+                    /*  JUDGED BEFORE IT IS SENT: a lane the door would refuse is a
+                        ride lost with nothing to show for it, and the refusal is
+                        worth a record of its own rather than a surprise - the
+                        pass ends `dropped`, nothing written, every lane or none. */
+                    const auto written = doc::readLevelLane (text);
+
+                    if (! written.problem.empty())
+                    {
+                        judged = false;
+                        break;
+                    }
 
                     auto first = std::numeric_limits<double>::max();
                     auto last = std::numeric_limits<double>::lowest();
 
-                    for (const auto& segment : ride)
+                    for (const auto& segment : book.ride)
                         if (! segment.empty())
                         {
                             first = std::min (first, segment.front().seconds);
@@ -16568,19 +16699,31 @@ namespace wfg::cue
                     /*  THE JOINS ARE POINTS TOO, a dot each on the lane, and the
                         splice put nothing else between them: every point from
                         the first join to the last is the pass's. */
-                    const auto from = first - 0.05;
-                    const auto to = last + 0.05;
-                    const auto points = std::count_if (written.points.begin(), written.points.end(),
-                                                       [from, to] (const doc::LanePoint& point)
-                                                       {
-                                                           return point.seconds >= from - 1.0e-4
-                                                                    && point.seconds <= to + 1.0e-4;
-                                                       });
+                    points += static_cast<std::int32_t> (
+                        std::count_if (written.points.begin(), written.points.end(),
+                                       [lo = first - 0.05, hi = last + 0.05] (const doc::LanePoint& point)
+                                       {
+                                           return point.seconds >= lo - 1.0e-4 && point.seconds <= hi + 1.0e-4;
+                                       }));
+
+                    from = std::min (from, first - 0.05);
+                    to = std::max (to, last + 0.05);
+                    names += (names.empty() ? "" : " ") + key;
+
+                    write.push_back (osc::Value::string (key));
+                    write.push_back (osc::Value::string (text));
+                    write.push_back (osc::Value::string (book.sendId));
+                }
+
+                if (judged)
+                {
+                    engine.submit (origin::engine, "lane.write", std::move (write));
 
                     said = { osc::Value::string ("kept"),
-                             osc::Value::int32 (static_cast<std::int32_t> (points)),
+                             osc::Value::int32 (points),
                              osc::Value::float64 (std::max (0.0, from)),
-                             osc::Value::float64 (to) };
+                             osc::Value::float64 (to),
+                             osc::Value::string (names) };
                 }
                 else
                 {
@@ -16588,7 +16731,7 @@ namespace wfg::cue
                 }
             }
 
-            ride.clear();
+            forget();
 
             /*  A STOP, NOT A KILL (2026-10-02, K4, namespace draft §23.15, the
                 author's "graceful stop", overruling GB of §23.6): the pane's
@@ -16602,42 +16745,93 @@ namespace wfg::cue
             return;
         }
 
-        /*  UNTIL A HAND TOUCHES THE RIDE, THE FADER READS THE LANE: the run's
-            own lane term, where the file is. From the first touch the pass is
-            LATCHED (DH) - the hand's level is the voice's lane term, heard at
+        /*  EACH LANE, EVERY TICK. Until its lane is armed and a hand touches its
+            fader, a fader reads its lane where the file is - the run's own
+            level term, or its send's offset - and the motor follows it. From
+            an armed lane's first touch it is LATCHED (DH): the hand's level,
+            less the number it is an offset on, is that lane's term, heard at
             once, and it stays the hand's after the hand lets go. A touch with
             no move yet has written nothing, so the latch starts from where the
-            fader was. */
-        const auto held = touches != nullptr && ! touches->holdersOf (rideAddress).empty();
-
-        if (held && ! lanes->touched)
-        {
-            lanes->touched = true;
-
-            if (! lanes->handSeen)
-                lanes->handDb = lanes->rideDb;
-        }
-
-        if (! lanes->touched)
-        {
-            lanes->rideDb = run->laneDb;
-            return;
-        }
-
-        run->laneDb = lanes->handDb;
-        lanes->rideDb = lanes->handDb;
+            fader was. A REC pressed off lets the lane go back to its curve
+            (UP); pressed again, the next touch starts a new segment. */
+        const auto rate = audio != nullptr ? static_cast<double> (audio->sampleRate()) : 0.0;
+        const auto now = audio != nullptr ? audio->samplesElapsed() : std::int64_t { 0 };
+        const auto sounding = audio != nullptr && rate > 0.0 && run->state == runState::playing
+                                && run->launchedAtSample > 0 && now >= run->launchedAtSample;
 
         /*  AND A SAMPLE WHERE THE VOICE IS NOW - not one slew ahead, as the lane
             is read: a hand answers what it hears. Only once the voice sounds;
             before its launch the second does not move. */
-        if (audio == nullptr || run->state != runState::playing || run->launchedAtSample <= 0)
-            return;
+        const auto second = sounding ? lanePositionAt (*run, now, rate) : 0.0;
 
-        const auto rate = static_cast<double> (audio->sampleRate());
-        const auto now = audio->samplesElapsed();
+        for (auto& [key, book] : laneBooks)
+        {
+            auto& ride = lanes->rideOf (key);
+            const auto isLevel = key == levelLaneKey;
+            const auto address = isLevel ? std::string ("/godot/surface/laneRide")
+                                         : "/godot/bus/" + key + "/laneRide";
+            const auto armed = lanes->isArmed (key);
+            const auto held = touches != nullptr && ! touches->holdersOf (address).empty();
 
-        if (rate > 0.0 && now >= run->launchedAtSample)
-            appendRide (ride, lanePositionAt (*run, now, rate), lanes->handDb);
+            if (armed && held && ! ride.touched)
+            {
+                ride.touched = true;
+
+                if (! ride.handSeen)
+                    ride.handDb = ride.rideDb;
+            }
+
+            const auto latched = armed && ride.touched;
+
+            if (latched && ! book.wasTouched)
+                book.ride.emplace_back();
+
+            book.wasTouched = latched;
+
+            if (! latched)
+            {
+                if (isLevel)
+                {
+                    ride.rideDb = std::clamp (book.written + run->laneDb, silenceDb, 12.0);
+                    continue;
+                }
+
+                heldBuses.erase (key);
+
+                const auto offset = run->sendLaneDb.find (key);
+                ride.rideDb = book.sends ? std::clamp (book.written + (offset != run->sendLaneDb.end() ? offset->second
+                                                                                                       : 0.0),
+                                                       silenceDb, 12.0)
+                                         : silenceDb;
+                continue;
+            }
+
+            const auto offset = std::clamp (ride.handDb - book.written, silenceDb, 12.0);
+            ride.rideDb = ride.handDb;
+
+            if (isLevel)
+            {
+                run->laneDb = offset;
+            }
+            else
+            {
+                /*  A SEND'S TERM is its offset in the run's matrix, rebuilt when
+                    it moves (§28.3); a mix with none is sent to by the run alone
+                    until the pass gives it a send (UQ, `resolveRouting`). */
+                heldBuses.insert (key);
+
+                const auto was = run->sendLaneDb.find (key);
+
+                if (was == run->sendLaneDb.end() || std::abs (was->second - offset) > 0.01)
+                {
+                    run->sendLaneDb[key] = offset;
+                    ++sendLaneRevision;
+                }
+            }
+
+            if (sounding)
+                appendRide (book.ride, second, offset);
+        }
     }
 
     void Runner::applyLevels()

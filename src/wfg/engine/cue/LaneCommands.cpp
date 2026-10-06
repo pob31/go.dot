@@ -20,29 +20,82 @@
 #include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/ShowWalk.h>
+#include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::cue
 {
+    std::vector<std::string> flippedLanes (const doc::ShowDocument& document)
+    {
+        std::vector<std::pair<int, std::string>> mixes;
+
+        for (const auto& bus : document.root().getChildWithName ("Audio"))
+        {
+            if (! bus.hasType ("Bus") || ! bus.hasProperty (idProperty))
+                continue;
+
+            //  An absent kind is the row's default, a direct out.
+            if (bus.getProperty ("kind").toString() != "mix")
+                continue;
+
+            mixes.emplace_back (static_cast<int> (bus.getProperty ("firstChannel", 0)),
+                                bus[idProperty].toString().toStdString());
+        }
+
+        std::sort (mixes.begin(), mixes.end());
+
+        std::vector<std::string> out { levelLaneKey };
+
+        for (auto& [first, id] : mixes)
+            out.push_back (std::move (id));
+
+        return out;
+    }
+
+    namespace
+    {
+        bool isLaneOf (const doc::ShowDocument& document, const std::string& key)
+        {
+            const auto keys = flippedLanes (document);
+            return std::find (keys.begin(), keys.end(), key) != keys.end();
+        }
+
+        /** The cue's send into a mix, or an invalid tree when it sends nowhere there. */
+        juce::ValueTree sendInto (const juce::ValueTree& cue, const std::string& busId)
+        {
+            for (const auto& child : cue)
+                if (child.hasType ("Send") && child[juce::Identifier ("bus")].toString().toStdString() == busId)
+                    return child;
+
+            return {};
+        }
+    }
+
     void registerLaneCommands (CommandRegistry& registry, Engine& engine, Runner& runner,
                                doc::ShowDocument& document, LaneTable& lanes)
     {
+        /*  THE FLIP (namespace draft §34, UI and UJ): every fader surface shows
+            this cue's level and its sends, a fader to a lane, until the faders
+            are flipped back. The window's, and the window's alone (UJ). */
         registry.add ({ "lane.arm",
-                        "Arms a media cue's level lane to be recorded from a fader: the next"
-                        " fader touched on any surface is taken for it. Empty frees the fader.",
+                        "Flips every fader surface to a media cue's level and sends, a fader to each"
+                        " of its lanes, to be armed by their REC and recorded. Empty flips them back.",
                         { { "cue", 's', false } },
                         true,
                         [&document, &lanes] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto id = args[0].getString();
 
-                            /*  A PASS IS A DECISION HALF MADE: the lane it ends in
-                                is written when it stops, and moving the fader to
-                                another cue under it would leave that half nowhere. */
+                            /*  A PASS IS A DECISION HALF MADE: the lanes it ends
+                                in are written when it stops, and moving the
+                                faders to another cue under it would leave that
+                                half nowhere. */
                             if (lanes.recording)
                                 return Outcome::rejected (reason::busy);
 
@@ -66,40 +119,12 @@ namespace wfg::cue
                             if (document.isLocked())
                                 return Outcome::rejected (reason::locked);
 
-                            lanes.arm (id);
-                            return Outcome::ok (args);
-                        } });
-
-        registry.add ({ "lane.take",
-                        "Takes a strip's fader for the lane that waits for one - what a surface"
-                        " sends for the first fader touched while a lane is armed.",
-                        { { "strip", 's', false } },
-                        true,
-                        [&document, &lanes] (CommandContext&, const std::vector<osc::Value>& args)
-                        {
-                            if (! lanes.waiting())
-                                return Outcome::rejected (reason::notWaiting);
-
-                            const auto id = args[0].getString();
-                            const auto strip = document.findById (id);
-
-                            if (! strip.isValid() || strip.getType().toString() != "Strip")
-                                return Outcome::rejected (reason::unknownId);
-
-                            /*  A PAD IS A GATE, NOT A FADER: it says pressed and
-                                let go, and a lane is a level that moves. */
-                            const auto surface = strip.getParent()[idProperty].toString().toStdString();
-
-                            if (document.getAttribute ("/godot/surface/" + surface + "/profile").value_or ("")
-                                  == "midiPads")
-                                return Outcome::rejected (reason::badValue);
-
-                            lanes.take (id);
+                            lanes.flip (id);
                             return Outcome::ok (args);
                         } });
 
         registry.add ({ "lane.free",
-                        "Lets the lane's fader go back to what it rode, and forgets the lane.",
+                        "Flips the faders back to what they rode, and forgets the cue and its REC choices.",
                         {},
                         true,
                         [&lanes] (CommandContext&, const std::vector<osc::Value>& args)
@@ -111,6 +136,33 @@ namespace wfg::cue
                             return Outcome::ok (args);
                         } });
 
+        /*  A STRIP'S REC (UI): one lane armed or not, by its key - `level`, or
+            a mix's identifier. During a pass too (UL): armed, it is written
+            from its next touch; disarmed, what it rode is kept and the lane
+            plays as written from then on (UP). An explicit switch rather than
+            a toggle, so a record says what the light showed. */
+        registry.add ({ "lane.rec",
+                        "Arms or disarms one lane of the cue the faders are flipped to - level, or a"
+                        " mix's identifier for the cue's send into it - before a pass or during one.",
+                        { { "lane", 's', false }, { "on", 'T', false } },
+                        true,
+                        [&document, &lanes] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (! lanes.flipped())
+                                return Outcome::rejected (reason::notFlipped);
+
+                            if (document.isLocked())
+                                return Outcome::rejected (reason::locked);
+
+                            const auto key = args[0].getString();
+
+                            if (! isLaneOf (document, key))
+                                return Outcome::rejected (reason::badValue);
+
+                            lanes.setArmed (key, args[1].getBool());
+                            return Outcome::ok (args);
+                        } });
+
         /*  THE PASS STARTS BY FIRING THE CUE the way `cue.fire` does - not a GO,
             so the GO window (§21.2) never holds it back and the standby does not
             move - and AT THE SECOND ASKED, nought being the cue's own start
@@ -118,18 +170,19 @@ namespace wfg::cue
             moved there rather than recorded wherever it had got to. The
             Runner's `startLanePass` says how. The run's identifier is drawn
             here and written into the record, so a replay re-supplies it, as
-            `cue.fire` does. */
+            `cue.fire` does. A pass with nothing armed is a pass: a REC can join
+            it (UL). */
         registry.add ({ "lane.record",
-                        "Starts a pass on the lane that has a fader: its cue plays from the"
-                        " second given, or from its own start with none, and the fader's level"
-                        " is written from its first touch until the pass stops.",
+                        "Starts a pass on the cue the faders are flipped to: it plays from the second"
+                        " given, or from its own start with none, and every armed lane is written"
+                        " from its fader's first touch until the pass stops.",
                         { { "from", 'd', true }, { "run", 's', true } },
                         true,
                         [&engine, &runner, &document, &lanes]
                         (CommandContext& context, const std::vector<osc::Value>& args)
                         {
-                            if (! lanes.taken())
-                                return Outcome::rejected (reason::noFader);
+                            if (! lanes.flipped())
+                                return Outcome::rejected (reason::notFlipped);
 
                             if (lanes.recording)
                                 return Outcome::rejected (reason::busy);
@@ -153,29 +206,110 @@ namespace wfg::cue
                             return Outcome::ok ({ osc::Value::float64 (from), osc::Value::string (runId) });
                         } });
 
+        /*  WHAT A PASS ENDS IN, ONE STEP OF UNDO (namespace draft §34, UQ): the
+            Runner's, once a pass that rode something is over. For each lane, its
+            key, the lane's whole text, and the send it is written on - the
+            level's has none, nor has a mix the cue did not send to, which is
+            given a send here, at nought, holding the lane (§29's convention for
+            a moving send). The identifier drawn for it goes into the record, so
+            a replay makes the same send. Judged whole before anything is
+            written: every lane or none. */
+        registry.add ({ "lane.write",
+                        "Writes the lanes a pass rode on a media cue, in one step of undo: for each,"
+                        " its key - level, or a mix's identifier - its text, and the send it is on,"
+                        " a mix the cue does not send to being given a send at nought.",
+                        { { "cue", 's', false }, { "lanes", 's', false, true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (document.isLocked())
+                                return Outcome::rejected (reason::locked);
+
+                            const auto cueId = args[0].getString();
+                            const auto cue = document.findById (cueId);
+
+                            if (! cue.isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (! cue.hasType ("Media"))
+                                return Outcome::rejected (reason::badValue);
+
+                            if ((args.size() - 1) % 3 != 0)
+                                return Outcome::rejected (reason::arity);
+
+                            std::vector<std::string> seen;
+
+                            for (std::size_t at = 1; at < args.size(); at += 3)
+                            {
+                                const auto key = args[at].getString();
+
+                                if (! isLaneOf (document, key)
+                                      || std::find (seen.begin(), seen.end(), key) != seen.end()
+                                      || ! doc::readLevelLane (args[at + 1].getString()).problem.empty())
+                                    return Outcome::rejected (reason::badValue);
+
+                                seen.push_back (key);
+                            }
+
+                            auto said = args;
+
+                            for (std::size_t at = 1; at < args.size(); at += 3)
+                            {
+                                const auto key = args[at].getString();
+                                const auto text = args[at + 1].getString();
+                                std::string address;
+
+                                if (key == levelLaneKey)
+                                {
+                                    address = "/godot/cue/" + cueId + "/levelLane";
+                                }
+                                else
+                                {
+                                    auto sendId = sendInto (cue, key)[idProperty].toString().toStdString();
+
+                                    if (sendId.empty())
+                                    {
+                                        const auto made = document.createSend (cueId, key, args[at + 2].getString(), "0");
+
+                                        if (! made.ok)
+                                            return Outcome::rejected (made.reason);
+
+                                        sendId = made.id;
+                                    }
+
+                                    said[at + 2] = osc::Value::string (sendId);
+                                    address = "/godot/send/" + sendId + "/levelLane";
+                                }
+
+                                if (const auto written = document.setAttribute (address, text); ! written.ok)
+                                    return Outcome::rejected (written.reason);
+                            }
+
+                            return Outcome::ok (std::move (said));
+                        } });
+
         /*  TWO VOICES, ONE VERB. With no argument it is a hand asking the pass
             to end - the window's stop, the D700's Rec - and only marks it: the
-            Runner holds the samples and writes the lane on its next tick. With
+            Runner holds the samples and writes the lanes on its next tick. With
             a word it is the Runner saying it has, which ends the pass; logged
-            after the lane's own `node.set`, so a replay reads the ask, the lane
-            and the end in the order they happened.
+            after the lanes' own `lane.write`, so a replay reads the ask, the
+            lanes and the end in the order they happened.
 
-            AND THE END GIVES THE FADER BACK, however the pass ended (2026-10-05,
-            QX, the author's decision) - so a pass never leaves a fader riding a
-            lane nobody is recording. What it ended in is kept for the window to
-            say (namespace draft §30.4): `kept` with the points the pass wrote
-            and the seconds they span; `untouched` when nobody rode the fader
-            while the cue sounded, and there is nothing to write; `locked` when
-            the show was locked under the pass, which keeps the lane as it was;
-            `dropped` when a kill took the pass. A `kept` with no numbers is a
-            record from before they were carried, and is still a pass kept. */
+            THE FADERS STAY FLIPPED (2026-10-06, UM, the author's decision), with
+            their REC choices: the next pass rides the next lane. What it ended
+            in is kept for the window to say (namespace draft §30.4): `kept`
+            with the points the pass wrote, the seconds they span and the lanes
+            it wrote; `untouched` when nobody rode an armed fader while the cue
+            sounded, and there is nothing to write; `locked` when the show was
+            locked under the pass, which keeps the lanes as they were; `dropped`
+            when a kill took the pass. */
         registry.add ({ "lane.stop",
                         "Ends the pass: with no argument, asks it to end; with kept, untouched,"
-                        " locked or dropped, says the lane has been written (how many points, over"
-                        " which seconds), that nobody rode the fader, that the lock kept the lane,"
-                        " or that the pass was dropped - and gives the fader back.",
+                        " locked or dropped, says the lanes have been written (how many points, over"
+                        " which seconds, which lanes), that nobody rode an armed fader, that the lock"
+                        " kept the lanes, or that the pass was dropped.",
                         { { "how", 's', true }, { "points", 'i', true },
-                          { "from", 'd', true }, { "to", 'd', true } },
+                          { "from", 'd', true }, { "to", 'd', true }, { "lanes", 's', true } },
                         true,
                         [&lanes] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
@@ -199,6 +333,9 @@ namespace wfg::cue
                                 said += " " + std::to_string (args[1].getInt32())
                                           + " " + osc::formatDouble (args[2].getFloat64())
                                           + " " + osc::formatDouble (args[3].getFloat64());
+
+                            if (how == "kept" && args.size() >= 5)
+                                said += " " + args[4].getString();
 
                             lanes.endPass (said);
                             return Outcome::ok (args);

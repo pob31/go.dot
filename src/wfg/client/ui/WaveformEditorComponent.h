@@ -226,6 +226,8 @@ namespace wfg::client::ui
         juce::TextButton freeFader;
         void sayWhatRecDoes();
         bool laneIsMine() const;
+        std::string pickedKey() const;
+        std::optional<double> drawnRide() const;
         int recWidth() const;
         void measureRec();
         int recWide = 0;
@@ -263,6 +265,7 @@ namespace wfg::client::ui
             the file's second and the fader's level, a point a pass - until the
             pass ends and the lane it wrote comes back in the reading. */
         std::vector<model::LanePoint> trail;
+        std::string trailKey;           // the lane the trail is of (§34)
         void paintTrail (juce::Graphics&, juce::Rectangle<int>);
 
         model::Hit hover;

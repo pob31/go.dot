@@ -200,9 +200,9 @@ namespace wfg::client::gesture
         return { origin::window, "lane.arm", { osc::Value::string (cueId) } };
     }
 
-    Event laneTake (const std::string& stripId)
+    Event laneRec (const std::string& laneKey, bool on)
     {
-        return { origin::window, "lane.take", { osc::Value::string (stripId) } };
+        return { origin::window, "lane.rec", { osc::Value::string (laneKey), osc::Value::boolean (on) } };
     }
 
     Event laneFree()

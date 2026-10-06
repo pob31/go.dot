@@ -224,15 +224,11 @@ namespace wfg
             write the same take twice. Until `take.kept` says it is done. */
         inline constexpr const char* busy             = "busy";
 
-        /*  A FADER OFFERED TO A LANE THAT IS NOT WAITING FOR ONE (namespace
-            draft §20.9): `lane.take` is what a surface sends for the first
-            fader touched while a lane is armed, and with none armed - or one
-            that already has its fader - there is nothing to take it for. */
-        inline constexpr const char* notWaiting       = "not-waiting";
-
-        /*  A PASS ASKED OF A LANE WITH NO FADER TAKEN (§20.9): the pass is the
-            fader's, and until one is touched there is no hand to record. */
-        inline constexpr const char* noFader          = "no-fader";
+        /*  A LANE ARMED, OR A PASS ASKED, WITH THE FADERS FLIPPED TO NO CUE
+            (namespace draft §34): a lane is a fader's, and until the faders
+            show a cue there is no fader to arm or to record. It replaced
+            §20.9's `no-fader` and `not-waiting` with the fader taken by touch. */
+        inline constexpr const char* notFlipped       = "not-flipped";
 
         /*  The argument's TYPE was right and its VALUE is not one this command
             accepts - a scope that is neither "round" nor "group", a stop verb

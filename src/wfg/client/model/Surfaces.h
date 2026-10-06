@@ -125,15 +125,11 @@ namespace wfg::client::model
     /** Every strip of every surface: surface order, then index. */
     std::vector<StripRow> readStrips (const tree::TreeSnapshot&);
 
-    /*  A LANE BEING RECORDED FROM A FADER (namespace draft §20.9), as the tree
-        says: the lane's cue, the fader taken for it (and how a person names
-        it - "Panel · fader 3"), whether it still waits for a touch, whether a
-        pass runs, and what the fader rides. */
-    /*  WHAT THE LAST PASS ENDED IN (namespace draft §30.4), as
+    /*  WHAT THE LAST PASS ENDED IN (namespace draft §30.4, §34), as
         `/godot/surface/lanePass` says it: the tick it ended on - nought or
-        less for no pass yet - its cue, and `kept` with the points it wrote and
-        the seconds they span (`spans`), `untouched`, `locked` or `dropped`. The fader
-        has gone back by then (QX), so this is the one row left to say it. */
+        less for no pass yet - its cue, and `kept` with the points it wrote,
+        the seconds they span (`spans`) and the lanes, by name; `untouched`,
+        `locked` or `dropped`. */
     struct LanePass
     {
         std::int64_t tick = -1;
@@ -143,28 +139,54 @@ namespace wfg::client::model
         double from = 0.0;
         double to = 0.0;
         bool spans = false;
+        std::vector<std::string> lanes;
     };
 
+    /*  ONE FLIPPED FADER (namespace draft §34): the lane it shows - `level`,
+        or a mix's identifier - the lane's name as a person reads it, the level
+        or the mix's name, whether its REC is armed, and what it rides: the
+        number as it is heard. */
+    struct LaneFaderReading
+    {
+        std::string key;
+        std::string name;
+        bool armed = false;
+        bool hasRide = false;
+        double rideDb = 0.0;
+    };
+
+    /*  THE FADERS FLIPPED TO A CUE (namespace draft §34), as the tree says:
+        the cue, whether a pass runs, every lane on the faders in strip order
+        - the level, then the show's mixes - and what the last pass ended in. */
     struct LaneRecordReading
     {
         std::string cue;
-        std::string strip;
-        std::string faderLabel;
-        bool waiting = false;
-        bool taken = false;
+        bool flipped = false;
         bool recording = false;
-        bool hasRide = false;
-        double rideDb = 0.0;
+        std::vector<LaneFaderReading> faders;
         LanePass pass;
+
+        /** The fader of one lane, or null when the faders show no such lane. */
+        const LaneFaderReading* faderOf (const std::string& key) const;
+
+        /** The armed lanes' names, in strip order. */
+        std::vector<std::string> armedNames() const;
     };
 
     LaneRecordReading readLaneRecord (const tree::TreeSnapshot&);
 
-    /*  THE LANE RECORDER'S NAME, the author's (2026-10-05, QY): on the
-        waveform's button at rest, and at the head of every sentence that
-        says what a pass did, so the button and what it reports are one
-        thing by one name. */
-    inline constexpr const char* laneRecorderName = "Level autom.";
+    /*  THE LANE A FLIPPED FADER RIDES, by its target (namespace draft §34):
+        `level` for `/godot/surface/laneRide`, a mix's identifier for
+        `/godot/bus/<mix>/laneRide`, nothing for any other node. */
+    std::optional<std::string> laneKeyOfRide (const std::string& target);
+
+    /*  THE LANE RECORDER'S NAME: on the waveform's button at rest, and at the
+        head of every sentence that says what a pass did, so the button and
+        what it reports are one thing by one name. "Level autom." was the
+        author's (2026-10-05, QY); since the faders record the sends too
+        (2026-10-06, §34) it is "Autom." - the implementer's word, which the
+        author kept when asked. */
+    inline constexpr const char* laneRecorderName = "Autom.";
 
     /*  WHAT A PASS ENDED IN, IN WORDS (namespace draft §30.4): the points it
         wrote and the seconds they span - "Level autom.: 7 points, 12.0–41.5 s",

@@ -276,40 +276,92 @@ namespace wfg::client::model
         return false;
     }
 
+    const LaneFaderReading* LaneRecordReading::faderOf (const std::string& key) const
+    {
+        for (const auto& fader : faders)
+            if (fader.key == key)
+                return &fader;
+
+        return nullptr;
+    }
+
+    std::vector<std::string> LaneRecordReading::armedNames() const
+    {
+        std::vector<std::string> out;
+
+        for (const auto& fader : faders)
+            if (fader.armed)
+                out.push_back (fader.name);
+
+        return out;
+    }
+
+    std::optional<std::string> laneKeyOfRide (const std::string& target)
+    {
+        const std::string bus = "/godot/bus/";
+        const std::string leaf = "/laneRide";
+
+        if (target == "/godot/surface/laneRide")
+            return std::string ("level");
+
+        if (target.size() > bus.size() + leaf.size() && target.compare (0, bus.size(), bus) == 0
+              && target.compare (target.size() - leaf.size(), leaf.size(), leaf) == 0)
+            return target.substr (bus.size(), target.size() - bus.size() - leaf.size());
+
+        return std::nullopt;
+    }
+
     LaneRecordReading readLaneRecord (const tree::TreeSnapshot& snapshot)
     {
         LaneRecordReading out;
         out.cue = text (snapshot, "/godot/surface/lane");
-        out.strip = text (snapshot, "/godot/surface/laneFader");
-        out.waiting = ! out.cue.empty() && out.strip.empty();
-        out.taken = ! out.cue.empty() && ! out.strip.empty();
-        out.recording = out.taken && isYes (flag (snapshot, "/godot/surface/laneRecording"));
+        out.flipped = ! out.cue.empty();
+        out.recording = out.flipped && isYes (flag (snapshot, "/godot/surface/laneRecording"));
 
-        if (const auto ride = osc::parseDouble (text (snapshot, "/godot/surface/laneRide")))
+        const auto armed = words (text (snapshot, "/godot/surface/laneRec"));
+        const auto isArmed = [&armed] (const std::string& key)
         {
-            out.hasRide = true;
-            out.rideDb = *ride;
+            return std::find (armed.begin(), armed.end(), key) != armed.end();
+        };
+
+        /*  THE LANES IN STRIP ORDER (§34, UN): the level, then the show's mixes
+            as `/godot/audio/mixes` lists them - each by the name a person
+            reads, and riding the number as it is heard. */
+        const auto nameOf = [&snapshot] (const std::string& key)
+        {
+            if (key == "level")
+                return std::string ("Level");
+
+            const auto name = text (snapshot, "/godot/bus/" + key + "/name");
+            return name.empty() ? key : name;
+        };
+
+        auto keys = words (text (snapshot, "/godot/audio/mixes"));
+        keys.insert (keys.begin(), "level");
+
+        for (const auto& key : keys)
+        {
+            LaneFaderReading fader;
+            fader.key = key;
+            fader.name = nameOf (key);
+            fader.armed = out.flipped && isArmed (key);
+
+            const auto address = key == "level" ? std::string ("/godot/surface/laneRide")
+                                                : "/godot/bus/" + key + "/laneRide";
+
+            if (out.flipped)
+                if (const auto ride = osc::parseDouble (text (snapshot, address)))
+                {
+                    fader.hasRide = true;
+                    fader.rideDb = *ride;
+                }
+
+            out.faders.push_back (std::move (fader));
         }
 
-        /*  THE FADER AS A PERSON NAMES IT: its surface's label and its number
-            on that surface, counted from one - what is printed on the desk. */
-        if (out.taken)
-        {
-            const auto base = "/godot/slot/" + out.strip + "/";
-            const auto surfaceId = text (snapshot, base + "surface");
-            const auto index = osc::parseDouble (text (snapshot, base + "index")).value_or (0.0);
-
-            std::string surfaceLabel = surfaceId;
-
-            for (const auto& surface : readSurfaces (snapshot))
-                if (surface.id == surfaceId)
-                    surfaceLabel = surface.label();
-
-            out.faderLabel = surfaceLabel + " · fader " + std::to_string (static_cast<int> (index) + 1);
-        }
-
-        /*  "<tick> <cue> <how> [<points> <from> <to>]", the engine's spelling:
-            numbers as the log writes them, a full stop in every locale. */
+        /*  "<tick> <cue> <how> [<points> <from> <to> [<lane>...]]", the
+            engine's spelling: numbers as the log writes them, a full stop in
+            every locale, and the lanes by key, named here. */
         if (const auto fields = words (text (snapshot, "/godot/surface/lanePass")); fields.size() >= 3)
         {
             const auto tick = osc::parseDouble (fields[0]);
@@ -333,6 +385,9 @@ namespace wfg::client::model
                         out.pass.to = *to;
                         out.pass.spans = true;
                     }
+
+                    for (std::size_t at = 6; at < fields.size(); ++at)
+                        out.pass.lanes.push_back (nameOf (fields[at]));
                 }
             }
         }
@@ -377,12 +432,18 @@ namespace wfg::client::model
             const auto span = tenthsText (pass.from) + "\xe2\x80\x93" + tenthsText (pass.to)
                                 + (minutes ? "" : " s");
 
-            return name + ": " + std::to_string (pass.points) + (pass.points == 1 ? " point, " : " points, ")
-                     + span;
+            /*  AND WHICH LANES (§34): "Autom.: Level, Face - 7 points, …". */
+            std::string lanes;
+
+            for (const auto& lane : pass.lanes)
+                lanes += (lanes.empty() ? "" : ", ") + lane;
+
+            return name + ": " + (lanes.empty() ? std::string {} : lanes + " - ")
+                     + std::to_string (pass.points) + (pass.points == 1 ? " point, " : " points, ") + span;
         }
 
         if (pass.how == "untouched")
-            return name + ": nothing written - the fader was not touched while the cue played";
+            return name + ": nothing written - no armed fader was touched while the cue played";
 
         if (pass.how == "locked")
             return name + ": nothing written - the show is locked";

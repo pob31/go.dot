@@ -200,7 +200,13 @@ namespace wfg::client::model
                 for (const auto& strip : readSends (snapshot, out.subject.objectId))
                     if (! strip.sendId.empty())
                         out.sendLanes.push_back ({ strip.sendId, strip.name,
-                                                   readLaneAt (snapshot, sendLaneAddress (strip.sendId)) });
+                                                   readLaneAt (snapshot, sendLaneAddress (strip.sendId)),
+                                                   strip.busId, strip.levelDb });
+
+            /*  AND THE CUE'S OWN LEVEL, which the level lane is an offset on
+                (namespace draft §34): a flipped fader rides the number as
+                heard, and the waveform draws its ride on the lane's axis. */
+            out.cueLevel = osc::parseDouble (at (cue + "level")).value_or (0.0);
             out.laneRecord = readLaneRecord (snapshot);
 
             /*  WHY THERE IS NOTHING TO DRAW, when there is nothing to draw, in

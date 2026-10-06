@@ -77,7 +77,7 @@ namespace wfg::client::ui
             a moving fader sends at most one `node.set` a pass. */
         void show (const std::vector<model::SurfaceRow>& surfacesNow,
                    const std::vector<model::StripRow>& stripsNow,
-                   bool laneWaitingNow = false);
+                   const model::LaneRecordReading& lanesNow = {});
 
         /** How many columns are drawn: every strip of every surface. */
         std::size_t columnCount() const noexcept { return strips.size(); }
@@ -204,9 +204,12 @@ namespace wfg::client::ui
 
         std::vector<model::StripRow> strips;
 
-        /*  A LANE WAITS FOR A FADER (namespace draft §20.9, DF): a press on any
-            fader strip takes it for the lane, and takes nothing else. */
-        bool laneWaiting = false;
+        /*  THE FADERS FLIPPED TO A CUE (namespace draft §34): a column riding
+            a lane is called by the lane, and its pad is the lane's REC. */
+        model::LaneRecordReading lanes;
+
+        /** The lane a column's fader rides while the faders are flipped, or null. */
+        const model::LaneFaderReading* laneOf (const model::StripRow&) const;
         std::vector<Band> bands;
         std::vector<int> columnX;
         std::string shape;

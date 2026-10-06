@@ -43,8 +43,9 @@ namespace wfg::cue
             std::string row;
         };
 
-        /*  THE LANE'S RIDE, one node for the one lane a fader records at a time
-            (DJ) - three parts, not an object's leaf, so it is named whole. */
+        /*  THE LEVEL'S RIDE while the faders are flipped to a cue (namespace
+            draft §34, UO) - three parts, not an object's leaf, so it is named
+            whole. A send's is its mix's leaf, `/godot/bus/<mix>/laneRide`. */
         constexpr std::string_view laneRide = "/godot/surface/laneRide";
 
         std::optional<LiveAddress> split (std::string_view address)
@@ -77,8 +78,9 @@ namespace wfg::cue
 
             const auto trim = row == "trim" && (owner == "run" || owner == "dca");
             const auto point = owner == "slot" && (row == "loopIn" || row == "loopOut");
+            const auto sendRide = owner == "bus" && row == "laneRide";
 
-            if (! trim && ! point)
+            if (! trim && ! point && ! sendRide)
                 return std::nullopt;
 
             return LiveAddress { std::string (owner), std::string (id), std::string (row) };
@@ -137,21 +139,26 @@ namespace wfg::cue
             if (! live.has_value())
                 return std::nullopt;
 
-            /*  THE LANE'S RIDE (DJ): the hand's level for the pass running, which
-                the Runner reads once the ride has been touched in it. With no
-                pass it is a fader a hand is setting before anything is recorded
-                - applied, and ignored (DG). */
-            if (live->owner == "surfaces")
+            /*  A LANE'S RIDE (namespace draft §34): the hand's level for the
+                pass running, as it is heard (UK), which the Runner reads once
+                the ride has been touched in it - the level's, or a send's by
+                its mix. With no pass, or on a lane whose REC is off, it is a
+                fader a hand is moving and nothing is recorded - applied, and
+                ignored (DG, UL). */
+            if (live->owner == "surfaces" || (live->owner == "bus" && live->row == "laneRide"))
             {
-                const auto decibels = parseNumber ("surfaces", "laneRide", text);
+                const auto decibels = parseNumber (live->owner, "laneRide", text);
 
                 if (! decibels.has_value())
                     return Outcome::rejected (reason::typeMismatch);
 
-                if (lanes != nullptr && lanes->recording)
+                const auto key = live->owner == "bus" ? live->id : std::string (levelLaneKey);
+
+                if (lanes != nullptr && lanes->recording && lanes->isArmed (key))
                 {
-                    lanes->handDb = *decibels;
-                    lanes->handSeen = true;
+                    auto& ride = lanes->rideOf (key);
+                    ride.handDb = *decibels;
+                    ride.handSeen = true;
                 }
 
                 return Outcome::ok (args);

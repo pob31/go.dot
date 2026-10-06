@@ -15,7 +15,8 @@
 */
 
 /*
-    A LANE RECORDED FROM A FADER (namespace draft §20.9).
+    A CUE'S LANES RECORDED FROM THE FADERS (namespace draft §20.9, and §34,
+    which flipped the faders to the cue and put the sends on them).
 
     The pure half first - a ride's segments, its thinning, its splice into the
     lane it replaces - then the commands against a real document, then the
@@ -66,6 +67,12 @@ namespace
 {
     constexpr const char* ride = "/godot/surface/laneRide";
 
+    /** A lane's ride node: the level's, or a send's by its mix (§34, UO). */
+    std::string rideOf (const std::string& key)
+    {
+        return key == "level" ? std::string (ride) : "/godot/bus/" + key + "/laneRide";
+    }
+
     //==========================================================================
     /*  The audio side with its clock in the test's hands: arms complete when
         the disk answers, and the sample count is whatever the case says. */
@@ -104,7 +111,7 @@ namespace
 
         bool stopAtSample (int, int, std::int64_t) override    { return true; }
         void setLevelDb (int, double levelDb) override          { lastLevel = levelDb; }
-        void setRouting (int, const std::vector<cue::Coefficient>&) override {}
+        void setRouting (int, const std::vector<cue::Coefficient>&) override { ++routings; }
         bool isPlaying (int track) const override               { return playing.count (track) > 0; }
         bool isArmReady (int track) const override              { return ready.count (track) > 0; }
 
@@ -122,6 +129,7 @@ namespace
 
         std::int64_t samples = 0;
         double lastLevel = 0.0;
+        int routings = 0;
         int stops = 0;
         int kills = 0;
         bool tails = false;
@@ -196,12 +204,17 @@ namespace
             }
         }
 
-        /*  Armed, taken and a pass running: the state every pass case starts
-            from, the voice launched and sounding. */
-        std::string startPass()
+        /*  Flipped, the lanes asked armed - the level's unless said - and a
+            pass running: the state every pass case starts from, the voice
+            launched and sounding. */
+        std::string startPass (const std::vector<std::string>& armed = { "level" })
         {
             REQUIRE (send ("lane.arm", { osc::Value::string (mediaId) }).applied >= 1);
-            REQUIRE (send ("lane.take", { osc::Value::string (strips[0]) }, "window").applied >= 1);
+
+            for (const auto& key : armed)
+                REQUIRE (send ("lane.rec", { osc::Value::string (key), osc::Value::boolean (true) }, "window")
+                           .applied >= 1);
+
             REQUIRE (send ("lane.record").applied >= 1);
 
             const auto runId = lanes.run;
@@ -229,6 +242,52 @@ namespace
         {
             return doc::readLevelLane (document.getAttribute ("/godot/cue/" + cueId + "/levelLane")
                                            .value_or ("")).points;
+        }
+
+        std::vector<doc::LanePoint> laneOfSend (const std::string& sendId) const
+        {
+            return doc::readLevelLane (document.getAttribute ("/godot/send/" + sendId + "/levelLane")
+                                           .value_or ("")).points;
+        }
+
+        /*  A MIX CHANNEL OF THE SHOW, by name: a lane on the flipped faders
+            whether or not the cue sends to it (§34). */
+        std::string mix (const std::string& name)
+        {
+            const auto made = document.createBus ("mix", 2);
+            REQUIRE (made.ok);
+            set ("/godot/bus/" + made.id + "/name", name);
+
+            /*  A send is routed by the file's width, which a show learns from
+                the file; this one has none, so it is said, as GoTests' routed
+                rig says it. */
+            document.findById (mediaId).setProperty (juce::Identifier ("channels"), 2, nullptr);
+            return made.id;
+        }
+
+        std::string sendTo (const std::string& busId, const std::string& level)
+        {
+            const auto made = document.createSend (mediaId, busId, {}, level);
+            REQUIRE (made.ok);
+            return made.id;
+        }
+
+        /** The cue's send into a mix, or empty - the bench cue's unless another is named. */
+        std::string sendOf (const std::string& busId, const std::string& cueId = {}) const
+        {
+            const auto cue = document.findById (cueId.empty() ? mediaId : cueId);
+
+            for (const auto& child : cue)
+                if (child.hasType ("Send") && child[juce::Identifier ("bus")].toString().toStdString() == busId)
+                    return child[juce::Identifier ("id")].toString().toStdString();
+
+            return {};
+        }
+
+        /** What a lane's fader rides now, as the Runner set it. */
+        double rideDb (const std::string& key)
+        {
+            return lanes.rides[key].rideDb;
         }
 
         /*  A RUN'S VOICE LANDS: its arms answered, its launch placed, the
@@ -330,6 +389,37 @@ namespace
     };
 }
 
+namespace
+{
+    /*  The fields of `/godot/surface/lanePass`: tick, cue, how, and for a pass
+        kept, the points and the seconds they span. */
+    std::vector<std::string> fieldsOf (const std::string& line)
+    {
+        std::vector<std::string> out;
+        std::string word;
+
+        for (const auto c : line)
+        {
+            if (c == ' ')
+            {
+                if (! word.empty())
+                    out.push_back (word);
+
+                word.clear();
+            }
+            else
+            {
+                word += c;
+            }
+        }
+
+        if (! word.empty())
+            out.push_back (word);
+
+        return out;
+    }
+}
+
 //==============================================================================
 TEST_CASE ("lane record: a ride's samples climb, a wrap starts a new segment, one instant is one sample")
 {
@@ -410,62 +500,114 @@ TEST_CASE ("lane record: a pass replaces the stretch it rode, joined to the curv
 }
 
 //==============================================================================
-TEST_CASE ("lane record: arming, taking and freeing a fader say no where they must")
+TEST_CASE ("lane record: flipping, arming a lane and flipping back say no where they must")
 {
     Rig rig;
 
     CHECK (rig.send ("lane.arm", { osc::Value::string ("NOTACUE1") }).rejected == 1);
     CHECK (rig.send ("lane.arm", { osc::Value::string (rig.memoId) }).rejected == 1);
 
-    //  Nothing waits, so nothing can be taken, and no pass without a fader.
-    CHECK (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }).rejected == 1);
+    //  Nothing is flipped, so nothing can be armed, and no pass.
+    CHECK (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (true) }).rejected == 1);
     CHECK (rig.send ("lane.record").rejected == 1);
 
     REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
-    CHECK (rig.lanes.waiting());
-    CHECK (rig.send ("lane.take", { osc::Value::string ("NOTASTR1") }).rejected == 1);
+    CHECK (rig.lanes.flipped());
+    CHECK (rig.lanes.cue() == rig.mediaId);
 
-    //  The first fader touched is taken, and a second is not waited for.
-    REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[1]) }).applied == 1);
-    CHECK (rig.lanes.taken());
-    CHECK (rig.lanes.strip() == rig.strips[1]);
-    CHECK (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }).rejected == 1);
+    //  A lane the faders do not show is refused; the level's is armed, and disarmed.
+    CHECK (rig.send ("lane.rec", { osc::Value::string ("NOTAMIX1"), osc::Value::boolean (true) }).rejected == 1);
+    REQUIRE (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (true) }).applied == 1);
+    CHECK (rig.lanes.isArmed ("level"));
+    CHECK (rig.published ("/godot/surface/laneRec") == "level");
+    REQUIRE (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (false) }).applied == 1);
+    CHECK_FALSE (rig.lanes.isArmed ("level"));
 
-    //  Freed, it is nobody's.
+    //  Flipped to the same cue again, its REC choices are kept; flipped back, forgotten.
+    REQUIRE (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (true) }).applied == 1);
+    REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
+    CHECK (rig.lanes.isArmed ("level"));
+
     REQUIRE (rig.send ("lane.free").applied == 1);
-    CHECK_FALSE (rig.lanes.taken());
+    CHECK_FALSE (rig.lanes.flipped());
     CHECK (rig.lanes.cue().empty());
+    CHECK_FALSE (rig.lanes.isArmed ("level"));
 
-    //  A lane is the show's: the lock refuses arming it.
+    //  A lane is the show's: the lock refuses the flip, and a REC.
+    REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
     rig.set ("/godot/document/locked", "true");
+    CHECK (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (true) }).rejected == 1);
+    rig.play (2);
     CHECK (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).rejected == 1);
 }
 
-TEST_CASE ("lane record: the taken strip rides the lane's node, which sits where the lane starts")
+TEST_CASE ("lane record: the faders flip to the cue's level and its mixes, each where its number is heard at the lane's start")
 {
+    /*  §34, UN and UK: strip k of the panel is lane k - the level, then the
+        show's mixes in /godot/audio/mixes order - and each fader sits at the
+        written number plus its lane, where the cue starts. A mix the cue
+        does not send to sits at the bottom; a send switched off says so. */
     Rig rig;
+    const auto face = rig.mix ("Face");
+    const auto loin = rig.mix ("Loin");
+
+    rig.set ("/godot/cue/" + rig.mediaId + "/level", "-4");
     rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -10 4 -30");
     rig.set ("/godot/cue/" + rig.mediaId + "/startOffset", "2");
 
-    REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
-    CHECK (rig.published ("/godot/surface/lane") == rig.mediaId);
-    CHECK (rig.published ("/godot/surface/laneFader").empty());
+    const auto send = rig.sendTo (face, "-6");
+    rig.set ("/godot/send/" + send + "/levelLane", "0 0 4 -10");
 
-    REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }).applied == 1);
+    const auto keys = cue::flippedLanes (rig.document);
+    REQUIRE (keys.size() >= 3u);
+    REQUIRE (keys[0] == "level");
+
+    REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
     rig.tickOnce();
 
-    CHECK (rig.published ("/godot/surface/laneFader") == rig.strips[0]);
-    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/target") == ride);
-    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/word") == "lane");
-    CHECK (rig.published ("/godot/slot/" + rig.strips[1] + "/target") != ride);
+    CHECK (rig.published ("/godot/surface/lane") == rig.mediaId);
 
-    //  DG: where the lane starts - the start offset's second, -20 dB.
-    CHECK (rig.lanes.rideDb == doctest::Approx (-20.0));
-    CHECK (rig.published (ride) == "-20");
+    for (std::size_t k = 0; k < rig.strips.size(); ++k)
+    {
+        const auto base = "/godot/slot/" + rig.strips[k] + "/";
+        CAPTURE (k);
 
-    //  A hand setting the fader before any pass is heard by nobody.
-    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-3.0) }, "window");
-    CHECK (rig.lanes.rideDb == doctest::Approx (-20.0));
+        if (k < keys.size())
+        {
+            CHECK (rig.published (base + "target") == rideOf (keys[k]));
+            CHECK (rig.published (base + "word") == "lane");
+            CHECK (rig.published (base + "cue") == rig.mediaId);
+        }
+        else
+        {
+            CHECK (rig.published (base + "target").empty());      // past the last lane, dark
+        }
+    }
+
+    //  DG and UK: at the start offset's second, the level -4 - 20; the send -6 - 5; Loin silent.
+    CHECK (rig.published (rideOf ("level")) == "-24");
+    CHECK (rig.published (rideOf (face)) == "-11");
+    CHECK (rig.published (rideOf (loin)) == "-120");
+
+    //  Its REC lights the word; a send switched off says so (US).
+    REQUIRE (rig.send ("lane.rec", { osc::Value::string (face), osc::Value::boolean (true) }).applied == 1);
+    rig.set ("/godot/send/" + send + "/on", "false");
+    rig.tickOnce();
+
+    const auto stripOf = [&rig, &keys] (const std::string& key)
+    {
+        return rig.strips[static_cast<std::size_t> (std::find (keys.begin(), keys.end(), key) - keys.begin())];
+    };
+
+    CHECK (rig.published ("/godot/slot/" + stripOf (face) + "/word") == "rec");
+    REQUIRE (rig.send ("lane.rec", { osc::Value::string (face), osc::Value::boolean (false) }).applied == 1);
+    rig.tickOnce();
+    CHECK (rig.published ("/godot/slot/" + stripOf (face) + "/word") == "off");
+
+    //  A hand setting a fader before any pass is heard by nobody.
+    rig.send ("node.set", { osc::Value::string (rideOf ("level")), osc::Value::float64 (-3.0) }, "window");
+    rig.tickOnce();
+    CHECK (rig.rideDb ("level") == doctest::Approx (-24.0));
 }
 
 //==============================================================================
@@ -480,15 +622,15 @@ TEST_CASE ("lane record: a pass writes the ride from its first touch, latched un
 
     //  UNTOUCHED, THE FADER READS THE LANE: a second in, about -1 dB.
     rig.play (50);
-    CHECK (rig.lanes.rideDb < -0.5);
-    CHECK (rig.lanes.rideDb > -1.5);
+    CHECK (rig.rideDb ("level") < -0.5);
+    CHECK (rig.rideDb ("level") > -1.5);
 
     //  THE TOUCH: the hand's level is heard at once.
     rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
     rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-6.0) }, "surface:PANEL");
     rig.play (50);
 
-    CHECK (rig.lanes.touched);
+    CHECK (rig.lanes.rides["level"].touched);
     CHECK (rig.runs.find (runId)->laneDb == doctest::Approx (-6.0));
     CHECK (rig.runs.find (runId)->level == doctest::Approx (-6.0));
 
@@ -530,6 +672,158 @@ TEST_CASE ("lane record: a pass writes the ride from its first touch, latched un
     //  ONE STEP OF UNDO takes the pass away.
     REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
     CHECK (rig.laneOfCue().size() == 2u);
+}
+
+TEST_CASE ("lane record: the level and a send ridden in one pass, each as heard, each from its own first touch, in one step")
+{
+    /*  §34, UI and UK: the hand rides the number as heard, and the lane keeps
+        the difference from the written one - so a cue at -4 ridden to -10 is
+        a level lane at -6, and a send at -6 ridden to -12 a send lane at -6.
+        Both are written by one `lane.write`, one step of undo. */
+    Rig rig;
+    const auto face = rig.mix ("Face");
+
+    rig.set ("/godot/cue/" + rig.mediaId + "/level", "-4");
+    const auto send = rig.sendTo (face, "-6");
+
+    const auto runId = rig.startPass ({ "level", face });
+    rig.play (20);
+
+    const auto routings = rig.audio.routings;
+
+    rig.send ("node.touch", { osc::Value::string (rideOf ("level")) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (rideOf ("level")), osc::Value::float64 (-10.0) }, "surface:PANEL");
+    rig.play (25);
+
+    CHECK (rig.runs.find (runId)->laneDb == doctest::Approx (-6.0));
+    CHECK_FALSE (rig.lanes.rides[face].touched);            // not yet: its own touch
+
+    rig.send ("node.touch", { osc::Value::string (rideOf (face)) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (rideOf (face)), osc::Value::float64 (-12.0) }, "surface:PANEL");
+    rig.play (25);
+
+    REQUIRE (rig.runs.find (runId)->sendLaneDb.count (face) == 1u);
+    CHECK (rig.runs.find (runId)->sendLaneDb.at (face) == doctest::Approx (-6.0));
+    CHECK (rig.audio.routings > routings);
+
+    //  The hand's term holds tick after tick: the routing is not rebuilt by a lane and a hand taking turns.
+    const auto held = rig.audio.routings;
+    rig.play (10);
+    CHECK (rig.audio.routings == held);
+
+    rig.document.beginTransaction ("lane.stop", rig.tick, "window", {});
+    rig.send ("lane.stop", {}, "window");
+    rig.tickOnce();
+
+    CHECK_FALSE (rig.lanes.recording);
+    CHECK (rig.lanes.flipped());                            // UM: the faders stay on the cue
+
+    const auto level = rig.laneOfCue();
+    const auto sent = rig.laneOfSend (send);
+    REQUIRE_FALSE (level.empty());
+    REQUIRE_FALSE (sent.empty());
+
+    //  The level from its touch at 0.4 s, the send from its own at 0.9 s.
+    CHECK (doc::laneLevelDb (level, 0.2) == doctest::Approx (0.0));
+    CHECK (doc::laneLevelDb (level, 0.7) == doctest::Approx (-6.0));
+    CHECK (doc::laneLevelDb (sent, 0.7) == doctest::Approx (0.0));
+    CHECK (doc::laneLevelDb (sent, 1.3) == doctest::Approx (-6.0));
+
+    //  What the pass ended in names both lanes.
+    const auto fields = fieldsOf (rig.published ("/godot/surface/lanePass"));
+    REQUIRE (fields.size() == 8u);
+    CHECK (fields[2] == "kept");
+    CHECK (fields[6] == "level");
+    CHECK (fields[7] == face);
+
+    //  ONE STEP OF UNDO takes both away.
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.laneOfCue().empty());
+    CHECK (rig.laneOfSend (send).empty());
+}
+
+TEST_CASE ("lane record: a mix the cue does not send to, ridden, becomes a send at nought holding the ride over silence")
+{
+    /*  §34, UQ: heard during the pass as a send of the run alone, and given a
+        send when the pass ends - at nought, its lane silence outside the ride,
+        the importer's way of writing a moving send. The send and its lane are
+        one step of undo. */
+    Rig rig;
+    const auto loin = rig.mix ("Loin");
+
+    const auto runId = rig.startPass ({ loin });
+    rig.play (20);
+
+    rig.send ("node.touch", { osc::Value::string (rideOf (loin)) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (rideOf (loin)), osc::Value::float64 (-8.0) }, "surface:PANEL");
+    rig.play (50);
+
+    REQUIRE (rig.runs.find (runId)->sendLaneDb.count (loin) == 1u);
+    CHECK (rig.runs.find (runId)->sendLaneDb.at (loin) == doctest::Approx (-8.0));
+    CHECK (rig.rideDb (loin) == doctest::Approx (-8.0));
+
+    rig.document.beginTransaction ("lane.stop", rig.tick, "window", {});
+    rig.send ("lane.stop", {}, "window");
+    rig.tickOnce();
+
+    const auto made = rig.sendOf (loin);
+    REQUIRE_FALSE (made.empty());
+    CHECK (rig.document.getAttribute ("/godot/send/" + made + "/level").value_or ("") == "0");
+
+    const auto lane = rig.laneOfSend (made);
+    REQUIRE_FALSE (lane.empty());
+    CHECK (doc::laneLevelDb (lane, 0.1) == doctest::Approx (-120.0));
+    CHECK (doc::laneLevelDb (lane, 1.0) == doctest::Approx (-8.0));
+    CHECK (doc::laneLevelDb (lane, 5.0) == doctest::Approx (-120.0));
+
+    //  And the faders, re-read, find the send: the fader sits where it is heard.
+    rig.play (2);
+    CHECK (rig.rideDb (loin) == doctest::Approx (-120.0));
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.sendOf (loin).empty());
+}
+
+TEST_CASE ("lane record: a REC pressed during a pass joins it from the next touch, and pressed off keeps what was ridden")
+{
+    /*  §34, UL and UP: a fader whose REC is off plays back - a hand on it is
+        heard by nobody - and its REC pressed mid-pass is a punch-in; pressed
+        off again, a punch-out, the lane following its curve from there. */
+    Rig rig;
+    rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -3");
+
+    const auto runId = rig.startPass ({});
+    rig.play (20);
+
+    //  Not armed: the hand moves nothing heard.
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-20.0) }, "surface:PANEL");
+    rig.play (10);
+    CHECK (rig.runs.find (runId)->laneDb == doctest::Approx (-3.0));
+    rig.send ("node.release", { osc::Value::string (ride) }, "surface:PANEL");
+
+    //  Punch in, at about 0.7 s.
+    REQUIRE (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (true) }, "surface:PANEL")
+               .applied == 1);
+    rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
+    rig.play (40);
+    CHECK (rig.runs.find (runId)->laneDb == doctest::Approx (-9.0));
+
+    //  Punch out, at about 1.5 s: the curve again.
+    REQUIRE (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (false) }, "surface:PANEL")
+               .applied == 1);
+    rig.play (40);
+    CHECK (rig.runs.find (runId)->laneDb == doctest::Approx (-3.0));
+
+    rig.send ("lane.stop", {}, "window");
+    rig.tickOnce();
+
+    const auto lane = rig.laneOfCue();
+    REQUIRE (lane.size() > 1u);
+    CHECK (doc::laneLevelDb (lane, 0.3) == doctest::Approx (-3.0));
+    CHECK (doc::laneLevelDb (lane, 1.1) == doctest::Approx (-9.0));
+    CHECK (doc::laneLevelDb (lane, 2.2) == doctest::Approx (-3.0));
 }
 
 TEST_CASE ("lane record: a pass nobody touched writes nothing, and a killed one drops the ride")
@@ -577,26 +871,25 @@ TEST_CASE ("lane record: a pass nobody touched writes nothing, and a killed one 
         rig.tickOnce();
 
         CHECK_FALSE (rig.lanes.recording);
-        CHECK_FALSE (rig.lanes.taken());
+        CHECK (rig.lanes.flipped());
         REQUIRE_FALSE (rig.laneOfCue().empty());
         CHECK (doc::laneLevelDb (rig.laneOfCue(), 0.3) == doctest::Approx (-9.0));
     }
 }
 
-TEST_CASE ("lane record: a double Esc lets the taken fader go - its strip rides what it rode before, and nothing moves it again")
+TEST_CASE ("lane record: a double Esc flips the faders back - each strip rides what it rode before, and nothing moves it again")
 {
     /*  THE ASSOCIATION IS DROPPED WITH EVERYTHING ELSE (2026-10-02, K4, the
         author: "double Esc would throw away the fader association"; namespace
-        draft §23.15, overruling JE of §23.11). A double Esc lets the fader go
-        as `lane.free` would: the strip goes back to what it rode before it was
-        taken, the lane is forgotten, the ride node leaves the tree - and the
-        fader is not sent to the lane's start first, as it was under JE. The
-        killed pass's ride is dropped as before (DM). From the press's own
-        handler, so a replay frees it in the same record. */
+        draft §23.15, §34). A double Esc flips the faders back as `lane.free`
+        would: each strip goes back to what it rode, the cue and its REC
+        choices are forgotten, the ride nodes leave the tree. The killed
+        pass's rides are dropped as before (DM). From the press's own
+        handler, so a replay frees them in the same record. */
     Rig rig;
     rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -20");
 
-    /*  The strip rides a DCA's trim before it is taken: what it goes back to. */
+    /*  The strip rides a DCA's trim before the flip: what it goes back to. */
     const auto band = rig.document.createDca ("Band");
     REQUIRE (band.ok);
     rig.set ("/godot/slot/" + rig.strips[0] + "/role", "dca");
@@ -618,37 +911,29 @@ TEST_CASE ("lane record: a double Esc lets the taken fader go - its strip rides 
         REQUIRE (rig.published (target) == ride);
     }
 
-    SUBCASE ("taken, no pass")
+    SUBCASE ("flipped and armed, no pass")
     {
         REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied >= 1);
-        REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window").applied >= 1);
+        REQUIRE (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (true) }, "window")
+                   .applied >= 1);
         rig.tickOnce();
 
         REQUIRE (rig.published (target) == ride);
         REQUIRE (rig.published (ride) == "-20");
     }
 
-    SUBCASE ("armed, still waiting for a touch")
-    {
-        /*  The review of K4: a lane armed and waiting is disarmed as well - the
-            next fader touched after the press is touched, not taken. */
-        REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied >= 1);
-        REQUIRE (rig.lanes.waiting());
-        REQUIRE (rig.published ("/godot/surface/lane") == rig.mediaId);
-    }
-
     REQUIRE (rig.send ("run.killAll", {}, "window").rejected == 0);
 
     //  Let go in the press's own drain: nothing waits for a hook.
-    CHECK_FALSE (rig.lanes.taken());
-    CHECK_FALSE (rig.lanes.waiting());
+    CHECK_FALSE (rig.lanes.flipped());
     CHECK_FALSE (rig.lanes.recording);
+    CHECK_FALSE (rig.lanes.isArmed ("level"));
     CHECK (rig.lanes.cue().empty());
 
     rig.play (3);
 
     CHECK (rig.published (target) == before);
-    CHECK (rig.published ("/godot/surface/laneFader").empty());
+    CHECK (rig.published ("/godot/surface/laneRec").empty());
     CHECK (rig.published ("/godot/surface/lane").empty());
     CHECK (rig.published ("/godot/surface/laneRecording") == "false");
     CHECK (rig.published (ride).empty());                  // the ride node is gone, not at -20
@@ -657,20 +942,19 @@ TEST_CASE ("lane record: a double Esc lets the taken fader go - its strip rides 
 
     CHECK (rig.published (target) == before);
     CHECK (rig.published (ride).empty());
-    CHECK_FALSE (rig.lanes.taken());
     CHECK (rig.laneOfCue().size() == 1u);       // the drawn lane, any ride dropped (DM)
 
-    //  And a pass needs a fader again.
+    //  And a pass needs the faders flipped again.
     CHECK (rig.send ("lane.record").rejected == 1);
 }
 
 TEST_CASE ("lane record: a session with a double Esc in the middle of a pass replays record for record")
 {
     /*  THE FREE IS THE HANDLER'S (KO; the review of K4 asked for the proof):
-        `run.killAll` lets the fader go inside its own handler, so a replay -
-        which runs no hook - frees it in the same record, and the records
-        after it (the hand's writes on a ride that has gone, a new arming)
-        are answered the same way. */
+        `run.killAll` flips the faders back inside its own handler, so a
+        replay - which runs no hook - frees them in the same record, and the
+        records after it (the hand's writes on a ride that has gone, a new
+        flip) are answered the same way. */
     Rig rig;
     rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -20");
     rig.startPass();
@@ -682,12 +966,12 @@ TEST_CASE ("lane record: a session with a double Esc in the middle of a pass rep
     rig.send ("run.killAll", {}, "window");
     rig.play (5);
     rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-4.0) }, "surface:PANEL");
-    rig.send ("lane.record");                               // refused: no fader
+    rig.send ("lane.record");                               // refused: not flipped
     rig.send ("lane.arm", { osc::Value::string (rig.mediaId) });
     rig.play (3);
 
-    REQUIRE_FALSE (rig.lanes.taken());
-    REQUIRE (rig.lanes.waiting());
+    REQUIRE (rig.lanes.flipped());
+    REQUIRE_FALSE (rig.lanes.isArmed ("level"));
 
     const auto show = doc::CanonicalXml::write (rig.document);
     const auto original = LogFile::parse (rig.engine.log().contents());
@@ -708,24 +992,21 @@ TEST_CASE ("lane record: a session with a double Esc in the middle of a pass rep
 
     CHECK (result.ok);
     CHECK (result.recordsReplayed == result.recordsExpected);
-    CHECK_FALSE (fresh.lanes.taken());
     CHECK_FALSE (fresh.lanes.recording);
     CHECK (fresh.lanes.cue() == rig.mediaId);
+    CHECK_FALSE (fresh.lanes.isArmed ("level"));
 }
 
-TEST_CASE ("lane record: Esc ends the pass and gives the fader back, and the pass it ended keeps its ride")
+TEST_CASE ("lane record: Esc ends the pass, the pass it ended keeps its ride, and the faders stay on the cue")
 {
-    /*  THE STOP GIVES IT BACK, HOWEVER IT STOPS (2026-10-05, QX, the author's;
-        namespace draft §30.4), replacing K4's "a single Esc would keep the
-        association" (§23.15), which this case pinned until then. Esc ends the
-        pass as the cue ending would - the ride written (DM) - and the strip
-        rides what it rode before it was taken; the next pass is a new arm
-        and a new touch. */
+    /*  §34, UM (the author's, 2026-10-06), replacing QX's "the stop gives the
+        fader back" for the flip: Esc ends the pass as the cue ending would -
+        the ride written (DM) - and the faders stay flipped, their REC choices
+        kept, so the next pass is one Rec away. */
     Rig rig;
     rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -20");
 
     const auto target = "/godot/slot/" + rig.strips[0] + "/target";
-    const auto before = rig.published (target);
 
     rig.startPass();
 
@@ -738,18 +1019,17 @@ TEST_CASE ("lane record: Esc ends the pass and gives the fader back, and the pas
     rig.play (60);                              // past the panic fade (1 s)
 
     CHECK_FALSE (rig.lanes.recording);
-    CHECK_FALSE (rig.lanes.taken());
-    CHECK (rig.lanes.cue().empty());
-    CHECK (rig.published (target) == before);
-    CHECK (rig.published ("/godot/surface/laneFader").empty());
-    CHECK (rig.published ("/godot/surface/lane").empty());
+    CHECK (rig.lanes.flipped());
+    CHECK (rig.lanes.isArmed ("level"));
+    CHECK (rig.published (target) == ride);
+    CHECK (rig.published ("/godot/surface/lane") == rig.mediaId);
 
     REQUIRE_FALSE (rig.laneOfCue().empty());
     CHECK (doc::laneLevelDb (rig.laneOfCue(), 0.3) == doctest::Approx (-9.0));
 
-    //  The next pass needs a fader taken again.
-    CHECK (rig.send ("lane.record").rejected == 1);
-    CHECK_FALSE (rig.lanes.recording);
+    //  The next pass starts straight away.
+    CHECK (rig.send ("lane.record").applied == 1);
+    CHECK (rig.lanes.recording);
 }
 
 TEST_CASE ("lane record: the hand ending a pass stops its cue gracefully, and its tail rings")
@@ -776,7 +1056,7 @@ TEST_CASE ("lane record: the hand ending a pass stops its cue gracefully, and it
     rig.play (3);
 
     CHECK_FALSE (rig.lanes.recording);
-    CHECK_FALSE (rig.lanes.taken());                    // and the fader given back (QX)
+    CHECK (rig.lanes.flipped());                        // and the faders kept on the cue (UM)
 
     const auto* run = rig.runs.find (runId);
     REQUIRE (run != nullptr);
@@ -801,7 +1081,7 @@ TEST_CASE ("lane record: a touch with no move latches where the fader was, not a
     rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
     rig.play (10);
 
-    CHECK (rig.lanes.touched);
+    CHECK (rig.lanes.rides["level"].touched);
     CHECK (rig.runs.find (runId)->laneDb == doctest::Approx (-7.0));
 }
 
@@ -813,37 +1093,6 @@ TEST_CASE ("lane record: a touch with no move latches where the fader was, not a
     "was not released back to its sampler". The cases below walk the paths
     that took them there - a sampler member, ranges, a retake, every end of a
     pass - which the cases above, one plain cue on one slot, never did. */
-
-namespace
-{
-    /*  The fields of `/godot/surface/lanePass`: tick, cue, how, and for a pass
-        kept, the points and the seconds they span. */
-    std::vector<std::string> fieldsOf (const std::string& line)
-    {
-        std::vector<std::string> out;
-        std::string word;
-
-        for (const auto c : line)
-        {
-            if (c == ' ')
-            {
-                if (! word.empty())
-                    out.push_back (word);
-
-                word.clear();
-            }
-            else
-            {
-                word += c;
-            }
-        }
-
-        if (! word.empty())
-            out.push_back (word);
-
-        return out;
-    }
-}
 
 TEST_CASE ("lane record: a sampler member sounding under a pulled-down fader is recorded from its start, and heard")
 {
@@ -875,9 +1124,10 @@ TEST_CASE ("lane record: a sampler member sounding under a pulled-down fader is 
     REQUIRE (rig.runs.find (runId)->trim <= -118.0);
     REQUIRE_FALSE (rig.runs.find (runId)->isFinished());
 
-    //  Its own strip taken for its lane, as the author did, and a pass with no `from`.
+    //  The faders flipped to the member, its level armed, and a pass with no `from`.
     REQUIRE (rig.send ("lane.arm", { osc::Value::string (member) }).applied == 1);
-    REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "surface:PANEL").applied == 1);
+    REQUIRE (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (true) }, "surface:PANEL")
+               .applied == 1);
     REQUIRE (rig.send ("lane.record").applied == 1);
 
     //  The same run, moved to the cue's start, and its fader lifted to the member's initial level.
@@ -904,8 +1154,11 @@ TEST_CASE ("lane record: a sampler member sounding under a pulled-down fader is 
     CHECK (lane.back().seconds < 1.4);
     CHECK (doc::laneLevelDb (lane, 0.5) == doctest::Approx (-6.0));
 
-    //  And the fader is the sample's again (QX).
-    CHECK_FALSE (rig.lanes.taken());
+    //  And the faders stay on the member until they are flipped back (UM), then are the sample's.
+    CHECK (rig.lanes.flipped());
+    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/target") == ride);
+    REQUIRE (rig.send ("lane.free").rejected == 0);
+    CHECK_FALSE (rig.lanes.flipped());
     CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/target") != ride);
 }
 
@@ -929,10 +1182,8 @@ TEST_CASE ("lane record: a pass started while the last pass's cue still rings ou
     rig.play (2);
 
     REQUIRE (rig.runs.find (runId)->state == cue::runState::stopping);
-    REQUIRE_FALSE (rig.lanes.taken());          // QX: a retake is a new arm and a new touch
+    REQUIRE (rig.lanes.flipped());              // UM: a retake is one Rec away
 
-    REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
-    REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window").applied == 1);
     REQUIRE (rig.send ("lane.record").applied == 1);
 
     CHECK (rig.lanes.run == runId);
@@ -969,7 +1220,7 @@ TEST_CASE ("lane record: a cue with ranges is recorded from the second asked, in
     rig.addRange (30.0, 60.0);
 
     REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
-    REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window").applied == 1);
+    REQUIRE (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (true) }, "window").applied == 1);
     REQUIRE (rig.send ("lane.record", { osc::Value::float64 (21.5) }).applied == 1);
 
     const auto runId = rig.lanes.run;
@@ -1074,17 +1325,16 @@ TEST_CASE ("lane record: a seek on a cue with ranges lands at the second asked -
     CHECK (now()->sliceFrom == doctest::Approx (5.0));
 }
 
-TEST_CASE ("lane record: the fader is the sample's again however the pass ends, and what the pass ended in is published")
+TEST_CASE ("lane record: the faders stay on the cue however the pass ends, and what the pass ended in is published")
 {
-    /*  QX (the author's decision, 2026-10-05): the touch takes the fader and
-        the end of the pass gives it back - kept, nobody riding it, a kill, Esc
-        (above), the cue ending on its own. And each end says what it was, for
-        the window to say in words (§30.4). */
+    /*  §34, UM (the author's, 2026-10-06): the end of a pass - kept, nobody
+        riding, a kill, Esc (above), the cue ending on its own - leaves the
+        faders flipped, which QX had given back. And each end says what it was,
+        for the window to say in words (§30.4). */
     Rig rig;
     rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -3");
 
     const auto target = "/godot/slot/" + rig.strips[0] + "/target";
-    const auto before = rig.published (target);
     REQUIRE (rig.published ("/godot/surface/lanePass").empty());
 
     std::string how;
@@ -1100,12 +1350,13 @@ TEST_CASE ("lane record: the fader is the sample's again however the pass ends, 
         how = "kept";
 
         const auto fields = fieldsOf (rig.published ("/godot/surface/lanePass"));
-        REQUIRE (fields.size() == 6u);
+        REQUIRE (fields.size() == 7u);
         //  Read as the log writes numbers - a full stop in every locale.
         CHECK (osc::parseDouble (fields[3]).value_or (0.0) >= 2.0);
         CHECK (osc::parseDouble (fields[4]).value_or (9.0) < 0.1);
         CHECK (osc::parseDouble (fields[5]).value_or (0.0) > 0.9);
         CHECK (osc::parseDouble (fields[5]).value_or (9.0) < 1.3);
+        CHECK (fields[6] == "level");
     }
 
     SUBCASE ("untouched - the cue ended on its own, nobody riding it")
@@ -1130,10 +1381,10 @@ TEST_CASE ("lane record: the fader is the sample's again however the pass ends, 
     }
 
     CHECK_FALSE (rig.lanes.recording);
-    CHECK_FALSE (rig.lanes.taken());
-    CHECK (rig.lanes.cue().empty());
-    CHECK (rig.published (target) == before);
-    CHECK (rig.published ("/godot/surface/laneFader").empty());
+    CHECK (rig.lanes.flipped());
+    CHECK (rig.lanes.isArmed ("level"));
+    CHECK (rig.lanes.cue() == rig.mediaId);
+    CHECK (rig.published (target) == ride);
 
     const auto fields = fieldsOf (rig.published ("/godot/surface/lanePass"));
     REQUIRE (fields.size() >= 3u);
@@ -1141,42 +1392,30 @@ TEST_CASE ("lane record: the fader is the sample's again however the pass ends, 
     CHECK (fields[2] == how);
 }
 
-TEST_CASE ("lane record: locking the show lets a waiting or taken fader go, and a pass under way ends before its fader does")
+TEST_CASE ("lane record: locking the show flips the faders back, and a pass under way ends before they do")
 {
-    /*  DN said the lock frees the fader, and only the refusals were built: a
-        fader taken for a lane the lock will not let anybody record played
-        nothing for as long as the show stayed locked (§30.4). Let go by
-        `lane.free`, the engine's, so the log says why. */
+    /*  DN said the lock frees the fader (§30.4); since §34 it flips the faders
+        back: faders on a cue the lock will not let anybody record would play
+        nothing for as long as the show stayed locked. Let go by `lane.free`,
+        the engine's, so the log says why. */
     Rig rig;
 
-    SUBCASE ("taken")
+    SUBCASE ("flipped and armed")
     {
         REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
-        REQUIRE (rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window").applied == 1);
-        REQUIRE (rig.lanes.taken());
+        REQUIRE (rig.send ("lane.rec", { osc::Value::string ("level"), osc::Value::boolean (true) }, "window")
+                   .applied == 1);
 
         rig.set ("/godot/document/locked", "true");
         rig.play (2);
 
-        CHECK_FALSE (rig.lanes.taken());
+        CHECK_FALSE (rig.lanes.flipped());
         CHECK (rig.lanes.cue().empty());
-        CHECK (rig.published ("/godot/surface/laneFader").empty());
+        CHECK (rig.published ("/godot/surface/laneRec").empty());
         CHECK (rig.engine.log().contents().find ("engine lane.free") != std::string::npos);
     }
 
-    SUBCASE ("waiting for a touch")
-    {
-        REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
-        REQUIRE (rig.lanes.waiting());
-
-        rig.set ("/godot/document/locked", "true");
-        rig.play (2);
-
-        CHECK_FALSE (rig.lanes.waiting());
-        CHECK (rig.lanes.cue().empty());
-    }
-
-    SUBCASE ("a pass under way: it runs on, and its end gives the fader back, writing nothing the lock keeps")
+    SUBCASE ("a pass under way: it runs on, its end writes nothing the lock keeps, and then the faders flip back")
     {
         rig.startPass();
         rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
@@ -1186,13 +1425,13 @@ TEST_CASE ("lane record: locking the show lets a waiting or taken fader go, and 
         rig.play (20);
 
         CHECK (rig.lanes.recording);
-        CHECK (rig.lanes.taken());
+        CHECK (rig.lanes.flipped());
 
         rig.send ("lane.stop", {}, "window");
-        rig.tickOnce();
+        rig.play (3);
 
         CHECK_FALSE (rig.lanes.recording);
-        CHECK_FALSE (rig.lanes.taken());
+        CHECK_FALSE (rig.lanes.flipped());
         CHECK (rig.laneOfCue().empty());
 
         const auto fields = fieldsOf (rig.published ("/godot/surface/lanePass"));
@@ -1201,41 +1440,46 @@ TEST_CASE ("lane record: locking the show lets a waiting or taken fader go, and 
     }
 }
 
-TEST_CASE ("lane record: a session of passes - a retake under a ringing stop, the cue ending on its own, the lock - replays record for record")
+TEST_CASE ("lane record: a session of passes - a retake under a ringing stop, the cue ending on its own, a send made, the lock - replays record for record")
 {
-    /*  Everything §30.4 moved is a handler's or rides a record: the pass's
-        start (`startLanePass`, from the run table and the document), its end
-        and what it ended in (`lane.stop`'s arguments), the lock's let-go
-        (`lane.free` from the engine). So a replay, which runs no hook,
-        answers every record the night did. */
+    /*  Everything §30.4 and §34 moved is a handler's or rides a record: the
+        pass's start (`startLanePass`, from the run table and the document),
+        the lanes it ends in (`lane.write`, the send it makes by the
+        identifier the record carries), its end and what it ended in
+        (`lane.stop`'s arguments), the lock's let-go (`lane.free` from the
+        engine). So a replay, which runs no hook, answers every record the
+        night did. */
     Rig rig;
     rig.audio.tails = true;
+    const auto loin = rig.mix ("Loin");
     rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -3");
 
-    const auto runId = rig.startPass();
+    const auto runId = rig.startPass ({ "level", loin });
     rig.send ("node.touch", { osc::Value::string (ride) }, "surface:PANEL");
     rig.send ("node.set", { osc::Value::string (ride), osc::Value::float64 (-9.0) }, "surface:PANEL");
+    rig.send ("node.touch", { osc::Value::string (rideOf (loin)) }, "surface:PANEL");
+    rig.send ("node.set", { osc::Value::string (rideOf (loin)), osc::Value::float64 (-14.0) }, "surface:PANEL");
     rig.play (30);
     rig.send ("node.release", { osc::Value::string (ride) }, "surface:PANEL");
+    rig.send ("node.release", { osc::Value::string (rideOf (loin)) }, "surface:PANEL");
     rig.send ("lane.stop", {}, "window");
     rig.play (2);
 
-    rig.send ("lane.arm", { osc::Value::string (rig.mediaId) });
-    rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window");
+    REQUIRE_FALSE (rig.sendOf (loin).empty());
+
     rig.send ("lane.record", { osc::Value::float64 (0.5) });
     rig.land (runId);
     rig.play (20);
     rig.audio.playing.erase (rig.runs.find (runId)->track);
     rig.play (3);
 
-    rig.send ("lane.arm", { osc::Value::string (rig.mediaId) });
-    rig.send ("lane.take", { osc::Value::string (rig.strips[0]) }, "window");
     rig.set ("/godot/document/locked", "true");
     rig.play (3);
 
-    REQUIRE_FALSE (rig.lanes.taken());
+    REQUIRE_FALSE (rig.lanes.flipped());
 
     const auto log = rig.engine.log().contents();
+    REQUIRE (log.find ("engine lane.write") != std::string::npos);
     REQUIRE (log.find ("lane.stop s:\"kept\" i:") != std::string::npos);
     REQUIRE (log.find ("lane.stop s:\"untouched\"") != std::string::npos);
     REQUIRE (log.find ("engine lane.free") != std::string::npos);
@@ -1244,6 +1488,9 @@ TEST_CASE ("lane record: a session of passes - a retake under a ringing stop, th
     const auto original = LogFile::parse (log);
     REQUIRE (original.errors.empty());
 
+    /*  THE SHOW AS IT WAS BEFORE THE NIGHT, which the replay plays the night
+        onto: the send the pass made comes from the record, so it is taken out
+        of the canonical text first, with its lane. */
     Rig fresh { false };
     const auto read = doc::CanonicalXml::read (show, fresh.document);
 
@@ -1252,6 +1499,11 @@ TEST_CASE ("lane record: a session of passes - a retake under a ringing stop, th
 
     REQUIRE (read.ok);
 
+    const auto made = fresh.sendOf (loin, rig.mediaId);
+    REQUIRE_FALSE (made.empty());
+    REQUIRE (fresh.document.remove (made).ok);
+    REQUIRE (fresh.document.setAttribute ("/godot/cue/" + rig.mediaId + "/levelLane", "0 -3").ok);
+
     const auto result = replay (fresh.engine, original);
 
     for (const auto& mismatch : result.mismatches)
@@ -1259,6 +1511,8 @@ TEST_CASE ("lane record: a session of passes - a retake under a ringing stop, th
 
     CHECK (result.ok);
     CHECK (result.recordsReplayed == result.recordsExpected);
-    CHECK_FALSE (fresh.lanes.taken());
+    CHECK_FALSE (fresh.lanes.flipped());
     CHECK (fresh.lanes.lastPass == rig.lanes.lastPass);
+    CHECK (fresh.sendOf (loin, rig.mediaId) == rig.sendOf (loin));
+    CHECK (fresh.laneOfSend (fresh.sendOf (loin, rig.mediaId)).size() == rig.laneOfSend (rig.sendOf (loin)).size());
 }

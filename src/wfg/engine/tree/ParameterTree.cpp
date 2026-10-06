@@ -18,6 +18,7 @@
 
 #include <wfg/engine/cue/TakeTable.h>
 #include <wfg/engine/cue/LaneTable.h>
+#include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/ShowWalk.h>
@@ -1640,10 +1641,10 @@ namespace wfg::tree
                           && document.resolve (surfaces->dial().address).isValid())
                         text = surfaces->dial().address;
 
-                    /*  THE LANE A FADER RECORDS (namespace draft §20.9), from the
-                        table the `lane.*` commands move - every one of them a
-                        command, so this half is rebuilt when they apply. The
-                        RIDE is the runtime half's: it moves every tick. */
+                    /*  THE CUE THE FADERS ARE FLIPPED TO (namespace draft §34),
+                        from the table the `lane.*` commands move - every one of
+                        them a command, so this half is rebuilt when they apply.
+                        The RIDES are the runtime half's: they move every tick. */
                     if (name == "laneRide")
                         continue;
 
@@ -1651,8 +1652,12 @@ namespace wfg::tree
                           && document.findById (lanes->cue()).isValid())
                         text = lanes->cue();
 
-                    if (name == "laneFader" && lanes != nullptr)
-                        text = lanes->strip();
+                    /*  ITS ARMED LANES, in strip order, as the REC lights show
+                        them. */
+                    if (name == "laneRec" && lanes != nullptr)
+                        for (const auto& key : cue::flippedLanes (document))
+                            if (lanes->isArmed (key))
+                                text += (text.empty() ? "" : " ") + key;
 
                     if (name == "laneRecording")
                         text = lanes != nullptr && lanes->recording ? "true" : "false";
@@ -1743,7 +1748,9 @@ namespace wfg::tree
                                                     document.getAttribute (stripBase + "role")
                                                         .value_or (std::string {}),
                                                     document.getAttribute (stripBase + "dca")
-                                                        .value_or (std::string {}) });
+                                                        .value_or (std::string {}),
+                                                    position - 1,
+                                                    profile == "midiPads" });
                         }
                     }
                 }
@@ -1854,6 +1861,11 @@ namespace wfg::tree
                             and `width`, and this is the cached half. Empty for
                             a mix channel, because nothing about a mix is a
                             claim. */
+                        /*  A FLIPPED FADER'S RIDE is the runtime half's: it
+                            moves every tick (namespace draft §34). */
+                        if (name == "laneRide")
+                            continue;
+
                         const auto text = name == "usage"    ? analysis.usageOf (id)
                                         : name == "overlaps" ? analysis.overlapsOf (id)
                                                              : storedText (attribute, bus);
@@ -2288,6 +2300,7 @@ namespace wfg::tree
         declaredInputs = std::move (inputOrder);
         declaredStrips = std::move (stripOrder);
         declaredSurfaces = std::move (surfaceOrder);
+        declaredLaneKeys = cue::flippedLanes (document);
 
         //----------------------------------------------------------------------
         /*  Commands, as write-only method nodes. `node.set` is deliberately
@@ -3227,14 +3240,29 @@ namespace wfg::tree
             trim; a sampler strip rides the trim of the run holding it, which
             changes at every handover - that is how one fader plays a different
             sound after a bank change. */
-        /*  THE LANE'S RIDE (DJ): what the taken fader rides - the lane where the
-            file is, or where it starts, until a hand touches it in a pass, and
-            the hand's level from then on. Nothing while no fader is taken. */
-        if (lanes != nullptr && lanes->taken())
-            for (const auto* row : doc::Schema::rowsForOwner ("surfaces"))
-                if (row->name == "laneRide")
-                    runtime.push_back (makeLeaf (std::string (godot) + "/surface/laneRide", *row,
-                                                 osc::formatDouble (std::round (lanes->rideDb * 100.0) / 100.0)));
+        /*  THE FLIPPED FADERS' RIDES (namespace draft §34): what each lane's
+            fader rides - the number as it is heard, where the file is or where
+            it starts, until its lane is armed and touched in a pass, and the
+            hand's level from then on. The level's at `/godot/surface/laneRide`,
+            a send's at its mix's `laneRide`. Nothing while nothing is flipped. */
+        const auto flipped = lanes != nullptr && lanes->flipped();
+        const juce::ValueTree flippedCue = flipped ? document.findById (lanes->cue()) : juce::ValueTree {};
+
+        if (flipped)
+            for (const auto& key : declaredLaneKeys)
+            {
+                const auto found = lanes->rides.find (key);
+                const auto db = found != lanes->rides.end() ? found->second.rideDb
+                                                            : (key == cue::levelLaneKey ? 0.0 : -120.0);
+                const auto* row = key == cue::levelLaneKey ? rowNamed ("surfaces", "laneRide")
+                                                           : rowNamed ("bus", "laneRide");
+
+                if (row != nullptr)
+                    runtime.push_back (makeLeaf (key == cue::levelLaneKey
+                                                   ? std::string (godot) + "/surface/laneRide"
+                                                   : std::string (godot) + "/bus/" + key + "/laneRide",
+                                                 *row, osc::formatDouble (std::round (db * 100.0) / 100.0)));
+            }
 
         for (const auto& strip : declaredStrips)
         {
@@ -3242,15 +3270,40 @@ namespace wfg::tree
             std::string word;
             std::string cueText;
 
-            /*  A STRIP TAKEN FOR A LANE rides the lane's node and nothing else
-                while it is taken (DN) - before its DCA and before any clip the
-                sampler put under it, whose claim is untouched and comes back to
-                it when the lane lets the fader go. */
-            if (lanes != nullptr && lanes->taken() && lanes->strip() == strip.id)
+            /*  A FLIPPED FADER rides its lane and nothing else while the faders
+                are flipped (namespace draft §34, UN): strip k of a fader surface
+                is lane k - before its DCA and before any clip the sampler put
+                under it, whose claim is untouched and comes back to it when the
+                faders flip back. A strip past the last lane is dark. Its word
+                says whether its REC is armed, and whether it is being written:
+                armed and touched in a pass. A send switched off says so (US). */
+            if (flipped && ! strip.pad)
             {
-                target = std::string (godot) + "/surface/laneRide";
-                word = lanes->recording ? "recording" : "lane";
-                cueText = lanes->cue();
+                word = "free";
+
+                if (strip.index >= 0 && static_cast<std::size_t> (strip.index) < declaredLaneKeys.size())
+                {
+                    cueText = lanes->cue();
+                    const auto& key = declaredLaneKeys[static_cast<std::size_t> (strip.index)];
+                    const auto ride = lanes->rides.find (key);
+                    const auto writing = lanes->recording && lanes->isArmed (key)
+                                           && ride != lanes->rides.end() && ride->second.touched;
+                    auto off = false;
+
+                    if (key != cue::levelLaneKey)
+                        for (const auto& child : flippedCue)
+                            if (child.hasType ("Send") && child[juce::Identifier ("bus")].toString().toStdString() == key)
+                                off = document.getAttribute (std::string (godot) + "/send/"
+                                                               + child[idProperty].toString().toStdString() + "/on")
+                                        .value_or ("true") == "false";
+
+                    target = key == cue::levelLaneKey ? std::string (godot) + "/surface/laneRide"
+                                                      : std::string (godot) + "/bus/" + key + "/laneRide";
+                    word = writing                 ? "recording"
+                         : lanes->isArmed (key)    ? "rec"
+                         : off                     ? "off"
+                                                   : "lane";
+                }
             }
             else if (strip.role == "dca")
             {

@@ -58,6 +58,31 @@ namespace wfg::surface
         /*  The node a strip taken for a lane rides (namespace draft §20.9, DJ). */
         constexpr std::string_view laneRideAddress = "/godot/surface/laneRide";
 
+        /*  A FLIPPED FADER'S RIDE (namespace draft §34, UO): the level's at
+            `laneRideAddress`, a send's at `/godot/bus/<mix>/laneRide`. */
+        bool isLaneRide (std::string_view target)
+        {
+            constexpr std::string_view bus = "/godot/bus/";
+            constexpr std::string_view leaf = "/laneRide";
+
+            return target == laneRideAddress
+                     || (target.size() > bus.size() + leaf.size()
+                           && target.substr (0, bus.size()) == bus
+                           && target.substr (target.size() - leaf.size()) == leaf);
+        }
+
+        /** The lane a ride is: `level`, or the mix's identifier. */
+        std::string laneKeyOf (std::string_view target)
+        {
+            constexpr std::string_view bus = "/godot/bus/";
+            constexpr std::string_view leaf = "/laneRide";
+
+            if (target == laneRideAddress || ! isLaneRide (target))
+                return "level";
+
+            return std::string (target.substr (bus.size(), target.size() - bus.size() - leaf.size()));
+        }
+
         /*  THE DEVICE ID ON EVERY SYSEX, whatever the surface says it is: both
             of the D700's banks accept 0x14 (protocol §2.1), and the bank is the
             port a message goes to, never the id inside it. */
@@ -521,14 +546,14 @@ namespace wfg::surface
             bool handDown = false;          // the fader's touch sense
             std::string touched;            // the address this surface's node.touch holds for it
 
-            /*  A HAND ON A LANE'S FADER WHEN THE LANE LET IT GO (2026-10-02,
-                the review of K4, namespace draft §23.15): `onLane` while the
-                hand is down on a strip riding the lane's node; `deaf` once that
-                target went from under it - a double Esc frees the fader in its
-                own drain - until the hand lifts. Deaf, the fader's positions
-                write nothing: the hand was riding the lane, and its next move
-                would otherwise be a write to the DCA or clip the strip rides
-                again, at the lane's level. */
+            /*  A HAND ON A FLIPPED FADER WHEN THE FADERS FLIPPED BACK
+                (2026-10-02, the review of K4, namespace draft §23.15, §34):
+                `onLane` while the hand is down on a strip riding a lane's node;
+                `deaf` once that target went from under it - a double Esc flips
+                the faders back in its own drain - until the hand lifts. Deaf,
+                the fader's positions write nothing: the hand was riding a lane,
+                and its next move would otherwise be a write to the DCA or clip
+                the strip rides again, at the lane's level. */
             bool onLane = false;
             bool deaf = false;
             bool gateDown = false;          // a V-Pot press held on a sampler strip
@@ -827,27 +852,29 @@ namespace wfg::surface
             return aimed.empty() ? std::string {} : textAt (published.get(), "/godot/cue/" + aimed + "/channel");
         }
 
-        /*  THE LANE A FADER RECORDS (namespace draft §20.9), as the tree says:
-            a lane that waits for a fader, the strip taken for it, and whether a
-            pass runs. Copies, not references - the addresses are temporaries. */
+        /*  THE FADERS FLIPPED TO A CUE (namespace draft §34), as the tree says:
+            whether they are, which lanes are armed, and whether a pass runs.
+            Copies, not references - the addresses are temporaries. */
         struct LaneState
         {
-            bool waiting = false;
-            bool taken = false;
+            bool flipped = false;
             bool recording = false;
-            std::string strip;
+            std::string armed;      // the keys, space-separated, as `laneRec` says
+
+            bool isArmed (const std::string& key) const
+            {
+                return (" " + armed + " ").find (" " + key + " ") != std::string::npos;
+            }
         };
 
         LaneState laneState() const
         {
             const auto* at = published.get();
-            const std::string cue = textAt (at, "/godot/surface/lane");
 
             LaneState out;
-            out.strip = textAt (at, "/godot/surface/laneFader");
-            out.waiting = ! cue.empty() && out.strip.empty();
-            out.taken = ! cue.empty() && ! out.strip.empty();
-            out.recording = out.taken && flagAt (at, "/godot/surface/laneRecording");
+            out.flipped = ! textAt (at, "/godot/surface/lane").empty();
+            out.recording = out.flipped && flagAt (at, "/godot/surface/laneRecording");
+            out.armed = textAt (at, "/godot/surface/laneRec");
             return out;
         }
 
@@ -1329,14 +1356,14 @@ namespace wfg::surface
                         it all the same, since `handDown` holds the motor, and
                         what it moves goes to the new node: a ride with no
                         touch, which starts nothing. */
-                    /*  AND A HAND THAT WAS RIDING THE LANE GOES DEAF when the
-                        lane lets the fader go under it (see `Strip::deaf`):
-                        what the strip rides now never hears that hand, which
-                        has to lift and land again to move it. Whatever it
-                        asked this tick before the target moved is dropped. */
+                    /*  AND A HAND THAT WAS RIDING A LANE GOES DEAF when the
+                        faders flip back under it (see `Strip::deaf`): what the
+                        strip rides now never hears that hand, which has to
+                        lift and land again to move it. Whatever it asked this
+                        tick before the target moved is dropped. */
                     if (strip.handDown)
                     {
-                        if (targetOf (strip) == laneRideAddress)
+                        if (isLaneRide (targetOf (strip)))
                         {
                             strip.onLane = true;
                         }
@@ -1497,25 +1524,7 @@ namespace wfg::surface
 
                 strip.handDown = true;
 
-                /*  A LANE WAITS FOR A FADER (DF): the first fader touched is
-                    taken for it, and that touch does nothing else - no clip
-                    under it starts, no DCA moves. The strip rides the lane's
-                    node from the next publish, and the motor flies there once
-                    the hand lets go. */
-                if (laneState().waiting)
-                {
-                    submit (commandFrom (box.origin, "lane.take", { osc::Value::string (strip.id) }));
-
-                    /*  ON THE LANE FROM THIS TOUCH: should the lane not have the
-                        fader by the time its target is read again - the take
-                        refused, or freed in the same drain by a double Esc -
-                        the hand goes deaf (`Strip::deaf`) rather than moving
-                        what the strip rode before. */
-                    strip.onLane = true;
-                    return;
-                }
-
-                strip.onLane = targetOf (strip) == laneRideAddress;
+                strip.onLane = isLaneRide (targetOf (strip));
 
                 if (const auto& target = targetOf (strip); ! target.empty())
                 {
@@ -1656,11 +1665,11 @@ namespace wfg::surface
                     words - nothing sounding there, every layer in use. */
                 case Action::record:
                 case Action::loop:
-                    /*  WITH A LANE'S FADER TAKEN, REC IS THE LANE'S (DI): it
-                        starts a pass, and stops the one running. The take's
-                        Rec comes back when the fader is freed. */
+                    /*  WITH THE FADERS FLIPPED, REC IS THE LANES' (DI, §34):
+                        it starts a pass, and stops the one running. The take's
+                        Rec comes back when the faders flip back. */
                     if (event.down && action == Action::record)
-                        if (const auto lane = laneState(); lane.taken)
+                        if (const auto lane = laneState(); lane.flipped)
                         {
                             submit (commandFrom (box.origin, lane.recording ? "lane.stop" : "lane.record"));
                             break;
@@ -1731,10 +1740,23 @@ namespace wfg::surface
         {
             const auto* at = published.get();
 
-            /*  NOT ON A STRIP TAKEN FOR A LANE: its cue is the lane's, which is
-                no sampler member with a starting level to set (§20.9). */
+            /*  A FLIPPED FADER'S REC ARMS ITS LANE (2026-10-06, UI, the
+                author's: "enable for each level/send independently by pressing
+                the fader's Rec button"), or disarms it - before a pass or
+                during one (UL). Its cue is the flipped one, no sampler member
+                with a starting level to set. */
+            if (const auto& target = textAt (at, strip.targetAt); isLaneRide (target))
+            {
+                const auto key = laneKeyOf (target);
+
+                submit (commandFrom (box.origin, "lane.rec",
+                                     { osc::Value::string (key),
+                                       osc::Value::boolean (! laneState().isArmed (key)) }));
+                return;
+            }
+
             if (strip.cueId.empty() || textAt (at, strip.roleAt) == "dca"
-                  || flagAt (at, "/godot/document/locked") || laneState().strip == strip.id)
+                  || flagAt (at, "/godot/document/locked"))
                 return;
 
             const auto& target = textAt (at, strip.targetAt);
@@ -2657,9 +2679,9 @@ namespace wfg::surface
                                                : textAt (published.get(), "/godot/slot/" + channel + "/take");
             const auto lane = laneState();
 
-            /*  THE LANE'S PASS FIRST (DI): while a fader is taken the key is the
-                lane's, so its light says whether a pass runs. */
-            const auto wanted = lane.taken             ? (lane.recording ? Led::on : Led::off)
+            /*  THE LANES' PASS FIRST (DI, §34): while the faders are flipped
+                the key is the lanes', so its light says whether a pass runs. */
+            const auto wanted = lane.flipped           ? (lane.recording ? Led::on : Led::off)
                               : state == "recording"   ? Led::on
                               : state == "overdubbing" ? blinked (Led::flash, tick)
                                                        : Led::off;
@@ -2751,11 +2773,14 @@ namespace wfg::surface
                 strip.soloLed = static_cast<int> (soloLit);
             }
 
-            //  REC, lit a moment after it set the starting level - and on the
-            //  strip taken for a lane, lit while its pass runs (§20.9).
-            const auto lane = laneState();
-            const auto laneRecording = lane.recording && lane.strip == strip.id;
-            const auto recLit = tick < strip.recLitUntil || laneRecording ? Led::on : Led::off;
+            /*  REC, lit a moment after it set the starting level - and on a
+                flipped fader, steady while its lane is armed and blinking while
+                a pass writes it (§34, UR). */
+            const auto onLane = isLaneRide (target);
+            const auto recLit = tick < strip.recLitUntil       ? Led::on
+                              : onLane && word == "recording" ? blinked (Led::flash, tick)
+                              : onLane && word == "rec"       ? Led::on
+                                                              : Led::off;
 
             if (static_cast<int> (recLit) != strip.recLed)
             {
@@ -2801,6 +2826,15 @@ namespace wfg::surface
                 else if (const auto& longName = textAt (at, strip.dcaNameAt); ! longName.empty())
                     name = longName;
             }
+            else if (const auto& target = textAt (at, strip.targetAt); isLaneRide (target))
+            {
+                /*  A FLIPPED FADER IS CALLED BY ITS LANE (§34): the level, or
+                    the mix its send goes to, by the mix's name. */
+                laneName = laneKeyOf (target) == "level"
+                             ? std::string ("Level")
+                             : textAt (at, "/godot/bus/" + laneKeyOf (target) + "/name");
+                name = laneName;
+            }
             else if (! strip.cueId.empty())
             {
                 if (const auto& shortName = textAt (at, strip.cueShortAt); ! shortName.empty())
@@ -2834,13 +2868,19 @@ namespace wfg::surface
                     never the only carrier (§4.8). And "lane" on the strip taken
                     to record a level lane, for as long as it is taken (§20.9
                     said so; built 2026-10-05, namespace draft §30.4): it rides
-                    the lane, whatever its role says it rides otherwise. */
-                const auto lane = laneState();
-                const std::string_view role = lane.taken && lane.strip == strip.id ? "lane"
-                                            : isDca                                ? "dca"
-                                            : strip.cueId.empty()                 ? "free"
-                                            : picked                               ? "picked"
-                                                                                   : "sampler";
+                    the lane, whatever its role says it rides otherwise. Since
+                    2026-10-06 the faders flip to a cue (§34): "lane", "rec"
+                    when its REC is armed, "REC" while a pass writes it, and
+                    "off" for a send switched off. */
+                const auto onLane = isLaneRide (textAt (at, strip.targetAt));
+                const std::string_view role = onLane && word == "recording" ? "REC"
+                                            : onLane && word == "rec"       ? "rec"
+                                            : onLane && word == "off"       ? "off"
+                                            : onLane                        ? "lane"
+                                            : isDca                         ? "dca"
+                                            : strip.cueId.empty()           ? "free"
+                                            : picked                        ? "picked"
+                                                                            : "sampler";
 
                 if (changed (strip.rows[2], role))
                     send (port, d700DisplayRow3 (element, role));
@@ -3333,6 +3373,7 @@ namespace wfg::surface
         bool tableMoved = false;
 
         std::string levelScratch;
+        std::string laneName;           // a flipped fader's lane, by name (§34)
         std::string labelScratch;
         std::string pageScratch;
         midi::Bytes colourScratch;

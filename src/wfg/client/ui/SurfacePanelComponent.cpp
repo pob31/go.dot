@@ -131,11 +131,20 @@ namespace wfg::client::ui
     }
 
     //==============================================================================
+    const model::LaneFaderReading* SurfacePanelComponent::laneOf (const model::StripRow& strip) const
+    {
+        if (! lanes.flipped || strip.endpoint == "gate")
+            return nullptr;
+
+        const auto key = model::laneKeyOfRide (strip.target);
+        return key.has_value() ? lanes.faderOf (*key) : nullptr;
+    }
+
     void SurfacePanelComponent::show (const std::vector<model::SurfaceRow>& surfacesNow,
                                       const std::vector<model::StripRow>& stripsNow,
-                                      bool laneWaitingNow)
+                                      const model::LaneRecordReading& lanesNow)
     {
-        laneWaiting = laneWaitingNow;
+        lanes = lanesNow;
 
         /*  THE HAND'S LATEST FIRST, before the readings move: a fader dragged
             since the last pass sends where it got to, once, on this pass's
@@ -469,9 +478,12 @@ namespace wfg::client::ui
             DCA; a dash for a free strip (`StripRow::label`). Fitted rather
             than cut, over two lines - the short name is there so nothing has
             to be cut, and a panel has more room than a scribble strip. */
+        const auto* lane = laneOf (strip);
+
         g.setColour (Look::colour (theme, strip.cue.empty() && strip.role != "dca" ? "ink-off" : "ink"));
         g.setFont (Look::font (theme, 12.0f));
-        g.drawFittedText (juce::String (strip.label()), parts.label, juce::Justification::centred, 2, 0.7f);
+        g.drawFittedText (juce::String::fromUTF8 (lane != nullptr ? lane->name.c_str() : strip.label().c_str()),
+                          parts.label, juce::Justification::centred, 2, 0.7f);
 
         /*  THE WORD, ALWAYS, AND THE COLOUR BESIDE IT (§4.8). The colour says
             which sound; the word says what it is doing, and a screen read by
@@ -531,6 +543,25 @@ namespace wfg::client::ui
             g.drawText (riding && (strip.hasLevel || grabbed) ? juce::String (model::faderText (level))
                                                               : juce::String::fromUTF8 ("\xe2\x80\x93"),
                         parts.value, juce::Justification::centred, false);
+        }
+
+        /*  ON A FLIPPED FADER THE PAD IS ITS LANE'S REC (namespace draft §34,
+            the hardware's strip REC): lit while the lane is armed, in the
+            recording colour while a pass writes it, and saying so in words. */
+        if (lane != nullptr)
+        {
+            const auto writing = strip.word == "recording";
+            const auto recPad = parts.pad.toFloat().reduced (1.0f);
+
+            g.setColour (Look::colour (theme, writing ? "failed" : lane->armed ? "standby" : "panel-high"));
+            g.fillRoundedRectangle (recPad, 5.0f);
+            g.setColour (Look::colour (theme, lane->armed ? "ink" : "rule"));
+            g.drawRoundedRectangle (recPad, 5.0f, 1.0f);
+            g.setFont (Look::font (theme, 10.0f));
+            g.setColour (Look::colour (theme, lane->armed ? "ink" : "ink-off"));
+            g.drawFittedText (writing ? juce::String::fromUTF8 ("REC \xe2\x97\x8f") : juce::String ("REC"),
+                              parts.pad.reduced (scaled (3)), juce::Justification::centred, 1, 0.7f);
+            return;
         }
 
         /*  THE PAD, on every strip. Lit while a hand is on it - this one's, or
@@ -694,6 +725,16 @@ namespace wfg::client::ui
 
     void SurfacePanelComponent::pressPad (std::size_t column, double height)
     {
+        /*  A FLIPPED FADER'S PAD IS ITS REC (§34): it arms or disarms the
+            lane, against what the tree says it is now, and strikes nothing. */
+        if (const auto* lane = column < strips.size() ? laneOf (strips[column]) : nullptr; lane != nullptr)
+        {
+            if (send)
+                send (gesture::laneRec (lane->key, ! lane->armed));
+
+            return;
+        }
+
         //  One pointer, one pad: a second press while one is down is not a hand.
         if (mousePad.has_value())
             return;
@@ -725,18 +766,6 @@ namespace wfg::client::ui
         //  One hand, one fader: already on this one is taken; on another, not.
         if (grab.has_value())
             return grab->strip == strip.id;
-
-        /*  A LANE WAITS FOR A FADER (DF): this press takes the strip for it -
-            even one that rides nothing, which is most likely the one somebody
-            chose - and does nothing else. The strip rides the lane from the
-            next pass, and the next press takes its fader as any other. */
-        if (laneWaiting && strip.endpoint != "gate")
-        {
-            if (send)
-                send (gesture::laneTake (strip.id));
-
-            return false;
-        }
 
         /*  A PAD STRIP HAS NO FADER, and a strip riding nothing has no node
             to hold: both are drawn and neither can be taken. */
@@ -949,7 +978,7 @@ namespace wfg::client::ui
             return;
 
         panel->show (model::readSurfaces (snapshot), model::readStrips (snapshot),
-                     model::readLaneRecord (snapshot).waiting);
+                     model::readLaneRecord (snapshot));
     }
 
     void SurfaceWindow::closeButtonPressed()

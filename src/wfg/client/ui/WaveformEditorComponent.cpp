@@ -25,13 +25,14 @@ namespace wfg::client::ui
             on a trackpad is not. */
         constexpr int grabRadius = 7;
 
-        /*  THE LANE RECORDER'S FOUR WORDS (2026-10-05, QY, the author's): at
-            rest, waiting for a touch, ready with a fader, and recording. The
-            first is the model's, so the sentences that report a pass open with
-            the same name. */
+        /*  THE LANE RECORDER'S THREE WORDS: at rest, with the faders flipped to
+            this cue, and recording. QY's four were the author's (2026-10-05);
+            the flip took the touch away (2026-10-06, §34), and these are the
+            implementer's, which the author kept when asked. The first is the
+            model's, so the sentences that report a pass open with the same
+            name. */
         const char* const recAtRest    = model::laneRecorderName;
-        const char* const recWaiting   = "Touch a fader\xe2\x80\xa6";
-        const char* const recReady     = "\xe2\x97\x8f Rec level";
+        const char* const recReady     = "\xe2\x97\x8f Rec";
         const char* const recRecording = "\xe2\x96\xa0 Stop";
 
         juce::String said (const char* utf8)
@@ -151,9 +152,10 @@ namespace wfg::client::ui
         addAndMakeVisible (transport);
         sayWhichWayTheTransportGoes();
 
-        /*  THE LANE'S REC (§20.9): what a click does is decided by what the
-            tree says the lane is doing, read again at every click - never by
-            what the button last showed. */
+        /*  THE LANES' REC (§34): what a click does is decided by what the tree
+            says the faders are doing, read again at every click - never by
+            what the button last showed. At rest it flips the faders to this
+            cue; flipped, it starts a pass; recording, it ends it. */
         rec.setWantsKeyboardFocus (false);
         rec.onClick = [this]
         {
@@ -165,15 +167,10 @@ namespace wfg::client::ui
                 if (actions.laneStop)
                     actions.laneStop();
             }
-            else if (laneIsMine() && lane.taken)
+            else if (laneIsMine())
             {
                 if (actions.laneRecord)
                     actions.laneRecord (headSeconds());
-            }
-            else if (laneIsMine() && lane.waiting)
-            {
-                if (actions.laneArm)
-                    actions.laneArm ({});
             }
             else if (actions.laneArm)
             {
@@ -184,7 +181,7 @@ namespace wfg::client::ui
         addAndMakeVisible (rec);
 
         freeFader.setButtonText (juce::String::fromUTF8 ("\xe2\x9c\x95"));
-        freeFader.setTooltip ("Let the fader go back to what it rode");
+        freeFader.setTooltip ("Flip the faders back to what they rode");
         freeFader.setWantsKeyboardFocus (false);
         freeFader.onClick = [this]
         {
@@ -271,6 +268,42 @@ namespace wfg::client::ui
         return ! reading.laneRecord.cue.empty() && reading.laneRecord.cue == reading.subject.objectId;
     }
 
+    /*  THE LANE DRAWN, AS THE FLIPPED FADERS NAME IT (§34): `level`, or the
+        picked send's mix. */
+    std::string WaveformEditorComponent::pickedKey() const
+    {
+        if (sendPicked())
+            for (const auto& send : reading.sendLanes)
+                if (send.sendId == pickedSend)
+                    return send.busId;
+
+        return "level";
+    }
+
+    /*  WHERE THE DRAWN LANE'S FADER IS, on the lane's own axis, while this
+        cue's pass runs: the ride is the number as heard (UK), and the lane is
+        an offset on the written one, so the written number comes off it. */
+    std::optional<double> WaveformEditorComponent::drawnRide() const
+    {
+        if (! (laneIsMine() && reading.laneRecord.recording))
+            return std::nullopt;
+
+        const auto key = pickedKey();
+        const auto* fader = reading.laneRecord.faderOf (key);
+
+        if (fader == nullptr || ! fader->hasRide)
+            return std::nullopt;
+
+        auto written = reading.cueLevel;
+
+        if (key != "level")
+            for (const auto& send : reading.sendLanes)
+                if (send.busId == key)
+                    written = send.writtenDb;
+
+        return fader->rideDb - written;
+    }
+
     int WaveformEditorComponent::recWidth() const
     {
         const auto height = headArea().getHeight();
@@ -287,7 +320,7 @@ namespace wfg::client::ui
         const auto font = rec.getLookAndFeel().getTextButtonFont (rec, height);
         auto widest = 0;
 
-        for (const auto* label : { recAtRest, recWaiting, recReady, recRecording })
+        for (const auto* label : { recAtRest, recReady, recRecording })
             widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidthInt (font, said (label)));
 
         recWide = juce::jmax (height * 3, widest + height);
@@ -389,45 +422,32 @@ namespace wfg::client::ui
         const auto& lane = reading.laneRecord;
         const auto mine = laneIsMine();
         const auto recording = mine && lane.recording;
-        const auto fader = juce::String::fromUTF8 (lane.faderLabel.c_str());
 
         if (recording)
         {
             rec.setButtonText (said (recRecording));
-            rec.setTooltip (said (recRecording) + ": end the pass, write what " + fader
-                              + " rode into the level lane, and give the fader back");
+            rec.setTooltip (said (recRecording) + ": end the pass and write every lane its armed faders rode"
+                              " - the faders stay on this cue");
         }
-        else if (mine && lane.taken)
+        else if (mine)
         {
             rec.setButtonText (said (recReady));
-            rec.setTooltip (said (recReady) + ": play the cue from the playhead and record the level from the"
-                              " first touch of " + fader + ", held until " + said (recRecording));
-        }
-        else if (mine && lane.waiting)
-        {
-            rec.setButtonText (said (recWaiting));
-            rec.setTooltip (said (recWaiting) + " on any surface to take it for " + said (recAtRest)
-                              + " Click to cancel");
+            rec.setTooltip (said (recReady) + ": play the cue from the playhead and record each fader whose REC"
+                              " is lit, from its first touch, held until " + said (recRecording));
         }
         else
         {
             rec.setButtonText (said (recAtRest));
-            rec.setTooltip (said (recAtRest) + ": record this cue's level from a fader - click, then touch"
-                              " a fader on any surface");
+            rec.setTooltip (said (recAtRest) + ": put this cue's level and sends on the faders of every surface"
+                              " - then a fader's REC arms its lane");
         }
 
-        rec.setToggleState (mine && (lane.waiting || recording), juce::dontSendNotification);
+        rec.setToggleState (mine, juce::dontSendNotification);
         rec.setColour (juce::TextButton::buttonOnColourId,
                        Look::colour (theme, recording ? "failed" : "standby"));
-        rec.setEnabled (recording || (reading.cueKind == "media" && ! reading.locked && reading.notice.empty()
-                                        && ! sendPicked()));
+        rec.setEnabled (recording || (reading.cueKind == "media" && ! reading.locked && reading.notice.empty()));
 
-        /*  A SEND'S LANE IS DRAWN, NOT RECORDED (namespace draft §28.5): Rec
-            says so rather than arming the level behind the drawing's back. */
-        if (sendPicked() && ! recording)
-            rec.setTooltip (said (recAtRest) + " records the level lane only - pick Level to record one");
-
-        const auto freeable = mine && lane.taken && ! recording;
+        const auto freeable = mine && ! recording;
 
         if (freeFader.isVisible() != freeable)
         {
@@ -538,13 +558,23 @@ namespace wfg::client::ui
         sayWhichWayTheTransportGoes();
         sayWhatRecDoes();
 
-        /*  THE RIDE AS IT IS HEARD, a point a pass while this cue's lane records
-            - the file's second and the fader's level - and nothing once the pass
-            is over: the lane it wrote is in the reading by then. */
-        if (laneIsMine() && reading.laneRecord.recording && reading.running && reading.laneRecord.hasRide)
-            trail.push_back ({ reading.position, reading.laneRecord.rideDb });
+        /*  THE RIDE OF THE LANE DRAWN, a point a pass while this cue records
+            - the file's second and its fader's level on the lane's own axis -
+            and nothing once the pass is over: the lane it wrote is in the
+            reading by then. A lane its REC leaves alone follows its curve, and
+            draws a trail along it. Another lane picked starts the trail again. */
+        if (const auto ride = drawnRide(); ride.has_value() && reading.running)
+        {
+            if (trailKey != pickedKey())
+                trail.clear();
+
+            trailKey = pickedKey();
+            trail.push_back ({ reading.position, *ride });
+        }
         else if (! (laneIsMine() && reading.laneRecord.recording))
+        {
             trail.clear();
+        }
 
         /*  AND THE VIEW FOLLOWS THE PASS (namespace draft §30.4): a 647-second
             file drawn whole is a pixel and a half a second, and a ride drawn
@@ -1089,9 +1119,9 @@ namespace wfg::client::ui
             {
                 /*  WHILE A PASS RECORDS, WHERE THE FADER IS: what is heard is
                     the hand's, not the lane's. */
-                const auto riding = laneIsMine() && reading.laneRecord.recording && reading.laneRecord.hasRide;
-                const auto y = yForLevel (riding ? reading.laneRecord.rideDb
-                                                 : model::laneLevelAt (points, reading.position));
+                const auto ride = drawnRide();
+                const auto riding = ride.has_value();
+                const auto y = yForLevel (riding ? *ride : model::laneLevelAt (points, reading.position));
 
                 g.setColour (juce::Colours::black);
                 g.fillEllipse (x - 3.5f, y - 3.5f, 7.0f, 7.0f);
@@ -1174,31 +1204,29 @@ namespace wfg::client::ui
             return;
         }
 
-        /*  A LANE BEING RECORDED FROM A FADER says so here, in place of the
-            row's instructions: what it waits for, which fader has it, what a
-            pass is doing - in the button's own words (QY), so the line names
-            the button that does the next thing. */
+        /*  THE FADERS FLIPPED TO THIS CUE say so here, in place of the row's
+            instructions: which lanes are armed and what a pass is doing - in
+            the button's own words, so the line names the button that does the
+            next thing (§34). */
         const auto& laneRecord = reading.laneRecord;
 
-        if (laneIsMine() && laneRecord.waiting)
+        if (laneIsMine())
         {
-            g.setColour (Look::colour (theme, "standby"));
-            g.drawText (said (recWaiting) + " on any surface to take it for " + said (recAtRest)
-                          + " - click " + said (recWaiting) + " to cancel",
-                        area, juce::Justification::centredLeft, true);
-            return;
-        }
+            juce::String armed;
 
-        if (laneIsMine() && laneRecord.taken)
-        {
-            const auto fader = juce::String::fromUTF8 (laneRecord.faderLabel.c_str());
+            for (const auto& name : laneRecord.armedNames())
+                armed += (armed.isEmpty() ? "" : ", ") + juce::String::fromUTF8 (name.c_str());
 
             g.setColour (Look::colour (theme, laneRecord.recording ? "failed" : "ink-dim"));
             g.drawText (laneRecord.recording
-                          ? "recording the level from " + fader + ", held from the first touch - "
-                              + said (recRecording) + " ends the pass and gives the fader back"
-                          : said (recAtRest) + " on " + fader + " - " + said (recReady)
-                              + " plays the cue from the playhead and records from the first touch",
+                          ? (armed.isEmpty() ? juce::String ("playing back - a fader's REC joins the pass")
+                                             : "recording " + armed + ", each from its first touch - a fader's"
+                                                 " REC joins or leaves - " + said (recRecording) + " ends the pass")
+                          : (armed.isEmpty() ? "the faders show this cue - a fader's REC arms its lane, then "
+                                                 + said (recReady)
+                                             : "REC on " + armed + " - " + said (recReady)
+                                                 + " plays the cue from the playhead and records each from its"
+                                                   " first touch"),
                         area, juce::Justification::centredLeft, true);
             return;
         }

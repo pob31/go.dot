@@ -529,9 +529,20 @@ namespace wfg::tree
             std::string id;
             std::string role;
             std::string dca;
+
+            /*  Where it is on its surface, from nought, and whether that
+                surface is pads - what a flip reads (namespace draft §34, UN):
+                strip k of a fader surface shows lane k, and a pad has none. */
+            int index = 0;
+            bool pad = false;
         };
 
         std::vector<DeclaredStrip> declaredStrips;
+
+        /*  THE LANES A FLIP PUTS ON THE FADERS, in strip order (§34, UN): the
+            level, then the show's mixes - a reading of the show, so the
+            document half's, and read against by the runtime half's strips. */
+        std::vector<std::string> declaredLaneKeys;
 
         /*  Every surface, in document order: the roster its page rows are
             published against from the runtime half (2026-09-25), because a

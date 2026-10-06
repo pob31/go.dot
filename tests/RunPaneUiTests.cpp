@@ -480,11 +480,13 @@ TEST_CASE ("waveform: a send's lane is picked, drawn over the file and written a
 }
 
 
-TEST_CASE ("surface panel: while a lane waits for a fader, a press takes it and does nothing else")
+TEST_CASE ("surface panel: with the faders flipped, a column's pad is its lane's REC, and its fader rides the lane")
 {
-    /*  Namespace draft §20.9, decision DF: the first fader touched is taken
-        for the lane - even a strip riding nothing, the likeliest one to be
-        chosen - and that press neither touches nor moves anything. */
+    /*  Namespace draft §34: the faders flip to a cue, and on the window's
+        panel - which has no REC button - a flipped column's pad is its lane's
+        REC, arming or disarming against what the tree says; its fader rides
+        the lane's node as any fader rides its target. A column not flipped -
+        a pad strip - keeps its pad. */
     std::vector<wfg::Event> sent;
 
     ui::SurfacePanelComponent panel (model::Theme {},
@@ -498,55 +500,73 @@ TEST_CASE ("surface panel: while a lane waits for a fader, a press takes it and 
     desk.strips = 2;
     desk.connected = true;
 
-    model::StripRow idle;
-    idle.id = "STP00002";
-    idle.surface = desk.id;
-    idle.index = 0;
-    idle.role = "sampler";
-    idle.endpoint = "absolute";
-    idle.word = "free";
+    model::StripRow level;
+    level.id = "STP00002";
+    level.surface = desk.id;
+    level.index = 0;
+    level.role = "sampler";
+    level.endpoint = "absolute";
+    level.target = "/godot/surface/laneRide";
+    level.word = "lane";
+    level.cue = "CUE00001";
+    level.hasLevel = true;
+    level.levelDb = -4.0;
 
-    model::StripRow band;
-    band.id = "STP00003";
-    band.surface = desk.id;
-    band.index = 1;
-    band.role = "dca";
-    band.dca = "DCA00001";
-    band.endpoint = "absolute";
-    band.target = "/godot/dca/DCA00001/trim";
-    band.word = "dca";
-    band.hasLevel = true;
-    band.levelDb = -6.0;
+    model::StripRow face = level;
+    face.id = "STP00003";
+    face.index = 1;
+    face.target = "/godot/bus/SN000010/laneRide";
+    face.word = "rec";
+    face.levelDb = -12.0;
 
-    //  Nothing waits: a strip riding nothing cannot be taken, as before.
-    panel.show ({ desk }, { idle, band }, false);
-    panel.dragFader (0, 0.5);
-    CHECK (sent.empty());
+    model::LaneRecordReading lanes;
+    lanes.cue = "CUE00001";
+    lanes.flipped = true;
+    lanes.faders = { { "level", "Level", false, true, -4.0 }, { "SN000010", "Face", true, true, -12.0 } };
 
-    //  A lane waits: the press is `lane.take`, and nothing else goes.
-    panel.show ({ desk }, { idle, band }, true);
-    panel.dragFader (0, 0.5);
+    panel.show ({ desk }, { level, face }, lanes);
 
+    //  The level's pad arms its lane; Face's, armed, disarms it.
+    panel.pressPad (0, 0.5);
     REQUIRE (sent.size() == 1u);
-    CHECK (sent[0].command == "lane.take");
-    REQUIRE (sent[0].args.size() == 1u);
-    CHECK (sent[0].args[0].getString() == "STP00002");
+    CHECK (sent[0].command == "lane.rec");
+    REQUIRE (sent[0].args.size() == 2u);
+    CHECK (sent[0].args[0].getString() == "level");
+    CHECK (sent[0].args[1].getBool());
 
-    //  Even on a strip that rides a DCA: its trim is not touched.
+    panel.pressPad (1, 0.5);
+    REQUIRE (sent.size() == 2u);
+    CHECK (sent[1].args[0].getString() == "SN000010");
+    CHECK_FALSE (sent[1].args[1].getBool());
+
+    //  The fader rides the lane's node: a touch, then the value.
+    sent.clear();
     panel.dragFader (1, 0.2);
 
-    REQUIRE (sent.size() == 2u);
-    CHECK (sent[1].command == "lane.take");
-    CHECK (sent[1].args[0].getString() == "STP00003");
+    REQUIRE_FALSE (sent.empty());
+    CHECK (sent[0].command == "node.touch");
+    CHECK (sent[0].args[0].getString() == "/godot/bus/SN000010/laneRide");
+
+    //  Flipped back, a pad is a pad again: nothing for the lanes.
+    panel.endFader (1);
+    sent.clear();
+    level.target.clear();
+    level.word = "free";
+    panel.show ({ desk }, { level, face }, {});
+    panel.pressPad (0, 0.5);
+    panel.releasePad (0);
+
+    for (const auto& event : sent)
+        CHECK (event.command != "lane.rec");
 }
 
-TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops - saying which")
+TEST_CASE ("waveform: the lanes' Rec flips the faders, records and stops - saying which")
 {
-    /*  Namespace draft §20.9: one button, four states read from the tree at
-        every click, and the transport's stop ending a pass rather than
-        killing it (a kill drops the ride). In the author's words since
-        2026-10-05 (QY): "Level autom.", "Touch a fader…", "● Rec level",
-        "■ Stop" - each one whole on a button as wide as the longest. */
+    /*  Namespace draft §34 (after §20.9): one button, three states read from
+        the tree at every click, and the transport's stop ending a pass
+        rather than killing it (a kill drops the ride). "Autom.", "● Rec",
+        "■ Stop" - the implementer's since the flip, kept by the author - each
+        one whole on a button as wide as the longest. */
     std::vector<std::string> said;
 
     ui::WaveformEditorComponent::Actions actions;
@@ -572,7 +592,7 @@ TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops 
         juce::Button* found = nullptr;
 
         for (auto* button : buttonsUnder (editor))
-            for (const auto* word : { "Level autom.", "Touch a fader", "Rec level", "Stop" })
+            for (const auto* word : { "Autom.", "Rec", "Stop" })
                 if (button->getButtonText().contains (juce::String::fromUTF8 (word)))
                     found = button;
 
@@ -591,36 +611,23 @@ TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops 
         return juce::GlyphArrangement::getStringWidthInt (font, button->getButtonText()) < button->getWidth();
     };
 
-    //  IDLE: "Level autom." arms this cue's lane.
+    //  IDLE: "Autom." flips the faders to this cue (§34).
     editor.show (reading, nullptr);
-    CHECK (rec()->getButtonText() == "Level autom.");
-    CHECK (rec()->getTooltip().startsWith ("Level autom."));
+    CHECK (rec()->getButtonText() == "Autom.");
+    CHECK (rec()->getTooltip().startsWith ("Autom."));
     CHECK (fits());
     rec()->onClick();
     CHECK (said.back() == "arm CUE00001");
 
-    //  WAITING: a click cancels.
+    //  FLIPPED: Rec starts a pass from the playhead, and a cross flips the faders back.
     reading.laneRecord.cue = "CUE00001";
-    reading.laneRecord.waiting = true;
+    reading.laneRecord.flipped = true;
+    reading.laneRecord.faders = { { "level", "Level", true, true, 0.0 } };
     editor.show (reading, nullptr);
-    CHECK (rec()->getButtonText() == juce::String::fromUTF8 ("Touch a fader\xe2\x80\xa6"));
-    CHECK (rec()->getTooltip().startsWith (juce::String::fromUTF8 ("Touch a fader\xe2\x80\xa6")));
-    CHECK (fits());
+
+    CHECK (rec()->getButtonText() == juce::String::fromUTF8 ("\xe2\x97\x8f Rec"));
+    CHECK (rec()->getTooltip().contains ("REC"));
     CHECK (rec()->getToggleState());
-    rec()->onClick();
-    CHECK (said.back() == "arm ");
-
-    //  TAKEN: Rec starts a pass from the playhead, and a cross frees the fader.
-    reading.laneRecord.waiting = false;
-    reading.laneRecord.taken = true;
-    reading.laneRecord.strip = "STRP0003";
-    reading.laneRecord.faderLabel = "Panel \xc2\xb7 fader 3";
-    reading.laneRecord.hasRide = true;
-    reading.laneRecord.rideDb = 0.0;
-    editor.show (reading, nullptr);
-
-    CHECK (rec()->getButtonText() == juce::String::fromUTF8 ("\xe2\x97\x8f Rec level"));
-    CHECK (rec()->getTooltip().contains (juce::String::fromUTF8 ("Panel \xc2\xb7 fader 3")));
     CHECK (fits());
     rec()->onClick();
     CHECK (said.back() == "record 0");
@@ -644,7 +651,7 @@ TEST_CASE ("waveform: the lane's Rec arms, waits for a fader, records and stops 
     for (int pass = 0; pass < 12; ++pass)
     {
         reading.position = 1.0 + 0.25 * pass;
-        reading.laneRecord.rideDb = -3.0 - 1.5 * pass;
+        reading.laneRecord.faders[0].rideDb = -3.0 - 1.5 * pass;
         editor.show (reading, nullptr);
     }
 
@@ -731,18 +738,16 @@ TEST_CASE ("waveform: a pass follows the playhead at a readable scale, and its e
 
     //  RECORDING: the view follows, a minute across.
     reading.laneRecord.cue = "CUE00001";
-    reading.laneRecord.strip = "STRP0003";
-    reading.laneRecord.faderLabel = "Panel \xc2\xb7 fader 3";
-    reading.laneRecord.taken = true;
+    reading.laneRecord.flipped = true;
     reading.laneRecord.recording = true;
-    reading.laneRecord.hasRide = true;
+    reading.laneRecord.faders = { { "level", "Level", true, true, 0.0 } };
     reading.running = true;
     reading.runId = "RN000001";
 
     for (int pass = 0; pass < 20; ++pass)
     {
         reading.position = 12.0 + 0.5 * pass;
-        reading.laneRecord.rideDb = -3.0 - 0.25 * pass;
+        reading.laneRecord.faders[0].rideDb = -3.0 - 0.25 * pass;
         editor.show (reading, nullptr);
     }
 
@@ -754,7 +759,7 @@ TEST_CASE ("waveform: a pass follows the playhead at a readable scale, and its e
     CHECK (head < 1000.0f);
     CHECK (notes.empty());
 
-    //  THE PASS ENDS: the fader given back, and what it wrote framed and said.
+    //  THE PASS ENDS: what it wrote framed and said.
     reading.laneRecord = {};
     reading.running = false;
     reading.laneRecord.pass.tick = 900;
@@ -767,7 +772,7 @@ TEST_CASE ("waveform: a pass follows the playhead at a readable scale, and its e
     editor.show (reading, nullptr);
 
     REQUIRE (notes.size() == 1u);
-    CHECK (notes.back() == juce::String::fromUTF8 ("Level autom.: 7 points, 12.0\xe2\x80\x93" "21.5 s"));
+    CHECK (notes.back() == juce::String::fromUTF8 ("Autom.: 7 points, 12.0\xe2\x80\x93" "21.5 s"));
 
     //  Framed: the stretch spans most of the bar, both its ends on the picture.
     const auto from = editor.pointPosition ({ 12.0, 0.0 }).x;
@@ -794,7 +799,7 @@ TEST_CASE ("waveform: a pass follows the playhead at a readable scale, and its e
     editor.show (reading, nullptr);
 
     REQUIRE (notes.size() == 2u);
-    CHECK (notes.back().startsWith ("Level autom.: nothing written"));
+    CHECK (notes.back().startsWith ("Autom.: nothing written"));
 }
 
 TEST_CASE ("range table: every slice shows its times, and the arrow gives the next one this length")

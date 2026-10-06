@@ -72,7 +72,8 @@ namespace wfg::cue
 
     /** Whether `address` is one of the rows answered here rather than by the
         document: `/godot/run/<id>/trim`, `/godot/dca/<id>/trim`, a take's
-        `/godot/slot/<id>/loopIn` and `/loopOut`, or `/godot/surface/laneRide`. */
+        `/godot/slot/<id>/loopIn` and `/loopOut`, or a lane's ride - `/godot/surface/laneRide`
+        for the level, `/godot/bus/<mix>/laneRide` for a send (namespace draft §34). */
     bool isLiveAddress (std::string_view address);
 
     /*  Whether an applied command was a ride on a live row - `node.set` on
@@ -97,9 +98,9 @@ namespace wfg::cue
           on a take with no length to keep it in - recording its first pass,
           or empty - it is applied and ignored, for the finished run's reason.
           `takes` may be null, and every point is then ignored.
-        - the lane's ride is the hand's level for the pass running, APPLIED AND
-          IGNORED with no pass (DG: nothing is written until a touch in one),
-          and with `lanes` null. */
+        - a lane's ride is the hand's level for the pass running, APPLIED AND
+          IGNORED with no pass, on a lane whose REC is off (DG, UL: nothing is
+          written until a touch in one), and with `lanes` null. */
     doc::LiveWrite liveWriteFor (RunTable& runs, DcaTable& dcas,
                                  const doc::ShowDocument& document, TakeTable* takes = nullptr,
                                  LaneTable* lanes = nullptr);

@@ -110,6 +110,14 @@ namespace wfg::client::model
         std::string sendId;
         std::string busName;
         std::vector<LanePoint> points;
+
+        /*  The mix, by identifier: the key of its lane on the flipped faders
+            (namespace draft §34). */
+        std::string busId;
+
+        /*  The send's written level, which its lane is an offset on: what a
+            flipped fader's ride, the number as heard, is drawn less of. */
+        double writtenDb = 0.0;
     };
 
     /*  Everything the foot needs for one pass, read while the window has its
