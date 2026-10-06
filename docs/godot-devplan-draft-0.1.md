@@ -850,6 +850,10 @@ undo takes both back, a mix with no send becomes one, and CI is green.
 
 **Needs from the author:** the flip on the D700, its REC lights and screens, and the window's words.
 
+**Built 2026-10-06, F.0-F.5** (namespace draft §34.7). The lanes a pass rode are one `lane.write`,
+the send a mix lacked made in the same step; the driver hears a level and a send ridden in one pass,
+the send under the level's ride.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

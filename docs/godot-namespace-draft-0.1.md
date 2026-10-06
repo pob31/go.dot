@@ -20371,3 +20371,42 @@ The Runner's hook between `applyLanes` and `applyLevels`, as §20.9's, run once 
 Touch and write modes; flipping from the D700; more lanes than a surface has strips (the rest are
 not on the faders); lanes on pan, EQ or a plugin's parameter; a fader's REC choices kept after the
 faders are flipped back.
+
+### 34.7 What was built, against what §34 drew
+
+*Written at close-out, 2026-10-06.* Where the build departs from the drawing, or says more than it:
+
+- **The lanes a pass rode are written by a command of their own, `lane.write`** - the Runner's, as
+  the level's `node.set` was. It takes the cue, then for each lane its key, its text and the send
+  it is on, and it makes the send a mix lacks in the same edit. So UQ's fallback is not needed:
+  the sends a pass makes and every lane it writes are one command, and one step of undo. A made
+  send's identifier goes into the record, so a replay makes the same send. Judged whole first:
+  every lane or none.
+- **The rides are where UO left them open**: the level keeps `/godot/surface/laneRide`, which an
+  older log's rides still find, and a send rides `/godot/bus/<mix>/laneRide`.
+- **One refusal word replaces two**: `not-flipped`, for a REC or a pass with the faders flipped
+  to no cue, replaces §20.9's `no-fader` and `not-waiting`.
+- **A strip past the last lane** rides nothing and shows no cue, its word `free`.
+- **The D700's third row** says `lane`, `rec` while armed, `REC` while a pass writes it, and `off`
+  for a send switched off; its first row names the lane - `Level`, or the mix's name.
+- **The window's panel has no REC button**, so a flipped column's pad is its REC: lit in the standby
+  colour while armed, in the recording colour while written, and saying `REC` in words.
+- **The waveform's button** is `Autom.` at rest, `● Rec` with a ✕ once the faders are flipped to
+  this cue, and `■ Stop` while a pass runs. Its row lists the armed lanes by name. The ride's trail
+  is the picked lane's, drawn on the lane's own axis - the ride less the written number.
+- **A REC pressed while a hand already holds that fader** latches where the fader reads, until the
+  hand next moves: the moves it made with the REC off were heard by nobody.
+- **`lanePass`'s `kept` names the lanes** after the span, by key; the window says them by name.
+- **The replay fixture was edited by hand**: its `lane.take` records became `lane.rec`, and its two
+  refusals `not-flipped`. The driver serves a copy of the bundle with a mix added, Face, so the
+  fixture's bundle stays the one its log knows.
+- **The driver's numbers** (Debug, this machine, both locales): 44 checks. The level ridden to -6
+  and -12 is heard there on the main pair; the mix the cue did not send to, ridden to -10, is heard
+  at -16 and then -22 - the level's ride over the send's (§28) - and is silent before its fader is
+  touched. The ride's turn is written within the tenth of a second the driver allows off CI.
+
+**The words on screen** - `Autom.`, `● Rec`, `■ Stop` in the window, and `lane`, `rec`, `REC`,
+`off` on the D700's third row - are the implementer's; asked on 2026-10-06, the author kept them.
+
+**Waiting for the author and the bench:** the flip on the D700, its REC lights steady and
+blinking, the first and third rows, and the motors following the unarmed faders' curves.
