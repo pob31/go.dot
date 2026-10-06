@@ -235,9 +235,25 @@ namespace wfg::client::model
         return extension == "png" || extension == "jpg" || extension == "jpeg" || extension == "gif";
     }
 
+    bool isMovieFile (const std::string& name)
+    {
+        const auto dot = name.find_last_of ('.');
+
+        if (dot == std::string::npos)
+            return false;
+
+        auto extension = name.substr (dot + 1);
+
+        for (auto& c : extension)
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char> (c - 'A' + 'a');
+
+        return extension == "mov";
+    }
+
     const char* pictureWildcard()
     {
-        return "*.png;*.jpg;*.jpeg;*.gif";
+        return "*.png;*.jpg;*.jpeg;*.gif;*.mov";
     }
 
     std::vector<std::pair<std::string, std::string>> canvasChoices (const std::vector<CanvasRow>& canvases)

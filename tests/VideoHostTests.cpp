@@ -32,6 +32,7 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include "HapMovieWriter.h"
 #include "TestSupport.h"
 
 #include <wfg/engine/document/Bundle.h>
@@ -753,6 +754,64 @@ TEST_CASE ("video host: a picture read off the disk by a renderer with no window
 
         host.sink().move ("RUN00001", video::Property::offsetX, { clock.now(), 10.0 });
         CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
+    }
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("video host: a HAP movie read by a renderer with no window, its frame chosen by the playhead's points")
+{
+    using namespace wfg::testing::hapmovie;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-movie-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    /*  THREE FRAMES A SECOND APART: red, blue, green - one plain, one Snappy. */
+    std::vector<Bytes> frames;
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0xFF0000)));
+    frames.push_back (section (0xBB, snappyLiterals (solidDxt1 (16, 8, 0x0000FF))));
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0x00FF00)));
+    const auto movie = writeMovie (folder, "three.mov", hapMovie (16, 8, frames, 1));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "movie";
+        layer.file = movie.getFullPathName().toStdString();
+
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { clock.now(), 1.0 });
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 0.2 });
+
+        std::int64_t seen = -1;
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
+
+        /*  THE PLAYHEAD MOVED to a second and a half: the second frame. */
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 1.5 });
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x0000FFu; }));
+
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 2.5 });
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x00FF00u; }));
     }
 
     folder.deleteRecursively();

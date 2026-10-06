@@ -1300,6 +1300,14 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="loops">
+          <a:documentation>How many times a movie plays through, as a slice&apos;s loops (WA): one plays it once, nought for ever. A movie that has played them holds its last frame and its run ends (WB). Proposed.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
           <data type="string"/>
@@ -1373,6 +1381,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="rate">
+          <a:documentation>A movie&apos;s speed, as a sound&apos;s (namespace draft 37, WA): one is the file&apos;s own, a half takes twice as long, two half as long; nought holds the frame. A fade moves it (fade/video pairs). Proposed, waiting for the author.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">20</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="rotation">
           <a:documentation>How far it is turned about its own centre, clockwise, in degrees (VT). A fade moves it, and several turns are a fade&apos;s to make.</a:documentation>
           <data type="double">
@@ -1403,7 +1420,16 @@
             <value>fill</value>
             <value>mask</value>
             <value>picture</value>
+            <value>movie</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="startOffset">
+          <a:documentation>How far into the movie it begins, in seconds of the file, as a sound&apos;s start offset. Proposed.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
         </attribute>
       </optional>
       <zeroOrMore>
@@ -1733,7 +1759,7 @@
       </optional>
       <optional>
         <attribute name="video">
-          <a:documentation>What the fade moves a video cue to, as row:value pairs space-separated, sorted - opacity, scale, offsetX, offsetY and rotation, in the rows&apos; own units (namespace draft 36, VS). Each moves from where the picture is to its value over the duration, along the curve; a row not listed is left where it is. stopWhenDone takes the picture away where the fade arrives.</a:documentation>
+          <a:documentation>What the fade moves a video cue to, as row:value pairs space-separated, sorted - opacity, scale, offsetX, offsetY and rotation, and a movie&apos;s rate, in the rows&apos; own units (namespace draft 36, VS). Each moves from where the picture is to its value over the duration, along the curve; a row not listed is left where it is. stopWhenDone takes the picture away where the fade arrives.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

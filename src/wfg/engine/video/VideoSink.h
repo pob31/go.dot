@@ -55,10 +55,11 @@ namespace wfg::video
         scale = 1,      ///< % of the fitted size
         offsetX = 2,    ///< % of the canvas's width, right positive
         offsetY = 3,    ///< % of the canvas's height, up positive
-        rotation = 4    ///< degrees, clockwise
+        rotation = 4,   ///< degrees, clockwise
+        time = 5        ///< a movie's playhead: seconds of the file (namespace draft 37, VZ)
     };
 
-    constexpr int propertyCount = 5;
+    constexpr int propertyCount = 6;
 
     /*  One layer: what a video run puts on a canvas. A VALUE, carrying no
         document reference, for `ArmRequest`'s reason - it is read on the other

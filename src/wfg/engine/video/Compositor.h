@@ -120,6 +120,14 @@ namespace wfg::video
         virtual bool sizeOf (const std::string& path, int& width, int& height) const = 0;
         virtual bool colourAt (const std::string& path, double u, double v,
                                double& red, double& green, double& blue, double& alpha) const = 0;
+
+        /*  AND A MOVIE'S (§37): its size, and the colour of the frame showing
+            at `seconds` of the file - false while that frame has not been
+            read. None by default. */
+        virtual bool movieSizeOf (const std::string&, int&, int&) const  { return false; }
+
+        virtual bool movieColourAt (const std::string&, double, double, double,
+                                    double&, double&, double&, double&) const  { return false; }
     };
 
     /*  THE CANVAS'S COLOUR AT ONE POINT, as 0xRRGGBB: (x, y) on its pixels
@@ -163,6 +171,22 @@ namespace wfg::video
                                                 static_cast<double> (width), static_cast<double> (height));
 
                 if (! place.toTexture (x, y, u, v) || ! pictures->colourAt (layer->file, u, v, r, g, b, alpha))
+                    continue;
+            }
+            else if (layer->source == region::Source::movie)
+            {
+                /*  A MOVIE: the frame its playhead says, at this sample (VZ). */
+                int width = 0, height = 0;
+
+                if (pictures == nullptr || ! pictures->movieSizeOf (layer->file, width, height))
+                    continue;
+
+                const auto place = placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                                static_cast<double> (width), static_cast<double> (height));
+                const auto seconds = valueOf (*layer, Property::time, sample, 0.0);
+
+                if (! place.toTexture (x, y, u, v)
+                      || ! pictures->movieColourAt (layer->file, seconds, u, v, r, g, b, alpha))
                     continue;
             }
             else

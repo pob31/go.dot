@@ -4306,8 +4306,19 @@ namespace wfg::cue
 
             /*  A PICTURE'S FILE AS A WHOLE PATH, resolved here as a sound's is
                 (VX), and the geometry as the cue is written (§36.3). */
-            if (job.spec.source == "picture")
+            if (job.spec.source == "picture" || job.spec.source == "movie")
                 job.spec.file = mediaPathOf (textOf (cue, "file"));
+
+            /*  A MOVIE'S PLAYHEAD (§37): from its start offset, at its speed,
+                for its passes. */
+            if (job.spec.source == "movie")
+            {
+                job.movie = true;
+                job.movieFile = textOf (cue, "file");
+                job.moviePosition = std::max (0.0, numberOf (cue, "startOffset"));
+                job.rate = std::clamp (numberOf (cue, "rate"), 0.0, 20.0);
+                job.loops = std::max (0, static_cast<int> (std::lround (numberOf (cue, "loops"))));
+            }
 
             job.spec.fit = textOf (cue, "fit");
             job.spec.scale = numberOf (cue, "scale");
@@ -15409,9 +15420,21 @@ namespace wfg::cue
                         videoSink->opacity (job.self, point);
                 }
 
+                /*  A MOVIE STARTS WHERE ITS OFFSET SAYS, on the sample it comes
+                    up on. */
+                if (job.movie)
+                {
+                    job.movieAt = at;
+                    placeVideoPoint (job, video::Property::time, { at, job.moviePosition });
+                }
+
                 job.placed = true;
                 engine.submit (origin::engine, "run.started", one (job.self));
             }
+
+            /*  A MOVIE PLAYS ON, through a fade-out too, until its run ends. */
+            if (job.movie && job.placed && ! job.movieEnded)
+                advanceMovie (engine, job);
 
             /*  DOWN, AS ESC ASKED: from where it is at the horizon to black over
                 the panic fade, and gone on the frame it gets there. */
@@ -15454,7 +15477,8 @@ namespace wfg::cue
         const auto base = property == video::Property::scale    ? job.spec.scale
                         : property == video::Property::offsetX  ? job.spec.offsetX
                         : property == video::Property::offsetY  ? job.spec.offsetY
-                                                                : job.spec.rotation;
+                        : property == video::Property::rotation ? job.spec.rotation
+                                                                : 0.0;
 
         return video::valueAt (job.moved[static_cast<std::size_t> (property)], sample, base,
                                [] (const video::Point&) { return true; });
@@ -15504,7 +15528,12 @@ namespace wfg::cue
             if (! value.has_value())
                 continue;
 
-            if (name == "opacity")       job.to.push_back ({ video::Property::opacity, std::clamp (*value / 100.0, 0.0, 1.0) });
+            if (name == "rate")
+            {
+                job.movesRate = true;
+                job.rateTo = std::clamp (*value, 0.0, 20.0);
+            }
+            else if (name == "opacity")  job.to.push_back ({ video::Property::opacity, std::clamp (*value / 100.0, 0.0, 1.0) });
             else if (name == "scale")    job.to.push_back ({ video::Property::scale, *value });
             else if (name == "offsetX")  job.to.push_back ({ video::Property::offsetX, *value });
             else if (name == "offsetY")  job.to.push_back ({ video::Property::offsetY, *value });
@@ -15517,7 +15546,7 @@ namespace wfg::cue
             nothing. */
         const auto* live = runs.liveRunOf (targetCue[idProperty].toString().toStdString());
 
-        if (live == nullptr || job.to.empty())
+        if (live == nullptr || (job.to.empty() && ! job.movesRate))
         {
             FadeJob nothing;
             nothing.self = runId;
@@ -15528,6 +15557,68 @@ namespace wfg::cue
         job.target = live->id;
         videoFades.push_back (std::move (job));
         return true;
+    }
+
+    void Runner::advanceMovie (Engine& engine, VideoJob& job)
+    {
+        const auto at = videoSampleAhead();
+        const auto rate = videoSampleRate();
+
+        if (at < 0 || rate <= 0 || at <= job.movieAt)
+            return;
+
+        /*  ITS LENGTH, AS THE SHOW KNOWS IT: read when the show opened, or by
+            the analyser since. Not known yet, and it plays on unwrapped. */
+        double duration = 0.0;
+
+        if (const auto* known = handlerDurations())
+            if (const auto found = known->find (job.movieFile); found != known->end())
+                duration = found->second;
+
+        auto target = job.moviePosition + job.rate * static_cast<double> (at - job.movieAt) / static_cast<double> (rate);
+
+        while (duration > 0.0 && target >= duration && job.rate > 0.0)
+        {
+            /*  THE SAMPLE THE FILE ENDS ON, between the last point and this
+                one. */
+            const auto reaches = job.movieAt + static_cast<std::int64_t> (std::llround ((duration - job.moviePosition)
+                                                                                         / job.rate * static_cast<double> (rate)));
+
+            if (job.loops == 0 || job.pass + 1 < job.loops)
+            {
+                //  ANOTHER PASS: a step back to the top, on that sample.
+                placeVideoPoint (job, video::Property::time, { reaches, duration });
+                placeVideoPoint (job, video::Property::time, { reaches, 0.0 });
+                ++job.pass;
+                target -= duration;
+                job.moviePosition = 0.0;
+                job.movieAt = reaches;
+                continue;
+            }
+
+            /*  THE LAST PASS DONE (WB): the last frame held a tick, then the
+                layer goes and the run ends - its footers run, as a sound's do
+                when its file ends. */
+            placeVideoPoint (job, video::Property::time, { reaches, duration });
+            job.moviePosition = duration;
+            job.movieAt = reaches;
+            job.movieEnded = true;
+
+            if (! job.removed)
+            {
+                if (videoSink != nullptr)
+                    videoSink->remove (job.self, reaches + samplesPerTick);
+
+                job.removed = true;
+            }
+
+            engine.submit (origin::engine, "run.ended", one (job.self));
+            return;
+        }
+
+        placeVideoPoint (job, video::Property::time, { at, target });
+        job.moviePosition = target;
+        job.movieAt = at;
     }
 
     void Runner::advanceVideoFades (Engine& engine, std::int64_t tick)
@@ -15570,6 +15661,7 @@ namespace wfg::cue
                 for (const auto& [property, value] : fade.to)
                     fade.from[static_cast<std::size_t> (property)] = videoValueOf (*job, property, at);
 
+                fade.rateFrom = job->rate;
                 fade.begun = true;
             }
 
@@ -15580,6 +15672,9 @@ namespace wfg::cue
             for (const auto& [property, value] : fade.to)
                 placeVideoPoint (*job, property, { at, moveValueAt (fade.from[static_cast<std::size_t> (property)],
                                                                    value, progress, fade.sCurve, MoveDomain::linear) });
+
+            if (fade.movesRate)
+                job->rate = moveValueAt (fade.rateFrom, fade.rateTo, progress, fade.sCurve, MoveDomain::linear);
 
             if (progress < 1.0)
                 continue;

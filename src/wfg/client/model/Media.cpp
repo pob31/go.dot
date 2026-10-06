@@ -165,7 +165,7 @@ namespace wfg::client::model
     {
         /*  A PICTURE'S CUE IS A VIDEO CUE (Phase 8a, namespace draft 36): the
             same three things, with that kind. */
-        const auto wanted = isPictureFile (job.mediaName) ? "video" : "media";
+        const auto wanted = isVisualFile (job.mediaName) ? "video" : "media";
         return kind == wanted && name == job.cueName && file.empty();
     }
 

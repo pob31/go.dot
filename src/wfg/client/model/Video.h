@@ -82,6 +82,12 @@ namespace wfg::client::model
         What makes a dropped file a picture cue rather than a sound. */
     bool isPictureFile (const std::string& name);
 
-    /*  The wildcard a file chooser offers for a picture. */
+    /*  AND A MOVIE (namespace draft 37): a QuickTime `.mov`, HAP inside. */
+    bool isMovieFile (const std::string& name);
+
+    /*  A picture or a movie: what a video cue shows from a file. */
+    inline bool isVisualFile (const std::string& name)  { return isPictureFile (name) || isMovieFile (name); }
+
+    /*  The wildcard a file chooser offers for a video cue's file. */
     const char* pictureWildcard();
 }

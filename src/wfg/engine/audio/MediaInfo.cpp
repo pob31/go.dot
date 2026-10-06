@@ -15,6 +15,9 @@
 */
 
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/video/Movie.h>
+
+#include <algorithm>
 
 #include <wfg/engine/document/ShowDocument.h>
 
@@ -224,6 +227,15 @@ namespace wfg::audio
         return named;
     }
 
+    std::vector<std::string> movieFilesNamedBy (const doc::ShowDocument& document)
+    {
+        auto named = pictureFilesNamedBy (document);
+        named.erase (std::remove_if (named.begin(), named.end(),
+                                     [] (const std::string& name) { return ! video::movie::isMovieName (name); }),
+                     named.end());
+        return named;
+    }
+
     std::map<std::string, double> mediaDurations (const doc::ShowDocument& document,
                                                  const std::string& mediaFolder)
     {
@@ -236,6 +248,11 @@ namespace wfg::audio
             same file. */
         for (const auto& named : mediaFilesNamedBy (document))
             durations[named] = mediaDurationSeconds (resolveMediaPath (mediaFolder, named));
+
+        /*  AND EACH MOVIE'S (Phase 8b), read from its own index - nought for
+            one that will not read, as for a sound. */
+        for (const auto& named : movieFilesNamedBy (document))
+            durations[named] = std::max (0.0, video::movie::durationOf (resolveMediaPath (mediaFolder, named)));
 
         return durations;
     }

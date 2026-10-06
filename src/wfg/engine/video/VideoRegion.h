@@ -65,7 +65,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 2;
+    constexpr std::uint32_t version = 3;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -89,12 +89,13 @@ namespace wfg::video::region
     /** "Not going": a layer whose removal has not been placed. */
     constexpr std::int64_t notRemoved = std::numeric_limits<std::int64_t>::max();
 
-    enum class Source : std::uint32_t { fill = 0, mask = 1, picture = 2 };
+    enum class Source : std::uint32_t { fill = 0, mask = 1, picture = 2, movie = 3 };
 
     inline Source sourceFrom (std::string_view word) noexcept
     {
         if (word == "mask")    return Source::mask;
         if (word == "picture") return Source::picture;
+        if (word == "movie")   return Source::movie;
         return Source::fill;
     }
 

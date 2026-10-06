@@ -20856,3 +20856,35 @@ Go.dot's audio clock (PRD §3.19d) so it cannot slide away from the sound beside
   compressed, drawn by the same quad as a picture; Hap Q's colour turned back in the shader.
 - **M.4 - The window**: a movie dropped on the list is a movie cue; the inspector's rows; a fade's
   `rate`.
+
+### 37.4 What M.1 to M.4 built, against what §37 drew
+
+*Written 2026-10-07, early - the night the author left this to be done.* All of §37.2 is still the
+implementer's, waiting for the author's yes.
+
+- **The playhead is the sixth moving value**, `time`, with its own ring in the region (version 3).
+  The Runner moves it on each tick by the speed times the time gone by, a horizon ahead; a loop's wrap
+  is two points at the sample the file ends on; the last pass holds its last frame a tick, then the
+  layer goes and the run ends (`run.ended`, from the hook) - so a movie ends, loops and keeps time in a
+  show with no output connected, and a replay reads the same records.
+- **A movie's length is known as a sound's is**: read from its index when the show opens, and by the
+  analyser when one arrives mid-session - never on the tick thread. The analyser does not analyse a
+  movie; it publishes its seconds alone, the shape every file has before its analysis.
+- **`rate` moves through a fade's `video` pairs** on the Runner's side, since the playhead is placed
+  from it; nought holds the frame.
+- **The renderer opens each movie once**, on a thread of its own, and reads the frame the playhead is
+  on and three after - wrapping, for a loop - unpacked and held; a window uploads a frame still
+  compressed (S3TC DXT1 or DXT5) when it changes, and draws it with the picture's quad. Hap Q's colour
+  is turned back from scaled YCoCg in its own shader; HAP's straight alpha is premultiplied there. A
+  frame not read yet shows the nearest one read before it, a frame late rather than black.
+- **The window**: a dropped `.mov` is a movie cue; "+ video" offers a Movie on each canvas; Browse
+  offers pictures and movies for a video cue; the inspector shows `startOffset`, `rate` ("speed") and
+  `loops`.
+- **Tests**: Snappy, the three HAP section shapes, DXT1, DXT5 and Hap Q decoded on the CPU, a
+  QuickTime file's frames found and read - all on movies a writer of the tests' own makes; the
+  Runner's playhead at double speed for two passes; and a HAP file read by a renderer with no window,
+  its frame chosen by the playhead's points.
+- **Not built, and waiting for the bench or the author**: a real encoder's HAP file on a projector
+  (frame pacing, how many 4K streams a machine plays); Hap R and Hap Q Alpha; a movie's sound (WC);
+  the DCA on opacity (WD); in and out points and slices; a movie's frame at standby read before GO
+  (it is read from the first frame when it comes up).

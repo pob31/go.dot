@@ -98,4 +98,20 @@ namespace wfg::video::movie
     /*  A movie's length in seconds, its file opened and closed: the engine's
         question, asked off the tick thread. -1 for a file that will not read. */
     double durationOf (const std::string& path);
+
+    /*  WHETHER A NAME IS A MOVIE'S, by its extension: a QuickTime `.mov`, the
+        container HAP comes in (VY). */
+    inline bool isMovieName (const std::string& name)
+    {
+        if (name.size() < 4)
+            return false;
+
+        auto extension = name.substr (name.size() - 4);
+
+        for (auto& c : extension)
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char> (c - 'A' + 'a');
+
+        return extension == ".mov";
+    }
 }

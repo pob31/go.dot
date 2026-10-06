@@ -2245,6 +2245,20 @@ namespace wfg::cue
                 opacity's are `points` above - so a fade starts from where the
                 picture is. */
             std::array<std::vector<video::Point>, video::propertyCount> moved;
+
+            /*  A MOVIE'S PLAYHEAD (namespace draft 37, VZ, WA, WB): where in
+                the file it is at `movieAt`, the sample of its last point; how
+                fast it moves; how many passes it plays and how many it has.
+                `movieFile` is the document's name for it, the key its length
+                is found under. */
+            bool movie = false;
+            std::string movieFile;
+            double moviePosition = 0.0;
+            std::int64_t movieAt = -1;
+            double rate = 1.0;
+            int loops = 1;
+            int pass = 0;
+            bool movieEnded = false;
         };
 
         std::vector<VideoJob> showing;
@@ -2258,6 +2272,12 @@ namespace wfg::cue
             std::string target;             // the video run it moves
             std::vector<std::pair<video::Property, double>> to;
             std::array<double, video::propertyCount> from {};
+
+            /*  A MOVIE'S SPEED, moved on the Runner's side: the playhead is
+                placed from it (WA). */
+            bool movesRate = false;
+            double rateTo = 1.0;
+            double rateFrom = 1.0;
             std::int64_t startTick = 0;
             int ticks = 0;
             bool sCurve = false;
@@ -2279,6 +2299,10 @@ namespace wfg::cue
         bool fireVideoFade (const juce::ValueTree& fade, const std::string& runId, std::int64_t tick);
 
         void advanceVideoFades (Engine& engine, std::int64_t tick);
+
+        /*  A movie's playhead a horizon ahead, its loops wrapped and its end
+            reached (VZ, WB). */
+        void advanceMovie (Engine& engine, VideoJob& job);
         std::uint64_t videoOrder = 0;
 
         tree::MountTable* mounts = nullptr;

@@ -19,6 +19,8 @@
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/video/Compositor.h>
 #include <wfg/engine/video/Displays.h>
+#include <wfg/engine/video/Hap.h>
+#include <wfg/engine/video/Movie.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoRegion.h>
 
@@ -208,11 +210,210 @@ namespace wfg::video
             std::uint64_t versions = 0;
         };
 
-        /*  THE CPU'S VIEW OF THE STORE (Compositor.h): a picture's size and
-            its colour at one point, nearest pixel, straight colour. */
+        //==============================================================================
+        /*  THE MOVIES THE RENDERER IS PLAYING (namespace draft 37): each file
+            opened once, on a thread of its own, and its frames read and
+            unpacked a few ahead of where each playhead is - a disk read and a
+            copy each, which is what HAP is for. A frame is handed out whole and
+            never changed, so a window's drawing thread holds it without a lock
+            while it uploads it. */
+        struct MovieFrame
+        {
+            hap::Texture texture = hap::Texture::none;
+            std::vector<std::uint8_t> blocks;
+            int width = 0;
+            int height = 0;
+            int index = -1;
+        };
+
+        class MovieStore final : private juce::Thread
+        {
+        public:
+            MovieStore() : juce::Thread ("video movies")  { startThread(); }
+            ~MovieStore() override                         { stopThread (4000); }
+
+            /*  Each movie wanted now, and the frame its playhead is on. */
+            void want (const std::map<std::string, int>& frames)
+            {
+                {
+                    const std::lock_guard<std::mutex> hold (lock);
+                    wanted = frames;
+
+                    for (auto at = held.begin(); at != held.end();)
+                        at = wanted.count (at->first) > 0 ? std::next (at) : held.erase (at);
+                }
+
+                notify();
+            }
+
+            /*  The frame showing at `seconds`, by the file's own index: -1
+                before the file is open. */
+            int frameAt (const std::string& path, double seconds) const
+            {
+                const std::lock_guard<std::mutex> hold (lock);
+                const auto found = held.find (path);
+                return found != held.end() && found->second.open ? found->second.info.frameAt (seconds) : -1;
+            }
+
+            bool sizeOf (const std::string& path, int& width, int& height) const
+            {
+                const std::lock_guard<std::mutex> hold (lock);
+                const auto found = held.find (path);
+
+                if (found == held.end() || ! found->second.open)
+                    return false;
+
+                width = found->second.info.width;
+                height = found->second.info.height;
+                return true;
+            }
+
+            /*  Frame `index` if it has been read, else the nearest read before
+                it - a frame late rather than a black one. */
+            std::shared_ptr<const MovieFrame> frame (const std::string& path, int index) const
+            {
+                const std::lock_guard<std::mutex> hold (lock);
+                const auto found = held.find (path);
+
+                if (found == held.end() || found->second.frames.empty())
+                    return {};
+
+                auto at = found->second.frames.upper_bound (index);
+
+                if (at == found->second.frames.begin())
+                    return {};
+
+                return std::prev (at)->second;
+            }
+
+        private:
+            struct Held
+            {
+                bool open = false;
+                bool failed = false;
+                movie::Info info;
+                std::map<int, std::shared_ptr<const MovieFrame>> frames;
+            };
+
+            void run() override
+            {
+                std::map<std::string, std::unique_ptr<movie::MovieFile>> files;
+                std::vector<std::uint8_t> bytes;
+
+                while (! threadShouldExit())
+                {
+                    std::map<std::string, int> now;
+
+                    {
+                        const std::lock_guard<std::mutex> hold (lock);
+                        now = wanted;
+                    }
+
+                    for (auto at = files.begin(); at != files.end();)
+                        at = now.count (at->first) > 0 ? std::next (at) : files.erase (at);
+
+                    bool worked = false;
+
+                    for (const auto& [path, current] : now)
+                    {
+                        auto& file = files[path];
+
+                        if (file == nullptr)
+                        {
+                            file = std::make_unique<movie::MovieFile>();
+                            std::string why;
+                            const auto opened = file->open (path, why) && file->info().isHap();
+
+                            const std::lock_guard<std::mutex> hold (lock);
+                            auto& entry = held[path];
+                            entry.open = opened;
+                            entry.failed = ! opened;
+
+                            if (opened)
+                                entry.info = file->info();
+                        }
+
+                        if (file->info().frames.empty())
+                            continue;
+
+                        /*  THE FRAME THE PLAYHEAD IS ON AND THREE AFTER, wrapping
+                            round the end as a loop does; anything well behind
+                            let go. */
+                        const auto count = static_cast<int> (file->info().frames.size());
+                        const auto first = std::clamp (current, 0, count - 1);
+
+                        for (int ahead = 0; ahead < 4 && ! threadShouldExit(); ++ahead)
+                        {
+                            const auto index = (first + ahead) % count;
+
+                            {
+                                const std::lock_guard<std::mutex> hold (lock);
+                                const auto found = held.find (path);
+
+                                if (found == held.end() || found->second.frames.count (index) > 0)
+                                    continue;
+                            }
+
+                            auto frame = std::make_shared<MovieFrame>();
+                            frame->index = index;
+                            frame->width = file->info().width;
+                            frame->height = file->info().height;
+
+                            if (! file->readFrame (index, bytes)
+                                  || ! hap::unpack (bytes.data(), bytes.size(), frame->texture, frame->blocks))
+                                frame->texture = hap::Texture::none;
+
+                            const std::lock_guard<std::mutex> hold (lock);
+                            auto& entry = held[path];
+                            entry.frames[index] = std::move (frame);
+                            worked = true;
+
+                            for (auto at = entry.frames.begin(); at != entry.frames.end();)
+                            {
+                                const auto distance = (at->first - first + count) % count;
+                                at = distance > 8 ? entry.frames.erase (at) : std::next (at);
+                            }
+                        }
+                    }
+
+                    if (! worked)
+                        wait (5);
+                }
+            }
+
+            mutable std::mutex lock;
+            std::map<std::string, int> wanted;
+            std::map<std::string, Held> held;
+        };
+
+        /*  THE CPU'S VIEW OF THE STORES (Compositor.h): a picture's size and
+            its colour at one point, nearest pixel, straight colour - and a
+            movie's, from the frame its playhead is on. */
         struct StoreSampler final : PictureSampler
         {
-            explicit StoreSampler (const PictureStore& storeToRead) : store (storeToRead) {}
+            StoreSampler (const PictureStore& storeToRead, const MovieStore& moviesToRead)
+                : store (storeToRead), movies (moviesToRead) {}
+
+            bool movieSizeOf (const std::string& path, int& width, int& height) const override
+            {
+                return movies.sizeOf (path, width, height);
+            }
+
+            bool movieColourAt (const std::string& path, double seconds, double u, double v,
+                                double& red, double& green, double& blue, double& alpha) const override
+            {
+                const auto frame = movies.frame (path, movies.frameAt (path, seconds));
+
+                if (frame == nullptr || frame->texture == hap::Texture::none)
+                    return false;
+
+                const auto padded = (frame->width + 3) / 4 * 4;
+                const auto x = std::clamp (static_cast<int> (u * frame->width), 0, frame->width - 1);
+                const auto y = std::clamp (static_cast<int> ((1.0 - v) * frame->height), 0, frame->height - 1);
+
+                return hap::pixelAt (frame->texture, frame->blocks, padded, (frame->height + 3) / 4 * 4,
+                                     x, y, red, green, blue, alpha);
+            }
 
             bool sizeOf (const std::string& path, int& width, int& height) const override
             {
@@ -250,6 +451,7 @@ namespace wfg::video
             }
 
             const PictureStore& store;
+            const MovieStore& movies;
         };
 
         /*  The canvases the configuration holds, by identifier, with their
@@ -272,9 +474,9 @@ namespace wfg::video
         class OutputWindow final : public juce::Component, private juce::OpenGLRenderer
         {
         public:
-            OutputWindow (region::Region& regionToRead, const PictureStore& picturesToDraw,
+            OutputWindow (region::Region& regionToRead, const PictureStore& picturesToDraw, const MovieStore& moviesToDraw,
                           std::string outputIdToShow, int stateSlot, const DisplayInfo& display)
-                : r (regionToRead), pictures (picturesToDraw), outputId (std::move (outputIdToShow)), slot (stateSlot),
+                : r (regionToRead), pictures (picturesToDraw), movies (moviesToDraw), outputId (std::move (outputIdToShow)), slot (stateSlot),
                   periodNanos (1.0e9 / std::max (24.0, static_cast<double> (display.refreshHz)))
             {
                 setOpaque (true);
@@ -339,12 +541,48 @@ namespace wfg::video
                                            "void main() { gl_FragColor = texture2D (picture, at) * opacity; }\n"))
                                     && pictureProgram->link();
 
-                if (! fillOk || ! pictureOk)
+                /*  A MOVIE'S TWO: DXT's colour premultiplied by its own alpha -
+                    HAP's is straight - and Hap Q's scaled YCoCg turned back to
+                    RGB as the HAP shader does (Hap.h). */
+                movieProgram = std::make_unique<juce::OpenGLShaderProgram> (context);
+                movieQProgram = std::make_unique<juce::OpenGLShaderProgram> (context);
+
+                const auto movieOk = movieProgram->addVertexShader (vertex)
+                                  && movieProgram->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
+                                         "uniform sampler2D picture;\n"
+                                         "uniform float opacity;\n"
+                                         "varying vec2 at;\n"
+                                         "void main() { vec4 c = texture2D (picture, at); gl_FragColor = vec4 (c.rgb * c.a, c.a) * opacity; }\n"))
+                                  && movieProgram->link();
+
+                const auto movieQOk = movieQProgram->addVertexShader (vertex)
+                                   && movieQProgram->addFragmentShader (juce::OpenGLHelpers::translateFragmentShaderToV3 (
+                                          "uniform sampler2D picture;\n"
+                                          "uniform float opacity;\n"
+                                          "varying vec2 at;\n"
+                                          "void main() {\n"
+                                          "  vec4 q = texture2D (picture, at);\n"
+                                          "  float scale = (q.b * (255.0 / 8.0)) + 1.0;\n"
+                                          "  float co = (q.r - 0.50196078431373) / scale;\n"
+                                          "  float cg = (q.g - 0.50196078431373) / scale;\n"
+                                          "  vec3 rgb = vec3 (q.a + co - cg, q.a + cg, q.a - co - cg);\n"
+                                          "  gl_FragColor = vec4 (clamp (rgb, 0.0, 1.0), 1.0) * opacity;\n"
+                                          "}\n"))
+                                   && movieQProgram->link();
+
+                if (! fillOk || ! pictureOk || ! movieOk || ! movieQOk)
                 {
                     fillProgram.reset();
                     pictureProgram.reset();
+                    movieProgram.reset();
+                    movieQProgram.reset();
                     return;
                 }
+
+                movieUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieProgram, "picture");
+                movieOpacity = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieProgram, "opacity");
+                movieQUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieQProgram, "picture");
+                movieQOpacity = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*movieQProgram, "opacity");
 
                 colour = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*fillProgram, "colour");
                 pictureUniform = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*pictureProgram, "picture");
@@ -358,7 +596,7 @@ namespace wfg::video
 
                 /*  THE SAME TWO ATTRIBUTES IN BOTH PROGRAMS, bound by the
                     location each program gave them. */
-                for (auto* program : { fillProgram.get(), pictureProgram.get() })
+                for (auto* program : { fillProgram.get(), pictureProgram.get(), movieProgram.get(), movieQProgram.get() })
                 {
                     const auto position = juce::OpenGLShaderProgram::Attribute (*program, "position").attributeID;
                     const auto texel = juce::OpenGLShaderProgram::Attribute (*program, "texel").attributeID;
@@ -378,6 +616,14 @@ namespace wfg::video
                 when the texture is larger than the picture it holds. */
             void drawQuad (const Placement& place, double uMax, double vMin)
             {
+                drawQuad (place, uMax, vMin, 1.0);
+            }
+
+            /*  `tBottom` and `tTop`: where the picture's bottom and top rows are
+                in the texture - a picture's flipped on loading, a movie's
+                blocks laid top row first (§37). */
+            void drawQuad (const Placement& place, double uMax, double tBottom, double tTop)
+            {
                 using namespace juce::gl;
 
                 GLfloat vertices[16];
@@ -394,7 +640,7 @@ namespace wfg::video
                     vertices[n * 4 + 0] = static_cast<GLfloat> (x / (0.5 * place.canvasWidth));
                     vertices[n * 4 + 1] = static_cast<GLfloat> (y / (0.5 * place.canvasHeight));
                     vertices[n * 4 + 2] = static_cast<GLfloat> (u * uMax);
-                    vertices[n * 4 + 3] = static_cast<GLfloat> (vMin + v * (1.0 - vMin));
+                    vertices[n * 4 + 3] = static_cast<GLfloat> (tBottom + v * (tTop - tBottom));
                 }
 
                 glBindBuffer (GL_ARRAY_BUFFER, vertexBuffer);
@@ -517,6 +763,10 @@ namespace wfg::video
                                       uMax, vMin);
                             texture->unbind();
                         }
+                        else if (layer->source == region::Source::movie)
+                        {
+                            drawMovie (*layer, sample, canvasWidth, canvasHeight, a);
+                        }
                     }
 
                     glBindVertexArray (0);
@@ -528,8 +778,77 @@ namespace wfg::video
                 for (auto at = textures.begin(); at != textures.end();)
                     at = at->second.used ? std::next (at) : textures.erase (at);
 
+                for (auto at = movieTextures.begin(); at != movieTextures.end();)
+                {
+                    if (at->second.used)
+                    {
+                        ++at;
+                        continue;
+                    }
+
+                    juce::gl::glDeleteTextures (1, &at->second.id);
+                    at = movieTextures.erase (at);
+                }
+
                 if (testPattern)
                     drawTestPattern (width, height);
+            }
+
+            /*  A MOVIE'S FRAME AT THIS SAMPLE, uploaded still compressed when it
+                is not the one this context holds, and drawn by the picture's
+                quad. The frame a little late rather than none while the next is
+                read. */
+            void drawMovie (const region::LayerReading& layer, std::int64_t sample,
+                            double canvasWidth, double canvasHeight, double a)
+            {
+                using namespace juce::gl;
+
+                const auto seconds = valueOf (layer, Property::time, sample, 0.0);
+                const auto frame = movies.frame (layer.file, movies.frameAt (layer.file, seconds));
+
+                if (frame == nullptr || frame->texture == hap::Texture::none || frame->width <= 0)
+                    return;
+
+                auto& held = movieTextures[layer.file];
+                held.used = true;
+
+                const auto paddedWidth = (frame->width + 3) / 4 * 4;
+                const auto paddedHeight = (frame->height + 3) / 4 * 4;
+
+                if (held.id == 0)
+                    glGenTextures (1, &held.id);
+
+                glActiveTexture (GL_TEXTURE0);
+                glBindTexture (GL_TEXTURE_2D, held.id);
+
+                if (held.index != frame->index || held.width != frame->width)
+                {
+                    const auto format = frame->texture == hap::Texture::dxt1 ? GL_COMPRESSED_RGB_S3TC_DXT1_EXT
+                                                                             : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+
+                    glCompressedTexImage2D (GL_TEXTURE_2D, 0, format, paddedWidth, paddedHeight, 0,
+                                            static_cast<GLsizei> (frame->blocks.size()), frame->blocks.data());
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                    held.index = frame->index;
+                    held.width = frame->width;
+                }
+
+                const auto q = frame->texture == hap::Texture::ycocgDxt5;
+                (q ? movieQProgram : movieProgram)->use();
+                (q ? movieQUniform : movieUniform)->set (0);
+                (q ? movieQOpacity : movieOpacity)->set (static_cast<GLfloat> (a));
+
+                /*  THE BLOCKS RUN FROM THE TOP ROW: the picture's top is the
+                    texture's first row, its bottom `height` rows down. */
+                drawQuad (placementOf (layer, sample, canvasWidth, canvasHeight,
+                                       static_cast<double> (frame->width), static_cast<double> (frame->height)),
+                          static_cast<double> (frame->width) / paddedWidth,
+                          static_cast<double> (frame->height) / paddedHeight, 0.0);
+
+                glBindTexture (GL_TEXTURE_2D, 0);
             }
 
             void openGLContextClosing() override
@@ -537,6 +856,18 @@ namespace wfg::video
                 using namespace juce::gl;
 
                 textures.clear();
+
+                for (auto& held : movieTextures)
+                    if (held.second.id != 0)
+                        glDeleteTextures (1, &held.second.id);
+
+                movieTextures.clear();
+                movieUniform.reset();
+                movieOpacity.reset();
+                movieQUniform.reset();
+                movieQOpacity.reset();
+                movieProgram.reset();
+                movieQProgram.reset();
 
                 if (vertexBuffer != 0)
                     glDeleteBuffers (1, &vertexBuffer);
@@ -603,6 +934,7 @@ namespace wfg::video
 
             region::Region& r;
             const PictureStore& pictures;
+            const MovieStore& movies;
             std::string outputId;
             int slot = 0;
             double periodNanos = 1.0e9 / 60.0;
@@ -624,6 +956,19 @@ namespace wfg::video
 
             std::map<std::string, HeldTexture> textures;
 
+            std::unique_ptr<juce::OpenGLShaderProgram> movieProgram, movieQProgram;
+            std::unique_ptr<juce::OpenGLShaderProgram::Uniform> movieUniform, movieOpacity, movieQUniform, movieQOpacity;
+
+            struct MovieTexture
+            {
+                GLuint id = 0;
+                int index = -1;
+                int width = 0;
+                bool used = false;
+            };
+
+            std::map<std::string, MovieTexture> movieTextures;
+
             ClockReader clock;
             std::int64_t lastFrame = 0;
             double jitterMs = 0.0;
@@ -639,7 +984,7 @@ namespace wfg::video
         {
         public:
             Session (region::Region& regionToServe, std::int64_t parentPidToWatch, bool windowedToUse)
-                : r (regionToServe), parentPid (parentPidToWatch), windowed (windowedToUse), sampler (pictures)
+                : r (regionToServe), parentPid (parentPidToWatch), windowed (windowedToUse), sampler (pictures, movies)
             {
                 followDisplays (true);
                 startTimer (10);
@@ -680,9 +1025,22 @@ namespace wfg::video
                 const auto layers = readLayers (r);
                 auto wanted = std::set<std::string> {};
 
+                std::map<std::string, int> moviesWanted;
+                const auto now = clock.sampleAt (r, steadyNanos());
+
                 for (const auto& layer : layers)
+                {
                     if (layer.source == region::Source::picture && ! layer.file.empty())
                         wanted.insert (layer.file);
+
+                    /*  A MOVIE AND THE FRAME ITS PLAYHEAD IS ON NOW - the store
+                        reads from there on. */
+                    if (layer.source == region::Source::movie && ! layer.file.empty())
+                        moviesWanted[layer.file] = std::max (0, movies.frameAt (layer.file,
+                                                                                 valueOf (layer, Property::time, std::max<std::int64_t> (now, 0), 0.0)));
+                }
+
+                movies.want (moviesWanted);
 
                 for (const auto& path : region::readPrepared (r))
                     if (! path.empty())
@@ -768,7 +1126,7 @@ namespace wfg::video
                     region::endWrite (state.seq);
 
                     if (display >= 0)
-                        windows.push_back (std::make_unique<OutputWindow> (r, pictures, output.id, static_cast<int> (n),
+                        windows.push_back (std::make_unique<OutputWindow> (r, pictures, movies, output.id, static_cast<int> (n),
                                                                            displays[static_cast<std::size_t> (display)]));
                 }
 
@@ -818,6 +1176,7 @@ namespace wfg::video
 
             std::vector<DisplayInfo> displays;
             PictureStore pictures;
+            MovieStore movies;
             StoreSampler sampler;
             std::set<std::string> lastWanted;
             std::vector<std::unique_ptr<OutputWindow>> windows;

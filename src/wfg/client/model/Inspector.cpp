@@ -90,6 +90,7 @@ namespace wfg::client::model
                     the stack, how solid and in what colour, then how it comes
                     in. */
                 { "video",   { "source", "canvas", "file", "fit", "layer", "opacity", "paint", "fadeIn",
+                               "startOffset", "rate", "loops",
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV" } },
 
                 /*  What it moves - a cue, or a DCA instead - then where to and

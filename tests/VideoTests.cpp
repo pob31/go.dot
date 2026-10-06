@@ -695,3 +695,71 @@ TEST_CASE ("video: a fade cue moves a picture's opacity, scale, offset and turn,
     CHECK (rig.sink.removed.front().first == picture);
     CHECK (rig.runs.find (picture)->isFinished());
 }
+
+TEST_CASE ("video: a movie's playhead moves at its speed, wraps for its loops, and its run ends after the last")
+{
+    VideoRig rig;
+
+    /*  A MOVIE OF TWO SECONDS, as the show knows its length, played twice at
+        double speed from half a second in. */
+    const std::map<std::string, double> lengths { { "clip.mov", 2.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov"),
+                                                osc::Value::string ("rate"), osc::Value::string ("2"),
+                                                osc::Value::string ("loops"), osc::Value::string ("2"),
+                                                osc::Value::string ("startOffset"), osc::Value::string ("0.5") }).applied >= 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+    rig.ticks (3);
+
+    const auto* run = rig.runOf ("VD000060");
+    REQUIRE (run != nullptr);
+    const auto id = run->id;
+
+    REQUIRE (rig.sink.shown.size() == 1);
+    CHECK (rig.sink.shown.front().source == "movie");
+
+    const auto& times = rig.sink.geometry[id][video::Property::time];
+    REQUIRE_FALSE (times.empty());
+    CHECK (times.front().value == doctest::Approx (0.5));
+
+    /*  AT TWICE ITS SPEED, a second of the show is two of the file: half a
+        second in, the first pass ends after three-quarters of a second, wraps
+        - a step back to the top at one sample - and the second ends after one
+        more second. */
+    rig.ticks (20);
+    CHECK_FALSE (rig.runs.find (id)->isFinished());
+    CHECK (times.back().value > 0.5);
+
+    rig.ticks (40);
+
+    bool wrapped = false;
+
+    for (std::size_t n = 1; n < times.size(); ++n)
+    {
+        CHECK (times[n].sample >= times[n - 1].sample);
+
+        if (times[n].sample == times[n - 1].sample && times[n - 1].value == doctest::Approx (2.0)
+              && times[n].value == doctest::Approx (0.0))
+            wrapped = true;
+    }
+
+    CHECK (wrapped);
+
+    rig.ticks (60);
+    CHECK (rig.runs.find (id)->isFinished());
+    CHECK (times.back().value == doctest::Approx (2.0));
+    REQUIRE (rig.sink.removed.size() == 1);
+    CHECK (rig.sink.removed.front().first == id);
+
+    /*  ITS LENGTH WAS 0.75 + 1 SECONDS OF THE SHOW: ended near 1.75 s after it
+        came up, not before and not long after. */
+    const auto playedFor = static_cast<double> (rig.sink.removed.front().second - times.front().sample) / 48000.0;
+    CHECK (playedFor == doctest::Approx (1.75).epsilon (0.03));
+}

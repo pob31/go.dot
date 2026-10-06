@@ -191,6 +191,12 @@ namespace wfg::audio
         what a copy carries beside the sounds, and never what the analyser reads. */
     std::vector<std::string> pictureFilesNamedBy (const doc::ShowDocument& document);
 
+    /*  The movies among them (Phase 8b, namespace draft 37): their lengths are
+        read as a sound's are - when the show opens, and by the analyser when
+        one arrives - so the engine knows where a movie ends without opening
+        it on the tick thread. */
+    std::vector<std::string> movieFilesNamedBy (const doc::ShowDocument& document);
+
     /*  Every distinct `file` a media cue in this show names, mapped to its
         length in seconds.
 

@@ -3993,6 +3993,9 @@ namespace
         for (const auto& named : wfg::audio::mediaFilesNamedBy (document))
             analyser.queue (named);
 
+        for (const auto& named : wfg::audio::movieFilesNamedBy (document))
+            analyser.queue (named);
+
         if (! udp.start (requestedOsc,
                          [&engine, &nameSpace, &senders, &refusedDatagrams]
                          (wfg::osc::Datagram datagram)
@@ -4674,6 +4677,9 @@ namespace
                                         a GO moves standby, which is a state
                                         row, and walks nothing. */
                                     for (const auto& named : wfg::audio::mediaFilesNamedBy (document))
+                                        analyser.queue (named);
+
+                                    for (const auto& named : wfg::audio::movieFilesNamedBy (document))
                                         analyser.queue (named);
 
                                     /*  AND WHAT THE SHOW NOW SAYS ABOUT ITS

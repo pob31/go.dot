@@ -81,7 +81,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_plugin_format[] = { "VST3", "AU", "LV2" };
     inline constexpr std::string_view enum_plugin_side[] = { "before", "after" };
     inline constexpr std::string_view enum_plugin_state[] = { "unloaded", "loading", "loaded", "missing", "failed" };
-    inline constexpr std::string_view enum_video_source[] = { "fill", "mask", "picture" };
+    inline constexpr std::string_view enum_video_source[] = { "fill", "mask", "picture", "movie" };
     inline constexpr std::string_view enum_video_fit[] = { "fit", "fill", "stretch" };
     inline constexpr std::string_view enum_videoOutputs_renderer[] = { "stopped", "starting", "running", "failed" };
 
@@ -1398,7 +1398,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "What the fade moves a video cue to, as row:value pairs space-separated, sorted - opacity, scale, offsetX, offsetY and rotation, in the rows' own units (namespace draft 36, VS). Each moves from where the picture is to its value over the duration, along the curve; a row not listed is left where it is. stopWhenDone takes the picture away where the fade arrives." },
+          "What the fade moves a video cue to, as row:value pairs space-separated, sorted - opacity, scale, offsetX, offsetY and rotation, and a movie's rate, in the rows' own units (namespace draft 36, VS). Each moves from where the picture is to its value over the duration, along the curve; a row not listed is left where it is. stopWhenDone takes the picture away where the fade arrives." },
         { "transport", "target",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",
@@ -3475,7 +3475,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "fill",
           false, 0.0, false, 0.0,
-          enum_video_source, 3,
+          enum_video_source, 4,
           "", 50.0, false, "park",
           "",
           "What the cue puts on its canvas (namespace draft 35, the author's words): a fill, one flat colour over the whole canvas, sitting behind; a mask, a shape laid over what is under it; a picture, an image file. Later a movie and a capture. One element for every source (VE), because the canvas, the layer, the opacity and the blend are the same whatever it shows." },
@@ -3583,6 +3583,30 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Mirrored top to bottom about its own centre, before the turn." },
+        { "video", "rate",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
+          true, "1",
+          true, 0.0, true, 20.0,
+          nullptr, 0,
+          "x", 50.0, false, "park",
+          "",
+          "A movie's speed, as a sound's (namespace draft 37, WA): one is the file's own, a half takes twice as long, two half as long; nought holds the frame. A fade moves it (fade/video pairs). Proposed, waiting for the author." },
+        { "video", "loops",
+          ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show,
+          true, "1",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "How many times a movie plays through, as a slice's loops (WA): one plays it once, nought for ever. A movie that has played them holds its last frame and its run ends (WB). Proposed." },
+        { "video", "startOffset",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "s", 50.0, false, "park",
+          "",
+          "How far into the movie it begins, in seconds of the file, as a sound's start offset. Proposed." },
         { "canvases", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

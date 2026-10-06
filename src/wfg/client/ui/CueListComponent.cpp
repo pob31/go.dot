@@ -1224,7 +1224,7 @@ namespace wfg::client::ui
 
         for (const auto& path : files)
             if (formats.findFormatForFileExtension (juce::File (path).getFileExtension()) != nullptr
-                  || model::isPictureFile (path.toStdString()))
+                  || model::isVisualFile (path.toStdString()))
                 return true;
 
         return false;

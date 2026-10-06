@@ -1966,11 +1966,12 @@ namespace wfg::client
                     show's first canvas; a sound a media cue, as ever. */
                 if (steps.create.has_value())
                 {
-                    if (model::isPictureFile (steps.create->mediaName))
+                    if (model::isVisualFile (steps.create->mediaName))
                     {
                         const auto canvases = latest != nullptr ? model::readCanvases (*latest)
                                                                 : std::vector<model::CanvasRow> {};
-                        std::vector<std::pair<std::string, std::string>> bornWith { { "source", "picture" } };
+                        std::vector<std::pair<std::string, std::string>> bornWith {
+                            { "source", model::isMovieFile (steps.create->mediaName) ? "movie" : "picture" } };
 
                         if (! canvases.empty())
                             bornWith.push_back ({ "canvas", canvases.front().id });
@@ -2283,7 +2284,7 @@ namespace wfg::client
                 const auto picture = latest != nullptr && model::text (*latest, "/godot/cue/" + cueId + "/kind") == "video";
 
                 chooser = std::make_unique<juce::FileChooser> (
-                            picture ? "Choose the picture this cue shows" : "Choose the media this cue plays",
+                            picture ? "Choose the picture or movie this cue shows" : "Choose the media this cue plays",
                             mediaFolder(), picture ? juce::String (model::pictureWildcard())
                                                    : formats.getWildcardForAllFormats());
 

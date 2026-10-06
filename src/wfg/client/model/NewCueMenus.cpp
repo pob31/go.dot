@@ -251,6 +251,9 @@ namespace wfg::client::model
             choices.push_back ({ "Picture", "a picture file, chosen in the inspector", "video",
                                  { { "source", "picture" }, { "canvas", canvas.id } },
                                  "On " + canvas.label(), false, false });
+            choices.push_back ({ "Movie", "a HAP movie, chosen in the inspector", "video",
+                                 { { "source", "movie" }, { "canvas", canvas.id } },
+                                 "On " + canvas.label(), false, false });
             choices.push_back ({ "Fill", "one colour over the whole canvas, behind", "video",
                                  { { "source", "fill" }, { "canvas", canvas.id } },
                                  "On " + canvas.label(), false, false });

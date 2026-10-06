@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/audio/MediaAnalyser.h>
+#include <wfg/engine/video/Movie.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Peaks.h>
@@ -480,6 +481,29 @@ namespace wfg::audio
                 merely NAMES, and a decoder that throws on one malformed file
                 must cost that file its colours - not stop a performance by
                 taking the process down with it. */
+            /*  A MOVIE IS NOT ANALYSED (Phase 8b): it has no waveform. Its
+                length is read from its index and published alone - the shape
+                every file has before its analysis, with no hash and no
+                pyramid. */
+            if (video::movie::isMovieName (named))
+            {
+                const auto seconds = video::movie::durationOf (resolveMediaPath (folder, named));
+
+                if (seconds > 0.0 && media != nullptr)
+                {
+                    MediaRecord record;
+                    record.seconds = seconds;
+                    media->publish (named, std::move (record));
+                }
+
+                const std::lock_guard<std::mutex> lock { guard };
+
+                if (pending > 0)
+                    --pending;
+
+                continue;
+            }
+
             MediaAnalysis analysis;
 
             try
