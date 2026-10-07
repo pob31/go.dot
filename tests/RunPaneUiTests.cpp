@@ -3685,7 +3685,7 @@ TEST_CASE ("new-cue bar: four buttons open their list under themselves, the rest
         if (button->onClick)
             button->onClick();
 
-    CHECK (chosen.size() == 5);   // group, transport, midi, mic and video (Phase 8a)
+    CHECK (chosen.size() == 6);   // group, transport, midi, mic, video (Phase 8a) and media (§38)
     for (const auto& [kind, anchor] : chosen)
     {
         CAPTURE (kind);
@@ -3697,7 +3697,7 @@ TEST_CASE ("new-cue bar: four buttons open their list under themselves, the rest
         CHECK ((*at)->getButtonText().endsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"))));
     }
 
-    CHECK (created.size() == model::cueKinds().size() - 5);
+    CHECK (created.size() == model::cueKinds().size() - 6);
     for (const auto& kind : created)
         CHECK_FALSE (model::opensList (kind));
 

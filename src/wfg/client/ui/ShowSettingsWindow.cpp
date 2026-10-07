@@ -5,6 +5,7 @@
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
+#include <wfg/client/model/NewCueMenus.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Fx.h>
@@ -5647,6 +5648,171 @@ namespace wfg::client::ui
             std::vector<std::pair<std::string, std::string>> dcaChoices;
         };
 
+        /*  THE SHOW'S CUE TEMPLATES (namespace draft §38): a cue's settings kept
+            under a name, which the Add lists offer. Made from a picked cue -
+            Edit, Save as template - and saved again the same way under the
+            same name; here they are named, read and taken away. Every row is a
+            command: a rename is a `node.set`, the cross an `object.delete`. */
+        class TemplatesPage final : public juce::Component,
+                                    private juce::ListBoxModel
+        {
+        public:
+            TemplatesPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch))
+            {
+                list.setModel (this);
+                list.setRowHeight (34);
+                list.setOutlineThickness (0);
+                list.setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                addAndMakeVisible (list);
+
+                addChildComponent (nameEditor);
+                nameEditor.setEditable (false, true, false);
+                nameEditor.setColour (juce::Label::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                nameEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                nameEditor.onEditorHide = [this] { commitName(); };
+
+                addAndMakeVisible (explanation);
+                explanation.setJustificationType (juce::Justification::topLeft);
+                explanation.setText ("A template keeps a cue's settings - its level, DCA, routing, EQ, sends,"
+                                     " effects and speed; a picture's canvas, geometry and grade - but never its"
+                                     " file, its name or its times in the file. The Add lists offer them: new"
+                                     " media cues from a template, the files chosen next. To make one, pick a"
+                                     " cue and choose Edit, Save as template; saving again under the same name"
+                                     " changes the template, and no cue already made from it.",
+                                     juce::dontSendNotification);
+            }
+
+            void show (std::vector<model::CueTemplateRow> templatesNow, bool editable)
+            {
+                const auto same = templatesNow.size() == rows.size()
+                                    && std::equal (templatesNow.begin(), templatesNow.end(), rows.begin(),
+                                                   [] (const model::CueTemplateRow& a, const model::CueTemplateRow& b)
+                                                   { return a.id == b.id && a.name == b.name && a.kind == b.kind
+                                                              && a.parts == b.parts; });
+                const auto sameLock = locked == ! editable;
+
+                rows = std::move (templatesNow);
+                locked = ! editable;
+
+                if (! same)
+                    list.updateContent();
+
+                if (! same || ! sameLock)
+                    list.repaint();
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+                explanation.setBounds (area.removeFromTop (64));
+                area.removeFromTop (6);
+                heading = area.removeFromTop (20);
+                list.setBounds (area);
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                g.setFont (Look::font (theme, 11.0f));
+                g.setColour (Look::colour (theme, "ink-off"));
+
+                const auto cells = cellsFor (heading.withWidth (list.getWidth()));
+                const char* names[] { "Template", "Makes", "Carries" };
+
+                for (auto at = 0; at < 3; ++at)
+                    g.drawText (names[at], cells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
+            }
+
+        private:
+            static std::array<juce::Rectangle<int>, 4> cellsFor (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+                const auto cross = area.removeFromRight (24);
+                const auto name = area.removeFromLeft (juce::jmax (120, area.getWidth() / 4));
+                const auto makes = area.removeFromLeft (110);
+                return { name, makes, area, cross };
+            }
+
+            int getNumRows() override { return static_cast<int> (rows.size()); }
+
+            void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return;
+
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+                const auto cells = cellsFor ({ 0, 0, width, height });
+
+                g.setColour (Look::colour (theme, row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText (juce::String (entry.label()), cells[0], juce::Justification::centredLeft, true);
+
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (entry.kindWord()), cells[1], juce::Justification::centredLeft, true);
+                g.drawText (juce::String (entry.carriesWords()), cells[2], juce::Justification::centredLeft, true);
+
+                if (! locked)
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[3], juce::Justification::centred);
+            }
+
+            void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+            {
+                if (locked || row < 0 || static_cast<std::size_t> (row) >= rows.size() || ! send)
+                    return;
+
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                   : list.getWidth();
+                const auto cells = cellsFor ({ 0, 0, width, list.getRowHeight() });
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                if (cells[3].contains (event.x, cells[3].getCentreY()))
+                {
+                    send (gesture::deleteObject (entry.id));
+                    return;
+                }
+
+                if (cells[0].contains (event.x, cells[0].getCentreY()))
+                {
+                    auto place = list.getRowPosition (row, true);
+                    place.translate (list.getX(), list.getY());
+
+                    editing = entry.id;
+                    nameEditor.setBounds (cells[0].withY (place.getY()).withHeight (place.getHeight())
+                                                  .translated (list.getX(), 0));
+                    nameEditor.setText (juce::String (entry.name), juce::dontSendNotification);
+                    nameEditor.setVisible (true);
+                    nameEditor.showEditor();
+                }
+            }
+
+            void commitName()
+            {
+                const auto typed = nameEditor.getText().trim().toStdString();
+                const auto id = editing;
+
+                editing.clear();
+                nameEditor.setVisible (false);
+
+                if (id.empty() || typed.empty() || ! send)
+                    return;
+
+                send (gesture::setNode ("/godot/cueTemplate/" + id + "/name", typed));
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+            std::vector<model::CueTemplateRow> rows;
+            bool locked = false;
+            juce::ListBox list;
+            juce::Label nameEditor, explanation;
+            juce::Rectangle<int> heading;
+            std::string editing;
+        };
+
         class PlaybackPage final : public juce::Component
         {
         public:
@@ -5806,6 +5972,8 @@ namespace wfg::client::ui
                     { "Video",        "Canvases - the pictures video cues are laid onto - and the outputs that"
                                       " show them on this machine's displays. Nothing to do for a show with"
                                       " no picture." },
+                    { "Templates",    "Cue templates: a cue's settings kept under a name, for new cues to be"
+                                      " born with from the Add lists." },
                     { "Playback",     "How GO, Doh! and Esc behave: the least time between two GOs, how"
                                       " long after a GO it can be taken back, and how long the panic fade"
                                       " takes." },
@@ -5953,6 +6121,7 @@ namespace wfg::client::ui
             plugins = std::make_unique<PluginsPage> (theme, send);
             rackPage = std::make_unique<RackPage> (theme, send);
             video = std::make_unique<VideoPage> (theme, send);
+            templates = std::make_unique<TemplatesPage> (theme, send);
             playback = std::make_unique<PlaybackPage> (theme, send);
 
             /*  A tab named in the list is found by its name, so the list and
@@ -6037,6 +6206,10 @@ namespace wfg::client::ui
             /*  AFTER THE RACK, the pictures' side of the show (Phase 8a,
                 decision VB): one tab for the canvases and the outputs. */
             tabs.addTab ("Video", background, video.get(), false);
+
+            /*  AFTER THE VIDEO: the cue templates the Add lists offer
+                (namespace draft §38), made from cues and kept with the show. */
+            tabs.addTab ("Templates", background, templates.get(), false);
 
             /*  AFTER THE RACK: the two numbers that say how GO and Esc behave,
                 set once a show is otherwise ready to run (2026-09-28). */
@@ -6177,6 +6350,9 @@ namespace wfg::client::ui
                          model::text (snapshot, "/godot/videoOutput/rendererProblem"),
                          ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
                          model::dcaChoices (model::readDcas (snapshot)));
+
+            templates->show (model::readCueTemplates (snapshot),
+                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 
             /*  GO AND ESC: the document's, re-read every pass like the outputs,
                 since each lands at once as a `node.set`. */
@@ -6377,6 +6553,7 @@ namespace wfg::client::ui
         std::unique_ptr<OutputPage> outputList;
         std::unique_ptr<InputPage> inputList;
         std::unique_ptr<VideoPage> video;
+        std::unique_ptr<TemplatesPage> templates;
         std::unique_ptr<NetworkPage> network;
         std::unique_ptr<MidiPage> midi;
         std::unique_ptr<SurfacesPage> surfaces;

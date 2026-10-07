@@ -118,7 +118,12 @@ namespace wfg::client
             menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance, menuUpdateTemplate,
             menuImportAls,
             menuConvertUsed, menuConvertWhole, menuConvertUsedQuality, menuConvertWholeQuality,
-            menuMovieSound, menuCancelConversion, menuDownloadFfmpeg
+            menuMovieSound, menuCancelConversion, menuDownloadFfmpeg,
+            menuSaveTemplate,
+
+            /*  THE TEMPLATES APPLY TEMPLATE OFFERS, numbered from here in the
+                order the show keeps them (namespace draft §38). */
+            menuApplyTemplateFirst = 1000
         };
 
         class Window final : public wfg::Client,
@@ -757,7 +762,9 @@ namespace wfg::client
                     case menuConvertWholeQuality:
                     case menuMovieSound:
                     case menuCancelConversion:
-                    case menuDownloadFfmpeg: break;
+                    case menuDownloadFfmpeg:
+                    case menuSaveTemplate:
+                    case menuApplyTemplateFirst: break;
                 }
 
                 return {};
@@ -855,6 +862,14 @@ namespace wfg::client
                     case menuDownloadFfmpeg:
                         return latest != nullptr && model::ffmpegPath (*latest).empty()
                                  && ! model::readFfmpegInstall (*latest).running();
+
+                    /*  A PICKED MEDIA OR VIDEO CUE, kept as a template, or the
+                        templates of its kind stamped onto every picked cue
+                        (namespace draft §38). */
+                    case menuSaveTemplate:
+                        return unlocked && ! templateKindOfAnchor().empty();
+                    case menuApplyTemplateFirst:
+                        return unlocked && ! selection.empty() && ! templatesForAnchor().empty();
                 }
 
                 return false;
@@ -918,6 +933,29 @@ namespace wfg::client
                                                    ? "Copy " + juce::String (static_cast<int> (selection.size())) + " cues"
                                                    : "Copy cue");
                     addMenuItem (menu, menuPaste, "Paste");
+                    menu.addSeparator();
+
+                    /*  CUE TEMPLATES (namespace draft §38): the picked cue's
+                        settings kept under a name, and those of its kind
+                        stamped onto the picked cues. */
+                    addMenuItem (menu, menuSaveTemplate, "Save as template...");
+                    {
+                        juce::PopupMenu offered;
+                        const auto rows = templatesForAnchor();
+
+                        for (std::size_t at = 0; at < rows.size(); ++at)
+                        {
+                            juce::PopupMenu::Item entry { juce::String (rows[at].label()) };
+                            entry.itemID = menuApplyTemplateFirst + static_cast<int> (at);
+                            entry.isEnabled = menuItemEnabled (menuApplyTemplateFirst);
+                            offered.addItem (entry);
+                        }
+
+                        menu.addSubMenu (selection.size() > 1 ? "Apply template to "
+                                                                  + juce::String (static_cast<int> (selection.size())) + " cues"
+                                                              : juce::String ("Apply template"),
+                                         offered, ! rows.empty() && menuItemEnabled (menuApplyTemplateFirst));
+                    }
                     menu.addSeparator();
                     addMenuItem (menu, menuSelectAll, "Select all cues");
                     addMenuItem (menu, menuDeleteCue, selection.size() > 1
@@ -1051,8 +1089,104 @@ namespace wfg::client
                         break;
                     case menuRecord:     send (model::isYes (last.recording) ? gesture::recordStop()
                                                                              : gesture::recordStart()); break;
-                    default: break;
+                    case menuSaveTemplate: askToSaveTemplate(); break;
+                    default:
+                        if (itemId >= menuApplyTemplateFirst)
+                        {
+                            const auto rows = templatesForAnchor();
+                            const auto at = static_cast<std::size_t> (itemId - menuApplyTemplateFirst);
+
+                            if (at < rows.size() && ! refusedWhileLocked())
+                            {
+                                send (gesture::applyCueTemplate (rows[at].id, selection.ids()));
+                                shell->transport.setNotice ("Template " + juce::String (rows[at].label()) + " applied to "
+                                                              + juce::String (static_cast<int> (selection.size()))
+                                                              + (selection.size() == 1 ? " cue" : " cues"));
+                            }
+                        }
+                        break;
                 }
+            }
+
+            /*  THE PICKED CUE'S TEMPLATE KIND (namespace draft §38): "media",
+                a video cue's source, or empty for a cue no template is made of. */
+            std::string templateKindOfAnchor() const
+            {
+                if (latest == nullptr || selection.anchor().empty())
+                    return {};
+
+                const auto base = "/godot/cue/" + selection.anchor() + "/";
+                const auto kind = model::text (*latest, base + "kind");
+
+                if (kind == "media")
+                    return "media";
+
+                if (kind == "video")
+                {
+                    const auto source = model::text (*latest, base + "source");
+                    return source.empty() ? std::string ("fill") : source;
+                }
+
+                return {};
+            }
+
+            std::vector<model::CueTemplateRow> templatesForAnchor() const
+            {
+                if (latest == nullptr || selection.anchor().empty())
+                    return {};
+
+                const auto base = "/godot/cue/" + selection.anchor() + "/";
+                return model::templatesFor (model::readCueTemplates (*latest), model::text (*latest, base + "kind"),
+                                            model::text (*latest, base + "source"));
+            }
+
+            /*  SAVE AS TEMPLATE: a name asked for, the picked cue's own offered.
+                A name a template of the same kind already has takes the cue's
+                settings into that one - saving again is how a template is
+                changed - and says so before it does. */
+            void askToSaveTemplate()
+            {
+                if (refusedWhileLocked() || latest == nullptr)
+                    return;
+
+                const auto kind = templateKindOfAnchor();
+                const auto cueId = selection.anchor();
+
+                if (kind.empty())
+                    return;
+
+                auto* ask = new juce::AlertWindow ("Save as template",
+                                                   "A template keeps this cue's settings - everything but its file,"
+                                                   " its name and its times in the file - for new cues to be born"
+                                                   " with. A cue made from it keeps what it was given: saving the"
+                                                   " template again changes no cue already made.",
+                                                   juce::MessageBoxIconType::NoIcon);
+                ask->addTextEditor ("name", juce::String (model::text (*latest, "/godot/cue/" + cueId + "/name")),
+                                    "Name");
+                ask->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                ask->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                ask->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, ask, kind, cueId, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int result)
+                    {
+                        const auto name = ask->getTextEditorContents ("name").trim().toStdString();
+
+                        if (safe == nullptr || result != 1 || name.empty() || latest == nullptr)
+                            return;
+
+                        for (const auto& row : model::readCueTemplates (*latest))
+                        {
+                            if (row.name == name && row.kind == kind)
+                            {
+                                send (gesture::saveCueTemplate (row.id, cueId));
+                                shell->transport.setNotice ("Template " + juce::String (name) + " saved again");
+                                return;
+                            }
+                        }
+
+                        send (gesture::createCueTemplate (name, cueId));
+                        shell->transport.setNotice ("Template " + juce::String (name) + " saved");
+                    }), true);
             }
 
             /*  ONE `object.delete`, from the key and from the menu alike. It does
@@ -2100,7 +2234,7 @@ namespace wfg::client
                 command is - and named a tick later, once the tree shows it: the
                 identifier is the engine's to draw, never a client's. */
             void importMedia (const std::string& parent, int index,
-                              const juce::StringArray& files)
+                              const juce::StringArray& files, const std::string& cueTemplate = {})
             {
                 if (refusedWhileLocked())
                     return;
@@ -2126,7 +2260,7 @@ namespace wfg::client
                 for (const auto& path : files)
                     sources.push_back (path.toStdString());
 
-                imports.add (parent, index, orderOf (parent), sources);
+                imports.add (parent, index, orderOf (parent), sources, cueTemplate);
                 followImports();
             }
 
@@ -2183,6 +2317,12 @@ namespace wfg::client
 
                         send (gesture::createCue (steps.create->parent, steps.create->index, "video",
                                                   steps.create->cueName, bornWith));
+                    }
+                    else if (! steps.create->cueTemplate.empty())
+                    {
+                        //  Born from the template the files were chosen for (namespace draft §38).
+                        send (gesture::createCueFrom (steps.create->parent, steps.create->index,
+                                                      steps.create->cueTemplate, steps.create->cueName));
                     }
                     else
                     {
@@ -2678,6 +2818,11 @@ namespace wfg::client
                     honest - and the line below says why it is silent, because
                     a cue that plays nothing with no explanation is the worst
                     of the three. */
+                /*  A TEMPLATE THAT SAID WHERE IT PLAYS is not overruled
+                    (namespace draft §38): the cue was born with its direct out. */
+                if (latest != nullptr && ! model::text (*latest, "/godot/cue/" + cueId + "/directOut").empty())
+                    return {};
+
                 const auto lowest = firstDirectOut();
 
                 if (lowest.empty())
@@ -3585,6 +3730,29 @@ namespace wfg::client
                 createCue (kind, {});
             }
 
+            void createFromTemplate (const model::Choice& line)
+            {
+                const auto [parent, index] = destination();
+
+                if (parent.empty())
+                {
+                    shell->transport.setNotice ("no list to add a cue to");
+                    return;
+                }
+
+                if (line.kind == "media")
+                {
+                    chooseMedia (parent, index, line.cueTemplate);
+                    return;
+                }
+
+                const auto members = static_cast<int> (model::words (orderOf (parent)).size());
+                const auto at = index < 0 ? members : juce::jlimit (0, members, index);
+
+                send (gesture::createCueFrom (parent, at, line.cueTemplate, ""));
+                creations.push_back ({ parent, at, line.kind, last.revision, 0 });
+            }
+
             /*  AND BORN WITH ITS SETTINGS, when a line of a list chose them:
                 one `cue.create`, one record, one Undo. */
             void createCue (const std::string& kind, const model::Settings& bornWith)
@@ -3673,6 +3841,11 @@ namespace wfg::client
                     offered = model::videoChoices (*latest);
                     lines = model::videoMenu (*latest, offered, where);
                 }
+                else if (kind == "media")
+                {
+                    offered = model::mediaChoices (*latest);
+                    lines = model::mediaMenu (offered, where);
+                }
                 else
                 {
                     createCue (kind);
@@ -3703,6 +3876,15 @@ namespace wfg::client
                 if (! wrapped.empty())
                 {
                     wrapAround (wrapped, bornWith);
+                    return;
+                }
+
+                /*  BORN FROM A TEMPLATE (namespace draft §38): a media cue's
+                    files chosen first, each cue born from it as it lands; a
+                    picture's cue at once, its file chosen in the inspector. */
+                if (! line.cueTemplate.empty())
+                {
+                    createFromTemplate (line);
                     return;
                 }
 
@@ -3743,7 +3925,7 @@ namespace wfg::client
                 cue would have gone; nothing is made when the dialogue is
                 cancelled. Several files make several cues, in the order
                 chosen, exactly as a drop of several does. */
-            void chooseMedia (const std::string& parent, int index)
+            void chooseMedia (const std::string& parent, int index, const std::string& cueTemplate = {})
             {
                 juce::AudioFormatManager formats;
                 formats.registerBasicFormats();
@@ -3756,7 +3938,7 @@ namespace wfg::client
                                         | juce::FileBrowserComponent::canSelectFiles
                                         | juce::FileBrowserComponent::canSelectMultipleItems,
                                       [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
-                                       this, parent, index] (const juce::FileChooser& answered)
+                                       this, parent, index, cueTemplate] (const juce::FileChooser& answered)
                                       {
                                           if (safe == nullptr)
                                               return;
@@ -3768,7 +3950,7 @@ namespace wfg::client
                                                   files.add (file.getFullPathName());
 
                                           if (! files.isEmpty())
-                                              importMedia (parent, index, files);
+                                              importMedia (parent, index, files, cueTemplate);
                                       });
             }
 

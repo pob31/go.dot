@@ -257,6 +257,17 @@ namespace wfg::client::gesture
     Event copyPart (const std::string& part, const std::string& cueId);
     Event pastePart (const std::string& fragment, const std::vector<std::string>& cueIds);
 
+    /*  CUE TEMPLATES (namespace draft §38): a cue's settings kept under a
+        name, taken again from a cue into one already there, stamped onto cues,
+        and a cue born from one - `cue.createFrom`, with the settings it is
+        born with as pairs that win over the template's. */
+    Event createCueTemplate (const std::string& name, const std::string& cueId);
+    Event saveCueTemplate (const std::string& templateId, const std::string& cueId);
+    Event applyCueTemplate (const std::string& templateId, const std::vector<std::string>& cueIds);
+    Event createCueFrom (const std::string& parent, int index, const std::string& templateId,
+                         const std::string& name,
+                         const std::vector<std::pair<std::string, std::string>>& bornWith = {});
+
     /*  ONE FIELD, COMMITTED. The address is the NODE's own, never one this
         client assembled: a generic inspector writes back to what it read,
         which is the whole reason it needs no table of field names. */

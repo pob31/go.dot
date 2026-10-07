@@ -72,7 +72,39 @@ namespace wfg::client::model
 
         /** Born aimed at the picked cue: `target` is added when one is picked. */
         bool aimed = false;
+
+        /*  BORN FROM A CUE TEMPLATE (namespace draft §38), by its identifier:
+            `cue.createFrom` rather than `cue.create`, and for a media cue the
+            files chosen first. Empty for every other line. */
+        std::string cueTemplate;
     };
+
+    /*  THE SHOW'S CUE TEMPLATES (namespace draft §38), in the show's order:
+        each one's name, its kind - "media", or a picture's source: "movie",
+        "picture", "fill", "mask" - and in words what it carries. */
+    struct CueTemplateRow
+    {
+        std::string id;
+        std::string name;
+        std::string kind;
+        std::string parts;      ///< the fragment, as the engine keeps it
+
+        std::string label() const;          ///< the name, else "Template"
+        std::string kindWord() const;       ///< "media cue", "movie", "fill"...
+        std::string carriesWords() const;   ///< "level, DCA, routing, EQ, 2 sends, 1 effect, speed"
+    };
+
+    std::vector<CueTemplateRow> readCueTemplates (const tree::TreeSnapshot&);
+
+    /*  THE TEMPLATES A PICKED CUE OF THIS KIND MAY TAKE: a media cue's the
+        media templates, a video cue's those of its own source. */
+    std::vector<CueTemplateRow> templatesFor (const std::vector<CueTemplateRow>&, const std::string& cueKind,
+                                              const std::string& source);
+
+    /*  THE "+ media" LIST (namespace draft §38): files chosen from the disk, as
+        the button always did, then each media template - the files chosen
+        next, each cue born from it. */
+    std::vector<Choice> mediaChoices (const tree::TreeSnapshot&);
 
     /** Whether the button for this kind opens a list rather than making a cue. */
     bool opensList (const std::string& kind);
@@ -140,6 +172,8 @@ namespace wfg::client::model
 
     /*  And for `videoChoices`, saying where a canvas is made when the show
         has none. */
+    std::vector<MenuLine> mediaMenu (const std::vector<Choice>& choices, const std::string& destination);
+
     std::vector<MenuLine> videoMenu (const tree::TreeSnapshot&, const std::vector<Choice>& choices,
                                      const std::string& destination);
 

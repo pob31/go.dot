@@ -21297,3 +21297,31 @@ pasted as a cue would be a cue with no file and no name.
   times the level, through the same arithmetic.
 - **The Video tab** has a Level cell typed in place and a DCA cell chosen from a menu of the show's
   DCAs on each canvas.
+
+### 38.9 What S4 and S5 built
+
+- **`<Show><CueTemplates><CueTemplate>`**: `name`, `kind` (`media`, or a picture's source: `movie`,
+  `picture`, `fill`, `mask`) and `parts`, the fragment a paste takes - text, so a template is never a
+  cue a GO or a `node.set` could reach. The container is made on demand after the video outputs, so no
+  show written before it gains a line. `/godot/cueTemplate/order` beside
+  `/godot/cueTemplate/<id>/name`.
+- **Commands**: `cueTemplate.create name cue [id]` keeps what WP says of a media or video cue;
+  `cueTemplate.save template cue` takes a cue's settings into one already there (a cue of its kind,
+  else `type-mismatch`); `cueTemplate.apply template cues [ids]` is `cue.pastePart` of it; `cue.createFrom
+  parent index template name [id] [ids] [attribute value]...` makes a cue of the template's kind and
+  stamps it in one step, the pairs given written last so they win over the template - a file's
+  channels, a direct out - and the record carries the cue's identifier and its children's. A
+  template is deleted with `object.delete` and renamed with `node.set`. A show's template and its
+  performances (§25) compare the templates as one setting, "cue templates".
+- **In the window**: *+ media* now opens a list - *Files...*, as the button always did, then each media
+  template, the files chosen next and each cue born from it as it lands. *+ video* offers each
+  picture template after the canvases, its file chosen in the inspector. **Edit > Save as
+  template...** asks a name, the picked cue's offered; a name a template of the same kind already has
+  saves into that one, which is how a template is changed. **Edit > Apply template** offers the
+  templates of the picked cue's kind and stamps one onto every picked cue. **Show settings >
+  Templates** lists them - name (renamed in place), what each makes, what it carries in words, a cross
+  to take it away.
+- **What the plan said and did not do**: an imported file does not become one undo step. A file is
+  named only once its copy into the show has landed, and the copy runs off the window's thread, so the
+  create, the file and its routing stay the steps they were; a template adds none. A direct out the
+  template gave is not overruled by the import's first-direct-out default.

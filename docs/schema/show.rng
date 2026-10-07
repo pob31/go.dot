@@ -64,6 +64,9 @@
       <optional>
         <ref name="VideoOutputs"/>
       </optional>
+      <optional>
+        <ref name="CueTemplates"/>
+      </optional>
     </element>
   </define>
 
@@ -3354,6 +3357,46 @@
       <optional>
         <attribute name="name">
           <a:documentation>What the show calls this output - Face, Wings monitor. An output is a display on this machine showing one canvas through its own mapping (namespace draft 35, the author&apos;s word).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="CueTemplates">
+    <element name="CueTemplates">
+      <zeroOrMore>
+        <ref name="CueTemplate"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="CueTemplate">
+    <element name="CueTemplate">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="kind">
+          <a:documentation>What kind of cue the template makes, fixed when it is saved from a cue: a media cue, or a video cue of one source - a movie, a picture, a fill or a mask. The Add menu offers it beside cues of that kind.</a:documentation>
+          <choice>
+            <value>media</value>
+            <value>movie</value>
+            <value>picture</value>
+            <value>fill</value>
+            <value>mask</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the template is called in the Add menu and in Apply template - Voice, Ambience bed, Projection left (namespace draft §38). A template is a set of a cue-s settings kept in the show, a new cue born with them; it never names a file.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="parts">
+          <a:documentation>What the template carries, as the fragment `cue.pastePart` takes: a &lt;Fragment part=&quot;…&quot;&gt; holding a stripped copy of the cue it was saved from (namespace draft §38, WP: everything not bound to the file - level, DCA, routing, colour, EQ, sends, effects, speed, how a sample answers a hand; a picture-s canvas, layer, blend, opacity, geometry, grade and mask). Written by `cueTemplate.create` and `cueTemplate.save`, read by `cueTemplate.apply` and `cue.createFrom`. A template is stamped into a cue, never linked (PRD 4.12): a template saved again changes no cue already made.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

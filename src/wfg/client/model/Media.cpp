@@ -341,7 +341,7 @@ namespace wfg::client::model
 
     //==========================================================================
     void MediaImports::add (const std::string& parent, int index, const std::string& orderText,
-                            const std::vector<std::string>& sources)
+                            const std::vector<std::string>& sources, const std::string& cueTemplate)
     {
         if (sources.empty())
             return;
@@ -349,6 +349,7 @@ namespace wfg::client::model
         Batch batch;
         batch.serial = ++serials;
         batch.parent = parent;
+        batch.cueTemplate = cueTemplate;
 
         /*  THE NUMBER TURNED INTO A MEMBER: the one the hand let go after, or
             the top, or the end - which is what the drop meant, and what a long
@@ -737,6 +738,7 @@ namespace wfg::client::model
             job.mediaName = next->mediaName;
             job.askedAt = revision;
             job.askedTick = snapshot.tick();
+            job.cueTemplate = batch.cueTemplate;
 
             next->stage = Stage::creating;
             creating = Where { batch.serial, static_cast<std::size_t> (next - batch.files.begin()) };

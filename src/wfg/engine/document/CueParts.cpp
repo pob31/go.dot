@@ -18,6 +18,7 @@
 
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/document/ShowDocument.h>
 
 #include <algorithm>
@@ -562,5 +563,173 @@ namespace wfg::doc
             joined += (joined.empty() ? "" : " ") + id;
 
         return EditResult::succeeded (joined);
+    }
+
+    //==============================================================================
+    namespace
+    {
+        /*  THE KIND A TEMPLATE OF THIS CUE IS: "media", or a video cue's source
+            - what the Add menu offers it beside. Empty for a cue no template is
+            made of. */
+        std::string templateKindOf (const juce::ValueTree& cue)
+        {
+            if (cue.hasType ("Media"))
+                return "media";
+
+            if (cue.hasType ("Video"))
+            {
+                const auto source = cue.getProperty ("source").toString().toStdString();
+                return source.empty() ? std::string ("fill") : source;
+            }
+
+            return {};
+        }
+
+        std::string templateWordsFor (const juce::ValueTree& cue)
+        {
+            return parts::wordsFor (parts::templatePartsFor (cue.getType().toString().toStdString()));
+        }
+    }
+
+    EditResult ShowDocument::createCueTemplate (const std::string& name, const std::string& cueId,
+                                                const std::string& id)
+    {
+        /*  ASKED HERE AS WELL AS AT THE DOOR, for createCanvas's reason: the
+            container is made before the door is reached, and a locked show must
+            not gain an empty one from a refusal. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        const auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        const auto kind = templateKindOf (cue);
+
+        if (kind.empty())
+            return EditResult::failed (reason::typeMismatch);
+
+        const auto fragment = partFragmentOf (templateWordsFor (cue), cueId);
+
+        if (fragment.empty())
+            return EditResult::failed (reason::typeMismatch);
+
+        auto container = showNode.getChildWithName ("CueTemplates");
+
+        if (! container.isValid())
+        {
+            /*  AT A FIXED PLACE, after the video outputs, the canvases and the
+                DCAs, whichever there are - and outside the history, as the
+                canvases' container is: it carries nothing, and the template
+                that made it is the step Undo takes back. */
+            int at = 0;
+
+            for (int i = 0; i < showNode.getNumChildren(); ++i)
+            {
+                const auto type = showNode.getChild (i).getType().toString();
+
+                if (type == "Dcas" || type == "Canvases" || type == "VideoOutputs")
+                    at = i + 1;
+            }
+
+            container = juce::ValueTree ("CueTemplates");
+            showNode.addChild (container, at, nullptr);
+        }
+
+        std::vector<std::pair<std::string_view, std::string>> attributes { { "kind", kind }, { "parts", fragment } };
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        return insertObject (container, endOfSequence, "CueTemplate", id, attributes);
+    }
+
+    EditResult ShowDocument::saveCueTemplate (const std::string& templateId, const std::string& cueId)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        auto found = findById (templateId);
+        const auto cue = findById (cueId);
+
+        if (! found.hasType ("CueTemplate") || ! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        /*  A TEMPLATE KEEPS ITS KIND: a movie's settings saved into a fill's
+            template would offer a fill that is born a movie's. */
+        if (templateKindOf (cue) != found.getProperty ("kind").toString().toStdString())
+            return EditResult::failed (reason::typeMismatch);
+
+        const auto fragment = partFragmentOf (templateWordsFor (cue), cueId);
+
+        if (fragment.empty())
+            return EditResult::failed (reason::typeMismatch);
+
+        return writeOwned (found, "CueTemplate", "parts", fragment);
+    }
+
+    EditResult ShowDocument::applyCueTemplate (const std::string& templateId, const std::vector<std::string>& cueIds,
+                                               const std::vector<std::string>& ids)
+    {
+        const auto found = findById (templateId);
+
+        if (! found.hasType ("CueTemplate"))
+            return EditResult::failed (reason::unknownId);
+
+        return pastePart (found.getProperty ("parts").toString().toStdString(), cueIds, ids);
+    }
+
+    EditResult ShowDocument::createCueFrom (const std::string& parentId, int index, const std::string& templateId,
+                                            const std::string& name, const std::string& id,
+                                            const std::vector<std::string>& childIds, const Attributes& attributes,
+                                            std::string& madeChildren)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        const auto found = findById (templateId);
+
+        if (! found.hasType ("CueTemplate"))
+            return EditResult::failed (reason::unknownId);
+
+        const auto kind = found.getProperty ("kind").toString().toStdString();
+        auto born = attributes;
+
+        /*  A PICTURE'S SOURCE IS THE TEMPLATE'S KIND, unless a pair says so:
+            the picture part leaves what a picture IS to the cue. */
+        if (kind != "media"
+              && std::none_of (born.begin(), born.end(), [] (const auto& pair) { return pair.first == "source"; }))
+            born.insert (born.begin(), { "source", kind });
+
+        const auto made = createCue (parentId, index, kind == "media" ? "media" : "video", name, id, born);
+
+        if (! made.ok)
+            return made;
+
+        const auto stamped = pastePart (found.getProperty ("parts").toString().toStdString(), { made.id }, childIds);
+
+        if (! stamped.ok)
+            return stamped;
+
+        madeChildren = stamped.id;
+
+        /*  AND THE PAIRS GIVEN WIN: written again where the template wrote
+            over them - a file's direct out, its channels - in the same step. */
+        const auto cue = findById (made.id);
+
+        for (const auto& [row, text] : born)
+        {
+            const auto address = "/godot/" + std::string (addressOwnerFor (cue.getType().toString().toStdString()))
+                                   + "/" + made.id + "/" + row;
+
+            if (getAttribute (address) == text)
+                continue;
+
+            if (const auto written = setAttribute (address, text); ! written.ok)
+                return written;
+        }
+
+        return made;
     }
 }

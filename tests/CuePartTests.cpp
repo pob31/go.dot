@@ -466,3 +466,104 @@ TEST_CASE ("cue parts: a paste onto several cues is one step of undo, and its re
     REQUIRE (again.ok);
     CHECK (again.id == recorded);
 }
+
+//==============================================================================
+TEST_CASE ("cue templates: a cue's settings kept under a name, stamped into a cue born from it and onto cues")
+{
+    /*  Namespace draft §38, WP: a template carries everything not bound to
+        the file - here A's level, EQ, send and chain, never its file, name or
+        Range - and is STAMPED: saved again, it changes no cue already made. */
+    doc::ShowDocument document;
+    open (document);
+
+    REQUIRE (document.setAttribute ("/godot/cue/CP000002/level", "-4").ok);
+    REQUIRE (document.setAttribute ("/godot/cue/CP000002/rate", "0.75").ok);
+
+    const auto made = document.createCueTemplate ("Voice", "CP000002");
+    REQUIRE (made.ok);
+
+    const auto parts = document.getAttribute ("/godot/cueTemplate/" + made.id + "/parts").value_or ("");
+    CHECK (parts.rfind ("<Fragment part=\"mix play eq sends fx speed\">", 0) == 0);
+    CHECK (parts.find ("file=") == std::string::npos);
+    CHECK (parts.find ("<Range") == std::string::npos);
+    CHECK (document.getAttribute ("/godot/cueTemplate/" + made.id + "/kind") == std::string ("media"));
+    CHECK (document.getAttribute ("/godot/cueTemplate/" + made.id + "/name") == std::string ("Voice"));
+
+    /*  A movie's kind is its source; a mic is no template's. */
+    const auto movie = document.createCueTemplate ("Projection", "CP000006");
+    REQUIRE (movie.ok);
+    CHECK (document.getAttribute ("/godot/cueTemplate/" + movie.id + "/kind") == std::string ("movie"));
+    CHECK (document.createCueTemplate ("Mic", "CP000005").reason == std::string (reason::typeMismatch));
+
+    /*  BORN FROM IT, in one step, its file and channels given - and a pair
+        given wins over the template. */
+    std::string children;
+    const auto born = document.createCueFrom ("CP000001", 0, made.id, "New voice", {}, {},
+                                              { { "file", "voice.wav" }, { "channels", "1" } }, children);
+    REQUIRE (born.ok);
+    const std::string base = "/godot/cue/" + born.id + "/";
+    CHECK (at (document, base + "file") == "voice.wav");
+    CHECK (at (document, base + "name") == "New voice");
+    CHECK (at (document, base + "level") == "-4");
+    CHECK (at (document, base + "rate") == "0.75");
+    CHECK (at (document, base + "eqB1Gain") == "6");
+    CHECK (childrenOf (document, born.id, "Send").size() == 1);
+    CHECK (childrenOf (document, born.id, "Fx").size() == 2);
+    CHECK (childrenOf (document, born.id, "Range").empty());
+    CHECK (! children.empty());
+
+    std::string unused;
+    const auto picture = document.createCueFrom ("CP000001", 0, movie.id, "Clip", {}, {},
+                                                 { { "file", "clip.mov" } }, unused);
+    REQUIRE (picture.ok);
+    CHECK (at (document, "/godot/cue/" + picture.id + "/source") == "movie");
+
+    /*  STAMPED, NOT LINKED: the template saved again from another cue leaves
+        the cue born from it as it was. */
+    REQUIRE (document.saveCueTemplate (made.id, "CP000004").ok);
+    CHECK (at (document, base + "level") == "-4");
+    CHECK (document.saveCueTemplate (made.id, "CP000006").reason == std::string (reason::typeMismatch));
+
+    /*  APPLIED onto a cue that has its own: replaced whole. */
+    REQUIRE (document.applyCueTemplate (movie.id, { "CP000006" }, {}).ok);
+    REQUIRE (document.applyCueTemplate (made.id, { "CP000003" }, {}).ok);
+    CHECK (childrenOf (document, "CP000003", "Send").empty());
+    CHECK (childrenOf (document, "CP000003", "Fx").empty());
+    CHECK (at (document, "/godot/cue/CP000003/eqB2Gain") == "0");
+
+    /*  Written into the show, read back the same. */
+    const auto written = doc::CanonicalXml::write (document);
+    CHECK (written.find ("<CueTemplates>") != std::string::npos);
+    doc::ShowDocument again;
+    const auto reread = doc::CanonicalXml::read (written, again);
+
+    for (const auto& problem : reread.problems)
+        INFO (problem);
+
+    REQUIRE (reread.ok);
+    CHECK (doc::CanonicalXml::write (again) == written);
+    CHECK (document.validate().empty());
+}
+
+TEST_CASE ("cue templates: a cue born from a template is one step of undo, and replays to the same names")
+{
+    Rig rig;
+
+    REQUIRE (rig.apply ("cueTemplate.create", { text ("Voice"), text ("CP000002") }).applied == 1);
+    const auto templateId = rig.lastAppliedArg (2);
+
+    REQUIRE (rig.apply ("cue.createFrom", { text ("CP000001"), osc::Value::int32 (0), text (templateId),
+                                            text ("New"), text (""), text (""), text ("file"), text ("new.wav") }).applied == 1);
+    CHECK (rig.document.history (doc::UndoDomain::document).getUndoDescription() == "cue.createFrom");
+
+    const auto cueId = rig.lastAppliedArg (4);
+    const auto childIds = rig.lastAppliedArg (5);
+    REQUIRE (rig.document.findById (cueId).isValid());
+    CHECK (! childIds.empty());
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK_FALSE (rig.document.findById (cueId).isValid());
+
+    REQUIRE (rig.document.redo (doc::UndoDomain::document).has_value());
+    CHECK (rig.document.findById (cueId).isValid());
+}

@@ -310,6 +310,44 @@ namespace wfg::client::gesture
         return { origin::window, "cue.pastePart", { osc::Value::string (fragment), osc::Value::string (joined) } };
     }
 
+    Event createCueTemplate (const std::string& name, const std::string& cueId)
+    {
+        return { origin::window, "cueTemplate.create", { osc::Value::string (name), osc::Value::string (cueId) } };
+    }
+
+    Event saveCueTemplate (const std::string& templateId, const std::string& cueId)
+    {
+        return { origin::window, "cueTemplate.save", { osc::Value::string (templateId), osc::Value::string (cueId) } };
+    }
+
+    Event applyCueTemplate (const std::string& templateId, const std::vector<std::string>& cueIds)
+    {
+        std::string joined;
+
+        for (const auto& id : cueIds)
+            joined += (joined.empty() ? "" : " ") + id;
+
+        return { origin::window, "cueTemplate.apply", { osc::Value::string (templateId), osc::Value::string (joined) } };
+    }
+
+    Event createCueFrom (const std::string& parent, int index, const std::string& templateId,
+                         const std::string& name, const std::vector<std::pair<std::string, std::string>>& bornWith)
+    {
+        /*  BOTH IDENTIFIERS EMPTY, the cue's and its children's: the engine
+            draws them and the record carries them (`cue.create`'s shape). */
+        std::vector<osc::Value> args { osc::Value::string (parent), osc::Value::int32 (index),
+                                       osc::Value::string (templateId), osc::Value::string (name),
+                                       osc::Value::string (""), osc::Value::string ("") };
+
+        for (const auto& [row, value] : bornWith)
+        {
+            args.push_back (osc::Value::string (row));
+            args.push_back (osc::Value::string (value));
+        }
+
+        return { origin::window, "cue.createFrom", std::move (args) };
+    }
+
     Event groupRole (const std::string& group, const std::string& role)
     {
         return { origin::window, "group.role", { osc::Value::string (group), osc::Value::string (role) } };

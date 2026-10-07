@@ -100,6 +100,10 @@ namespace wfg::client::model
         std::string mediaName;   ///< what the cue's `file` should say
         std::uint64_t askedAt = 0;   ///< the revision when the create was sent
         std::int64_t askedTick = 0;  ///< and the engine's tick then, which is what patience counts (S7)
+
+        /*  THE CUE TEMPLATE IT IS BORN FROM (namespace draft §38), or empty:
+            `cue.createFrom` rather than `cue.create`. */
+        std::string cueTemplate;
     };
 
     /*  WHETHER THE CUE STANDING AT THE ASKED-FOR POSITION IS THE ONE THE
@@ -289,7 +293,7 @@ namespace wfg::client::model
             container's order as the window drew it, which turns the number
             into the member the cues follow. */
         void add (const std::string& parent, int index, const std::string& orderText,
-                  const std::vector<std::string>& sources);
+                  const std::vector<std::string>& sources, const std::string& cueTemplate = {});
 
         /** One file for a media cue that is already there. */
         void link (const std::string& cueId, const std::string& source);
@@ -369,6 +373,7 @@ namespace wfg::client::model
             int index = 0;            ///< the position dropped at, should `after` go
             Clash standing = Clash::ask;
             std::vector<Arriving> files;
+            std::string cueTemplate;  ///< each cue born from it (namespace draft §38), or empty
         };
 
         struct Where

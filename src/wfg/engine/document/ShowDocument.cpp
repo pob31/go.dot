@@ -372,6 +372,10 @@ namespace wfg::doc
             `/godot/videoOutput/displays` beside `/godot/videoOutput/<id>/canvas`. */
         if (element == "Canvases")     return "canvas";
         if (element == "VideoOutputs") return "videoOutput";
+
+        /*  And namespace draft §38's: `/godot/cueTemplate/order` beside
+            `/godot/cueTemplate/<id>/name`. */
+        if (element == "CueTemplates") return "cueTemplate";
         return {};
     }
 
@@ -450,6 +454,10 @@ namespace wfg::doc
         if (element == "Canvas")                    return "canvas";
         if (element == "VideoOutputs")              return "videoOutputs";
         if (element == "VideoOutput")               return "videoOutput";
+
+        /*  NAMESPACE DRAFT §38. The cue templates and their container. */
+        if (element == "CueTemplates")              return "cueTemplates";
+        if (element == "CueTemplate")               return "cueTemplate";
 
         return {};
     }
@@ -738,6 +746,7 @@ namespace wfg::doc
         if (segment == "dca")      return showNode.getChildWithName ("Dcas");
         if (segment == "canvas")   return showNode.getChildWithName ("Canvases");
         if (segment == "videoOutput") return showNode.getChildWithName ("VideoOutputs");
+        if (segment == "cueTemplate") return showNode.getChildWithName ("CueTemplates");
         return {};
     }
 

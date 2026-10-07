@@ -84,6 +84,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_video_source[] = { "fill", "mask", "picture", "movie" };
     inline constexpr std::string_view enum_video_blend[] = { "normal", "add", "screen", "multiply" };
     inline constexpr std::string_view enum_video_fit[] = { "fit", "fill", "stretch" };
+    inline constexpr std::string_view enum_cueTemplate_kind[] = { "media", "movie", "picture", "fill", "mask" };
     inline constexpr std::string_view enum_videoOutputs_renderer[] = { "stopped", "starting", "running", "failed" };
 
     inline constexpr AttributeRow attributes[] =
@@ -3744,6 +3745,38 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Whether a mask covers what is outside its outline rather than inside - the spill round a set, with the set left clear." },
+        { "cueTemplates", "order",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "The identifiers of the show-s cue templates, in document order, space-separated (namespace draft §38): the order the Add menu offers them in." },
+        { "cueTemplate", "name",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "What the template is called in the Add menu and in Apply template - Voice, Ambience bed, Projection left (namespace draft §38). A template is a set of a cue-s settings kept in the show, a new cue born with them; it never names a file." },
+        { "cueTemplate", "kind",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::show,
+          true, "media",
+          false, 0.0, false, 0.0,
+          enum_cueTemplate_kind, 5,
+          "", 50.0, false, "park",
+          "",
+          "What kind of cue the template makes, fixed when it is saved from a cue: a media cue, or a video cue of one source - a movie, a picture, a fill or a mask. The Add menu offers it beside cues of that kind." },
+        { "cueTemplate", "parts",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "What the template carries, as the fragment `cue.pastePart` takes: a <Fragment part=\"…\"> holding a stripped copy of the cue it was saved from (namespace draft §38, WP: everything not bound to the file - level, DCA, routing, colour, EQ, sends, effects, speed, how a sample answers a hand; a picture-s canvas, layer, blend, opacity, geometry, grade and mask). Written by `cueTemplate.create` and `cueTemplate.save`, read by `cueTemplate.apply` and `cue.createFrom`. A template is stamped into a cue, never linked (PRD 4.12): a template saved again changes no cue already made." },
         { "canvases", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

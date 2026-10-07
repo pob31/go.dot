@@ -926,6 +926,76 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  CUE TEMPLATES (namespace draft §38, WP): a set of a cue's settings
+            kept under a name - saved from a cue, applied to cues, a cue born
+            from one in one step. Stamped, never linked (PRD §4.12). */
+        registry.add ({ "cueTemplate.create",
+                        "Keeps a media or video cue's settings - everything not bound to its file - as a"
+                        " named cue template at the end of the show's.",
+                        { { "name", 's', false }, { "cue", 's', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+                            const auto edit = document.createCueTemplate (args[0].getString(), args[1].getString(), id);
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        registry.add ({ "cueTemplate.save",
+                        "Takes a cue's settings into a cue template already there, a cue of its kind.",
+                        { { "template", 's', false }, { "cue", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.saveCueTemplate (args[0].getString(), args[1].getString()), args);
+                        } });
+
+        registry.add ({ "cueTemplate.apply",
+                        "Stamps a cue template onto cues, by id, each part replaced whole, as one edit;"
+                        " the record carries the ids of what it made.",
+                        { { "template", 's', false }, { "cues", 's', false }, { "ids", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto ids = args.size() > 2 ? splitWords (args[2].getString())
+                                                             : std::vector<std::string> {};
+
+                            const auto edit = document.applyCueTemplate (args[0].getString(),
+                                                                         splitWords (args[1].getString()), ids);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        /*  A CUE BORN FROM A TEMPLATE, as `cue.create` is born with its pairs:
+            one step, the pairs after the two identifiers so the record carries
+            both - the cue's and its children's. */
+        registry.add ({ "cue.createFrom",
+                        "Creates a media or video cue from a cue template inside a list or a group, with"
+                        " any settings it is born with given as attribute-value pairs, which win over the"
+                        " template's.",
+                        { { "parent", 's', false }, { "index", 'i', false },
+                          { "template", 's', false }, { "name", 's', false },
+                          { "id", 's', true }, { "ids", 's', true }, { "attribute", 's', true, true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 4 ? args[4].getString() : std::string {};
+                            const auto ids = args.size() > 5 ? splitWords (args[5].getString())
+                                                             : std::vector<std::string> {};
+                            const auto attributes = pairsFrom (args, 6);
+
+                            if (! attributes)
+                                return Outcome::rejected (reason::badValue);
+
+                            std::string children;
+                            const auto edit = document.createCueFrom (args[0].getString(), args[1].getInt32(),
+                                                                      args[2].getString(), args[3].getString(),
+                                                                      id, ids, *attributes, children);
+
+                            return fromEdit (edit, withId (withId (args, 4, edit.id), 5, children));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "object.move",
                         "Moves an object to a new parent and position.",
                         { { "id", 's', false }, { "parent", 's', false },

@@ -1807,6 +1807,36 @@ namespace wfg::tree
                     dcaOrder.push_back (id);
                 }
             }
+            else if (containerName == "CueTemplates")
+            {
+                /*  THE SHOW'S CUE TEMPLATES (namespace draft §38): each one's
+                    name, kind and parts, and their order - what the Add menu
+                    offers and Apply template names. */
+                for (const auto* row : doc::Schema::rowsForOwner ("cueTemplates"))
+                    if (row->name == "order")
+                        nodes.push_back (makeLeaf (std::string (godot) + "/cueTemplate/order", *row,
+                                                   orderOf (container, "CueTemplate")));
+
+                for (const auto& object : container)
+                {
+                    const auto id = object[idProperty].toString().toStdString();
+
+                    if (id.empty())
+                        continue;
+
+                    const auto base = std::string (godot) + "/cueTemplate/" + id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("cueTemplate"))
+                    {
+                        if (row->persist == doc::Persist::none)
+                            continue;
+
+                        const doc::Attribute attribute { "CueTemplate", row };
+                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
+                                                   storedText (attribute, object)));
+                    }
+                }
+            }
             else if (containerName == "Canvases" || containerName == "VideoOutputs")
             {
                 /*  PHASE 8a'S CANVASES AND OUTPUTS (namespace draft 35): what

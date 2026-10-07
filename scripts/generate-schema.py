@@ -126,7 +126,12 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # canvas through its mapping (the author's words). `canvases`
                 # and `videoOutputs` are CONTAINER tokens like `dcas`,
                 # addressed /godot/canvas/order beside /godot/canvas/<id>.
-                "video", "canvases", "canvas", "videoOutputs", "videoOutput")
+                "video", "canvases", "canvas", "videoOutputs", "videoOutput",
+                # Namespace draft 38 (2026-10-07). The show's CUE TEMPLATES: a
+                # set of a cue's settings kept under a name, a new cue born with
+                # them. `cueTemplates` is a CONTAINER token like `canvases`,
+                # addressed /godot/cueTemplate/order beside /godot/cueTemplate/<id>.
+                "cueTemplates", "cueTemplate")
 
 VALUE_TYPES = {
     "s": "string",

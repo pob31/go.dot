@@ -118,8 +118,10 @@ namespace wfg::client::model
 
     bool opensList (const std::string& kind)
     {
+        /*  AND MEDIA, since namespace draft §38: files as ever, or files born
+            from a cue template. */
         return kind == "group" || kind == "transport" || kind == "midi" || kind == "mic"
-            || kind == "video";
+            || kind == "video" || kind == "media";
     }
 
     //==============================================================================
@@ -131,15 +133,15 @@ namespace wfg::client::model
             force, since a manual group ignores `selection`. */
         static const std::vector<Choice> choices {
             { "Timeline group", "members start together, each after its own pre-wait", "group",
-              { { "mode", "timeline" } }, {}, false, false },
+              { { "mode", "timeline" } }, {}, false, false, {} },
             { "Sequential group, on GO", "one member per GO", "group",
-              { { "mode", "sequence" }, { "advance", "manual" } }, {}, false, false },
+              { { "mode", "sequence" }, { "advance", "manual" } }, {}, false, false, {} },
             { "Sequential group, automatic", "each member when the one before ends", "group",
-              { { "mode", "sequence" }, { "advance", "auto" } }, {}, false, false },
+              { { "mode", "sequence" }, { "advance", "auto" } }, {}, false, false, {} },
             { "Shuffle group", "automatic, in a fresh order each round", "group",
-              { { "mode", "sequence" }, { "advance", "auto" }, { "selection", "shuffle" } }, {}, false, false },
+              { { "mode", "sequence" }, { "advance", "auto" }, { "selection", "shuffle" } }, {}, false, false, {} },
             { "Sampler group", "faders and pads start its members", "group",
-              { { "mode", "sampler" } }, {}, true, false },
+              { { "mode", "sampler" } }, {}, true, false, {} },
         };
 
         return choices;
@@ -148,23 +150,23 @@ namespace wfg::client::model
     const std::vector<Choice>& transportChoices()
     {
         static const std::vector<Choice> choices {
-            { "Stop", "at once", "transport", { { "verb", "hard" } }, "Stop", false, true },
+            { "Stop", "at once", "transport", { { "verb", "hard" } }, "Stop", false, true, {} },
             { "Stop after this member", "a group finishes the member playing", "transport",
-              { { "verb", "afterMember" } }, "Stop", false, true },
+              { { "verb", "afterMember" } }, "Stop", false, true, {} },
             { "Stop after this round", "a group finishes the round", "transport",
-              { { "verb", "afterIteration" } }, "Stop", false, true },
+              { { "verb", "afterIteration" } }, "Stop", false, true, {} },
             { "Advance", "a ranged cue leaves the slice it is on", "transport",
-              { { "verb", "advance" } }, "Stop", false, true },
+              { { "verb", "advance" } }, "Stop", false, true, {} },
 
             /*  START IS ITS OWN KIND (the author, 2026-09-27: the list, not a
                 merge), listed here because it is what the others are - a cue
                 that does something to another cue. */
-            { "Start", "fires the target, wherever it sits", "start", {}, "Start", false, true },
+            { "Start", "fires the target, wherever it sits", "start", {}, "Start", false, true, {} },
 
-            { "Rec", "the take's Rec button", "transport", { { "verb", "record" } }, "On a take", false, true },
-            { "Loop", "the take's Loop button", "transport", { { "verb", "loop" } }, "On a take", false, true },
-            { "Overdub", "a layer begun or closed", "transport", { { "verb", "overdub" } }, "On a take", false, true },
-            { "Clear", "the take emptied", "transport", { { "verb", "clear" } }, "On a take", false, true },
+            { "Rec", "the take's Rec button", "transport", { { "verb", "record" } }, "On a take", false, true, {} },
+            { "Loop", "the take's Loop button", "transport", { { "verb", "loop" } }, "On a take", false, true, {} },
+            { "Overdub", "a layer begun or closed", "transport", { { "verb", "overdub" } }, "On a take", false, true, {} },
+            { "Clear", "the take emptied", "transport", { { "verb", "clear" } }, "On a take", false, true, {} },
 
             /*  THE SWITCHES FOR THIS RUN AND THE SHOW'S OWN PARK (the author,
                 2026-10-05, namespace draft §27). Not arm and disarm: arm already
@@ -172,13 +174,13 @@ namespace wfg::client::model
                 question after the first, because a line makes one cue as it
                 stands; the inspector's switch turns one into the other (PV). */
             { "Enable", "the target runs again, until the show closes", "transport",
-              { { "verb", "enable" } }, "For this run", false, true },
+              { { "verb", "enable" } }, "For this run", false, true, {} },
             { "Disable", "the target is skipped, until the show closes", "transport",
-              { { "verb", "disable" } }, "For this run", false, true },
+              { { "verb", "disable" } }, "For this run", false, true, {} },
             { "Jump to", "standby moves to the target", "transport",
-              { { "verb", "jump" } }, "Standby", false, true },
+              { { "verb", "jump" } }, "Standby", false, true, {} },
             { "Jump to and Go", "standby moves to the target and fires it", "transport",
-              { { "verb", "jump" }, { "andGo", "true" } }, "Standby", false, true },
+              { { "verb", "jump" }, { "andGo", "true" } }, "Standby", false, true, {} },
         };
 
         return choices;
@@ -190,16 +192,16 @@ namespace wfg::client::model
             first, notes after, SysEx last. */
         static const std::vector<Choice> choices {
             { "Program change", "recall a scene or a patch", "midi",
-              { { "type", "programChange" } }, "Scenes and controls", false, false },
+              { { "type", "programChange" } }, "Scenes and controls", false, false, {} },
             { "Control change", "move a fader or a switch", "midi",
-              { { "type", "controlChange" } }, "Scenes and controls", false, false },
-            { "Note on", {}, "midi", { { "type", "noteOn" } }, "Notes", false, false },
-            { "Note off", {}, "midi", { { "type", "noteOff" } }, "Notes", false, false },
-            { "Aftertouch", "pressure on one note", "midi", { { "type", "aftertouch" } }, "Notes", false, false },
-            { "Pitch bend", {}, "midi", { { "type", "pitchBend" } }, "Whole channel", false, false },
+              { { "type", "controlChange" } }, "Scenes and controls", false, false, {} },
+            { "Note on", {}, "midi", { { "type", "noteOn" } }, "Notes", false, false, {} },
+            { "Note off", {}, "midi", { { "type", "noteOff" } }, "Notes", false, false, {} },
+            { "Aftertouch", "pressure on one note", "midi", { { "type", "aftertouch" } }, "Notes", false, false, {} },
+            { "Pitch bend", {}, "midi", { { "type", "pitchBend" } }, "Whole channel", false, false, {} },
             { "Channel pressure", "pressure on the whole channel", "midi",
-              { { "type", "channelPressure" } }, "Whole channel", false, false },
-            { "SysEx", "bytes copied from a manual", "midi", { { "type", "sysex" } }, "System", false, false },
+              { { "type", "channelPressure" } }, "Whole channel", false, false, {} },
+            { "SysEx", "bytes copied from a manual", "midi", { { "type", "sysex" } }, "System", false, false, {} },
         };
 
         return choices;
@@ -229,11 +231,11 @@ namespace wfg::client::model
 
                 choices.push_back ({ "through " + channel.name, lowered (channel.classWord()), "mic",
                                      { { "input", input.id }, { "channel", channel.id } },
-                                     section, false, false });
+                                     section, false, false, {} });
             }
         }
 
-        choices.push_back ({ "No input yet", "set it in the inspector", "mic", {}, {}, false, false });
+        choices.push_back ({ "No input yet", "set it in the inspector", "mic", {}, {}, false, false, {} });
         return choices;
     }
 
@@ -250,22 +252,161 @@ namespace wfg::client::model
         {
             choices.push_back ({ "Picture", "a picture file, chosen in the inspector", "video",
                                  { { "source", "picture" }, { "canvas", canvas.id } },
-                                 "On " + canvas.label(), false, false });
+                                 "On " + canvas.label(), false, false, {} });
             choices.push_back ({ "Movie", "a HAP movie, chosen in the inspector", "video",
                                  { { "source", "movie" }, { "canvas", canvas.id } },
-                                 "On " + canvas.label(), false, false });
+                                 "On " + canvas.label(), false, false, {} });
             choices.push_back ({ "Fill", "one colour over the whole canvas, behind", "video",
                                  { { "source", "fill" }, { "canvas", canvas.id } },
-                                 "On " + canvas.label(), false, false });
+                                 "On " + canvas.label(), false, false, {} });
             choices.push_back ({ "Mask", "a shape laid over, in black", "video",
                                  { { "source", "mask" }, { "canvas", canvas.id }, { "layer", "100" },
                                    { "shape", "0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75" } },
-                                 "On " + canvas.label(), false, false });
+                                 "On " + canvas.label(), false, false, {} });
         }
 
         choices.push_back ({ "Fill, on no canvas yet", "set it in the inspector", "video",
-                             { { "source", "fill" } }, {}, false, false });
+                             { { "source", "fill" } }, {}, false, false, {} });
+
+        /*  AND EACH PICTURE TEMPLATE (namespace draft §38): born on the canvas
+            the template says, its file chosen in the inspector as any
+            picture's is. */
+        for (const auto& row : readCueTemplates (snapshot))
+        {
+            if (row.kind == "media")
+                continue;
+
+            Choice line { row.label(), "a " + row.kindWord() + " from a template", "video", {},
+                          "From a template", false, false, row.id };
+            choices.push_back (std::move (line));
+        }
+
         return choices;
+    }
+
+    //==============================================================================
+    std::string CueTemplateRow::label() const
+    {
+        return name.empty() ? std::string ("Template") : name;
+    }
+
+    std::string CueTemplateRow::kindWord() const
+    {
+        return kind == "media" ? std::string ("media cue") : kind.empty() ? std::string ("cue") : kind;
+    }
+
+    std::string CueTemplateRow::carriesWords() const
+    {
+        /*  READ OFF THE FRAGMENT BY WHAT IT HOLDS, a word per part somebody
+            would recognise; the rows themselves are the engine's to read. */
+        const auto has = [this] (const char* attribute)
+        {
+            return parts.find (std::string (" ") + attribute + "=\"") != std::string::npos;
+        };
+
+        const auto count = [this] (const char* element)
+        {
+            std::size_t found = 0;
+
+            for (auto at = parts.find (element); at != std::string::npos; at = parts.find (element, at + 1))
+                ++found;
+
+            return found;
+        };
+
+        std::vector<std::string> said;
+
+        if (has ("level"))                            said.push_back ("level");
+        if (has ("dca"))                              said.push_back ("DCA");
+        if (has ("directOut") || has ("sharedOut"))   said.push_back ("routing");
+        if (has ("canvas"))                           said.push_back ("canvas");
+
+        if (has ("opacity") || has ("scale") || has ("rotation") || has ("offsetX") || has ("offsetY"))
+            said.push_back ("geometry");
+
+        if (has ("contrast") || has ("saturation") || has ("gamma") || has ("hue"))
+            said.push_back ("grade");
+
+        if (parts.find (" eq") != std::string::npos && kind == "media")
+            said.push_back ("EQ");
+
+        if (const auto sends = count ("<Send "); sends > 0)
+            said.push_back (std::to_string (sends) + (sends == 1 ? " send" : " sends"));
+
+        if (const auto effects = count ("<Fx "); effects > 0)
+            said.push_back (std::to_string (effects) + (effects == 1 ? " effect" : " effects"));
+
+        if (has ("rate"))                             said.push_back ("speed");
+
+        if (said.empty())
+            return "the defaults";
+
+        std::string out;
+
+        for (const auto& word : said)
+            out += (out.empty() ? "" : ", ") + word;
+
+        return out;
+    }
+
+    std::vector<CueTemplateRow> readCueTemplates (const tree::TreeSnapshot& snapshot)
+    {
+        std::vector<CueTemplateRow> rows;
+
+        for (const auto& id : words (text (snapshot, "/godot/cueTemplate/order")))
+        {
+            CueTemplateRow row;
+            row.id = id;
+            row.name = text (snapshot, "/godot/cueTemplate/" + id + "/name");
+            row.kind = text (snapshot, "/godot/cueTemplate/" + id + "/kind");
+            row.parts = text (snapshot, "/godot/cueTemplate/" + id + "/parts");
+            rows.push_back (std::move (row));
+        }
+
+        return rows;
+    }
+
+    std::vector<CueTemplateRow> templatesFor (const std::vector<CueTemplateRow>& all, const std::string& cueKind,
+                                              const std::string& source)
+    {
+        std::vector<CueTemplateRow> out;
+
+        for (const auto& row : all)
+            if ((cueKind == "media" && row.kind == "media") || (cueKind == "video" && row.kind == source))
+                out.push_back (row);
+
+        return out;
+    }
+
+    std::vector<Choice> mediaChoices (const tree::TreeSnapshot& snapshot)
+    {
+        std::vector<Choice> choices;
+        choices.push_back ({ "Files...", "chosen from the disk, a cue each", "media", {}, {}, false, false, {} });
+
+        for (const auto& row : readCueTemplates (snapshot))
+        {
+            if (row.kind != "media")
+                continue;
+
+            Choice line { row.label(), "files chosen next, each cue with " + row.carriesWords(), "media", {},
+                          "From a template", false, false, row.id };
+            choices.push_back (std::move (line));
+        }
+
+        return choices;
+    }
+
+    std::vector<MenuLine> mediaMenu (const std::vector<Choice>& choices, const std::string& destination)
+    {
+        std::vector<MenuLine> lines;
+        lines.push_back ({ MenuLine::Kind::note, "New media cues, " + destination, -1, false });
+        appendChoices (lines, choices, true);
+
+        if (choices.size() <= 1)
+            lines.push_back ({ MenuLine::Kind::note,
+                               "No template yet: pick a cue, then Edit, Save as template.", -1, false });
+
+        return lines;
     }
 
     //==============================================================================

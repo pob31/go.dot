@@ -3296,6 +3296,71 @@ TEST_CASE ("client: an output's trim and DCA are read, and a DCA that counts twi
 }
 
 //==============================================================================
+TEST_CASE ("client: cue templates are offered in the Add lists, and a cue is born from one")
+{
+    /*  Namespace draft §38: a template saved from a cue, read off the tree
+        with what it carries in words; "+ media" opens a list of files or
+        templates; a picture's templates join "+ video"; a picked cue is
+        offered the templates of its own kind; and a cue born from one, its
+        file given, plays it with the template's settings. */
+    CHECK (model::opensList ("media"));
+
+    Rig rig;
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    auto tick = std::int64_t { 1 };
+
+    REQUIRE (rig.apply (tick++, "window", "cue.create",
+                        { osc::Value::string (listId), osc::Value::int32 (0),
+                          osc::Value::string ("media"), osc::Value::string ("Voice") }).applied == 1);
+    const auto voice = model::createdAt (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order"), 0);
+
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + voice + "/level"), osc::Value::string ("-6") }).applied == 1);
+
+    //  No template yet: the files, and a word on how one is made.
+    auto choices = model::mediaChoices (*rig.publish (tick));
+    REQUIRE (choices.size() == 1);
+    CHECK (choices[0].cueTemplate.empty());
+    CHECK (model::mediaMenu (choices, "at the end").back().text.find ("Save as template") != std::string::npos);
+
+    const auto save = gesture::createCueTemplate ("Voice", voice);
+    REQUIRE (rig.apply (tick++, save.origin, save.command, save.args).applied == 1);
+
+    auto snapshot = rig.publish (tick);
+    const auto templates = model::readCueTemplates (*snapshot);
+    REQUIRE (templates.size() == 1);
+    CHECK (templates[0].name == "Voice");
+    CHECK (templates[0].kind == "media");
+    CHECK (templates[0].kindWord() == "media cue");
+    CHECK (templates[0].carriesWords().find ("level") != std::string::npos);
+
+    choices = model::mediaChoices (*snapshot);
+    REQUIRE (choices.size() == 2);
+    CHECK (choices[1].cueTemplate == templates[0].id);
+    CHECK (choices[1].section == "From a template");
+
+    //  A picked media cue may take it; a picture may not.
+    CHECK (model::templatesFor (templates, "media", "").size() == 1);
+    CHECK (model::templatesFor (templates, "video", "movie").empty());
+
+    //  Born from it, its file given, in one step.
+    const auto make = gesture::createCueFrom (listId, 1, templates[0].id, "Second voice", { { "file", "two.wav" } });
+    REQUIRE (rig.apply (tick++, make.origin, make.command, make.args).applied == 1);
+
+    snapshot = rig.publish (tick);
+    const auto second = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 1);
+    CHECK (model::text (*snapshot, "/godot/cue/" + second + "/name") == "Second voice");
+    CHECK (model::text (*snapshot, "/godot/cue/" + second + "/file") == "two.wav");
+    CHECK (model::text (*snapshot, "/godot/cue/" + second + "/level") == "-6");
+
+    /*  AN IMPORT CARRIES IT: the cue it asks for is to be born from it. */
+    model::MediaImports imports;
+    imports.add (listId, -1, model::text (*snapshot, "/godot/list/" + listId + "/order"), { "C:/a.wav" },
+                 templates[0].id);
+    CHECK_FALSE (imports.idle());
+}
+
+//==============================================================================
 TEST_CASE ("client: a fold is recorded with the show, and a rebuilt list opens folded the way it was left")
 {
     /*  The author (2026-09-18): "fold state should be recorded in project
@@ -3927,9 +3992,9 @@ TEST_CASE ("client: every line of the new-cue lists makes its cue, born with wha
                               [] (const model::Choice& choice)
                               { return choice.settings == model::Settings { { "verb", "fade" } }; }));
 
-    for (const char* kind : { "group", "transport", "midi", "mic" })
+    for (const char* kind : { "group", "transport", "midi", "mic", "media" })
         CHECK (model::opensList (kind));
-    for (const char* kind : { "memo", "media", "fade", "osc" })
+    for (const char* kind : { "memo", "fade", "osc" })
         CHECK_FALSE (model::opensList (kind));
 
     /*  A WORD FOR EVERY VERB THE ENGINE HAS, short enough for the kind

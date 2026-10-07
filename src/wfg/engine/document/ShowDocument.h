@@ -538,6 +538,34 @@ namespace wfg::doc
         EditResult pastePart (const std::string& fragment, const std::vector<std::string>& cueIds,
                               const std::vector<std::string>& ids);
 
+        /*  CUE TEMPLATES (namespace draft §38, WP): a set of a cue's settings
+            kept in the show under a name, a new cue born with them. STAMPED,
+            never linked (PRD §4.12): what a template holds is copied into a
+            cue when it is made or applied, and a template saved again changes
+            no cue already made.
+
+            `createCueTemplate` keeps what `parts::templatePartsFor` says of a
+            media or video cue, at the end of the show's templates; its kind is
+            "media" or the video cue's source. `saveCueTemplate` takes a cue's
+            settings into a template already there, a cue of its kind.
+            `applyCueTemplate` is `pastePart` of the template onto cues.
+
+            `createCueFrom` makes a cue of the template's kind and stamps it, in
+            one transaction: the cue under `id` when one is handed back, its
+            children under `childIds`, and `attributes` - the file, its
+            channels, a direct out - written last, so a pair given wins over
+            the template. The result's `id` is the cue's; `childIds` answers
+            what was made under it. */
+        EditResult createCueTemplate (const std::string& name, const std::string& cueId,
+                                      const std::string& id = {});
+        EditResult saveCueTemplate (const std::string& templateId, const std::string& cueId);
+        EditResult applyCueTemplate (const std::string& templateId, const std::vector<std::string>& cueIds,
+                                     const std::vector<std::string>& ids);
+        EditResult createCueFrom (const std::string& parentId, int index, const std::string& templateId,
+                                  const std::string& name, const std::string& id,
+                                  const std::vector<std::string>& childIds, const Attributes& attributes,
+                                  std::string& madeChildren);
+
         //======================================================================
         // Values
         //======================================================================
