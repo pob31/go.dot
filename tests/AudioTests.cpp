@@ -7869,3 +7869,78 @@ TEST_CASE ("slice move: a stretched loop moved while it plays goes on with no ga
     CHECK (quietestDb > -3.0);
     CHECK (step < 1.5f * ownStep);
 }
+
+//==============================================================================
+TEST_CASE ("audio host: an output's gain trims what leaves on its channels and nothing else")
+{
+    /*  Namespace draft §38: an output's trim and its DCA's, applied after the
+        graph has mixed onto the output's channels and before the block leaves.
+        One tone to two outputs: the first down 6 dB carries half the tone, the
+        second all of it; the first all the way down carries nothing. */
+    constexpr int rate = 48000;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 1, rate);
+    REQUIRE (tone.existsAsFile());
+    REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
+
+    auto* matrix = rig.host.trackMatrix (0);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->setGain (0, 1, 1.0f);
+    matrix->snapToTargets();
+
+    rig.host.setOutputGainDb (0, 1, -6.0);
+
+    PeakSink sink;
+    sink.reset (2);
+    rig.host.setBlockSink (&sink);
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+    REQUIRE (rig.host.launchTrack (0));
+
+    //  Past the launch and the 20 ms ramp, then measured.
+    for (int i = 0; i < 32; ++i)
+        rig.host.processBlock();
+
+    sink.reset (2);
+
+    for (int i = 0; i < 40; ++i)
+        rig.host.processBlock();
+
+    CHECK (sink[0] == doctest::Approx (sourceAmplitude (0) * juce::Decibels::decibelsToGain (-6.0f)).epsilon (0.02));
+    CHECK (sink[1] == doctest::Approx (sourceAmplitude (0)).epsilon (0.02));
+
+    /*  ALL THE WAY DOWN: silence on that output, after its ramp. */
+    rig.host.setOutputGainDb (0, 1, -120.0);
+
+    for (int i = 0; i < 16; ++i)
+        rig.host.processBlock();
+
+    sink.reset (2);
+
+    for (int i = 0; i < 20; ++i)
+        rig.host.processBlock();
+
+    CHECK (sink[0] < 1.0e-6f);
+    CHECK (sink[1] == doctest::Approx (sourceAmplitude (0)).epsilon (0.02));
+
+    rig.host.setBlockSink (nullptr);
+}

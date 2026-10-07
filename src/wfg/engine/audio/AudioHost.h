@@ -524,6 +524,17 @@ namespace wfg::audio
             is below nought, or the queue is full. */
         bool placeTrackRate (int trackIndex, std::int64_t atSample, double rate) noexcept;
 
+        /*  AN OUTPUT'S GAIN (namespace draft §38): `gainDb` on the logical
+            output channels `firstChannel` to `firstChannel + width - 1`, applied
+            after the graph has mixed every cue and send onto them and before
+            the block leaves for the interface. -120 dB and below is silence.
+            The audio thread ramps to it over 20 ms, so a fader moved or a trim
+            typed is never a click.
+
+            Tick thread, lock-free: a relaxed store a channel. Channels the
+            interface was not opened with are passed over. */
+        void setOutputGainDb (int firstChannel, int width, double gainDb) noexcept;
+
         /*  How many of a track's breakpoints arrived after the moment they were
             for had played, and were placed at the block instead - the horizon
             exists so that this stays nought. Any thread. */

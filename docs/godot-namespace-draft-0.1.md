@@ -21260,3 +21260,22 @@ pasted as a cue would be a cue with no file and no name.
   Ctrl/Cmd+V with a part on the clipboard pastes it onto the picked cues rather than inserting cues.
 - **Tests**: `CuePartTests` (the table against the schema, each part's copy and paste, every refusal
   before a write, the movie's sound, one undo step, the replay's identifiers) and a client case.
+
+### 38.7 What S6 and S7 built
+
+- **`bus/trim`** (dB, -120 to +12, saved, resting at nought) **and `bus/dca`** on every output. The
+  tick adds the trim and every DCA's trim up the output's DCA nesting and hands the sum to the audio
+  side each tick - every tick, not on a change, so an audio side brought up again after a rate change
+  or a lost device has its outputs' gains on its first tick. The audio side applies it as one gain per
+  logical output channel, after the graph has mixed every cue and send onto it and before the block
+  leaves for the interface, ramped over 20 ms so a fader moved or a trim typed is never a click; a
+  channel at unity and staying there is not touched. It reaches the device, the hosted and the
+  offline paths alike. The output test signal is unaffected.
+- **A DCA counts at each place** (WQ): -6 dB on a DCA marked on a cue and on the output it plays
+  through is -6 on the cue's level and -6 more on the output. **A double Esc leaves both** as they
+  were: the trim is a decision and the DCA a fader.
+- **The Outputs tab** has two more cells on each output: its trim ("trim -3 dB"), typed in place, and
+  its DCA ("DCA Music", or "no DCA"), from a menu of the show's DCAs. Under the list, a sentence for
+  each output whose DCA also marks a cue routed to it, by a direct out or a send: *"Music also trims 3
+  cues played through Front: there it counts twice."* Only a cue's own mark is read; a group's mark
+  over it is not.

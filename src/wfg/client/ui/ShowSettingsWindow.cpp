@@ -442,8 +442,10 @@ namespace wfg::client::ui
 
                 addAndMakeVisible (regime);
                 addAndMakeVisible (summary);
+                addAndMakeVisible (dcaNote);
                 regime.setJustificationType (juce::Justification::topLeft);
                 summary.setJustificationType (juce::Justification::topLeft);
+                dcaNote.setJustificationType (juce::Justification::topLeft);
 
                 /*  FOUR BUTTONS AND NO FLIP (author, 2026-09-22: "I'd rather
                     have fixed add mono and add stereo direct out or mix
@@ -491,16 +493,36 @@ namespace wfg::client::ui
             }
 
             void show (std::vector<model::OutputRow> outputs, bool settled, bool editable,
-                       int hardwareOutputs, int tracks)
+                       int hardwareOutputs, int tracks,
+                       std::vector<std::pair<std::string, std::string>> dcaChoicesToShow,
+                       const std::vector<std::string>& twice)
             {
                 const auto sameRows = outputs.size() == rows.size()
+                                        && dcaChoicesToShow == dcaChoices
                                         && std::equal (outputs.begin(), outputs.end(), rows.begin(),
                                                        [] (const model::OutputRow& a, const model::OutputRow& b)
                                                        {
                                                            return a.id == b.id && a.name == b.name
                                                                && a.kind == b.kind && a.width == b.width
-                                                               && a.firstChannel == b.firstChannel;
+                                                               && a.firstChannel == b.firstChannel
+                                                               && a.trimWord() == b.trimWord() && a.dca == b.dca;
                                                        });
+
+                dcaChoices = std::move (dcaChoicesToShow);
+
+                /*  WHERE A DCA COUNTS TWICE (WQ), in words under the list: not
+                    a refusal - it is how a desk behaves - but a thing a
+                    designer should not find out from the level. */
+                juce::String note;
+
+                for (const auto& sentence : twice)
+                    note << (note.isEmpty() ? "" : " ") << juce::String (sentence);
+
+                if (dcaNote.getText() != note)
+                {
+                    dcaNote.setText (note, juce::dontSendNotification);
+                    resized();
+                }
 
                 const auto sameLock = locked == ! editable;
 
@@ -584,6 +606,7 @@ namespace wfg::client::ui
                 area.removeFromTop (8);
                 regime.setBounds (area.removeFromTop (34));
                 summary.setBounds (area.removeFromBottom (26));
+                dcaNote.setBounds (area.removeFromBottom (dcaNote.getText().isEmpty() ? 0 : 40));
                 area.removeFromTop (4);
                 list.setBounds (area);
             }
@@ -636,9 +659,33 @@ namespace wfg::client::ui
                 g.drawText (juce::String (entry.kindWord()), area.removeFromRight (96),
                             juce::Justification::centredLeft);
 
+                /*  ITS DCA AND ITS TRIM (namespace draft §38), in words - "no DCA"
+                    and "0 dB" fainter than a DCA named or a trim set, the word
+                    itself saying which, so it is not the shade alone. */
+                const auto dcaWord = dcaLabelOf (entry.dca);
+                g.setColour (Look::colour (theme, entry.dca.empty() ? "ink-off" : "ink"));
+                g.drawText (dcaWord, area.removeFromRight (dcaCellWidth), juce::Justification::centredLeft, true);
+
+                g.setColour (Look::colour (theme, juce::approximatelyEqual (entry.trimDb, 0.0) ? "ink-off" : "ink"));
+                g.drawText ("trim " + juce::String (entry.trimWord()), area.removeFromRight (trimCellWidth),
+                            juce::Justification::centredLeft);
+
                 g.setFont (Look::font (theme, 13.0f));
                 g.setColour (ink);
                 g.drawText (juce::String (entry.name), area, juce::Justification::centredLeft, true);
+            }
+
+            /*  A DCA by the name a menu gives it, or "no DCA". */
+            juce::String dcaLabelOf (const std::string& id) const
+            {
+                if (id.empty())
+                    return "no DCA";
+
+                for (const auto& [key, label] : dcaChoices)
+                    if (key == id)
+                        return "DCA " + juce::String (label);
+
+                return "DCA ?";
             }
 
             void listBoxItemClicked (int row, const juce::MouseEvent& event) override
@@ -663,10 +710,75 @@ namespace wfg::client::ui
                     word here reports rather than offers. `bus.width` is still
                     a command and still tested; nothing in this window sends
                     it. */
+                const auto cells = juce::Rectangle<int> (0, 0, width, list.getRowHeight()).reduced (8, 0);
+                const auto trimCell = cells.getRight() - 24 - 74 - 80 - 96 - dcaCellWidth - trimCellWidth;
+                const auto dcaCell = trimCell + trimCellWidth;
+
                 if (event.x > width - 32)
                     send (gesture::deleteBus (entry.id));
+                else if (event.x >= trimCell && event.x < dcaCell)
+                    editTrimAt (row);
+                else if (event.x >= dcaCell && event.x < dcaCell + dcaCellWidth)
+                    chooseDcaFor (entry.id, entry.dca);
                 else
                     renameAt (row, event);
+            }
+
+            /*  THE TRIM TYPED IN PLACE, in the name's floating editor: Return
+                or clicking away writes it, Escape puts it back. "-3", "-3 dB"
+                and "-3,5" are all read as the number they mean. */
+            void editTrimAt (int row)
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return;
+
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                const auto right = place.reduced (8, 0).getRight() - 24 - 74 - 80 - 96 - dcaCellWidth;
+
+                editing = entry.id;
+                editingTrim = true;
+
+                nameEditor.setBounds (juce::Rectangle<int> (right - trimCellWidth, place.getY(),
+                                                            trimCellWidth, place.getHeight()));
+                nameEditor.setText (juce::String (entry.trimWord()).upToFirstOccurrenceOf (" ", false, false),
+                                    juce::dontSendNotification);
+                nameEditor.setVisible (true);
+                nameEditor.showEditor();
+            }
+
+            /*  THE DCA FROM A MENU of the show's, "(none)" first, the one it
+                has ticked. */
+            void chooseDcaFor (const std::string& busId, const std::string& current)
+            {
+                if (dcaChoices.size() <= 1)
+                {
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "No DCA yet",
+                                                            "The show has no DCA to assign. DCAs are made on the"
+                                                            " Surfaces tab.");
+                    return;
+                }
+
+                juce::PopupMenu menu;
+                int item = 1;
+
+                for (const auto& [key, label] : dcaChoices)
+                    menu.addItem (item++, juce::String (label), true, key == current);
+
+                menu.showMenuAsync (juce::PopupMenu::Options(),
+                                    [safe = juce::Component::SafePointer<OutputPage> (this), busId] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || safe->send == nullptr)
+                                            return;
+
+                                        const auto at = static_cast<std::size_t> (chosen - 1);
+
+                                        if (at < safe->dcaChoices.size())
+                                            safe->send (gesture::setNode ("/godot/bus/" + busId + "/dca",
+                                                                          safe->dcaChoices[at].first));
+                                    });
             }
 
             /*  A DOUBLE CLICK IS THE SAME THING TWICE now that one click
@@ -684,7 +796,7 @@ namespace wfg::client::ui
             {
                 auto area = row.reduced (8, 0);
                 area.removeFromLeft (18);
-                area.removeFromRight (24 + 74 + 80 + 96);
+                area.removeFromRight (24 + 74 + 80 + 96 + dcaCellWidth + trimCellWidth);
                 return area;
             }
 
@@ -821,12 +933,28 @@ namespace wfg::client::ui
             {
                 const auto typed = nameEditor.getText().trim().toStdString();
                 const auto id = editing;
+                const auto trim = editingTrim;
 
                 editing.clear();
+                editingTrim = false;
                 nameEditor.setVisible (false);
 
                 if (id.empty() || typed.empty() || send == nullptr)
                     return;
+
+                if (trim)
+                {
+                    /*  The number and nothing else, with a comma read as the
+                        point a French keyboard types; the engine refuses what
+                        is not a trim and the cell shows what it holds. */
+                    const auto number = juce::String (typed).replaceCharacter (',', '.')
+                                          .retainCharacters ("+-.0123456789");
+
+                    if (number.isNotEmpty())
+                        send (gesture::setNode ("/godot/bus/" + id + "/trim", number.toStdString()));
+
+                    return;
+                }
 
                 send (gesture::setNode ("/godot/bus/" + id + "/name", typed));
             }
@@ -843,8 +971,14 @@ namespace wfg::client::ui
                 Empty when nothing is being typed into. */
             juce::Label nameEditor;
             std::string editing;
+            bool editingTrim = false;
 
-            juce::Label regime, summary, polyphonyLabel;
+            /*  The show's DCAs as the menu offers them, "(none)" first, and the
+                two cells' widths, which the painter and the click share. */
+            std::vector<std::pair<std::string, std::string>> dcaChoices;
+            static constexpr int trimCellWidth = 86, dcaCellWidth = 120;
+
+            juce::Label regime, summary, polyphonyLabel, dcaNote;
             juce::TextEditor polyphony;
         };
 
@@ -5891,8 +6025,10 @@ namespace wfg::client::ui
 
                 settled = model::patchHasSettled (snapshot);
                 outputs->setSettled (settled);
+                const auto dcas = model::readDcas (snapshot);
                 outputList->show (rows, settled, ! lockedShow, hardware,
-                                  juce::String (model::text (snapshot, "/godot/audio/tracks")).getIntValue());
+                                  juce::String (model::text (snapshot, "/godot/audio/tracks")).getIntValue(),
+                                  model::dcaChoices (dcas), model::dcaTwiceSentences (snapshot, rows, dcas));
 
                 /*  Unconditional: `setListRows` reads the draft back before it
                     redraws, so a rename reaches the rows without disturbing a

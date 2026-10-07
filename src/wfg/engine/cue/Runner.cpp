@@ -6467,31 +6467,8 @@ namespace wfg::cue
             dcaChainsRevision = document.showRevision();
 
             const auto root = document.root();
-            const auto dcaList = root.getChildWithName ("Dcas");
             const juce::Identifier dcaProperty { "dca" };
-
-            /*  UP THE NESTING, bounded by how many DCAs there are: the door
-                refuses a circle and so does the reader, but a sum walked here
-                must not be the thing that finds out it did not. */
-            const auto chainFrom = [&dcaList, &dcaProperty] (std::string first)
-            {
-                std::vector<std::string> chain;
-                const auto bound = dcaList.isValid() ? dcaList.getNumChildren() : 0;
-
-                for (int steps = 0; steps < bound && ! first.empty(); ++steps)
-                {
-                    const auto node = dcaList.getChildWithProperty (idProperty,
-                                                                    juce::String (first));
-
-                    if (! node.isValid())
-                        break;
-
-                    chain.push_back (first);
-                    first = node[dcaProperty].toString().toStdString();
-                }
-
-                return chain;
-            };
+            const auto chainFrom = [this] (std::string first) { return dcaNestingFrom (std::move (first)); };
 
             std::function<void (const juce::ValueTree&)> visit;
             visit = [this, &visit, &chainFrom, &dcaProperty] (const juce::ValueTree& node)
@@ -6517,6 +6494,73 @@ namespace wfg::cue
         static const std::vector<std::string> none;
         const auto found = dcaChains.find (cueId);
         return found != dcaChains.end() ? found->second : none;
+    }
+
+    std::vector<std::string> Runner::dcaNestingFrom (std::string first) const
+    {
+        /*  UP THE NESTING, bounded by how many DCAs there are: the door
+            refuses a circle and so does the reader, but a sum walked here
+            must not be the thing that finds out it did not. */
+        const auto dcaList = document.root().getChildWithName ("Dcas");
+        const juce::Identifier dcaProperty { "dca" };
+
+        std::vector<std::string> chain;
+        const auto bound = dcaList.isValid() ? dcaList.getNumChildren() : 0;
+
+        for (int steps = 0; steps < bound && ! first.empty(); ++steps)
+        {
+            const auto node = dcaList.getChildWithProperty (idProperty, juce::String (first));
+
+            if (! node.isValid())
+                break;
+
+            chain.push_back (first);
+            first = node[dcaProperty].toString().toStdString();
+        }
+
+        return chain;
+    }
+
+    void Runner::applyOutputLevels()
+    {
+        if (audio == nullptr)
+            return;
+
+        /*  READ ONCE PER SHOW REVISION, as a cue's chain is: an output's
+            channels, its trim and its mark change only by an edit. */
+        if (! outputGainsRead || outputGainsRevision != document.showRevision())
+        {
+            outputGainSources.clear();
+            outputGainsRead = true;
+            outputGainsRevision = document.showRevision();
+
+            if (const auto audioNode = document.root().getChildWithName ("Audio"); audioNode.isValid())
+            {
+                for (const auto& bus : audioNode)
+                {
+                    if (! bus.hasType ("Bus"))
+                        continue;
+
+                    OutputGainSource source;
+                    source.firstChannel = static_cast<int> (bus.getProperty ("firstChannel", 0));
+                    source.width = static_cast<int> (bus.getProperty ("width", 1));
+                    source.trimDb = static_cast<double> (bus.getProperty ("trim", 0.0));
+                    source.dcaChain = dcaNestingFrom (bus.getProperty ("dca").toString().toStdString());
+                    outputGainSources.push_back (std::move (source));
+                }
+            }
+        }
+
+        for (const auto& source : outputGainSources)
+        {
+            auto gainDb = source.trimDb;
+
+            if (dcas != nullptr)
+                for (const auto& dcaId : source.dcaChain)
+                    gainDb += dcas->trimOf (dcaId);
+
+            audio->setOutputGainDb (source.firstChannel, source.width, gainDb);
+        }
     }
 
     //==============================================================================
@@ -15373,6 +15417,7 @@ namespace wfg::cue
         applyLanes();
         recordLane (engine);
         applyLevels();
+        applyOutputLevels();
         applyRouting();
         applyEq();
         applyFx();

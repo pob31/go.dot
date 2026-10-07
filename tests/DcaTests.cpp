@@ -71,6 +71,11 @@ namespace
         bool stop (int) override                                         { return true; }
         bool stopAtSample (int, int, std::int64_t) override              { return true; }
         void setLevelDb (int track, double levelDb) override             { levels[track] = levelDb; }
+        void setOutputGainDb (int first, int width, double gainDb) override
+        {
+            for (int channel = first; channel < first + width; ++channel)
+                outputs[channel] = gainDb;
+        }
         void setRouting (int, const std::vector<cue::Coefficient>&) override {}
         bool isPlaying (int) const override                              { return false; }
         bool isArmReady (int) const override                             { return false; }
@@ -81,6 +86,9 @@ namespace
 
         /** What reached each voice last, which is the sum as the audio hears it. */
         std::map<int, double> levels;
+
+        /** And each logical output channel's gain, as the tick last handed it over. */
+        std::map<int, double> outputs;
     };
 
     struct Rig
@@ -516,4 +524,70 @@ TEST_CASE ("go.doh: a DCA the GO faded is trimmed back, and nothing logs a rejec
     CHECK (near (rig.dcas.trimOf (band), 0.0));
     CHECK (rig.engine.errorCount() == errors);
     CHECK (rig.runOf (down)->takenBack);
+}
+
+//==============================================================================
+TEST_CASE ("dca: an output plays at its own trim plus every DCA above it, and a DCA on a cue and its output counts twice")
+{
+    /*  Namespace draft §38: a trim and a DCA on an output. The output's gain
+        is its trim plus its DCA's and every DCA that one sits inside; a cue
+        marked with the same DCA is trimmed by it as well, at its own level
+        (WQ, the author's pick: it counts at each place); a double Esc leaves
+        both where they are, the trim being a decision and the DCA a fader. */
+    Rig rig;
+
+    const auto front = rig.document.createBus ("direct", 2).id;
+    const auto side = rig.document.createBus ("direct", 2).id;
+    REQUIRE (! front.empty());
+    REQUIRE (! side.empty());
+
+    const auto everything = rig.dca ("Everything");
+    const auto music = rig.dca ("Music");
+    rig.set ("/godot/dca/" + music + "/dca", everything);
+
+    rig.set ("/godot/bus/" + front + "/trim", "-3");
+    rig.set ("/godot/bus/" + front + "/dca", music);
+
+    const auto song = rig.media (rig.listId, 0, "song", 0);
+    rig.set ("/godot/cue/" + song + "/dca", music);
+
+    rig.apply ("cue.fire", { osc::Value::string (song) });
+    rig.tickOnce();
+
+    CHECK (near (rig.audio.outputs.at (0), -3.0));
+    CHECK (near (rig.audio.outputs.at (1), -3.0));
+    CHECK (near (rig.audio.outputs.at (2), 0.0));     // the side pair trims nothing
+    CHECK (near (rig.levelOf (song), 0.0));
+
+    /*  MUSIC DOWN SIX: the cue by six, and the output by six more on top of
+        its own three - twelve at the speaker for the cue, were it routed
+        there. (This rig's player routes nothing; the two sums are what the
+        audio side is handed, and that is what is asked.) */
+    rig.apply ("node.set", { osc::Value::string ("/godot/dca/" + music + "/trim"), osc::Value::float64 (-6.0) });
+    rig.tickOnce();
+
+    CHECK (near (rig.levelOf (song), -6.0));
+    CHECK (near (rig.audio.outputs.at (0), -9.0));
+    CHECK (near (rig.audio.outputs.at (2), 0.0));
+
+    /*  AND THE DCA IT SITS INSIDE, on both. */
+    rig.apply ("node.set", { osc::Value::string ("/godot/dca/" + everything + "/trim"), osc::Value::float64 (-1.0) });
+    rig.tickOnce();
+
+    CHECK (near (rig.levelOf (song), -7.0));
+    CHECK (near (rig.audio.outputs.at (1), -10.0));
+
+    /*  THE TRIM IS A DECISION and is saved; the DCA's is where a hand left it
+        and is not. */
+    CHECK (rig.document.getAttribute ("/godot/bus/" + front + "/trim") == std::string ("-3"));
+
+    /*  A DOUBLE ESC kills what plays and leaves the output as it was. */
+    rig.apply ("run.killAll", {});
+    rig.tickOnce();
+    CHECK (near (rig.audio.outputs.at (0), -10.0));
+
+    /*  The mark taken off: the trim alone. */
+    rig.set ("/godot/bus/" + front + "/dca", "");
+    rig.tickOnce();
+    CHECK (near (rig.audio.outputs.at (0), -3.0));
 }

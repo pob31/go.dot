@@ -306,6 +306,18 @@ namespace wfg::cue
             tick while a fade runs, and one relaxed atomic store. */
         virtual void setLevelDb (int track, double levelDb) = 0;
 
+        /*  AN OUTPUT'S GAIN, in dB, on the logical channels it occupies
+            (namespace draft §38): its trim and its DCA's, after everything
+            that reaches it. Tick thread, every tick, a relaxed store a channel;
+            the audio side ramps to it. Nothing by default - a show replayed
+            with no audio side has no outputs to trim. */
+        virtual void setOutputGainDb (int firstChannel, int width, double gainDb)
+        {
+            (void) firstChannel;
+            (void) width;
+            (void) gainDb;
+        }
+
         /*  A VOICE'S SPEED, placed ahead (namespace draft §22.4): from the last
             breakpoint the voice holds, its speed moves in a straight line to
             `rate` at `sample` - one is the file's own - and two at one sample
@@ -1544,6 +1556,19 @@ namespace wfg::cue
         void applyLevels();
         void applyRouting();
 
+        /*  EVERY OUTPUT'S GAIN (namespace draft §38): its own trim plus the
+            trim of its DCA and of every DCA that one sits inside, handed to the
+            audio side each tick. A DCA counts at each place (WQ): a cue marked
+            with it is trimmed by it in `applyLevels`, and the output it plays
+            through again here. Pushed every tick rather than on a change, so
+            an audio side brought up again - a rate change, a device back -
+            has its outputs' gains on its first tick without being told. */
+        void applyOutputLevels();
+
+        /*  The DCAs from `first` up its nesting, outermost last, bounded by how
+            many DCAs the show has: one walk for a cue's mark and an output's. */
+        std::vector<std::string> dcaNestingFrom (std::string first) const;
+
         /*  WHAT EACH SOUNDING MEDIA CUE'S LEVEL LANE ASKS FOR THIS TICK
             (namespace draft §20.4), into `Run::laneDb` for `applyLevels` to add.
             Just before it, below nothing: with no Player there is no sample
@@ -2383,6 +2408,20 @@ namespace wfg::cue
         std::map<std::string, std::vector<std::string>> dcaChains;
         std::uint64_t dcaChainsRevision = 0;
         bool dcaChainsRead = false;
+
+        /*  EACH OUTPUT AS `applyOutputLevels` READS IT, at the revision it was
+            read at: its channels, its own trim and its DCA nesting. */
+        struct OutputGainSource
+        {
+            int firstChannel = 0;
+            int width = 1;
+            double trimDb = 0.0;
+            std::vector<std::string> dcaChain;
+        };
+
+        std::vector<OutputGainSource> outputGainSources;
+        std::uint64_t outputGainsRevision = 0;
+        bool outputGainsRead = false;
 
         /*  Who asks a target what a value is. Null everywhere a replay or
             a tree dump runs, and a verified cue there finishes on its own

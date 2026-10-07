@@ -3222,6 +3222,80 @@ TEST_CASE ("client: the foot copies the part it shows, and pastes it onto the pi
 }
 
 //==============================================================================
+TEST_CASE ("client: an output's trim and DCA are read, and a DCA that counts twice is said in words")
+{
+    /*  Namespace draft §38: each output's trim and DCA on its row, the trim
+        in no locale's spelling, and WQ's sentence when an output's DCA also
+        marks a cue routed to it - by a direct out or by a send. */
+    model::OutputRow row;
+    row.trimDb = 0.0;
+    CHECK (row.trimWord() == "0 dB");
+    row.trimDb = -3.0;
+    CHECK (row.trimWord() == "-3 dB");
+    row.trimDb = 1.5;
+    CHECK (row.trimWord() == "+1.5 dB");
+    row.trimDb = -0.04;
+    CHECK (row.trimWord() == "0 dB");
+
+    Rig rig;
+    auto tick = std::int64_t { 1 };
+
+    const auto applied = [&] (const auto& event)
+    {
+        REQUIRE (rig.apply (tick++, event.origin, event.command, event.args).applied == 1);
+    };
+
+    const auto before = model::readOutputs (*rig.publish (tick));
+    applied (gesture::createBus ("direct", 2, -1));
+    applied (gesture::createBus ("mix", 2, -1));
+    applied (gesture::createDca ("Music"));
+
+    auto snapshot = rig.publish (tick);
+    const auto outputs = model::readOutputs (*snapshot);
+    REQUIRE (outputs.size() == before.size() + 2);
+
+    const auto front = outputs[before.size()].id;
+    const auto reverb = outputs[before.size() + 1].id;
+    const auto dcas = model::readDcas (*snapshot);
+    REQUIRE (! dcas.empty());
+    const auto music = dcas.back().id;
+
+    applied (gesture::setNode ("/godot/bus/" + front + "/trim", "-4.5"));
+    applied (gesture::setNode ("/godot/bus/" + front + "/dca", music));
+
+    snapshot = rig.publish (tick);
+    const auto read = model::readOutputs (*snapshot);
+    CHECK (read[before.size()].trimWord() == "-4.5 dB");
+    CHECK (read[before.size()].dca == music);
+
+    //  Nothing routed there is marked yet: nothing to say.
+    CHECK (model::dcaTwiceSentences (*snapshot, read, model::readDcas (*snapshot)).empty());
+
+    const auto listId = model::readTransport (*snapshot).listId;
+    REQUIRE (rig.apply (tick++, "window", "cue.create",
+                        { osc::Value::string (listId), osc::Value::int32 (0),
+                          osc::Value::string ("media"), osc::Value::string ("Song") }).applied == 1);
+    const auto song = model::createdAt (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order"), 0);
+
+    applied (gesture::setNode ("/godot/cue/" + song + "/dca", music));
+    applied (gesture::setNode ("/godot/cue/" + song + "/directOut", front));
+
+    snapshot = rig.publish (tick);
+    const auto twice = model::dcaTwiceSentences (*snapshot, model::readOutputs (*snapshot), model::readDcas (*snapshot));
+    REQUIRE (twice.size() == 1);
+    CHECK (twice[0].find ("Music also trims 1 cue played through") == 0);
+    CHECK (twice[0].find ("counts twice") != std::string::npos);
+
+    /*  A send into a mix marked with the same DCA is the same story. */
+    applied (gesture::setNode ("/godot/bus/" + reverb + "/dca", music));
+    REQUIRE (rig.apply (tick++, "window", "send.create",
+                        { osc::Value::string (song), osc::Value::string (reverb) }).applied == 1);
+
+    snapshot = rig.publish (tick);
+    CHECK (model::dcaTwiceSentences (*snapshot, model::readOutputs (*snapshot), model::readDcas (*snapshot)).size() == 2);
+}
+
+//==============================================================================
 TEST_CASE ("client: a fold is recorded with the show, and a rebuilt list opens folded the way it was left")
 {
     /*  The author (2026-09-18): "fold state should be recorded in project

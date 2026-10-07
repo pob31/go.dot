@@ -395,6 +395,19 @@ namespace wfg::audio
             for (int channel = 0; channel < std::max (1, tapChannels); ++channel)
                 inputPeaks[static_cast<std::size_t> (channel)].store (0.0f, std::memory_order_relaxed);
 
+            /*  EVERY OUTPUT CHANNEL AT UNITY until the tick says otherwise
+                (namespace draft §38), its ramp set to the rate it will run at. */
+            outputChannels = std::max (0, requested.outputChannels);
+            outputGains = std::make_unique<std::atomic<float>[]> (static_cast<std::size_t> (std::max (1, outputChannels)));
+            outputRamps.assign (static_cast<std::size_t> (std::max (1, outputChannels)), {});
+
+            for (std::size_t channel = 0; channel < outputRamps.size(); ++channel)
+            {
+                outputGains[channel].store (1.0f, std::memory_order_relaxed);
+                outputRamps[channel].reset (static_cast<double> (requested.sampleRate), 0.02);
+                outputRamps[channel].setCurrentAndTargetValue (1.0f);
+            }
+
             current = requested;
             sampleRate = static_cast<double> (requested.sampleRate);
             blocks.store (0, std::memory_order_relaxed);
@@ -1390,6 +1403,26 @@ namespace wfg::audio
                 const rt::ScopedRealtimeCheck tracktionsBlock { rt::Region::foreign };
 
                 engine->getDeviceManager().getHostedAudioDeviceInterface().processBlock (scratch, midi);
+            }
+
+            /*  EACH OUTPUT'S GAIN (namespace draft §38): its trim and its DCA's,
+                on what the graph mixed onto its channels, before it leaves. A
+                channel at unity and staying there is not touched, which is
+                every channel of a show that trims nothing. Ours, and
+                allocation-free: a fixed ramp per channel, made at `start`. */
+            for (int channel = 0; channel < std::min (current.outputChannels, outputChannels); ++channel)
+            {
+                const auto index = static_cast<std::size_t> (channel);
+                auto& ramp = outputRamps[index];
+                const auto target = outputGains[index].load (std::memory_order_relaxed);
+
+                if (! juce::exactlyEqual (ramp.getTargetValue(), target))
+                    ramp.setTargetValue (target);
+
+                if (! ramp.isSmoothing() && juce::exactlyEqual (ramp.getCurrentValue(), 1.0f))
+                    continue;
+
+                ramp.applyGain (scratch.getWritePointer (channel), current.blockSize);
             }
 
             if (sink != nullptr)
@@ -2446,6 +2479,13 @@ namespace wfg::audio
         std::unique_ptr<std::atomic<float>[]> inputPeaks;
         int tapChannels = 0;
 
+        /*  EACH LOGICAL OUTPUT'S GAIN (namespace draft §38): the target the
+            tick thread stores, linear, and the ramp only the audio thread
+            touches. Both sized at `start`. */
+        std::unique_ptr<std::atomic<float>[]> outputGains;
+        std::vector<juce::SmoothedValue<float>> outputRamps;
+        int outputChannels = 0;
+
         AudioClockSource samples;
         std::atomic<std::int64_t> blocks { 0 };
 
@@ -2999,6 +3039,18 @@ namespace wfg::audio
             return 0.0f;
 
         return impl->plugins[static_cast<std::size_t> (trackIndex)]->takeOutputPeak();
+    }
+
+    void AudioHost::setOutputGainDb (int firstChannel, int width, double gainDb) noexcept
+    {
+        if (impl->outputGains == nullptr)
+            return;
+
+        const auto gain = gainDb <= -120.0 ? 0.0f
+                                           : juce::Decibels::decibelsToGain (static_cast<float> (gainDb), -120.0f);
+
+        for (int channel = std::max (0, firstChannel); channel < firstChannel + width && channel < impl->outputChannels; ++channel)
+            impl->outputGains[static_cast<std::size_t> (channel)].store (gain, std::memory_order_relaxed);
     }
 
     int AudioHost::inputChannelCount() const noexcept

@@ -352,6 +352,12 @@ namespace wfg::audio
             matrix->setLevelDb (static_cast<float> (levelDb));
     }
 
+    void HostPlayer::setOutputGainDb (int firstChannel, int width, double gainDb)
+    {
+        //  The tick thread, every tick: a relaxed store a channel (namespace draft §38).
+        audioHost.setOutputGainDb (firstChannel, width, gainDb);
+    }
+
     bool HostPlayer::placeRate (int track, std::int64_t sample, double rate)
     {
         /*  The tick thread, at a launch and at each change of speed (namespace

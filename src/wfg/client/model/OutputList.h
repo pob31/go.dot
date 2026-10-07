@@ -60,6 +60,16 @@ namespace wfg::client::model
         int width = 1;
         int firstChannel = 0;
 
+        /*  ITS TRIM AND ITS DCA (namespace draft §38): a level set against the
+            room, in dB, and the DCA that rides it, by identifier - empty for
+            none. */
+        double trimDb = 0.0;
+        std::string dca;
+
+        /*  The trim as a cell says it: "0 dB", "-3 dB", "+1.5 dB", to the
+            tenth and in no locale's spelling. */
+        std::string trimWord() const;
+
         /** "Direct out" / "Mix channel", for a column somebody reads. */
         std::string kindWord() const;
 
@@ -96,4 +106,15 @@ namespace wfg::client::model
         output claims — which a hand-written layout can leave — reads "Output 7"
         so the row still says what it is. */
     std::vector<std::string> channelLabels (const std::vector<OutputRow>&, int atLeast);
+
+    struct DcaRow;
+
+    /*  WHERE A DCA COUNTS TWICE (namespace draft §38, WQ: it counts at each
+        place, as on a desk): one sentence per output whose DCA - or a DCA that
+        one sits inside - also marks cues routed to that output, by their
+        direct out or a send. "Music also trims 3 cues played through Front:
+        there it counts twice." Empty when no output's DCA reaches a cue routed
+        to it. A cue's own mark is what is read; a group's mark over it is not. */
+    std::vector<std::string> dcaTwiceSentences (const tree::TreeSnapshot&, const std::vector<OutputRow>&,
+                                                const std::vector<DcaRow>&);
 }

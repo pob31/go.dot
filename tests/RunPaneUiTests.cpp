@@ -164,12 +164,29 @@ TEST_CASE ("foot panel: it opens on one subject, draws a file, and a drag writes
         panel.paintEntireComponent (g, true);
     }
 
-    //  The close button is the one control the host owns.
+    /*  The close button is the host's, and so are Copy and Paste of the part
+        the panel shows (namespace draft §38) - the waveform's is its time and
+        loops. Found by what they say, not by where they sit. */
     juce::Button* shut = nullptr;
+    juce::Button* copy = nullptr;
+    juce::Button* paste = nullptr;
 
     for (auto* child : panel.getChildren())
         if (auto* button = dynamic_cast<juce::Button*> (child))
-            shut = button;
+        {
+            if (button->getTooltip() == "Close the panel")
+                shut = button;
+            else if (button->getButtonText() == "Copy")
+                copy = button;
+            else if (button->getButtonText() == "Paste")
+                paste = button;
+        }
+
+    REQUIRE (copy != nullptr);
+    REQUIRE (paste != nullptr);
+    CHECK (copy->isVisible());
+    CHECK (paste->isVisible());
+    CHECK_FALSE (paste->isEnabled());     // nothing copied yet
 
     REQUIRE (shut != nullptr);
     shut->onClick();

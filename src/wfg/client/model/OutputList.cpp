@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/OutputList.h>
 
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -36,6 +37,33 @@ namespace wfg::client::model
             below this one: GCC's -Wshadow reports a parameter shadowing a
             global declaration, and the repo's convention is to rename the
             parameter rather than the thing it hid. */
+        /*  A decimal the engine wrote: '.' always, whatever the locale -
+            read by hand, since `std::stod` would read "1.5" as 1 under
+            fr_FR. */
+        double decimal (const std::string& reading, double fallback)
+        {
+            if (reading.empty())
+                return fallback;
+
+            auto at = std::size_t { 0 };
+            auto sign = 1.0;
+
+            if (reading[at] == '-' || reading[at] == '+')
+                sign = reading[at++] == '-' ? -1.0 : 1.0;
+
+            auto value = 0.0;
+            auto digits = 0;
+
+            for (; at < reading.size() && reading[at] >= '0' && reading[at] <= '9'; ++at, ++digits)
+                value = value * 10.0 + static_cast<double> (reading[at] - '0');
+
+            if (at < reading.size() && reading[at] == '.')
+                for (auto scale = 0.1; ++at < reading.size() && reading[at] >= '0' && reading[at] <= '9'; scale *= 0.1, ++digits)
+                    value += scale * static_cast<double> (reading[at] - '0');
+
+            return digits > 0 ? sign * value : fallback;
+        }
+
         int number (const std::string& reading, int fallback)
         {
             /*  The tree's own text, which came through `osc::formatDouble` or
@@ -107,6 +135,8 @@ namespace wfg::client::model
             else if (name == "kind")         row.kind = text (node);
             else if (name == "width")        row.width = number (text (node), 1);
             else if (name == "firstChannel") row.firstChannel = number (text (node), 0);
+            else if (name == "trim")         row.trimDb = decimal (text (node), 0.0);
+            else if (name == "dca")          row.dca = text (node);
         }
 
         std::vector<OutputRow> rows;
@@ -219,5 +249,155 @@ namespace wfg::client::model
             }
 
         return labels;
+    }
+
+    std::string OutputRow::trimWord() const
+    {
+        //  To the tenth, built from integers so no locale's comma gets in.
+        const auto tenths = static_cast<long> (trimDb * 10.0 + (trimDb < 0.0 ? -0.5 : 0.5));
+
+        if (tenths == 0)
+            return "0 dB";
+
+        const auto magnitude = tenths < 0 ? -tenths : tenths;
+        auto out = std::string (tenths < 0 ? "-" : "+") + std::to_string (magnitude / 10);
+
+        if (magnitude % 10 != 0)
+            out += "." + std::to_string (magnitude % 10);
+
+        return out + " dB";
+    }
+
+    std::vector<std::string> dcaTwiceSentences (const tree::TreeSnapshot& snapshot,
+                                                const std::vector<OutputRow>& outputs,
+                                                const std::vector<DcaRow>& dcas)
+    {
+        /*  UP A DCA'S NESTING, bounded by how many there are, as the engine
+            walks it: a circle the door refused cannot hang a window either. */
+        const auto chainOf = [&dcas] (std::string first)
+        {
+            std::vector<std::string> chain;
+
+            for (std::size_t steps = 0; steps < dcas.size() && ! first.empty(); ++steps)
+            {
+                const auto found = std::find_if (dcas.begin(), dcas.end(),
+                                                 [&first] (const DcaRow& d) { return d.id == first; });
+
+                if (found == dcas.end())
+                    break;
+
+                chain.push_back (first);
+                first = found->parent;
+            }
+
+            return chain;
+        };
+
+        /*  ONE PASS over the tree, as `readOutputs` makes: each cue's mark and
+            direct out, and each send's cue and mix. */
+        struct Cue { std::string dca, directOut; };
+        std::map<std::string, Cue> cues;
+        std::map<std::string, std::pair<std::string, std::string>> sends;   // send -> cue, bus
+
+        for (const auto* node : snapshot.all())
+        {
+            const auto& address = node->address;
+
+            if (address.rfind ("/godot/cue/", 0) == 0)
+            {
+                const auto rest = address.substr (11);
+                const auto slash = rest.find ('/');
+
+                if (slash == std::string::npos)
+                    continue;
+
+                const auto field = rest.substr (slash + 1);
+
+                if (field == "dca")
+                    cues[rest.substr (0, slash)].dca = text (node);
+                else if (field == "directOut")
+                    cues[rest.substr (0, slash)].directOut = text (node);
+            }
+            else if (address.rfind ("/godot/send/", 0) == 0)
+            {
+                const auto rest = address.substr (12);
+                const auto slash = rest.find ('/');
+
+                if (slash == std::string::npos)
+                    continue;
+
+                const auto field = rest.substr (slash + 1);
+
+                if (field == "cue")
+                    sends[rest.substr (0, slash)].first = text (node);
+                else if (field == "bus")
+                    sends[rest.substr (0, slash)].second = text (node);
+            }
+        }
+
+        std::vector<std::string> sentences;
+
+        for (const auto& output : outputs)
+        {
+            const auto outputChain = chainOf (output.dca);
+
+            if (outputChain.empty())
+                continue;
+
+            //  The cues routed here, once each.
+            std::vector<std::string> routed;
+
+            for (const auto& [id, cue] : cues)
+                if (cue.directOut == output.id)
+                    routed.push_back (id);
+
+            for (const auto& [send, toWhere] : sends)
+                if (toWhere.second == output.id
+                      && std::find (routed.begin(), routed.end(), toWhere.first) == routed.end())
+                    routed.push_back (toWhere.first);
+
+            /*  The DCA they share with the output: the first of the output's
+                chain - its own mark before the ones it sits inside - that is
+                also in the cue's. */
+            std::string shared;
+            std::size_t count = 0;
+
+            for (const auto& id : routed)
+            {
+                const auto found = cues.find (id);
+
+                if (found == cues.end())
+                    continue;
+
+                const auto cueChain = chainOf (found->second.dca);
+
+                for (const auto& dca : outputChain)
+                {
+                    if (std::find (cueChain.begin(), cueChain.end(), dca) == cueChain.end())
+                        continue;
+
+                    ++count;
+
+                    if (shared.empty())
+                        shared = dca;
+
+                    break;
+                }
+            }
+
+            if (count == 0)
+                continue;
+
+            const auto named = std::find_if (dcas.begin(), dcas.end(),
+                                             [&shared] (const DcaRow& d) { return d.id == shared; });
+            const auto dcaName = named == dcas.end() ? shared
+                                 : named->name.empty() ? named->label() : named->name;
+
+            sentences.push_back (dcaName + " also trims " + std::to_string (count)
+                                   + (count == 1 ? " cue" : " cues") + " played through "
+                                   + output.name + ": there it counts twice.");
+        }
+
+        return sentences;
     }
 }

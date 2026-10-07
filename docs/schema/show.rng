@@ -2703,6 +2703,12 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA this output is assigned to, by identifier, or empty (namespace draft §38). The DCA-s trim, and that of every DCA it sits inside, is added to the output-s own trim. It COUNTS AT EACH PLACE (WQ, the author-s pick): a cue marked with the same DCA and played through this output is trimmed by it twice, as a channel and the master it feeds are on a desk with one VCA on both.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="firstChannel">
           <a:documentation>The first hardware output channel this bus occupies, counting from zero. Read-only at the door and maintained by bus.create, bus.delete, bus.move and bus.width, which repack every bus as the running sum of the widths before it: a client that could write this one could leave two buses overlapping, and nothing downstream would notice until a show night. A layout written by hand that is not packed is left exactly as it is and warned about, never rewritten.</a:documentation>
           <data type="integer">
@@ -2723,6 +2729,15 @@
         <attribute name="name">
           <a:documentation>The bus name as the designer wrote it. Names are what appear in a dropdown and on a scribble strip; channel numbers are not.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="trim">
+          <a:documentation>A level trim on everything leaving this output, in dB, after every cue and send has reached it (namespace draft §38, the author-s request of 2026-10-07): the place an output is set against the room and the rest of the rig, written in the show because somebody decided it. Nought, the resting value, leaves the output as it was. Applied on the audio side as one gain per channel, smoothed over 20 ms, so a change is never a click; a double Esc leaves it where it is, as it leaves a DCA.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-120</param>
+            <param name="maxInclusive">12</param>
+          </data>
         </attribute>
       </optional>
       <optional>
