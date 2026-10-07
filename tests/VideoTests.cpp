@@ -1150,3 +1150,255 @@ TEST_CASE ("video: a movie converted to HAP by FFmpeg and Go.dot, with its sound
 
     folder.deleteRecursively();
 }
+
+//==============================================================================
+/*  A SOUND LOCKED TO ITS MOVIE (namespace draft 37.5, WJ and WL): the movie
+    leads - its start offset, speed and Ranges are copied onto the sound in
+    the same edit, refused on the sound, undone together; detached, the sound
+    is its own again; the movie deleted, the sound stays. */
+TEST_CASE ("video: a sound locked to its movie takes its start, speed and Ranges, in the same edit")
+{
+    Rig rig;
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/source"), text ("movie") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/file"), text ("clip.mov") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/startOffset"), text ("2.5") }));
+
+    REQUIRE (rig.applied ("cue.create", { text ("VD000001"), osc::Value::int32 (1), text ("media"),
+                                          text ("Clip sound"), text ("VD000040") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/file"), text ("clip (sound).wav") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/rate"), text ("0.5") }));
+
+    /*  LOCKED: the movie's start offset and speed at once. */
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/lockedTo"), text ("VD000002") }));
+    CHECK (rig.at ("/godot/cue/VD000040/startOffset") == "2.5");
+    CHECK (rig.at ("/godot/cue/VD000040/rate") == "1");
+
+    /*  THE MOVIE MOVED, the sound with it; the sound's own refused. */
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/rate"), text ("1.25") }));
+    CHECK (rig.at ("/godot/cue/VD000040/rate") == "1.25");
+
+    const auto refused = rig.apply ("node.set", { text ("/godot/cue/VD000040/startOffset"), text ("9") });
+    CHECK (refused.applied == 0);
+    CHECK (rig.at ("/godot/cue/VD000040/startOffset") == "2.5");
+
+    /*  ITS LEVEL AND EVERYTHING ELSE ARE ITS OWN. */
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/level"), text ("-6") }));
+    CHECK (rig.at ("/godot/cue/VD000040/level") == "-6");
+
+    /*  RANGES: made, cut, moved and removed on the movie, and the sound's
+        follow - under identifiers of their own. */
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/startOffset"), text ("0") }));
+    REQUIRE (rig.applied ("range.create", { text ("VD000002"), osc::Value::float64 (1.0), osc::Value::float64 (5.0),
+                                            text ("VD000081") }));
+    REQUIRE (rig.applied ("range.create", { text ("VD000002"), osc::Value::float64 (8.0), osc::Value::float64 (9.0),
+                                            text ("VD000082") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/range/VD000082/loops"), text ("3") }));
+
+    const auto soundRanges = [&rig]
+    {
+        std::vector<std::string> out;
+
+        for (const auto& child : rig.document.findById ("VD000040"))
+            if (child.hasType ("Range"))
+                out.push_back (child["id"].toString().toStdString());
+
+        return out;
+    };
+
+    auto ranges = soundRanges();
+    REQUIRE (ranges.size() == 2);
+    CHECK (ranges[0] != "VD000081");
+    CHECK (rig.at ("/godot/range/" + ranges[0] + "/in") == "1");
+    CHECK (rig.at ("/godot/range/" + ranges[0] + "/out") == "5");
+    CHECK (rig.at ("/godot/range/" + ranges[1] + "/in") == "8");
+    CHECK (rig.at ("/godot/range/" + ranges[1] + "/loops") == "3");
+
+    REQUIRE (rig.applied ("range.split", { text ("VD000002"), osc::Value::float64 (3.0), text ("VD000083") }));
+    ranges = soundRanges();
+    REQUIRE (ranges.size() == 3);
+    CHECK (rig.at ("/godot/range/" + ranges[0] + "/out") == "3");
+    CHECK (rig.at ("/godot/range/" + ranges[1] + "/in") == "3");
+    CHECK (rig.at ("/godot/range/" + ranges[1] + "/out") == "5");
+
+    /*  A RANGE OF THE SOUND is the movie's to change. */
+    CHECK (rig.apply ("node.set", { text ("/godot/range/" + ranges[0] + "/in"), text ("0.5") }).applied == 0);
+    CHECK (rig.apply ("object.delete", { text (ranges[0]) }).applied == 0);
+    CHECK_FALSE (rig.applied ("range.create", { text ("VD000040"), osc::Value::float64 (10.0), osc::Value::float64 (11.0) }));
+
+    REQUIRE (rig.applied ("object.delete", { text ("VD000081") }));
+    ranges = soundRanges();
+    REQUIRE (ranges.size() == 2);
+    CHECK (rig.at ("/godot/range/" + ranges[0] + "/in") == "3");
+
+    /*  ONE UNDO TAKES BACK BOTH. */
+    REQUIRE (rig.applied ("undo"));
+    CHECK (soundRanges().size() == 3);
+    CHECK (rig.at ("/godot/range/" + soundRanges()[0] + "/in") == "1");
+
+    /*  DETACHED, the sound is its own: its rows take an edit, and the movie's
+        no longer reach it. */
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/lockedTo"), text ("") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/startOffset"), text ("0.75") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/rate"), text ("2") }));
+    CHECK (rig.at ("/godot/cue/VD000040/rate") == "1.25");
+
+    /*  LOCKED AGAIN, then the movie deleted: the sound stays, as a sound of
+        its own, and its rows take edits again. */
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/lockedTo"), text ("VD000002") }));
+    CHECK (rig.at ("/godot/cue/VD000040/rate") == "2");
+    REQUIRE (rig.applied ("object.delete", { text ("VD000002") }));
+    CHECK (rig.exists ("/godot/cue/VD000040/name"));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/rate"), text ("1") }));
+}
+
+TEST_CASE ("video: a locked sound's copies of the movie's Ranges take the same identifiers on every machine")
+{
+    /*  TWO DOCUMENTS, the same edits: the sound's Ranges come out under the
+        same identifiers, which is what lets a replay of the log reach them. */
+    std::vector<std::string> made[2];
+
+    for (auto& out : made)
+    {
+        Rig rig;
+        REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/source"), text ("movie") }));
+        REQUIRE (rig.applied ("cue.create", { text ("VD000001"), osc::Value::int32 (1), text ("media"),
+                                              text ("Sound"), text ("VD000040") }));
+        REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/lockedTo"), text ("VD000002") }));
+        REQUIRE (rig.applied ("range.create", { text ("VD000002"), osc::Value::float64 (1.0), osc::Value::float64 (2.0),
+                                                text ("VD000081") }));
+        REQUIRE (rig.applied ("range.create", { text ("VD000002"), osc::Value::float64 (3.0), osc::Value::float64 (4.0),
+                                                text ("VD000082") }));
+
+        for (const auto& child : rig.document.findById ("VD000040"))
+            if (child.hasType ("Range"))
+                out.push_back (child["id"].toString().toStdString());
+    }
+
+    REQUIRE (made[0].size() == 2);
+    CHECK (made[0] == made[1]);
+}
+
+/*  AND AS IT RUNS: the movie's GO fires its sound with it, as its child, in
+    the same tick; a stop on the movie stops the sound; the standby walks past
+    the sound, and a group does not fire it on its own (37.5, WJ). */
+TEST_CASE ("video: a movie fires its locked sound with it, and stops it with it")
+{
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 20.0 }, { "clip (sound).wav", 20.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov") }).applied >= 1);
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (1),
+                                                osc::Value::string ("media"), osc::Value::string ("Clip sound"),
+                                                osc::Value::string ("VD000061"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip (sound).wav") }).applied >= 1);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000061/lockedTo", "VD000060").ok);
+
+    /*  THE STANDBY WALKS PAST IT: from the movie, the next stop is the cue
+        after the sound. */
+    const auto list = rig.document.findById ("VD000001");
+    CHECK_FALSE (cue::mayStandOn (list, "VD000061"));
+    CHECK (cue::mayStandOn (list, "VD000060"));
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+    rig.ticks (2);
+
+    const auto* movie = rig.runOf ("VD000060");
+    const auto* sound = rig.runOf ("VD000061");
+    REQUIRE (movie != nullptr);
+    REQUIRE (sound != nullptr);
+    CHECK (sound->parent == movie->id);
+    CHECK (rig.runner.goOfRun (sound->id) == rig.runner.goOfRun (movie->id));
+
+    const auto movieId = movie->id;
+    const auto soundId = sound->id;
+    CHECK_FALSE (rig.runs.find (soundId)->isFinished());
+
+    /*  STOPPED WITH IT. */
+    rig.submitAndTick ("run.stop", { osc::Value::string (movieId) });
+    rig.ticks (4);
+    CHECK (rig.runs.find (movieId)->isFinished());
+    CHECK (rig.runs.find (soundId)->isFinished());
+
+    /*  FIRED BY NAME, the sound plays alone, as any cue may be fired. */
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000061") });
+    rig.ticks (1);
+    const auto* alone = rig.runOf ("VD000061");
+    REQUIRE (alone != nullptr);
+    CHECK (alone->id != soundId);
+    CHECK (alone->parent.empty());
+}
+
+/*  ARMED WITH ITS MOVIE: the standby on the movie makes its sound ready, as
+    it would a sound of its own, and the GO takes that run - the one the arm
+    made - as the movie's child, so it launches where the picture comes up. */
+namespace
+{
+    struct ArmingPlayer final : cue::Player
+    {
+        int trackCount() const override                                  { return 8; }
+        void requestArm (const cue::ArmRequest&) override                {}
+        int slotCount() const override                                   { return 1; }
+        bool launchAtSample (int, int, std::int64_t) override            { return true; }
+        bool stop (int) override                                         { return true; }
+        bool stopAtSample (int, int, std::int64_t) override              { return true; }
+        void setLevelDb (int, double) override                           {}
+        void setRouting (int, const std::vector<cue::Coefficient>&) override {}
+        bool isPlaying (int) const override                              { return false; }
+        bool isArmReady (int) const override                             { return false; }
+        std::int64_t samplesElapsed() const override                     { return 0; }
+        int blockSize() const override                                   { return 128; }
+        int sampleRate() const override                                  { return 48000; }
+        int channelsPerTrack() const override                            { return 2; }
+    };
+}
+
+TEST_CASE ("video: a movie on standby arms its locked sound, and its GO takes that run")
+{
+    ArmingPlayer audio;
+    VideoRig rig;
+    rig.runner.setPlayer (&audio);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov") }).applied >= 1);
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (1),
+                                                osc::Value::string ("media"), osc::Value::string ("Clip sound"),
+                                                osc::Value::string ("VD000061"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip (sound).wav") }).applied >= 1);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000061/lockedTo", "VD000060").ok);
+
+    rig.submitAndTick ("list.focus", { osc::Value::string ("VD000001") });
+    rig.submitAndTick ("standby.set", { osc::Value::string ("VD000060") });
+    rig.ticks (3);
+
+    const auto* armed = rig.runOf ("VD000061");
+    REQUIRE (armed != nullptr);
+    CHECK (armed->parent.empty());
+    CHECK_FALSE (armed->isFinished());
+    const auto armedId = armed->id;
+
+    /*  LEFT IN PLACE while the pointer stays on the movie. */
+    rig.ticks (3);
+    CHECK_FALSE (rig.runs.find (armedId)->isFinished());
+
+    rig.submitAndTick ("go");
+    rig.ticks (1);
+
+    const auto* movie = rig.runOf ("VD000060");
+    REQUIRE (movie != nullptr);
+    const auto* sound = rig.runs.find (armedId);
+    REQUIRE (sound != nullptr);
+    CHECK (sound->parent == movie->id);
+    CHECK (rig.runOf ("VD000061")->id == armedId);
+}

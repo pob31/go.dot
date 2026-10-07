@@ -1132,6 +1132,11 @@ namespace wfg::doc
                 return *refusal;
         }
 
+        /*  A SOUND LOCKED TO ITS MOVIE takes what it shares from the movie
+            (namespace draft 37.5, WL). */
+        if (refusedOnAFollower (target.node, target.attribute->name()))
+            return EditResult::failed (reason::lockedToMovie);
+
         /*  A LIST, which this door could not take until PR 5.16a (§14.6):
             `parseValue` read "0 -60 1 0" as one number and refused it, so the
             two `gains` rows had never been written by a client. Parsed element
@@ -1275,7 +1280,164 @@ namespace wfg::doc
         keepBefore (target.node, property, onto);
         target.node.setProperty (property, toVar (value), onto);
 
+        keepSoundsAfter (target.node, target.attribute->name());
         return EditResult::succeeded (target.node[idProperty].toString().toStdString());
+    }
+
+    //==============================================================================
+    bool ShowDocument::followsAMovie (const juce::ValueTree& node) const
+    {
+        if (! node.hasType ("Media"))
+            return false;
+
+        const auto movie = node["lockedTo"].toString().toStdString();
+        return ! movie.empty() && findById (movie).hasType ("Video");
+    }
+
+    bool ShowDocument::refusedOnAFollower (const juce::ValueTree& node, std::string_view row) const
+    {
+        if (keepingSounds)
+            return false;
+
+        if (node.hasType ("Media"))
+            return (row == "startOffset" || row == "rate") && followsAMovie (node);
+
+        if (node.hasType ("Range"))
+            return followsAMovie (node.getParent());
+
+        return false;
+    }
+
+    void ShowDocument::keepSoundsAfter (const juce::ValueTree& node, std::string_view row)
+    {
+        if (keepingSounds || ! node.isValid())
+            return;
+
+        if (node.hasType ("Video") && (row == "startOffset" || row == "rate"))
+            keepSoundsWith (node);
+        else if (node.hasType ("Range") && node.getParent().hasType ("Video"))
+            keepSoundsWith (node.getParent());
+        else if (node.hasType ("Media") && row == "lockedTo" && followsAMovie (node))
+            keepSoundsWith (findById (node["lockedTo"].toString().toStdString()));
+    }
+
+    void ShowDocument::keepSoundsWith (const juce::ValueTree& movie)
+    {
+        if (! movie.hasType ("Video"))
+            return;
+
+        const juce::ScopedValueSetter<bool> copyingNow (keepingSounds, true);
+        auto* const onto = structuralHistory();
+        const auto movieId = movie[idProperty].toString();
+
+        std::vector<juce::ValueTree> sounds;
+
+        std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& node)
+        {
+            if (node.hasType ("Media") && node["lockedTo"].toString() == movieId)
+                sounds.push_back (node);
+
+            for (const auto& child : node)
+                visit (child);
+        };
+
+        visit (showNode);
+
+        const auto rangesOf = [] (const juce::ValueTree& cue)
+        {
+            std::vector<juce::ValueTree> out;
+
+            for (const auto& child : cue)
+                if (child.hasType ("Range"))
+                    out.push_back (child);
+
+            return out;
+        };
+
+        /*  KEPT AS IT WAS FIRST too, as every write through the door is, so a
+            `node.setMany` that has to put the movie back puts its sound back. */
+        const auto copy = [this, onto] (const juce::ValueTree& from, juce::ValueTree to, const juce::Identifier& property)
+        {
+            if (from.hasProperty (property))
+            {
+                if (to[property] != from[property])
+                {
+                    keepBefore (to, property, onto);
+                    to.setProperty (property, from[property], onto);
+                }
+            }
+            else if (to.hasProperty (property))
+            {
+                keepBefore (to, property, onto);
+                to.removeProperty (property, onto);
+            }
+        };
+
+        const auto movieRanges = rangesOf (movie);
+
+        for (auto sound : sounds)
+        {
+            for (const auto* row : { "startOffset", "rate" })
+                copy (movie, sound, juce::Identifier (row));
+
+            auto soundRanges = rangesOf (sound);
+
+            for (std::size_t n = 0; n < movieRanges.size(); ++n)
+            {
+                if (n < soundRanges.size())
+                {
+                    for (const auto* row : { "in", "out", "loops", "name" })
+                        copy (movieRanges[n], soundRanges[n], juce::Identifier (row));
+
+                    continue;
+                }
+
+                /*  A RANGE THE SOUND HAS NOT GOT: made, after its last, under
+                    an identifier drawn from the sound's and the movie range's -
+                    FNV-1a, the same on every machine - and salted until free. */
+                std::string objectId;
+                const auto joined = sound[idProperty].toString().toStdString() + "/"
+                                  + movieRanges[n][idProperty].toString().toStdString();
+
+                for (std::uint64_t salt = 0; salt < 64 && objectId.empty(); ++salt)
+                {
+                    std::uint64_t hash = 14695981039346656037ull ^ salt;
+
+                    for (const auto c : joined)
+                    {
+                        hash ^= static_cast<std::uint8_t> (c);
+                        hash *= 1099511628211ull;
+                    }
+
+                    if (const auto candidate = Id::encode (hash); registry.reserve (candidate))
+                        objectId = candidate;
+                }
+
+                if (objectId.empty())
+                    continue;
+
+                juce::ValueTree made { "Range" };
+                made.setProperty (idProperty, juce::String (objectId), nullptr);
+
+                for (const auto* row : { "in", "out", "loops", "name" })
+                    if (movieRanges[n].hasProperty (row))
+                        made.setProperty (row, movieRanges[n][row], nullptr);
+
+                const auto after = soundRanges.empty() ? sound.getNumChildren()
+                                                       : sound.indexOf (soundRanges.back()) + 1;
+                sound.addChild (made, after, onto);
+                soundRanges.push_back (made);
+            }
+
+            /*  AND ONE THE MOVIE HAS NOT, taken away. */
+            for (auto n = soundRanges.size(); n > movieRanges.size(); --n)
+            {
+                const auto gone = soundRanges[n - 1];
+                const auto goneId = gone[idProperty].toString().toStdString();
+                sound.removeChild (gone, onto);
+                registry.release (goneId);
+            }
+        }
     }
 
     std::optional<std::string> ShowDocument::getAttribute (const std::string& address) const
@@ -2308,9 +2470,17 @@ namespace wfg::doc
         if (in < 0.0 || ! (out > in))
             return EditResult::failed (reason::badValue);
 
-        return insertObject (cue, endOfSequence, "Range", id,
-                             { { "in", osc::formatDouble (in) },
-                               { "out", osc::formatDouble (out) } });
+        if (! keepingSounds && followsAMovie (cue))
+            return EditResult::failed (reason::lockedToMovie);
+
+        auto made = insertObject (cue, endOfSequence, "Range", id,
+                                  { { "in", osc::formatDouble (in) },
+                                    { "out", osc::formatDouble (out) } });
+
+        if (made.ok)
+            keepSoundsAfter (findById (made.id), "in");
+
+        return made;
     }
 
     EditResult ShowDocument::splitRange (const std::string& cueId, double at,
@@ -2323,6 +2493,9 @@ namespace wfg::doc
 
         if (cue.getType().toString() != "Media" && cue.getType().toString() != "Video")
             return EditResult::failed (reason::typeMismatch);
+
+        if (! keepingSounds && followsAMovie (cue))
+            return EditResult::failed (reason::lockedToMovie);
 
         /*  A MILLISECOND, which is the resolution a range is placed at by a
             hand on a bar and the same one the client calls "the same instant".
@@ -2824,6 +2997,11 @@ namespace wfg::doc
         if (! parent.isValid())
             return EditResult::failed (reason::unknownId);
 
+        /*  A RANGE OF A SOUND LOCKED TO ITS MOVIE is the movie's to take away
+            (namespace draft 37.5, WL). */
+        if (node.hasType ("Range") && ! keepingSounds && followsAMovie (parent))
+            return EditResult::failed (reason::lockedToMovie);
+
         /*  Every identifier under it comes back, not just its own — deleting a
             group deletes its cues, and leaving their identifiers reserved would
             slowly poison the registry over a long editing session. */
@@ -2923,6 +3101,10 @@ namespace wfg::doc
         if (! repairList.empty())
             setAttribute ("/godot/list/" + repairList + "/standby", repairStandby);
 
+        /*  A MOVIE'S RANGE GONE, and its sounds' with it. */
+        if (node.hasType ("Range") && parent.hasType ("Video"))
+            keepSoundsAfter (parent, "startOffset");
+
         return EditResult::succeeded (id);
     }
 
@@ -2963,6 +3145,11 @@ namespace wfg::doc
                 return EditResult::failed (reason::badAddress);
 
         auto oldParent = node.getParent();
+
+        /*  A RANGE MOVED OUT OF OR INTO A SOUND LOCKED TO ITS MOVIE is the
+            movie's to move (namespace draft 37.5, WL). */
+        if (node.hasType ("Range") && ! keepingSounds && (followsAMovie (oldParent) || followsAMovie (newParent)))
+            return EditResult::failed (reason::lockedToMovie);
 
         /*  A move WITHIN one list's top level is a reorder, and a reorder never
             moves the standby: it still names the same cue, which is still a
@@ -3065,6 +3252,13 @@ namespace wfg::doc
         if (! vacatedList.empty()
               && ! cue::mayStandOn (findById (vacatedList), id))
             setAttribute ("/godot/list/" + vacatedList + "/standby", "");
+
+        /*  A MOVIE'S RANGES REORDERED, or one moved between movies: their
+            sounds follow. */
+        if (node.hasType ("Range"))
+            for (const auto& movie : { oldParent, newParent })
+                if (movie.hasType ("Video"))
+                    keepSoundsAfter (movie, "startOffset");
 
         return EditResult::succeeded (id);
     }

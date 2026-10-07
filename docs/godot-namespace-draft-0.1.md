@@ -21032,6 +21032,22 @@ decision in the implementer's words; the rest is marked (proposed).
   rows are its own again. A movie deleted leaves its sound's mark naming nothing, which is a sound
   detached; undoing the delete brings the movie back and the lock with it.
 
+- **WM - A dual cue, in the window** (author): *"Maybe show as a 'dual cue' as in two line one for video
+  properties and the other for audio properties. Reference, range, loop are shared. Most of the rest
+  is specific to the type of cue."* A movie and the sound locked to it are drawn as one cue of two
+  lines, the picture's and the sound's; what they share - the reference, the Ranges and their passes -
+  is shown once, and each line has its own rows. Underneath they stay two cues and the lock (WJ, WL):
+  the window draws the pair, the document does not change shape. (proposed) The engine already keeps
+  the sound off the standby's path and out of a group's members, so the GO on the pair is the movie's.
+- **Fire together** (the author's pick, 2026-10-07): the Runner fires the sound itself, no group
+  around them. Built (F.5): a movie on standby arms its locked sounds through `audio.arm`, as a sound's
+  own standby does, and the pointer leaving keeps them while it stands on the movie; the movie's GO
+  takes each as its child in the same tick - adopted, or made under an identifier drawn from the movie
+  run's and the cue's so a replay makes the same - and launches it at the horizon the picture comes up
+  at. A movie stopped, killed or ended ends its sounds with it (`run.stop` or `run.kill` records); Esc
+  fades them as it fades every sound; Doh! takes them back with the GO they share. A locked sound fired
+  by name plays alone.
+
 ### 37.6 Stages for WE-WK
 
 - **F.0 - WE, the DCA on opacity**: built, `951b9f8`.

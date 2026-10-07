@@ -294,6 +294,14 @@ namespace wfg
             mounted write reach no door that says it. */
         inline constexpr const char* locked          = "locked";
 
+        /*  A SOUND LOCKED TO ITS MOVIE (namespace draft 37.5, WJ, WL) was asked
+            to change what it shares with the movie - its start offset, its
+            speed, its Ranges. The movie leads: those are copied from it in the
+            same edit as every change to it, so a change made on the sound would
+            be undone by the next one made to the movie. The remedy is to edit
+            the movie, or to detach the sound (clear its `lockedTo`). */
+        inline constexpr const char* lockedToMovie   = "locked-to-movie";
+
         /*  THE STACK IS EMPTY, and that is not the same fact as the show being
             unedited: a `document.revert`, a `document.recover` or a bundle load
             clears the history without clearing the show, and an edit that wrote

@@ -155,12 +155,42 @@ namespace wfg::cue
             <Persistent> section, a route, a range, a trigger - which is why
             those are never entered by anything below: they are not stops, so
             nothing recurses into them. */
+        /*  A SOUND LOCKED TO ITS MOVIE (namespace draft 37.5, WJ): the movie's
+            GO fires it, so it is no place for the pointer to stand - a GO on it
+            would play it a second time. Locked means naming a video cue that is
+            there; one whose movie has gone is a sound like any other. */
+        juce::ValueTree findUnder (const juce::ValueTree& node, const juce::var& wanted)
+        {
+            if (node[idProperty] == wanted)
+                return node;
+
+            for (const auto& child : node)
+                if (const auto found = findUnder (child, wanted); found.isValid())
+                    return found;
+
+            return {};
+        }
+
+        bool followsAMovie (const juce::ValueTree& cue)
+        {
+            if (! cue.hasType ("Media"))
+                return false;
+
+            const auto movie = cue[juce::Identifier ("lockedTo")];
+
+            if (movie.toString().isEmpty())
+                return false;
+
+            return findUnder (cue.getRoot(), movie).hasType ("Video");
+        }
+
         std::vector<juce::ValueTree> stops (const juce::ValueTree& container)
         {
             std::vector<juce::ValueTree> out;
 
             for (const auto& child : container)
-                if (child.hasProperty (idProperty) && isCueElement (child) && isEnabled (child))
+                if (child.hasProperty (idProperty) && isCueElement (child) && isEnabled (child)
+                      && ! followsAMovie (child))
                     out.push_back (child);
 
             return out;

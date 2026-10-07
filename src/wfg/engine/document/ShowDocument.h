@@ -980,6 +980,26 @@ namespace wfg::doc
             went: the cue comes back, and the operator decides where to stand. */
         juce::UndoManager* historyFor (const Attribute& attribute) noexcept;
 
+        /*  A SOUND LOCKED TO ITS MOVIE (namespace draft 37.5, WJ and WL).
+
+            `followsAMovie`: a media cue whose `lockedTo` names a video cue
+            that is there. `refusedOnAFollower`: an edit to what such a sound
+            shares with its movie - its start offset, its speed, a Range of it -
+            which answers `locked-to-movie`. `keepSoundsWith`: after an edit to
+            what a movie shares, or to a sound's `lockedTo`, every sound locked
+            to that movie is made the movie's again - start offset, speed and
+            Ranges - IN THE SAME TRANSACTION, so one undo takes back both and
+            an undo of either is never asked to reconcile anything.
+
+            A sound's copy of a movie's Range takes an identifier drawn from
+            the two identifiers it joins, never from the random source, so a
+            replay of the log that made the edit makes the same one. */
+        bool followsAMovie (const juce::ValueTree& node) const;
+        bool refusedOnAFollower (const juce::ValueTree& node, std::string_view row) const;
+        void keepSoundsWith (const juce::ValueTree& movie);
+        void keepSoundsAfter (const juce::ValueTree& node, std::string_view row);
+        bool keepingSounds = false;
+
         /*  EVERY IDENTIFIER IN THE TREE, RESERVED AGAIN, after an undo or a
             redo. Undo touches the registry not at all - `removeChild` with a
             manager holds a ref-counted handle on the child and its undo re-adds

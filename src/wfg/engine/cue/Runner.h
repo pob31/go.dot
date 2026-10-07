@@ -2093,6 +2093,24 @@ namespace wfg::cue
         /** The cues a group runs, in order: its enabled children. */
         std::vector<std::string> membersOf (const juce::ValueTree& group) const;
 
+        /*  A MOVIE'S OWN SOUNDS (namespace draft 37.5, WJ): the media cues
+            locked to it, in document order - which its GO fires with it, on
+            the same sample, and its standby arms with it. `followsAMovie`: a
+            media cue whose `lockedTo` names a video cue that is there, which
+            no GO and no group fires on its own. */
+        std::vector<std::string> soundsLockedTo (const std::string& movieCue) const;
+        bool followsAMovie (const juce::ValueTree& cue) const;
+
+        /*  The sounds of a movie run fired with it: adopted when the standby
+            armed them, else made under an identifier drawn from the movie
+            run's and the cue's - so a replay, which re-supplies the movie's,
+            makes the same - and launched in the same tick. */
+        void fireLockedSounds (Engine& engine, std::int64_t tick, const std::string& movieCue,
+                               const std::string& movieRun);
+
+        /*  And ended with it: stopped when it was stopped, killed when it was. */
+        void endLockedSounds (Engine& engine, const std::string& movieRun);
+
         /*  Draws this group run's next round and REPORTS IT, returning what it
             drew so the caller can schedule against it at once.
 

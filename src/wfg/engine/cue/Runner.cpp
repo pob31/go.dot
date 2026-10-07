@@ -788,6 +788,17 @@ namespace wfg::cue
         if (! run.onlyPrepared() || run.cue == standby)
             return false;
 
+        /*  NOR THE SOUND OF THE MOVIE IT STANDS ON, armed with it (namespace
+            draft 37.5, WJ) - nor of the block's first cue, for the same reason. */
+        if (run.parent.empty())
+            if (const auto sound = document.findById (run.cue); followsAMovie (sound))
+            {
+                const auto movie = sound[juce::Identifier ("lockedTo")].toString().toStdString();
+
+                if (movie == standby || (! horizon.empty() && movie == horizon.front()))
+                    return false;
+            }
+
         /*  AT THE TOP OF A LIST, a block or an arm is left once it is not the
             block the pointer is in - the outermost of its groups (§13.6). */
         if (run.parent.empty())
@@ -4382,8 +4393,16 @@ namespace wfg::cue
             job.opacity = std::clamp (numberOf (cue, "opacity") / 100.0, 0.0, 1.0);
             job.fadeInSeconds = std::max (0.0, numberOf (cue, "fadeIn"));
 
+            const auto movieCue = job.movie ? job.cue : std::string {};
+
             std::erase_if (showing, [&runId] (const VideoJob& held) { return held.self == runId; });
             showing.push_back (std::move (job));
+
+            /*  ITS OWN SOUNDS, fired with it in this tick (namespace draft
+                37.5, WJ): launched where it is placed, a horizon ahead. */
+            if (! movieCue.empty())
+                fireLockedSounds (engine, tick, movieCue, runId);
+
             return;
         }
 
@@ -13001,10 +13020,111 @@ namespace wfg::cue
             if (! runsNow (child))
                 continue;
 
+            /*  A SOUND LOCKED TO ITS MOVIE is fired by the movie (37.5, WJ). */
+            if (followsAMovie (child))
+                continue;
+
             out.push_back (id);
         }
 
         return out;
+    }
+
+    std::vector<std::string> Runner::soundsLockedTo (const std::string& movieCue) const
+    {
+        std::vector<std::string> out;
+
+        if (movieCue.empty())
+            return out;
+
+        const juce::Identifier lockedTo { "lockedTo" };
+        const juce::String wanted (movieCue);
+
+        std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& node)
+        {
+            if (node.hasType ("Media") && node[lockedTo].toString() == wanted && runsNow (node))
+                out.push_back (node[idProperty].toString().toStdString());
+
+            for (const auto& child : node)
+                visit (child);
+        };
+
+        if (const auto showLists = document.root().getChildWithName ("Lists"); showLists.isValid())
+            visit (showLists);
+
+        return out;
+    }
+
+    bool Runner::followsAMovie (const juce::ValueTree& cue) const
+    {
+        if (! cue.hasType ("Media"))
+            return false;
+
+        const auto movie = cue[juce::Identifier ("lockedTo")].toString().toStdString();
+        return ! movie.empty() && document.findById (movie).hasType ("Video");
+    }
+
+    void Runner::fireLockedSounds (Engine& engine, std::int64_t tick, const std::string& movieCue,
+                                   const std::string& movieRun)
+    {
+        for (const auto& soundCue : soundsLockedTo (movieCue))
+        {
+            std::string id;
+
+            /*  ARMED BY THE STANDBY, or under a block the movie is in: taken. */
+            if (const auto* live = runs.liveRunOf (soundCue))
+            {
+                const auto adoptable = live->state == runState::armed && ! live->launchRequested
+                                    && ! claimedByAJob (live->id)
+                                    && (live->parent.empty() || inAncestryOf (live->parent, movieRun));
+
+                /*  PLAYING ALREADY, fired by name: left as it is. */
+                if (! adoptable)
+                    continue;
+            }
+            else
+            {
+                /*  MADE NOW: FNV-1a over the two identifiers, the same on
+                    every machine, salted until free. */
+                const auto joined = movieRun + "/" + soundCue;
+
+                for (std::uint64_t salt = 0; salt < 64 && id.empty(); ++salt)
+                {
+                    std::uint64_t hash = 14695981039346656037ull ^ (salt * 0x9e3779b97f4a7c15ull);
+
+                    for (const auto c : joined)
+                    {
+                        hash ^= static_cast<std::uint8_t> (c);
+                        hash *= 1099511628211ull;
+                    }
+
+                    if (const auto candidate = doc::Id::encode (hash);
+                        runs.find (candidate) == nullptr && ids.reserve (candidate))
+                        id = candidate;
+                }
+
+                if (id.empty())
+                    continue;
+            }
+
+            if (const auto made = spawnChild (engine, movieRun, soundCue, id, tick); ! made.empty())
+                launchRun (engine, tick, made);
+        }
+    }
+
+    void Runner::endLockedSounds (Engine& engine, const std::string& movieRun)
+    {
+        const auto* movie = runs.find (movieRun);
+
+        if (movie == nullptr)
+            return;
+
+        const auto graceful = ! movie->killed && ! movie->skipFooter;
+
+        for (const auto* child : runs.childrenOf (movieRun))
+            if (child != nullptr && ! child->isFinished() && child->state != runState::stopping
+                  && followsAMovie (document.findById (child->cue)))
+                endMember (engine, *child, graceful);
     }
 
     std::string Runner::spawnChild (Engine& engine, const std::string& parentRun,
@@ -15099,9 +15219,19 @@ namespace wfg::cue
             would fill the log with a refusal about something nobody did wrong. */
         if (element == "Media" || element == "Mic")
         {
+            /*  A SOUND LOCKED TO ITS MOVIE is the movie's to arm. */
+            if (followsAMovie (cue))
+                return {};
+
             const auto id = cue[idProperty].toString().toStdString();
             return id.empty() ? std::vector<std::string> {} : std::vector<std::string> { id };
         }
+
+        /*  A MOVIE MAKES ITS OWN SOUNDS READY (namespace draft 37.5, WJ), so
+            the GO that brings the picture up starts them on its sample. */
+        if (element == "Video")
+            return textOf (cue, "source") == "movie" ? soundsLockedTo (cue[idProperty].toString().toStdString())
+                                                     : std::vector<std::string> {};
 
         if (element != "Group")
             return {};
@@ -15431,8 +15561,18 @@ namespace wfg::cue
                     videoSink->remove (job.self, -1);
 
                 job.removed = true;
+
+                if (job.movie)
+                    endLockedSounds (engine, job.self);
+
                 continue;
             }
+
+            /*  STOPPING - a stop cue, a hard stop - and its sounds with it, on
+                the tick the movie was asked. Esc's own fade reaches them as it
+                reaches every sound. */
+            if (job.movie && run->state == runState::stopping && job.fadeOutTicks < 0 && job.endsAtTick < 0)
+                endLockedSounds (engine, job.self);
 
             /*  TAKEN BACK BEFORE IT CAME UP - Doh! in the tick it was fired -
                 and never seen at all. */
