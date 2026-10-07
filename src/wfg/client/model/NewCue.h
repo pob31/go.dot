@@ -51,6 +51,14 @@ namespace wfg::client::model
         `cue.create` takes; the test holds the two lists together. */
     const std::vector<std::string>& cueKinds();
 
+    /*  THE WORD A PERSON READS FOR A KIND (namespace draft §39, WZ, the
+        author's pick on 2026-10-07): "audio" for `media`, which since the
+        movies arrived makes only sounds - a movie is a `video` cue. The kind
+        stays `media` in the show file and the API, so saved shows and scripts
+        keep working; only what the window says changes. Every other kind is
+        its own word. */
+    std::string kindWord (const std::string& kind);
+
     /*  The member position a new cue takes to land AFTER `cueId` in the
         order given, or -1 - "the end" - when the cue is not among those
         members, which is what a picked cue that has just been deleted or a

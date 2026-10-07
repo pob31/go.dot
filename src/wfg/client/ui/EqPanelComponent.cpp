@@ -377,8 +377,22 @@ namespace wfg::client::ui
 
         for (auto& box : boxes)
         {
+            /*  Never while being typed in - unless the master dial is turning
+                this very number and nothing has been typed (§39, as the
+                inspector does): the touch that opened it put it on the dial. */
             if (box->value.isBeingEdited())
-                continue;
+            {
+                const auto* editor = box->value.getCurrentTextEditor();
+                const auto said = juce::String (numberText (box->current(), box->decimals));
+                const auto onTheDial = ! dialed.empty() && ! reading.subject.objectId.empty()
+                                         && model::eqAddress (reading.subject.objectId, box->row) == dialed;
+
+                if (editor == nullptr || ! onTheDial || editor->getText() != box->value.getText()
+                    || said == box->value.getText())
+                    continue;
+
+                box->value.hideEditor (true);
+            }
 
             box->value.setText (juce::String (numberText (box->current(), box->decimals)),
                                 juce::dontSendNotification);

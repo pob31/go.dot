@@ -16,6 +16,8 @@
 
 #include <wfg/client/model/Foot.h>
 
+#include <wfg/client/model/NewCue.h>
+
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -360,8 +362,23 @@ namespace wfg::client::model
                 with three different answers. */
             const auto movie = out.cueKind == "video" && at (cue + "source") == "movie";
 
+            /*  AND A CUE WITH NO SOUND TO DRAW SAYS PLAINLY THAT THE PANEL
+                IS NOT FOR IT (author, 2026-10-07: "make it plain obvious that
+                for files that don't have anything to show in the foot panel
+                this is not relevant to them ... Check of notes, fades and such
+                don't have the same notice") - by its kind, and never in words
+                that sound like something still being worked on. */
             if (out.cueKind != "media" && ! movie)
-                out.notice = "Only a media cue or a movie has a waveform and ranges.";
+            {
+                const auto source = out.cueKind == "video" ? at (cue + "source") : std::string {};
+                const auto what = ! source.empty() ? source : out.cueKind.empty() ? std::string ("cue")
+                                                                                   : kindWord (out.cueKind);
+                const auto article = ! what.empty() && std::string_view ("aeiou").find (what[0]) != std::string_view::npos
+                                       ? "an " : "a ";
+
+                out.notice = std::string ("Nothing to show here for ") + article + what
+                           + ": only an audio cue or a movie has a waveform and ranges.";
+            }
             else if (out.file.empty())
                 out.notice = "This cue names no file yet.";
             else if (! (out.fileLength > 0.0))
@@ -424,7 +441,7 @@ namespace wfg::client::model
                 out.cueLevels.push_back (osc::parseDouble (at ("/godot/cue/" + id + "/level")).value_or (0.0));
 
             if (out.cueKind != "media" && out.cueKind != "mic")
-                out.notice = "Only a media or a mic cue has send levels.";
+                out.notice = "Only an audio or a mic cue has send levels.";
             else if (out.sends.empty())
                 out.notice = "This show declares no mix channels yet - Show, Audio settings, "
                              "Outputs, add a mix channel.";

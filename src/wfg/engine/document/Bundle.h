@@ -208,6 +208,18 @@ namespace wfg::doc
             for either reason hides nothing below it. */
         juce::File offeredRecovery (const juce::File& folder);
 
+        /*  EVERY OFFER THAT HOLDS THE SHOW ALREADY IN THE FOLDER GOES (namespace
+            draft §39, the author's niggle of 2026-10-07: "a recover lost data
+            even when the file was saved right before quitting"). Offered by
+            `offeredRecovery`'s rule, newest first, and deleted while its
+            show.xml is byte for byte `savedShow` - the show the session opened,
+            as `snapshotOf` writes it - so an afternoon that came back to the
+            saved show is not offered as lost work, and the first one that
+            differs stops the walk and is offered as before. Its state.xml is
+            not compared: a standby is where the operator was, not work. An
+            empty `savedShow` deletes nothing. Returns how many went. */
+        int discardRecoveriesHolding (const juce::File& folder, const std::string& savedShow);
+
         /*  Every `recovery.previous.N/` in the bundle that is an offer by
             `offeredRecovery`'s rule, lowest N first. Folders only: a file that
             happens to carry the name is nothing anybody moved aside. Since H6b

@@ -138,6 +138,90 @@ namespace wfg::surface
         };
     }
 
+    std::map<std::string, DcaContents> dcaContents (const tree::TreeSnapshot& snapshot)
+    {
+        std::map<std::string, DcaContents> out;
+        const auto declared = wordsOf (textOf (snapshot, "/godot/dca/order"));
+
+        if (declared.empty())
+            return out;
+
+        //  A cue's own kind, and a group's every member's, under one DCA.
+        const auto markCue = [&snapshot, &out] (auto&& self, const std::string& cueId, const std::string& dca,
+                                                int depth) -> void
+        {
+            if (depth > 64)
+                return;
+
+            const auto base = "/godot/cue/" + cueId + "/";
+            const auto kind = textOf (snapshot, base + "kind");
+
+            if (kind == "media" || kind == "mic")
+                out[dca].sound = true;
+            else if (kind == "video")
+                out[dca].picture = true;
+            else if (kind == "group")
+                for (const auto* order : { "order", "headerOrder", "footerOrder" })
+                    for (const auto& member : wordsOf (textOf (snapshot, base + order)))
+                        self (self, member, dca, depth + 1);
+        };
+
+        for (const auto* node : snapshot.all())
+        {
+            const auto& address = node->address;
+
+            if (address.size() < 5 || address.compare (address.size() - 4, 4, "/dca") != 0
+                  || node->values.size() != 1 || ! node->values.front().isString())
+                continue;
+
+            const auto& dca = node->values.front().getString();
+
+            if (dca.empty())
+                continue;
+
+            const auto owner = std::string_view (address).substr (0, address.size() - 4);
+
+            if (owner.rfind ("/godot/cue/", 0) == 0)
+            {
+                const auto cueId = std::string (owner.substr (11));
+
+                if (cueId.find ('/') == std::string::npos && textOf (snapshot, "/godot/cue/" + cueId + "/kind") != "fade")
+                    markCue (markCue, cueId, dca, 0);
+            }
+            else if (owner.rfind ("/godot/bus/", 0) == 0 && owner.find ('/', 11) == std::string_view::npos)
+            {
+                out[dca].sound = true;
+            }
+            else if (owner.rfind ("/godot/canvas/", 0) == 0 && owner.find ('/', 14) == std::string_view::npos)
+            {
+                out[dca].picture = true;
+            }
+        }
+
+        /*  UP THE NESTING: a DCA inside another is part of what the outer one
+            rides. Walked from each DCA up its chain, as far as there are DCAs. */
+        auto handed = out;
+
+        for (const auto& [dca, contents] : out)
+        {
+            auto above = textOf (snapshot, "/godot/dca/" + dca + "/dca");
+
+            for (std::size_t steps = 0; steps < declared.size() && ! above.empty() && above != dca; ++steps)
+            {
+                handed[above].sound = handed[above].sound || contents.sound;
+                handed[above].picture = handed[above].picture || contents.picture;
+                above = textOf (snapshot, "/godot/dca/" + above + "/dca");
+            }
+        }
+
+        return handed;
+    }
+
+    std::string_view contentLetters (const DcaContents& contents) noexcept
+    {
+        return contents.sound && contents.picture ? "AV" : contents.sound ? "A" : contents.picture ? "V" : "";
+    }
+
     std::map<std::string, DcaLight> dcaLights (const tree::TreeSnapshot& snapshot)
     {
         //  THE NESTING: each DCA and the one it sits inside.

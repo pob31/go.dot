@@ -48,6 +48,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace wfg::tree { class TreeSnapshot; }
 
@@ -71,4 +72,25 @@ namespace wfg::surface
     /*  The light as it is shown when nothing sounds: the colour at its picture
         brightness. With a sounding member the caller moves it by the envelope. */
     Rgb restingLight (const DcaLight& light) noexcept;
+
+    /*  WHAT IS ASSIGNED TO EACH DCA, playing or not (namespace draft §39, the
+        author's niggle of 2026-10-07: "On the D700 screen for the DCA faders,
+        could we add A, V and AV when only audio, video contents and both
+        respectively are assigned to it? No A, V or AV means nothing is
+        assigned to it"). Sound: an audio or a mic cue marked with the DCA, or
+        inside a group so marked, and an output the DCA rides. Picture: a
+        video cue so marked or so placed, and a canvas the DCA rides. A DCA
+        inside another hands its contents up. A fade's `dca` is the DCA it
+        moves, not one it belongs to, and counts for nothing. Reads the whole
+        tree, so the caller keeps the answer until the show changes. */
+    struct DcaContents
+    {
+        bool sound = false;
+        bool picture = false;
+    };
+
+    std::map<std::string, DcaContents> dcaContents (const tree::TreeSnapshot& snapshot);
+
+    /*  The letters a strip's screen shows for them: "A", "V", "AV", or nothing. */
+    std::string_view contentLetters (const DcaContents& contents) noexcept;
 }

@@ -1656,3 +1656,138 @@ TEST_CASE ("wfg replay refuses a session that recovered: up front for a --recove
         CHECK (boundary.replayable == 3u);
     }
 }
+
+//==============================================================================
+/*  §39: A SHOW WHOSE EDITS CAME BACK TO THE SAVED BYTES IS NO LOST WORK (the
+    author's niggle of 2026-10-07: "a recover lost data even when the file was
+    saved right before quitting"). His log had it: a cue pasted, moved and
+    deleted after the save, the window closed, and the next open offered a
+    recovery/show.xml byte for byte the show.xml beside it. */
+TEST_CASE ("writer: an autosave of a show back to its saved bytes saves instead - the dot goes out and recovery/ with it (§39)")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.savedShow = Bundle::snapshotOf (document).show;
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    const auto original = document.getAttribute (houseToHalfName).value_or ("");
+    REQUIRE_FALSE (original.empty());
+
+    //  An edit, autosaved: recovery/ holds it, as ever.
+    REQUIRE (document.setAttribute (houseToHalfName, "Changed").ok);
+    REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+    wiring.settleNow();
+    CHECK (nameIn (Bundle::recoveryFolder (temp.folder)) == "Changed");
+
+    //  Put back by hand: the history moved twice, the bytes are the saved ones.
+    REQUIRE (document.setAttribute (houseToHalfName, original).ok);
+    REQUIRE (isDirty (document, session));
+
+    REQUIRE (wiring.invoke ("document.autosave", {}, 200).applied);
+    wiring.settleNow();
+
+    CHECK_FALSE (isDirty (document, session));
+    CHECK_FALSE (Bundle::recoveryFolder (temp.folder).exists());
+    CHECK (nameInBundle (temp.folder) == original);
+    CHECK (session.savedShow == Bundle::snapshotOf (document).show);
+
+    //  And a real change after it is autosaved as before.
+    REQUIRE (document.setAttribute (houseToHalfName, "Changed again").ok);
+    REQUIRE (wiring.invoke ("document.autosave", {}, 400).applied);
+    wiring.settleNow();
+    CHECK (isDirty (document, session));
+    CHECK (nameIn (Bundle::recoveryFolder (temp.folder)) == "Changed again");
+}
+
+TEST_CASE ("writer: under the lock a show back to its saved bytes is autosaved as before, since no Save is offered there (§39)")
+{
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.savedShow = Bundle::snapshotOf (document).show;
+    Wiring wiring { document, session, DocumentWriter::Mode::synchronous };
+
+    const auto original = document.getAttribute (houseToHalfName).value_or ("");
+    REQUIRE (document.setAttribute (houseToHalfName, "Changed").ok);
+    REQUIRE (document.setAttribute (houseToHalfName, original).ok);
+    REQUIRE (document.setAttribute ("/godot/document/locked", "true").ok);
+
+    //  The lock is a show change too, so the bytes now differ only by it - put it in the saved copy.
+    session.savedShow = Bundle::snapshotOf (document).show;
+
+    REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+    wiring.settleNow();
+
+    CHECK (isDirty (document, session));
+    CHECK (Bundle::hasRecovery (temp.folder));
+}
+
+TEST_CASE ("writer: the clean exit counts a show back to its saved bytes as saved, and leaves no recovery/ to offer (§39)")
+{
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto savedBytes = readBytes (Bundle::showFile (temp.folder));
+
+    {
+        ShowDocument document;
+        REQUIRE (Bundle::open (temp.folder, document).ok);
+
+        DocumentSession session { temp.folder, document.showRevision() };
+        session.savedShow = Bundle::snapshotOf (document).show;
+        Wiring wiring { document, session, DocumentWriter::Mode::background };
+        REQUIRE (wiring.writer.start());
+
+        const auto original = document.getAttribute (houseToHalfName).value_or ("");
+        REQUIRE (document.setAttribute (houseToHalfName, "Changed").ok);
+        REQUIRE (wiring.invoke ("document.autosave", {}, 10).applied);
+
+        //  Put back, and closed before the next autosave could turn into a save.
+        REQUIRE (document.setAttribute (houseToHalfName, original).ok);
+        finishSession (document, session, wiring.writer);
+
+        CHECK (isDirty (document, session));
+        CHECK_FALSE (Bundle::recoveryFolder (temp.folder).exists());
+    }
+
+    //  The show on the disk is the one that was opened, untouched.
+    CHECK (readBytes (Bundle::showFile (temp.folder)) == savedBytes);
+}
+
+TEST_CASE ("bundle: an offer holding the saved show is discarded at open, newest first, and the first that differs is still offered (§39)")
+{
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+    const auto saved = Bundle::snapshotOf (document).show;
+
+    //  An older afternoon that is real work, moved aside...
+    abandonAnAfternoon (temp.folder, "Real work");
+    REQUIRE (Bundle::recoveryFolder (temp.folder).moveFileTo (temp.folder.getChildFile ("recovery.previous.1")));
+
+    //  ...and a newer one that is the saved show itself.
+    writeBytes (Bundle::recoveryShowFile (temp.folder), saved);
+    REQUIRE (Bundle::offeredRecovery (temp.folder) == Bundle::recoveryFolder (temp.folder));
+
+    CHECK (Bundle::discardRecoveriesHolding (temp.folder, saved) == 1);
+    CHECK_FALSE (Bundle::recoveryFolder (temp.folder).exists());
+    CHECK (Bundle::offeredRecovery (temp.folder) == temp.folder.getChildFile ("recovery.previous.1"));
+    CHECK (nameIn (Bundle::offeredRecovery (temp.folder)) == "Real work");
+
+    //  Nothing known about the saved show deletes nothing.
+    CHECK (Bundle::discardRecoveriesHolding (temp.folder, {}) == 0);
+    CHECK (Bundle::offeredRecovery (temp.folder) != juce::File());
+}

@@ -110,6 +110,16 @@ namespace wfg::client::model
                + (cue.name.empty() ? cue.id : cue.name) + " stays where it is";
     }
 
+    bool samplerTakes (const Row& cue)
+    {
+        return cue.kind == "media" && cue.lockedTo.empty() && ! cue.isGroup;
+    }
+
+    std::string notForASampler (const Row& cue)
+    {
+        return "a sampler plays sounds only, so " + (cue.name.empty() ? cue.id : cue.name) + " stays where it is";
+    }
+
     std::string containerOf (const Row& row)
     {
         return row.section == Section::member || row.sectionId.empty() ? row.parent : row.sectionId;
@@ -249,11 +259,24 @@ namespace wfg::client::model
 
             if (over.isGroup)
             {
+                if (over.mode == "sampler" && ! samplerTakes (dragged) && dragged.parent != over.id)
+                {
+                    drop.refused = notForASampler (dragged);
+                    return drop;
+                }
+
                 drop.kind = DropKind::into;
                 drop.container = over.id;
                 drop.index = -1;
                 return drop;
             }
+        }
+
+        //  Nor after one of a sampler's members, unless it is one already (§39).
+        if (over.memberOfSampler && ! samplerTakes (dragged) && containerOf (dragged) != over.parent)
+        {
+            drop.refused = notForASampler (dragged);
+            return drop;
         }
 
         /*  AFTER, in the row's own container: a member's parent, or the

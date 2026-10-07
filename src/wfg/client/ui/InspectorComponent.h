@@ -73,6 +73,10 @@ namespace wfg::client::ui
                 same `node.set`, which is what keeps §14.16's third rule. */
             std::function<void (const std::string& cueId)> chooseFile;
 
+            /*  THE MOVIE'S WAY TO HAP (§39): the button beside its file, pressed
+                - the window answers with the Show menu's own list, under it. */
+            std::function<void (const std::string& cueId, juce::Component& under)> convertToHap;
+
             /*  A FIELD THAT NAMES A CUE, committed as typed: a number, a name
                 or an identifier. The window resolves it to the identifier the
                 document stores and says so when it cannot. Every picked cue's
@@ -111,6 +115,18 @@ namespace wfg::client::ui
             line, never a colour alone (§4.8). Empty marks nothing. */
         void showDial (const std::string& address);
 
+        /*  WHETHER THE FILE ROW OFFERS "-> HAP", and in what words: a movie
+            played as a preview, or one converting ("HAP 42 %"). The window
+            works it out; the panel only draws it (§39). */
+        struct HapOffer
+        {
+            bool shown = false;
+            juce::String words { juce::CharPointer_UTF8 ("\xe2\x86\x92 HAP") };
+            juce::String tooltip;
+        };
+
+        void showHap (const HapOffer& offer);
+
         void paint (juce::Graphics& g) override;
         void resized() override;
         void mouseDown (const juce::MouseEvent& event) override;
@@ -130,6 +146,7 @@ namespace wfg::client::ui
         juce::String nameOf (const model::Field& field) const;
         void markDial();
         std::string dialed;
+        HapOffer hapOffer;
 
         void rebuild (const model::Inspection& inspection);
         void layOut();

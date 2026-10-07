@@ -329,7 +329,7 @@ namespace wfg::client::ui
         goButton.getProperties().set (Look::caption(), juce::String (last.goLine()));
         goButton.setTooltip (running ? "Space: fires the standby cue"
                                      : "Space: fires the standby cue. The audio is not running, "
-                                       "so a media cue will not be heard - Show settings, Audio.");
+                                       "so an audio cue will not be heard - Show settings, Audio.");
         goButton.repaint();
     }
 

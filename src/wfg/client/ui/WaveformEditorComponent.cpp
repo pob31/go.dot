@@ -897,6 +897,14 @@ namespace wfg::client::ui
 
         if (drawn.empty())
         {
+            /*  A MOVIE'S PICTURE HAS NO WAVEFORM, and is not waiting for one
+                (author, 2026-10-07: "make it plain obvious that for files that
+                don't have anything to show ... Empty is fine or something that
+                doesn't suggest that it's being processed"). Its ranges and its
+                ruler are what the panel is for; the bar stays empty. */
+            if (reading.cueKind != "media")
+                return;
+
             /*  NOT ANALYSED YET is a different thing from silence, and the
                 engine's own answer for it is no shape at all (§3.30). */
             g.setColour (Look::colour (theme, "ink-off"));

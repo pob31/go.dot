@@ -292,7 +292,7 @@ namespace wfg::client::model
 
     std::string CueTemplateRow::kindWord() const
     {
-        return kind == "media" ? std::string ("media cue") : kind.empty() ? std::string ("cue") : kind;
+        return kind == "media" ? std::string ("audio cue") : kind.empty() ? std::string ("cue") : kind;
     }
 
     std::string CueTemplateRow::carriesWords() const
@@ -399,7 +399,7 @@ namespace wfg::client::model
     std::vector<MenuLine> mediaMenu (const std::vector<Choice>& choices, const std::string& destination)
     {
         std::vector<MenuLine> lines;
-        lines.push_back ({ MenuLine::Kind::note, "New media cues, " + destination, -1, false });
+        lines.push_back ({ MenuLine::Kind::note, "New audio cues, " + destination, -1, false });
         appendChoices (lines, choices, true);
 
         if (choices.size() <= 1)

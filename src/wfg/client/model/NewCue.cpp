@@ -32,6 +32,11 @@ namespace wfg::client::model
         return kinds;
     }
 
+    std::string kindWord (const std::string& kind)
+    {
+        return kind == "media" ? std::string ("audio") : kind;
+    }
+
     int positionAfter (const std::string& orderText, const std::string& cueId)
     {
         if (cueId.empty())

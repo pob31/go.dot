@@ -134,6 +134,30 @@ namespace wfg::video
        #endif
     }
 
+    bool coverDisplay (void* nativeWindow, const DisplayInfo& display)
+    {
+       #if defined (_WIN32)
+        auto* window = static_cast<HWND> (nativeWindow);
+
+        if (window == nullptr || display.physicalWidth <= 0 || display.physicalHeight <= 0)
+            return false;
+
+        RECT now {};
+
+        if (GetWindowRect (window, &now) && now.left == display.physicalX && now.top == display.physicalY
+              && now.right - now.left == display.physicalWidth && now.bottom - now.top == display.physicalHeight)
+            return false;
+
+        SetWindowPos (window, HWND_TOPMOST, display.physicalX, display.physicalY,
+                      display.physicalWidth, display.physicalHeight,
+                      SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        return true;
+       #else
+        juce::ignoreUnused (nativeWindow, display);
+        return false;
+       #endif
+    }
+
     std::vector<DisplayInfo> listDisplays()
     {
         std::vector<DisplayInfo> out;
@@ -160,6 +184,12 @@ namespace wfg::video
             info.width = bounds.getWidth();
             info.height = bounds.getHeight();
             info.isMain = display.isMain;
+
+            const auto physical = display.physicalBounds.toNearestInt();
+            info.physicalX = physical.getX();
+            info.physicalY = physical.getY();
+            info.physicalWidth = physical.getWidth();
+            info.physicalHeight = physical.getHeight();
 
             if (display.verticalFrequencyHz.has_value() && *display.verticalFrequencyHz > 1.0)
                 info.refreshHz = static_cast<float> (*display.verticalFrequencyHz);

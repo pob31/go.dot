@@ -104,6 +104,11 @@ namespace wfg::client::ui
         return juce::roundToInt (parts.side + parts.gap + parts.wordWidth + parts.markGap + parts.markWidth + 8.0f);
     }
 
+    int Look::getTabButtonBestWidth (juce::TabBarButton& button, int tabDepth)
+    {
+        return juce::LookAndFeel_V4::getTabButtonBestWidth (button, tabDepth) + tabDepth * 2 / 3;
+    }
+
     juce::Font Look::getTextButtonFont (juce::TextButton& button, int buttonHeight)
     {
         auto font = LookAndFeel_V4::getTextButtonFont (button, buttonHeight);

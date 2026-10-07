@@ -98,6 +98,18 @@ namespace wfg::doc
             costs somebody a save, and a false "saved" costs them a show. */
         std::uint64_t savedRevision = 0;
 
+        /*  THE SHOW'S BYTES AT `savedRevision`, as `Bundle::snapshotOf` writes
+            them: what the folder's show.xml holds, kept so that a show whose
+            history moved and whose contents came back - a cue pasted, moved
+            and deleted again - can be told from one that changed (namespace
+            draft §39, the author's niggle of 2026-10-07: a recovery offered at
+            the next open that was the very show he had saved). Stamped beside
+            `savedRevision` and by the same events; empty is "not known", which
+            compares equal to no show. `isDirty` is unchanged - it still
+            answers "is the file this document's history"; the autosave and the
+            clean exit ask this one. */
+        std::string savedShow {};
+
         /*  `showRevision()` as it stood when `recovery/show.xml` was last
             written - the autosave's own equivalent of the field above, and what
             stops a dirty show that nobody is touching from writing the same
@@ -273,6 +285,16 @@ namespace wfg::doc
     inline bool isDirty (const ShowDocument& document, const DocumentSession& session) noexcept
     {
         return document.showRevision() != session.savedRevision;
+    }
+
+    /*  WHETHER THESE SHOW BYTES ARE THE ONES THE FOLDER HOLDS (§39): a dirty
+        show whose edits cancelled out. Asked with a snapshot already taken -
+        by the autosave, which serialises anyway, and by the clean exit - and
+        never per tick, because a serialisation is a millisecond on a large
+        show and the tick is the GO path's. */
+    inline bool showIsAsSaved (const DocumentSession& session, const std::string& showBytes) noexcept
+    {
+        return ! session.savedShow.empty() && showBytes == session.savedShow;
     }
 
     /*  WHETHER THE ENGINE SHOULD DECIDE, ON NOBODY'S BEHALF, TO WRITE THE SHOW

@@ -467,6 +467,10 @@ namespace wfg::doc
                 done.landed = written.ok;
                 done.problem = describe (written);
 
+                //  The bytes the folder now holds, for `savedShow` (§39).
+                if (written.ok)
+                    done.show = job.snapshot.show;
+
                 /*  AND THIS SESSION'S `recovery/` GOES, AFTER THE SAVE'S OWN
                     BYTES AND BEFORE ANYTHING QUEUED BEHIND IT, because the work
                     has become the show (§14.10). Here and not on the tick
@@ -664,6 +668,7 @@ namespace wfg::doc
                 {
                     case WriteJob::Kind::save:
                         session.savedRevision = done.revision;
+                        session.savedShow = std::move (done.show);
 
                         if (done.recoveryCleared)
                             session.autosavedRevision = 0;
@@ -711,8 +716,14 @@ namespace wfg::doc
         writer.stop();
         settle (session, writer);
 
-        if (! isDirty (document, session)
-            && session.offeredRecovery != Bundle::recoveryFolder (session.folder))
+        /*  A dirty show whose edits came back to the saved bytes is clean for
+            this purpose (§39): `recovery/` would hold the show already in the
+            folder, and the next open would offer it as lost work. One
+            serialisation, after the clock has stopped. */
+        const auto asSaved = ! isDirty (document, session)
+                               || showIsAsSaved (session, Bundle::snapshotOf (document).show);
+
+        if (asSaved && session.offeredRecovery != Bundle::recoveryFolder (session.folder))
             Bundle::discardRecovery (session.folder);
     }
 }

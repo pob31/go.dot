@@ -110,6 +110,7 @@
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/DocumentWriter.h>
+#include <wfg/engine/surface/DcaColour.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/tree/Mount.h>
@@ -3331,7 +3332,7 @@ TEST_CASE ("client: cue templates are offered in the Add lists, and a cue is bor
     REQUIRE (templates.size() == 1);
     CHECK (templates[0].name == "Voice");
     CHECK (templates[0].kind == "media");
-    CHECK (templates[0].kindWord() == "media cue");
+    CHECK (templates[0].kindWord() == "audio cue");
     CHECK (templates[0].carriesWords().find ("level") != std::string::npos);
 
     choices = model::mediaChoices (*snapshot);
@@ -4272,7 +4273,7 @@ TEST_CASE ("client: the foot panel says which subject it is on, and follows a pi
         analysed are three situations with three different answers. */
     const auto onGroup = model::readFoot (*snapshot,
                                           { model::Subject::Kind::waveform, "P4GRP001" });
-    CHECK (onGroup.notice.find ("media cue") != std::string::npos);
+    CHECK (onGroup.notice.find ("audio cue") != std::string::npos);
 
     //  A shut panel reads nothing at all.
     CHECK (model::readFoot (*snapshot, shut).cueName.empty());
@@ -5090,7 +5091,7 @@ TEST_CASE ("client: the lanes' refusals read as sentences under the recorder's n
     CHECK (reading.errorLine() == "Autom. not armed: the show is locked");
 
     reading.lastError = "5411 26 window bad-value lane.arm";
-    CHECK (reading.errorLine() == "Autom. records a media cue's level and sends only");
+    CHECK (reading.errorLine() == "Autom. records an audio cue's level and sends only");
 
     reading.lastError = "5411 26 window busy lane.free";
     CHECK (reading.errorLine() == "Autom.: a pass is running - stop it first");
@@ -8518,7 +8519,7 @@ TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and
         const auto plain = memo.publish (1);
         const auto none = model::readFx (*plain, "B3N8R5TW");
         CHECK_FALSE (none.present);
-        CHECK (none.notice.find ("media") != std::string::npos);
+        CHECK (none.notice.find ("audio") != std::string::npos);
     }
 
     SUBCASE ("and a show with no set says so, with the strips empty")
@@ -8684,7 +8685,7 @@ TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, a
         const auto none = model::readEq (*plain, "B3N8R5TW");
 
         CHECK_FALSE (none.present);
-        CHECK (none.notice.find ("media") != std::string::npos);
+        CHECK (none.notice.find ("audio") != std::string::npos);
     }
 }
 
@@ -10098,4 +10099,172 @@ TEST_CASE ("client: a fade's mixer has a strip per slider, lit where the fade mo
     CHECK (model::fractionForSpeed (1.0) == doctest::Approx (0.5).epsilon (0.01));
     CHECK (model::speedForFraction (1.0) == doctest::Approx (20.0));
     CHECK (model::speedForFraction (model::fractionForSpeed (0.5)) == doctest::Approx (0.5));
+}
+
+//==============================================================================
+/*  THE NIGGLES OF 2026-10-07 (namespace draft §39). */
+TEST_CASE ("client: a sampler group takes sounds as members and nothing else - not a picture, not a locked sound - and its header stays free (§39)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto pads = rig.document.createCue (list, 0, "group", "Pads");
+    REQUIRE (pads.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + pads.id + "/mode", "sampler").ok);
+
+    //  A sound is a member; a picture, a memo, a group and a mic are not.
+    CHECK (rig.document.createCue (pads.id, 0, "media", "Thunder").ok);
+    CHECK_FALSE (rig.document.createCue (pads.id, 0, "video", "Moon").ok);
+    CHECK_FALSE (rig.document.createCue (pads.id, 0, "memo", "Note").ok);
+    CHECK_FALSE (rig.document.createCue (pads.id, 0, "group", "Inner").ok);
+    CHECK_FALSE (rig.document.createCue (pads.id, 0, "mic", "Voice").ok);
+
+    //  Moved in: the same answer.
+    const auto picture = rig.document.createCue (list, 1, "video", "Sun");
+    const auto sound = rig.document.createCue (list, 2, "media", "Rain");
+    REQUIRE (picture.ok);
+    REQUIRE (sound.ok);
+    CHECK_FALSE (rig.document.move (picture.id, pads.id, 0).ok);
+    CHECK (rig.document.move (sound.id, pads.id, 0).ok);
+
+    //  A sound locked to a movie is its movie's, never a strip's.
+    const auto locked = rig.document.createCue (list, 2, "media", "Movie sound", {},
+                                                { { "lockedTo", picture.id } });
+
+    if (locked.ok)
+        CHECK_FALSE (rig.document.move (locked.id, pads.id, 0).ok);
+
+    //  The header is the group's preparation, and takes anything.
+    const auto header = rig.document.createRole (pads.id, "header");
+    REQUIRE (header.ok);
+    CHECK (rig.document.createCue (header.id, 0, "video", "Blackout").ok);
+    CHECK (rig.document.createCue (header.id, 0, "memo", "Load").ok);
+
+    //  And a new sampler made from picked cues takes only sounds.
+    const auto another = rig.document.createCue (list, 3, "video", "Stars");
+    REQUIRE (another.ok);
+    CHECK_FALSE (rig.document.groupSelection ({ another.id }, {}, { { "mode", "sampler" } }).ok);
+}
+
+TEST_CASE ("client: a drag of anything but a sound into or among a sampler's members is refused in words (§39)")
+{
+    model::Row dragged;
+    dragged.rowKind = model::RowKind::cue;
+    dragged.id = "VID00001";
+    dragged.kind = "video";
+    dragged.name = "Moon";
+    dragged.parent = "7K2QM9X4";
+
+    model::Row sampler;
+    sampler.rowKind = model::RowKind::cue;
+    sampler.id = "SMP00001";
+    sampler.kind = "group";
+    sampler.isGroup = true;
+    sampler.mode = "sampler";
+    sampler.parent = "7K2QM9X4";
+
+    //  Into the sampler, on its row.
+    const auto into = model::dropFor (sampler, dragged, 0.5);
+    CHECK (into.kind == model::DropKind::none);
+    CHECK (into.refused.find ("a sampler plays sounds only") != std::string::npos);
+    CHECK (into.refused.find ("Moon") != std::string::npos);
+
+    //  After one of its members.
+    model::Row member;
+    member.rowKind = model::RowKind::cue;
+    member.id = "MED00001";
+    member.kind = "media";
+    member.parent = sampler.id;
+    member.memberOfSampler = true;
+    member.indexInParent = 0;
+
+    CHECK_FALSE (model::dropFor (member, dragged, 0.9).refused.empty());
+
+    //  A sound goes in.
+    dragged.kind = "media";
+    CHECK (model::dropFor (member, dragged, 0.9).refused.empty());
+    CHECK (model::dropFor (sampler, dragged, 0.5).kind == model::DropKind::into);
+
+    //  But not one locked to a movie.
+    dragged.lockedTo = "VID00002";
+    CHECK_FALSE (model::dropFor (sampler, dragged, 0.5).refused.empty());
+}
+
+TEST_CASE ("client: a movie's row shows its speed as a sound's does, and its time at that speed (§39)")
+{
+    model::Row movie;
+    movie.kind = "video";
+    movie.rate = "0.5";
+
+    const auto marks = model::marksFor (movie);
+    REQUIRE_FALSE (marks.empty());
+    CHECK (marks[0].icon == model::Icon::speed);
+    CHECK (marks[0].meaning == "plays at " + marks[0].text);
+
+    //  At one, nothing to say.
+    movie.rate = "1";
+    CHECK (model::marksFor (movie).empty());
+}
+
+TEST_CASE ("client: the window says audio for a media cue, and every other kind is its own word (§39, WZ)")
+{
+    CHECK (model::kindWord ("media") == "audio");
+    CHECK (model::kindWord ("video") == "video");
+    CHECK (model::kindWord ("mic") == "mic");
+
+    //  The kind the engine is asked for is unchanged.
+    const auto& kinds = model::cueKinds();
+    CHECK (std::find (kinds.begin(), kinds.end(), "media") != kinds.end());
+}
+
+TEST_CASE ("client: a DCA's strip says A, V or AV for what is assigned to it, and nothing for nothing (§39)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto sounds = rig.document.createDca ("Sounds");
+    const auto pictures = rig.document.createDca ("Pictures");
+    const auto both = rig.document.createDca ("Both");
+    const auto empty = rig.document.createDca ("Empty");
+    const auto outer = rig.document.createDca ("Outer");
+    REQUIRE (sounds.ok);
+    REQUIRE (pictures.ok);
+    REQUIRE (both.ok);
+    REQUIRE (empty.ok);
+    REQUIRE (outer.ok);
+
+    const auto rain = rig.document.createCue (list, 0, "media", "Rain");
+    const auto moon = rig.document.createCue (list, 1, "video", "Moon");
+    const auto group = rig.document.createCue (list, 2, "group", "Scene");
+    REQUIRE (rain.ok);
+    REQUIRE (moon.ok);
+    REQUIRE (group.ok);
+
+    const auto inside = rig.document.createCue (group.id, 0, "video", "Stars");
+    const auto alsoInside = rig.document.createCue (group.id, 1, "media", "Wind");
+    REQUIRE (inside.ok);
+    REQUIRE (alsoInside.ok);
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rain.id + "/dca", sounds.id).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + moon.id + "/dca", pictures.id).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + group.id + "/dca", both.id).ok);
+
+    //  A DCA inside another hands its contents up.
+    REQUIRE (rig.document.setAttribute ("/godot/dca/" + pictures.id + "/dca", outer.id).ok);
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+    const auto contents = surface::dcaContents (*snapshot);
+
+    const auto lettersOf = [&contents] (const std::string& dca)
+    {
+        const auto found = contents.find (dca);
+        return std::string (found != contents.end() ? surface::contentLetters (found->second) : std::string_view {});
+    };
+
+    CHECK (lettersOf (sounds.id) == "A");
+    CHECK (lettersOf (pictures.id) == "V");
+    CHECK (lettersOf (both.id) == "AV");
+    CHECK (lettersOf (empty.id).empty());
+    CHECK (lettersOf (outer.id) == "V");
 }

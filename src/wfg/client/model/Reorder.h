@@ -105,6 +105,13 @@ namespace wfg::client::model
         is. */
     std::string notPersistent (const Row& cue);
 
+    /*  WHAT A SAMPLER GROUP TAKES AS A MEMBER (namespace draft §39): a sound,
+        and not one locked to a movie, since the hand plays a sampler's members
+        from strips and only a sound has one. The engine refuses the rest too;
+        this is the sentence the hand reads while it still holds the cue. */
+    bool samplerTakes (const Row& cue);
+    std::string notForASampler (const Row& cue);
+
     /*  WHICH COLOUR SAYS WHAT LETTING GO WOULD DO (author, 2026-09-21: "so the
         drag and drop has a clear colour coding for the user to be sure what
         they're doing").

@@ -215,7 +215,7 @@ namespace wfg::client::model
 
         if (kind != "media" && kind != "mic")
         {
-            out.notice = "Inserts belong to media and mic cues; this cue plays no sound.";
+            out.notice = "Inserts belong to audio and mic cues; this cue plays no sound.";
             return out;
         }
 

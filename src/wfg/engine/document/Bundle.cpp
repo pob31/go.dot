@@ -647,6 +647,38 @@ namespace wfg::doc
         return previous.empty() ? juce::File() : previous.back();
     }
 
+    int Bundle::discardRecoveriesHolding (const juce::File& folder, const std::string& savedShow)
+    {
+        if (savedShow.empty())
+            return 0;
+
+        const auto holdsTheShow = [&savedShow] (const juce::File& recovery)
+        {
+            juce::MemoryBlock bytes;
+
+            return recovery.getChildFile ("show.xml").loadFileAsData (bytes)
+                     && bytes.getSize() == savedShow.size()
+                     && std::memcmp (bytes.getData(), savedShow.data(), savedShow.size()) == 0;
+        };
+
+        int gone = 0;
+
+        /*  One folder at a time through `offeredRecovery`, so the walk follows
+            the offer's own rule; a folder that will not delete stops it, or it
+            would be found again for ever. */
+        for (auto offered = offeredRecovery (folder);
+             offered != juce::File() && holdsTheShow (offered);
+             offered = offeredRecovery (folder))
+        {
+            if (! discardRecoveryAt (offered))
+                break;
+
+            ++gone;
+        }
+
+        return gone;
+    }
+
     //==============================================================================
     juce::File Bundle::supersededFile (const juce::File& recovery)
     {
@@ -1508,6 +1540,23 @@ namespace wfg::doc
                             job.snapshot = Bundle::snapshotOf (document);
                             job.tick = context.tick;
 
+                            /*  A SHOW BACK TO WHAT THE FOLDER HOLDS IS SAVED
+                                INSTEAD (§39, the author's niggle of
+                                2026-10-07): a cue pasted, moved and deleted
+                                after a save leaves the bytes the save wrote and
+                                a history that moved, and an autosave of those
+                                bytes was a `recovery/` the next open offered as
+                                lost work - the very show he had saved. The same
+                                bytes as a save put the dot out and take this
+                                session's `recovery/` with them, on the save's
+                                own terms (an earlier session's offer is left as
+                                it is). Not under the lock, where a client
+                                offers no Save: there the autosave stays what it
+                                was. Replayed, the same document makes the same
+                                choice, so the record needs nothing new. */
+                            if (! document.isLocked() && showIsAsSaved (session, job.snapshot.show))
+                                job.kind = WriteJob::Kind::save;
+
                             writer.submit (std::move (job));
                             return Outcome::ok (args);
                         } });
@@ -1721,6 +1770,7 @@ namespace wfg::doc
                                 session was settled in the same breath, so the
                                 offer it names is where the disk has it. */
                             session.savedRevision = document.showRevision();
+                            session.savedShow = Bundle::snapshotOf (document).show;
 
                             if (session.offeredRecovery != Bundle::recoveryFolder (session.folder))
                             {

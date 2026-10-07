@@ -351,10 +351,17 @@ namespace wfg::client::model
         row.number = attribute (snapshot, cueId, "number");
         row.preset = attribute (snapshot, cueId, "preset");
         row.preWait = timeText (snapshot, cueId, "preWait");
-        row.duration = row.kind == "media" ? mediaTime (snapshot, cueId) : timeText (snapshot, cueId, "duration");
+        /*  A MOVIE'S TIME IS AT ITS SPEED TOO (§39, the author's niggle of
+            2026-10-07): it plays at `rate` as a sound does, so its column and
+            its mark say so. Only a movie - a still has a speed row it ignores. */
+        const auto isMovie = row.kind == "video" && attribute (snapshot, cueId, "source") == "movie";
+        row.duration = row.kind == "media" || isMovie ? mediaTime (snapshot, cueId)
+                                                      : timeText (snapshot, cueId, "duration");
         row.postWait = timeText (snapshot, cueId, "postWait");
         row.depth = depth;
         row.section = section;
+        row.memberOfSampler = section == Section::member && ! parent.empty()
+                                && attribute (snapshot, parent, "mode") == "sampler";
         row.parent = parent;
         row.indexInParent = indexInParent;
         row.enabled = flag (snapshot, "/godot/cue/" + cueId + "/enabled") != Flag::no;
@@ -396,6 +403,9 @@ namespace wfg::client::model
             if (const auto* lane = snapshot.find ("/godot/cue/" + cueId + "/levelLane"))
                 row.lane = ! lane->values.empty();
         }
+
+        if (isMovie)
+            row.rate = attribute (snapshot, cueId, "rate");   // no `rateMode`: a movie's speed is its frames'
 
         if (row.kind == "fade")
         {

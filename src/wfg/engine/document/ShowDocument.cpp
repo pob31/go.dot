@@ -41,6 +41,39 @@ namespace wfg::doc
         const juce::Identifier standbyProperty { "standby" };
         const juce::Identifier lockedProperty { "locked" };
 
+        /*  A SAMPLER GROUP'S MEMBERS ARE SOUNDS (namespace draft §39, the
+            author's niggle of 2026-10-07: "Nothing prevents video cues from
+            being dragged into sampler groups"). The hand plays a sampler's
+            members from strips, and only a media cue has one (PRD §3.27,
+            SamplerLayout's `placeMembers`); anything else among them sat there
+            doing nothing, and a sound locked to a movie would have been put on
+            a strip and played without its picture. Its header and footer are
+            lists of their own, whose parent is not the group, and stay free. A
+            mic or a picture as a member is PRD §6.9's, still proposed. */
+        bool isSampler (const juce::ValueTree& parent)
+        {
+            return parent.hasType ("Group") && parent["mode"].toString() == "sampler";
+        }
+
+        bool samplerRefuses (const juce::ValueTree& parent, std::string_view element, const juce::String& lockedTo)
+        {
+            if (! isSampler (parent))
+                return false;
+
+            if (element == "Media")
+                return lockedTo.isNotEmpty();
+
+            //  Its sections and its triggers are the group's own, not members.
+            return element == "Cue" || element == "Group" || element == "Mic" || element == "Video"
+                || element == "Fade" || element == "Transport" || element == "Osc" || element == "Midi"
+                || element == "Start";
+        }
+
+        bool samplerRefuses (const juce::ValueTree& parent, const juce::ValueTree& node)
+        {
+            return samplerRefuses (parent, node.getType().toString().toStdString(), node["lockedTo"].toString());
+        }
+
         /*  Whether a value is a legal standby for this list: one of the places
             the pointer may stand, or nothing at all.
 
@@ -1503,6 +1536,17 @@ namespace wfg::doc
         if (parentElement == nullptr || ! parentElement->mayContain (elementName))
             return EditResult::failed (reason::badAddress);
 
+        {
+            juce::String lockedTo;
+
+            for (const auto& [name, value] : attributes)
+                if (name == "lockedTo")
+                    lockedTo = juce::String (value);
+
+            if (samplerRefuses (parent, elementName, lockedTo))
+                return EditResult::failed (reason::badAddress);
+        }
+
         if (index < 0)
             return EditResult::failed (reason::badAddress);
 
@@ -1691,6 +1735,14 @@ namespace wfg::doc
             if (sibling == first) break;
             if (isSequenceChild (sibling)) ++position;
         }
+        /*  A new sampler takes only what a sampler may hold (§39), asked
+            before anything is made. */
+        for (const auto& [name, value] : attributes)
+            if (name == "mode" && value == "sampler")
+                for (const auto& node : ordered)
+                    if (! node.hasType ("Media") || node["lockedTo"].toString().isNotEmpty())
+                        return EditResult::failed (reason::typeMismatch);
+
         // All sources and the destination are validated before the first edit.
         const auto created = createCue (parent[idProperty].toString().toStdString(), position, "group", "", id,
                                         attributes);
@@ -3146,6 +3198,10 @@ namespace wfg::doc
             || ! parentElement->mayContain (node.getType().toString().toStdString()))
             return EditResult::failed (reason::badAddress);
 
+        //  Unless it is the sampler it is already in: a reorder among its own members (§39).
+        if (samplerRefuses (newParent, node) && node.getParent() != newParent)
+            return EditResult::failed (reason::badAddress);
+
         /*  A group cannot be moved inside itself. Without this the tree stops
             being a tree: the subtree detaches with the node and is never seen
             again, and the identifiers in it stay reserved forever. */
@@ -3374,7 +3430,8 @@ namespace wfg::doc
 
         for (const auto& node : read.nodes)
         {
-            if (! parentElement->mayContain (node.getType().toString().toStdString()))
+            if (! parentElement->mayContain (node.getType().toString().toStdString())
+                || samplerRefuses (parent, node))
             {
                 for (const auto& id : read.ids)
                     registry.release (id);

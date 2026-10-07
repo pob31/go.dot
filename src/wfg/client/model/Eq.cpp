@@ -94,7 +94,7 @@ namespace wfg::client::model
 
         if (on == Flag::unsaid)
         {
-            out.notice = "Only a media or a mic cue has an EQ.";
+            out.notice = "Only an audio or a mic cue has an EQ.";
             return out;
         }
 
@@ -163,7 +163,7 @@ namespace wfg::client::model
 
         if (! out.present)
         {
-            out.notice = "This fade's target has no EQ: only a media or a mic cue has one.";
+            out.notice = "This fade's target has no EQ: only an audio or a mic cue has one.";
             return out;
         }
 

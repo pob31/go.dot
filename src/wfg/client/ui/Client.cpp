@@ -375,6 +375,16 @@ namespace wfg::client
                     menuItemsChanged();
                 };
 
+                inspectorActions.convertToHap = [this] (const std::string&, juce::Component& under)
+                {
+                    movieMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&under),
+                                               [this] (int chosen)
+                                               {
+                                                   if (chosen != 0)
+                                                       menuItemSelected (chosen, 0);
+                                               });
+                };
+
                 inspectorActions.chooseFile = [this] (const std::string& cueId)
                                               { chooseFile (cueId); };
 
@@ -986,16 +996,7 @@ namespace wfg::client
                     /*  THE PICKED MOVIE TO HAP (namespace draft 37.5, WF-WJ):
                         the part its cues use or the whole file, Hap or Hap Q;
                         its sound brought in on its own; a conversion stopped. */
-                    juce::PopupMenu movie;
-                    addMenuItem (movie, menuConvertUsed, "The part the cues use, as Hap");
-                    addMenuItem (movie, menuConvertWhole, "The whole file, as Hap");
-                    addMenuItem (movie, menuConvertUsedQuality, "The part the cues use, as Hap Q");
-                    addMenuItem (movie, menuConvertWholeQuality, "The whole file, as Hap Q");
-                    movie.addSeparator();
-                    addMenuItem (movie, menuMovieSound, "Bring its sound in, locked to it");
-                    addMenuItem (movie, menuCancelConversion, "Stop its conversion");
-                    movie.addSeparator();
-                    addMenuItem (movie, menuDownloadFfmpeg, "Download FFmpeg...");
+                    auto movie = movieMenu();
                     menu.addSubMenu ("Convert the movie to HAP", movie,
                                      ! pickedMovieFile().empty() || menuItemEnabled (menuDownloadFfmpeg));
                     menu.addSeparator();
@@ -1636,6 +1637,7 @@ namespace wfg::client
             }
 
             bool openedSettingsAtStart = false;
+            juce::Time firstPass;
 
             /*  THE NETWORK MONITOR, made once and kept like the settings: shut,
                 it keeps its lines and the engine records nothing; opened, it
@@ -1690,8 +1692,30 @@ namespace wfg::client
                     build them from. */
                 if (host.openSettingsAtStart && ! openedSettingsAtStart)
                 {
-                    openedSettingsAtStart = true;
-                    openShowSettings();
+                    /*  BUT THE LAUNCHER'S EMPTY SHOW ONLY WHEN THERE IS
+                        SOMETHING TO SET (namespace draft §39, the author's
+                        niggle of 2026-10-07: "Opening a file shows the show
+                        preferences systematically even when everything is
+                        set"). Its interface open is everything an empty show
+                        needs, so the window waits a few seconds for the engine
+                        to open it and opens only if it did not - a first launch,
+                        a device unplugged, sound turned off. A new show still
+                        opens on its settings at once: its outputs are its own. */
+                    if (firstPass == juce::Time())
+                        firstPass = juce::Time::getCurrentTime();
+
+                    const auto sounding = ! model::text (*snapshot, "/godot/audio/device").empty();
+                    const auto waited = (juce::Time::getCurrentTime() - firstPass).inSeconds();
+
+                    if (! host.emptyShowAtStart || (! sounding && waited > 4.0))
+                    {
+                        openedSettingsAtStart = true;
+                        openShowSettings();
+                    }
+                    else if (sounding)
+                    {
+                        openedSettingsAtStart = true;
+                    }
                 }
 
                 /*  THE VIRTUAL SURFACE, from the same pointer: rule 2's one call
@@ -2030,6 +2054,9 @@ namespace wfg::client
                 shell->inspector.showDial (dialed);
                 shell->foot.showDial (dialed);
 
+                //  The file row's way to HAP (§39).
+                shell->inspector.showHap (hapOfferNow());
+
                 last = reading;
             }
 
@@ -2040,6 +2067,36 @@ namespace wfg::client
                 followTheNewPerformance();
                 followTheSaveBeforeReview();
                 followTheCopy();
+                followTheClose();
+            }
+
+            /*  THE WINDOW GOES ONCE THE SHOW IS CLEAN (WW): saved, or put back
+                to the folder by the revert - which is when the engine has taken
+                `recovery/` away, so the exit leaves nothing to offer. A save that
+                fails says so and the window stays; a show that is still not
+                clean after a while closes anyway, its autosave kept and offered
+                at the next open, which is the safe way round. */
+            void followTheClose()
+            {
+                if (! closeOnceClean.has_value())
+                    return;
+
+                if (closeOnceClean->saving && ! last.writeError.empty() && last.writeError != closeOnceClean->errorBefore)
+                {
+                    shell->transport.setNotice ("the show was not saved, so the window stays: " + juce::String (last.writeError));
+                    closeOnceClean.reset();
+                    return;
+                }
+
+                const auto waited = (juce::Time::getCurrentTime() - closeOnceClean->since).inSeconds();
+
+                if (last.dirty == model::Flag::no || waited > 10.0)
+                {
+                    closeOnceClean.reset();
+
+                    if (host.quit)
+                        host.quit();
+                }
             }
 
             /*  THE ONE WAY OUT OF THIS CLIENT INTO THE SHOW (§14.16, rule 1).
@@ -2255,12 +2312,27 @@ namespace wfg::client
                     return;
                 }
 
-                std::vector<std::string> sources;
+                std::vector<std::string> sources, pictures;
+
+                /*  A SAMPLER HOLDS SOUNDS (§39): pictures and movies dropped
+                    among its members go in a batch of their own, just after
+                    the sampler group, and the sounds where they were put. */
+                const auto [outside, outsideIndex] = outsideASampler (parent, index, "video");
+                const auto intoASampler = outside != parent;
 
                 for (const auto& path : files)
-                    sources.push_back (path.toStdString());
+                    (intoASampler && model::isVisualFile (model::mediaNameFor (path.toStdString())) ? pictures : sources)
+                        .push_back (path.toStdString());
 
-                imports.add (parent, index, orderOf (parent), sources, cueTemplate);
+                if (! sources.empty())
+                    imports.add (parent, index, orderOf (parent), sources, cueTemplate);
+
+                if (! pictures.empty())
+                {
+                    imports.add (outside, outsideIndex, orderOf (outside), pictures, cueTemplate);
+                    shell->transport.setNotice ("a sampler plays sounds only: the pictures go just after it");
+                }
+
                 followImports();
             }
 
@@ -2729,6 +2801,92 @@ namespace wfg::client
             }
 
             /*  The file of the movie picked, or empty: a video cue showing one. */
+            /*  THE PICKED MOVIE'S CONVERSIONS, as one list: the Show menu's
+                submenu, and what the file row's "-> HAP" opens under itself
+                (§39) - one list, so the two can never offer different things. */
+            juce::PopupMenu movieMenu()
+            {
+                juce::PopupMenu movie;
+                addMenuItem (movie, menuConvertUsed, "The part the cues use, as Hap");
+                addMenuItem (movie, menuConvertWhole, "The whole file, as Hap");
+                addMenuItem (movie, menuConvertUsedQuality, "The part the cues use, as Hap Q");
+                addMenuItem (movie, menuConvertWholeQuality, "The whole file, as Hap Q");
+                movie.addSeparator();
+                addMenuItem (movie, menuMovieSound, "Bring its sound in, locked to it");
+                addMenuItem (movie, menuCancelConversion, "Stop its conversion");
+                movie.addSeparator();
+                addMenuItem (movie, menuDownloadFfmpeg, "Download FFmpeg...");
+                return movie;
+            }
+
+            /*  WHETHER A MOVIE PLAYS AS A PREVIEW - through FFmpeg, not as HAP
+                (namespace draft 37.6) - which nothing in the tree says: the
+                renderer decides it by opening the file. The window asks the
+                same question of the file's header, once per file and again only
+                when the file changes, since the panel asks it on every pass. A
+                file not there is offered nothing. */
+            bool playsAsPreview (const std::string& file)
+            {
+                if (file.empty() || mediaFolder() == juce::File())
+                    return false;
+
+                const auto path = mediaFolder().getChildFile (juce::String::fromUTF8 (file.c_str()));
+                const auto stamp = path.getLastModificationTime().toMilliseconds();
+
+                if (const auto known = previewAnswers.find (file);
+                    known != previewAnswers.end() && known->second.first == stamp)
+                    return known->second.second;
+
+                auto preview = path.existsAsFile();
+
+                if (preview && path.hasFileExtension ("mov"))
+                {
+                    video::movie::MovieFile movie;
+                    std::string why;
+                    preview = ! (movie.open (path.getFullPathName().toStdString(), why) && movie.info().isHap());
+                }
+
+                previewAnswers[file] = { stamp, preview };
+                return preview;
+            }
+
+            std::map<std::string, std::pair<juce::int64, bool>> previewAnswers;
+
+            /*  WHAT THE FILE ROW'S BUTTON SAYS (§39): "-> HAP" on a movie played
+                as a preview, its conversion's progress while there is one, and
+                nothing on anything else. Asked each pass, from this pass's
+                snapshot. */
+            ui::InspectorComponent::HapOffer hapOfferNow()
+            {
+                ui::InspectorComponent::HapOffer offer;
+                const auto file = pickedMovieFile();
+
+                if (file.empty() || latest == nullptr)
+                    return offer;
+
+                for (const auto& row : model::readConversions (*latest))
+                    if (row.file == file && row.running())
+                    {
+                        offer.shown = true;
+                        offer.words = row.state == "waiting" ? juce::String ("HAP: waiting")
+                                                             : "HAP " + juce::String (row.percent) + " %";
+                        offer.tooltip = "Converting to HAP. Press to stop it.";
+                        return offer;
+                    }
+
+                if (! playsAsPreview (file))
+                    return offer;
+
+                offer.shown = true;
+                offer.tooltip = "This movie plays as a preview. Convert it to HAP, which plays at full quality";
+
+                for (const auto& row : model::readConversions (*latest))
+                    if (row.file == file && ! row.problem.empty())
+                        offer.tooltip = "The last conversion failed: " + juce::String (row.problem);
+
+                return offer;
+            }
+
             std::string pickedMovieFile() const
             {
                 const auto picked = selection.anchor();
@@ -2950,6 +3108,13 @@ namespace wfg::client
                                           if (refused.empty() && host.emptyShowAtStart && host.quit
                                                 && ! last.hasSomethingToSave() && last.canUndo == model::Flag::no)
                                               host.quit();
+
+                                          /*  AND ONE THAT STAYS TAKES ITS SETTINGS OUT OF THE
+                                              WAY (§39): they were about its first moment, and
+                                              left up they sat beside the show just opened as if
+                                              they were that show's. */
+                                          else if (refused.empty() && host.emptyShowAtStart && audioSettings != nullptr)
+                                              audioSettings->closeButtonPressed();
                                       });
             }
 
@@ -3698,7 +3863,7 @@ namespace wfg::client
                 one thing the page's "+ media" cannot do (decision Y). */
 
             /** The container and member position the next new cue takes. Empty parent when there is no list. */
-            std::pair<std::string, int> destination() const
+            std::pair<std::string, int> destination (const std::string& kind = "media") const
             {
                 const auto& picked = selection.anchor();
 
@@ -3707,10 +3872,29 @@ namespace wfg::client
                     const auto parent = model::text (*latest, "/godot/cue/" + picked + "/parent");
 
                     if (! parent.empty())
-                        return { parent, model::positionAfter (orderOf (parent), picked) };
+                        return outsideASampler (parent, model::positionAfter (orderOf (parent), picked), kind);
                 }
 
                 return { last.listId, -1 };
+            }
+
+            /*  A SAMPLER HOLDS SOUNDS (namespace draft §39): a cue of another
+                kind that would land among a sampler's members lands just after
+                the sampler group instead, where the engine takes it, rather
+                than being refused inside it. A sound goes where it was put. */
+            std::pair<std::string, int> outsideASampler (const std::string& parent, int index,
+                                                         const std::string& kind) const
+            {
+                if (latest == nullptr || kind == "media" || parent.empty()
+                    || model::text (*latest, "/godot/cue/" + parent + "/mode") != "sampler")
+                    return { parent, index };
+
+                const auto above = model::text (*latest, "/godot/cue/" + parent + "/parent");
+
+                if (above.empty())
+                    return { parent, index };
+
+                return { above, model::positionAfter (orderOf (above), parent) };
             }
 
             juce::String destinationSentence() const
@@ -3732,7 +3916,7 @@ namespace wfg::client
 
             void createFromTemplate (const model::Choice& line)
             {
-                const auto [parent, index] = destination();
+                const auto [parent, index] = destination (line.kind);
 
                 if (parent.empty())
                 {
@@ -3760,7 +3944,7 @@ namespace wfg::client
                 if (refusedWhileLocked())
                     return;
 
-                const auto [parent, index] = destination();
+                const auto [parent, index] = destination (kind);
 
                 if (parent.empty())
                 {
@@ -4099,6 +4283,39 @@ namespace wfg::client
                                                     .withButton ("OK")
                                                     .withAssociatedComponent (window.get()),
                                                   [] (int) {});
+                    return;
+                }
+
+                /*  CHANGES NOT SAVED ASK FIRST (namespace draft §39, WW, the
+                    author's pick on 2026-10-07): save them, throw them away, or
+                    stay. Until then a close asked nothing about them, kept the
+                    autosave, and the next open offered it as lost work - every
+                    time, since an offer nobody answers stays. "Close without
+                    saving" is `document.revert`, which takes this session's
+                    `recovery/` with it, so the answer is the one that offer was
+                    waiting for. `isYes`: a show the engine has said nothing
+                    about closes as before. */
+                if (model::isYes (last.dirty))
+                {
+                    juce::AlertWindow::showAsync (Options()
+                                                    .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                                    .withTitle ("Save the changes to " + juce::String (last.show) + " before closing?")
+                                                    .withMessage ("Running cues will stop. Closing without saving throws away "
+                                                                  "every change since the show was last saved.")
+                                                    .withButton ("Save and close")
+                                                    .withButton ("Close without saving")
+                                                    .withButton ("Cancel")
+                                                    .withAssociatedComponent (window.get()),
+                                                  [this, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                                                  {
+                                                      //  Three buttons: 1, 2, and the last answers 0.
+                                                      if (safe == nullptr || ! host.quit || (answer != 1 && answer != 2))
+                                                          return;
+
+                                                      closeOnceClean = CloseOnceClean { juce::Time::getCurrentTime(), last.writeError,
+                                                                                        answer == 1 };
+                                                      send (answer == 1 ? gesture::save() : gesture::revert());
+                                                  });
                     return;
                 }
 
@@ -4442,6 +4659,16 @@ namespace wfg::client
             };
 
             std::optional<ReviewAfterSave> reviewAfterSave;
+
+            //  A close answered "save" or "without saving", waiting for the show to be clean (WW).
+            struct CloseOnceClean
+            {
+                juce::Time since;
+                std::string errorBefore;
+                bool saving = false;
+            };
+
+            std::optional<CloseOnceClean> closeOnceClean;
             std::unique_ptr<ui::TemplateReviewWindow> templateReview;
 
             /*  AN IMPORT UNDER WAY (§29): the scene list while it is open, and

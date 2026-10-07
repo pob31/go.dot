@@ -180,12 +180,13 @@ namespace wfg::client::model
                 marks.push_back ({ Icon::follow, {}, "each member follows the one before, with no GO" });
         }
 
-        if (row.kind == "media" && ! row.rate.empty())
+        if ((row.kind == "media" || row.kind == "video") && ! row.rate.empty())
         {
             if (const auto said = speedMark (row.rate); ! said.empty())
                 marks.push_back ({ row.rateMode == "timestretch" ? Icon::stretch : Icon::speed, said,
-                                   row.rateMode == "timestretch" ? "plays at " + said + ", its pitch kept"
-                                                                 : "plays at " + said + ", its pitch moved with it" });
+                                   row.kind == "video"            ? "plays at " + said
+                                   : row.rateMode == "timestretch" ? "plays at " + said + ", its pitch kept"
+                                                                   : "plays at " + said + ", its pitch moved with it" });
         }
 
         if (row.lane)

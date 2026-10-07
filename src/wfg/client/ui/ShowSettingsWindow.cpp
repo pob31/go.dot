@@ -3767,7 +3767,7 @@ namespace wfg::client::ui
                 };
 
                 addButton.setTooltip ("Declare the picked plugin in the show's set: every voice carries"
-                                      " it, and a media cue switches it in from its FX.");
+                                      " it, and an audio cue switches it in from its FX.");
                 removeButton.setTooltip ("Take the picked entry out of the set. Cues that switched it in"
                                          " keep their Fx, aimed at nothing.");
                 restartButton.setTooltip ("A fresh child process for the picked entry - for one that"
@@ -5677,7 +5677,7 @@ namespace wfg::client::ui
                 explanation.setText ("A template keeps a cue's settings - its level, DCA, routing, EQ, sends,"
                                      " effects and speed; a picture's canvas, geometry and grade - but never its"
                                      " file, its name or its times in the file. The Add lists offer them: new"
-                                     " media cues from a template, the files chosen next. To make one, pick a"
+                                     " audio cues from a template, the files chosen next. To make one, pick a"
                                      " cue and choose Edit, Save as template; saving again under the same name"
                                      " changes the template, and no cue already made from it.",
                                      juce::dontSendNotification);
@@ -5947,7 +5947,7 @@ namespace wfg::client::ui
                                juce::dontSendNotification);
 
                 outro.setText ("Then close this window and build the show: the Add row over the cue list makes"
-                               " cues, a sound file dropped on the list becomes a media cue, and Space is GO."
+                               " cues, a sound file dropped on the list becomes an audio cue, and Space is GO."
                                " Show settings... in the Show menu brings this window back.",
                                juce::dontSendNotification);
 
@@ -6589,8 +6589,19 @@ namespace wfg::client::ui
         /*  TALL ENOUGH FOR THE GETTING STARTED LIST WHOLE (author, 2026-09-30:
             "the playback button ... was slightly squashed. Can the settings
             pop up window be slightly taller"); the page scrolls on a screen
-            that cannot give it this much. */
-        centreWithSize (880, 740);
+            that cannot give it this much. AND WIDER, by about a third (author,
+            2026-10-07: "can be 25% to 50% wider by default, things are really
+            cramped now"), never past the screen it opens on. */
+        auto width = 1200;
+        auto height = 740;
+
+        if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        {
+            width = juce::jmin (width, juce::roundToIntAccurate (display->userBounds.getWidth()) - 40);
+            height = juce::jmin (height, juce::roundToIntAccurate (display->userBounds.getHeight()) - 40);
+        }
+
+        centreWithSize (juce::jmax (740, width), juce::jmax (550, height));
         setAlwaysOnTop (true);
         setVisible (true);
        #if ! JUCE_LINUX

@@ -160,6 +160,12 @@ namespace wfg::client::ui
         /** The file control's other half: the box takes a name, this goes looking. */
         juce::TextButton browse { "..." };
 
+        /*  AND A MOVIE PLAYED AS A PREVIEW, ITS WAY TO HAP (namespace draft
+            §39, the author's niggle of 2026-10-07: "a '-> HAP' button to
+            convert a preview video would be nice next to the file
+            reference"). Shown only while the window says so (`showHap`). */
+        juce::TextButton hap { juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92 HAP")) };
+
         /*  The direct-out menu's other half: a door to the send mixer, beside
             the output the cue lands on rather than on a row of its own
             (author, 2026-09-22: "add a button next to this drop down menu").
@@ -264,6 +270,25 @@ namespace wfg::client::ui
             line->box.setColour (juce::Label::outlineColourId,
                                  on ? Look::colour (theme, "picked") : juce::Colours::transparentBlack);
         }
+    }
+
+    void InspectorComponent::showHap (const HapOffer& offer)
+    {
+        if (offer.shown == hapOffer.shown && offer.words == hapOffer.words && offer.tooltip == hapOffer.tooltip)
+            return;
+
+        const auto relayOut = offer.shown != hapOffer.shown;
+        hapOffer = offer;
+
+        if (relayOut)
+            resized();
+        else
+            for (auto& line : lines)
+                if (line->hap.isVisible())
+                {
+                    line->hap.setButtonText (hapOffer.words);
+                    line->hap.setTooltip (hapOffer.tooltip);
+                }
     }
 
     void InspectorComponent::showDial (const std::string& address)
@@ -566,9 +591,26 @@ namespace wfg::client::ui
             /*  NEVER WHILE SOMEBODY IS TYPING IN IT. A poll that overwrote a
                 half-typed value would lose exactly the keystrokes somebody was
                 in the middle of, which is the one thing a panel like this must
-                not do. */
+                not do.
+
+                UNLESS THE MASTER DIAL IS TURNING IT and nothing has been typed
+                (namespace draft §39, the author's niggle of 2026-10-07: "the
+                master rotary as touch-and-turn isn't working as expected"). A
+                touch on the value opens it for typing AND puts it on the dial,
+                and the number then stood still on the screen while the dial
+                moved it. The editor still holding the words it opened with
+                has nothing to lose: it closes, and the box follows the dial. */
             if (line.box.isBeingEdited())
-                return;
+            {
+                const auto* editor = line.box.getCurrentTextEditor();
+                const auto untouched = editor != nullptr && editor->getText() == line.box.getText();
+
+                if (! (untouched && ! dialed.empty() && line.field.address == dialed
+                       && field.value != line.field.value))
+                    return;
+
+                line.box.hideEditor (true);
+            }
 
             switch (line.field.control)
             {
@@ -1126,6 +1168,15 @@ namespace wfg::client::ui
                     };
 
                     content.addAndMakeVisible (line->browse);
+
+                    line->hap.setWantsKeyboardFocus (false);
+                    line->hap.onClick = [this, button = &line->hap]
+                    {
+                        if (actions.convertToHap)
+                            actions.convertToHap (drawnCue, *button);
+                    };
+
+                    content.addChildComponent (line->hap);
                 }
 
                 /*  ONE CLICK, NOT TWO. This wanted a double-click at first, and
@@ -1324,6 +1375,9 @@ namespace wfg::client::ui
                                         && line->field.control == model::Control::loopCount);
             line->browse.setVisible (! hidden && line->browse.getParentComponent() != nullptr
                                        && line->field.control == model::Control::file);
+            line->hap.setVisible (line->browse.isVisible() && hapOffer.shown);
+            line->hap.setButtonText (hapOffer.words);
+            line->hap.setTooltip (hapOffer.tooltip);
 
             const auto opens = line->field.control == model::Control::opener;
 
@@ -1377,6 +1431,9 @@ namespace wfg::client::ui
                 if (line->browse.isVisible())
                     line->browse.setBounds (boxArea.removeFromRight (juce::jmin (row + row / 2,
                                                                                  boxArea.getWidth() / 3)));
+
+                if (line->hap.isVisible())
+                    line->hap.setBounds (boxArea.removeFromRight (juce::jmin (row * 4, boxArea.getWidth() / 3)));
 
                 /*  Taken off the right of the value column, as the file row's
                     browse button is, so a menu and its door share one line and

@@ -69,7 +69,7 @@ namespace wfg::client::model
         if (pickedCueId.empty())
         {
             out.title = name;
-            out.reason = "Nothing is picked: pick a media or a mic cue to set its " + name + ".";
+            out.reason = "Nothing is picked: pick an audio or a mic cue to set its " + name + ".";
             return out;
         }
 
@@ -88,7 +88,7 @@ namespace wfg::client::model
 
             if (! text (snapshot, fade + "dca").empty() || targetId.empty())
             {
-                out.reason = label + " moves no cue's sound: aim it at a media or a mic cue to move its "
+                out.reason = label + " moves no cue's sound: aim it at an audio or a mic cue to move its "
                                + name + ".";
                 return out;
             }

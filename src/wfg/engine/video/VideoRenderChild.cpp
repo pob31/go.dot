@@ -677,6 +677,7 @@ namespace wfg::video
                 setWantsKeyboardFocus (false);
                 setMouseCursor (juce::MouseCursor::NoCursor);
                 setBounds (display.x, display.y, display.width, display.height);
+                covering = display;
 
                 context.setRenderer (this);
                 context.setOpenGLVersionRequired (juce::OpenGLContext::openGL3_2);
@@ -692,6 +693,17 @@ namespace wfg::video
                                 | juce::ComponentPeer::windowIgnoresKeyPresses);
                 setAlwaysOnTop (true);
                 setVisible (true);
+
+                //  And on the display's own pixels, whatever its scale (Displays.h, §39).
+                coverDisplay (getWindowHandle(), covering);
+            }
+
+            /*  ASKED EACH SECOND (§39): a window the system resized - a change
+                of scale handled late, a display woken from sleep - is put back
+                over its display's pixels. */
+            void keepCovering()
+            {
+                coverDisplay (getWindowHandle(), covering);
             }
 
             ~OutputWindow() override
@@ -1587,6 +1599,7 @@ namespace wfg::video
             std::string outputId;
             int slot = 0;
             double periodNanos = 1.0e9 / 60.0;
+            DisplayInfo covering;
 
             juce::OpenGLContext context;
             std::unique_ptr<juce::OpenGLShaderProgram> fillProgram, pictureProgram;
@@ -1688,6 +1701,11 @@ namespace wfg::video
                     boundSeq = config.seq;
                     bind (config);
                 }
+
+                //  Each window over its display's pixels, half a second after the display check (§39).
+                if (ticks % 100 == 50)
+                    for (auto& window : windows)
+                        window->keepCovering();
 
                 /*  THE PICTURES WANTED: every layer's, and the standby's the
                     engine named - read before GO, so GO only shows them (VX). */
@@ -1797,7 +1815,9 @@ namespace wfg::video
                                                    [] (const DisplayInfo& a, const DisplayInfo& b)
                                                    {
                                                        return a.id == b.id && a.name == b.name && a.x == b.x
-                                                           && a.y == b.y && a.width == b.width && a.height == b.height;
+                                                           && a.y == b.y && a.width == b.width && a.height == b.height
+                                                           && a.physicalWidth == b.physicalWidth   // a scale changed (§39)
+                                                           && a.physicalHeight == b.physicalHeight;
                                                    });
 
                 if (same)

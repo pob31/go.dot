@@ -868,6 +868,7 @@ namespace
 
                 replayed.folder = out;
                 replayed.savedRevision = document.showRevision();
+                replayed.savedShow = wfg::doc::Bundle::snapshotOf (document).show;
                 wfg::doc::registerBundleCommands (engine.commands(), document, replayed, writer, out);
             }
 
@@ -3007,6 +3008,7 @@ namespace
             it. Captured by value, the stamp would land on a copy and the dot
             would never go out. */
         wfg::doc::DocumentSession session { target, document.showRevision() };
+        session.savedShow = wfg::doc::Bundle::snapshotOf (document).show;   // §39, before `--recover`
 
         /*  AND THE THREAD THAT WRITES, beside the session and for the same
             reason: every handler that writes a byte holds both by reference for
@@ -3081,6 +3083,14 @@ namespace
             record could ever point at it; the header line written below from
             `adoptedAtOpen` is the only thing that lets `wfg replay` refuse this
             session in a sentence instead of diverging from tick nought. */
+        /*  AN OFFER THAT IS THE SAVED SHOW IS NO LOST WORK (§39): a session
+            whose edits cancelled out and was closed before its autosave turned
+            into a save left the very bytes this folder opened with. Deleted
+            before anything reads the offer, and said on the start-up lines. */
+        if (const auto gone = wfg::doc::Bundle::discardRecoveriesHolding (target, session.savedShow); gone > 0)
+            std::cout << "wfg: " << gone << (gone == 1 ? " recovery" : " recoveries")
+                      << " holding the saved show, discarded" << std::endl;
+
         session.offeredRecovery = wfg::doc::Bundle::offeredRecovery (target);
 
         if (wfg::doc::hasRecoveryOffer (session))

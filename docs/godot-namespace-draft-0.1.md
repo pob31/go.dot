@@ -21347,3 +21347,156 @@ pasted as a cue would be a cue with no file and no name.
   once per strip; **the virtual panel's** DCA swatch shows the same colour.
 - **Owed to the bench**: the ring by eye on the D700, the tint on a real display, and whether the
   loudness weighting reads well with a loud bed and a quiet effect on one DCA.
+
+## 39. The niggles of 2026-10-07
+
+Written 2026-10-07, evening. After a first look at §38 the author sent a list of twelve things, most
+of them small and found by using the show: the master dial, a movie's marks in the list, what a
+sampler group takes, the projector's window on a scaled display, the width of Show settings, a way
+from a preview movie to HAP, the name of the "media" button, reverse playback, letters on a DCA's
+strip, several canvases on one output, Show settings on every open, and a recovery offered after a
+save. The two large ones - reverse playback and canvases sharing an output - have their own sections
+when they are built; this one is the rest.
+
+### 39.1 Decisions
+
+The author's (each the option I recommended; the words of each option were mine):
+
+- **WW** Closing a window with changes not saved **asks**: save and close, close without saving, or
+  stay. "Close without saving" is `document.revert`, so this session's `recovery/` goes with it and the
+  next open offers nothing; "save and close" waits for the save to land and stays open, saying why, if
+  it does not. Until now a close asked nothing about unsaved work and the autosave was offered at the
+  next open, every time, because an offer nobody answers stays (§14.10).
+- **WX** Reverse is a **signed speed**, -20 to 20, moving through nought while a cue plays - a fade
+  from 1 to -1 stops and plays back; ping-pong is a choice on a Range's loop; for sounds and HAP
+  movies, the FFmpeg preview forward only. *Not built yet - its own section.*
+- **WY** Several canvases on one output: **each placed canvas has its own warp** - four corners and
+  extra splits, the whole output until moved - apart or overlapping, stacked in order with a blend and
+  an opacity. *Not built yet - its own section.*
+- **WZ** The `media` kind is called **audio on screen** - the button, the list's kind word, the menus
+  and the sentences - and stays `media` in the show file and the API, so saved shows and scripts keep
+  working. A movie is a `video` cue.
+
+Mine (proposed):
+
+- **XA** A recovery whose show is byte for byte the saved show is **no lost work** (below).
+- **XB** A sampler group's members are **sounds not locked to a movie** (below).
+- **XC** A DCA strip's letters go on the strip's **third line**, after "dca".
+- **XD** The empty show's settings open at start **only when its interface did not open** within four
+  seconds.
+
+### 39.2 The master dial and a box being typed in
+
+A touch on a number's value box in the inspector or the EQ panel opens it for typing and, by §17.18's
+BM, puts it on the master dial. The panel never refills a box being typed in, so the number stood
+still on the screen while the dial moved it - the engine and the transport line had it right. Now a
+box still holding the words it opened with, whose row the dial is on, closes when the value moves and
+follows the dial. A box somebody has typed into is left alone. Under the lock the dial still takes any
+number and the engine still refuses all but EQ bands, sends and plugin parameters (BT); the window
+does not yet say so.
+
+### 39.3 A movie's row
+
+A movie's speed is the same row as a sound's, `/godot/cue/<id>/rate`, and the list read it only for
+`media`. A movie (`source = movie`) now wears the speed mark - "plays at ×0.5", no pitch words, since
+a movie has no `rateMode` - and its time column is its length at that speed, ∞ at nought, as a sound's
+is (§22.5). A still's speed row means nothing and draws nothing. Every other mark (DCA, preset, off
+for this run) was already the same for every kind.
+
+### 39.4 What a sampler group takes (XB)
+
+PRD §3.27 makes a sampler's members sounds the hand plays from strips; `placeMembers` arms only
+`Media`. Nothing refused anything else - not a drag, a file drop, a new cue or the engine - and a
+picture, a memo or a group among the members sat there doing nothing; a sound locked to a movie
+would have taken a strip and played without its picture. Now:
+
+- **The document refuses** (`bad-address`) a create, a move or a paste of anything but a `Media` with
+  no `lockedTo` into a sampler group's members, and a new sampler made from picked cues
+  (`typeMismatch`) that are not all such sounds. A member already there may be reordered. The header,
+  the footer and the triggers are the group's own and take anything, as before.
+- **The list refuses the drag in words** - "a sampler plays sounds only, so Moon stays where it is" -
+  on the group's row and after any of its members.
+- **A new cue of another kind** made while a sampler member is picked lands just after the sampler
+  group; pictures and movies dropped or chosen among its members are imported just after it, and the
+  sounds where they were put.
+- Switching an existing group with other members to `sampler` is not refused; the members it cannot
+  play stay inert, as before. A mic or a picture as a member stays PRD §6.9's.
+
+### 39.5 The projector's window on a scaled display
+
+On Windows a window is created on the main display and sized with that display's scale, then moved
+onto its own; when the two scale differently, the size it ended with depended on how the move's
+change of scale was handled. Each display's pixel rectangle now travels with it (`DisplayInfo`), the
+output window is put straight onto it after it is made, and every second it is asked again and put
+back if the system moved it. A display whose pixels change (its scale did) rebinds its windows. Owed
+to the bench: a projector at 125 % and 150 % beside a main display at 100 % and the other way round.
+
+### 39.6 Show settings, wider
+
+1200 by 740 rather than 880 by 740, never past the screen it opens on.
+
+### 39.7 → HAP beside a movie's file
+
+A movie played as a preview - not HAP, so the renderer plays it through FFmpeg (37.6) - has a
+**→ HAP** button beside its file. It opens the Show menu's own conversion list under it: the part the
+cues use or the whole file, Hap or Hap Q, its sound brought in, a conversion stopped, FFmpeg
+downloaded. While the file converts the button says "HAP 42 %" (or "HAP: waiting"); a failure is its
+tooltip; once the cue names the HAP file it goes. Whether a movie is a preview is not in the tree: the
+window reads the file's header as the import does, once per file and again only when the file changes.
+
+### 39.8 Audio, on screen (WZ)
+
+The button reads "audio", the list's kind column "audio", the "+ audio" list "New audio cues", a
+template "an audio cue from a template", and every sentence that said "a media cue" says "an audio
+cue". `cue.create` still takes `media`; nothing in the file or the API moved.
+
+### 39.9 A DCA's strip says what it rides
+
+The D700's third line on a DCA strip reads **dca A** when only sounds are assigned to it, **dca V**
+when only pictures, **dca AV** for both, and **dca** for nothing (the author's words: "No A, V or AV
+means nothing is assigned to it"). Assigned, not playing: an audio or a mic cue marked with the DCA or
+inside a group so marked, an output it rides; a video cue so marked or placed, a canvas it rides. A
+DCA inside another hands its letters up. A fade's `dca` is the DCA it moves and counts for nothing.
+Read from the whole tree, so worked out once per show change (`surface::dcaContents`).
+
+### 39.10 Show settings on every open (XD)
+
+A plain launch opens the empty show with `--show-settings`. The author's log showed the rest: he
+pressed Apply with "save" ticked, which made an edit, so the empty show no longer gave way when he
+opened a file (it gives way only with nothing to save and nothing to undo), and its settings window
+stayed up beside the show he had opened. Now the empty show opens its settings only when its
+interface has not opened four seconds in; and an empty show that opens another and stays puts its
+settings away. A new show still opens on its settings at once.
+
+### 39.11 A recovery that was the saved show (XA)
+
+The author's log of the afternoon: saved at 19:31, then a movie cue pasted, moved into a group and
+out, and deleted; closed. The show was exactly what was saved, but its history had moved, so it was
+dirty; the clean exit kept the autosave, and the next open offered a `recovery/show.xml` byte for byte
+the `show.xml` beside it. `isDirty` still answers "is the file this document's history" (§14.15); what
+changed is what the autosave and the exit do with a show whose bytes came back:
+
+- **The session keeps the saved show's bytes** (`DocumentSession::savedShow`), stamped at open, by a
+  save that landed and by a revert.
+- **An autosave that finds the show back to them saves instead**, writing the same bytes, so the dot
+  goes out and this session's `recovery/` goes on the save's own terms (an earlier session's offer is
+  left as it is). Not under the lock, where no client offers Save: there it autosaves as before.
+  Replayed, the same document makes the same choice, so the log needs nothing new.
+- **The clean exit counts such a show as saved** and leaves no `recovery/`.
+- **At open, an offer whose show.xml is the saved show is deleted**, newest first, until one differs,
+  which is offered as before (`Bundle::discardRecoveriesHolding`), and a `wfg:` line says how many
+  went. This also clears the ones already on the disk.
+
+With WW, the banner is now what it was meant to be: the trace of a crash, a kill or a pulled plug.
+
+### 39.12 Three more, later the same evening
+
+- **The Show settings tabs have room either side of their words** (`Look::getTabButtonBestWidth`, two
+  thirds of the bar's depth more per tab); a bar too short for them all shrinks every tab a little, as
+  JUCE does, before it hides one.
+- **The foot panel says plainly when it is not for the cue**: a memo, a fade, a picture or anything
+  else with no sound to draw reads "Nothing to show here for a memo: only an audio cue or a movie has a
+  waveform and ranges", by its kind; and a movie, whose picture has no waveform, leaves the bar empty
+  under its ranges and ruler instead of "waiting for the analysis of this file", which it would have
+  said for ever. The author's answer: "Check of notes, fades and such don't have the same notice."
+- **A video monitor window** for the canvases, from the Show menu, is built with §40.

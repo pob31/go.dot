@@ -91,6 +91,12 @@ namespace wfg::client::ui
 
         juce::Font getTextButtonFont (juce::TextButton& button, int buttonHeight) override;
 
+        /*  A TAB'S WORD WITH ROOM EITHER SIDE (author, 2026-10-07: "Can the
+            tabs of the show parameters have a little more padding?"). A bar too
+            short for them all shrinks every tab a little, as JUCE does, before
+            it hides one. */
+        int getTabButtonBestWidth (juce::TabBarButton& button, int tabDepth) override;
+
     private:
         /*  The type scale, kept because a look-and-feel is asked for a font
             long after the theme that set it has gone out of scope. Everything

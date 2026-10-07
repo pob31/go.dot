@@ -2874,14 +2874,31 @@ namespace wfg::surface
                     when its REC is armed, "REC" while a pass writes it, and
                     "off" for a send switched off. */
                 const auto onLane = isLaneRide (textAt (at, strip.targetAt));
-                const std::string_view role = onLane && word == "recording" ? "REC"
-                                            : onLane && word == "rec"       ? "rec"
-                                            : onLane && word == "off"       ? "off"
-                                            : onLane                        ? "lane"
-                                            : isDca                         ? "dca"
-                                            : strip.cueId.empty()           ? "free"
-                                            : picked                        ? "picked"
-                                                                            : "sampler";
+                std::string_view role = onLane && word == "recording" ? "REC"
+                                      : onLane && word == "rec"       ? "rec"
+                                      : onLane && word == "off"       ? "off"
+                                      : onLane                        ? "lane"
+                                      : isDca                         ? "dca"
+                                      : strip.cueId.empty()           ? "free"
+                                      : picked                        ? "picked"
+                                                                      : "sampler";
+
+                /*  A DCA'S STRIP SAYS WHAT IS ASSIGNED TO IT (§39): "dca A"
+                    for sound only, "dca V" for pictures only, "dca AV" for
+                    both, plain "dca" for nothing - letters, not a colour (§4.8). */
+                if (isDca && ! onLane)
+                {
+                    const auto& contents = dcaContentsNow();
+                    const auto found = contents.find (strip.dcaId);
+                    const auto letters = found != contents.end() ? contentLetters (found->second) : std::string_view {};
+
+                    if (! letters.empty())
+                    {
+                        roleScratch.assign ("dca ");
+                        roleScratch.append (letters);
+                        role = roleScratch;
+                    }
+                }
 
                 if (changed (strip.rows[2], role))
                     send (port, d700DisplayRow3 (element, role));
@@ -3417,6 +3434,29 @@ namespace wfg::surface
 
             return dcaLightCache;
         }
+
+        /*  AND WHAT IS ASSIGNED TO EACH (§39), which reads the whole tree: so
+            once per show change, by the document's revision, and not per
+            snapshot. */
+        std::string dcaContentsAt { "-" };
+        std::map<std::string, DcaContents> dcaContentCache;
+
+        const std::map<std::string, DcaContents>& dcaContentsNow()
+        {
+            const auto revision = published != nullptr ? textAt (published.get(), "/godot/document/revision")
+                                                       : std::string {};
+
+            if (revision != dcaContentsAt)
+            {
+                dcaContentsAt = revision;
+                dcaContentCache = published != nullptr ? dcaContents (*published)
+                                                       : std::map<std::string, DcaContents> {};
+            }
+
+            return dcaContentCache;
+        }
+
+        std::string roleScratch;
         bool tableMoved = false;
 
         std::string levelScratch;

@@ -257,7 +257,7 @@ namespace wfg::client::model
                 return name + " not " + (fields[4] == "lane.record" ? "recorded" : "armed") + ": the show is locked";
 
             if (fields[4] == "lane.arm" && fields[3] == "bad-value")
-                return name + " records a media cue's level and sends only";
+                return name + " records an audio cue's level and sends only";
 
             if (fields[4] == "lane.record" && (fields[3] == "bad-value" || fields[3] == "unknown-id"))
                 return name + " not recorded: its cue cannot be played";

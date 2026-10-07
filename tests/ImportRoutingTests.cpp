@@ -129,9 +129,15 @@ TEST_CASE ("new-cue lists: a group wrapped around cues is born with its settings
         cue wrapped into a sampler lets go of it, as it would if the cue had
         been dragged into a sampler that already existed: a sampler's members
         are not places the pointer may stand. */
-    REQUIRE (document.setAttribute (standby, "F7HR8TVD").ok);
+    /*  A sampler takes only sounds (namespace draft §39): the memo is refused,
+        and a sound made for the purpose is wrapped. */
+    CHECK_FALSE (document.groupSelection ({ "F7HR8TVD" }, {}, { { "mode", "sampler" } }).ok);
+
+    const auto sound = document.createCue ("7K2QM9X4", 0, "media", "Thunder");
+    REQUIRE (sound.ok);
+    REQUIRE (document.setAttribute (standby, sound.id).ok);
     document.beginTransaction ("group.wrap", 100, "window", {});
-    REQUIRE (document.groupSelection ({ "F7HR8TVD" }, {}, { { "mode", "sampler" } }).ok);
+    REQUIRE (document.groupSelection ({ sound.id }, {}, { { "mode", "sampler" } }).ok);
     CHECK (document.getAttribute (standby).value_or ("?").empty());
 
     // A bad setting refuses the whole wrap before anything moves.

@@ -179,6 +179,10 @@ namespace wfg::doc
 
         /*  A save that landed and took this session's `recovery/` with it. */
         bool recoveryCleared = false;
+
+        /*  A save that landed: the show bytes it wrote, back for the session's
+            `savedShow` (DocumentSession.h, §39). Empty otherwise. */
+        std::string show;
     };
 
     /*  The command a job belongs to, as the log spells it. */

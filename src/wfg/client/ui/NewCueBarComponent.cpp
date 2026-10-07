@@ -42,7 +42,7 @@ namespace wfg::client::ui
                 list under a button carries everywhere else (2026-09-27): the
                 click that used to make a cue now asks which one. */
             const auto opens = model::opensList (kind);
-            auto label = juce::String (kind);
+            auto label = juce::String (model::kindWord (kind));
 
             if (opens)
                 label << " " << juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"));

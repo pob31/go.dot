@@ -18,6 +18,7 @@
 
 #include <wfg/client/model/Video.h>
 #include <wfg/client/model/Icons.h>
+#include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/NewCueMenus.h>
 
@@ -292,7 +293,7 @@ namespace wfg::client::ui
         {
             if (actions.say)
                 actions.say (cell == model::EditCell::duration
-                               ? (entry.kind == "media" ? juce::String ("a media cue's duration is its file's")
+                               ? (entry.kind == "media" ? juce::String ("an audio cue's duration is its file's")
                                                         : juce::String ("a ") + entry.kind + " has no duration to set")
                                : juce::String ("not a value this cue has"));
             return;
@@ -789,7 +790,7 @@ namespace wfg::client::ui
         g.drawText (entry.isGroup && ! entry.mode.empty() ? juce::String (entry.mode)
                       : ! entry.verb.empty()               ? juce::String (model::verbWord (entry.verb, entry.andGo))
                       : entry.followsMovie                 ? juce::String ("sound")
-                                                           : juce::String (entry.kind),
+                                                           : juce::String (model::kindWord (entry.kind)),
                     kindCell, juce::Justification::centredRight, true);
 
         //  The number, then the name, indented by how deep the cue sits.

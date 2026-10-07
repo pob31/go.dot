@@ -156,6 +156,7 @@ namespace wfg::client::model
         bool soundOfAbove = false;
         bool soundBelow = false;
         bool rateOn = false;         ///< a fade that moves its target's speed
+        bool memberOfSampler = false;  ///< a member (not header or footer) of a sampler group (§39)
         bool stopWhenDone = false;   ///< a fade that stops what it faded, once it arrives
 
         int depth = 0;           ///< 0 at the top of the list; a group's members are one deeper
