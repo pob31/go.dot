@@ -54,14 +54,14 @@ namespace wfg::video
             return std::equal (a.begin(), a.end(), b.begin(), b.end(),
                                [] (const region::OutputReading& x, const region::OutputReading& y)
                                {
-                                   const auto sameCdl = [] (const Cdl& a, const Cdl& b)
+                                   const auto sameCdl = [] (const Cdl& one, const Cdl& other)
                                    {
                                        for (int n = 0; n < 3; ++n)
-                                           if (std::abs (a.slope[n] - b.slope[n]) > 1e-12 || std::abs (a.offset[n] - b.offset[n]) > 1e-12
-                                                 || std::abs (a.power[n] - b.power[n]) > 1e-12)
+                                           if (std::abs (one.slope[n] - other.slope[n]) > 1e-12 || std::abs (one.offset[n] - other.offset[n]) > 1e-12
+                                                 || std::abs (one.power[n] - other.power[n]) > 1e-12)
                                                return false;
 
-                                       return std::abs (a.saturation - b.saturation) < 1e-12;
+                                       return std::abs (one.saturation - other.saturation) < 1e-12;
                                    };
 
                                    return x.id == y.id && x.canvas == y.canvas && x.name == y.name

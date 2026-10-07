@@ -192,7 +192,7 @@ TEST_CASE ("video region: the configuration written whole and read back, and tex
     auto& r = *memory.region;
 
     std::vector<video::region::CanvasReading> canvases { { "CANVAS01", 3840, 2160 }, { "CANVAS02", 1920, 1080 } };
-    std::vector<video::region::OutputReading> outputs { { "OUTPUT01", "CANVAS01", "Face", "EPSON PJ", "\\\\?\\DISPLAY#EPS", true, false } };
+    std::vector<video::region::OutputReading> outputs { { "OUTPUT01", "CANVAS01", "Face", "EPSON PJ", "\\\\?\\DISPLAY#EPS", true, false, {}, {} } };
 
     video::region::writeConfig (r, canvases, outputs);
 
