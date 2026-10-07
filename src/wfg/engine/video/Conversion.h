@@ -47,6 +47,7 @@
 #include <wfg/engine/video/Hap.h>
 
 #include <atomic>
+#include <cstdint>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -152,7 +153,8 @@ namespace wfg::video
         std::deque<ConversionRequest> queue;
         std::vector<ConversionStatus> known;
         std::string folder;
-        std::string tools;
+        mutable std::string tools;
+        mutable std::uint32_t lookedAt = 0;
         std::string current;
         std::atomic<bool> cancelCurrent { false };
         bool stopping = false;

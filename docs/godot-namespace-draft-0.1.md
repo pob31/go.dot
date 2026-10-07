@@ -21114,4 +21114,19 @@ all (proposed) unless marked the author's.
   FFmpeg's (`movie::durationOf` falls back to `ffprobe`), so the Runner ends and loops it and its
   Ranges are drawn against it. A `.mp4` named by a sound cue is now a movie to the analyser, and is
   not drawn as a waveform; `.m4a` stays a sound.
-- **Not built**: shipping FFmpeg (F.7).
+- **Shipping FFmpeg (F.7)** is WN below: built as it says - `ffmpeg.install` downloads, unpacks,
+  runs and puts in place; `/godot/videoOutput/ffmpegInstall` says how it goes; the window offers it
+  once a session when a movie needs FFmpeg and asks about the movies that waited once it has come,
+  and Show > Convert the movie to HAP > Download FFmpeg offers it any time nothing has it. Checked
+  on Windows by downloading BtbN's build into a folder of the test's own (`movie: FFmpeg downloaded`,
+  skipped unless `WFG_FFMPEG_DOWNLOAD` is set); the Mac's and Linux's links are owed a run there.
+- **WN - FFmpeg is downloaded on first use** (the author's pick, 2026-10-07, over bundling it - which
+  would add 90 to 190 MB to every installer - and over never shipping it). The installers stay as
+  they are. When a movie needs FFmpeg and none is found, Go.dot offers to download one into its own
+  folder (the user's application data, `Go.dot/ffmpeg`), saying how far it has got; FFmpeg beside
+  Go.dot, at `WFG_FFMPEG` or on the path is used first. A machine with no internet has FFmpeg put
+  there by hand. (proposed) The builds: on Windows BtbN's GPL shared build of FFmpeg 8.1, on Linux
+  BtbN's static one, on the Mac Martin Riedl's signed builds for Apple Silicon or Intel; each the
+  latest of its line, checked after the download by running it, since those links move with every
+  rebuild and cannot be pinned to a checksum. The Linux `.deb` recommends the system's `ffmpeg`,
+  which serves as well.

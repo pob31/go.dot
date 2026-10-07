@@ -1518,6 +1518,13 @@ TEST_CASE ("video: the window reads the conversions, and a sound's lock as a men
     later.percent = 51;
     CHECK_FALSE (client::model::conversionNews (&running, later).empty());
 
+    client::model::FfmpegInstallRow idle, fetching { "downloading", 34, {}, "github.com" };
+    CHECK (client::model::installNews (idle, fetching) == "Downloading FFmpeg from github.com: 34 %.");
+    CHECK (client::model::installNews (fetching, fetching).empty());
+    CHECK (fetching.running());
+    client::model::FfmpegInstallRow ready { "done", 100, {}, "github.com" };
+    CHECK (client::model::installNews (fetching, ready) == "FFmpeg is ready: movies can be converted to HAP and previewed.");
+
     client::model::ConversionRow failed { "clip.mp4", "failed", 0, "Invalid data found" };
     CHECK (client::model::conversionNews (&running, failed) == "clip.mp4 could not be converted to HAP: Invalid data found.");
     CHECK (client::model::conversionNews (&failed, failed).empty());

@@ -41,6 +41,7 @@
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/video/Conversion.h>
+#include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/VideoHost.h>
 
 #include <algorithm>
@@ -3443,6 +3444,17 @@ namespace wfg::tree
                         text = found.rendererProblem;
                     else if (name == "ffmpeg")
                         text = converter != nullptr ? converter->ffmpegPath() : std::string {};
+                    else if (name == "ffmpegInstall")
+                    {
+                        if (installer != nullptr)
+                        {
+                            const auto status = installer->status();
+
+                            if (! status.state.empty())
+                                text = status.state + "\t" + std::to_string (status.percent) + "\t" + status.problem
+                                     + "\t" + video::ffmpeg::downloadSource();
+                        }
+                    }
                     else if (name == "conversions")
                     {
                         if (converter != nullptr)

@@ -83,6 +83,7 @@
 #include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/video/Ffmpeg.h>
+#include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/Movie.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -117,7 +118,7 @@ namespace wfg::client
             menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance, menuUpdateTemplate,
             menuImportAls,
             menuConvertUsed, menuConvertWhole, menuConvertUsedQuality, menuConvertWholeQuality,
-            menuMovieSound, menuCancelConversion
+            menuMovieSound, menuCancelConversion, menuDownloadFfmpeg
         };
 
         class Window final : public wfg::Client,
@@ -744,8 +745,14 @@ namespace wfg::client
                     case menuAssociate:
                     case menuNewPerformance:
                     case menuUpdateTemplate:
-                    case menuImportAls: break;
-                    
+                    case menuImportAls:
+                    case menuConvertUsed:
+                    case menuConvertWhole:
+                    case menuConvertUsedQuality:
+                    case menuConvertWholeQuality:
+                    case menuMovieSound:
+                    case menuCancelConversion:
+                    case menuDownloadFfmpeg: break;
                 }
 
                 return {};
@@ -838,6 +845,11 @@ namespace wfg::client
                                  && ! model::ffmpegPath (*latest).empty() && ! conversionRunning (pickedMovieFile());
                     case menuCancelConversion:
                         return ! pickedMovieFile().empty() && conversionRunning (pickedMovieFile());
+
+                    //  Where nothing has it, and it is not on its way (37.5, WN).
+                    case menuDownloadFfmpeg:
+                        return latest != nullptr && model::ffmpegPath (*latest).empty()
+                                 && ! model::readFfmpegInstall (*latest).running();
                 }
 
                 return false;
@@ -939,7 +951,10 @@ namespace wfg::client
                     movie.addSeparator();
                     addMenuItem (movie, menuMovieSound, "Bring its sound in, locked to it");
                     addMenuItem (movie, menuCancelConversion, "Stop its conversion");
-                    menu.addSubMenu ("Convert the movie to HAP", movie, ! pickedMovieFile().empty());
+                    movie.addSeparator();
+                    addMenuItem (movie, menuDownloadFfmpeg, "Download FFmpeg...");
+                    menu.addSubMenu ("Convert the movie to HAP", movie,
+                                     ! pickedMovieFile().empty() || menuItemEnabled (menuDownloadFfmpeg));
                     menu.addSeparator();
                     addMenuItem (menu, menuRecord, model::isYes (last.recording) ? "Stop the live recorder"
                                                                                   : "Start the live recorder");
@@ -1000,6 +1015,9 @@ namespace wfg::client
                         break;
                     case menuCancelConversion:
                         send (gesture::cancelConversion (pickedMovieFile()));
+                        break;
+                    case menuDownloadFfmpeg:
+                        askToDownloadFfmpeg ({});
                         break;
                     case menuShowSettings:
                         openShowSettings();
@@ -2318,11 +2336,18 @@ namespace wfg::client
             {
                 const auto shown = juce::String::fromUTF8 (name.c_str());
 
+                /*  NO FFMPEG HERE: offered once a session, and the movie asked
+                    about again when it has come (37.5, WN). */
                 if (! ffmpeg)
                 {
                     if (! probed.isHap())
-                        shell->transport.setNotice (shown + " is not HAP, and FFmpeg was not found: it cannot be converted"
-                                                            " or previewed until FFmpeg is installed beside Go.dot.");
+                    {
+                        moviesWaitingForFfmpeg.push_back (name);
+
+                        if (! ffmpegOffered)
+                            askToDownloadFfmpeg (name);
+                    }
+
                     return;
                 }
 
@@ -2398,6 +2423,36 @@ namespace wfg::client
                     }), true);
             }
 
+            /*  FFMPEG DOWNLOADED ON FIRST USE (namespace draft 37.5, WN): what it
+                is for, how large, where from, and that it is free software. */
+            void askToDownloadFfmpeg (const std::string& forMovie)
+            {
+                ffmpegOffered = true;
+
+                if (! video::ffmpeg::canDownload())
+                {
+                    shell->transport.setNotice ("FFmpeg was not found, and there is no build to download for this machine:"
+                                                " install it, or put ffmpeg and ffprobe beside Go.dot.");
+                    return;
+                }
+
+                auto message = juce::String (forMovie.empty() ? "" : juce::String::fromUTF8 (forMovie.c_str()) + " is not HAP. ")
+                             + "Go.dot needs FFmpeg to convert movies to HAP and to preview them. It can download it now"
+                               " - about 90 MB, from " + juce::String (video::ffmpeg::downloadSource())
+                             + " - and keep it in its own folder. FFmpeg is free software, under the GPL.";
+
+                auto* box = new juce::AlertWindow ("Download FFmpeg?", message, juce::MessageBoxIconType::QuestionIcon, window.get());
+                box->addButton ("Download", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                box->addButton ("Not now", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                box->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                    {
+                        if (safe != nullptr && answer == 1)
+                            send (gesture::installFfmpeg());
+                    }), true);
+            }
+
             /*  The file of the movie picked, or empty: a video cue showing one. */
             std::string pickedMovieFile() const
             {
@@ -2436,6 +2491,24 @@ namespace wfg::client
                 it changes - started, each tenth of the way, done, failed. */
             void followConversions (const tree::TreeSnapshot& snapshot)
             {
+                /*  FFMPEG ON ITS WAY, said as it comes; once it is here, the
+                    movies that waited for it are asked about. */
+                const auto installing = model::readFfmpegInstall (snapshot);
+
+                if (const auto news = model::installNews (ffmpegInstallSeen, installing); ! news.empty() && shell != nullptr)
+                    shell->transport.setNotice (juce::String::fromUTF8 (news.c_str()));
+
+                if (installing.state == "done" && ffmpegInstallSeen.state != "done")
+                {
+                    for (const auto& name : moviesWaitingForFfmpeg)
+                        movieOffers.push_back (name);
+
+                    moviesWaitingForFfmpeg.clear();
+                    probeNextMovie();
+                }
+
+                ffmpegInstallSeen = installing;
+
                 for (const auto& row : model::readConversions (snapshot))
                 {
                     const auto seen = conversionsSeen.find (row.file);
@@ -3783,6 +3856,12 @@ namespace wfg::client
             bool probingMovie = false;
             bool askingAboutMovie = false;
             std::map<std::string, model::ConversionRow> conversionsSeen;
+
+            /*  FFmpeg offered once a session; the movies waiting for it; how
+                its download was last said (37.5, WN). */
+            bool ffmpegOffered = false;
+            std::vector<std::string> moviesWaitingForFfmpeg;
+            model::FfmpegInstallRow ffmpegInstallSeen;
             std::string importSaid;         ///< the progress last put on the foot, so it is said once
             juce::String importWarning;     ///< what routing an imported cue found missing, said at the end
 

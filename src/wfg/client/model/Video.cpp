@@ -308,6 +308,61 @@ namespace wfg::client::model
         return text (snapshot, "/godot/videoOutput/ffmpeg");
     }
 
+    FfmpegInstallRow readFfmpegInstall (const tree::TreeSnapshot& snapshot)
+    {
+        const auto all = text (snapshot, "/godot/videoOutput/ffmpegInstall");
+        std::vector<std::string> fields;
+        std::string::size_type from = 0;
+
+        while (! all.empty())
+        {
+            const auto tab = all.find ('\t', from);
+            fields.push_back (all.substr (from, tab == std::string::npos ? std::string::npos : tab - from));
+
+            if (tab == std::string::npos)
+                break;
+
+            from = tab + 1;
+        }
+
+        FfmpegInstallRow row;
+
+        if (! fields.empty())
+            row.state = fields[0];
+
+        if (fields.size() > 1)
+            row.percent = static_cast<int> (osc::parseDouble (fields[1]).value_or (0.0));
+
+        if (fields.size() > 2)
+            row.problem = fields[2];
+
+        if (fields.size() > 3)
+            row.source = fields[3];
+
+        return row;
+    }
+
+    std::string installNews (const FfmpegInstallRow& before, const FfmpegInstallRow& now)
+    {
+        if (now.state == before.state && (now.state != "downloading" || now.percent / 10 == before.percent / 10))
+            return {};
+
+        if (now.state == "downloading")
+            return "Downloading FFmpeg" + (now.source.empty() ? std::string {} : " from " + now.source)
+                 + ": " + std::to_string (now.percent) + " %.";
+
+        if (now.state == "unpacking" || now.state == "checking")
+            return "FFmpeg is downloaded, and being made ready.";
+
+        if (now.state == "done")
+            return "FFmpeg is ready: movies can be converted to HAP and previewed.";
+
+        if (now.state == "failed")
+            return "FFmpeg could not be downloaded" + (now.problem.empty() ? std::string (".") : ": " + now.problem + ".");
+
+        return {};
+    }
+
     std::string conversionNews (const ConversionRow* before, const ConversionRow& now)
     {
         const auto named = now.file;

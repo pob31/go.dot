@@ -83,6 +83,7 @@ namespace wfg::surface { class SurfaceTable; }
 namespace wfg::cue { class DcaTable; class LaneTable; class LiveEdits; class TakeTable; }
 
 namespace wfg::video { class VideoHost; class Converter; }
+namespace wfg::video::ffmpeg { class Installer; }
 
 namespace wfg::tree
 {
@@ -326,6 +327,9 @@ namespace wfg::tree
             the Video readouts; none in every verb but serve. */
         void setConverter (const video::Converter* converterToRead) noexcept { converter = converterToRead; }
 
+        /*  FFmpeg being downloaded on first use (namespace draft 37.5, WN). */
+        void setInstaller (const video::ffmpeg::Installer* installerToRead) noexcept { installer = installerToRead; }
+
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
             four `none` rows under /godot/plugin/<id>. The surface table's
@@ -454,6 +458,7 @@ namespace wfg::tree
         const cue::LaneTable* lanes = nullptr;
         const video::VideoHost* videoHost = nullptr;
         const video::Converter* converter = nullptr;
+        const video::ffmpeg::Installer* installer = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;

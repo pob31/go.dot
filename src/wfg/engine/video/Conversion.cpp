@@ -351,7 +351,26 @@ namespace wfg::video
 
     std::string Converter::ffmpegPath() const
     {
+        /*  LOOKED FOR AGAIN while there is none, at most once a second: one
+            downloaded on first use (37.5, WN), or installed by hand, is found
+            without Go.dot being started again. */
+        {
+            const std::lock_guard<std::mutex> held (lock);
+
+            if (! tools.empty())
+                return tools;
+
+            const auto now = juce::Time::getMillisecondCounter();
+
+            if (now - lookedAt < 1000)
+                return tools;
+
+            lookedAt = now;
+        }
+
+        const auto found = ffmpeg::find().ffmpeg;
         const std::lock_guard<std::mutex> held (lock);
+        tools = found;
         return tools;
     }
 

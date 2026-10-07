@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/video/Ffmpeg.h>
+#include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/PipedChild.h>
 
 #include <wfg/engine/osc/OscValue.h>
@@ -97,6 +98,11 @@ namespace wfg::video::ffmpeg
                                     beside.getParentDirectory().getChildFile ("Resources").getChildFile ("ffmpeg") })
             if (const auto tools = inFolder (folder); tools.found())
                 return tools;
+
+        /*  DOWNLOADED ON FIRST USE (namespace draft 37.5, WN), into Go.dot's
+            own folder. */
+        if (const auto tools = inFolder (juce::File (juce::String::fromUTF8 (installFolder().c_str()))); tools.found())
+            return tools;
 
         /*  ON THE PATH. */
         const auto separator = juce::File::getSeparatorChar() == '\\' ? ";" : ":";

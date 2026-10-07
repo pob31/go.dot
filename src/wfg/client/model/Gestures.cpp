@@ -438,6 +438,11 @@ namespace wfg::client::gesture
         return { origin::window, "media.convert.cancel", { osc::Value::string (file) } };
     }
 
+    Event installFfmpeg()
+    {
+        return { origin::window, "ffmpeg.install", {} };
+    }
+
     Event pressStrip (const std::string& stripId, int velocity)
     {
         /*  A HAND WITH NO VELOCITY SAYS NONE. The argument is optional because

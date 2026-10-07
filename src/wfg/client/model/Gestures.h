@@ -363,6 +363,9 @@ namespace wfg::client::gesture
     Event convertMovie (const std::string& file, const std::string& scope, const std::string& format, bool sound);
     Event cancelConversion (const std::string& file);
 
+    /*  FFmpeg downloaded into Go.dot's own folder (namespace draft 37.5, WN). */
+    Event installFfmpeg();
+
     /*  A HAND ON A SAMPLER STRIP, AND THE HAND LIFTED (PRD §3.27): a pad of
         the virtual panel clicked, a number key held. `velocity` is 1 to 127,
         from where on the pad the click landed; below 1 the argument is left

@@ -48,6 +48,7 @@
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/ScanJob.h>
 #include <wfg/engine/video/Conversion.h>
+#include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/VideoCommands.h>
 #include <wfg/engine/video/VideoHost.h>
 #include <wfg/engine/video/VideoRenderChild.h>
@@ -366,6 +367,7 @@ namespace
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
+        wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -659,6 +661,7 @@ namespace
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
+        wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -1272,6 +1275,7 @@ namespace
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
+        wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -3913,6 +3917,12 @@ namespace
                                           } };
         wfg::video::registerConversionCommands (engine.commands(), document, &converter);
         parameters.setConverter (&converter);
+
+        /*  AND FFMPEG ITSELF, downloaded on first use when nothing has it
+            (namespace draft 37.5, WN). */
+        wfg::video::ffmpeg::Installer ffmpegInstaller;
+        wfg::video::ffmpeg::registerInstallCommands (engine.commands(), &ffmpegInstaller);
+        parameters.setInstaller (&ffmpegInstaller);
         videoHost.configure (document);
 
         /*  The show's revision the video configuration was last read at: the

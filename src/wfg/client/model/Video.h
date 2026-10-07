@@ -106,6 +106,24 @@ namespace wfg::client::model
     /*  Where FFmpeg was found on the engine's machine, or empty. */
     std::string ffmpegPath (const tree::TreeSnapshot&);
 
+    /*  FFMPEG BEING DOWNLOADED on first use (namespace draft 37.5, WN), as
+        /godot/videoOutput/ffmpegInstall says it; `state` empty when nobody
+        asked. */
+    struct FfmpegInstallRow
+    {
+        std::string state;
+        int percent = 0;
+        std::string problem;
+        std::string source;
+
+        bool running() const  { return state == "downloading" || state == "unpacking" || state == "checking"; }
+    };
+
+    FfmpegInstallRow readFfmpegInstall (const tree::TreeSnapshot&);
+
+    /*  The sentence its change is worth: each tenth of the way, done, failed. */
+    std::string installNews (const FfmpegInstallRow& before, const FfmpegInstallRow& now);
+
     /*  THE ONE SENTENCE A CONVERSION'S CHANGE IS WORTH, for the transport's
         line: started, how far (in tens of %), done, failed and why, or
         cancelled. Empty when nothing worth saying changed. */

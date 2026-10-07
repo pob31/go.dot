@@ -29,6 +29,7 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/video/Ffmpeg.h>
+#include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/Hap.h>
 #include <wfg/engine/video/HapEncoder.h>
 #include <wfg/engine/video/Movie.h>
@@ -570,6 +571,44 @@ TEST_CASE ("movie: a movie Go.dot writes is read back frame for frame")
         const std::vector<std::uint8_t> theirs (raw.begin() + 2 * width * height * 4, raw.begin() + 3 * width * height * 4);
         CHECK (errorOf (format, blocks, theirs, width, height, false).first < 1.0);
     }
+
+    folder.deleteRecursively();
+}
+
+/*  FFMPEG DOWNLOADED ON FIRST USE (namespace draft 37.5, WN): fetched,
+    unpacked, run once each, and put in place - into a folder of the test's
+    own. Skipped unless WFG_FFMPEG_DOWNLOAD is set: it is tens of megabytes
+    from a server CI does not own. */
+TEST_CASE ("movie: FFmpeg downloaded, unpacked, checked and put in place")
+{
+    if (juce::SystemStats::getEnvironmentVariable ("WFG_FFMPEG_DOWNLOAD", {}).isEmpty() || ! video::ffmpeg::canDownload())
+        return;
+
+    const auto folder = juce::File::createTempFile ("ffmpeg-install");
+    const auto into = folder.getChildFile ("ffmpeg");
+    REQUIRE (folder.createDirectory());
+
+    video::ffmpeg::Installer installer { into.getFullPathName().toStdString() };
+    REQUIRE (installer.start());
+
+    auto status = installer.status();
+
+    for (int waited = 0; waited < 1200 && (status.state != "done" && status.state != "failed"); ++waited)
+    {
+        juce::Thread::sleep (500);
+        status = installer.status();
+    }
+
+    MESSAGE ("FFmpeg from " << video::ffmpeg::downloadSource() << ": " << status.state << " " << status.problem);
+    REQUIRE (status.state == "done");
+
+   #if JUCE_WINDOWS
+    CHECK (into.getChildFile ("ffmpeg.exe").existsAsFile());
+    CHECK (into.getChildFile ("ffprobe.exe").existsAsFile());
+   #else
+    CHECK (into.getChildFile ("ffmpeg").existsAsFile());
+    CHECK (into.getChildFile ("ffprobe").existsAsFile());
+   #endif
 
     folder.deleteRecursively();
 }
