@@ -248,12 +248,95 @@ namespace wfg::client::model
             if (c >= 'A' && c <= 'Z')
                 c = static_cast<char> (c - 'A' + 'a');
 
-        return extension == "mov";
+        for (const auto* known : { "mov", "mp4", "m4v", "mkv", "avi", "mxf", "webm", "mpg", "mpeg" })
+            if (extension == known)
+                return true;
+
+        return false;
+    }
+
+    std::vector<ConversionRow> readConversions (const tree::TreeSnapshot& snapshot)
+    {
+        std::vector<ConversionRow> out;
+
+        const auto all = text (snapshot, "/godot/videoOutput/conversions");
+        std::vector<std::string> lines;
+
+        for (std::size_t at = 0; at < all.size();)
+        {
+            const auto end = all.find ('\n', at);
+            lines.push_back (all.substr (at, end == std::string::npos ? std::string::npos : end - at));
+
+            if (end == std::string::npos)
+                break;
+
+            at = end + 1;
+        }
+
+        for (const auto& line : lines)
+        {
+            std::vector<std::string> fields;
+            std::string::size_type from = 0;
+
+            for (;;)
+            {
+                const auto tab = line.find ('\t', from);
+                fields.push_back (line.substr (from, tab == std::string::npos ? std::string::npos : tab - from));
+
+                if (tab == std::string::npos)
+                    break;
+
+                from = tab + 1;
+            }
+
+            if (fields.size() < 2 || fields[0].empty())
+                continue;
+
+            ConversionRow row;
+            row.file = fields[0];
+            row.state = fields[1];
+            row.percent = fields.size() > 2 ? static_cast<int> (osc::parseDouble (fields[2]).value_or (0.0)) : 0;
+            row.problem = fields.size() > 3 ? fields[3] : std::string {};
+            out.push_back (row);
+        }
+
+        return out;
+    }
+
+    std::string ffmpegPath (const tree::TreeSnapshot& snapshot)
+    {
+        return text (snapshot, "/godot/videoOutput/ffmpeg");
+    }
+
+    std::string conversionNews (const ConversionRow* before, const ConversionRow& now)
+    {
+        const auto named = now.file;
+
+        if (before != nullptr && before->state == now.state
+              && (now.state != "converting" || before->percent / 10 == now.percent / 10))
+            return {};
+
+        if (now.state == "waiting")
+            return named + " will be converted to HAP after the one before it.";
+
+        if (now.state == "converting")
+            return "Converting " + named + " to HAP: " + std::to_string (now.percent) + " %.";
+
+        if (now.state == "done")
+            return named + " is converted to HAP, and its cues play the HAP file.";
+
+        if (now.state == "failed")
+            return named + " could not be converted to HAP" + (now.problem.empty() ? std::string (".") : ": " + now.problem + ".");
+
+        if (now.state == "cancelled")
+            return "The conversion of " + named + " to HAP was stopped.";
+
+        return {};
     }
 
     const char* pictureWildcard()
     {
-        return "*.png;*.jpg;*.jpeg;*.gif;*.mov";
+        return "*.png;*.jpg;*.jpeg;*.gif;*.mov;*.mp4;*.m4v;*.mkv;*.avi;*.mxf;*.webm;*.mpg;*.mpeg";
     }
 
     std::vector<std::pair<std::string, std::string>> canvasChoices (const std::vector<CanvasRow>& canvases)

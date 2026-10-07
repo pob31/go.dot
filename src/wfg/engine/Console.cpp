@@ -3908,7 +3908,8 @@ namespace
                                                              { wfg::osc::Value::string (request.sourceName),
                                                                wfg::osc::Value::string (request.targetName),
                                                                wfg::osc::Value::float64 (request.start),
-                                                               wfg::osc::Value::string (request.soundName) });
+                                                               wfg::osc::Value::string (request.soundName),
+                                                               wfg::osc::Value::int32 (std::max (1, request.soundChannels)) });
                                           } };
         wfg::video::registerConversionCommands (engine.commands(), document, &converter);
         parameters.setConverter (&converter);

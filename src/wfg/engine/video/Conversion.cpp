@@ -62,7 +62,7 @@ namespace wfg::video
         }
     }
 
-    bool convertMovie (const ConversionRequest& request, std::string& why,
+    bool convertMovie (ConversionRequest& request, std::string& why,
                        const std::function<void (double)>& progress, const std::atomic<bool>* cancelled)
     {
         const auto tools = ffmpeg::find();
@@ -94,128 +94,142 @@ namespace wfg::video
         const auto length = request.length >= 0.0 ? std::min (request.length, rest) : rest;
         const auto expected = std::max (1.0, length * static_cast<double> (timeScale) / static_cast<double> (frameDuration));
 
-        const juce::File target (juce::String::fromUTF8 (request.target.c_str()));
+        const auto pictures = ! request.target.empty();
+        const juce::File target (juce::String::fromUTF8 ((pictures ? request.target : request.sound).c_str()));
         const auto part = target.getSiblingFile (target.getFileName() + ".part");
         const auto errors = target.getSiblingFile (target.getFileName() + ".log");
         target.getParentDirectory().createDirectory();
 
-        /*  THE FRAMES, raw, at the source's own rate made steady. */
-        std::vector<std::string> command { tools.ffmpeg, "-nostdin", "-v", "error",
-                                           "-ss", osc::formatDouble (start), "-i", request.source };
-
-        if (request.length >= 0.0)
-        {
-            command.push_back ("-t");
-            command.push_back (osc::formatDouble (length));
-        }
-
-        for (const auto* word : { "-map", "0:v:0", "-an", "-sn", "-fps_mode", "cfr" })
-            command.push_back (word);
-
-        command.push_back ("-r");
-        command.push_back (std::to_string (timeScale) + "/" + std::to_string (frameDuration));
-
-        for (const auto* word : { "-f", "rawvideo", "-pix_fmt", "rgba", "-" })
-            command.push_back (word);
-
-        PipedChild decoder;
-
-        if (! decoder.start (command, errors.getFullPathName().toStdString()))
-        {
-            why = "FFmpeg would not start";
-            return false;
-        }
-
+        std::string ignored;
         movie::MovieWriter writer;
-
-        if (! writer.open (part.getFullPathName().toStdString(), codec, probe.width, probe.height,
-                           timeScale, frameDuration, why))
-        {
-            decoder.kill();
-            return false;
-        }
-
-        const auto width = probe.width, height = probe.height;
-        const auto frameBytes = static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 4;
-        const auto rowsOfBlocks = (height + 3) / 4;
-        const auto threads = std::clamp (static_cast<int> (std::thread::hardware_concurrency()) - 2, 1, 16);
-
-        std::vector<std::uint8_t> pixels (frameBytes), blocks, frame, scratch;
-        auto stopped = false;
-        auto count = 0;
-
-        while (decoder.readExactly (pixels.data(), pixels.size()))
-        {
-            if (cancelled != nullptr && cancelled->load())
-            {
-                stopped = true;
-                break;
-            }
-
-            /*  ITS BLOCKS ON EVERY THREAD SPARED, a band of rows each. */
-            blocks.resize (static_cast<std::size_t> (((width + 3) / 4) * rowsOfBlocks) * hap::bytesPerBlock (texture));
-            const auto band = (rowsOfBlocks + threads - 1) / threads;
-            std::vector<std::thread> workers;
-
-            for (int t = 1; t < threads; ++t)
-                workers.emplace_back ([&, t]
-                                      {
-                                          hap::encodeTexture (texture, pixels.data(), width, height,
-                                                              static_cast<std::size_t> (width) * 4, blocks, t * band, band);
-                                      });
-
-            hap::encodeTexture (texture, pixels.data(), width, height, static_cast<std::size_t> (width) * 4, blocks, 0, band);
-
-            for (auto& worker : workers)
-                worker.join();
-
-            hap::packFrame (texture, blocks, frame, scratch);
-
-            if (! writer.write (frame.data(), frame.size()))
-            {
-                why = "the HAP file could not be written";
-                stopped = true;
-                break;
-            }
-
-            ++count;
-
-            if (progress)
-                progress (std::min (0.99, static_cast<double> (count) / expected));
-        }
-
-        if (stopped)
-            decoder.kill();
-
-        const auto exit = decoder.wait (30000);
 
         const auto fail = [&] (std::string reason)
         {
-            std::string ignored;
-            writer.finish (ignored);
-            part.deleteFile();
+            if (pictures)
+            {
+                writer.finish (ignored);
+                part.deleteFile();
+            }
+
+            errors.deleteFile();
             why = std::move (reason);
             return false;
         };
 
-        if (stopped)
-            return fail (why.empty() ? std::string ("cancelled") : why);
-
-        if (exit != 0 || count == 0)
+        if (pictures)
         {
-            const auto said = lastLineOf (errors);
-            return fail (said.empty() ? std::string ("FFmpeg could not decode it") : said);
-        }
+            /*  THE FRAMES, raw, at the source's own rate made steady. */
+            std::vector<std::string> command { tools.ffmpeg, "-nostdin", "-v", "error",
+                                               "-ss", osc::formatDouble (start), "-i", request.source };
 
-        if (! writer.finish (why))
-        {
-            part.deleteFile();
-            return false;
+            if (request.length >= 0.0)
+            {
+                command.push_back ("-t");
+                command.push_back (osc::formatDouble (length));
+            }
+
+            for (const auto* word : { "-map", "0:v:0", "-an", "-sn", "-fps_mode", "cfr" })
+                command.push_back (word);
+
+            command.push_back ("-r");
+            command.push_back (std::to_string (timeScale) + "/" + std::to_string (frameDuration));
+
+            for (const auto* word : { "-f", "rawvideo", "-pix_fmt", "rgba", "-" })
+                command.push_back (word);
+
+            PipedChild decoder;
+
+            if (! decoder.start (command, errors.getFullPathName().toStdString()))
+            {
+                why = "FFmpeg would not start";
+                return false;
+            }
+
+            if (! writer.open (part.getFullPathName().toStdString(), codec, probe.width, probe.height,
+                               timeScale, frameDuration, why))
+            {
+                decoder.kill();
+                return false;
+            }
+
+            const auto width = probe.width, height = probe.height;
+            const auto frameBytes = static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 4;
+            const auto rowsOfBlocks = (height + 3) / 4;
+            const auto threads = std::clamp (static_cast<int> (std::thread::hardware_concurrency()) - 2, 1, 16);
+
+            std::vector<std::uint8_t> pixels (frameBytes), blocks, frame, scratch;
+            auto stopped = false;
+            auto count = 0;
+
+            while (decoder.readExactly (pixels.data(), pixels.size()))
+            {
+                if (cancelled != nullptr && cancelled->load())
+                {
+                    stopped = true;
+                    break;
+                }
+
+                /*  ITS BLOCKS ON EVERY THREAD SPARED, a band of rows each. */
+                blocks.resize (static_cast<std::size_t> (((width + 3) / 4) * rowsOfBlocks) * hap::bytesPerBlock (texture));
+                const auto band = (rowsOfBlocks + threads - 1) / threads;
+                std::vector<std::thread> workers;
+
+                for (int t = 1; t < threads; ++t)
+                    workers.emplace_back ([&, t]
+                                          {
+                                              hap::encodeTexture (texture, pixels.data(), width, height,
+                                                                  static_cast<std::size_t> (width) * 4, blocks, t * band, band);
+                                          });
+
+                hap::encodeTexture (texture, pixels.data(), width, height, static_cast<std::size_t> (width) * 4, blocks, 0, band);
+
+                for (auto& worker : workers)
+                    worker.join();
+
+                hap::packFrame (texture, blocks, frame, scratch);
+
+                if (! writer.write (frame.data(), frame.size()))
+                {
+                    why = "the HAP file could not be written";
+                    stopped = true;
+                    break;
+                }
+
+                ++count;
+
+                if (progress)
+                    progress (std::min (0.99, static_cast<double> (count) / expected));
+            }
+
+            if (stopped)
+                decoder.kill();
+
+            const auto exit = decoder.wait (30000);
+
+            if (stopped)
+                return fail (why.empty() ? std::string ("cancelled") : why);
+
+            if (exit != 0 || count == 0)
+            {
+                const auto said = lastLineOf (errors);
+                return fail (said.empty() ? std::string ("FFmpeg could not decode it") : said);
+            }
+
+            if (! writer.finish (why))
+            {
+                part.deleteFile();
+                return false;
+            }
         }
 
         /*  ITS SOUND, over the same span, when asked and when it has one. */
+        if (! pictures && ! probe.sound)
+            return fail ("it has no sound");
+
         if (! request.sound.empty() && probe.sound)
         {
+            request.soundChannels = probe.soundChannels;
+
             const juce::File sound (juce::String::fromUTF8 (request.sound.c_str()));
             const auto soundPart = sound.getSiblingFile (sound.getFileName() + ".part");
 
@@ -252,14 +266,21 @@ namespace wfg::video
             if (! soundPart.moveFileTo (sound))
                 return fail ("its sound could not be put in place");
         }
-
-        target.deleteFile();
-
-        if (! part.moveFileTo (target))
+        else
         {
-            part.deleteFile();
-            why = "the HAP file could not be put in place";
-            return false;
+            request.soundName.clear();
+        }
+
+        if (pictures)
+        {
+            target.deleteFile();
+
+            if (! part.moveFileTo (target))
+            {
+                part.deleteFile();
+                why = "the HAP file could not be put in place";
+                return false;
+            }
         }
 
         errors.deleteFile();
@@ -486,7 +507,9 @@ namespace wfg::video
                             const auto format = args.size() > 2 ? args[2].getString() : std::string ("hap");
                             const auto sound = args.size() > 3 && args[3].isBool() && args[3].getBool();
 
-                            if (file.empty() || (scope != "whole" && scope != "used") || (format != "hap" && format != "hapq"))
+                            if (file.empty() || (scope != "whole" && scope != "used")
+                                  || (format != "hap" && format != "hapq" && format != "none")
+                                  || (format == "none" && ! sound))
                                 return Outcome::rejected (reason::badValue);
 
                             if (converter == nullptr)
@@ -517,10 +540,16 @@ namespace wfg::video
                             request.id = juce::Uuid().toDashedString().toStdString();
                             request.sourceName = file;
                             request.source = source;
-                            request.targetName = freeName (stem + (format == "hapq" ? " (Hap Q)" : " (Hap)"), ".mov").toStdString();
-                            request.target = root.getChildFile (juce::String::fromUTF8 (request.targetName.c_str()))
-                                                 .getFullPathName().toStdString();
-                            if (scope == "used")
+                            /*  THE SOUND ALONE takes the whole file: the movie
+                                is not cut, so neither is what goes with it. */
+                            if (format != "none")
+                            {
+                                request.targetName = freeName (stem + (format == "hapq" ? " (Hap Q)" : " (Hap)"), ".mov").toStdString();
+                                request.target = root.getChildFile (juce::String::fromUTF8 (request.targetName.c_str()))
+                                                     .getFullPathName().toStdString();
+                            }
+
+                            if (scope == "used" && format != "none")
                             {
                                 const auto span = usedSpanOf (document, file);
                                 request.start = span.start;
@@ -558,15 +587,21 @@ namespace wfg::video
                         " what was cut from the front. Submitted by the converter, one undoable edit; the original"
                         " stays in media/.",
                         { { "source", 's', false }, { "target", 's', false }, { "cut", 'd', false },
-                          { "sound", 's', true } },
+                          { "sound", 's', true }, { "channels", 'i', true }, { "made", 's', true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto source = args[0].getString();
                             const auto target = args[1].getString();
                             const auto cut = args[2].asDouble();
+                            const auto soundFile = args.size() > 3 && args[3].isString() ? args[3].getString() : std::string {};
+                            const auto channels = args.size() > 4 && args[4].isNumber()
+                                                    ? std::clamp (static_cast<int> (args[4].asDouble()), 1, 64) : 2;
+                            const auto supplied = args.size() > 5 && args[5].isString()
+                                                    ? juce::StringArray::fromTokens (juce::String (args[5].getString()), " ", "")
+                                                    : juce::StringArray();
 
-                            if (source.empty() || target.empty() || ! std::isfinite (cut) || cut < 0.0)
+                            if (source.empty() || ! std::isfinite (cut) || cut < 0.0 || (target.empty() && soundFile.empty()))
                                 return Outcome::rejected (reason::badValue);
 
                             std::vector<std::string> cues;
@@ -587,6 +622,10 @@ namespace wfg::video
                                 const auto base = "/godot/cue/" + id + "/";
                                 const auto node = document.findById (id);
                                 const auto offset = osc::parseDouble (node["startOffset"].toString().toStdString()).value_or (0.0);
+
+                                /*  THE SOUND ALONE: the movie stays as it is. */
+                                if (target.empty())
+                                    continue;
 
                                 if (const auto edit = document.setAttribute (base + "file", target); ! edit.ok)
                                     return Outcome::rejected (edit.reason);
@@ -621,7 +660,96 @@ namespace wfg::video
                                 }
                             }
 
-                            return Outcome::ok (args);
+                            /*  ITS SOUND AS A CUE LOCKED TO IT (WJ): one after
+                                each movie, or the one it has pointed at the new
+                                file. Made after the movie's edit, so it takes
+                                the movie's start offset and Ranges as they now
+                                are. */
+                            std::vector<std::string> made;
+                            int taken = 0;
+
+                            if (! soundFile.empty())
+                                for (const auto& movieId : cues)
+                                {
+                                    const auto movie = document.findById (movieId);
+                                    juce::ValueTree existing;
+
+                                    std::function<void (const juce::ValueTree&)> find = [&] (const juce::ValueTree& node)
+                                    {
+                                        if (node.hasType ("Media") && node["lockedTo"].toString().toStdString() == movieId)
+                                            existing = node;
+
+                                        for (const auto& child : node)
+                                            find (child);
+                                    };
+
+                                    find (document.root());
+
+                                    if (existing.isValid())
+                                    {
+                                        const auto existingId = existing["id"].toString().toStdString();
+
+                                        if (const auto edit = document.setAttribute ("/godot/cue/" + existingId + "/file", soundFile); ! edit.ok)
+                                            return Outcome::rejected (edit.reason);
+
+                                        continue;
+                                    }
+
+                                    /*  RIGHT AFTER THE MOVIE, among its parent's members. */
+                                    const auto parent = movie.getParent();
+                                    int position = 0;
+
+                                    for (const auto& sibling : parent)
+                                    {
+                                        if (sibling == movie)
+                                            break;
+
+                                        if (doc::ShowDocument::ownerForElement (sibling.getType().toString().toStdString()) == "cue")
+                                            ++position;
+                                    }
+
+                                    const auto wanted = taken < supplied.size() ? supplied[taken].toStdString() : std::string {};
+                                    ++taken;
+
+                                    const auto name = movie["name"].toString().toStdString() + " (sound)";
+                                    const auto created = document.createCue (parent["id"].toString().toStdString(), position + 1,
+                                                                             "media", name, wanted);
+
+                                    if (! created.ok)
+                                        return Outcome::rejected (created.reason);
+
+                                    made.push_back (created.id);
+
+                                    const auto cueBase = "/godot/cue/" + created.id + "/";
+
+                                    for (const auto& [row, value] : { std::pair<std::string, std::string> { "file", soundFile },
+                                                                      std::pair<std::string, std::string> { "channels", std::to_string (channels) },
+                                                                      std::pair<std::string, std::string> { "lockedTo", movieId } })
+                                        if (const auto edit = document.setAttribute (cueBase + row, value); ! edit.ok)
+                                            return Outcome::rejected (edit.reason);
+
+                                    /*  ROUTED AS AN IMPORTED SOUND IS, to the first
+                                        bus; a show with none leaves it to be. */
+                                    document.defaultMediaRoute (created.id, channels);
+                                }
+
+                            auto applied = args;
+
+                            while (applied.size() < 5)
+                                applied.push_back (applied.size() == 3 ? osc::Value::string (soundFile)
+                                                                       : osc::Value::int32 (channels));
+
+                            std::string madeText;
+
+                            for (const auto& id : made)
+                                madeText += (madeText.empty() ? "" : " ") + id;
+
+                            if (applied.size() > 5)
+                                applied[5] = osc::Value::string (madeText);
+                            else
+                                applied.push_back (osc::Value::string (madeText));
+
+                            return Outcome::ok (applied);
                         } });
     }
 }

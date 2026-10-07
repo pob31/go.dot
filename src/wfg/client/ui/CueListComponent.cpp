@@ -788,6 +788,7 @@ namespace wfg::client::ui
         g.setColour (faint);
         g.drawText (entry.isGroup && ! entry.mode.empty() ? juce::String (entry.mode)
                       : ! entry.verb.empty()               ? juce::String (model::verbWord (entry.verb, entry.andGo))
+                      : entry.followsMovie                 ? juce::String ("sound")
                                                            : juce::String (entry.kind),
                     kindCell, juce::Justification::centredRight, true);
 
@@ -795,7 +796,28 @@ namespace wfg::client::ui
         auto numberCell = area.removeFromLeft (numberChars * unit);
         g.setColour (isStandby ? standbyColour : faint);
         g.setFont (Look::font (theme, 12.0f));
-        g.drawText (entry.number, numberCell, juce::Justification::centredLeft, false);
+
+        /*  A DUAL CUE'S SECOND LINE (namespace draft 37.5, WM): the sound of
+            the movie above, joined to it by a rule from the movie's number -
+            a shape as well as the word in the kind column (§4.8) - and no
+            number of its own, since the pair is one cue to GO. */
+        if (entry.soundOfAbove || entry.soundBelow)
+        {
+            const auto x = numberCell.getX() + unit / 2;
+            g.setColour (Look::colour (theme, "rule"));
+
+            if (entry.soundBelow)
+                g.fillRect (x, (height / 2) + unit / 2, 1, height - (height / 2) - unit / 2);
+
+            if (entry.soundOfAbove)
+            {
+                g.fillRect (x, 0, 1, (height / 2));
+                g.fillRect (x, (height / 2), unit, 1);
+            }
+        }
+
+        if (! entry.soundOfAbove)
+            g.drawText (entry.number, numberCell, juce::Justification::centredLeft, false);
 
         /*  WHAT HOLDS WHAT, DRAWN AS THE PAGE DRAWS IT (author, 2026-09-18:
             "containers are not as clear as on the webview"). Indentation alone

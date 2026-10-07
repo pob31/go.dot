@@ -427,6 +427,17 @@ namespace wfg::client::gesture
         return { origin::window, "videoOutput.identify", { osc::Value::string (outputId), osc::Value::boolean (on) } };
     }
 
+    Event convertMovie (const std::string& file, const std::string& scope, const std::string& format, bool sound)
+    {
+        return { origin::window, "media.convert", { osc::Value::string (file), osc::Value::string (scope),
+                                                    osc::Value::string (format), osc::Value::boolean (sound) } };
+    }
+
+    Event cancelConversion (const std::string& file)
+    {
+        return { origin::window, "media.convert.cancel", { osc::Value::string (file) } };
+    }
+
     Event pressStrip (const std::string& stripId, int velocity)
     {
         /*  A HAND WITH NO VELOCITY SAYS NONE. The argument is optional because

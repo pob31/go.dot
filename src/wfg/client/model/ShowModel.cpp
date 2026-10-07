@@ -143,6 +143,26 @@ namespace wfg::client::model
         if (! listId.empty())
             walk (snapshot, listId, true, 0);
 
+        /*  THE DUAL CUES (namespace draft 37.5, WM): a sound locked to a movie
+            that is there, and, when that movie is the row above it, the pair
+            drawn as one cue of two lines. */
+        for (std::size_t at = 0; at < drawn.size(); ++at)
+        {
+            auto& row = drawn[at];
+
+            if (row.kind != "media" || row.lockedTo.empty())
+                continue;
+
+            row.followsMovie = text (snapshot, "/godot/cue/" + row.lockedTo + "/kind") == "video";
+
+            if (row.followsMovie && at > 0 && drawn[at - 1].id == row.lockedTo
+                  && drawn[at - 1].rowKind == RowKind::cue)
+            {
+                row.soundOfAbove = true;
+                drawn[at - 1].soundBelow = true;
+            }
+        }
+
         return true;
     }
 
@@ -368,6 +388,7 @@ namespace wfg::client::model
 
         if (row.kind == "media")
         {
+            row.lockedTo = attribute (snapshot, cueId, "lockedTo");
             row.rate = attribute (snapshot, cueId, "rate");
             row.rateMode = attribute (snapshot, cueId, "rateMode");
 

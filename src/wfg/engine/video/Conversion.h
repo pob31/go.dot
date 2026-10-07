@@ -74,6 +74,10 @@ namespace wfg::video
         bool quality = false;           ///< Hap Q rather than Hap / Hap Alpha
         std::string soundName;          ///< the sound's file as the document will name it; empty: none
         std::string sound;
+
+        /*  How many channels the sound came out with, told once it has: what
+            its cue's route is laid out for. */
+        int soundChannels = 0;
     };
 
     /*  HOW ONE IS GOING, for the readouts. */
@@ -88,8 +92,9 @@ namespace wfg::video
 
     /*  The whole of one conversion, here and now. `progress` is told 0..1 as
         frames are written; `cancelled` is read between frames. False with
-        `why` said; nothing is left under the target's name then. */
-    bool convertMovie (const ConversionRequest& request, std::string& why,
+        `why` said; nothing is left under the target's name then. No target
+        is the sound alone - a movie already HAP whose sound is wanted. */
+    bool convertMovie (ConversionRequest& request, std::string& why,
                        const std::function<void (double)>& progress = {},
                        const std::atomic<bool>* cancelled = nullptr);
 
@@ -155,6 +160,12 @@ namespace wfg::video
     };
 
     /*  `media.convert` and `media.converted`. `converter` null: the first is
-        taken and does nothing; the second, the edit, is made everywhere. */
+        taken and does nothing; the second, the edit, is made everywhere.
+
+        `media.converted` also makes a movie's sound a cue (WJ): one after
+        every video cue that names the movie, a media cue on the sound's file,
+        locked to it, routed as an imported sound is - or, for a movie that
+        has one already, that one pointed at the new file. The identifiers it
+        drew go on its record, which a replay re-supplies. */
     void registerConversionCommands (CommandRegistry& registry, doc::ShowDocument& document, Converter* converter);
 }

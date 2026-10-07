@@ -82,13 +82,17 @@
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/video/Ffmpeg.h>
+#include <wfg/engine/video/Movie.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <deque>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -111,7 +115,9 @@ namespace wfg::client
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
             menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance, menuUpdateTemplate,
-            menuImportAls
+            menuImportAls,
+            menuConvertUsed, menuConvertWhole, menuConvertUsedQuality, menuConvertWholeQuality,
+            menuMovieSound, menuCancelConversion
         };
 
         class Window final : public wfg::Client,
@@ -819,6 +825,19 @@ namespace wfg::client
                     case menuWaveform:  return shell != nullptr
                                                  && (shell->footSubject().isOpen()
                                                      || ! selection.empty());
+
+                    /*  A PICKED MOVIE, on a machine whose engine found FFmpeg
+                        (namespace draft 37.5, WF-WJ); its conversion stopped
+                        while it runs. */
+                    case menuConvertUsed:
+                    case menuConvertWhole:
+                    case menuConvertUsedQuality:
+                    case menuConvertWholeQuality:
+                    case menuMovieSound:
+                        return unlocked && ! pickedMovieFile().empty() && latest != nullptr
+                                 && ! model::ffmpegPath (*latest).empty() && ! conversionRunning (pickedMovieFile());
+                    case menuCancelConversion:
+                        return ! pickedMovieFile().empty() && conversionRunning (pickedMovieFile());
                 }
 
                 return false;
@@ -908,6 +927,19 @@ namespace wfg::client
                     addMenuItem (menu, menuWaveform,
                                  shell != nullptr && shell->footSubject().isOpen()
                                    ? "Close the waveform" : "Waveform...");
+
+                    /*  THE PICKED MOVIE TO HAP (namespace draft 37.5, WF-WJ):
+                        the part its cues use or the whole file, Hap or Hap Q;
+                        its sound brought in on its own; a conversion stopped. */
+                    juce::PopupMenu movie;
+                    addMenuItem (movie, menuConvertUsed, "The part the cues use, as Hap");
+                    addMenuItem (movie, menuConvertWhole, "The whole file, as Hap");
+                    addMenuItem (movie, menuConvertUsedQuality, "The part the cues use, as Hap Q");
+                    addMenuItem (movie, menuConvertWholeQuality, "The whole file, as Hap Q");
+                    movie.addSeparator();
+                    addMenuItem (movie, menuMovieSound, "Bring its sound in, locked to it");
+                    addMenuItem (movie, menuCancelConversion, "Stop its conversion");
+                    menu.addSubMenu ("Convert the movie to HAP", movie, ! pickedMovieFile().empty());
                     menu.addSeparator();
                     addMenuItem (menu, menuRecord, model::isYes (last.recording) ? "Stop the live recorder"
                                                                                   : "Start the live recorder");
@@ -959,6 +991,16 @@ namespace wfg::client
                     case menuLoadToTime: toggleLoadToTime(); break;
                     case menuUndoHistory: toggleUndoHistory(); break;
                     case menuWaveform:  toggleWaveform(); break;
+                    case menuConvertUsed:         convertPicked ("used", "hap"); break;
+                    case menuConvertWhole:        convertPicked ("whole", "hap"); break;
+                    case menuConvertUsedQuality:  convertPicked ("used", "hapq"); break;
+                    case menuConvertWholeQuality: convertPicked ("whole", "hapq"); break;
+                    case menuMovieSound:
+                        send (gesture::convertMovie (pickedMovieFile(), "whole", "none", true));
+                        break;
+                    case menuCancelConversion:
+                        send (gesture::cancelConversion (pickedMovieFile()));
+                        break;
                     case menuShowSettings:
                         openShowSettings();
                         break;
@@ -1664,6 +1706,7 @@ namespace wfg::client
 
                 //  And any import or create still waiting for the cue it made.
                 followImports (*snapshot, reading.revision);
+                followConversions (*snapshot);
                 finishCreations (*snapshot, reading.revision);
                 finishFooterMoves (*snapshot);
                 mirrorClipboard (*snapshot);
@@ -1957,6 +2000,15 @@ namespace wfg::client
                 {
                     send (gesture::setNode ("/godot/cue/" + naming.cueId + "/file", naming.mediaName));
 
+                    /*  A MOVIE IS ASKED ABOUT (namespace draft 37.5, WF, WJ):
+                        once FFmpeg has said what it is. */
+                    if (model::isMovieFile (naming.mediaName))
+                    {
+                        movieOffers.push_back (naming.mediaName);
+                        probeNextMovie();
+                        continue;
+                    }
+
                     if (const auto nowhere = routeImportedMedia (naming.cueId, naming.mediaName); nowhere.isNotEmpty())
                         importWarning = nowhere;
                 }
@@ -2212,6 +2264,190 @@ namespace wfg::client
             /*  Answers what the cue still lacks to sound, in a sentence, or
                 nothing - said at the end of the import rather than here, where
                 the next file's progress would cover it (§30, S7). */
+            //======================================================================
+            /*  A MOVIE AND ITS HAP (namespace draft 37.5, WF-WJ).
+
+                AN IMPORTED MOVIE IS ASKED ABOUT once FFmpeg has said what it
+                is - on a thread of its own, since a file on a network share may
+                take a while to answer. Not HAP: convert the whole file now, or
+                later from the Show menu; Hap or Hap Q. With sound: bring it in
+                as a cue locked to the movie. One question at a time, in the
+                order the movies came. */
+            void probeNextMovie()
+            {
+                if (probingMovie || askingAboutMovie || movieOffers.empty() || mediaFolder() == juce::File())
+                    return;
+
+                probingMovie = true;
+                const auto name = movieOffers.front();
+                const auto path = mediaFolder().getChildFile (juce::String::fromUTF8 (name.c_str())).getFullPathName().toStdString();
+                const juce::Component::SafePointer<ui::MainWindow> safe (window.get());
+
+                std::thread ([this, safe, name, path]
+                {
+                    const auto tools = video::ffmpeg::find();
+                    auto probed = video::ffmpeg::probe (tools, path);
+
+                    /*  NO FFMPEG HERE: Go.dot's own reader can still say whether
+                        it is HAP, which plays as it is. */
+                    if (! tools.found())
+                    {
+                        video::movie::MovieFile movie;
+                        std::string why;
+                        probed.ok = movie.open (path, why) && movie.info().isHap();
+                        probed.codec = probed.ok ? "hap" : std::string {};
+                    }
+
+                    juce::MessageManager::callAsync ([this, safe, name, probed, found = tools.found()]
+                    {
+                        if (safe == nullptr)
+                            return;
+
+                        probingMovie = false;
+
+                        if (! movieOffers.empty())
+                            movieOffers.pop_front();
+
+                        askAboutMovie (name, probed, found);
+                        probeNextMovie();
+                    });
+                }).detach();
+            }
+
+            void askAboutMovie (const std::string& name, const video::ffmpeg::Probe& probed, bool ffmpeg)
+            {
+                const auto shown = juce::String::fromUTF8 (name.c_str());
+
+                if (! ffmpeg)
+                {
+                    if (! probed.isHap())
+                        shell->transport.setNotice (shown + " is not HAP, and FFmpeg was not found: it cannot be converted"
+                                                            " or previewed until FFmpeg is installed beside Go.dot.");
+                    return;
+                }
+
+                if (! probed.ok)
+                {
+                    shell->transport.setNotice (shown + ": " + juce::String::fromUTF8 (probed.why.c_str()));
+                    return;
+                }
+
+                const auto convert = ! probed.isHap();
+
+                if (! convert && ! probed.sound)
+                    return;
+
+                const auto title = convert ? juce::String ("Convert this movie to HAP?")
+                                           : juce::String ("Bring in this movie's sound?");
+                auto message = convert
+                    ? shown + " is " + juce::String (probed.codec) + ", which Go.dot plays only as a preview. Converting"
+                        " makes a HAP copy beside it in the show's media, in the background, and its cue then plays"
+                        " the HAP. It can also be done later, from Show > Convert the movie to HAP."
+                    : shown + " has sound.";
+
+                if (probed.sound)
+                    message << "\n\nIts sound can come in as a sound cue locked to the movie: they start, stop and"
+                               " loop together, and the sound's level, routing and EQ are its own.";
+
+                auto* box = new juce::AlertWindow (title, message, juce::MessageBoxIconType::QuestionIcon, window.get());
+
+                std::shared_ptr<juce::ComboBox> format;
+
+                if (convert)
+                {
+                    format = std::make_shared<juce::ComboBox>();
+                    format->addItem ("Hap", 1);
+                    format->addItem ("Hap Q - finer, about twice the size", 2);
+                    format->setSelectedId (1, juce::dontSendNotification);
+                    format->setSize (360, 24);
+                    box->addCustomComponent (format.get());
+                }
+
+                std::shared_ptr<juce::ToggleButton> sound;
+
+                if (probed.sound)
+                {
+                    sound = std::make_shared<juce::ToggleButton> ("Bring its sound in as a cue locked to the movie");
+                    sound->setToggleState (true, juce::dontSendNotification);
+                    sound->setSize (360, 24);
+                    box->addCustomComponent (sound.get());
+                }
+
+                box->addButton (convert ? "Convert the whole file" : "Bring the sound in", 1,
+                                juce::KeyPress (juce::KeyPress::returnKey));
+                box->addButton (convert ? "Later" : "Not now", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                askingAboutMovie = true;
+
+                box->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, name, convert, format, sound, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                    {
+                        if (safe == nullptr)
+                            return;
+
+                        askingAboutMovie = false;
+                        const auto withSound = sound != nullptr && sound->getToggleState();
+
+                        if (answer == 1 && convert)
+                            send (gesture::convertMovie (name, "whole", format != nullptr && format->getSelectedId() == 2 ? "hapq" : "hap",
+                                                         withSound));
+                        else if (withSound && (answer == 1 || convert))
+                            send (gesture::convertMovie (name, "whole", "none", true));
+
+                        probeNextMovie();
+                    }), true);
+            }
+
+            /*  The file of the movie picked, or empty: a video cue showing one. */
+            std::string pickedMovieFile() const
+            {
+                const auto picked = selection.anchor();
+
+                if (picked.empty() || latest == nullptr)
+                    return {};
+
+                const auto base = "/godot/cue/" + picked + "/";
+
+                if (model::text (*latest, base + "kind") != "video" || model::text (*latest, base + "source") != "movie")
+                    return {};
+
+                return model::text (*latest, base + "file");
+            }
+
+            bool conversionRunning (const std::string& file) const
+            {
+                if (latest == nullptr || file.empty())
+                    return false;
+
+                for (const auto& row : model::readConversions (*latest))
+                    if (row.file == file && row.running())
+                        return true;
+
+                return false;
+            }
+
+            void convertPicked (const std::string& scope, const std::string& format)
+            {
+                if (const auto file = pickedMovieFile(); ! file.empty())
+                    send (gesture::convertMovie (file, scope, format, false));
+            }
+
+            /*  WHAT EACH CONVERSION IS DOING, said on the transport's line when
+                it changes - started, each tenth of the way, done, failed. */
+            void followConversions (const tree::TreeSnapshot& snapshot)
+            {
+                for (const auto& row : model::readConversions (snapshot))
+                {
+                    const auto seen = conversionsSeen.find (row.file);
+                    const auto* before = seen != conversionsSeen.end() ? &seen->second : nullptr;
+
+                    if (const auto news = model::conversionNews (before, row); ! news.empty() && shell != nullptr)
+                        shell->transport.setNotice (juce::String::fromUTF8 (news.c_str()));
+
+                    conversionsSeen[row.file] = row;
+                }
+            }
+
             juce::String routeImportedMedia (const std::string& cueId, const std::string& name)
             {
                 // Read the copied file's header off the tick/audio threads.
@@ -3540,6 +3776,13 @@ namespace wfg::client
                                      } };
 
             bool askingAboutClash = false;  ///< a question about a name already in media/ is up
+
+            /*  Movies imported and not yet asked about, the probe running, the
+                question up; and each conversion as last said (37.5, WF-WJ). */
+            std::deque<std::string> movieOffers;
+            bool probingMovie = false;
+            bool askingAboutMovie = false;
+            std::map<std::string, model::ConversionRow> conversionsSeen;
             std::string importSaid;         ///< the progress last put on the foot, so it is said once
             juce::String importWarning;     ///< what routing an imported cue found missing, said at the end
 

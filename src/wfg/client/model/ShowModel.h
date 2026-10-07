@@ -144,6 +144,17 @@ namespace wfg::client::model
         std::string rateMode;
         std::string dca;
         bool lane = false;           ///< a media cue with a level lane drawn over its file
+
+        /*  A DUAL CUE (namespace draft 37.5, WM, the author's): a movie and the
+            sound locked to it, drawn as one cue of two lines. `lockedTo` is the
+            sound's movie, by identifier; `soundOfAbove` says the row above is
+            that movie, so this row is its second line; `soundBelow` says the
+            row below is this movie's sound. A sound locked to a movie that is
+            there is never a place to park - its movie's GO fires it. */
+        std::string lockedTo;
+        bool followsMovie = false;
+        bool soundOfAbove = false;
+        bool soundBelow = false;
         bool rateOn = false;         ///< a fade that moves its target's speed
         bool stopWhenDone = false;   ///< a fade that stops what it faded, once it arrives
 
@@ -210,7 +221,7 @@ namespace wfg::client::model
             get a log record where an answer should have been. */
         bool mayPark() const noexcept
         {
-            return rowKind == RowKind::cue && section == Section::member;
+            return rowKind == RowKind::cue && section == Section::member && ! followsMovie;
         }
 
         /*  WHERE A CLICK IN THIS ROW'S GUTTER SENDS THE POINTER, which since

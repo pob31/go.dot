@@ -31,6 +31,9 @@
 
 #include "TestSupport.h"
 
+#include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/Video.h>
+#include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
@@ -43,6 +46,7 @@
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/video/Compositor.h>
@@ -1138,6 +1142,19 @@ TEST_CASE ("video: a movie converted to HAP by FFmpeg and Go.dot, with its sound
     CHECK (quality.info().codec == "HapY");
     CHECK (std::abs (static_cast<int> (quality.info().frames.size()) - 75) <= 1);
 
+    /*  THE SOUND ALONE, of a movie left as it is: a WAV of the whole file, its
+        channels told. */
+    video::ConversionRequest soundOnly;
+    soundOnly.id = "three";
+    soundOnly.sourceName = "source.mp4";
+    soundOnly.source = request.source;
+    soundOnly.soundName = "alone.wav";
+    soundOnly.sound = folder.getChildFile ("alone.wav").getFullPathName().toStdString();
+    REQUIRE_MESSAGE (video::convertMovie (soundOnly, why), why);
+    CHECK (soundOnly.soundChannels == 1);
+    CHECK (juce::File (soundOnly.sound).getSize() > 48000 * 3 * 29 / 10);
+    CHECK_FALSE (folder.getChildFile ("alone.wav.part").exists());
+
     /*  A SOURCE THAT IS NOT A MOVIE fails, said, and leaves nothing behind. */
     auto broken = request;
     broken.source = folder.getChildFile ("source (sound).wav").getFullPathName().toStdString();
@@ -1401,4 +1418,248 @@ TEST_CASE ("video: a movie on standby arms its locked sound, and its GO takes th
     REQUIRE (sound != nullptr);
     CHECK (sound->parent == movie->id);
     CHECK (rig.runOf ("VD000061")->id == armedId);
+}
+
+/*  A FINISHED CONVERSION WITH ITS SOUND (namespace draft 37.5, WJ): a media
+    cue after each movie on the sound's file, locked to it, routed - one edit
+    with the movie's, its identifiers on the record; and done again, the same
+    cue pointed at the new file rather than a second one made. */
+TEST_CASE ("video: a conversion with its sound makes the movie's sound a locked cue after it")
+{
+    Rig rig;
+    video::registerConversionCommands (rig.engine.commands(), rig.document, nullptr);
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/source"), text ("movie") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/file"), text ("clip.mp4") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/startOffset"), text ("12") }));
+
+    const auto outcome = rig.apply ("media.converted", { text ("clip.mp4"), text ("clip (Hap).mov"),
+                                                         osc::Value::float64 (2.0), text ("clip (sound).wav"),
+                                                         osc::Value::int32 (2) });
+    REQUIRE (outcome.applied == 1);
+
+    const auto members = [&rig]
+    {
+        std::vector<std::string> out;
+
+        for (const auto& child : rig.document.findById ("VD000001"))
+            out.push_back (child["id"].toString().toStdString());
+
+        return out;
+    };
+
+    auto list = members();
+    REQUIRE (list.size() == 3);
+    CHECK (list[0] == "VD000002");
+    const auto sound = list[1];
+    CHECK (list[2] == "VD000003");
+
+    CHECK (rig.at ("/godot/cue/" + sound + "/kind") == "media");
+    CHECK (rig.at ("/godot/cue/" + sound + "/file") == "clip (sound).wav");
+    CHECK (rig.at ("/godot/cue/" + sound + "/lockedTo") == "VD000002");
+    CHECK (rig.at ("/godot/cue/" + sound + "/name") == "Blue wash (sound)");
+    CHECK (rig.at ("/godot/cue/" + sound + "/startOffset") == "10");
+    CHECK (rig.at ("/godot/cue/VD000002/file") == "clip (Hap).mov");
+
+    bool routed = false;
+
+    for (const auto& child : rig.document.findById (sound))
+        routed = routed || child.hasType ("Route");
+
+    CHECK (routed);
+
+    /*  THE RECORD CARRIES WHAT IT MADE, which a replay re-supplies. */
+    const auto logged = LogFile::parse (rig.engine.log().contents());
+    REQUIRE_FALSE (logged.records.empty());
+    const auto& last = logged.records.back();
+    REQUIRE (last.args.size() == 6);
+    CHECK (last.args[5].getString() == sound);
+
+    /*  ONE UNDO: the movie as it was, and no sound cue. */
+    REQUIRE (rig.applied ("undo"));
+    CHECK (members().size() == 2);
+    CHECK (rig.at ("/godot/cue/VD000002/file") == "clip.mp4");
+
+    /*  THE SOUND ALONE, of a movie that stays as it is, made under the
+        identifier a replay supplies. */
+    REQUIRE (rig.applied ("media.converted", { text ("clip.mp4"), text (""), osc::Value::float64 (0.0),
+                                               text ("clip (sound).wav"), osc::Value::int32 (1), text ("VD000099") }));
+    CHECK (rig.at ("/godot/cue/VD000002/file") == "clip.mp4");
+    CHECK (rig.at ("/godot/cue/VD000099/lockedTo") == "VD000002");
+    CHECK (rig.at ("/godot/cue/VD000099/startOffset") == "12");
+
+    /*  AGAIN: the sound it has is pointed at the new file. */
+    REQUIRE (rig.applied ("media.converted", { text ("clip.mp4"), text (""), osc::Value::float64 (0.0),
+                                               text ("clip (sound) 2.wav"), osc::Value::int32 (1) }));
+    CHECK (members().size() == 3);
+    CHECK (rig.at ("/godot/cue/VD000099/file") == "clip (sound) 2.wav");
+
+    /*  ASKED FOR THE SOUND ALONE, nothing is converted - and with no sound
+        asked, "none" means nothing and is refused. */
+    CHECK (rig.applied ("media.convert", { text ("clip.mp4"), text ("whole"), text ("none"), osc::Value::boolean (true) }));
+    CHECK_FALSE (rig.applied ("media.convert", { text ("clip.mp4"), text ("whole"), text ("none"), osc::Value::boolean (false) }));
+}
+
+/*  THE WINDOW'S SIDE (namespace draft 37.6, F.4): the conversions as the
+    readout says them and the sentence each change is worth; a sound's lock as
+    a menu of the show's movies, and the rows the movie leads drawn, not typed. */
+TEST_CASE ("video: the window reads the conversions, and a sound's lock as a menu of movies")
+{
+    CHECK (client::model::isMovieFile ("clip.MP4"));
+    CHECK (client::model::isMovieFile ("show/clip.mov"));
+    CHECK_FALSE (client::model::isMovieFile ("clip.wav"));
+
+    client::model::ConversionRow running { "clip.mp4", "converting", 42, {} };
+    CHECK (client::model::conversionNews (nullptr, running) == "Converting clip.mp4 to HAP: 42 %.");
+
+    auto later = running;
+    later.percent = 47;
+    CHECK (client::model::conversionNews (&running, later).empty());
+    later.percent = 51;
+    CHECK_FALSE (client::model::conversionNews (&running, later).empty());
+
+    client::model::ConversionRow failed { "clip.mp4", "failed", 0, "Invalid data found" };
+    CHECK (client::model::conversionNews (&running, failed) == "clip.mp4 could not be converted to HAP: Invalid data found.");
+    CHECK (client::model::conversionNews (&failed, failed).empty());
+
+    Rig rig;
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/source"), text ("movie") }));
+    REQUIRE (rig.applied ("cue.create", { text ("VD000001"), osc::Value::int32 (1), text ("media"),
+                                          text ("Clip sound"), text ("VD000040") }));
+
+    const auto lockOf = [&rig]
+    {
+        rig.parameters.markStale();
+        rig.snapshot = rig.parameters.publish (rig.tick, rig.state);
+        const auto panel = client::model::inspect (*rig.snapshot, "VD000040");
+        std::vector<client::model::Field> fields;
+
+        for (const auto& block : panel.blocks)
+            for (const auto& field : block.fields)
+                fields.push_back (field);
+
+        return fields;
+    };
+
+    const auto find = [] (const std::vector<client::model::Field>& fields, const std::string& name)
+    {
+        for (const auto& field : fields)
+            if (field.name == name)
+                return field;
+
+        return client::model::Field {};
+    };
+
+    auto fields = lockOf();
+    auto lock = find (fields, "lockedTo");
+    CHECK (lock.label == "locked to movie");
+    CHECK (lock.control == client::model::Control::movieRef);
+    REQUIRE (lock.choices.size() == 2);
+    CHECK (lock.choices[0].first.empty());
+    CHECK (lock.choices[1].first == "VD000002");
+    CHECK (find (fields, "startOffset").writable);
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/lockedTo"), text ("VD000002") }));
+    fields = lockOf();
+    CHECK_FALSE (find (fields, "startOffset").writable);
+    CHECK_FALSE (find (fields, "rate").writable);
+    CHECK (find (fields, "level").writable);
+}
+
+/*  THE DUAL CUE (namespace draft 37.5, WM): the cue list draws a movie and the
+    sound locked to it as one cue of two lines - the sound's row marked as the
+    movie's second line, the movie's as having one, and the sound no place to
+    park. Moved away from its movie, it is a locked sound on a line of its own. */
+TEST_CASE ("video: the cue list draws a movie and its locked sound as one cue of two lines")
+{
+    Rig rig;
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/source"), text ("movie") }));
+    REQUIRE (rig.applied ("cue.create", { text ("VD000001"), osc::Value::int32 (1), text ("media"),
+                                          text ("Clip sound"), text ("VD000040") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/lockedTo"), text ("VD000002") }));
+
+    rig.parameters.markStale();
+    rig.snapshot = rig.parameters.publish (rig.tick, rig.state);
+
+    client::model::ShowModel show;
+    show.refresh (*rig.snapshot, "VD000001");
+
+    const auto cueRows = [&show]
+    {
+        std::vector<client::model::Row> out;
+
+        for (const auto& row : show.rows())
+            if (row.rowKind == client::model::RowKind::cue)
+                out.push_back (row);
+
+        return out;
+    };
+
+    const auto rows = cueRows();
+    REQUIRE (rows.size() == 3);
+    CHECK (rows[0].soundBelow);
+    CHECK (rows[1].soundOfAbove);
+    CHECK (rows[1].followsMovie);
+    CHECK_FALSE (rows[1].mayPark());
+    CHECK (rows[0].mayPark());
+
+    REQUIRE (rig.applied ("object.move", { text ("VD000040"), text ("VD000001"), osc::Value::int32 (3) }));
+    rig.parameters.markStale();
+    rig.snapshot = rig.parameters.publish (rig.tick, rig.state);
+    show = client::model::ShowModel {};
+    show.refresh (*rig.snapshot, "VD000001");
+
+    const auto moved = cueRows();
+    REQUIRE (moved.size() == 3);
+    CHECK_FALSE (moved[0].soundBelow);
+    CHECK (moved[2].followsMovie);
+    CHECK_FALSE (moved[2].soundOfAbove);
+}
+
+TEST_CASE ("video: a movie moved takes the sound locked to it along, in one edit")
+{
+    Rig rig;
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/source"), text ("movie") }));
+    REQUIRE (rig.applied ("cue.create", { text ("VD000001"), osc::Value::int32 (1), text ("media"),
+                                          text ("Clip sound"), text ("VD000040") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/lockedTo"), text ("VD000002") }));
+
+    const auto order = [&rig]
+    {
+        std::vector<std::string> out;
+
+        for (const auto& child : rig.document.findById ("VD000001"))
+            out.push_back (child["id"].toString().toStdString());
+
+        return out;
+    };
+
+    REQUIRE (order() == std::vector<std::string> { "VD000002", "VD000040", "VD000003" });
+
+    //  Later in the list: the sound comes too, straight after it.
+    REQUIRE (rig.applied ("object.move", { text ("VD000002"), text ("VD000001"), osc::Value::int32 (3) }));
+    CHECK (order() == std::vector<std::string> { "VD000003", "VD000002", "VD000040" });
+
+    //  And back to the top, the same.
+    REQUIRE (rig.applied ("object.move", { text ("VD000002"), text ("VD000001"), osc::Value::int32 (0) }));
+    CHECK (order() == std::vector<std::string> { "VD000002", "VD000040", "VD000003" });
+
+    //  One undo, one move undone - both rows.
+    REQUIRE (rig.applied ("undo"));
+    CHECK (order() == std::vector<std::string> { "VD000003", "VD000002", "VD000040" });
+
+    //  Into a group: both go in.
+    REQUIRE (rig.applied ("cue.create", { text ("VD000001"), osc::Value::int32 (0), text ("group"),
+                                          text ("Scene"), text ("VD000050") }));
+    REQUIRE (rig.applied ("object.move", { text ("VD000002"), text ("VD000050"), osc::Value::int32 (0) }));
+
+    std::vector<std::string> inside;
+
+    for (const auto& child : rig.document.findById ("VD000050"))
+        inside.push_back (child["id"].toString().toStdString());
+
+    CHECK (inside == std::vector<std::string> { "VD000002", "VD000040" });
 }

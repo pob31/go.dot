@@ -196,6 +196,11 @@ namespace wfg::client::model
             out.lane = readLane (snapshot, out.subject.objectId);
             out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 
+            /*  A SOUND LOCKED TO ITS MOVIE takes its Ranges from the movie
+                (namespace draft 37.5, WL): drawn, and edited on the movie. */
+            if (const auto movie = at (cue + "lockedTo"); ! movie.empty() && at ("/godot/cue/" + movie + "/kind") == "video")
+                out.locked = true;
+
             if (out.cueKind == "media")
                 for (const auto& strip : readSends (snapshot, out.subject.objectId))
                     if (! strip.sendId.empty())

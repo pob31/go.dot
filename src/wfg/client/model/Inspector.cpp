@@ -75,7 +75,7 @@ namespace wfg::client::model
                     fades. The speed and its mode sit after where the file
                     starts: two more things said about how the file is played
                     (namespace draft §22.7). */
-                { "media",   { "file", "channels", "stereoToMono", "directOut",
+                { "media",   { "file", "lockedTo", "channels", "stereoToMono", "directOut",
                                "level", "startOffset", "rate", "rateMode", "dca", "strip", "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
                                "releaseFade" } },
@@ -162,6 +162,8 @@ namespace wfg::client::model
                 { "curveGreen", "green curve" },
                 { "curveBlue", "blue curve" },
                 { "doh", "on Doh!" },
+                /*  A MOVIE'S SOUND (namespace draft 37.5, WJ). */
+                { "lockedTo", "locked to movie" },
                 { "dohRollback", "rollback" },
             };
 
@@ -707,6 +709,54 @@ namespace wfg::client::model
                 field.choices = canvasChoices (readCanvases (snapshot));
                 return;
             }
+        }
+
+        /*  WHICH MOVIE A SOUND IS LOCKED TO (namespace draft 37.5, WJ), as a
+            menu of the show's movies, "not locked" first; and while it is,
+            what the movie leads - its start offset and speed - drawn but not
+            typed into, since the engine would refuse it as locked-to-movie. */
+        void offerTheMovies (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
+        {
+            Field* lock = nullptr;
+
+            for (auto& field : decided)
+                if (field.name == "lockedTo")
+                    lock = &field;
+
+            if (lock == nullptr)
+                return;
+
+            if (lock->writable)
+            {
+                lock->control = Control::movieRef;
+                lock->choices = { { "", "not locked" } };
+
+                for (const auto* node : snapshot.all())
+                {
+                    constexpr std::string_view prefix = "/godot/cue/";
+                    constexpr std::string_view suffix = "/source";
+                    const std::string_view address = node->address;
+
+                    if (address.size() <= prefix.size() + suffix.size() || address.substr (0, prefix.size()) != prefix
+                          || address.substr (address.size() - suffix.size()) != suffix || text (node) != "movie")
+                        continue;
+
+                    const auto id = std::string (address.substr (prefix.size(), address.size() - prefix.size() - suffix.size()));
+                    const auto number = text (snapshot, "/godot/cue/" + id + "/number");
+                    const auto name = text (snapshot, "/godot/cue/" + id + "/name");
+                    lock->choices.push_back ({ id, (number.empty() ? std::string {} : number + "  ") + (name.empty() ? id : name) });
+                }
+            }
+
+            if (lock->value.empty() || lock->mixed)
+                return;
+
+            for (auto& field : decided)
+                if (field.name == "startOffset" || field.name == "rate")
+                {
+                    field.writable = false;
+                    field.description = "Locked to its movie, which leads: " + field.description;
+                }
         }
 
         void offerTheInputsAndChannels (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
@@ -1257,6 +1307,7 @@ namespace wfg::client::model
             asked of the rows rather than of the kind, so that whichever kind
             gains it next gets the menu with no line here. */
         aimAtADca (snapshot, decided);
+        offerTheMovies (snapshot, decided);
 
         //  Which group's header prepares it, on every kind: the row is every cue's (§30, QZ).
         offerTheGroupsAround (snapshot, cueId, decided);

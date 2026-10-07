@@ -3230,6 +3230,22 @@ namespace wfg::doc
             insertion point but one index past the last slot a move can end at.
             JUCE clamps it too, with and without an undo manager - this says so
             where it is read rather than leaving it to a library detail. */
+        /*  A DUAL CUE MOVES AS ONE (namespace draft 37.5, WM): the sounds
+            locked to a movie that sit straight after it go with it, and land
+            straight after it again - in this edit, so one undo puts all back. */
+        std::vector<juce::ValueTree> itsSounds;
+
+        if (node.hasType ("Video"))
+            for (auto at = oldParent.indexOf (node) + 1; at < oldParent.getNumChildren(); ++at)
+            {
+                const auto next = oldParent.getChild (at);
+
+                if (! next.hasType ("Media") || next["lockedTo"] != node[idProperty])
+                    break;
+
+                itsSounds.push_back (next);
+            }
+
         if (oldParent == newParent)
         {
             const auto from = newParent.indexOf (node);
@@ -3242,6 +3258,29 @@ namespace wfg::doc
             oldParent.removeChild (node, structuralHistory());
             newParent.addChild (node, rawIndexForPosition (newParent, newIndex),
                                 structuralHistory());
+        }
+
+        for (std::size_t n = 0; n < itsSounds.size(); ++n)
+        {
+            const auto& sound = itsSounds[n];
+            auto from = sound.getParent();
+
+            if (from == newParent)
+            {
+                const auto at = newParent.indexOf (sound);
+                auto to = newParent.indexOf (node) + 1 + static_cast<int> (n);
+
+                if (at < to)
+                    --to;
+
+                if (at != to)
+                    newParent.moveChild (at, to, structuralHistory());
+            }
+            else
+            {
+                from.removeChild (sound, structuralHistory());
+                newParent.addChild (sound, newParent.indexOf (node) + 1 + static_cast<int> (n), structuralHistory());
+            }
         }
 
         /*  Asked AFTER the move, because whether the cue is still somewhere the

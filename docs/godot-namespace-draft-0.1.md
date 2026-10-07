@@ -21069,3 +21069,44 @@ decision in the implementer's words; the rest is marked (proposed).
   raw, restarted from where the playhead jumps to.
 - **F.7 - Shipping FFmpeg**: in the Windows installer, the `.deb` and the macOS app, with its licence
   and where its source is.
+
+### 37.7 What F.1 to F.5 and the window built, 2026-10-07
+
+*Written the same day.* What §37.5 and §37.6 drew, as it stands, and the implementer's calls in it,
+all (proposed) unless marked the author's.
+
+- **The engine** (F.1-F.3, F.5, pushed): FFmpeg found beside `wfg`, at `WFG_FFMPEG` or on the path,
+  run as a child that inherits its three handles and no socket; `ffprobe`'s answer read; Go.dot's
+  own HAP encoder (WK); `media.convert <file> <whole|used> <hap|hapq|none> <sound>` queued on
+  serve's converter, one at a time; `media.converted` the edit when one is done. **`none` is the
+  sound alone**, of the whole file, for a movie already HAP: the movie is left as it is. With a
+  sound, `media.converted` **makes the sound a cue**: a media cue straight after every video cue
+  naming the movie, named after it with " (sound)", on the WAV, locked to it, routed to the first
+  bus as an imported sound is - or, when the movie has one already, that one pointed at the new
+  file. The cues it made go on its record, which a replay re-supplies.
+- **The import** (the window): a movie - `.mov`, `.mp4`, `.m4v`, `.mkv`, `.avi`, `.mxf`, `.webm`,
+  `.mpg` - dropped or chosen becomes a movie cue as before, and is then asked about once FFmpeg has
+  said what it is, one movie at a time: not HAP, *Convert this movie to HAP?* with Hap or Hap Q and
+  *Convert the whole file* or *Later*; with sound, a switch to bring it in as a cue locked to the
+  movie (on by default); already HAP with sound, *Bring in this movie's sound?*. *Later* with the
+  switch on still brings the sound in. No FFmpeg: a movie that is not HAP is said to need it.
+- **The Show menu**: *Convert the movie to HAP*, on the picked movie - the part the cues use or the
+  whole file, as Hap or as Hap Q; bring its sound in; stop its conversion.
+- **What a conversion is doing** is said on the transport's line: started, each tenth of the way,
+  done, failed and why, stopped.
+- **The lock in the inspector**: a media cue's *locked to movie* is a menu of the show's movies,
+  *not locked* first; while locked, its start offset and speed are drawn and not typed into, and in
+  the foot panel its Ranges are drawn read-only.
+- **The dual cue (WM)**: a sound locked to the movie on the row above is drawn as that movie's
+  second line - no number of its own, a rule joining it to the movie's number, *sound* in the kind
+  column - and is never a place to park. Each line is picked and inspected on its own: the picture's
+  rows on one, the sound's on the other. **A movie moved takes the locked sounds straight after it
+  along**, in the same edit, so one undo puts all back - into a group too.
+- **Words on screen that are the implementer's, waiting for the author's yes**: "locked to movie",
+  "not locked", "sound" (the kind column of a dual cue's second line), "Convert the movie to HAP"
+  and its six items, "Convert this movie to HAP?", "Bring in this movie's sound?", "Convert the whole
+  file", "Later", "Bring the sound in", "Not now", "Hap Q - finer, about twice the size", and the
+  transport's sentences.
+- **Not built**: the preview of a movie that is not HAP (F.6) - until it is, such a movie's cue
+  shows nothing until it is converted, and its length is not known, so its Ranges cannot be drawn
+  against it; shipping FFmpeg (F.7).

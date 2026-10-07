@@ -357,6 +357,12 @@ namespace wfg::client::gesture
     /** An output's test pattern on or off, to find which projector is which: tonight's. */
     Event identifyVideoOutput (const std::string& outputId, bool on);
 
+    /*  A MOVIE CONVERTED TO HAP in the background (namespace draft 37.5,
+        WF-WJ): `scope` whole or used, `format` hap, hapq - or none, its sound
+        alone - and whether its sound comes in as a cue locked to it. */
+    Event convertMovie (const std::string& file, const std::string& scope, const std::string& format, bool sound);
+    Event cancelConversion (const std::string& file);
+
     /*  A HAND ON A SAMPLER STRIP, AND THE HAND LIFTED (PRD §3.27): a pad of
         the virtual panel clicked, a number key held. `velocity` is 1 to 127,
         from where on the pad the click landed; below 1 the argument is left

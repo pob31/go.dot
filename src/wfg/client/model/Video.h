@@ -82,8 +82,34 @@ namespace wfg::client::model
         What makes a dropped file a picture cue rather than a sound. */
     bool isPictureFile (const std::string& name);
 
-    /*  AND A MOVIE (namespace draft 37): a QuickTime `.mov`, HAP inside. */
+    /*  AND A MOVIE (namespace draft 37): a QuickTime `.mov`, HAP inside - or,
+        since 37.5 (WF), any movie FFmpeg reads, played as a preview until it
+        is converted: .mp4, .m4v, .mkv, .avi, .mxf, .webm, .mpg, .mpeg. */
     bool isMovieFile (const std::string& name);
+
+    /*  A MOVIE BEING CONVERTED TO HAP (namespace draft 37.6, F.3), as
+        /godot/videoOutput/conversions says it: the file as the show names it,
+        waiting, converting, done, failed or cancelled, how far in %, and what
+        went wrong. */
+    struct ConversionRow
+    {
+        std::string file;
+        std::string state;
+        int percent = 0;
+        std::string problem;
+
+        bool running() const  { return state == "waiting" || state == "converting"; }
+    };
+
+    std::vector<ConversionRow> readConversions (const tree::TreeSnapshot&);
+
+    /*  Where FFmpeg was found on the engine's machine, or empty. */
+    std::string ffmpegPath (const tree::TreeSnapshot&);
+
+    /*  THE ONE SENTENCE A CONVERSION'S CHANGE IS WORTH, for the transport's
+        line: started, how far (in tens of %), done, failed and why, or
+        cancelled. Empty when nothing worth saying changed. */
+    std::string conversionNews (const ConversionRow* before, const ConversionRow& now);
 
     /*  A picture or a movie: what a video cue shows from a file. */
     inline bool isVisualFile (const std::string& name)  { return isPictureFile (name) || isMovieFile (name); }
