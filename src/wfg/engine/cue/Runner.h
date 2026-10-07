@@ -2256,9 +2256,15 @@ namespace wfg::cue
             double moviePosition = 0.0;
             std::int64_t movieAt = -1;
             double rate = 1.0;
-            int loops = 1;
-            int pass = 0;
             bool movieEnded = false;
+
+            /*  ITS RANGES (namespace draft 37.5, WL), as a sound's: the cue's,
+                read again every tick so an edit is seen at once (TZ); the one
+                playing, by identifier, and which pass of it. No range: the
+                file once, from the start offset. */
+            std::string cue;
+            std::string rangeId;
+            int pass = 0;
 
             /*  WHAT THE DCAS ABOVE IT LEAVE OF ITS OPACITY (namespace draft
                 37.5, WE), as last placed: all of it until one says less. */

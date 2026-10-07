@@ -4311,15 +4311,21 @@ namespace wfg::cue
             if (job.spec.source == "picture" || job.spec.source == "movie")
                 job.spec.file = mediaPathOf (textOf (cue, "file"));
 
-            /*  A MOVIE'S PLAYHEAD (§37): from its start offset, at its speed,
-                for its passes. */
+            /*  A MOVIE'S PLAYHEAD (§37): from its start offset at its speed,
+                or from its first Range's in point (WL). */
             if (job.spec.source == "movie")
             {
                 job.movie = true;
                 job.movieFile = textOf (cue, "file");
+                job.cue = cue[idProperty].toString().toStdString();
                 job.moviePosition = std::max (0.0, numberOf (cue, "startOffset"));
                 job.rate = std::clamp (numberOf (cue, "rate"), 0.0, 20.0);
-                job.loops = std::max (0, static_cast<int> (std::lround (numberOf (cue, "loops"))));
+
+                if (const auto ranges = rangesOf (cue); ! ranges.empty())
+                {
+                    job.rangeId = ranges.front().id;
+                    job.moviePosition = std::max (0.0, ranges.front().in);
+                }
             }
 
             job.spec.fit = textOf (cue, "fit");
@@ -15690,21 +15696,73 @@ namespace wfg::cue
 
         auto target = job.moviePosition + job.rate * static_cast<double> (at - job.movieAt) / static_cast<double> (rate);
 
-        while (duration > 0.0 && target >= duration && job.rate > 0.0)
+        /*  ITS RANGES AS THEY ARE NOW (WL, TZ): a range moved while it plays
+            is heard at once, one taken away finishes where the playhead is. */
+        const auto ranges = rangesOf (document.findById (job.cue));
+
+        const auto indexOf = [&ranges] (const std::string& id)
         {
-            /*  THE SAMPLE THE FILE ENDS ON, between the last point and this
-                one. */
-            const auto reaches = job.movieAt + static_cast<std::int64_t> (std::llround ((duration - job.moviePosition)
+            for (std::size_t n = 0; n < ranges.size(); ++n)
+                if (ranges[n].id == id)
+                    return static_cast<int> (n);
+
+            return -1;
+        };
+
+        /*  WHERE THIS STRETCH ENDS: the range's out point, never past the
+            file; the file's end with no range. Below nought when unknown. */
+        const auto endOf = [&ranges, &indexOf, &job, duration]
+        {
+            if (job.rangeId.empty())
+                return duration > 0.0 ? duration : -1.0;
+
+            const auto index = indexOf (job.rangeId);
+            const auto out = index >= 0 ? ranges[static_cast<std::size_t> (index)].out : job.moviePosition;
+            return duration > 0.0 ? std::min (out, duration) : out;
+        };
+
+        for (int guard = 0; guard < 10000 && job.rate > 0.0; ++guard)
+        {
+            const auto end = endOf();
+
+            if (! (end >= 0.0) || target < end)
+                break;
+
+            /*  THE SAMPLE THIS STRETCH ENDS ON, between the last point and
+                this one. */
+            const auto reaches = job.movieAt + static_cast<std::int64_t> (std::llround (std::max (0.0, end - job.moviePosition)
                                                                                          / job.rate * static_cast<double> (rate)));
 
-            if (job.loops == 0 || job.pass + 1 < job.loops)
+            /*  WHERE IT GOES NEXT: this range again for another pass, the next
+                range for the first of its own, or nowhere. */
+            std::optional<double> next;
+
+            if (! job.rangeId.empty())
             {
-                //  ANOTHER PASS: a step back to the top, on that sample.
-                placeVideoPoint (job, video::Property::time, { reaches, duration });
-                placeVideoPoint (job, video::Property::time, { reaches, 0.0 });
-                ++job.pass;
-                target -= duration;
-                job.moviePosition = 0.0;
+                const auto index = indexOf (job.rangeId);
+                const auto* playing = index >= 0 ? &ranges[static_cast<std::size_t> (index)] : nullptr;
+
+                if (playing != nullptr && (playing->loops == 0 || job.pass + 1 < playing->loops))
+                {
+                    ++job.pass;
+                    next = playing->in;
+                }
+                else if (index >= 0 && static_cast<std::size_t> (index) + 1 < ranges.size())
+                {
+                    const auto& following = ranges[static_cast<std::size_t> (index) + 1];
+                    job.rangeId = following.id;
+                    job.pass = 0;
+                    next = following.in;
+                }
+            }
+
+            if (next.has_value())
+            {
+                //  A STEP to where it goes, on that sample.
+                placeVideoPoint (job, video::Property::time, { reaches, end });
+                placeVideoPoint (job, video::Property::time, { reaches, *next });
+                target = *next + (target - end);
+                job.moviePosition = *next;
                 job.movieAt = reaches;
                 continue;
             }
@@ -15712,8 +15770,8 @@ namespace wfg::cue
             /*  THE LAST PASS DONE (WB): the last frame held a tick, then the
                 layer goes and the run ends - its footers run, as a sound's do
                 when its file ends. */
-            placeVideoPoint (job, video::Property::time, { reaches, duration });
-            job.moviePosition = duration;
+            placeVideoPoint (job, video::Property::time, { reaches, end });
+            job.moviePosition = end;
             job.movieAt = reaches;
             job.movieEnded = true;
 

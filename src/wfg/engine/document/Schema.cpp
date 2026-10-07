@@ -205,7 +205,7 @@ namespace wfg::doc
                     the same whatever it shows; a kind per source would be
                     added again to every list above. Not a sound: no Route, no
                     Send, nothing of a voice. */
-                { "Video",  true,  { "Trigger" },         { "cue", "video" } },
+                { "Video",  true,  { "Trigger", "Range" }, { "cue", "video" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,

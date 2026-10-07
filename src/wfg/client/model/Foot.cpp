@@ -214,8 +214,10 @@ namespace wfg::client::model
                 blank would leave somebody wondering whether the file is silent,
                 missing, or still being looked at - three different situations
                 with three different answers. */
-            if (out.cueKind != "media")
-                out.notice = "Only a media cue has a waveform.";
+            const auto movie = out.cueKind == "video" && at (cue + "source") == "movie";
+
+            if (out.cueKind != "media" && ! movie)
+                out.notice = "Only a media cue or a movie has a waveform and ranges.";
             else if (out.file.empty())
                 out.notice = "This cue names no file yet.";
             else if (! (out.fileLength > 0.0))

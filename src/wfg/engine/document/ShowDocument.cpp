@@ -2292,12 +2292,12 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        /*  ONLY A MEDIA CUE, because a range is a region of the cue's own file
-            (§3.24) and a cue that plays nothing has no file to cut up. The
-            element name is asked directly here rather than through the owner
-            word, unlike a trigger: `cue` is the answer for every kind, and this
-            is the one kind. */
-        if (cue.getType().toString() != "Media")
+        /*  ONLY A MEDIA CUE OR A VIDEO CUE, because a range is a region of the
+            cue's own file (§3.24) and a cue that plays nothing has no file to
+            cut up - a movie's since namespace draft 37.5 (WL). The element name
+            is asked directly here rather than through the owner word, unlike a
+            trigger: `cue` is the answer for every kind. */
+        if (cue.getType().toString() != "Media" && cue.getType().toString() != "Video")
             return EditResult::failed (reason::typeMismatch);
 
         /*  A RANGE THAT ENDS BEFORE IT BEGINS is not a range, and this is the
@@ -2321,7 +2321,7 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (cue.getType().toString() != "Media")
+        if (cue.getType().toString() != "Media" && cue.getType().toString() != "Video")
             return EditResult::failed (reason::typeMismatch);
 
         /*  A MILLISECOND, which is the resolution a range is placed at by a
@@ -3432,7 +3432,7 @@ namespace wfg::doc
 
             void visit (const juce::ValueTree& node)
             {
-                if (node.getType().toString() == "Media")
+                if (node.getType().toString() == "Media" || node.getType().toString() == "Video")
                 {
                     const auto offset = static_cast<double> (
                         node[juce::Identifier ("startOffset")]);

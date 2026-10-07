@@ -90,7 +90,7 @@ namespace wfg::client::model
                     the stack, how solid and in what colour, then how it comes
                     in. */
                 { "video",   { "source", "canvas", "file", "fit", "layer", "blend", "opacity", "dca", "paint", "fadeIn",
-                               "startOffset", "rate", "loops",
+                               "startOffset", "rate",
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
                                "contrast", "saturation", "gamma", "hue",
                                "curveLuma", "curveRed", "curveGreen", "curveBlue",

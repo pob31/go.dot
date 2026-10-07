@@ -93,13 +93,20 @@ namespace wfg::video
                        const std::function<void (double)>& progress = {},
                        const std::atomic<bool>* cancelled = nullptr);
 
-    /*  THE USED PART OF A SOURCE (WI): from the earliest any cue naming it
-        starts, ten seconds earlier where the file has them, to its end - a
-        movie has no out point yet. A cue that loops plays its later passes
-        from the file's start, so it uses the file from nought. Seconds; the
-        start is what is cut from the front, and every cue's start offset
-        moves back by it. */
-    double usedStartOf (const doc::ShowDocument& document, const std::string& sourceName);
+    /*  THE USED PART OF A SOURCE (WI): every cue naming it, from the earliest
+        it plays - its start offset, or its first Range's in point (WL) - to
+        the furthest - the file's end for a cue with no Range, else its last
+        out point - with ten seconds either side where the file has them.
+        Seconds of the source; `end` below nought is to the file's end. The
+        start is what is cut from the front, and every start offset and every
+        in and out point moves back by it. */
+    struct UsedSpan
+    {
+        double start = 0.0;
+        double end = -1.0;
+    };
+
+    UsedSpan usedSpanOf (const doc::ShowDocument& document, const std::string& sourceName);
 
     class Converter
     {

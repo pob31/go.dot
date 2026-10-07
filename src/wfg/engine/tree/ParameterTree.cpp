@@ -1008,7 +1008,7 @@ namespace wfg::tree
                     text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).channels);
                 else if (name == "insertLatency" && (isMedia || isMic))
                     text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).latencySamples);
-                else if (name == "duration" && isMedia)
+                else if (name == "duration" && (isMedia || isVideo))
                 {
                     /*  READ ONCE WHEN THE SHOW WAS OPENED, and nought when
                         nobody read any: a replay, a tree dump of a bundle with

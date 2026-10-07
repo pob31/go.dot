@@ -270,19 +270,42 @@ namespace wfg::video
         return true;
     }
 
-    double usedStartOf (const doc::ShowDocument& document, const std::string& sourceName)
+    namespace
     {
-        auto earliest = -1.0;
+        double secondsOf (const juce::ValueTree& node, const char* name, double otherwise)
+        {
+            return node.hasProperty (name) ? osc::parseDouble (node[name].toString().toStdString()).value_or (otherwise)
+                                           : otherwise;
+        }
+    }
+
+    UsedSpan usedSpanOf (const doc::ShowDocument& document, const std::string& sourceName)
+    {
+        auto earliest = -1.0, furthest = -1.0;
+        auto toTheEnd = false;
 
         std::function<void (const juce::ValueTree&)> visit;
         visit = [&] (const juce::ValueTree& node)
         {
             if (node.hasType ("Video") && node["file"].toString().toStdString() == sourceName)
             {
-                const auto offset = osc::parseDouble (node["startOffset"].toString().toStdString()).value_or (0.0);
-                const auto loops = node.hasProperty ("loops") ? osc::parseDouble (node["loops"].toString().toStdString()).value_or (1.0)
-                                                              : 1.0;
-                const auto from = std::lround (loops) == 1 ? std::max (0.0, offset) : 0.0;
+                auto from = -1.0;
+
+                for (const auto& child : node)
+                    if (child.hasType ("Range"))
+                    {
+                        const auto in = std::max (0.0, secondsOf (child, "in", 0.0));
+                        from = from < 0.0 ? in : std::min (from, in);
+                        furthest = std::max (furthest, secondsOf (child, "out", 0.0));
+                    }
+
+                /*  NO RANGE: from the start offset, to the end of the file. */
+                if (from < 0.0)
+                {
+                    from = std::max (0.0, secondsOf (node, "startOffset", 0.0));
+                    toTheEnd = true;
+                }
+
                 earliest = earliest < 0.0 ? from : std::min (earliest, from);
             }
 
@@ -291,7 +314,11 @@ namespace wfg::video
         };
 
         visit (document.root());
-        return earliest < 0.0 ? 0.0 : std::max (0.0, earliest - 10.0);
+
+        UsedSpan span;
+        span.start = earliest < 0.0 ? 0.0 : std::max (0.0, earliest - 10.0);
+        span.end = toTheEnd || furthest < 0.0 ? -1.0 : furthest + 10.0;
+        return span;
     }
 
     //==============================================================================
@@ -493,7 +520,13 @@ namespace wfg::video
                             request.targetName = freeName (stem + (format == "hapq" ? " (Hap Q)" : " (Hap)"), ".mov").toStdString();
                             request.target = root.getChildFile (juce::String::fromUTF8 (request.targetName.c_str()))
                                                  .getFullPathName().toStdString();
-                            request.start = scope == "used" ? usedStartOf (document, file) : 0.0;
+                            if (scope == "used")
+                            {
+                                const auto span = usedSpanOf (document, file);
+                                request.start = span.start;
+                                request.length = span.end >= 0.0 ? span.end - span.start : -1.0;
+                            }
+
                             request.quality = format == "hapq";
 
                             if (sound)
@@ -521,8 +554,9 @@ namespace wfg::video
 
         registry.add ({ "media.converted",
                         "A conversion is done (namespace draft 37.5, WH): every video cue naming the movie names"
-                        " its HAP file instead, its start offset moved back by what was cut from the front."
-                        " Submitted by the converter, one undoable edit; the original stays in media/.",
+                        " its HAP file instead, its start offset and its Ranges' in and out points moved back by"
+                        " what was cut from the front. Submitted by the converter, one undoable edit; the original"
+                        " stays in media/.",
                         { { "source", 's', false }, { "target", 's', false }, { "cut", 'd', false },
                           { "sound", 's', true } },
                         true,
@@ -557,11 +591,34 @@ namespace wfg::video
                                 if (const auto edit = document.setAttribute (base + "file", target); ! edit.ok)
                                     return Outcome::rejected (edit.reason);
 
-                                if (cut > 0.0)
-                                    if (const auto edit = document.setAttribute (base + "startOffset",
-                                                                                 osc::formatDouble (std::max (0.0, offset - cut)));
-                                        ! edit.ok)
-                                        return Outcome::rejected (edit.reason);
+                                if (! (cut > 0.0))
+                                    continue;
+
+                                if (const auto edit = document.setAttribute (base + "startOffset",
+                                                                             osc::formatDouble (std::max (0.0, offset - cut)));
+                                    ! edit.ok)
+                                    return Outcome::rejected (edit.reason);
+
+                                /*  ITS RANGES, by the same: the in point first,
+                                    since moving back it only draws away from
+                                    the out, so a range is never for a moment
+                                    one that ends before it begins. */
+                                for (const auto& child : node)
+                                {
+                                    if (! child.hasType ("Range"))
+                                        continue;
+
+                                    const auto rangeBase = "/godot/range/" + child["id"].toString().toStdString() + "/";
+                                    const auto in = secondsOf (child, "in", 0.0);
+                                    const auto out = secondsOf (child, "out", 0.0);
+
+                                    for (const auto& [row, value] : { std::pair<const char*, double> { "in", in },
+                                                                      std::pair<const char*, double> { "out", out } })
+                                        if (const auto edit = document.setAttribute (rangeBase + row,
+                                                                                     osc::formatDouble (std::max (0.0, value - cut)));
+                                            ! edit.ok)
+                                            return Outcome::rejected (edit.reason);
+                                }
                             }
 
                             return Outcome::ok (args);

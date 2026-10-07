@@ -212,12 +212,12 @@ TEST_CASE ("video: a video cue is a cue, then a picture - and nothing of a sound
     CHECK (rig.at (made + "opacity") == "50");
     CHECK (rig.at (made + "paint") == "#FFFFFF");
 
-    /*  NOT A SOUND: no destination, no send, no range. A trigger, as every
-        cue has. */
+    /*  NOT A SOUND: no destination, no send. A trigger, as every cue has;
+        and a Range, as a movie plays one (namespace draft 37.5, WL). */
     CHECK_FALSE (rig.applied ("route.create", { text ("VD000030"), text ("VD000004") }));
     CHECK_FALSE (rig.applied ("send.create", { text ("VD000030"), text ("VD000004") }));
-    CHECK_FALSE (rig.applied ("range.create", { text ("VD000030"), osc::Value::float64 (0.0),
-                                                osc::Value::float64 (1.0) }));
+    CHECK (rig.applied ("range.create", { text ("VD000030"), osc::Value::float64 (0.0),
+                                          osc::Value::float64 (1.0) }));
 }
 
 TEST_CASE ("video: the canvas and the output of the fixture, as the show says them")
@@ -796,12 +796,13 @@ TEST_CASE ("video: a fade cue moves a picture's opacity, scale, offset and turn,
     CHECK (rig.runs.find (picture)->isFinished());
 }
 
-TEST_CASE ("video: a movie's playhead moves at its speed, wraps for its loops, and its run ends after the last")
+TEST_CASE ("video: a movie with no Range plays once from its start offset at its speed, and its run ends there")
 {
     VideoRig rig;
 
-    /*  A MOVIE OF TWO SECONDS, as the show knows its length, played twice at
-        double speed from half a second in. */
+    /*  A MOVIE OF TWO SECONDS, as the show knows its length, played at double
+        speed from half a second in (namespace draft 37.5, WL: no Range, the
+        file once). */
     const std::map<std::string, double> lengths { { "clip.mov", 2.0 } };
     rig.runner.setMediaDurations (&lengths);
 
@@ -812,7 +813,6 @@ TEST_CASE ("video: a movie's playhead moves at its speed, wraps for its loops, a
                                                 osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
                                                 osc::Value::string ("file"), osc::Value::string ("clip.mov"),
                                                 osc::Value::string ("rate"), osc::Value::string ("2"),
-                                                osc::Value::string ("loops"), osc::Value::string ("2"),
                                                 osc::Value::string ("startOffset"), osc::Value::string ("0.5") }).applied >= 1);
 
     rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
@@ -829,39 +829,89 @@ TEST_CASE ("video: a movie's playhead moves at its speed, wraps for its loops, a
     REQUIRE_FALSE (times.empty());
     CHECK (times.front().value == doctest::Approx (0.5));
 
-    /*  AT TWICE ITS SPEED, a second of the show is two of the file: half a
-        second in, the first pass ends after three-quarters of a second, wraps
-        - a step back to the top at one sample - and the second ends after one
-        more second. */
     rig.ticks (20);
     CHECK_FALSE (rig.runs.find (id)->isFinished());
     CHECK (times.back().value > 0.5);
 
     rig.ticks (40);
-
-    bool wrapped = false;
-
-    for (std::size_t n = 1; n < times.size(); ++n)
-    {
-        CHECK (times[n].sample >= times[n - 1].sample);
-
-        if (times[n].sample == times[n - 1].sample && times[n - 1].value == doctest::Approx (2.0)
-              && times[n].value == doctest::Approx (0.0))
-            wrapped = true;
-    }
-
-    CHECK (wrapped);
-
-    rig.ticks (60);
     CHECK (rig.runs.find (id)->isFinished());
     CHECK (times.back().value == doctest::Approx (2.0));
     REQUIRE (rig.sink.removed.size() == 1);
     CHECK (rig.sink.removed.front().first == id);
 
-    /*  ITS LENGTH WAS 0.75 + 1 SECONDS OF THE SHOW: ended near 1.75 s after it
+    for (std::size_t n = 1; n < times.size(); ++n)
+        CHECK (times[n].value >= times[n - 1].value);
+
+    /*  1.5 SECONDS OF THE FILE AT DOUBLE SPEED: ended near 0.75 s after it
         came up, not before and not long after. */
     const auto playedFor = static_cast<double> (rig.sink.removed.front().second - times.front().sample) / 48000.0;
-    CHECK (playedFor == doctest::Approx (1.75).epsilon (0.03));
+    CHECK (playedFor == doctest::Approx (0.75).epsilon (0.05));
+}
+
+TEST_CASE ("video: a movie's Ranges play as a sound's - each for its passes, then the next, and the run ends after the last")
+{
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 2.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                osc::Value::string ("VD000060"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov"),
+                                                osc::Value::string ("rate"), osc::Value::string ("2") }).applied >= 1);
+
+    /*  TWO RANGES: 0.2 to 1.2 twice, then 1.5 to 1.9 once - a playlist over
+        the file, as a media cue's (WL). */
+    const auto first = rig.document.createRange ("VD000060", 0.2, 1.2);
+    REQUIRE (first.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + first.id + "/loops", "2").ok);
+    REQUIRE (rig.document.createRange ("VD000060", 1.5, 1.9).ok);
+
+    /*  A START OFFSET BESIDE THEM is refused when the show is checked, as a
+        sound's is. */
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/startOffset", "0.3").ok);
+    CHECK_FALSE (rig.document.validate().empty());
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/startOffset", "0").ok);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
+    rig.ticks (3);
+
+    const auto* run = rig.runOf ("VD000060");
+    REQUIRE (run != nullptr);
+    const auto id = run->id;
+    const auto& times = rig.sink.geometry[id][video::Property::time];
+    REQUIRE_FALSE (times.empty());
+    CHECK (times.front().value == doctest::Approx (0.2));
+
+    rig.ticks (100);
+    CHECK (rig.runs.find (id)->isFinished());
+    CHECK (times.back().value == doctest::Approx (1.9));
+
+    /*  THE STEPS, each two points on one sample: back to the first range's in
+        point once, then on to the second's. */
+    std::vector<std::pair<double, double>> steps;
+
+    for (std::size_t n = 1; n < times.size(); ++n)
+    {
+        CHECK (times[n].sample >= times[n - 1].sample);
+
+        if (times[n].sample == times[n - 1].sample && times[n].value != doctest::Approx (times[n - 1].value))
+            steps.push_back ({ times[n - 1].value, times[n].value });
+    }
+
+    REQUIRE (steps.size() == 2);
+    CHECK (steps[0].first == doctest::Approx (1.2));
+    CHECK (steps[0].second == doctest::Approx (0.2));
+    CHECK (steps[1].first == doctest::Approx (1.2));
+    CHECK (steps[1].second == doctest::Approx (1.5));
+
+    /*  TWO SECONDS OF THE FILE PLAYED (1 + 1 + 0.4) AT DOUBLE SPEED: 1.2 s. */
+    REQUIRE (rig.sink.removed.size() == 1);
+    const auto playedFor = static_cast<double> (rig.sink.removed.front().second - times.front().sample) / 48000.0;
+    CHECK (playedFor == doctest::Approx (1.2).epsilon (0.05));
 }
 
 TEST_CASE ("video: a cue's grade reaches the picture side, its curves baked")
@@ -931,13 +981,38 @@ TEST_CASE ("video: the part of a movie the cues use, and the edit a finished con
     REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/startOffset"), text ("25.5") }));
 
     /*  FROM THE EARLIEST START, TEN SECONDS EARLIER (WI). */
-    CHECK (video::usedStartOf (rig.document, "show/clip.mp4") == doctest::Approx (15.5));
-    CHECK (video::usedStartOf (rig.document, "elsewhere.mp4") == doctest::Approx (0.0));
+    CHECK (video::usedSpanOf (rig.document, "show/clip.mp4").start == doctest::Approx (15.5));
+    CHECK (video::usedSpanOf (rig.document, "show/clip.mp4").end < 0.0);
+    CHECK (video::usedSpanOf (rig.document, "elsewhere.mp4").start == doctest::Approx (0.0));
 
-    /*  A CUE THAT LOOPS plays its later passes from the file's start. */
-    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/loops"), text ("0") }));
-    CHECK (video::usedStartOf (rig.document, "show/clip.mp4") == doctest::Approx (0.0));
-    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/loops"), text ("1") }));
+    /*  WITH RANGES (WL), from the earliest in point to the furthest out
+        point, ten seconds either side - and to the file's end while any cue
+        naming it has none. */
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/startOffset"), text ("0") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/startOffset"), text ("0") }));
+    REQUIRE (rig.document.createRange ("VD000002", 30.0, 45.0, "VD000071").ok);
+    REQUIRE (rig.document.createRange ("VD000002", 70.0, 80.0, "VD000072").ok);
+    CHECK (video::usedSpanOf (rig.document, "show/clip.mp4").end < 0.0);
+
+    REQUIRE (rig.document.createRange ("VD000032", 22.0, 50.0, "VD000073").ok);
+    CHECK (video::usedSpanOf (rig.document, "show/clip.mp4").start == doctest::Approx (12.0));
+    CHECK (video::usedSpanOf (rig.document, "show/clip.mp4").end == doctest::Approx (90.0));
+
+    /*  A FINISHED CONVERSION MOVES THEM BACK BY THE CUT, in and out. */
+    REQUIRE (rig.applied ("media.converted", { text ("show/clip.mp4"), text ("show/clip (Hap).mov"),
+                                               osc::Value::float64 (12.0), text ("") }));
+    CHECK (rig.at ("/godot/range/VD000071/in") == "18");
+    CHECK (rig.at ("/godot/range/VD000071/out") == "33");
+    CHECK (rig.at ("/godot/range/VD000073/in") == "10");
+    CHECK (rig.at ("/godot/range/VD000073/out") == "38");
+    REQUIRE (rig.applied ("undo"));
+    CHECK (rig.at ("/godot/range/VD000073/in") == "22");
+
+    for (const auto* range : { "VD000071", "VD000072", "VD000073" })
+        REQUIRE (rig.document.remove (range).ok);
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/startOffset"), text ("40") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/startOffset"), text ("25.5") }));
 
     /*  NOTHING CONVERTS HERE: asked, it is taken and does nothing. A scope
         or a format it does not know is refused. */

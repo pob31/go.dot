@@ -1401,14 +1401,6 @@
         </attribute>
       </optional>
       <optional>
-        <attribute name="loops">
-          <a:documentation>How many times a movie plays through, as a slice&apos;s loops (WA): one plays it once, nought for ever. A movie that has played them holds its last frame and its run ends (WB). Proposed.</a:documentation>
-          <data type="integer">
-            <param name="minInclusive">0</param>
-          </data>
-        </attribute>
-      </optional>
-      <optional>
         <attribute name="name">
           <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
           <data type="string"/>
@@ -1546,14 +1538,17 @@
       </optional>
       <optional>
         <attribute name="startOffset">
-          <a:documentation>How far into the movie it begins, in seconds of the file, as a sound&apos;s start offset. Proposed.</a:documentation>
+          <a:documentation>How far into the movie it begins, in seconds of the file, as a sound&apos;s start offset - and like a sound&apos;s, refused beside Ranges, which say where it plays instead (namespace draft 37.5, WL). A movie with no Range plays once from here to its end.</a:documentation>
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
         </attribute>
       </optional>
       <zeroOrMore>
-        <ref name="Trigger"/>
+        <choice>
+          <ref name="Trigger"/>
+          <ref name="Range"/>
+        </choice>
       </zeroOrMore>
     </element>
   </define>

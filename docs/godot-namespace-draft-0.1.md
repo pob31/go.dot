@@ -21019,6 +21019,19 @@ decision in the implementer's words; the rest is marked (proposed).
   HAP files - Hap, Hap Alpha, Hap Q, chunked, uncompressed - within two steps of 255 of FFmpeg's
   decode (`movie: a real encoder's HAP files`, skipped unless `WFG_HAP_DIR` is set).
 
+- **WL - A movie has Ranges, as a sound has** (the author's pick, 2026-10-07): a movie cue is a sound
+  cue's twin in how it plays a file - a start offset, or **Ranges**, the playlist over the file of
+  in point, out point and passes that a media cue has (PRD §3.24, decision L), never both. The
+  movie's own `loops` row (WA) goes: a movie that loops is one Range with its passes. So the lock
+  (WJ) has one thing to match - start offset, speed and every Range - and picture and sound play the
+  same parts of the file the same number of times.
+  (proposed) **The movie leads.** While a sound is locked to it, its start offset, speed and Ranges
+  are the movie's, copied in the same edit as every change to the movie's, so one undo takes back
+  both; and they are refused on the sound itself - `locked-to-movie` - since an edit there would be
+  undone by the next one to the movie. Detaching is clearing `lockedTo`, after which the sound's
+  rows are its own again. A movie deleted leaves its sound's mark naming nothing, which is a sound
+  detached; undoing the delete brings the movie back and the lock with it.
+
 ### 37.6 Stages for WE-WK
 
 - **F.0 - WE, the DCA on opacity**: built, `951b9f8`.
@@ -21033,8 +21046,9 @@ decision in the implementer's words; the rest is marked (proposed).
 - **F.4 - The window**: a movie that is not HAP, dropped or chosen, asks: convert the whole file or
   later, Hap or Hap Q, its sound as a locked cue or not; a cue's menu offers the conversion of what
   it uses.
-- **F.5 - The lock (WJ)**: `media/lockedTo`; shared rows written to both; fired, stopped, taken
-  back and aborted with its movie; detach.
+- **F.5 - Ranges on a movie (WL), then the lock (WJ)**: a movie's Ranges played by its playhead, the
+  `loops` row gone; `media/lockedTo`; the movie's start offset, speed and Ranges copied to its
+  sound; fired, stopped, taken back and aborted with its movie; detach.
 - **F.6 - The preview (WF)**: the renderer plays a movie that is not HAP through FFmpeg, its frames
   raw, restarted from where the playhead jumps to.
 - **F.7 - Shipping FFmpeg**: in the Windows installer, the `.deb` and the macOS app, with its licence
