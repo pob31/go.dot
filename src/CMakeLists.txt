@@ -342,6 +342,8 @@ add_library(wfg_engine STATIC
     wfg/engine/tree/TreeSnapshot.cpp
     wfg/engine/tree/TreeSnapshot.h
     wfg/engine/video/Compositor.h
+    wfg/engine/video/Conversion.cpp
+    wfg/engine/video/Conversion.h
     wfg/engine/video/DcaOpacity.h
     wfg/engine/video/Displays.cpp
     wfg/engine/video/Displays.h

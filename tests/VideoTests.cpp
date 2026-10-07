@@ -46,14 +46,22 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/video/Compositor.h>
+#include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/video/DcaOpacity.h>
+#include <wfg/engine/video/Ffmpeg.h>
+#include <wfg/engine/video/Movie.h>
+#include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/video/VideoSink.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <memory>
 #include <string>
 #include <utility>
@@ -903,4 +911,167 @@ TEST_CASE ("video: a mask cue's outline, feather and inversion reach the picture
     CHECK (spec.shape.y[2] == doctest::Approx (0.8f));
     CHECK (spec.shape.feather == doctest::Approx (12.0f));
     CHECK (spec.shape.invert);
+}
+
+//==============================================================================
+/*  A MOVIE CONVERTED TO HAP (namespace draft 37.5 WF-WJ, 37.6 F.3). */
+TEST_CASE ("video: the part of a movie the cues use, and the edit a finished conversion makes")
+{
+    Rig rig;
+    video::registerConversionCommands (rig.engine.commands(), rig.document, nullptr);
+
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/source"), text ("movie") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/file"), text ("show/clip.mp4") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/startOffset"), text ("40") }));
+
+    REQUIRE (rig.applied ("cue.create", { text ("VD000001"), osc::Value::int32 (1), text ("video"),
+                                          text ("Later"), text ("VD000032") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/source"), text ("movie") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/file"), text ("show/clip.mp4") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/startOffset"), text ("25.5") }));
+
+    /*  FROM THE EARLIEST START, TEN SECONDS EARLIER (WI). */
+    CHECK (video::usedStartOf (rig.document, "show/clip.mp4") == doctest::Approx (15.5));
+    CHECK (video::usedStartOf (rig.document, "elsewhere.mp4") == doctest::Approx (0.0));
+
+    /*  A CUE THAT LOOPS plays its later passes from the file's start. */
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/loops"), text ("0") }));
+    CHECK (video::usedStartOf (rig.document, "show/clip.mp4") == doctest::Approx (0.0));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000032/loops"), text ("1") }));
+
+    /*  NOTHING CONVERTS HERE: asked, it is taken and does nothing. A scope
+        or a format it does not know is refused. */
+    CHECK (rig.applied ("media.convert", { text ("show/clip.mp4"), text ("used"), text ("hap"), osc::Value::boolean (true) }));
+    CHECK_FALSE (rig.applied ("media.convert", { text ("show/clip.mp4"), text ("some"), text ("hap") }));
+    CHECK_FALSE (rig.applied ("media.convert", { text ("show/clip.mp4"), text ("whole"), text ("h264") }));
+
+    /*  DONE: every cue naming the movie names the HAP file, its start moved
+        back by what was cut - one edit, which one undo takes back (WH). */
+    REQUIRE (rig.applied ("media.converted", { text ("show/clip.mp4"), text ("show/clip (Hap).mov"),
+                                               osc::Value::float64 (15.5), text ("") }));
+
+    CHECK (rig.at ("/godot/cue/VD000002/file") == "show/clip (Hap).mov");
+    CHECK (rig.at ("/godot/cue/VD000002/startOffset") == "24.5");
+    CHECK (rig.at ("/godot/cue/VD000032/file") == "show/clip (Hap).mov");
+    CHECK (rig.at ("/godot/cue/VD000032/startOffset") == "10");
+
+    REQUIRE (rig.applied ("undo"));
+    CHECK (rig.at ("/godot/cue/VD000002/file") == "show/clip.mp4");
+    CHECK (rig.at ("/godot/cue/VD000002/startOffset") == "40");
+    CHECK (rig.at ("/godot/cue/VD000032/file") == "show/clip.mp4");
+    CHECK (rig.at ("/godot/cue/VD000032/startOffset") == "25.5");
+
+    CHECK_FALSE (rig.applied ("media.converted", { text ("show/clip.mp4"), text (""), osc::Value::float64 (0.0) }));
+    CHECK_FALSE (rig.applied ("media.converted", { text ("show/clip.mp4"), text ("x.mov"), osc::Value::float64 (-1.0) }));
+}
+
+/*  AND FOR REAL, where FFmpeg is found: a movie with sound made by FFmpeg,
+    converted from a second in with its sound - a HAP movie Go.dot reads,
+    as many frames as the span holds, and a WAV as long - then the same
+    through the converter's thread, and once cancelled. */
+TEST_CASE ("video: a movie converted to HAP by FFmpeg and Go.dot, with its sound")
+{
+    const auto tools = video::ffmpeg::find();
+
+    if (! tools.found())
+        return;
+
+    const auto folder = juce::File::createTempFile ("convert");
+    REQUIRE (folder.createDirectory());
+    const auto source = folder.getChildFile ("source.mp4");
+
+    video::PipedChild maker;
+    REQUIRE (maker.start ({ tools.ffmpeg, "-nostdin", "-v", "error", "-y",
+                            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=3",
+                            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=3",
+                            "-c:v", "mpeg4", "-q:v", "3", "-c:a", "aac", "-shortest",
+                            source.getFullPathName().toStdString() }));
+    maker.readAll();
+    REQUIRE (maker.wait (60000) == 0);
+
+    video::ConversionRequest request;
+    request.id = "one";
+    request.sourceName = "source.mp4";
+    request.source = source.getFullPathName().toStdString();
+    request.targetName = "source (Hap).mov";
+    request.target = folder.getChildFile ("source (Hap).mov").getFullPathName().toStdString();
+    request.start = 1.0;
+    request.soundName = "source (sound).wav";
+    request.sound = folder.getChildFile ("source (sound).wav").getFullPathName().toStdString();
+
+    std::string why;
+    auto last = 0.0;
+    REQUIRE_MESSAGE (video::convertMovie (request, why, [&last] (double done) { last = done; }), why);
+    CHECK (last == doctest::Approx (1.0));
+    CHECK_FALSE (folder.getChildFile ("source (Hap).mov.part").exists());
+
+    video::movie::MovieFile movie;
+    REQUIRE (movie.open (request.target, why));
+    CHECK (movie.info().codec == "Hap1");
+    CHECK (movie.info().width == 320);
+    CHECK (movie.info().height == 180);
+    CHECK (std::abs (static_cast<int> (movie.info().frames.size()) - 50) <= 1);
+    CHECK (movie.info().frameRate() == doctest::Approx (25.0));
+
+    std::vector<std::uint8_t> bytes, blocks;
+    REQUIRE (movie.readFrame (10, bytes));
+    auto format = video::hap::Texture::none;
+    CHECK (video::hap::unpack (bytes.data(), bytes.size(), format, blocks));
+
+    const auto sound = video::ffmpeg::probe (tools, request.sound);
+    CHECK_FALSE (sound.ok);     // no picture in it: a sound alone
+    //  Two seconds - from one to three - of one channel of 24-bit at 48 kHz, and a header.
+    const auto soundBytes = juce::File (request.sound).getSize();
+    CHECK (soundBytes > 48000 * 3 * 19 / 10);
+    CHECK (soundBytes < 48000 * 3 * 21 / 10 + 1024);
+
+    /*  THROUGH THE CONVERTER'S THREAD: told when it is done, its status kept. */
+    std::mutex held;
+    std::condition_variable told;
+    std::vector<video::ConversionStatus> finished;
+
+    {
+        video::Converter converter ([&] (const video::ConversionRequest&, const video::ConversionStatus& status)
+                                    {
+                                        const std::lock_guard<std::mutex> guard (held);
+                                        finished.push_back (status);
+                                        told.notify_all();
+                                    });
+
+        CHECK (converter.ffmpegPath() == tools.ffmpeg);
+
+        auto again = request;
+        again.id = "two";
+        again.start = 0.0;
+        again.quality = true;
+        again.soundName.clear();
+        again.sound.clear();
+        again.target = folder.getChildFile ("source (Hap Q).mov").getFullPathName().toStdString();
+        converter.enqueue (again);
+
+        std::unique_lock<std::mutex> guard (held);
+        REQUIRE (told.wait_for (guard, std::chrono::seconds (120), [&finished] { return ! finished.empty(); }));
+        CHECK (finished.front().state == "done");
+
+        const auto statuses = converter.statuses();
+        REQUIRE (statuses.size() == 1);
+        CHECK (statuses.front().progress == doctest::Approx (1.0));
+    }
+
+    video::movie::MovieFile quality;
+    REQUIRE (quality.open (folder.getChildFile ("source (Hap Q).mov").getFullPathName().toStdString(), why));
+    CHECK (quality.info().codec == "HapY");
+    CHECK (std::abs (static_cast<int> (quality.info().frames.size()) - 75) <= 1);
+
+    /*  A SOURCE THAT IS NOT A MOVIE fails, said, and leaves nothing behind. */
+    auto broken = request;
+    broken.source = folder.getChildFile ("source (sound).wav").getFullPathName().toStdString();
+    broken.target = folder.getChildFile ("broken.mov").getFullPathName().toStdString();
+    broken.sound.clear();
+    CHECK_FALSE (video::convertMovie (broken, why));
+    CHECK_FALSE (why.empty());
+    CHECK_FALSE (folder.getChildFile ("broken.mov").exists());
+    CHECK_FALSE (folder.getChildFile ("broken.mov.part").exists());
+
+    folder.deleteRecursively();
 }

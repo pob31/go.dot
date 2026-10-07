@@ -47,6 +47,7 @@
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/ScanJob.h>
+#include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/video/VideoCommands.h>
 #include <wfg/engine/video/VideoHost.h>
 #include <wfg/engine/video/VideoRenderChild.h>
@@ -364,6 +365,7 @@ namespace
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
+        wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -656,6 +658,7 @@ namespace
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
+        wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -1268,6 +1271,7 @@ namespace
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::video::registerVideoCommands (engine.commands(), nullptr);
+        wfg::video::registerConversionCommands (engine.commands(), document, nullptr);
 
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
@@ -3889,6 +3893,25 @@ namespace
         wfg::video::registerVideoCommands (engine.commands(), &videoHost);
         runner.setVideo (&videoHost.sink());
         parameters.setVideo (&videoHost);
+
+        /*  MOVIES CONVERTED TO HAP IN THE BACKGROUND (namespace draft 37.5,
+            WF-WJ): one at a time, on the converter's thread; a finished one
+            becomes the command that makes the edit, in the log like any
+            other, so it is undoable and a replay makes it without FFmpeg. */
+        wfg::video::Converter converter { [&engine] (const wfg::video::ConversionRequest& request,
+                                                     const wfg::video::ConversionStatus& status)
+                                          {
+                                              if (status.state != "done")
+                                                  return;
+
+                                              engine.submit (wfg::origin::engine, "media.converted",
+                                                             { wfg::osc::Value::string (request.sourceName),
+                                                               wfg::osc::Value::string (request.targetName),
+                                                               wfg::osc::Value::float64 (request.start),
+                                                               wfg::osc::Value::string (request.soundName) });
+                                          } };
+        wfg::video::registerConversionCommands (engine.commands(), document, &converter);
+        parameters.setConverter (&converter);
         videoHost.configure (document);
 
         /*  The show's revision the video configuration was last read at: the
@@ -4232,6 +4255,7 @@ namespace
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media")
                                      .getFullPathName().toStdString());
+            converter.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
             runner.setPluginsFolder (target.getChildFile ("plugins").getFullPathName().toStdString());
 
             blockSource = &deviceDriver->host().clock();
@@ -4323,6 +4347,7 @@ namespace
             player = std::make_unique<wfg::audio::HostPlayer> (driver->host(), engine);
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
+            converter.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
             runner.setPluginsFolder (target.getChildFile ("plugins").getFullPathName().toStdString());
 
             /*  And the restart, now there is a graph to restart in. */
@@ -4942,6 +4967,7 @@ namespace
             }
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
+            converter.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
             runner.setPluginsFolder (target.getChildFile ("plugins").getFullPathName().toStdString());
             sessionClock.use (*blockSource, ticks.rebaseAudio (rate));
             engine.submit ("engine", "audio.settingsReady",

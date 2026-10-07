@@ -82,7 +82,7 @@ namespace wfg::surface { class SurfaceTable; }
 
 namespace wfg::cue { class DcaTable; class LaneTable; class LiveEdits; class TakeTable; }
 
-namespace wfg::video { class VideoHost; }
+namespace wfg::video { class VideoHost; class Converter; }
 
 namespace wfg::tree
 {
@@ -322,6 +322,10 @@ namespace wfg::tree
             dump - and the outputs read unbound, the renderer stopped. */
         void setVideo (const video::VideoHost* hostToRead) noexcept { videoHost = hostToRead; }
 
+        /*  The movies being converted to HAP (namespace draft 37.6, F.3), for
+            the Video readouts; none in every verb but serve. */
+        void setConverter (const video::Converter* converterToRead) noexcept { converter = converterToRead; }
+
         /*  What each plugin of the show's set turned out to be tonight - up,
             missing, failed, late by how much, how many parameters - for the
             four `none` rows under /godot/plugin/<id>. The surface table's
@@ -449,6 +453,7 @@ namespace wfg::tree
         const cue::TakeTable* takes = nullptr;
         const cue::LaneTable* lanes = nullptr;
         const video::VideoHost* videoHost = nullptr;
+        const video::Converter* converter = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;

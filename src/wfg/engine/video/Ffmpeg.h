@@ -58,6 +58,8 @@ namespace wfg::video::ffmpeg
         int width = 0;
         int height = 0;
         double frameRate = 0.0;     ///< frames a second, the average
+        int rateOver = 0;           ///< and as the fraction it was written as: 30000
+        int rateUnder = 1;          ///< over 1001
         double duration = 0.0;      ///< seconds
         bool alpha = false;         ///< its pixels carry transparency
         bool sound = false;

@@ -40,6 +40,7 @@
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/audio/Timbre.h>
+#include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/video/VideoHost.h>
 
 #include <algorithm>
@@ -3440,6 +3441,15 @@ namespace wfg::tree
                         text = found.renderer;
                     else if (name == "rendererProblem")
                         text = found.rendererProblem;
+                    else if (name == "ffmpeg")
+                        text = converter != nullptr ? converter->ffmpegPath() : std::string {};
+                    else if (name == "conversions")
+                    {
+                        if (converter != nullptr)
+                            for (const auto& status : converter->statuses())
+                                text += (text.empty() ? "" : "\n") + status.sourceName + "\t" + status.state + "\t"
+                                      + std::to_string (static_cast<int> (status.progress * 100.0)) + "\t" + status.problem;
+                    }
                     else
                         continue;
 

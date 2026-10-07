@@ -21,6 +21,8 @@
 
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
+#include <cmath>
 #include <thread>
 
 namespace wfg::video::ffmpeg
@@ -146,10 +148,29 @@ namespace wfg::video::ffmpeg
                     out.codec = stream["codec_name"].toString().toStdString();
                     out.width = static_cast<int> (numberOf (stream["width"]));
                     out.height = static_cast<int> (numberOf (stream["height"]));
-                    out.frameRate = rateOf (stream["avg_frame_rate"]);
+                    auto written = stream["avg_frame_rate"];
+                    out.frameRate = rateOf (written);
 
                     if (! (out.frameRate > 0.0))
-                        out.frameRate = rateOf (stream["r_frame_rate"]);
+                    {
+                        written = stream["r_frame_rate"];
+                        out.frameRate = rateOf (written);
+                    }
+
+                    /*  THE FRACTION ITSELF, for a movie written at exactly that
+                        rate: 30000/1001 kept as two whole numbers. */
+                    const auto text = written.toString();
+
+                    if (out.frameRate > 0.0 && text.contains ("/"))
+                    {
+                        out.rateOver = static_cast<int> (numberOf (text.upToFirstOccurrenceOf ("/", false, false)));
+                        out.rateUnder = std::max (1, static_cast<int> (numberOf (text.fromFirstOccurrenceOf ("/", false, false))));
+                    }
+                    else if (out.frameRate > 0.0)
+                    {
+                        out.rateOver = static_cast<int> (std::lround (out.frameRate * 1000.0));
+                        out.rateUnder = 1000;
+                    }
 
                     out.duration = numberOf (stream["duration"]);
                     out.alpha = pixelFormatHasAlpha (stream["pix_fmt"].toString().toStdString());
