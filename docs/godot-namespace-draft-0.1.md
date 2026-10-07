@@ -21325,3 +21325,25 @@ pasted as a cue would be a cue with no file and no name.
   named only once its copy into the show has landed, and the copy runs off the window's thread, so the
   create, the file and its routing stay the steps they were; a template adds none. A direct out the
   template gave is not overruled by the import's first-direct-out default.
+
+### 38.10 What S9 and S10 built
+
+- **A picture's tint, read on the CPU, not back from the graphics card** (proposed, a change from
+  §38.2's WR, which named a GPU readback): the renderer already holds every picture and movie frame
+  it draws, and its compositor - the one the no-window probe uses - can sample them. Ten times a second
+  it averages an eight by eight grid of each layer alone over black (its opacity and DCA in it) and of
+  each canvas whole (its level in it), and writes them to the region (version 10) by name. That is
+  sixty-four reads a picture, no stall of the GPU, and the same answer with or without a window. The
+  engine publishes `/godot/run/<id>/tint` and `/godot/canvas/<id>/tint` as `#RRGGBB`.
+- **A DCA's light** (`engine/surface/DcaColour.h`), a pure function of the tree for every DCA at once:
+  its members are the runs playing or stopping whose cue - or a group above it - is marked with it or
+  with a DCA inside it, the sounding runs that play through an output it rides, and each canvas it
+  rides. Sounds give their timbre's colour weighted by their loudness after the fader (`run/meter`);
+  pictures and canvases their tint's colour weighted by its brightness. While anything sounds the
+  light moves with the loudest one's envelope, as a sampler strip's does; with pictures only it is as
+  bright as the brightest, never under a tenth; a picture up but see-through is a tenth of white; a mic
+  with no analysis lights white. Nothing up, dark.
+- **The D700's DCA strip** paints its rotary's surround from it, worked out once per snapshot rather than
+  once per strip; **the virtual panel's** DCA swatch shows the same colour.
+- **Owed to the bench**: the ring by eye on the D700, the tint on a real display, and whether the
+  loudness weighting reads well with a loud bed and a quiet effect on one DCA.

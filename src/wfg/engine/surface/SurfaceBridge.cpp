@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/surface/SurfaceBridge.h>
+#include <wfg/engine/surface/DcaColour.h>
 
 #include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/cue/Runner.h>
@@ -2940,6 +2941,36 @@ namespace wfg::surface
                 std::optional<Rgb> wanted;
                 const auto sounding = word == "playing" || word == "held";
 
+                /*  A DCA'S RING SHOWS WHAT IT RIDES (namespace draft §38, WR):
+                    its members' sound and pictures as one colour, moving with
+                    the loudest one's envelope while anything sounds; dark with
+                    nothing up, as it always was. */
+                if (isDca)
+                {
+                    const auto& lights = dcaLightsNow();
+
+                    if (const auto found = lights.find (strip.dcaId); found != lights.end())
+                    {
+                        if (! found->second.loudestRun.empty())
+                        {
+                            const auto envelope = "/godot/run/" + found->second.loudestRun + "/envelope";
+                            wanted = pulsed (found->second.colour.value_or (Rgb {}), strip, textAt (at, envelope));
+                        }
+                        else
+                        {
+                            wanted = restingLight (found->second);
+                            strip.pulseFor.clear();
+                        }
+                    }
+                    else
+                    {
+                        strip.pulseFor.clear();
+                    }
+
+                    paintColour (port, vpotNote + element, strip, wanted.value_or (Rgb {}), tick);
+                    return;
+                }
+
                 if (sounding)
                 {
                     wanted = colourFromTimbre (textAt (at, strip.timbreAt));
@@ -3370,6 +3401,22 @@ namespace wfg::surface
         std::vector<Event> owed;
         std::shared_ptr<const tree::TreeSnapshot> published;
         std::atomic<std::size_t> refused { 0 };
+
+        /*  EVERY DCA'S LIGHT (namespace draft §38, WR), worked out once for
+            the snapshot it was read from - not once per strip. */
+        std::shared_ptr<const tree::TreeSnapshot> dcaLightsFrom;
+        std::map<std::string, DcaLight> dcaLightCache;
+
+        const std::map<std::string, DcaLight>& dcaLightsNow()
+        {
+            if (dcaLightsFrom != published)
+            {
+                dcaLightsFrom = published;
+                dcaLightCache = published != nullptr ? dcaLights (*published) : std::map<std::string, DcaLight> {};
+            }
+
+            return dcaLightCache;
+        }
         bool tableMoved = false;
 
         std::string levelScratch;

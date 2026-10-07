@@ -341,10 +341,14 @@ namespace wfg::video
             {
                 latest.displays = std::move (foundDisplays);
                 latest.outputs = std::move (foundOutputs);
+                latest.layerTints = region::readTints (r->layerTints);
+                latest.canvasTints = region::readTints (r->canvasTints);
             }
             else
             {
                 latest.outputs.clear();
+                latest.layerTints.clear();
+                latest.canvasTints.clear();
             }
         }
 

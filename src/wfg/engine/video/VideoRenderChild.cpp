@@ -1723,6 +1723,67 @@ namespace wfg::video
 
                 if (! windowed)
                     probe (config, layers);
+
+                /*  WHAT EACH PICTURE AND EACH CANVAS SHOWS, as one colour, a
+                    tenth of a second apart (namespace draft §38, WR). */
+                if (++tintTicks >= 10)
+                {
+                    tintTicks = 0;
+                    writeTints (config, layers);
+                }
+            }
+
+            /*  THE TINTS, through the compositor the probe uses, from the
+                pictures and frames the stores already hold: each layer alone
+                over black, and each canvas whole with its level. */
+            void writeTints (const region::ConfigReading& config, const std::vector<region::LayerReading>& layers)
+            {
+                const auto now = clock.sampleAt (r, steadyNanos());
+
+                if (now < 0)
+                    return;
+
+                std::size_t at = 0;
+
+                for (const auto& layer : layers)
+                {
+                    if (at >= static_cast<std::size_t> (region::maxLayers))
+                        break;
+
+                    const auto* canvas = canvasIn (config, layer.canvas);
+
+                    if (canvas == nullptr)
+                        continue;
+
+                    const std::vector<const region::LayerReading*> alone { &layer };
+                    region::writeTint (r.layerTints[at++], layer.id,
+                                       tintOf (alone, now, static_cast<double> (std::max (1, canvas->width)),
+                                               static_cast<double> (std::max (1, canvas->height)), &sampler));
+                }
+
+                for (; at < static_cast<std::size_t> (region::maxLayers); ++at)
+                    if (r.layerTints[at].id[0] != 0)
+                        region::writeTint (r.layerTints[at], {}, 0);
+
+                const auto count = std::min<std::size_t> (config.canvases.size(), region::maxCanvases);
+
+                for (std::size_t n = 0; n < static_cast<std::size_t> (region::maxCanvases); ++n)
+                {
+                    if (n >= count)
+                    {
+                        if (r.canvasTints[n].id[0] != 0)
+                            region::writeTint (r.canvasTints[n], {}, 0);
+
+                        continue;
+                    }
+
+                    const auto& canvas = config.canvases[n];
+                    region::writeTint (r.canvasTints[n], canvas.id,
+                                       scaledColour (tintOf (stackOf (layers, canvas.id), now,
+                                                             static_cast<double> (std::max (1, canvas.width)),
+                                                             static_cast<double> (std::max (1, canvas.height)), &sampler),
+                                                     region::canvasLevelOf (r, canvas.id)));
+                }
             }
 
             /*  THE DISPLAYS, published when they change: at the start, and
@@ -1842,6 +1903,7 @@ namespace wfg::video
             std::int64_t parentPid = 0;
             bool windowed = true;
             std::int64_t ticks = 0;
+            int tintTicks = 0;
             std::uint32_t boundSeq = 0xffffffffu;
 
             std::vector<DisplayInfo> displays;

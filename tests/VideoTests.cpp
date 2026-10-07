@@ -1717,3 +1717,30 @@ TEST_CASE ("video: a canvas's level and its DCA take the whole picture towards b
     CHECK (video::scaledColour (0xFF8040u, 0.5) == 0x804020u);
     CHECK (video::scaledColour (0xFF8040u, 0.0) == 0u);
 }
+
+//==============================================================================
+TEST_CASE ("video: what a picture shows, as one colour - its average, its opacity in it")
+{
+    /*  Namespace draft §38, WR: a DCA strip's ring shows its pictures by
+        their average tint, the opacity already in it, read through the
+        compositor from the pictures the renderer holds. */
+    video::region::LayerReading fill;
+    fill.source = video::region::Source::fill;
+    fill.paint = 0x2040A0u;
+    fill.rings[static_cast<int> (video::Property::opacity)].count = 1;
+    fill.rings[static_cast<int> (video::Property::opacity)].points[0] = { 0, 1.0 };
+
+    const std::vector<const video::region::LayerReading*> alone { &fill };
+    CHECK (video::tintOf (alone, 100, 1920.0, 1080.0, nullptr) == 0x2040A0u);
+
+    //  Half see-through over black: half as bright.
+    fill.rings[static_cast<int> (video::Property::opacity)].points[0] = { 0, 0.5 };
+    CHECK (video::tintOf (alone, 100, 1920.0, 1080.0, nullptr) == 0x102050u);
+
+    //  Gone: black.
+    fill.removeAt = 50;
+    CHECK (video::tintOf (alone, 100, 1920.0, 1080.0, nullptr) == 0u);
+
+    CHECK (video::tintText (0x2040A0u) == "#2040A0");
+    CHECK (video::tintText (0u) == "#000000");
+}

@@ -423,6 +423,27 @@ TEST_CASE ("video host: a renderer with no window draws the scene the region hol
         std::int64_t seen = -1;
         CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x2040A0u && seen >= at; }));
 
+        /*  WHAT IT SHOWS, AS ONE COLOUR (namespace draft §38, WR): the layer's
+            and the canvas's, read back by the engine by their names. */
+        CHECK (tickUntil (host, clock, [&host]
+                          {
+                              const auto said = host.readouts();
+                              const auto has = [] (const auto& tints, const char* id, std::uint32_t rgb)
+                              {
+                                  return std::find (tints.begin(), tints.end(),
+                                                    std::pair<std::string, std::uint32_t> { id, rgb }) != tints.end();
+                              };
+
+                              return has (said.layerTints, "RUN00001", 0x2040A0u)
+                                       && has (said.canvasTints, "VD000011", 0x2040A0u);
+                          }));
+
+        /*  A CANVAS AT HALF (WT): the whole composite towards black. */
+        host.sink().canvasLevels ({ { "VD000011", 0.5 } });
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x102050u; }));
+        host.sink().canvasLevels ({ { "VD000011", 1.0 } });
+        CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x2040A0u; }));
+
         /*  THE OUTPUT SAYS WHY IT IS NOT BOUND: the renderer has no window. */
         CHECK (tickUntil (host, clock, [&host]
                           {
@@ -1257,4 +1278,24 @@ TEST_CASE ("video region: a canvas's level reaches the renderer by the canvas's 
     CHECK (video::region::canvasLevelOf (region, "VD0000ZZ") == doctest::Approx (1.0));
     writer.canvasLevels ({ { "VD000012", 0.5 } });
     CHECK (video::region::canvasLevelOf (region, "VD000011") == doctest::Approx (1.0));
+}
+
+TEST_CASE ("video region: the renderer's tints reach the engine by name, and a slot let go says nothing")
+{
+    Memory memory;
+    auto& region = *memory.region;
+
+    CHECK (video::region::readTints (region.layerTints).empty());
+
+    video::region::writeTint (region.layerTints[0], "RUN00001", 0x2040A0u);
+    video::region::writeTint (region.layerTints[1], "RUN00002", 0xFFFFFFu);
+    video::region::writeTint (region.canvasTints[0], "CANVAS01", 0x101010u);
+
+    const auto layers = video::region::readTints (region.layerTints);
+    REQUIRE (layers.size() == 2);
+    CHECK (layers[0] == std::pair<std::string, std::uint32_t> { "RUN00001", 0x2040A0u });
+    CHECK (video::region::readTints (region.canvasTints).size() == 1);
+
+    video::region::writeTint (region.layerTints[1], {}, 0);
+    CHECK (video::region::readTints (region.layerTints).size() == 1);
 }

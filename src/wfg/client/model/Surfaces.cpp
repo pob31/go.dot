@@ -18,6 +18,7 @@
 
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/surface/DcaColour.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -462,6 +463,8 @@ namespace wfg::client::model
         std::map<std::string, StripRow> found;
         std::set<std::string> strips;
         std::string order;
+        std::map<std::string, surface::DcaLight> lights;
+        bool lightsRead = false;
 
         for (const auto* node : snapshot.all())
         {
@@ -542,6 +545,31 @@ namespace wfg::client::model
                 const auto authored = text (snapshot, dcaBase + "shortName");
 
                 row.dcaName = authored.empty() ? text (snapshot, dcaBase + "name") : authored;
+
+                /*  AND WHAT IT RIDES, AS ONE COLOUR (namespace draft §38, WR):
+                    the bridge's blend, worked out once for every DCA. */
+                if (! lightsRead)
+                {
+                    lights = surface::dcaLights (snapshot);
+                    lightsRead = true;
+                }
+
+                if (const auto lit = lights.find (row.dca); lit != lights.end() && lit->second.colour.has_value())
+                {
+                    const auto shown = lit->second.loudestRun.empty() ? surface::restingLight (lit->second)
+                                                                      : *lit->second.colour;
+                    constexpr char digits[] = "0123456789ABCDEF";
+                    std::string hex = "#";
+
+                    for (const auto component : { shown.red, shown.green, shown.blue })
+                    {
+                        const auto byte = std::clamp (component * 2, 0, 255);
+                        hex += digits[byte >> 4];
+                        hex += digits[byte & 0xf];
+                    }
+
+                    row.dcaColour = hex;
+                }
             }
 
             /*  WHAT IS UNDER THE FADER NOW, read off the node the fader rides -

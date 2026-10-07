@@ -42,6 +42,7 @@
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/video/FfmpegInstall.h>
+#include <wfg/engine/video/DcaOpacity.h>
 #include <wfg/engine/video/VideoHost.h>
 
 #include <algorithm>
@@ -3532,7 +3533,20 @@ namespace wfg::tree
                     runtime.push_back (makeLeaf (base + name, *row, text));
                 }
             }
+
+            /*  WHAT EACH CANVAS SHOWS, as one colour (namespace draft §38, WR):
+                a DCA strip's ring, for a canvas the DCA rides. */
+            for (const auto& [canvasId, rgb] : found.canvasTints)
+                for (const auto* row : doc::Schema::rowsForOwner ("canvas"))
+                    if (row->name == "tint")
+                        runtime.push_back (makeLeaf (std::string (godot) + "/canvas/" + canvasId + "/tint", *row,
+                                                     video::tintText (rgb)));
         }
+
+        /*  WHAT EACH PICTURE RUN SHOWS, as one colour (namespace draft §38, WR),
+            read once for every run below. */
+        const auto pictureTints = videoHost != nullptr ? videoHost->readouts().layerTints
+                                                       : std::vector<std::pair<std::string, std::uint32_t>> {};
 
         /*  WHAT EACH DCA IS TRIMMING BY TONIGHT (PRD §3.28), against the
             roster the document half left behind. From this half because a trim
@@ -3588,6 +3602,14 @@ namespace wfg::tree
                     here throttles it (§14.5). */
                 else if (name == "timbre")    text = timbreText (run, mediaRecords.get());
                 else if (name == "envelope")  text = envelopeText (run, mediaRecords.get());
+
+                //  A picture's colour, from the renderer (namespace draft §38, WR).
+                else if (name == "tint")
+                {
+                    for (const auto& [layerId, rgb] : pictureTints)
+                        if (layerId == run.id)
+                            text = video::tintText (rgb);
+                }
 
                 //  What left the track after the fader, to a tenth, as the envelope is.
                 else if (name == "meter")     text = osc::formatDouble (std::round (run.meter * 10.0) / 10.0);

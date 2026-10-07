@@ -33,6 +33,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <string>
 
 namespace wfg::video
 {
@@ -50,5 +52,18 @@ namespace wfg::video
             return 1.0;
 
         return std::clamp (surface::fractionForDb (decibels) / unity, 0.0, 1.0);
+    }
+
+    /*  A TINT AS THE TREE SAYS IT (namespace draft §38, WR): "#RRGGBB", in
+        capitals, as a fill's `paint` is written. */
+    inline std::string tintText (std::uint32_t rgb)
+    {
+        constexpr char digits[] = "0123456789ABCDEF";
+        std::string out = "#";
+
+        for (int shift = 20; shift >= 0; shift -= 4)
+            out += digits[(rgb >> shift) & 0xfu];
+
+        return out;
     }
 }

@@ -385,6 +385,18 @@ namespace wfg::client::ui
             has not arrived, the colour somebody gave the cue; and with
             neither, the theme's own off colour rather than a black that would
             read as a colour somebody chose. */
+        /*  A DCA STRIP SHOWS WHAT IT RIDES (namespace draft §38, WR): its
+            members' sound and pictures as one colour, as its rotary does. */
+        if (strip.role == "dca")
+        {
+            const juce::String rides (strip.dcaColour);
+
+            if (rides.length() == 7 && rides.startsWithChar ('#'))
+                return juce::Colour::fromString ("ff" + rides.substring (1));
+
+            return Look::colour (theme, "ink-off");
+        }
+
         if ((strip.word == "playing" || strip.word == "held") && ! strip.timbre.empty())
         {
             const auto hsl = model::words (strip.timbre);

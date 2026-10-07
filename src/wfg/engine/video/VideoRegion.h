@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 9;
+    constexpr std::uint32_t version = 10;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -180,6 +180,17 @@ namespace wfg::video::region
         std::atomic<std::uint32_t> seq;
         char id[idChars];
         std::atomic<double> factor;
+    };
+
+    /*  ONE COLOUR FOR WHAT A LAYER OR A CANVAS SHOWS (namespace draft §38,
+        WR): the average over it as 0xRRGGBB, written by the renderer about ten
+        times a second under its own `seq`, by the layer's (the run's) or the
+        canvas's identifier. An empty identifier is a slot nobody uses. */
+    struct Tint
+    {
+        std::atomic<std::uint32_t> seq;
+        char id[idChars];
+        std::atomic<std::uint32_t> rgb;
     };
 
     struct PointSlot
@@ -317,6 +328,11 @@ namespace wfg::video::region
         std::atomic<std::uint32_t> probeSeq;
         std::atomic<std::int64_t> probeSample;
         std::atomic<std::uint32_t> probe[maxCanvases];
+
+        /*  Renderer to engine: what each layer and each canvas shows, as one
+            colour (namespace draft §38, WR) - a DCA strip's ring. */
+        Tint layerTints[maxLayers];
+        Tint canvasTints[maxCanvases];
     };
 
     static_assert (std::atomic<std::uint32_t>::is_always_lock_free
@@ -358,6 +374,7 @@ namespace wfg::video::region
         mix (static_cast<std::uint32_t> (maxLayers));
         mix (pointsPerLayer);
         mix (static_cast<std::uint32_t> (sizeof (CanvasLevel)));
+        mix (static_cast<std::uint32_t> (sizeof (Tint)));
         return hash;
     }
 
@@ -483,6 +500,41 @@ namespace wfg::video::region
         }
 
         return 1.0;
+    }
+
+    /*  THE TINTS, the renderer's side: slot `n` names `id` at `rgb`; an empty
+        id empties it. */
+    inline void writeTint (Tint& slot, std::string_view id, std::uint32_t rgb) noexcept
+    {
+        beginWrite (slot.seq);
+        writeText (slot.id, id);
+        slot.rgb.store (rgb, std::memory_order_relaxed);
+        endWrite (slot.seq);
+    }
+
+    /*  And the engine's: every slot that names something, as (id, 0xRRGGBB). */
+    template <std::size_t N>
+    std::vector<std::pair<std::string, std::uint32_t>> readTints (const Tint (&slots)[N])
+    {
+        std::vector<std::pair<std::string, std::uint32_t>> out;
+
+        for (const auto& slot : slots)
+        {
+            char named[idChars] {};
+            std::uint32_t rgb = 0;
+
+            if (! readConsistent (slot.seq, [&]
+                                  {
+                                      std::memcpy (named, slot.id, idChars);
+                                      rgb = slot.rgb.load (std::memory_order_relaxed);
+                                  }))
+                continue;
+
+            if (auto id = readText (named); ! id.empty())
+                out.emplace_back (std::move (id), rgb);
+        }
+
+        return out;
     }
 
     struct ClockReading

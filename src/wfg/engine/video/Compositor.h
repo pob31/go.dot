@@ -276,4 +276,38 @@ namespace wfg::video
     {
         return colourAt (stack, sample, 1920.0, 1080.0, 0.0, 0.0, nullptr);
     }
+
+    /*  WHAT A STACK SHOWS, AS ONE COLOUR (namespace draft §38, WR): the average
+        of `colourAt` over an eight by eight grid of the canvas, each point the
+        middle of its cell, as 0xRRGGBB. Sixty-four reads of pictures the
+        renderer already holds - no read back from the graphics card. A stack of
+        one layer is that layer over black, its opacity and DCA in it. */
+    inline std::uint32_t tintOf (const std::vector<const region::LayerReading*>& stack, std::int64_t sample,
+                                 double canvasWidth, double canvasHeight, const PictureSampler* pictures) noexcept
+    {
+        constexpr int grid = 8;
+        double red = 0.0, green = 0.0, blue = 0.0;
+
+        for (int column = 0; column < grid; ++column)
+        {
+            for (int row = 0; row < grid; ++row)
+            {
+                const auto x = ((column + 0.5) / grid - 0.5) * canvasWidth;
+                const auto y = ((row + 0.5) / grid - 0.5) * canvasHeight;
+                const auto rgb = colourAt (stack, sample, canvasWidth, canvasHeight, x, y, pictures);
+
+                red += static_cast<double> ((rgb >> 16) & 0xffu);
+                green += static_cast<double> ((rgb >> 8) & 0xffu);
+                blue += static_cast<double> (rgb & 0xffu);
+            }
+        }
+
+        constexpr auto cells = static_cast<double> (grid * grid);
+        const auto channel = [] (double total, int shift)
+        {
+            return static_cast<std::uint32_t> (std::clamp (std::lround (total / cells), 0L, 255L)) << shift;
+        };
+
+        return channel (red, 16) | channel (green, 8) | channel (blue, 0);
+    }
 }

@@ -57,6 +57,7 @@
 #include <wfg/engine/surface/McuCodec.h>
 #include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
+#include <wfg/engine/surface/DcaColour.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
@@ -4417,4 +4418,87 @@ TEST_CASE ("surface bridge: a position with no strip is dark, says so, and does 
 
     desk.press ("PORTBNK2", 0x18 + 3);
     CHECK (desk.writes() == std::vector<std::string> { "surface.aim CUE00012" });
+}
+
+//==============================================================================
+TEST_CASE ("surface bridge: a DCA's ring shows what it rides - its sounds by timbre and loudness, its pictures by their tint")
+{
+    /*  Namespace draft §38, WR: the members a DCA's trim reaches - its own
+        marks, a DCA inside it, an output it rides - blended as one colour,
+        a sound by its timbre weighted by its loudness, a picture by its tint
+        weighted by how bright it is; the light moves with the loudest
+        sounding member; a picture up but see-through is a tenth of white; a
+        DCA with nothing up has no light. */
+    FakeTree fake;
+    fake.text ("/godot/dca/order", "DCA00001 DCA00002 DCA00003 DCA00004");
+    fake.text ("/godot/dca/DCA00002/dca", "DCA00001");               // 2 sits inside 1
+
+    fake.text ("/godot/run/order", "RUN00001 RUN00002 RUN00003 RUN00004 RUN00005");
+
+    //  A red sound at -6 dB, marked with 2.
+    fake.text ("/godot/run/RUN00001/state", "playing");
+    fake.text ("/godot/run/RUN00001/cue", "CUE00001");
+    fake.text ("/godot/run/RUN00001/timbre", "0 1 0.5");
+    fake.number ("/godot/run/RUN00001/meter", -6.0);
+    fake.text ("/godot/cue/CUE00001/kind", "media");
+    fake.text ("/godot/cue/CUE00001/dca", "DCA00002");
+
+    //  A blue picture, fully up, marked with 2.
+    fake.text ("/godot/run/RUN00002/state", "playing");
+    fake.text ("/godot/run/RUN00002/cue", "CUE00002");
+    fake.text ("/godot/run/RUN00002/tint", "#0000FF");
+    fake.text ("/godot/cue/CUE00002/kind", "video");
+    fake.text ("/godot/cue/CUE00002/dca", "DCA00002");
+
+    //  A green sound at 0 dB, unmarked, through an output 1 rides.
+    fake.text ("/godot/run/RUN00003/state", "playing");
+    fake.text ("/godot/run/RUN00003/cue", "CUE00003");
+    fake.text ("/godot/run/RUN00003/timbre", "120 1 0.5");
+    fake.number ("/godot/run/RUN00003/meter", 0.0);
+    fake.text ("/godot/cue/CUE00003/kind", "media");
+    fake.text ("/godot/cue/CUE00003/directOut", "BUS00001");
+    fake.text ("/godot/bus/BUS00001/dca", "DCA00001");
+
+    //  A picture up but see-through, marked with 3.
+    fake.text ("/godot/run/RUN00004/state", "playing");
+    fake.text ("/godot/run/RUN00004/cue", "CUE00004");
+    fake.text ("/godot/run/RUN00004/tint", "#000000");
+    fake.text ("/godot/cue/CUE00004/kind", "video");
+    fake.text ("/godot/cue/CUE00004/dca", "DCA00003");
+
+    //  A sound marked with 4 that has ended: nothing.
+    fake.text ("/godot/run/RUN00005/state", "done");
+    fake.text ("/godot/run/RUN00005/cue", "CUE00005");
+    fake.text ("/godot/cue/CUE00005/kind", "media");
+    fake.text ("/godot/cue/CUE00005/dca", "DCA00004");
+
+    const auto snapshot = fake.publish (1);
+    const auto lights = surface::dcaLights (*snapshot);
+
+    const auto red = surface::colourFromTimbre ("0 1 0.5").value();
+    const auto green = surface::colourFromTimbre ("120 1 0.5").value();
+    const auto half = std::pow (10.0, -6.0 / 20.0);
+
+    //  2: the red sound by its loudness, the blue picture by its brightness.
+    REQUIRE (lights.count ("DCA00002") == 1);
+    const auto& two = lights.at ("DCA00002");
+    REQUIRE (two.colour.has_value());
+    CHECK (two.colour->red == static_cast<int> (std::lround (red.red * half / (half + 1.0))));
+    CHECK (two.colour->blue == static_cast<int> (std::lround (127.0 / (half + 1.0))));
+    CHECK (two.loudestRun == "RUN00001");
+
+    //  1: everything 2 has, and the green sound through its output - the loudest.
+    REQUIRE (lights.count ("DCA00001") == 1);
+    const auto& one = lights.at ("DCA00001");
+    CHECK (one.loudestRun == "RUN00003");
+    CHECK (one.colour->green == static_cast<int> (std::lround (green.green * 1.0 / (half + 1.0 + 1.0))));
+
+    //  3: a tenth of white, so the rotary stays visible.
+    REQUIRE (lights.count ("DCA00003") == 1);
+    const auto three = surface::restingLight (lights.at ("DCA00003"));
+    CHECK (three == surface::Rgb { 13, 13, 13 });
+    CHECK (lights.at ("DCA00003").loudestRun.empty());
+
+    //  4: its only member has ended.
+    CHECK (lights.count ("DCA00004") == 0);
 }

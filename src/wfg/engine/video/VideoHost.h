@@ -90,6 +90,12 @@ namespace wfg::video
 
         std::vector<OutputEntry> outputs;
 
+        /*  WHAT EACH PICTURE RUN AND EACH CANVAS SHOWS, as one colour, by
+            identifier (namespace draft §38, WR): 0xRRGGBB. Empty while no
+            renderer runs. */
+        std::vector<std::pair<std::string, std::uint32_t>> layerTints;
+        std::vector<std::pair<std::string, std::uint32_t>> canvasTints;
+
         const OutputEntry* output (const std::string& id) const noexcept
         {
             for (const auto& entry : outputs)

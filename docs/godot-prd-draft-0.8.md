@@ -1946,6 +1946,11 @@ name. Playback walks the list.
   instance of the same gesture (after output assignment and fader binding), so it
   is **structured copy-paste of named field groups** rather than a feature per
   field *(proposed generalisation)*.
+  *Built 2026-10-07, at the author's direction* (`docs/godot-namespace-draft-0.1.md`
+  §38): the foot panel's Copy and Paste move one **part** of a cue - its time and
+  loops, sends, EQ or effects - onto every picked cue that takes it, the part
+  **replaced whole**, one step of undo. The same parts kept in the show under a name
+  are **cue templates**, a new cue born from one and never linked to it (§4.12).
 
 #### Advancing
 
@@ -2587,6 +2592,17 @@ member and with what mapping**.
 - **A DCA sits on a pinned strip** (§3.9a) and is a node like any other, so a
   show loaded on a laptop with no faders still has its DCAs on screen (§4.11).
   On release the trim parks (§3.6).
+
+*Amended 2026-10-07, at the author's direction* (`docs/godot-namespace-draft-0.1.md`
+§38): **an output and a canvas may be marked with a DCA too**, and each carries a
+level of its own - an output's **trim** in dB, a canvas's **level** in percent
+*(proposed)*. An output's gain is applied after everything has reached it; a
+canvas's level takes its whole composite towards black at once. A DCA **counts at
+each place** it is marked: on a cue and on the output it plays through, twice, as a
+VCA on a channel and on its master would. And a **DCA strip's ring shows what the
+DCA rides** as one colour: its sounds by their timbre (§3.30) weighted by loudness,
+its pictures by their average tint, their opacity in it - a tenth of white while a
+picture is up but see-through, so the rotary stays visible.
 
 ### 3.29 Persistent cues — a section that is checked, not fired
 
