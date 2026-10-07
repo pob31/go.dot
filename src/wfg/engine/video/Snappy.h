@@ -28,6 +28,7 @@
     renderer. Pure, no allocation but the output.
 */
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -147,5 +148,152 @@ namespace wfg::video::snappy
         }
 
         return written == length;
+    }
+    //==============================================================================
+    /*  AND COMPRESSED (namespace draft 37.6, F.2): what Go.dot's own HAP
+        encoder packs a frame's texture with (WK). The format's usual greedy
+        way - fragments of 64 KiB, a table of where each four bytes were last
+        seen, a copy wherever they repeat and literals between - which is what
+        every Snappy decoder expects, and what decompresses above. */
+    namespace detail
+    {
+        inline void literal (const std::uint8_t* from, std::size_t length, std::vector<std::uint8_t>& out)
+        {
+            while (length > 0)
+            {
+                const auto run = length < 65536 ? length : std::size_t { 65536 };
+                const auto n = run - 1;
+
+                if (n < 60)
+                {
+                    out.push_back (static_cast<std::uint8_t> (n << 2));
+                }
+                else if (n < 256)
+                {
+                    out.push_back (static_cast<std::uint8_t> (60u << 2));
+                    out.push_back (static_cast<std::uint8_t> (n));
+                }
+                else
+                {
+                    out.push_back (static_cast<std::uint8_t> (61u << 2));
+                    out.push_back (static_cast<std::uint8_t> (n & 0xffu));
+                    out.push_back (static_cast<std::uint8_t> (n >> 8));
+                }
+
+                out.insert (out.end(), from, from + run);
+                from += run;
+                length -= run;
+            }
+        }
+
+        /*  A copy of `length` bytes from `offset` back - under 64 KiB, inside
+            a fragment - as copies of at most 64. */
+        inline void copy (std::size_t offset, std::size_t length, std::vector<std::uint8_t>& out)
+        {
+            while (length > 0)
+            {
+                /*  NEVER LEAVE LESS THAN FOUR for the last: a copy of one to
+                    three is legal for the two-byte form, but kept to the
+                    shape every encoder writes. */
+                auto run = length > 64 ? std::size_t { 64 } : length;
+
+                if (length > 64 && length - 64 < 4)
+                    run = 60;
+
+                if (run >= 4 && run <= 11 && offset < 2048)
+                {
+                    out.push_back (static_cast<std::uint8_t> (0x01u | ((run - 4) << 2) | ((offset >> 8) << 5)));
+                    out.push_back (static_cast<std::uint8_t> (offset & 0xffu));
+                }
+                else
+                {
+                    out.push_back (static_cast<std::uint8_t> (0x02u | ((run - 1) << 2)));
+                    out.push_back (static_cast<std::uint8_t> (offset & 0xffu));
+                    out.push_back (static_cast<std::uint8_t> (offset >> 8));
+                }
+
+                length -= run;
+            }
+        }
+
+        inline std::uint32_t load32 (const std::uint8_t* at) noexcept
+        {
+            std::uint32_t value = 0;
+            std::memcpy (&value, at, 4);
+            return value;
+        }
+    }
+
+    inline void compress (const std::uint8_t* data, std::size_t size, std::vector<std::uint8_t>& out)
+    {
+        out.clear();
+        out.reserve (32 + size + size / 6);
+
+        /*  THE LENGTH, a varint. */
+        auto length = size;
+
+        do
+        {
+            auto byte = static_cast<std::uint8_t> (length & 0x7fu);
+            length >>= 7;
+
+            if (length != 0)
+                byte |= 0x80u;
+
+            out.push_back (byte);
+        }
+        while (length != 0);
+
+        constexpr std::size_t fragmentSize = 65536;
+        constexpr int tableBits = 14;
+        std::vector<std::uint16_t> table (std::size_t { 1 } << tableBits);
+
+        for (std::size_t fragment = 0; fragment < size; fragment += fragmentSize)
+        {
+            const auto* base = data + fragment;
+            const auto end = size - fragment < fragmentSize ? size - fragment : fragmentSize;
+
+            std::fill (table.begin(), table.end(), std::uint16_t { 0 });
+
+            const auto hashOf = [] (std::uint32_t bytes) noexcept
+            {
+                return static_cast<std::size_t> ((bytes * 0x1e35a7bdu) >> (32 - tableBits));
+            };
+
+            std::size_t at = 0, pending = 0;
+
+            while (at + 4 <= end)
+            {
+                const auto bytes = detail::load32 (base + at);
+                auto& seen = table[hashOf (bytes)];
+                const auto candidate = static_cast<std::size_t> (seen);
+                seen = static_cast<std::uint16_t> (at);
+
+                if (candidate < at && detail::load32 (base + candidate) == bytes)
+                {
+                    auto matched = std::size_t { 4 };
+
+                    while (at + matched < end && base[candidate + matched] == base[at + matched])
+                        ++matched;
+
+                    detail::literal (base + pending, at - pending, out);
+                    detail::copy (at - candidate, matched, out);
+
+                    /*  WHAT WAS COPIED, remembered too, two places in it, so
+                        a run that goes on is found again. */
+                    if (at + matched >= 2 && at + matched - 2 + 4 <= end)
+                        table[hashOf (detail::load32 (base + at + matched - 2))] = static_cast<std::uint16_t> (at + matched - 2);
+
+                    at += matched;
+                    pending = at;
+                }
+                else
+                {
+                    ++at;
+                }
+            }
+
+            detail::literal (base + pending, end - pending, out);
+        }
     }
 }

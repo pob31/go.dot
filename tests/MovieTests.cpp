@@ -30,7 +30,9 @@
 
 #include <wfg/engine/video/Ffmpeg.h>
 #include <wfg/engine/video/Hap.h>
+#include <wfg/engine/video/HapEncoder.h>
 #include <wfg/engine/video/Movie.h>
+#include <wfg/engine/video/MovieWriter.h>
 #include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/Snappy.h>
 
@@ -40,6 +42,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -356,6 +359,217 @@ TEST_CASE ("movie: FFmpeg, where it is found, describes a movie it made")
 
     const auto missing = video::ffmpeg::probe (tools, folder.getChildFile ("none.mov").getFullPathName().toStdString());
     CHECK_FALSE (missing.ok);
+
+    folder.deleteRecursively();
+}
+
+//==============================================================================
+/*  GO.DOT'S OWN HAP, WRITTEN (namespace draft 37.6, F.2, WK). */
+namespace
+{
+    /*  A PICTURE WITH SOMETHING IN IT: smooth ramps, a hard edge, a ring of
+        colour and a soft alpha - what a frame of a show is made of. */
+    std::vector<std::uint8_t> testPicture (int width, int height)
+    {
+        std::vector<std::uint8_t> rgba (static_cast<std::size_t> (width * height * 4));
+
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x)
+            {
+                auto* at = rgba.data() + (static_cast<std::size_t> (y * width + x)) * 4;
+                const auto dx = x - width / 2.0, dy = y - height / 2.0;
+                const auto ring = std::sqrt (dx * dx + dy * dy) / (width / 2.0);
+
+                at[0] = static_cast<std::uint8_t> (255 * x / std::max (1, width - 1));
+                at[1] = static_cast<std::uint8_t> (255 * y / std::max (1, height - 1));
+                at[2] = static_cast<std::uint8_t> (x < width / 3 ? 40.0 : 128.0 + 127.0 * std::sin (ring * 6.0));
+                at[3] = static_cast<std::uint8_t> (std::clamp (255.0 * (1.2 - ring), 0.0, 255.0));
+            }
+
+        return rgba;
+    }
+
+    /*  HOW FAR A TEXTURE DECODES FROM THE PICTURE: the mean and the worst,
+        over the colour (and the alpha, `withAlpha`). */
+    std::pair<double, double> errorOf (video::hap::Texture texture, const std::vector<std::uint8_t>& blocks,
+                                       const std::vector<std::uint8_t>& rgba, int width, int height, bool withAlpha)
+    {
+        double total = 0.0, worst = 0.0;
+        const auto channels = withAlpha ? 4 : 3;
+
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x)
+            {
+                double r = 0.0, g = 0.0, b = 0.0, a = 0.0;
+                REQUIRE (video::hap::pixelAt (texture, blocks, width, height, x, y, r, g, b, a));
+
+                const auto* want = rgba.data() + static_cast<std::size_t> (y * width + x) * 4;
+                const double got[4] { r, g, b, a * 255.0 };
+
+                for (int c = 0; c < channels; ++c)
+                {
+                    const auto off = std::abs (got[c] - static_cast<double> (want[c]));
+                    total += off;
+                    worst = std::max (worst, off);
+                }
+            }
+
+        return { total / (static_cast<double> (width * height) * channels), worst };
+    }
+}
+
+TEST_CASE ("movie: Snappy compresses to what it decompresses from")
+{
+    juce::Random random (37);
+
+    std::vector<std::vector<std::uint8_t>> inputs;
+    inputs.push_back ({});
+    inputs.push_back ({ 7 });
+    inputs.push_back (std::vector<std::uint8_t> (200000, 0x42));
+
+    std::vector<std::uint8_t> noise (70001);
+    for (auto& byte : noise) byte = static_cast<std::uint8_t> (random.nextInt (256));
+    inputs.push_back (noise);
+
+    //  Runs and repeats at every distance, across fragment edges.
+    std::vector<std::uint8_t> patterned;
+    for (int n = 0; n < 300000; ++n)
+        patterned.push_back (static_cast<std::uint8_t> ((n % 7) * 13 + ((n / 3000) % 5) + (random.nextInt (50) == 0 ? 1 : 0)));
+    inputs.push_back (patterned);
+
+    for (const auto& input : inputs)
+    {
+        CAPTURE (input.size());
+
+        std::vector<std::uint8_t> packed, unpacked;
+        video::snappy::compress (input.data(), input.size(), packed);
+        REQUIRE (video::snappy::decompress (packed.data(), packed.size(), unpacked));
+        CHECK (unpacked == input);
+    }
+
+    std::vector<std::uint8_t> packed;
+    video::snappy::compress (inputs[2].data(), inputs[2].size(), packed);
+    CHECK (packed.size() < inputs[2].size() / 20);
+}
+
+TEST_CASE ("movie: Go.dot's HAP encoder - Hap, Hap Alpha and Hap Q come back close to the picture")
+{
+    constexpr int width = 130, height = 70;     // not a multiple of four: edge blocks repeat the edge
+    const auto picture = testPicture (width, height);
+
+    for (const auto texture : { video::hap::Texture::dxt1, video::hap::Texture::dxt5, video::hap::Texture::ycocgDxt5 })
+    {
+        CAPTURE (static_cast<int> (texture));
+
+        std::vector<std::uint8_t> blocks;
+        video::hap::encodeTexture (texture, picture.data(), width, height, static_cast<std::size_t> (width) * 4, blocks);
+        CHECK (blocks.size() == static_cast<std::size_t> (((width + 3) / 4) * ((height + 3) / 4)) * video::hap::bytesPerBlock (texture));
+
+        const auto [mean, worst] = errorOf (texture, blocks, picture, width, height, texture == video::hap::Texture::dxt5);
+        MESSAGE ("texture " << static_cast<int> (texture) << ": mean " << mean << ", worst " << worst << " of 255");
+        CHECK (mean < 4.0);
+        CHECK (worst < 48.0);
+
+        /*  AND AS A FRAME: one section, packed, and unpacked to the same blocks. */
+        std::vector<std::uint8_t> frame, scratch, back;
+        video::hap::packFrame (texture, blocks, frame, scratch);
+
+        auto format = video::hap::Texture::none;
+        REQUIRE (video::hap::unpack (frame.data(), frame.size(), format, back));
+        CHECK (format == texture);
+        CHECK (back == blocks);
+    }
+
+    /*  ONE COLOUR IS EXACT, as far as 5:6:5 goes: pure white, black, a primary. */
+    for (const std::uint32_t rgb : { 0xffffffu, 0x000000u, 0xff0000u })
+    {
+        std::vector<std::uint8_t> flat (16 * 4);
+
+        for (std::size_t p = 0; p < 16; ++p)
+        {
+            flat[p * 4] = static_cast<std::uint8_t> (rgb >> 16);
+            flat[p * 4 + 1] = static_cast<std::uint8_t> (rgb >> 8);
+            flat[p * 4 + 2] = static_cast<std::uint8_t> (rgb);
+            flat[p * 4 + 3] = 255;
+        }
+
+        std::vector<std::uint8_t> blocks;
+        video::hap::encodeTexture (video::hap::Texture::dxt1, flat.data(), 4, 4, 16, blocks);
+        CHECK (errorOf (video::hap::Texture::dxt1, blocks, flat, 4, 4, false).second < 0.5);
+    }
+}
+
+TEST_CASE ("movie: a movie Go.dot writes is read back frame for frame")
+{
+    constexpr int width = 64, height = 48;
+    const auto folder = juce::File::createTempFile ("hapwrite");
+    REQUIRE (folder.createDirectory());
+    const auto path = folder.getChildFile ("written.mov").getFullPathName().toStdString();
+
+    std::vector<std::vector<std::uint8_t>> frames;
+    video::movie::MovieWriter writer;
+    std::string why;
+    REQUIRE (writer.open (path, "Hap1", width, height, 30000, 1001, why));
+
+    for (int n = 0; n < 5; ++n)
+    {
+        auto picture = testPicture (width, height);
+
+        for (std::size_t p = 0; p < picture.size(); p += 4)
+            picture[p] = static_cast<std::uint8_t> (picture[p] + n * 40);
+
+        std::vector<std::uint8_t> blocks, frame, scratch;
+        video::hap::encodeTexture (video::hap::Texture::dxt1, picture.data(), width, height, width * 4u, blocks);
+        video::hap::packFrame (video::hap::Texture::dxt1, blocks, frame, scratch);
+        REQUIRE (writer.write (frame.data(), frame.size()));
+        frames.push_back (frame);
+    }
+
+    REQUIRE (writer.finish (why));
+
+    video::movie::MovieFile movie;
+    REQUIRE (movie.open (path, why));
+    CHECK (movie.info().codec == "Hap1");
+    CHECK (movie.info().width == width);
+    CHECK (movie.info().height == height);
+    REQUIRE (movie.info().frames.size() == 5);
+    CHECK (movie.info().duration == doctest::Approx (5.0 * 1001.0 / 30000.0));
+    CHECK (movie.info().frameRate() == doctest::Approx (29.97).epsilon (0.001));
+
+    for (int n = 0; n < 5; ++n)
+    {
+        std::vector<std::uint8_t> bytes;
+        REQUIRE (movie.readFrame (n, bytes));
+        CHECK (bytes == frames[static_cast<std::size_t> (n)]);
+    }
+
+    /*  AND FFMPEG READS IT TOO, where it is found: the file is QuickTime,
+        not only what Go.dot's reader forgives. */
+    if (const auto tools = video::ffmpeg::find(); tools.found())
+    {
+        const auto probed = video::ffmpeg::probe (tools, path);
+        REQUIRE (probed.ok);
+        CHECK (probed.isHap());
+        CHECK (probed.width == width);
+        CHECK (probed.height == height);
+        CHECK (probed.frameRate == doctest::Approx (29.97).epsilon (0.001));
+
+        video::PipedChild decode;
+        REQUIRE (decode.start ({ tools.ffmpeg, "-nostdin", "-v", "error", "-i", path,
+                                 "-f", "rawvideo", "-pix_fmt", "rgba", "-" }));
+        const auto raw = decode.readAll();
+        CHECK (decode.wait (30000) == 0);
+        REQUIRE (raw.size() == static_cast<std::size_t> (5 * width * height * 4));
+
+        //  Frame 2 as FFmpeg decodes it, against Go.dot's decode of the same.
+        std::vector<std::uint8_t> bytes, blocks;
+        REQUIRE (movie.readFrame (2, bytes));
+        auto format = video::hap::Texture::none;
+        REQUIRE (video::hap::unpack (bytes.data(), bytes.size(), format, blocks));
+
+        const std::vector<std::uint8_t> theirs (raw.begin() + 2 * width * height * 4, raw.begin() + 3 * width * height * 4);
+        CHECK (errorOf (format, blocks, theirs, width, height, false).first < 1.0);
+    }
 
     folder.deleteRecursively();
 }
