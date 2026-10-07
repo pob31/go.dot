@@ -1574,6 +1574,17 @@ hatch for shows that outgrow this. Video must never sit in the GO path.
 **Codec:** **HAP** family as the primary playback format, with a few fallbacks for
 convenience (to be chosen). Not a general media player.
 
+*Amended 2026-10-07, at the author's direction* (namespace draft §37.5, WF-WI): **the fallbacks are
+for preview.** A movie in another codec plays as a preview while the show is built; adding it to
+the show copies it into the show's media and converts it to HAP in the background, offering the
+whole file or only the part the cues use with ten seconds either side. The decoder is **FFmpeg, run
+as a child process**. When the conversion is done the cue names the HAP file, one undoable edit, and
+the original stays in the show's media. **A movie's sound** is offered at import as an audio cue of
+its own, **locked** to the movie's cue so their start, speed, passes and edit points match; it can be
+detached, and either cue removed without the other (WJ). **A DCA reaches a picture's opacity** (WE):
+-inf is nothing, 0 dB and above is the cue's own opacity, and between, the picture follows the
+fader's travel.
+
 *Amended 2026-10-06, at the author's direction — Phase 8 started* (`docs/godot-namespace-draft-0.1.md`
 §35, decisions UU–VM). **Stills first, movies second:** 8a builds flat colours, masks, pictures,
 blending and the mesh; HAP, capture and DeckLink are 8b. The words are the author's: *"Canvas

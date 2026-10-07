@@ -2259,6 +2259,10 @@ namespace wfg::cue
             int loops = 1;
             int pass = 0;
             bool movieEnded = false;
+
+            /*  WHAT THE DCAS ABOVE IT LEAVE OF ITS OPACITY (namespace draft
+                37.5, WE), as last placed: all of it until one says less. */
+            double dcaFactor = 1.0;
         };
 
         std::vector<VideoJob> showing;
@@ -2294,6 +2298,17 @@ namespace wfg::cue
 
         /*  A point placed for a video run, on the job and on the picture side. */
         void placeVideoPoint (VideoJob& job, video::Property property, const video::Point& point);
+
+        /*  THE DCAS ON A PICTURE (namespace draft 37.5, WE): the trims of every
+            DCA marked on the run's cue and on each group's above it, summed in
+            dB as a sound's are, and turned into a factor of its opacity along
+            the fader's travel. One with no DCA table, or none marked. */
+        double videoDcaFactorOf (const Run& run);
+
+        /*  And followed: a point a horizon ahead on the tick the factor moves,
+            after one holding where it was, so a fader at rest for a minute
+            does not glide over that minute to where it went. */
+        void followVideoDcas (VideoJob& job, const Run& run);
 
         /*  A fade cue aimed at a video cue: true when it was one, and handled. */
         bool fireVideoFade (const juce::ValueTree& fade, const std::string& runId, std::int64_t tick);

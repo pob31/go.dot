@@ -1300,6 +1300,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA this cue is assigned to, by identifier, or empty - a mark on the member as a sound&apos;s is (PRD 3.28). The DCA&apos;s trim, and the trim of every DCA it sits inside and of every group&apos;s above the cue, turn into how solid the picture is (namespace draft 37.5, WE, the author&apos;s): nought dB and above is the opacity as it stands, -120 dB is nothing, and between the two the picture follows the show&apos;s fader travel - half way up the fader is about half way faded. Never more solid than the cue&apos;s own opacity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="enabled">
           <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>

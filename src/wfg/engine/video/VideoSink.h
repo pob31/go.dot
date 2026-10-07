@@ -59,10 +59,11 @@ namespace wfg::video
         offsetX = 2,    ///< % of the canvas's width, right positive
         offsetY = 3,    ///< % of the canvas's height, up positive
         rotation = 4,   ///< degrees, clockwise
-        time = 5        ///< a movie's playhead: seconds of the file (namespace draft 37, VZ)
+        time = 5,       ///< a movie's playhead: seconds of the file (namespace draft 37, VZ)
+        dca = 6         ///< 0..1, what the DCAs above the cue leave of its opacity (37.5, WE)
     };
 
-    constexpr int propertyCount = 6;
+    constexpr int propertyCount = 7;
 
     /*  One layer: what a video run puts on a canvas. A VALUE, carrying no
         document reference, for `ArmRequest`'s reason - it is read on the other

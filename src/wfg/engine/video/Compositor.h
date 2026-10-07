@@ -79,13 +79,15 @@ namespace wfg::video
     }
 
     /*  How solid one layer is at `sample`: nothing once its removal has come,
-        else what its opacity's points say. */
+        else what its opacity's points say, times what the DCAs above its cue
+        leave of it (namespace draft 37.5, WE) - all of it until they say. */
     inline double opacityOf (const region::LayerReading& layer, std::int64_t sample) noexcept
     {
         if (sample >= layer.removeAt)
             return 0.0;
 
-        return std::clamp (valueOf (layer, Property::opacity, sample, 0.0), 0.0, 1.0);
+        return std::clamp (valueOf (layer, Property::opacity, sample, 0.0), 0.0, 1.0)
+             * std::clamp (valueOf (layer, Property::dca, sample, 1.0), 0.0, 1.0);
     }
 
     /*  Where the layer lies at `sample`, on a canvas of this size, for a

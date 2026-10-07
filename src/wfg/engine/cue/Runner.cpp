@@ -37,6 +37,7 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/clock/TickClock.h>
+#include <wfg/engine/video/DcaOpacity.h>
 #include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -6475,7 +6476,7 @@ namespace wfg::cue
                 /*  ONLY MEDIA AND GROUPS CARRY A MARK (PRD §3.28): audio and
                     video cues, and groups. A fade's `dca` is what it moves and
                     a strip's is what it rides - neither is membership. */
-                if (element == "Media" || element == "Mic" || element == "Group")
+                if (element == "Media" || element == "Mic" || element == "Video" || element == "Group")
                     if (const auto mark = node[dcaProperty].toString().toStdString(); ! mark.empty())
                         if (auto chain = chainFrom (mark); ! chain.empty())
                             dcaChains[node[idProperty].toString().toStdString()] = std::move (chain);
@@ -15463,6 +15464,13 @@ namespace wfg::cue
                         videoSink->opacity (job.self, point);
                 }
 
+                /*  AND WHAT THE DCAS LEAVE OF IT, from the sample it comes up
+                    on (namespace draft 37.5, WE). */
+                job.dcaFactor = videoDcaFactorOf (*run);
+
+                if (job.dcaFactor < 1.0)
+                    placeVideoPoint (job, video::Property::dca, { at, job.dcaFactor });
+
                 /*  A MOVIE STARTS WHERE ITS OFFSET SAYS, on the sample it comes
                     up on. */
                 if (job.movie)
@@ -15478,6 +15486,10 @@ namespace wfg::cue
             /*  A MOVIE PLAYS ON, through a fade-out too, until its run ends. */
             if (job.movie && job.placed && ! job.movieEnded)
                 advanceMovie (engine, job);
+
+            /*  A DCA RIDDEN WHILE IT IS UP, through Esc's fade-out too. */
+            if (job.placed && ! job.removed)
+                followVideoDcas (job, *run);
 
             /*  DOWN, AS ESC ASKED: from where it is at the horizon to black over
                 the panic fade, and gone on the frame it gets there. */
@@ -15521,6 +15533,7 @@ namespace wfg::cue
                         : property == video::Property::offsetX  ? job.spec.offsetX
                         : property == video::Property::offsetY  ? job.spec.offsetY
                         : property == video::Property::rotation ? job.spec.rotation
+                        : property == video::Property::dca      ? 1.0
                                                                 : 0.0;
 
         return video::valueAt (job.moved[static_cast<std::size_t> (property)], sample, base,
@@ -15541,6 +15554,63 @@ namespace wfg::cue
 
         if (videoSink != nullptr)
             videoSink->move (job.self, property, point);
+    }
+
+    double Runner::videoDcaFactorOf (const Run& run)
+    {
+        if (dcas == nullptr)
+            return 1.0;
+
+        /*  THE DCA TERMS ALONE: a group's level and a strip's hand are
+            decibels of sound, and stay with the sound (37.5, proposed). */
+        const auto termsOf = [this] (const std::string& cueId)
+        {
+            auto total = 0.0;
+
+            for (const auto& dcaId : dcaChainOf (cueId))
+                total += dcas->trimOf (dcaId);
+
+            return total;
+        };
+
+        auto total = termsOf (run.cue);
+        auto parent = run.parent;
+
+        /*  BOUNDED BY THE TABLE, as the level's walk is. */
+        for (std::size_t guard = 0; guard <= runs.all().size() && ! parent.empty(); ++guard)
+        {
+            const auto* above = runs.find (parent);
+
+            if (above == nullptr)
+                break;
+
+            total += termsOf (above->cue);
+            parent = above->parent;
+        }
+
+        return video::opacityForTrim (total);
+    }
+
+    void Runner::followVideoDcas (VideoJob& job, const Run& run)
+    {
+        const auto factor = videoDcaFactorOf (run);
+
+        if (std::abs (factor - job.dcaFactor) < 1e-6)
+            return;
+
+        const auto at = videoSampleAhead();
+        const auto& placed = job.moved[static_cast<std::size_t> (video::Property::dca)];
+
+        if (at >= 0)
+        {
+            const auto heldFrom = at - samplesPerTick;
+
+            if (placed.empty() || placed.back().sample < heldFrom)
+                placeVideoPoint (job, video::Property::dca, { heldFrom, job.dcaFactor });
+        }
+
+        placeVideoPoint (job, video::Property::dca, { at, factor });
+        job.dcaFactor = factor;
     }
 
     bool Runner::fireVideoFade (const juce::ValueTree& fade, const std::string& runId, std::int64_t tick)

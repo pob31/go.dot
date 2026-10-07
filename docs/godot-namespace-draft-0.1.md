@@ -20904,10 +20904,10 @@ Go.dot's audio clock (PRD §3.19d) so it cannot slide away from the sound beside
 - **WC - A movie's sound is not built yet**: a HAP file's audio track is not read. The usual practice
   - the sound as its own file beside the movie, a media cue in the same group - works today, and
   stays in step by the shared clock. The author's DCA on a movie's audio level waits for the movie's
-  own sound.
+  own sound. *Answered 2026-10-07, §37.5 (WJ): a locked audio cue.*
 - **WD - The DCA on opacity is drawn, not built**: the author's "a DCA for opacity for still and moving
   images", and the curve between a DCA's dB and a picture's opacity the author expects to adjust, want a
-  conversation before a curve is chosen.
+  conversation before a curve is chosen. *Answered 2026-10-07, §37.5 (WE).*
 
 ### 37.3 Stages
 
@@ -20951,3 +20951,62 @@ implementer's, waiting for the author's yes.
   (frame pacing, how many 4K streams a machine plays); Hap R and Hap Q Alpha; a movie's sound (WC);
   the DCA on opacity (WD); in and out points and slices; a movie's frame at standby read before GO
   (it is read from the first frame when it comes up).
+
+### 37.5 The author's answers, 2026-10-07
+
+*Written the morning after.* The author answered two of §37.2's open questions and added a third.
+What is quoted is the author's; a choice the author picked from options offered is the author's
+decision in the implementer's words; the rest is marked (proposed).
+
+- **WE - The DCA on opacity** (author): *"go from -inf -> 0% opacity (media) to 0dB -> 100%. Don't go
+  over 100% even if the fader is above 0dB."* Between the two ends, the author chose that **opacity
+  follows the fader's travel**: how far up the show's fader a level sits, over how far up nought dB
+  sits. On the show's own fader (the panel's law, `FaderCurve.h`), that is 92 % at -6 dB, 75 % at
+  -20, 49 % at -40, 24 % at -60, 12 % at -90 and nothing at -120 - so half way up the fader looks half
+  way faded, and a hand fade on a DCA strip looks even on the picture. A video cue carries a `dca`
+  mark as a sound does (PRD §3.28), and a group's mark reaches the video cues under it.
+  (proposed) The sum is the DCA terms alone - the cue's own chain and every group's above it - and
+  not a group's level or a strip's hand, which are decibels of sound. The factor multiplies the
+  opacity a run is at, fades included, and is placed a horizon ahead like every moving value: a
+  seventh, `dca`, in the region. The show's fader law and not the D700's, because a DCA's trim is the
+  show's and a surface's law is how one surface draws it. A movie's sound is a cue of its own (WJ),
+  so a DCA reaches it as it reaches any sound, in dB.
+- **WF - Fallback codecs are for preview** (author): *"Fallback Codec are essentially for preview
+  before we add the media in HAP by converting it. This operation means we commit the media to the
+  project and in the background make the transcoding."* A movie in another codec - H.264, ProRes and
+  the rest - plays as a **preview**, good enough to build the show with. **Adding it commits it**:
+  the file is copied into the show's `media/` and converted to HAP in the background, and the HAP is
+  what the show plays.
+- **WG - FFmpeg, as a child process** (the author's pick of three): the `ffmpeg` program, shipped
+  beside Go.dot, decodes the preview and makes the HAP. One code path on the three systems, and a
+  decoder's fault stays in its own process as the renderer's does. (proposed) The preview's frames
+  reach the renderer raw; a jump in a preview starts the decoder again from there, so a preview
+  seeks slower than HAP does - which is what a preview is for.
+- **WH - The cue then names the HAP** (the author's pick): when a conversion is done, the cue's
+  `file` is rewritten to the HAP file, one undoable edit, and the original stays in `media/`. What
+  the show file says is what plays (PRD §4.10).
+- **WI - The whole file, or what is used** (author): *"Offer to only convert the used portion (+10s at
+  each end if possible) of the media file into HAP or the complete file."* (proposed) What is used is
+  the span every cue naming the file can reach, from the earliest start offset to the furthest end;
+  a movie has no out point yet (WA), so today that runs to the file's end. Ten seconds are kept
+  before it and after it where the file has them. The rewrite (WH) moves each cue's `startOffset` by
+  what was cut from the front, so every cue still starts on the same frame. Hap where the source has
+  no alpha, Hap Alpha where it has; Hap Q is a choice offered with the conversion.
+- **WJ - A movie's sound, as a locked audio cue** (author): *"For the video files' audio, when importing
+  video media offer to import the audio as a locked audio media cue so that edit points (in and out
+  times, loops match). It can eventually be detached and removed. Or video cues can be removed while
+  their audio cues stay."* This answers WC. Importing a movie that has sound offers its sound as a
+  media cue of its own - a file of its own in `media/`, which FFmpeg (WG) takes out of the movie - and
+  **locked** to the movie's cue: where they start, their speed and their passes (and their in and out
+  points, when a movie has them) stay the same. **Detached**, the two are two cues and either may go;
+  **deleting the movie's cue** leaves its sound as a cue of its own. And (author): *"Movie sound cues
+  have exactly the same parameters as normal audio media cues"* - it is a media cue, every row of one,
+  and nothing of its own but the lock.
+  (proposed) The lock is a mark on the sound's cue naming the movie's (`media/lockedTo`), a mark on the
+  member as a DCA's is (PRD §3.28, §4.12): nothing on the movie's cue lists it. While it is set, an
+  edit to a row the two share - `startOffset`, `rate`, `loops` - on either cue writes both, one
+  undoable edit, so each document row still says what someone decided (PRD §4.10). A locked sound
+  fires, stops, is taken back by Doh! and is aborted by Esc with its movie, on the same sample; it
+  keeps its own level, routing, EQ and DCA, which are the sound's. Deleting the movie's cue clears the
+  mark, in the same edit.
+

@@ -479,8 +479,10 @@ while the desktop shows the cue list.
 aligned from the tablet.
 
 **Needs from the author:** ~~DeckLink vs GPU output (PRD §6.3)~~ answered
-2026-10-06, GPU now and DeckLink later; fallback codec list; ~~blend-space choice
-confirmation~~ answered 2026-10-06, display space.
+2026-10-06, GPU now and DeckLink later; ~~fallback codec list~~ answered 2026-10-07,
+preview only, FFmpeg as a child process, converted to HAP in the background
+(namespace draft §37.5); ~~blend-space choice confirmation~~ answered 2026-10-06,
+display space.
 
 *Started 2026-10-06 and split in two* (namespace draft §35, decisions UU–VM; PRD
 §3.19 and §6.3 amended). The author's order: stills first, movies second. The
@@ -513,6 +515,12 @@ built (namespace draft §36.5). 8b drawn as §37 - movies, HAP first, a playhead
 with speed and loops - every decision there proposed and waiting for the
 author; its reader (M.1) built. *2026-10-07, early:* M.1-M.4 built (§37.4) - a
 HAP movie plays, loops and keeps time; the bench and the author's yes owed. V.4 (the grade on a cue) built the same morning (§36.6).
+
+*Status, 2026-10-07:* V.5 (blends and masks) and V.6 (each output's mesh and
+CDL) built. The author answered the DCA on opacity (it follows the fader's
+travel, never past 100 %) and the fallback codecs (a preview, then a background
+conversion to HAP by FFmpeg as a child process, of the whole file or the part
+used): namespace draft §37.5, WE-WI. Being built in that order.
 
 **Done when:** a scene of fills, masks and pictures runs from the cue list onto
 two outputs, one mapped onto a wall that is not flat, with Esc, double Esc and

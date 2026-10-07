@@ -89,7 +89,7 @@ namespace wfg::client::model
                 /*  A VIDEO CUE (Phase 8a): what it shows, where, how high in
                     the stack, how solid and in what colour, then how it comes
                     in. */
-                { "video",   { "source", "canvas", "file", "fit", "layer", "blend", "opacity", "paint", "fadeIn",
+                { "video",   { "source", "canvas", "file", "fit", "layer", "blend", "opacity", "dca", "paint", "fadeIn",
                                "startOffset", "rate", "loops",
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
                                "contrast", "saturation", "gamma", "hue",

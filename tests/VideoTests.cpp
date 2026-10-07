@@ -35,6 +35,7 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -44,11 +45,14 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/video/Compositor.h>
+#include <wfg/engine/video/DcaOpacity.h>
 #include <wfg/engine/video/VideoRamp.h>
 #include <wfg/engine/video/VideoSink.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -433,6 +437,94 @@ TEST_CASE ("video: the opacity between the points - straight, held after the las
     CHECK (video::paintFromText ("#ffffff", 7) == 0xFFFFFFu);
     CHECK (video::paintFromText ("2040A0", 6) == 0u);
     CHECK (video::paintFromText ("#20G0A0", 7) == 0u);
+}
+
+TEST_CASE ("video: a DCA's trim is how solid a picture is, along the fader's travel and never past its own")
+{
+    /*  THE AUTHOR'S ENDS (namespace draft 37.5, WE): nothing at the bottom,
+        all of it at nought dB, and no more above; between, the show's fader
+        travel over where nought dB sits on it - 0.85 of the way up. */
+    CHECK (video::opacityForTrim (0.0) == doctest::Approx (1.0));
+    CHECK (video::opacityForTrim (6.0) == doctest::Approx (1.0));
+    CHECK (video::opacityForTrim (12.0) == doctest::Approx (1.0));
+    CHECK (video::opacityForTrim (-6.0) == doctest::Approx (0.785 / 0.85));
+    CHECK (video::opacityForTrim (-20.0) == doctest::Approx ((0.2 + 0.65 * 40.0 / 60.0) / 0.85));
+    CHECK (video::opacityForTrim (-60.0) == doctest::Approx (0.2 / 0.85));
+    CHECK (video::opacityForTrim (-120.0) == doctest::Approx (0.0));
+    CHECK (video::opacityForTrim (-std::numeric_limits<double>::infinity()) == doctest::Approx (0.0));
+
+    /*  ON THE PICTURE SIDE, a factor of the opacity's points: all of it
+        before the DCA says anything, and what it says after. */
+    video::region::LayerReading layer;
+    layer.rings[static_cast<int> (video::Property::opacity)].count = 1;
+    layer.rings[static_cast<int> (video::Property::opacity)].points[0] = { 0, 0.8 };
+    CHECK (video::opacityOf (layer, 100) == doctest::Approx (0.8));
+
+    layer.rings[static_cast<int> (video::Property::dca)].count = 1;
+    layer.rings[static_cast<int> (video::Property::dca)].points[0] = { 50, 0.5 };
+    CHECK (video::opacityOf (layer, 40) == doctest::Approx (0.8));
+    CHECK (video::opacityOf (layer, 100) == doctest::Approx (0.4));
+}
+
+TEST_CASE ("video: a DCA marked on a video cue, or on its group, is followed while the picture is up")
+{
+    cue::DcaTable trims;
+    VideoRig rig;
+    rig.runner.setDcas (&trims);
+
+    const auto pictures = rig.document.createDca ("Pictures").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000002/dca", pictures).ok);
+    trims.set (pictures, -20.0);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (3);
+
+    const auto* run = rig.runOf ("VD000002");
+    REQUIRE (run != nullptr);
+
+    /*  FROM THE SAMPLE IT COMES UP ON, the opacity's own first point. */
+    const auto& dca = rig.sink.geometry[run->id][video::Property::dca];
+    REQUIRE (dca.size() == 1);
+    CHECK (dca[0].value == doctest::Approx (video::opacityForTrim (-20.0)));
+    CHECK (dca[0].sample == rig.sink.points[run->id].front().sample);
+
+    /*  RIDDEN UP PAST NOUGHT: where it stood held to a tick before, then all
+        of it - and no more - a horizon ahead. */
+    trims.set (pictures, 6.0);
+    rig.ticks (1);
+
+    REQUIRE (dca.size() == 3);
+    CHECK (dca[1].value == doctest::Approx (video::opacityForTrim (-20.0)));
+    CHECK (dca[2].value == doctest::Approx (1.0));
+    CHECK (dca[2].sample - dca[1].sample == 960);
+
+    /*  AT REST, nothing more is placed. */
+    trims.set (pictures, 3.0);
+    rig.ticks (5);
+    CHECK (dca.size() == 3);
+
+    /*  A GROUP'S MARK reaches the picture under it, its trim summed with the
+        cue's own in dB as a sound's is. */
+    const auto scene = rig.document.createCue ("VD000001", 0, "group", "Scene").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+    const auto wash = rig.document.createCue (scene, 0, "video", "Wash").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + wash + "/canvas", "VD000011").ok);
+
+    const auto everything = rig.document.createDca ("Everything").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/dca", everything).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + wash + "/dca", pictures).ok);
+    trims.set (pictures, -10.0);
+    trims.set (everything, -10.0);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string (scene) });
+    rig.ticks (4);
+
+    const auto* washRun = rig.runOf (wash);
+    REQUIRE (washRun != nullptr);
+
+    const auto& washDca = rig.sink.geometry[washRun->id][video::Property::dca];
+    REQUIRE_FALSE (washDca.empty());
+    CHECK (washDca.back().value == doctest::Approx (video::opacityForTrim (-20.0)));
 }
 
 TEST_CASE ("video: GO brings the layer up a horizon ahead over its fade-in, and it holds")

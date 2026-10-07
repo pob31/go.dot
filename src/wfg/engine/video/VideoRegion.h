@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 7;
+    constexpr std::uint32_t version = 8;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
