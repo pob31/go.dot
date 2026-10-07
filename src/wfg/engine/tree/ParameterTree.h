@@ -200,6 +200,9 @@ namespace wfg::tree
             copy. */
         std::string documentClipboard;
 
+        /** And the last PART `cue.copyPart` copied (namespace draft §38). */
+        std::string documentPartClipboard;
+
         /*  HOW MANY TIMES THE SHOW HALF HAS CHANGED since the bundle was
             opened - `ShowDocument::showRevision()`, copied here each tick so
             the tree publishes it beside the dot that is derived from the same

@@ -250,6 +250,13 @@ namespace wfg::client::gesture
     Event copyCues (const std::vector<std::string>& ids);
     Event pasteCues (const std::string& parent, int index, const std::string& fragment);
 
+    /*  PART OF A CUE (namespace draft §38): `cue.copyPart` of one cue's EQ,
+        sends, effects or time and loops, and `cue.pastePart` of a part
+        fragment onto every cue named - one record, one step, the part
+        replaced whole on each (WO). */
+    Event copyPart (const std::string& part, const std::string& cueId);
+    Event pastePart (const std::string& fragment, const std::vector<std::string>& cueIds);
+
     /*  ONE FIELD, COMMITTED. The address is the NODE's own, never one this
         client assembled: a generic inspector writes back to what it read,
         which is the whole reason it needs no table of field names. */

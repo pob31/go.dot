@@ -18,6 +18,24 @@ namespace wfg::client::ui
         shut.setTooltip ("Close the panel");
         shut.onClick = [this] { if (actions.close) actions.close(); };
 
+        addChildComponent (copyButton);
+        addChildComponent (pasteButton);
+        copyButton.setTooltip ("Copy this part of the cue");
+        pasteButton.setTooltip ("Nothing copied to paste here");
+        pasteButton.setEnabled (false);
+
+        copyButton.onClick = [this]
+        {
+            if (const auto part = model::partForPanel (showing.kind); ! part.empty() && actions.copyPart)
+                actions.copyPart (part);
+        };
+
+        pasteButton.onClick = [this]
+        {
+            if (const auto part = model::partForPanel (showing.kind); ! part.empty() && actions.pastePart)
+                actions.pastePart (part);
+        };
+
         setInterceptsMouseClicks (true, true);
     }
 
@@ -49,6 +67,14 @@ namespace wfg::client::ui
         if (takePanel != nullptr)
             takePanel->applyTheme (theme);
 
+        for (auto* button : { &copyButton, &pasteButton })
+        {
+            button->setColours (Look::colour (theme, "ink"), Look::colour (theme, "panel-high"),
+                                Look::colour (theme, "ink-faint"));
+            button->setTextHeight (Look::font (theme, 12.0f).getHeight());
+        }
+
+        resized();
         repaint();
     }
 
@@ -69,6 +95,11 @@ namespace wfg::client::ui
 
         showing = wanted;
         build();
+
+        const auto partShown = ! model::partForPanel (showing.kind).empty();
+        copyButton.setVisible (partShown);
+        pasteButton.setVisible (partShown);
+
         resized();
         repaint();
     }
@@ -407,6 +438,15 @@ namespace wfg::client::ui
             takePanel->show (reading, std::move (takes));
     }
 
+    void FootPanelComponent::setPasteable (bool pasteable, const juce::String& why)
+    {
+        if (pasteButton.isEnabled() != pasteable)
+            pasteButton.setEnabled (pasteable);
+
+        if (pasteButton.getTooltip() != why)
+            pasteButton.setTooltip (why);
+    }
+
     void FootPanelComponent::setEditorWords (std::map<std::string, std::string> words)
     {
         /*  KEPT HERE AS WELL, so a chain built after the words arrived - the
@@ -437,6 +477,7 @@ namespace wfg::client::ui
         auto head = juce::Rectangle<int> (0, gripHeight(), getWidth(), row).reduced (10, 0);
 
         head.removeFromRight (row);   // the close button's place
+        head.removeFromRight (headButtons);
 
         /*  WHAT IT IS, THEN WHOSE: the panel's picture and word, and the cue's
             kind as a picture in its accent before the cue's name. */
@@ -481,6 +522,25 @@ namespace wfg::client::ui
         auto head = area.removeFromTop (row);
 
         shut.setBounds (head.removeFromRight (row + 10).reduced (6, 3));
+
+        /*  PASTE NEAREST THE CLOSE BUTTON AND COPY BEFORE IT, as they read: a
+            word each while the head has room for both beside the title, the
+            pictures alone when it has not. */
+        headButtons = 0;
+
+        if (copyButton.isVisible())
+        {
+            const auto height = row - 6;
+            const auto roomy = head.getWidth() > 520;
+
+            for (auto* button : { &pasteButton, &copyButton })
+            {
+                button->setWordShown (roomy);
+                const auto width = roomy ? button->idealWidth (height) : height + 6;
+                button->setBounds (head.removeFromRight (width + 4).withTrimmedLeft (4).withSizeKeepingCentre (width, height));
+                headButtons += width + 4;
+            }
+        }
 
         if (waveform != nullptr)
         {

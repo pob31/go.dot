@@ -99,6 +99,7 @@ add_executable(wfg_tests
     RangeTests.cpp
     LevelLaneTests.cpp
     SendLaneTests.cpp
+    CuePartTests.cpp
     AlsReaderTests.cpp
     AlsWalkTests.cpp
     AlsImportTests.cpp

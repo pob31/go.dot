@@ -33,6 +33,7 @@
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FadeMixerComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
+#include <wfg/client/ui/Icons.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/TakePanelComponent.h>
 #include <wfg/client/ui/TimelineComponent.h>
@@ -107,6 +108,12 @@ namespace wfg::client::ui
             std::function<void (double fromSeconds)> laneRecord;
             std::function<void()> laneStop;
 
+            /*  COPY AND PASTE OF THE PART THE PANEL SHOWS (namespace draft
+                §38): its EQ, its sends, its chain, its time and loops - the
+                part's word, `model::partForPanel`'s. */
+            std::function<void (const std::string& part)> copyPart;
+            std::function<void (const std::string& part)> pastePart;
+
             std::function<void()> close;
 
             /** The height changed by a drag on the top edge, in pixels. */
@@ -153,6 +160,12 @@ namespace wfg::client::ui
         /** The number the master dial turns, marked in whichever panel draws it. */
         void showDial (const std::string& address);
 
+        /*  WHETHER PASTE HAS ANYTHING TO PUT DOWN HERE, told by the window each
+            pass, and the sentence its tooltip says - which cue's part, onto
+            how many. The window knows the clipboard and the pick; the panel
+            only draws the answer. */
+        void setPasteable (bool pasteable, const juce::String& why);
+
         void paint (juce::Graphics&) override;
         void resized() override;
 
@@ -192,6 +205,14 @@ namespace wfg::client::ui
         std::unique_ptr<TakePanelComponent> takePanel;
         std::map<std::string, std::string> editorWords;
         juce::TextButton shut { "x" };
+
+        /*  COPY AND PASTE in the head, before the close button, shown while the
+            panel is on a part of a cue (namespace draft §38). A picture and a
+            word each, so neither is told by colour; the word goes when the
+            head is narrow and stays the tooltip. */
+        IconButton copyButton { model::Icon::copy, "Copy" };
+        IconButton pasteButton { model::Icon::paste, "Paste" };
+        int headButtons = 0;   ///< how much of the head they take, for `paint`
         int columnWidth = 0, columnGap = 0;
 
         bool dragging = false;

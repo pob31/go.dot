@@ -142,6 +142,145 @@ namespace wfg::client::model
         return out;
     }
 
+    std::string partForPanel (Subject::Kind kind)
+    {
+        switch (kind)
+        {
+            case Subject::Kind::waveform:  return "time";
+            case Subject::Kind::sends:     return "sends";
+            case Subject::Kind::eq:        return "eq";
+            case Subject::Kind::fx:        return "fx";
+
+            /*  A timeline is a group's members, a curve and a fade's mixer
+                are a fade's own, a take is the channel's: none is a part of a
+                cue another cue could take. */
+            case Subject::Kind::timeline:
+            case Subject::Kind::curve:
+            case Subject::Kind::take:
+            case Subject::Kind::fade:
+            case Subject::Kind::none:      break;
+        }
+
+        return {};
+    }
+
+    PartClip readPartClip (const std::string& text)
+    {
+        /*  READ BY ITS TWO LANDMARKS AND NOTHING MORE, because the engine reads
+            the rest and refuses what is wrong: `<Fragment part="…">` and the
+            first element after it, which the canonical writer puts on the
+            next line with its attributes in name order. */
+        PartClip clip;
+
+        const auto start = text.find_first_not_of (" \t\r\n");
+
+        if (start == std::string::npos || text.compare (start, 16, "<Fragment part=\"") != 0)
+            return clip;
+
+        const auto wordsFrom = start + 16;
+        const auto wordsTo = text.find ('"', wordsFrom);
+
+        if (wordsTo == std::string::npos)
+            return clip;
+
+        const auto open = text.find ('<', wordsTo);
+
+        if (open == std::string::npos)
+            return clip;
+
+        const auto nameTo = text.find_first_of (" />", open + 1);
+
+        if (nameTo == std::string::npos)
+            return clip;
+
+        clip.element = text.substr (open + 1, nameTo - open - 1);
+
+        //  ITS ID, which every cue's element carries.
+        const auto tagTo = text.find ('>', open);
+        const auto idAt = text.find (" id=\"", open);
+
+        if (idAt != std::string::npos && idAt < tagTo)
+        {
+            const auto idFrom = idAt + 5;
+            const auto idTo = text.find ('"', idFrom);
+
+            if (idTo != std::string::npos)
+                clip.sourceId = text.substr (idFrom, idTo - idFrom);
+        }
+
+        if (clip.element != "Media" && clip.element != "Mic" && clip.element != "Video")
+            return {};
+
+        clip.parts = text.substr (wordsFrom, wordsTo - wordsFrom);
+        return clip;
+    }
+
+    bool takesPart (const PartClip& clip, const std::string& kind)
+    {
+        if (! clip.isPart())
+            return false;
+
+        //  The kind as the cue's element: "media" is a Media.
+        const auto element = kind == "media" ? std::string ("Media")
+                            : kind == "mic"   ? std::string ("Mic")
+                            : kind == "video" ? std::string ("Video")
+                                              : std::string {};
+
+        if (element.empty())
+            return false;
+
+        for (const auto& part : words (clip.parts))
+        {
+            const auto sound = element == "Media" || element == "Mic";
+            const auto timed = element == "Media" || element == "Video";
+
+            if ((part == "eq" || part == "sends") && ! sound)
+                return false;
+
+            //  WU: a chain only between cues of one kind.
+            if (part == "fx" && element != clip.element)
+                return false;
+
+            if ((part == "time" || part == "speed") && ! timed)
+                return false;
+
+            if (part == "play" && element != "Media")
+                return false;
+
+            if (part == "picture" && element != "Video")
+                return false;
+        }
+
+        return true;
+    }
+
+    std::vector<std::string> pasteTargets (const tree::TreeSnapshot& snapshot, const PartClip& clip,
+                                           const std::string& panelCue, const std::vector<std::string>& picked)
+    {
+        const auto takes = [&snapshot, &clip] (const std::string& id)
+        {
+            return id != clip.sourceId && takesPart (clip, text (snapshot, "/godot/cue/" + id + "/kind"));
+        };
+
+        const auto many = std::find (picked.begin(), picked.end(), panelCue) != picked.end() && picked.size() > 1;
+
+        std::vector<std::string> out;
+
+        if (! many)
+        {
+            if (! panelCue.empty() && takes (panelCue))
+                out.push_back (panelCue);
+
+            return out;
+        }
+
+        for (const auto& id : picked)
+            if (takes (id))
+                out.push_back (id);
+
+        return out;
+    }
+
     std::string manyCuesWords (std::size_t acting, std::size_t picked)
     {
         if (acting >= picked)

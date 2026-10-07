@@ -511,6 +511,33 @@ namespace wfg::doc
         void copyToClipboard (const std::vector<std::string>& ids);
         const std::string& clipboardText() const noexcept { return clipboard; }
 
+        /*  PART OF A CUE, COPIED AND PASTED (namespace draft §38, WO): its EQ,
+            its sends, its effects, its time and loops - `document/CueParts.h`
+            says which rows and children each part holds. `partFragmentOf` is
+            a read, a stripped copy of one cue as a `<Fragment part="…">`, and
+            empty for words that are no parts, a cue that is not there or a
+            part it has not got; `copyPartToClipboard` keeps it where the tree
+            publishes it (`document/partClipboard`), apart from the clipboard
+            of whole cues so that a paste of cues can never be handed a part.
+
+            `pastePart` is the write: the fragment's parts onto every cue
+            named, REPLACING each part whole - a row the source left at its
+            default goes back to its default, a send the source has not got is
+            taken away, the chain is swapped - in one transaction. Every
+            refusal is asked before the first write: a cue that is not there
+            (`unknown-id`), one of a kind the part does not fit or an effects
+            chain between kinds (`type-mismatch`, WU), a mic's chain onto a mic
+            of another channel (`bad-value`), and a sound locked to a movie
+            that is not pasted onto with it (`locked-to-movie`). A send to a
+            mix the show has not got, and an insert of an entry it no longer
+            declares, are passed over. The result's `id` is every child made,
+            space-separated, and `ids` hands them back on a replay. */
+        std::string partFragmentOf (const std::string& partWords, const std::string& cueId) const;
+        EditResult copyPartToClipboard (const std::string& partWords, const std::string& cueId);
+        const std::string& partClipboardText() const noexcept { return partClipboard; }
+        EditResult pastePart (const std::string& fragment, const std::vector<std::string>& cueIds,
+                              const std::vector<std::string>& ids);
+
         //======================================================================
         // Values
         //======================================================================
@@ -1048,6 +1075,9 @@ namespace wfg::doc
 
         /** The last fragment `copyToClipboard` made; engine state, never saved. */
         std::string clipboard;
+
+        /** And the last part `copyPartToClipboard` made, kept apart from it. */
+        std::string partClipboard;
 
         /*  Starts at 1 so that nought means "no cache has ever been built".
             See `revision()`. */

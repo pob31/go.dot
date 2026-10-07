@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/document/CueParts.h>
 
 #include <wfg/engine/osc/OscValue.h>
 
@@ -604,6 +605,14 @@ namespace wfg::doc
             return result;
         }
 
+        /*  PART OF A CUE IS NOT A CUE: its stripped copy would paste as one,
+            without its file or its name (namespace draft §38). */
+        if (xml->hasAttribute ("part"))
+        {
+            result.problem = "not a fragment of cues: it holds part of a cue";
+            return result;
+        }
+
         std::map<std::string, std::string> oldToNew;
         std::size_t drawn = 0;
 
@@ -648,6 +657,92 @@ namespace wfg::doc
             repointReferences (node, oldToNew);
 
         result.ok = true;
+        return result;
+    }
+
+    std::string CanonicalXml::writePartFragment (std::string_view partWords, const juce::ValueTree& cue)
+    {
+        std::string out;
+        out.reserve (512);
+        out += "<Fragment part=\"" + std::string (partWords) + "\">\n";
+
+        if (cue.isValid())
+            writeNode (cue, 1, out);
+
+        out += "</Fragment>\n";
+        return out;
+    }
+
+    CanonicalXml::PartFragmentResult CanonicalXml::readPartFragment (std::string_view text)
+    {
+        PartFragmentResult result;
+
+        juce::XmlDocument parser { juce::String (std::string (text)) };
+        const auto xml = parser.getDocumentElement();
+
+        if (xml == nullptr || xml->getTagName() != "Fragment" || ! xml->hasAttribute ("part"))
+        {
+            result.problem = "not part of a cue";
+            return result;
+        }
+
+        const auto words = xml->getStringAttribute ("part").toStdString();
+        const auto named = parts::partsForWords (words);
+
+        if (! named.has_value())
+        {
+            result.problem = "\"" + words + "\" names no parts of a cue";
+            return result;
+        }
+
+        const juce::XmlElement* only = nullptr;
+
+        for (auto* child : xml->getChildIterator())
+        {
+            if (child->isTextElement())
+                continue;
+
+            if (only != nullptr)
+            {
+                result.problem = "part of more than one cue";
+                return result;
+            }
+
+            only = child;
+        }
+
+        if (only == nullptr)
+        {
+            result.problem = "part of no cue";
+            return result;
+        }
+
+        const auto element = only->getTagName().toStdString();
+
+        for (const auto part : *named)
+        {
+            if (! parts::fits (part, element))
+            {
+                result.problem = "<" + element + "> has no \"" + std::string (parts::wordFor (part)) + "\"";
+                return result;
+            }
+        }
+
+        auto registry = IdRegistry::withSystemEntropy();
+        std::vector<std::string> problems;
+        Builder builder { registry, problems };
+
+        auto built = builder.build (*only, "");
+
+        if (! problems.empty() || ! built.isValid())
+        {
+            result.problem = problems.empty() ? std::string ("unreadable") : problems.front();
+            return result;
+        }
+
+        result.ok = true;
+        result.parts = parts::wordsFor (*named);
+        result.node = built;
         return result;
     }
 

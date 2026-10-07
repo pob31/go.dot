@@ -74,7 +74,10 @@ namespace wfg::client::model
         waveform, sends, curve, take,
 
         //  The inspector's drawers.
-        identity, clock, list, info, sound
+        identity, clock, list, info, sound,
+
+        //  What the foot's head does to the part it shows (namespace draft §38).
+        copy, paste
     };
 
     /*  THE ICON A ROW IS RECOGNISED BY: a group's mode (a sequence, a

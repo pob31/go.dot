@@ -4834,6 +4834,7 @@ namespace
                                 state.documentRedoHistory =
                                     undoHistory.getRedoDescriptions().joinIntoString (" ").toStdString();
                                 state.documentClipboard = document.clipboardText();
+                                state.documentPartClipboard = document.partClipboardText();
 
                                 /*  Published every tick, from the tick thread,
                                     like the lateness beside it. The audio

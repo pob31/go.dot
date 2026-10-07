@@ -890,6 +890,42 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  PART OF A CUE, COPIED AND PASTED (namespace draft §38, WO): the
+            foot panel's Copy and Paste. Copy is a read that leaves the part
+            where the tree publishes it (`document/partClipboard`); paste is
+            the write, onto every cue named, one transaction however many, its
+            record carrying the names of the sends, inserts and Ranges it made
+            so a replay draws none. The fragment says which parts it holds, so
+            paste takes no part word of its own. */
+        registry.add ({ "cue.copyPart",
+                        "Copies part of a cue - eq, sends, fx, time, or several, space-separated - into"
+                        " the part clipboard the tree publishes.",
+                        { { "part", 's', false }, { "cue", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.copyPartToClipboard (args[0].getString(),
+                                                                           args[1].getString()),
+                                             args);
+                        } });
+
+        registry.add ({ "cue.pastePart",
+                        "Pastes a part fragment onto cues, by id, each part replaced whole, as one"
+                        " edit; the record carries the ids of what it made.",
+                        { { "fragment", 's', false }, { "cues", 's', false }, { "ids", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto ids = args.size() > 2 ? splitWords (args[2].getString())
+                                                             : std::vector<std::string> {};
+
+                            const auto edit = document.pastePart (args[0].getString(),
+                                                                  splitWords (args[1].getString()), ids);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "object.move",
                         "Moves an object to a new parent and position.",
                         { { "id", 's', false }, { "parent", 's', false },

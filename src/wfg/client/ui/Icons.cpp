@@ -457,6 +457,25 @@ namespace wfg::client::ui
                     arc (l, 12.0f, 12.0f, 4.5f, 50.0f, 130.0f);
                     arc (l, 12.0f, 12.0f, 8.5f, 45.0f, 135.0f);
                     break;
+
+                //  THE FOOT'S HEAD -------------------------------------------------
+                case model::Icon::copy:
+                    //  Two sheets, one over the other: the same thing twice.
+                    l.addRoundedRectangle (8.5f, 3.5f, 11.0f, 13.5f, 1.6f);
+                    l.startNewSubPath (5.5f, 7.0f);
+                    l.lineTo (4.5f, 7.0f);
+                    l.lineTo (4.5f, 20.5f);
+                    l.lineTo (15.5f, 20.5f);
+                    l.lineTo (15.5f, 19.5f);
+                    break;
+
+                case model::Icon::paste:
+                    //  A clipboard, its clip at the top and a sheet on it.
+                    l.addRoundedRectangle (4.5f, 5.0f, 15.0f, 16.5f, 1.6f);
+                    f.addRoundedRectangle (8.5f, 2.5f, 7.0f, 4.0f, 1.2f);
+                    line (l, 8.5f, 11.0f, 15.5f, 11.0f);
+                    line (l, 8.5f, 15.0f, 13.5f, 15.0f);
+                    break;
             }
 
             return s;

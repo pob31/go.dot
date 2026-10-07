@@ -3145,6 +3145,83 @@ TEST_CASE ("client: copied cues come back as a fragment, and paste under new nam
 }
 
 //==============================================================================
+TEST_CASE ("client: the foot copies the part it shows, and pastes it onto the picked cues that take it")
+{
+    /*  Copy and Paste on the foot (namespace draft §38): each panel's part,
+        a copied part read back off the clipboard by its two landmarks, the
+        picked cues of a kind that takes it - never the cue it came from - and
+        the paste as the window sends it. */
+    CHECK (model::partForPanel (model::Subject::Kind::waveform) == "time");
+    CHECK (model::partForPanel (model::Subject::Kind::eq) == "eq");
+    CHECK (model::partForPanel (model::Subject::Kind::sends) == "sends");
+    CHECK (model::partForPanel (model::Subject::Kind::fx) == "fx");
+    CHECK (model::partForPanel (model::Subject::Kind::timeline).empty());
+    CHECK (model::partForPanel (model::Subject::Kind::fade).empty());
+
+    Rig rig;
+
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    auto tick = std::int64_t { 1 };
+
+    const auto create = [&] (const char* kind, const char* name)
+    {
+        REQUIRE (rig.apply (tick++, "window", "cue.create",
+                            { osc::Value::string (listId), osc::Value::int32 (0),
+                              osc::Value::string (kind), osc::Value::string (name) }).applied == 1);
+        return model::createdAt (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order"), 0);
+    };
+
+    const auto rain = create ("media", "Rain");
+    const auto wind = create ("media", "Wind");
+    const auto memo = create ("memo", "Note");
+    const auto movie = create ("video", "Clip");
+
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + rain + "/eqB1Gain"),
+                          osc::Value::string ("4.5") }).applied == 1);
+
+    const auto copy = gesture::copyPart ("eq", rain);
+    REQUIRE (rig.apply (tick++, copy.origin, copy.command, copy.args).applied == 1);
+
+    const auto fragment = rig.document.partClipboardText();
+    const auto clip = model::readPartClip (fragment);
+    REQUIRE (clip.isPart());
+    CHECK (clip.parts == "eq");
+    CHECK (clip.element == "Media");
+    CHECK (clip.sourceId == rain);
+
+    CHECK (model::takesPart (clip, "media"));
+    CHECK (model::takesPart (clip, "mic"));
+    CHECK_FALSE (model::takesPart (clip, "video"));
+    CHECK_FALSE (model::takesPart (clip, "memo"));
+
+    /*  Cues are not part of one, and words are not either. */
+    CHECK_FALSE (model::readPartClip ("<Fragment>\n  <Media id=\"X\"/>\n</Fragment>\n").isPart());
+    CHECK_FALSE (model::readPartClip ("hello").isPart());
+
+    const auto snapshot = rig.publish (tick);
+
+    /*  The panel's cue among several picked: every one that takes it, the
+        source passed over. Not among them: the panel's cue alone. */
+    CHECK (model::pasteTargets (*snapshot, clip, wind, { rain, wind, memo, movie })
+             == std::vector<std::string> { wind });
+    CHECK (model::pasteTargets (*snapshot, clip, wind, { memo, movie })
+             == std::vector<std::string> { wind });
+    CHECK (model::pasteTargets (*snapshot, clip, rain, {}).empty());
+
+    const auto paste = gesture::pastePart (fragment, { wind });
+    REQUIRE (rig.apply (tick++, paste.origin, paste.command, paste.args).applied == 1);
+    CHECK (model::text (*rig.publish (tick), "/godot/cue/" + wind + "/eqB1Gain") == "4.5");
+
+    /*  A chain only between cues of one kind (WU). */
+    model::PartClip chain;
+    chain.parts = "fx";
+    chain.element = "Media";
+    CHECK (model::takesPart (chain, "media"));
+    CHECK_FALSE (model::takesPart (chain, "mic"));
+}
+
+//==============================================================================
 TEST_CASE ("client: a fold is recorded with the show, and a rebuilt list opens folded the way it was left")
 {
     /*  The author (2026-09-18): "fold state should be recorded in project

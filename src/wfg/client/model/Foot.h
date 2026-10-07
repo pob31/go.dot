@@ -95,6 +95,40 @@ namespace wfg::client::model
         acts on every cue picked, "6 of 8 cues" when some were passed over. */
     std::string manyCuesWords (std::size_t acting, std::size_t picked);
 
+    /*  COPY AND PASTE ON THE FOOT (namespace draft §38, the author's request
+        of 2026-10-07): the part of a cue a panel shows - "time" for the
+        waveform (start offset, speed, the Ranges), "sends", "eq", "fx" - or
+        empty for a panel whose content is not a part of a cue. */
+    std::string partForPanel (Subject::Kind);
+
+    /*  WHAT A PART ON A CLIPBOARD IS: its part words, the element of the cue it
+        came from ("Media", "Mic", "Video") and that cue. Empty `parts` for
+        text that is not part of a cue - a fragment of whole cues among it. */
+    struct PartClip
+    {
+        std::string parts;
+        std::string element;
+        std::string sourceId;
+
+        bool isPart() const noexcept { return ! parts.empty(); }
+    };
+
+    PartClip readPartClip (const std::string& text);
+
+    /*  WHETHER A CUE OF THIS KIND ("media", "mic", "video") TAKES THE CLIP: every
+        part fits its kind, and an effects chain only between cues of one kind
+        (WU). The engine asks the same and refuses what does not; this is what
+        keeps a paste from being sent to be refused. */
+    bool takesPart (const PartClip&, const std::string& kind);
+
+    /*  THE CUES A PASTE GOES ONTO: every picked cue that takes the clip when the
+        panel's cue is among those picked, else the panel's cue alone - the one
+        a person is looking at - and never the cue the part came from, which
+        already is what it would become. */
+    std::vector<std::string> pasteTargets (const tree::TreeSnapshot&, const PartClip&,
+                                           const std::string& panelCue,
+                                           const std::vector<std::string>& picked);
+
     /*  THE WORD A SUBJECT GOES BY - "waveform", "sends", "eq" - which is what
         an inspector's panel button carries and what `model::iconForPanel`
         reads, and the way back from it. Empty and `none` for each other. */

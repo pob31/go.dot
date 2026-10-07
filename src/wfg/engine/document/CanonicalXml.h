@@ -103,6 +103,29 @@ namespace wfg::doc
         FragmentResult readFragment (std::string_view text, IdRegistry& registry,
                                      const std::vector<std::string>& ids);
 
+        /*  PART OF A CUE (namespace draft §38): `<Fragment part="eq sends">`
+            holding one stripped copy of the cue it came from - its element,
+            its identity and only the rows and children those parts hold - by
+            the same node writer, so it reads as the show does. A fragment of
+            cues and a fragment of parts are told apart by that one attribute,
+            and `readFragment` refuses one that carries it. */
+        std::string writePartFragment (std::string_view partWords, const juce::ValueTree& cue);
+
+        struct PartFragmentResult
+        {
+            bool ok = false;
+            std::string problem;        ///< the first thing wrong, when not ok
+            std::string parts;          ///< the part words, as the fragment named them
+            juce::ValueTree node;       ///< the stripped cue, typed
+        };
+
+        /*  Read into a registry of its own and thrown away with it: what is
+            pasted is the rows and the children's rows, never an identity, so
+            the show's names are not touched. Refuses words that are no parts,
+            anything but exactly one Media, Mic or Video, and a part that
+            element has not got. */
+        PartFragmentResult readPartFragment (std::string_view text);
+
         /*  Parses `text` into `document`, replacing whatever it held.
 
             Refuses rather than repairs. An unknown element, an unparseable

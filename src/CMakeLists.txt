@@ -260,6 +260,8 @@ add_library(wfg_engine STATIC
     wfg/engine/document/Bundle.h
     wfg/engine/document/CanonicalXml.cpp
     wfg/engine/document/CanonicalXml.h
+    wfg/engine/document/CueParts.cpp
+    wfg/engine/document/CueParts.h
     wfg/engine/document/DocumentCommands.cpp
     wfg/engine/document/DocumentCommands.h
     wfg/engine/document/DocumentSession.h

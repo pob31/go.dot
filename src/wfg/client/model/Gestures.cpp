@@ -295,6 +295,21 @@ namespace wfg::client::gesture
                  { osc::Value::string (parent), osc::Value::int32 (index), osc::Value::string (fragment) } };
     }
 
+    Event copyPart (const std::string& part, const std::string& cueId)
+    {
+        return { origin::window, "cue.copyPart", { osc::Value::string (part), osc::Value::string (cueId) } };
+    }
+
+    Event pastePart (const std::string& fragment, const std::vector<std::string>& cueIds)
+    {
+        std::string joined;
+
+        for (const auto& id : cueIds)
+            joined += (joined.empty() ? "" : " ") + id;
+
+        return { origin::window, "cue.pastePart", { osc::Value::string (fragment), osc::Value::string (joined) } };
+    }
+
     Event groupRole (const std::string& group, const std::string& role)
     {
         return { origin::window, "group.role", { osc::Value::string (group), osc::Value::string (role) } };

@@ -21130,3 +21130,133 @@ all (proposed) unless marked the author's.
   latest of its line, checked after the download by running it, since those links move with every
   rebuild and cannot be pinned to a checksum. The Linux `.deb` recommends the system's `ffmpeg`,
   which serves as well.
+
+## 38. Parts of a cue copied, cue templates, and DCAs on outputs and canvases
+
+Written 2026-10-07. The author asked for five things at once: *"Could we add copy paste buttons to
+the foot panel (Eq, sends, time&loops, effects)"*; *"Could we store some media audio & video cues as
+template for fast assignment? These would be project specific and show in the Add menu for media
+cues. They do not contain the media reference but the EQ, sends, effects chains, speed..."*; *"Could
+we add DCA on audio outs and a level trim. This could be in the show parameters, output definition
+tab"*; *"In the same way put DCA on canvases. A DCA can be set on both audio and video. It's up to the
+user to find the balance there"*; and *"Would it be possible to show on the DCA rotaries the same RGB
+spectral view as on the sampler channels? ... Maybe just show the opacity from 10% white for
+transparent ... to 100% white for full opacity. Or else we could calculate the average tint of the
+picture, but I'm afraid this might require a little too much resources."*
+
+### 38.1 What it is, before its names
+
+A cue's settings fall into a few groups a person thinks of as one thing: its **EQ**, its **sends**,
+its **effects**, its **time and loops** (where it starts, how fast it plays, which stretches of the
+file it plays and how often). Copying one of those groups from one cue and pasting it onto others is
+one gesture; keeping a whole set of them in the show, under a name, so a new cue is born with them,
+is a **template**. Both are the same machinery, the **part** (PRD §3.24 had asked for it as
+"structured copy-paste of named field groups rather than a feature per field").
+
+An **output's trim** is a level set once against the room, on everything leaving that output, and a
+**DCA on an output** lets a fader ride it. A **DCA on a canvas** does to a whole picture what a DCA on
+an output does to a whole sound: takes it down, towards black.
+
+### 38.2 Decisions
+
+The author's (each a choice of options offered, in the implementer's words; the author picked the
+recommended one each time):
+
+- **WO - A paste replaces the part whole.** The target ends up as the source was for that part: a row
+  the source left at its default goes back to its default, a send the source has not got is taken
+  away, the chain of effects is swapped whole. One undo step, however many cues were pasted onto.
+- **WP - A template carries everything that is not bound to the file**: level, DCA, routing, colour,
+  EQ, sends, effects, speed and how it is applied, how a sample answers a hand; a picture's canvas,
+  layer, blend, opacity, geometry, grade and mask. Not the file, the name or the number, nor what is
+  measured in the file's own seconds - the start offset, the Ranges, the level lane. A template is
+  **stamped** into a new cue, never linked (PRD §4.12: nothing inherits downward), so editing a
+  template later changes no cue already made.
+- **WQ - A DCA on a cue and on the output it plays through counts at each place**, as a channel and
+  the master it feeds do on a desk with one VCA on both: -6 dB on the DCA is -12 dB on that path. The
+  Outputs tab says so when it happens.
+- **WR - A DCA strip's ring shows what the DCA holds**: its sounding cues by their timbre, weighted by
+  loudness; its pictures by their average tint times their opacity, with a 10 % floor so the ring is
+  never dark while something shows. The tint is read back from the graphics card about ten times a
+  second, from a copy of each picture shrunk to a few pixels - microseconds a frame.
+
+The implementer's, *(proposed)*:
+
+- **WS - A media cue's template carries no fades**: a media cue has no fade-in or fade-out row to
+  carry. A picture's `fadeIn` is carried, with its picture.
+- **WT - A canvas also has a level** (100 % down to nothing), "in the same way" as an output's trim. It
+  darkens the composited canvas, not each layer, so two layers stacked go down together as one
+  picture rather than each turning see-through over the other.
+- **WU - Effects paste only between cues of one kind**: a media cue's inserts are entries of the
+  show's plugin set, a mic cue's are plugins of the rack channel it plays through, and a mic's chain
+  goes only onto a mic of the same channel.
+- **WV - A send's level lane is neither pasted nor templated**: it is drawn in its file's seconds. A
+  send the paste keeps keeps its own lane.
+
+### 38.3 The part
+
+| Part | What it holds | Cues |
+|---|---|---|
+| `eq` | the 23 EQ rows | media, mic |
+| `sends` | the `Send` children, matched by the mix they feed: `bus`, `level`, `on` | media, mic |
+| `fx` | the `Fx` children in chain order: `plugin`, `enabled`, `values`, `stateFile` | one kind only (WU) |
+| `time` | `startOffset`, `rate`, `rateMode` and the `Range` children (`name`, `in`, `out`, `loops`) | media, video |
+| `speed` | `rate`, `rateMode` | media, video |
+| `mix` | `level`, `dca`, `colour`, `directOut`, `stereoToMono`, `sharedOut` | media, mic, video |
+| `play` | `release`, `secondPress`, `velocity`, `velocityFloor`, `pressure`, `releaseFade`, `initialLevel` | media |
+| `picture` | `canvas`, `layer`, `blend`, `opacity`, `paint`, `fadeIn`, the geometry, the grade, the mask | video |
+
+`document/CueParts.h` is the one table. A part is written as a **fragment**, the same canonical XML a
+copied cue is, holding a stripped copy of the cue it came from:
+
+```xml
+<Fragment part="eq">
+  <Media eqB1Gain="6" eqHpf="true" id="CP000002"/>
+</Fragment>
+```
+
+`part` may name several (`"mix play eq sends fx speed"` is a media template). A fragment of cues and a
+fragment of parts are told apart by that one attribute, and each paste refuses the other: a part
+pasted as a cue would be a cue with no file and no name.
+
+### 38.4 Commands and addresses
+
+- `cue.copyPart part cue` - copies that part of one cue to `/godot/document/partClipboard`, apart
+  from `document/clipboard` (cues). Refuses `bad-value` for words that are no parts, `unknown-id`,
+  and `type-mismatch` for a part the cue has not got.
+- `cue.pastePart fragment cues [ids]` - the fragment's parts onto every cue named, each part replaced
+  whole, in one transaction. Every refusal comes before the first write: `unknown-id`,
+  `type-mismatch` (a part the cue has not got, or effects between kinds), `bad-value` (a mic's chain
+  onto another channel's mic, or text that is not a part), `locked-to-movie` (a sound locked to a
+  movie that is not pasted onto with it - pasted with it, the sound takes its time from the movie),
+  `locked`. A send to a mix the show has not got, and an insert of an entry it no longer declares, are
+  passed over. The record carries the identifiers of every send, insert and Range made, so a replay
+  draws none.
+
+### 38.5 Stages
+
+- **S1 - Parts**: the table, the fragment's writer and reader.
+- **S2 - `cue.copyPart`, `cue.pastePart`**.
+- **S3 - Copy and Paste on the foot panel**.
+- **S4 - Templates in the engine**: `<Show><CueTemplates><CueTemplate>`, saved from a cue, applied to
+  cues, a cue born from one in one step.
+- **S5 - Templates in the window**: the Add menu, "Save as template...", "Apply template", a tab in
+  Show settings; an imported file becomes one undo step.
+- **S6 - An output's trim and DCA** in the engine and the audio side.
+- **S7 - The Outputs tab**: a trim and a DCA on each output, and the sentence WQ asks for.
+- **S8 - A canvas's DCA and level** (WT).
+- **S9 - A picture's tint**, read back from the renderer.
+- **S10 - A DCA's colour** on the strip's ring and the panel's swatch (WR).
+
+### 38.6 What S1 to S3 built
+
+- **The foot's head has Copy and Paste** - a picture and a word each, before the close button, the
+  words dropped and kept as tooltips when the head is narrow - on the four panels that show a part:
+  the waveform (`time`), the send mixer (`sends`), the EQ (`eq`) and the chain (`fx`). Copy takes the
+  part of the cue the panel shows (the lead cue, when the panel serves several). Paste puts it onto
+  every picked cue that takes it when the panel's cue is among those picked, else onto the panel's cue
+  alone, never onto the cue it came from; it is greyed while there is nothing of this panel's part to
+  paste, and its tooltip says whose part, onto how many cues.
+- **The part travels on the system's clipboard** as copied cues do, so it pastes in another window;
+  Ctrl/Cmd+V with a part on the clipboard pastes it onto the picked cues rather than inserting cues.
+- **Tests**: `CuePartTests` (the table against the schema, each part's copy and paste, every refusal
+  before a write, the movie's sound, one undo step, the replay's identifiers) and a client case.

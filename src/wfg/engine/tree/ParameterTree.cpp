@@ -2806,6 +2806,7 @@ namespace wfg::tree
 
             //  What was last copied, for a client to carry to its clipboard or paste back.
             else if (name == "clipboard") text = state.documentClipboard;
+            else if (name == "partClipboard") text = state.documentPartClipboard;
 
             /*  Whether a previous session left work in `recovery/`. It changes
                 at most twice in a session - once when the bundle opens and once

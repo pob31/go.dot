@@ -475,6 +475,11 @@ namespace wfg::client
                 footActions.resetEq = [this] (const std::string& cueId)
                                       { send (gesture::eqReset (cueId)); };
 
+                /*  COPY AND PASTE OF THE PART THE FOOT SHOWS (namespace draft
+                    §38): its EQ, sends, chain, or time and loops. */
+                footActions.copyPart = [this] (const std::string& part) { copyPartShown (part); };
+                footActions.pastePart = [this] (const std::string& part) { pastePartShown (part); };
+
                 /*  THE CHAIN'S TWO DOORS (author, 2026-09-25): switching an
                     entry of the set in for the first time is `fx.create`, and
                     the EQ box shows the same cue's EQ in this same foot. */
@@ -1264,6 +1269,15 @@ namespace wfg::client
 
                 const auto text = juce::SystemClipboard::getTextFromClipboard();
 
+                /*  PART OF A CUE ON THE CLIPBOARD goes onto the picked cues
+                    rather than in between them (namespace draft §38): the same
+                    keys, the thing on the clipboard deciding what they do. */
+                if (const auto clip = model::readPartClip (text.toStdString()); clip.isPart())
+                {
+                    pastePart (text.toStdString(), clip, selection.anchor());
+                    return;
+                }
+
                 if (! text.trimStart().startsWith ("<Fragment"))
                 {
                     shell->transport.setNotice ("the clipboard holds no cues");
@@ -1285,16 +1299,135 @@ namespace wfg::client
             }
 
             /*  The engine's clipboard, mirrored to the system's when it moves:
-                what `document.copy` made is what ctrl/⌘-V in any window reads. */
+                what `document.copy` made is what ctrl/⌘-V in any window reads.
+                And its part clipboard the same way (namespace draft §38), so a
+                part copied here pastes in another window - whichever of the two
+                moved last is what the system's clipboard holds. */
             void mirrorClipboard (const tree::TreeSnapshot& snapshot)
             {
-                const auto fragment = model::text (snapshot, "/godot/document/clipboard");
+                const auto mirror = [] (const std::string& fragment, std::string& seen)
+                {
+                    if (fragment.empty() || fragment == seen)
+                        return;
 
-                if (fragment.empty() || fragment == clipboardSeen)
+                    seen = fragment;
+                    juce::SystemClipboard::copyTextToClipboard (juce::String (fragment));
+                };
+
+                mirror (model::text (snapshot, "/godot/document/clipboard"), clipboardSeen);
+                mirror (model::text (snapshot, "/godot/document/partClipboard"), partClipboardSeen);
+            }
+
+            /*  PART OF A CUE, IN WORDS: what a notice and a tooltip call it. */
+            static juce::String partWords (const std::string& part)
+            {
+                if (part == "eq")    return "EQ";
+                if (part == "sends") return "sends";
+                if (part == "fx")    return "effects";
+                if (part == "time")  return "time and loops";
+
+                return juce::String (part);
+            }
+
+            /*  COPY ON THE FOOT: the part of the cue the panel shows - the lead
+                cue when it shows several. The engine keeps it and the tree
+                brings it back, which is when it reaches the system's clipboard. */
+            void copyPartShown (const std::string& part)
+            {
+                const auto cueId = shell->footSubject().objectId;
+
+                if (cueId.empty())
                     return;
 
-                clipboardSeen = fragment;
-                juce::SystemClipboard::copyTextToClipboard (juce::String (fragment));
+                send (gesture::copyPart (part, cueId));
+
+                const auto name = latest != nullptr ? model::text (*latest, "/godot/cue/" + cueId + "/name")
+                                                    : std::string {};
+                shell->transport.setNotice (partWords (part) + " of " + (name.empty() ? juce::String ("the cue")
+                                                                                      : juce::String (name))
+                                              + " copied");
+            }
+
+            /*  PASTE ON THE FOOT: the part on the system's clipboard when it is
+                this panel's part - copied here or in another window - else the
+                one this engine holds, onto the panel's cues. */
+            void pastePartShown (const std::string& part)
+            {
+                if (refusedWhileLocked() || latest == nullptr)
+                    return;
+
+                auto text = juce::SystemClipboard::getTextFromClipboard().toStdString();
+                auto clip = model::readPartClip (text);
+
+                if (clip.parts != part)
+                {
+                    text = model::text (*latest, "/godot/document/partClipboard");
+                    clip = model::readPartClip (text);
+                }
+
+                if (clip.parts != part)
+                {
+                    shell->transport.setNotice ("no " + partWords (part) + " copied to paste");
+                    return;
+                }
+
+                pastePart (text, clip, shell->footSubject().objectId);
+            }
+
+            /*  ONE PASTE OF A PART, onto the cues `model::pasteTargets` names
+                for `panelCue` and the pick, said on the transport's line. */
+            void pastePart (const std::string& text, const model::PartClip& clip, const std::string& panelCue)
+            {
+                if (refusedWhileLocked() || latest == nullptr)
+                    return;
+
+                const auto targets = model::pasteTargets (*latest, clip, panelCue, selection.ids());
+
+                if (targets.empty())
+                {
+                    shell->transport.setNotice ("no picked cue takes " + partWords (clip.parts));
+                    return;
+                }
+
+                send (gesture::pastePart (text, targets));
+                shell->transport.setNotice (partWords (clip.parts) + " pasted onto "
+                                              + juce::String (static_cast<int> (targets.size()))
+                                              + (targets.size() == 1 ? " cue" : " cues"));
+            }
+
+            /*  WHETHER THE FOOT'S PASTE HAS ANYTHING TO PUT DOWN, and the
+                sentence its tooltip says, from the part this engine holds. */
+            void sayWhatPasteWouldDo (const tree::TreeSnapshot& snapshot, const model::Subject& subject)
+            {
+                const auto part = model::partForPanel (subject.kind);
+
+                if (part.empty())
+                    return;
+
+                const auto clip = model::readPartClip (model::text (snapshot, "/godot/document/partClipboard"));
+
+                if (clip.parts != part)
+                {
+                    shell->foot.setPasteable (false, "Nothing copied to paste here: Copy takes this cue's "
+                                                       + partWords (part));
+                    return;
+                }
+
+                const auto targets = model::pasteTargets (snapshot, clip, subject.objectId, selection.ids());
+                const auto from = model::text (snapshot, "/godot/cue/" + clip.sourceId + "/name");
+                const auto source = from.empty() ? juce::String ("a cue") : juce::String (from);
+
+                if (targets.empty())
+                {
+                    shell->foot.setPasteable (false, "The " + partWords (part) + " of " + source
+                                                       + " fits none of the cues here");
+                    return;
+                }
+
+                shell->foot.setPasteable (true, "Paste the " + partWords (part) + " of " + source + " onto "
+                                                  + juce::String (static_cast<int> (targets.size()))
+                                                  + (targets.size() == 1 ? " cue, replacing its own"
+                                                                         : " cues, replacing their own"));
             }
 
             void removeChosen()
@@ -1712,6 +1845,8 @@ namespace wfg::client
                     shell->foot.show (model::readFoot (*snapshot, subject,
                                                        surfaceHoldsFoot ? std::vector<std::string> {} : selection.ids()),
                                       mediaTable, takePictures);
+
+                    sayWhatPasteWouldDo (*snapshot, subject);
                 }
 
                 /*  AND EVERY OPEN PLUGIN WINDOW FOLLOWS THE PICK, from this
@@ -3878,6 +4013,7 @@ namespace wfg::client
 
             /** The engine's clipboard as last mirrored to the system's. */
             std::string clipboardSeen;
+            std::string partClipboardSeen;
 
             /*  When the inspector may open for the current pick, and whether a
                 box opened in the list holds it shut until the next pick. */
