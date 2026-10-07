@@ -184,14 +184,14 @@ namespace wfg::surface
         for (const auto& runId : wordsOf (textOf (snapshot, "/godot/run/order")))
         {
             const auto run = "/godot/run/" + runId + "/";
-            const auto& state = textOf (snapshot, run + "state");
+            const auto state = textOf (snapshot, run + "state");
 
             if (state != "playing" && state != "stopping")
                 continue;
 
             const auto cueId = textOf (snapshot, run + "cue");
             const auto cue = "/godot/cue/" + cueId + "/";
-            const auto& kind = textOf (snapshot, cue + "kind");
+            const auto kind = textOf (snapshot, cue + "kind");
 
             if (kind != "media" && kind != "mic" && kind != "video")
                 continue;
@@ -222,11 +222,11 @@ namespace wfg::surface
                 continue;
             }
 
-            if (const auto& out = textOf (snapshot, cue + "directOut"); ! out.empty())
+            if (const auto out = textOf (snapshot, cue + "directOut"); ! out.empty())
                 mark (textOf (snapshot, "/godot/bus/" + out + "/dca"));
 
             for (const auto& send : wordsOf (textOf (snapshot, cue + "sends")))
-                if (const auto& bus = textOf (snapshot, "/godot/send/" + send + "/bus"); ! bus.empty())
+                if (const auto bus = textOf (snapshot, "/godot/send/" + send + "/bus"); ! bus.empty())
                     mark (textOf (snapshot, "/godot/bus/" + bus + "/dca"));
 
             /*  A SOUND by its timbre, weighted by how loud it left its track. A
@@ -254,8 +254,8 @@ namespace wfg::surface
         for (const auto& canvasId : wordsOf (textOf (snapshot, "/godot/canvas/order")))
         {
             const auto base = "/godot/canvas/" + canvasId + "/";
-            const auto& dca = textOf (snapshot, base + "dca");
-            const auto& tint = textOf (snapshot, base + "tint");
+            const auto dca = textOf (snapshot, base + "dca");
+            const auto tint = textOf (snapshot, base + "tint");
 
             if (dca.empty() || tint.empty())
                 continue;

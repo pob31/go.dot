@@ -4481,7 +4481,7 @@ TEST_CASE ("surface bridge: a DCA's ring shows what it rides - its sounds by tim
 
     //  2: the red sound by its loudness, the blue picture by its brightness.
     REQUIRE (lights.count ("DCA00002") == 1);
-    const auto& two = lights.at ("DCA00002");
+    const auto two = lights.at ("DCA00002");
     REQUIRE (two.colour.has_value());
     CHECK (two.colour->red == static_cast<int> (std::lround (red.red * half / (half + 1.0))));
     CHECK (two.colour->blue == static_cast<int> (std::lround (127.0 / (half + 1.0))));
@@ -4489,7 +4489,7 @@ TEST_CASE ("surface bridge: a DCA's ring shows what it rides - its sounds by tim
 
     //  1: everything 2 has, and the green sound through its output - the loudest.
     REQUIRE (lights.count ("DCA00001") == 1);
-    const auto& one = lights.at ("DCA00001");
+    const auto one = lights.at ("DCA00001");
     CHECK (one.loudestRun == "RUN00003");
     CHECK (one.colour->green == static_cast<int> (std::lround (green.green * 1.0 / (half + 1.0 + 1.0))));
 
