@@ -1943,7 +1943,7 @@ TEST_CASE ("client: an import names its cue after the file, and finds what the c
         import made: the show has other clients, and somebody inserting from
         the page in the same two hundred milliseconds would put a stranger
         exactly where the import is looking. Three things must agree. */
-    const model::Import job { "L1", 3, "Thunder", "Thunder.wav", 7, 0 };
+    const model::Import job { "L1", 3, "Thunder", "Thunder.wav", 7, 0, {} };
 
     CHECK (model::madeByImport (job, "media", "Thunder", ""));
     CHECK_FALSE (model::madeByImport (job, "group", "Thunder", ""));     // not a media cue
