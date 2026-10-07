@@ -34,6 +34,8 @@
 
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -207,4 +209,71 @@ TEST_CASE ("movie: a QuickTime file's HAP frames found, timed and read")
     CHECK (video::movie::durationOf (junk.getFullPathName().toStdString()) < 0.0);
 
     folder.deleteRecursively();
+}
+
+//==============================================================================
+/*  A REAL ENCODER'S FILES (namespace draft 37.4 owed it): HAP movies FFmpeg's
+    own encoder wrote - Hap, Hap Alpha, Hap Q, chunked and uncompressed - read
+    by Go.dot's reader and decoded on the CPU, against FFmpeg's decode of the
+    same frame. Skipped unless WFG_HAP_DIR names a folder of `<name>.mov` with,
+    beside each, `<name>.rgba`: frame 30 as FFmpeg decodes it, raw RGBA. */
+TEST_CASE ("movie: a real encoder's HAP files read, frame for frame as FFmpeg decodes them")
+{
+    const auto folder = juce::SystemStats::getEnvironmentVariable ("WFG_HAP_DIR", {});
+
+    if (folder.isEmpty())
+        return;
+
+    const auto movies = juce::File (folder).findChildFiles (juce::File::findFiles, false, "*.mov");
+    REQUIRE_FALSE (movies.isEmpty());
+
+    for (const auto& file : movies)
+    {
+        CAPTURE (file.getFileName().toStdString());
+
+        juce::MemoryBlock reference;
+        REQUIRE (file.withFileExtension ("rgba").loadFileAsData (reference));
+
+        video::movie::MovieFile movie;
+        std::string why;
+        REQUIRE (movie.open (file.getFullPathName().toStdString(), why));
+        CHECK (movie.info().isHap());
+
+        const auto width = movie.info().width;
+        const auto height = movie.info().height;
+        REQUIRE (reference.getSize() == static_cast<std::size_t> (width * height * 4));
+        REQUIRE (movie.info().frames.size() > 30);
+
+        std::vector<std::uint8_t> bytes, texture;
+        REQUIRE (movie.readFrame (30, bytes));
+
+        auto format = video::hap::Texture::none;
+        REQUIRE (video::hap::unpack (bytes.data(), bytes.size(), format, texture));
+
+        const auto* expected = static_cast<const std::uint8_t*> (reference.getData());
+        double worst = 0.0, total = 0.0;
+
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x)
+            {
+                double r = 0.0, g = 0.0, b = 0.0, a = 0.0;
+                REQUIRE (video::hap::pixelAt (format, texture, width, height, x, y, r, g, b, a));
+
+                const auto* want = expected + (static_cast<std::size_t> (y) * static_cast<std::size_t> (width)
+                                               + static_cast<std::size_t> (x)) * 4;
+                const double got[4] { r, g, b, a * 255.0 };
+
+                for (int c = 0; c < 4; ++c)
+                {
+                    const auto off = std::abs (got[c] - static_cast<double> (want[c]));
+                    worst = std::max (worst, off);
+                    total += off;
+                }
+            }
+
+        const auto mean = total / (static_cast<double> (width) * static_cast<double> (height) * 4.0);
+        MESSAGE (file.getFileName() << ": mean " << mean << ", worst " << worst << " of 255");
+        CHECK (mean < 1.0);
+        CHECK (worst < 8.0);
+    }
 }
