@@ -55,6 +55,12 @@ namespace wfg::client::model
             return fallback;
         }
 
+        double numberOf (const tree::Node* node, double fallback)
+        {
+            const auto value = osc::parseDouble (text (node));
+            return value.has_value() ? *value : fallback;
+        }
+
         bool truthOf (const tree::Node* node, bool fallback)
         {
             const auto sole = node != nullptr ? node->soleValue() : std::nullopt;
@@ -118,6 +124,18 @@ namespace wfg::client::model
         return name.empty() ? id : name;
     }
 
+    std::string CanvasRow::levelWord() const
+    {
+        //  To the tenth, built from integers so no locale's comma gets in.
+        const auto tenths = static_cast<long> (level * 10.0 + 0.5);
+        auto out = std::to_string (tenths / 10);
+
+        if (tenths % 10 != 0)
+            out += "." + std::to_string (tenths % 10);
+
+        return out + " %";
+    }
+
     std::string CanvasRow::sizeWord() const
     {
         return std::to_string (width) + " \xc3\x97 " + std::to_string (height);
@@ -153,6 +171,8 @@ namespace wfg::client::model
             if (name == "name")        row.name = text (node);
             else if (name == "width")  row.width = static_cast<int> (integerOf (node, 1920));
             else if (name == "height") row.height = static_cast<int> (integerOf (node, 1080));
+            else if (name == "level")  row.level = numberOf (node, 100.0);
+            else if (name == "dca")    row.dca = text (node);
         }
 
         return inOrder (found, words (order));

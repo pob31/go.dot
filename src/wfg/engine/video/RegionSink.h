@@ -50,6 +50,17 @@ namespace wfg::video
             removing.fill (region::notRemoved);
         }
 
+        void canvasLevels (const std::vector<std::pair<std::string, double>>& levels) override
+        {
+            for (std::size_t n = 0; n < static_cast<std::size_t> (region::maxCanvases); ++n)
+            {
+                if (n < levels.size())
+                    region::writeCanvasLevel (r, n, levels[n].first, levels[n].second);
+                else
+                    region::writeCanvasLevel (r, n, {}, 1.0);
+            }
+        }
+
         void show (const LayerSpec& spec) override
         {
             auto at = slotOf (spec.id);

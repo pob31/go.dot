@@ -5092,13 +5092,17 @@ namespace wfg::client::ui
 
             void show (std::vector<model::CanvasRow> canvasRows, std::vector<model::VideoOutputRow> outputRows,
                        std::vector<std::string> displaysNow, std::string renderer, std::string rendererProblem,
-                       bool editable)
+                       bool editable, std::vector<std::pair<std::string, std::string>> dcaChoicesToShow)
             {
                 const auto sameCanvases = canvasRows.size() == canvases.size()
+                                            && dcaChoicesToShow == dcaChoices
                                             && std::equal (canvasRows.begin(), canvasRows.end(), canvases.begin(),
                                                            [] (const model::CanvasRow& a, const model::CanvasRow& b)
                                                            { return a.id == b.id && a.name == b.name && a.width == b.width
-                                                                      && a.height == b.height; });
+                                                                      && a.height == b.height && a.levelWord() == b.levelWord()
+                                                                      && a.dca == b.dca; });
+
+                dcaChoices = std::move (dcaChoicesToShow);
 
                 const auto sameOutputs = outputRows.size() == outputs.size()
                                            && std::equal (outputRows.begin(), outputRows.end(), outputs.begin(),
@@ -5176,9 +5180,9 @@ namespace wfg::client::ui
                 g.setColour (Look::colour (theme, "ink-off"));
 
                 const auto canvasCells = canvasCellsFor (canvasHeading.withWidth (canvasList.getWidth()));
-                const char* canvasNames[] { "Canvas", "Width", "Height" };
+                const char* canvasNames[] { "Canvas", "Width", "Height", "Level", "DCA" };
 
-                for (auto at = 0; at < 3; ++at)
+                for (auto at = 0; at < 5; ++at)
                     g.drawText (canvasNames[at], canvasCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
 
                 const auto outputCells = outputCellsFor (outputHeading.withWidth (outputList.getWidth()));
@@ -5190,13 +5194,15 @@ namespace wfg::client::ui
 
         private:
             /*  ONE CARVE PER LIST, for the painter and the click alike. */
-            static std::array<juce::Rectangle<int>, 4> canvasCellsFor (juce::Rectangle<int> row)
+            static std::array<juce::Rectangle<int>, 6> canvasCellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
                 const auto cross = area.removeFromRight (24);
+                const auto dca = area.removeFromRight (140);
+                const auto level = area.removeFromRight (80);
                 const auto height = area.removeFromRight (90);
                 const auto width = area.removeFromRight (90);
-                return { area, width, height, cross };
+                return { area, width, height, level, dca, cross };
             }
 
             static std::array<juce::Rectangle<int>, 7> outputCellsFor (juce::Rectangle<int> row)
@@ -5247,8 +5253,19 @@ namespace wfg::client::ui
                     g.drawText (juce::String (entry.width) + " px", cells[1], juce::Justification::centredLeft);
                     g.drawText (juce::String (entry.height) + " px", cells[2], juce::Justification::centredLeft);
 
+                    /*  ITS LEVEL AND ITS DCA (namespace draft §38, WT), in words:
+                        "no DCA" fainter than a DCA named, the word saying which. */
+                    g.setColour (Look::colour (page.theme, entry.level < 100.0 ? "ink" : "ink-dim"));
+                    g.drawText (juce::String (entry.levelWord()), cells[3], juce::Justification::centredLeft);
+
+                    g.setColour (Look::colour (page.theme, entry.dca.empty() ? "ink-off" : "ink"));
+                    g.drawText (page.dcaLabelOf (entry.dca), cells[4], juce::Justification::centredLeft, true);
+
                     if (! page.locked)
-                        g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[3], juce::Justification::centred);
+                    {
+                        g.setColour (Look::colour (page.theme, "ink-dim"));
+                        g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[5], juce::Justification::centred);
+                    }
                 }
 
                 void listBoxItemClicked (int row, const juce::MouseEvent& event) override
@@ -5261,12 +5278,16 @@ namespace wfg::client::ui
                     const auto cells = canvasCellsFor ({ 0, 0, width, page.canvasList.getRowHeight() });
                     const auto& entry = page.canvases[static_cast<std::size_t> (row)];
 
-                    switch (cellIndexAt (cells.data(), 4, event.x))
+                    switch (cellIndexAt (cells.data(), 6, event.x))
                     {
                         case 0: page.editCell (page.canvasList, row, cells[0], "/godot/canvas/" + entry.id + "/name", entry.name); return;
                         case 1: page.editCell (page.canvasList, row, cells[1], "/godot/canvas/" + entry.id + "/width", std::to_string (entry.width)); return;
                         case 2: page.editCell (page.canvasList, row, cells[2], "/godot/canvas/" + entry.id + "/height", std::to_string (entry.height)); return;
-                        case 3: page.send (gesture::deleteObject (entry.id)); return;
+                        case 3: page.editCell (page.canvasList, row, cells[3], "/godot/canvas/" + entry.id + "/level",
+                                               juce::String (entry.levelWord()).upToFirstOccurrenceOf (" ", false, false).toStdString());
+                                return;
+                        case 4: page.chooseDcaFor (entry.id, entry.dca); return;
+                        case 5: page.send (gesture::deleteObject (entry.id)); return;
                         default: return;
                     }
                 }
@@ -5376,6 +5397,51 @@ namespace wfg::client::ui
                         return canvas.label();
 
                 return id + " (not a canvas)";
+            }
+
+            /*  A DCA by the name a menu gives it, or "no DCA" (namespace draft §38). */
+            juce::String dcaLabelOf (const std::string& id) const
+            {
+                if (id.empty())
+                    return "no DCA";
+
+                for (const auto& [key, label] : dcaChoices)
+                    if (key == id)
+                        return juce::String (label);
+
+                return "?";
+            }
+
+            /*  A CANVAS'S DCA FROM A MENU of the show's, "(none)" first, the one
+                it has ticked - the Outputs tab's menu, for a picture. */
+            void chooseDcaFor (const std::string& canvasId, const std::string& current)
+            {
+                if (dcaChoices.size() <= 1)
+                {
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "No DCA yet",
+                                                            "The show has no DCA to assign. DCAs are made on the"
+                                                            " Surfaces tab.");
+                    return;
+                }
+
+                juce::PopupMenu menu;
+                int item = 1;
+
+                for (const auto& [key, label] : dcaChoices)
+                    menu.addItem (item++, juce::String (label), true, key == current);
+
+                menu.showMenuAsync (juce::PopupMenu::Options(),
+                                    [safe = juce::Component::SafePointer<VideoPage> (this), canvasId] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || safe->send == nullptr)
+                                            return;
+
+                                        const auto at = static_cast<std::size_t> (chosen - 1);
+
+                                        if (at < safe->dcaChoices.size())
+                                            safe->send (gesture::setNode ("/godot/canvas/" + canvasId + "/dca",
+                                                                          safe->dcaChoices[at].first));
+                                    });
             }
 
             void editCell (juce::ListBox& list, int row, juce::Rectangle<int> cell, std::string address, const std::string& now)
@@ -5576,6 +5642,9 @@ namespace wfg::client::ui
             std::vector<model::VideoOutputRow> outputs;
             std::vector<std::string> displays;
             bool locked = false;
+
+            /** The show's DCAs as a canvas's menu offers them, "(none)" first. */
+            std::vector<std::pair<std::string, std::string>> dcaChoices;
         };
 
         class PlaybackPage final : public juce::Component
@@ -6106,7 +6175,8 @@ namespace wfg::client::ui
             video->show (model::readCanvases (snapshot), model::readVideoOutputs (snapshot),
                          model::readDisplays (snapshot), model::text (snapshot, "/godot/videoOutput/renderer"),
                          model::text (snapshot, "/godot/videoOutput/rendererProblem"),
-                         ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+                         ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
+                         model::dcaChoices (model::readDcas (snapshot)));
 
             /*  GO AND ESC: the document's, re-read every pass like the outputs,
                 since each lands at once as a `node.set`. */

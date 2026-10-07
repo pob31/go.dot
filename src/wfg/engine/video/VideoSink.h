@@ -143,5 +143,12 @@ namespace wfg::video
             before GO so GO only shows them (VX). Replaces the last list. A sink
             that reads no picture has nothing to do. */
         virtual void prepare (const std::vector<std::string>&) {}
+
+        /*  EVERY CANVAS'S LEVEL (namespace draft §38, WT): how much of each
+            composited canvas reaches its outputs, 1 all and 0 black - its
+            level times what its DCA leaves. Every canvas each time, in the
+            show's order; sent when one moves. A sink that draws nothing has
+            nothing to do. */
+        virtual void canvasLevels (const std::vector<std::pair<std::string, double>>&) {}
     };
 }

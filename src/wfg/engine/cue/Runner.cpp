@@ -15587,11 +15587,58 @@ namespace wfg::cue
         }
     }
 
+    void Runner::followCanvasLevels()
+    {
+        if (videoSink == nullptr)
+            return;
+
+        if (! canvasLevelsRead || canvasLevelsRevision != document.showRevision())
+        {
+            canvasLevelSources.clear();
+            canvasLevelsRead = true;
+            canvasLevelsRevision = document.showRevision();
+
+            for (const auto& canvas : document.root().getChildWithName ("Canvases"))
+            {
+                CanvasLevelSource source;
+                source.id = canvas[idProperty].toString().toStdString();
+                source.level = std::clamp (static_cast<double> (canvas.getProperty ("level", 100.0)) / 100.0, 0.0, 1.0);
+                source.dcaChain = dcaNestingFrom (canvas.getProperty ("dca").toString().toStdString());
+
+                if (! source.id.empty())
+                    canvasLevelSources.push_back (std::move (source));
+            }
+        }
+
+        std::vector<std::pair<std::string, double>> levels;
+        levels.reserve (canvasLevelSources.size());
+
+        for (const auto& source : canvasLevelSources)
+        {
+            auto trim = 0.0;
+
+            if (dcas != nullptr)
+                for (const auto& dcaId : source.dcaChain)
+                    trim += dcas->trimOf (dcaId);
+
+            levels.emplace_back (source.id, source.level * (source.dcaChain.empty() ? 1.0 : video::opacityForTrim (trim)));
+        }
+
+        /*  ON THE TICK ONE MOVES, and on the first: what the video side holds
+            is the scene the engine holds (VC), and a level is part of it. */
+        if (levels != canvasLevelsSent)
+        {
+            videoSink->canvasLevels (levels);
+            canvasLevelsSent = std::move (levels);
+        }
+    }
+
     void Runner::advanceVideo (Engine& engine, std::int64_t tick)
     {
         juce::ignoreUnused (tick);
 
         prepareStandbyPictures();
+        followCanvasLevels();
 
         for (auto& job : showing)
         {

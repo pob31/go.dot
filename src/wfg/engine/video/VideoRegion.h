@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 8;
+    constexpr std::uint32_t version = 9;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -170,6 +170,18 @@ namespace wfg::video::region
         Output outputs[maxOutputs];
     };
 
+    /*  A CANVAS'S LEVEL (namespace draft §38, WT): how much of the composited
+        canvas reaches its outputs, 1 all of it and 0 black - its own level
+        times what its DCA leaves of it. By the canvas's identifier, under its
+        own `seq`, written by the tick when it moves; read every frame. An
+        identifier no slot names is at 1. */
+    struct CanvasLevel
+    {
+        std::atomic<std::uint32_t> seq;
+        char id[idChars];
+        std::atomic<double> factor;
+    };
+
     struct PointSlot
     {
         std::atomic<std::int64_t> sample;
@@ -268,6 +280,9 @@ namespace wfg::video::region
         Config config;
         Layer layers[maxLayers];
 
+        /** Engine to renderer: each canvas's level (WT), by identifier. */
+        CanvasLevel canvasLevels[maxCanvases];
+
         /*  Engine to renderer: the pictures to read ahead of GO - the
             standby's - as whole paths, under `preparedSeq` (VX). */
         std::atomic<std::uint32_t> preparedSeq;
@@ -342,6 +357,7 @@ namespace wfg::video::region
         mix (static_cast<std::uint32_t> (sizeof (OutputState)));
         mix (static_cast<std::uint32_t> (maxLayers));
         mix (pointsPerLayer);
+        mix (static_cast<std::uint32_t> (sizeof (CanvasLevel)));
         return hash;
     }
 
@@ -430,6 +446,43 @@ namespace wfg::video::region
         r.clock.nanos.store (nanos, std::memory_order_relaxed);
         r.clock.sampleRate.store (sampleRate, std::memory_order_relaxed);
         endWrite (r.clock.seq);
+    }
+
+    /*  THE CANVASES' LEVELS (WT), the engine's side: slot `n` names canvas
+        `id` at `factor`; an empty id empties the slot. */
+    inline void writeCanvasLevel (Region& r, std::size_t n, std::string_view id, double factor) noexcept
+    {
+        if (n >= static_cast<std::size_t> (maxCanvases))
+            return;
+
+        auto& slot = r.canvasLevels[n];
+        beginWrite (slot.seq);
+        writeText (slot.id, id);
+        slot.factor.store (factor, std::memory_order_relaxed);
+        endWrite (slot.seq);
+    }
+
+    /*  And the renderer's: the level of canvas `id`, 1 when no slot names it
+        - a show from before levels, or a canvas nobody has moved. */
+    inline double canvasLevelOf (const Region& r, std::string_view id)
+    {
+        for (const auto& slot : r.canvasLevels)
+        {
+            char named[idChars] {};
+            double factor = 1.0;
+
+            if (! readConsistent (slot.seq, [&]
+                                  {
+                                      std::memcpy (named, slot.id, idChars);
+                                      factor = slot.factor.load (std::memory_order_relaxed);
+                                  }))
+                continue;
+
+            if (readText (named) == id && ! id.empty())
+                return std::clamp (factor, 0.0, 1.0);
+        }
+
+        return 1.0;
     }
 
     struct ClockReading

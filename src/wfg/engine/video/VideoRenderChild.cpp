@@ -1118,6 +1118,27 @@ namespace wfg::video
                         }
                     }
 
+                    /*  THE CANVAS'S LEVEL (namespace draft §38, WT): the whole
+                        composite taken towards black, once, over every layer -
+                        so two layers stacked go down together as one picture,
+                        never each turning see-through over the other. Before
+                        the mapping and the test pattern, which are the
+                        output's and not the canvas's. */
+                    if (const auto level = region::canvasLevelOf (r, canvasId); level < 1.0)
+                    {
+                        fillProgram->use();
+                        glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+                        colour->set (0.0f, 0.0f, 0.0f, static_cast<GLfloat> (1.0 - level));
+
+                        Placement whole;
+                        whole.canvasWidth = canvasWidth;
+                        whole.canvasHeight = canvasHeight;
+                        whole.pictureWidth = canvasWidth;
+                        whole.pictureHeight = canvasHeight;
+                        whole.fit = static_cast<int> (region::Fit::stretch);
+                        drawQuad (whole, 1.0, 0.0);
+                    }
+
                     glBindVertexArray (0);
                     glDisable (GL_BLEND);
                 }
@@ -1804,10 +1825,11 @@ namespace wfg::video
                 for (std::size_t n = 0; n < count; ++n)
                 {
                     const auto& canvas = config.canvases[n];
-                    r.probe[n].store (colourAt (stackOf (layers, canvas.id), now,
-                                                static_cast<double> (std::max (1, canvas.width)),
-                                                static_cast<double> (std::max (1, canvas.height)),
-                                                0.0, 0.0, &sampler),
+                    r.probe[n].store (scaledColour (colourAt (stackOf (layers, canvas.id), now,
+                                                              static_cast<double> (std::max (1, canvas.width)),
+                                                              static_cast<double> (std::max (1, canvas.height)),
+                                                              0.0, 0.0, &sampler),
+                                                    region::canvasLevelOf (r, canvas.id)),
                                       std::memory_order_relaxed);
                 }
 

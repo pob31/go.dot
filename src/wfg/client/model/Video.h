@@ -43,7 +43,14 @@ namespace wfg::client::model
         int width = 1920;
         int height = 1080;
 
+        /*  ITS LEVEL AND ITS DCA (namespace draft §38, WT): how much of it
+            reaches its outputs, in percent, and the DCA that rides it - by
+            identifier, empty for none. */
+        double level = 100.0;
+        std::string dca;
+
         std::string label() const;   // the name, else the id
+        std::string levelWord() const;   // "100 %" or "62.5 %", to the tenth
         std::string sizeWord() const;   // "1920 × 1080"
     };
 

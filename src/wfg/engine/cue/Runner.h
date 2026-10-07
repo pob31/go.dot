@@ -2359,6 +2359,12 @@ namespace wfg::cue
             does not glide over that minute to where it went. */
         void followVideoDcas (VideoJob& job, const Run& run);
 
+        /*  EVERY CANVAS'S LEVEL (namespace draft §38, WT): its own level times
+            what its DCA, and every DCA that one sits inside, leaves of it along
+            the fader's travel - the picture's law (37.5, WE). Handed to the
+            video side on the tick one moves, every canvas at once. */
+        void followCanvasLevels();
+
         /*  A fade cue aimed at a video cue: true when it was one, and handled. */
         bool fireVideoFade (const juce::ValueTree& fade, const std::string& runId, std::int64_t tick);
 
@@ -2422,6 +2428,20 @@ namespace wfg::cue
         std::vector<OutputGainSource> outputGainSources;
         std::uint64_t outputGainsRevision = 0;
         bool outputGainsRead = false;
+
+        /*  EACH CANVAS AS `followCanvasLevels` READS IT, at the revision it was
+            read at, and what was last handed to the video side. */
+        struct CanvasLevelSource
+        {
+            std::string id;
+            double level = 1.0;
+            std::vector<std::string> dcaChain;
+        };
+
+        std::vector<CanvasLevelSource> canvasLevelSources;
+        std::uint64_t canvasLevelsRevision = 0;
+        bool canvasLevelsRead = false;
+        std::vector<std::pair<std::string, double>> canvasLevelsSent;
 
         /*  Who asks a target what a value is. Null everywhere a replay or
             a tree dump runs, and a verified cue there finishes on its own

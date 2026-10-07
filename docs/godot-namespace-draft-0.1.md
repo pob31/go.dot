@@ -21279,3 +21279,21 @@ pasted as a cue would be a cue with no file and no name.
   each output whose DCA also marks a cue routed to it, by a direct out or a send: *"Music also trims 3
   cues played through Front: there it counts twice."* Only a cue's own mark is read; a group's mark
   over it is not.
+
+### 38.8 What S8 built
+
+- **`canvas/level`** (percent, 0 to 100, saved, resting at 100) **and `canvas/dca`**. The tick
+  multiplies the level by what the DCA, and every DCA it sits inside, leaves of a picture along the
+  fader's travel - the picture's law (37.5, WE): nothing at -inf, all of it at 0 dB and above - and
+  hands every canvas's factor to the video side on the tick one moves.
+- **The region** (version 9) carries one level per canvas, by the canvas's identifier, under its own
+  sequence; the renderer reads it each frame, and a canvas no slot names is at 1. **Stepped at the
+  tick, 50 times a second** - a level is not placed ahead on Go.dot's clock as a layer's values are
+  (proposed: a DCA's fader and a hand's level do not need the frame accuracy a cue's fade has; if a
+  long DCA fade shows its steps on a wall, the level becomes a ring of points like a layer's `dca`).
+- **The renderer takes the composite down once**: after every layer of the canvas, one black quad over
+  the whole canvas at `1 - level`, before the output's mapping and its test pattern - so two layers
+  stacked go down together as one picture (WT). The `--no-window` probe is the composite's colour
+  times the level, through the same arithmetic.
+- **The Video tab** has a Level cell typed in place and a DCA cell chosen from a menu of the show's
+  DCAs on each canvas.

@@ -1240,3 +1240,21 @@ TEST_CASE ("video host: an output's mesh and CDL reach the region with its confi
 
     folder.deleteRecursively();
 }
+
+//==============================================================================
+TEST_CASE ("video region: a canvas's level reaches the renderer by the canvas's name")
+{
+    /*  Namespace draft §38, WT: the engine writes every canvas's level, the
+        renderer reads one by name each frame - 1 when no slot names it. */
+    Memory memory;
+    auto& region = *memory.region;
+    video::RegionSink writer { region };
+
+    CHECK (video::region::canvasLevelOf (region, "VD000011") == doctest::Approx (1.0));
+    writer.canvasLevels ({ { "VD000011", 0.25 }, { "VD000012", 0.75 } });
+    CHECK (video::region::canvasLevelOf (region, "VD000011") == doctest::Approx (0.25));
+    CHECK (video::region::canvasLevelOf (region, "VD000012") == doctest::Approx (0.75));
+    CHECK (video::region::canvasLevelOf (region, "VD0000ZZ") == doctest::Approx (1.0));
+    writer.canvasLevels ({ { "VD000012", 0.5 } });
+    CHECK (video::region::canvasLevelOf (region, "VD000011") == doctest::Approx (1.0));
+}

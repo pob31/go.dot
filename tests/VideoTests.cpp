@@ -356,6 +356,12 @@ namespace
 
         void clear() override  { ++clears; }
 
+        void canvasLevels (const std::vector<std::pair<std::string, double>>& levels) override
+        {
+            canvasLevelsSent.push_back (levels);
+        }
+
+        std::vector<std::vector<std::pair<std::string, double>>> canvasLevelsSent;
         std::vector<video::LayerSpec> shown;
         std::map<std::string, std::vector<video::Point>> points;
         std::map<std::string, std::map<video::Property, std::vector<video::Point>>> geometry;
@@ -1669,4 +1675,45 @@ TEST_CASE ("video: a movie moved takes the sound locked to it along, in one edit
         inside.push_back (child["id"].toString().toStdString());
 
     CHECK (inside == std::vector<std::string> { "VD000002", "VD000040" });
+}
+
+//==============================================================================
+TEST_CASE ("video: a canvas's level and its DCA take the whole picture towards black")
+{
+    /*  Namespace draft §38, WT: a canvas's level, times what its DCA leaves
+        along the fader's travel (the picture's law, 37.5 WE), handed to the
+        video side on the tick one moves; the region carries it to the
+        renderer by the canvas's name; and the composite is taken down once,
+        towards black, never layer by layer. */
+    VideoRig rig;
+    cue::DcaTable dcas;
+    rig.runner.setDcas (&dcas);
+
+    rig.tickOnce();
+    REQUIRE (! rig.sink.canvasLevelsSent.empty());
+    CHECK (rig.sink.canvasLevelsSent.back() == std::vector<std::pair<std::string, double>> { { "VD000011", 1.0 } });
+
+    const auto sentBefore = rig.sink.canvasLevelsSent.size();
+    rig.tickOnce();
+    CHECK (rig.sink.canvasLevelsSent.size() == sentBefore);      // nothing moved, nothing sent
+
+    REQUIRE (rig.document.setAttribute ("/godot/canvas/VD000011/level", "50").ok);
+    rig.tickOnce();
+    REQUIRE (rig.sink.canvasLevelsSent.size() == sentBefore + 1);
+    CHECK (rig.sink.canvasLevelsSent.back()[0].second == doctest::Approx (0.5));
+
+    const auto dca = rig.document.createDca ("Pictures").id;
+    REQUIRE (rig.document.setAttribute ("/godot/canvas/VD000011/dca", dca).ok);
+    dcas.set (dca, -6.0);
+    rig.tickOnce();
+    CHECK (rig.sink.canvasLevelsSent.back()[0].second == doctest::Approx (0.5 * video::opacityForTrim (-6.0)));
+
+    dcas.set (dca, -120.0);
+    rig.tickOnce();
+    CHECK (rig.sink.canvasLevelsSent.back()[0].second == doctest::Approx (0.0));
+
+    /*  THE COMPOSITE, each channel towards black. */
+    CHECK (video::scaledColour (0xFF8040u, 1.0) == 0xFF8040u);
+    CHECK (video::scaledColour (0xFF8040u, 0.5) == 0x804020u);
+    CHECK (video::scaledColour (0xFF8040u, 0.0) == 0u);
 }

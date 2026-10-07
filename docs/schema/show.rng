@@ -3238,11 +3238,26 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA this canvas is assigned to, by identifier, or empty (namespace draft §38, the author-s request of 2026-10-07: a DCA can be set on sound and on pictures, and the balance is the user-s). Its trim, and that of every DCA it sits inside, turns into how much of the canvas shows along the fader-s travel, as a cue-s does (37.5, WE): nothing at -inf, the canvas-s level at 0 dB and above. It counts at each place (WQ): a picture cue marked with the same DCA is taken down by it as well.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="height">
           <a:documentation>How high the canvas is, in pixels.</a:documentation>
           <data type="integer">
             <param name="minInclusive">16</param>
             <param name="maxInclusive">16384</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="level">
+          <a:documentation>How much of the canvas reaches its outputs, in percent: 100 all of it, nought black (namespace draft §38, WT, proposed). It takes the whole composited picture towards black at once - two layers stacked go down together as one picture, never each turning see-through over the other - after the layers and before each output-s mapping. The canvas-s DCA multiplies it.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">100</param>
           </data>
         </attribute>
       </optional>

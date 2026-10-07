@@ -132,6 +132,21 @@ namespace wfg::video
                                     double&, double&, double&, double&) const  { return false; }
     };
 
+    /*  A CANVAS'S COLOUR TAKEN DOWN BY ITS LEVEL (namespace draft §38, WT):
+        each channel times `factor`, towards black - what the renderer's one
+        black pass over the whole composite does on the GPU. */
+    inline std::uint32_t scaledColour (std::uint32_t rgb, double factor) noexcept
+    {
+        const auto f = std::clamp (factor, 0.0, 1.0);
+        const auto channel = [rgb, f] (int shift)
+        {
+            const auto value = static_cast<double> ((rgb >> shift) & 0xffu) * f;
+            return static_cast<std::uint32_t> (std::lround (value)) << shift;
+        };
+
+        return channel (16) | channel (8) | channel (0);
+    }
+
     /*  THE CANVAS'S COLOUR AT ONE POINT, as 0xRRGGBB: (x, y) on its pixels
         from its middle, y up. Every layer of the stack laid over the last,
         normal blending in display space (VD), from black. */
