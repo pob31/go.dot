@@ -18,9 +18,12 @@
 
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/video/Mapping.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -178,6 +181,134 @@ namespace wfg::client::model
         return inOrder (found, words (order));
     }
 
+    //==============================================================================
+    WarpPoints WarpPoints::whole (int columns, int rows)
+    {
+        WarpPoints out;
+        out.columns = std::max (2, columns);
+        out.rows = std::max (2, rows);
+
+        for (int row = 0; row < out.rows; ++row)
+            for (int column = 0; column < out.columns; ++column)
+            {
+                out.x.push_back (static_cast<double> (column) / (out.columns - 1));
+                out.y.push_back (static_cast<double> (row) / (out.rows - 1));
+            }
+
+        return out;
+    }
+
+    bool WarpPoints::isWhole() const
+    {
+        const auto plain = whole (columns, rows);
+
+        for (std::size_t n = 0; n < x.size() && n < plain.x.size(); ++n)
+            if (std::abs (x[n] - plain.x[n]) > 1.0e-6 || std::abs (y[n] - plain.y[n]) > 1.0e-6)
+                return false;
+
+        return x.size() == plain.x.size();
+    }
+
+    WarpPoints readWarp (const tree::TreeSnapshot& snapshot, const std::string& base)
+    {
+        const auto whole = [&snapshot, &base] (const char* row, int fallback)
+        {
+            const auto value = osc::parseDouble (text (snapshot, base + row));
+            return value.has_value() ? std::clamp (static_cast<int> (*value), 2, 16) : fallback;
+        };
+
+        auto out = WarpPoints::whole (whole ("meshColumns", 2), whole ("meshRows", 2));
+        //  A list row: its values, not one text (the tree publishes `d*` as numbers).
+        std::vector<double> numbers;
+
+        if (const auto* node = snapshot.find (base + "mesh"))
+            for (const auto& value : node->values)
+                if (value.isNumber() && ! value.isNonFinite())
+                    numbers.push_back (value.asDouble());
+
+        if (numbers.size() != 2 * out.x.size())
+            return out;
+
+        for (std::size_t n = 0; n < out.x.size(); ++n)
+        {
+            out.x[n] = numbers[2 * n];
+            out.y[n] = numbers[2 * n + 1];
+        }
+
+        return out;
+    }
+
+    std::string warpText (const WarpPoints& warp)
+    {
+        std::string out;
+
+        for (std::size_t n = 0; n < warp.x.size() && n < warp.y.size(); ++n)
+        {
+            if (! out.empty())
+                out += ' ';
+
+            out += osc::formatDouble (std::round (warp.x[n] * 10000.0) / 10000.0);
+            out += ' ';
+            out += osc::formatDouble (std::round (warp.y[n] * 10000.0) / 10000.0);
+        }
+
+        return out;
+    }
+
+    WarpPoints regridded (const WarpPoints& warp, int columns, int rows)
+    {
+        auto out = WarpPoints::whole (columns, rows);
+
+        video::Mesh mesh;
+        mesh.columns = warp.columns;
+        mesh.rows = warp.rows;
+
+        for (std::size_t n = 0; n < warp.x.size(); ++n)
+        {
+            mesh.x.push_back (static_cast<float> (warp.x[n]));
+            mesh.y.push_back (static_cast<float> (warp.y[n]));
+        }
+
+        if (! mesh.isValid())
+            return out;
+
+        for (int row = 0; row < out.rows; ++row)
+            for (int column = 0; column < out.columns; ++column)
+            {
+                double x = 0.0, y = 0.0;
+                video::meshAt (mesh, static_cast<double> (column) / (out.columns - 1),
+                               static_cast<double> (row) / (out.rows - 1), x, y);
+                out.x[out.index (column, row)] = x;
+                out.y[out.index (column, row)] = y;
+            }
+
+        return out;
+    }
+
+    std::vector<ZoneRow> readZones (const tree::TreeSnapshot& snapshot, const std::string& outputId)
+    {
+        std::vector<ZoneRow> out;
+
+        for (const auto& id : words (text (snapshot, std::string (outputPrefix) + outputId + "/zones")))
+        {
+            const auto base = "/godot/zone/" + id + "/";
+            ZoneRow row;
+            row.id = id;
+            row.name = text (snapshot, base + "name");
+            row.canvas = text (snapshot, base + "canvas");
+            row.blend = text (snapshot, base + "blend");
+            row.opacity = osc::parseDouble (text (snapshot, base + "opacity")).value_or (100.0);
+            row.warp = readWarp (snapshot, base);
+
+            if (row.blend.empty())
+                row.blend = "normal";
+
+            out.push_back (std::move (row));
+        }
+
+        return out;
+    }
+
     std::vector<VideoOutputRow> readVideoOutputs (const tree::TreeSnapshot& snapshot)
     {
         std::map<std::string, VideoOutputRow> found;
@@ -208,6 +339,7 @@ namespace wfg::client::model
             else if (name == "testPattern")     row.testPattern = truthOf (node, false);
             else if (name == "framesPresented") row.framesPresented = integerOf (node, 0);
             else if (name == "framesLate")      row.framesLate = integerOf (node, 0);
+            else if (name == "zones")           row.zones = static_cast<int> (words (text (node)).size());
         }
 
         return inOrder (found, words (order));

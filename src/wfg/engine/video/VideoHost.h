@@ -140,6 +140,23 @@ namespace wfg::video
         /** What the renderer found, as of the host thread's last look. Any thread. */
         Readouts readouts() const;
 
+        /*  THE MONITOR'S SIDE DOOR (namespace draft 40, the author's "video
+            monitor window for the canvases"): while a window wants them, the
+            renderer draws every canvas small, about ten times a second, and
+            this hands back the latest of each. Not the show and not the tree -
+            a picture of what is up, like the network monitor's lines. Any
+            thread; a copy, so the caller holds nothing of the region. */
+        struct CanvasPicture
+        {
+            std::string canvasId;
+            int width = 0, height = 0;
+            std::int64_t sample = -1;
+            std::vector<std::uint8_t> rgb;      ///< rows from the top-left, three bytes a pixel
+        };
+
+        void setMonitoring (bool wanted) noexcept;
+        std::vector<CanvasPicture> canvasPictures() const;
+
         /** The region itself, for a test that reads what the renderer wrote. */
         region::Region* regionForTests() noexcept;
 

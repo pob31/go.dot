@@ -425,7 +425,13 @@ namespace wfg::doc
                 { "Canvases",     false, { "Canvas" },      { "canvases" } },
                 { "Canvas",       true,  {},                { "canvas" } },
                 { "VideoOutputs", false, { "VideoOutput" }, { "videoOutputs" } },
-                { "VideoOutput",  true,  {},                { "videoOutput" } },
+                { "VideoOutput",  true,  { "Zone" },        { "videoOutput" } },
+
+                /*  A ZONE (namespace draft 40, WY, the author's pick): a further
+                    canvas on an output, through a warp of its own, laid over the
+                    output's own canvas in the order the zones sit. A child of its
+                    output, as a range is of its cue. */
+                { "Zone",         true,  {},                { "zone" } },
 
                 /*  THE SHOW'S CUE TEMPLATES (namespace draft §38): a set of a
                     cue's settings kept under a name, its parts held as the

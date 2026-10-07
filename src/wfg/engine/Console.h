@@ -183,6 +183,24 @@ namespace wfg
         std::function<ImportScenes (const std::vector<std::string>& sets)> readImportScenes {};
         std::function<ImportResult (const ImportRequest&, const std::function<void (const std::string&)>& progress)>
             importSets {};
+
+        /*  THE FIFTH DOOR: THE CANVASES AS THEY ARE (namespace draft 40, the
+            author's video monitor). While a monitor window is open the
+            renderer draws every canvas small, about ten times a second, and
+            the window reads the latest of each here - a picture of what is up,
+            like the network monitor's lines, and nothing the show decided, so
+            no command and no record. Either may be called from the message
+            thread; both are empty when the engine has no video. */
+        struct CanvasPicture
+        {
+            std::string canvasId;
+            int width = 0, height = 0;
+            long long sample = -1;
+            std::vector<unsigned char> rgb;     ///< rows from the top-left, three bytes a pixel
+        };
+
+        std::function<void (bool wanted)> monitorCanvases {};
+        std::function<std::vector<CanvasPicture>()> canvasPictures {};
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

@@ -575,6 +575,10 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/InspectorComponent.cpp
     wfg/client/ui/NetworkMonitorWindow.h
     wfg/client/ui/NetworkMonitorWindow.cpp
+    wfg/client/ui/VideoMonitorWindow.h
+    wfg/client/ui/VideoMonitorWindow.cpp
+    wfg/client/ui/WarpEditorWindow.h
+    wfg/client/ui/WarpEditorWindow.cpp
     wfg/client/ui/ImportWindow.cpp
     wfg/client/ui/ImportWindow.h
     wfg/client/ui/MediaCopier.cpp

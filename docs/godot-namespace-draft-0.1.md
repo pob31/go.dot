@@ -21499,4 +21499,107 @@ With WW, the banner is now what it was meant to be: the trace of a crash, a kill
   waveform and ranges", by its kind; and a movie, whose picture has no waveform, leaves the bar empty
   under its ranges and ruler instead of "waiting for the analysis of this file", which it would have
   said for ever. The author's answer: "Check of notes, fades and such don't have the same notice."
-- **A video monitor window** for the canvases, from the Show menu, is built with §40.
+- **A video monitor window** for the canvases, from the Show menu, is §40.6.
+
+## 40. Several canvases on one output, their warps drawn, and a monitor for the canvases
+
+Written 2026-10-08, overnight. Two of the author's niggles of 2026-10-07 (§39): *"A canvas should be
+assignable to several output with different warping/mapping. And each output should be able to have
+several canvas with layering order and blending modes. I think the square with the 4 corners and
+eventual extra vertical and horizontal splits allows to draw various zones in the output from the full
+coverage and map for each a different canvas. Do you think this is possible?"*; and, later the same
+evening, *"Can we have a video monitor window for the canvases? This would be opened by a item in the
+show menu."*
+
+### 40.1 What it is, before its names
+
+The first half was already there: one canvas on several outputs, each with its own warp (§35, VA). The
+second was not. Now an output shows its own canvas through its own warp, as before, and then any
+number of **zones** over it: each a further canvas, through a warp of its own, laid on what is under it
+by a blend and an opacity, in the order they were added. A zone starts as the whole output; its four
+corners and its splits are dragged to put it where it belongs - a flat on stage left, the floor, a
+logo in a corner. Zones may sit apart, touch, or overlap. The **warp editor** draws them over the
+shape of the output, and the projector follows while a point is dragged.
+
+The **video monitor** is a window with a tile per canvas, showing what each has up, about ten times a
+second.
+
+### 40.2 Decisions
+
+The author's (each the option I recommended; the words of each option were mine):
+
+- **WY** each placed canvas has **its own warp**, rather than taking cells of one grid the output
+  shares; apart or overlapping, stacked, a blend and an opacity each.
+- The warps are edited in a **drawn editor, live** - the projector follows a drag - with typed
+  numbers too.
+- The monitor shows **every canvas, about ten times a second**, drawn small on the CPU while it is
+  open.
+
+Mine (proposed):
+
+- **XE** The output's own canvas and mesh stay where they were and are the **bottom zone**: no show
+  written before today changes a byte, and an output with no zones draws exactly as it did. The
+  output's own canvas has no blend or opacity of its own: it is laid normally, whole.
+- **XF** Zones are blended **on the output, in display space**, and the output's calibration (its
+  CDL and the dither) is applied **once, after them all** (PRD §3.19b amended).
+- **XG** At most **eight zones** an output (`region::maxZones`).
+- **XH** The monitor's tiles are at most **256 by 144**, through the reference compositor - what is
+  up, not how good it looks: no output's warp, no calibration.
+- **XI** The monitor is a **side door** (`ClientHost::canvasPictures`), not the tree: a picture of
+  what is up is not something the show decided, like the network monitor's lines.
+- **XJ** The renderer's windows are **made again only when which output is on which display
+  changes**. A mesh, a zone, a calibration or a canvas is read from the configuration every frame,
+  so a drag never blacks the projector out for a moment.
+
+### 40.3 The rows
+
+- `<VideoOutput>` holds `<Zone>` children: `/godot/zone/<id>/canvas` (refers to a canvas), `blend`
+  (normal, add, screen, multiply - the layers' four, §35's VD), `opacity` (0..100 %, 100), `name`,
+  `meshColumns`, `meshRows` and `mesh` (the output's own mesh rows, in 0..1 of the display); `output`
+  is derived from where it sits. `/godot/videoOutput/<id>/zones` lists them, bottom first.
+- `zone.create <output> [canvas] [id]` puts one on top; `object.delete` takes one away; `node.set`
+  changes one.
+
+### 40.4 How it is drawn
+
+An output with no zones is drawn as before: straight onto the display, or through its mesh and CDL
+from an offscreen copy of its canvas. An output with zones draws each of its canvases offscreen at the
+canvas's size - its own first, then each zone's - warps each onto an offscreen picture of the whole
+output (half float, the display's size) by its blend and its opacity, and then puts that picture onto
+the display once, through the output's CDL and the dither. Each pass keeps its own offscreen canvas and
+its own warp grid, so neither is made again every frame. The region (version 11) carries each output's
+zones.
+
+The canvas is still composited once per output that shows it, not once for all of them as §35.1 says:
+each output window has its own OpenGL context. Sharing them is an optimisation left for when a show
+needs it.
+
+### 40.5 The warp editor
+
+From the Video tab, the **Warp...** cell of an output's row (it says how many zones it has). The list
+says each warp in words - "Stage - the output's own", "Zone 1: Logo, screen, 60 %" - and the picked one
+is drawn bright over a black picture of the output, with its points; the others are outlines. A point is
+dragged, or clicked and moved with the arrow keys (a thousandth of the display, a hundredth with
+Shift), or typed. **+ col**, **- col**, **+ row**, **- row** add and take away splits, the warp keeping its
+shape (the new points are read off the curve the renderer draws). **Whole output** puts the picked warp
+back. A zone's canvas, blend and opacity are chosen beside it; **+ Zone** and **Remove zone** add and
+take away. Under the lock it shows, and changes nothing. A drag is a run of `node.set` on one address,
+which the document folds into one undo step; a split is one `node.setMany`.
+
+Owed to the bench: the editor shows the output as 16 by 9 whatever the display's shape; the picture
+of the canvas is not drawn under the grid; nothing is drawn on the projector itself while editing.
+
+### 40.6 The video monitor
+
+**Show > Video monitor...** opens a window with a tile per canvas, in the canvas's shape, its name and
+size beneath, "no picture" when the renderer has drawn none and "not updating" when its picture is
+more than a second and a half old. While it is open the renderer draws every canvas small on its own
+CPU, through the compositor its probe and its tints use, ten times a second; shut, it draws nothing for
+anybody. The pictures come through the region (`Preview`, by canvas) and `VideoHost::canvasPictures`.
+
+### 40.7 Not in this work
+
+- Edge blending between overlapping projectors (the calibration masks, §35.2's VA, after V.5).
+- The canvas drawn under the warp in the editor, and the grid drawn on the projector while editing.
+- The display's own shape in the editor.
+- The monitor at full rate or full size.

@@ -64,11 +64,22 @@ namespace wfg::video
                                        return std::abs (one.saturation - other.saturation) < 1e-12;
                                    };
 
+                                   const auto sameZones = std::equal (x.zones.begin(), x.zones.end(), y.zones.begin(), y.zones.end(),
+                                                                      [] (const region::ZoneReading& one, const region::ZoneReading& other)
+                                                                      {
+                                                                          return one.canvas == other.canvas && one.blend == other.blend
+                                                                              && std::abs (one.opacity - other.opacity) < 1e-9
+                                                                              && one.mesh.columns == other.mesh.columns
+                                                                              && one.mesh.rows == other.mesh.rows
+                                                                              && one.mesh.x == other.mesh.x && one.mesh.y == other.mesh.y;
+                                                                      });
+
                                    return x.id == y.id && x.canvas == y.canvas && x.name == y.name
                                        && x.display == y.display && x.displayId == y.displayId
                                        && x.enabled == y.enabled && x.testPattern == y.testPattern
                                        && x.mesh.columns == y.mesh.columns && x.mesh.rows == y.mesh.rows
-                                       && x.mesh.x == y.mesh.x && x.mesh.y == y.mesh.y && sameCdl (x.cdl, y.cdl);
+                                       && x.mesh.x == y.mesh.x && x.mesh.y == y.mesh.y && sameCdl (x.cdl, y.cdl)
+                                       && sameZones;
                                });
         }
     }
@@ -502,6 +513,37 @@ namespace wfg::video
 
             entry.cdl = Cdl::from (numbers (base + "cdl"));
 
+            /*  ITS ZONES (namespace draft 40, WY), bottom first: each a further
+                canvas through its own warp, by its blend and its opacity. */
+            for (const auto& child : output)
+            {
+                const auto zoneId = child["id"].toString().toStdString();
+
+                if (! child.hasType ("Zone") || zoneId.empty())
+                    continue;
+
+                const auto at = "/godot/zone/" + zoneId + "/";
+                region::ZoneReading zone;
+                zone.canvas = text (at + "canvas");
+                zone.blend = region::blendFrom (text (at + "blend"));
+                zone.opacity = std::clamp (osc::parseDouble (text (at + "opacity")).value_or (100.0) / 100.0, 0.0, 1.0);
+                zone.mesh.columns = std::clamp (whole (at + "meshColumns", 2), 2, Mesh::maxPoints);
+                zone.mesh.rows = std::clamp (whole (at + "meshRows", 2), 2, Mesh::maxPoints);
+
+                const auto zonePoints = numbers (at + "mesh");
+
+                if (zonePoints.size() == static_cast<std::size_t> (2 * zone.mesh.columns * zone.mesh.rows))
+                    for (std::size_t n = 0; n + 1 < zonePoints.size(); n += 2)
+                    {
+                        zone.mesh.x.push_back (static_cast<float> (zonePoints[n]));
+                        zone.mesh.y.push_back (static_cast<float> (zonePoints[n + 1]));
+                    }
+                else
+                    zone.mesh = Mesh::identity (zone.mesh.columns, zone.mesh.rows);
+
+                entry.zones.push_back (std::move (zone));
+            }
+
             anyEnabled = anyEnabled || entry.enabled;
             outputs.push_back (std::move (entry));
         }
@@ -515,6 +557,39 @@ namespace wfg::video
         }
 
         impl->wantRenderer.store (anyEnabled, std::memory_order_release);
+    }
+
+    void VideoHost::setMonitoring (bool wanted) noexcept
+    {
+        if (impl->r != nullptr)
+            impl->r->previewWanted.store (wanted ? 1u : 0u, std::memory_order_release);
+    }
+
+    std::vector<VideoHost::CanvasPicture> VideoHost::canvasPictures() const
+    {
+        std::vector<CanvasPicture> out;
+
+        if (impl->r == nullptr)
+            return out;
+
+        for (const auto& slot : impl->r->previews)
+        {
+            CanvasPicture picture;
+
+            const auto read = region::readConsistent (slot.seq, [&]
+            {
+                picture.canvasId = region::readText (slot.id);
+                picture.width = std::clamp (static_cast<int> (slot.width.load (std::memory_order_relaxed)), 0, region::previewWidth);
+                picture.height = std::clamp (static_cast<int> (slot.height.load (std::memory_order_relaxed)), 0, region::previewHeight);
+                picture.sample = slot.sample.load (std::memory_order_relaxed);
+                picture.rgb.assign (slot.rgb, slot.rgb + 3 * picture.width * picture.height);
+            });
+
+            if (read && ! picture.canvasId.empty() && picture.width > 0 && picture.height > 0)
+                out.push_back (std::move (picture));
+        }
+
+        return out;
     }
 
     void VideoHost::identify (const std::string& outputId, bool on)

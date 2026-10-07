@@ -372,6 +372,9 @@ namespace wfg::client::gesture
     Event createCanvas (const std::string& name);
     Event createVideoOutput (const std::string& name, const std::string& canvasId);
 
+    /** A further canvas on an output, through a warp of its own (namespace draft 40, WY). */
+    Event createZone (const std::string& outputId, const std::string& canvasId);
+
     /** An output's test pattern on or off, to find which projector is which: tonight's. */
     Event identifyVideoOutput (const std::string& outputId, bool on);
 

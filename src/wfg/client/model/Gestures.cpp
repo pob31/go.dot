@@ -475,6 +475,11 @@ namespace wfg::client::gesture
         return { origin::window, "videoOutput.create", { osc::Value::string (name), osc::Value::string (canvasId) } };
     }
 
+    Event createZone (const std::string& outputId, const std::string& canvasId)
+    {
+        return { origin::window, "zone.create", { osc::Value::string (outputId), osc::Value::string (canvasId) } };
+    }
+
     Event identifyVideoOutput (const std::string& outputId, bool on)
     {
         return { origin::window, "videoOutput.identify", { osc::Value::string (outputId), osc::Value::boolean (on) } };

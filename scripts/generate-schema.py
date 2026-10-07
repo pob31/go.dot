@@ -127,6 +127,9 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # and `videoOutputs` are CONTAINER tokens like `dcas`,
                 # addressed /godot/canvas/order beside /godot/canvas/<id>.
                 "video", "canvases", "canvas", "videoOutputs", "videoOutput",
+                # Namespace draft 40 (2026-10-07, WY): a ZONE is a further canvas
+                # on an output through a warp of its own, a child of the output.
+                "zone",
                 # Namespace draft 38 (2026-10-07). The show's CUE TEMPLATES: a
                 # set of a cue's settings kept under a name, a new cue born with
                 # them. `cueTemplates` is a CONTAINER token like `canvases`,

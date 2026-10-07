@@ -69,6 +69,7 @@
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/NetworkMonitorWindow.h>
+#include <wfg/client/ui/VideoMonitorWindow.h>
 #include <wfg/client/ui/ImportWindow.h>
 #include <wfg/client/ui/TemplateReviewWindow.h>
 #include <wfg/client/ui/ShowSettingsWindow.h>
@@ -119,7 +120,7 @@ namespace wfg::client
             menuImportAls,
             menuConvertUsed, menuConvertWhole, menuConvertUsedQuality, menuConvertWholeQuality,
             menuMovieSound, menuCancelConversion, menuDownloadFfmpeg,
-            menuSaveTemplate,
+            menuSaveTemplate, menuVideoMonitor,
 
             /*  THE TEMPLATES APPLY TEMPLATE OFFERS, numbered from here in the
                 order the show keeps them (namespace draft §38). */
@@ -762,6 +763,7 @@ namespace wfg::client
                     case menuShowSettings:
                     case menuSurfaces:
                     case menuNetworkMonitor:
+                    case menuVideoMonitor:
                     case menuAssociate:
                     case menuNewPerformance:
                     case menuUpdateTemplate:
@@ -844,6 +846,7 @@ namespace wfg::client
                     /*  Whenever the engine has a tap to read: watching the wire
                         changes nothing, under the lock or not. */
                     case menuNetworkMonitor: return host.traffic != nullptr;
+                    case menuVideoMonitor: return static_cast<bool> (host.canvasPictures);
 
                     //  Linux's, where the console gives one (Console.h, `associate`).
                     case menuAssociate: return host.associate != nullptr;
@@ -1014,6 +1017,11 @@ namespace wfg::client
                         in and out, in a window of its own. */
                     menu.addSeparator();
                     addMenuItem (menu, menuNetworkMonitor, "Network monitor...");
+
+                    /*  AND WHAT THE CANVASES SHOW (author, 2026-10-07: "a video
+                        monitor window for the canvases ... opened by an item in
+                        the show menu"). */
+                    addMenuItem (menu, menuVideoMonitor, "Video monitor...");
                 }
 
                 return menu;
@@ -1068,6 +1076,9 @@ namespace wfg::client
                         break;
                     case menuNetworkMonitor:
                         openNetworkMonitor();
+                        break;
+                    case menuVideoMonitor:
+                        openVideoMonitor();
                         break;
                     case menuAssociate:
                         if (host.associate)
@@ -1661,6 +1672,27 @@ namespace wfg::client
 
             std::vector<wfg::monitor::Capture> trafficArrived;
 
+            /*  THE VIDEO MONITOR (namespace draft 40), made once and kept like
+                the network monitor: open, the renderer draws the canvases small
+                for it; shut, it draws nothing for anybody. */
+            void openVideoMonitor()
+            {
+                if (! host.canvasPictures)
+                    return;
+
+                if (videoMonitor == nullptr)
+                {
+                    ui::VideoMonitorWindow::Actions monitorActions;
+                    monitorActions.monitor = host.monitorCanvases;
+                    monitorActions.panic = [this] { panic(); };
+                    videoMonitor = std::make_unique<ui::VideoMonitorWindow> (theme, std::move (monitorActions));
+                }
+
+                videoMonitor->open();
+            }
+
+            int videoMonitorPasses = 0;
+
             /*  RULE 2's ONE CALL SITE. A pointer copy, never null, and the
                 snapshot is only ever swapped whole. */
             void pass()
@@ -1716,6 +1748,19 @@ namespace wfg::client
                     {
                         openedSettingsAtStart = true;
                     }
+                }
+
+                /*  THE CANVASES FOR THE VIDEO MONITOR, ten times a second while it
+                    is open - as often as the renderer draws them (§40). */
+                if (videoMonitor != nullptr && videoMonitor->watching() && host.canvasPictures
+                      && ++videoMonitorPasses % std::max (1, juce::roundToInt (theme.refreshHz / 10.0)) == 0)
+                {
+                    std::vector<ui::VideoMonitorWindow::Tile> tiles;
+
+                    for (const auto& canvas : model::readCanvases (*snapshot))
+                        tiles.push_back ({ canvas.id, canvas.label(), canvas.width, canvas.height });
+
+                    videoMonitor->show (std::move (tiles), host.canvasPictures());
                 }
 
                 /*  THE VIRTUAL SURFACE, from the same pointer: rule 2's one call
@@ -4350,6 +4395,7 @@ namespace wfg::client
             std::unique_ptr<ui::ShowSettingsWindow> audioSettings;
             std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
             std::unique_ptr<ui::NetworkMonitorWindow> networkMonitor;   // Show > Network monitor...
+            std::unique_ptr<ui::VideoMonitorWindow> videoMonitor;       // Show > Video monitor...
             ui::Shell* shell = nullptr;                     // owned by the window
 
             /*  The plugins' own windows, each a helper process. Declared after

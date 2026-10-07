@@ -1874,6 +1874,48 @@ namespace wfg::tree
                                                    storedText (attribute, object)));
                     }
 
+                    /*  AN OUTPUT'S ZONES (namespace draft 40, WY): its children,
+                        bottom first, each at /godot/zone/<id> with the output it
+                        is on beside what it stores. */
+                    if (! isCanvases)
+                    {
+                        std::string zoneOrder;
+
+                        for (const auto& zone : object)
+                        {
+                            if (! zone.hasType ("Zone"))
+                                continue;
+
+                            const auto zoneId = zone[idProperty].toString().toStdString();
+
+                            if (zoneId.empty())
+                                continue;
+
+                            zoneOrder += (zoneOrder.empty() ? "" : " ") + zoneId;
+                            const auto zoneBase = std::string (godot) + "/zone/" + zoneId;
+
+                            for (const auto* row : doc::Schema::rowsForOwner ("zone"))
+                            {
+                                if (row->name == "output")
+                                {
+                                    nodes.push_back (makeLeaf (zoneBase + "/output", *row, id));
+                                    continue;
+                                }
+
+                                if (row->persist == doc::Persist::none)
+                                    continue;
+
+                                const doc::Attribute attribute { "Zone", row };
+                                nodes.push_back (makeLeaf (zoneBase + "/" + std::string (row->name), *row,
+                                                           storedText (attribute, zone)));
+                            }
+                        }
+
+                        for (const auto* row : doc::Schema::rowsForOwner ("videoOutput"))
+                            if (row->name == "zones")
+                                nodes.push_back (makeLeaf (base + "/zones", *row, zoneOrder));
+                    }
+
                     (isCanvases ? canvasOrder : videoOutputOrder).push_back (id);
                 }
             }

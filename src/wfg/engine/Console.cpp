@@ -5588,6 +5588,20 @@ namespace
                                                 && openedAtLaunchCount == 0;
                 clientHost.traffic = &traffic;
 
+                //  The fifth door (Console.h): the canvases, small, for the video monitor.
+                clientHost.monitorCanvases = [&videoHost] (bool wanted) { videoHost.setMonitoring (wanted); };
+                clientHost.canvasPictures = [&videoHost]
+                {
+                    std::vector<wfg::ClientHost::CanvasPicture> out;
+
+                    for (auto& picture : videoHost.canvasPictures())
+                        out.push_back ({ std::move (picture.canvasId), picture.width, picture.height,
+                                         static_cast<long long> (picture.sample),
+                                         std::vector<unsigned char> (picture.rgb.begin(), picture.rgb.end()) });
+
+                    return out;
+                };
+
                 //  The show's template (§25), for this window's document.
                 clientHost.compareWithTemplate = [&target] { return wfg::doc::Template::compare (target); };
                 clientHost.updateTemplate = [&target] (const std::vector<wfg::TemplatePick>& picks, bool copySounds)

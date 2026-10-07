@@ -855,8 +855,11 @@ namespace wfg::video
                                         "uniform float saturation;\n"
                                         "varying vec2 at;\n"
                                         "float noise (vec2 p) { return fract (sin (dot (p, vec2 (12.9898, 78.233))) * 43758.5453); }\n"
+                                        "uniform float opacity;\n"
+                                        "uniform float calibrate;\n"
                                         "void main() {\n"
                                         "  vec3 c = texture2D (canvas, at).rgb;\n"
+                                        "  if (calibrate < 0.5) { gl_FragColor = vec4 (c * opacity, opacity); return; }\n"
                                         "  c = pow (clamp (c * slope + offset, 0.0, 1.0), power);\n"
                                         "  float luma = dot (c, vec3 (0.2126, 0.7152, 0.0722));\n"
                                         "  c = clamp (luma + saturation * (c - luma), 0.0, 1.0);\n"
@@ -868,7 +871,7 @@ namespace wfg::video
                 if (! warpOk)
                     warpProgram.reset();
                 else
-                    for (const auto* name : { "canvas", "slope", "offset", "power", "saturation" })
+                    for (const auto* name : { "canvas", "slope", "offset", "power", "saturation", "opacity", "calibrate" })
                         warpUniforms[name] = std::make_unique<juce::OpenGLShaderProgram::Uniform> (*warpProgram, name);
 
                 if (maskProgram != nullptr)
@@ -1026,137 +1029,31 @@ namespace wfg::video
 
                 const auto* canvas = canvasIn (config, canvasId);
 
-                /*  A MAPPED OUTPUT draws its canvas offscreen first, at the
-                    canvas's own size, and bends it onto the display after; one
-                    nobody mapped draws straight onto the display, as ever. */
-                const auto mapped = mine != nullptr && canvas != nullptr && fillProgram != nullptr && warpProgram != nullptr
-                                      && (! mine->mesh.isIdentity() || ! mine->cdl.isIdentity())
-                                      && bindCanvasTarget (std::max (1, canvas->width), std::max (1, canvas->height));
-
                 for (auto& held : textures)
                     held.second.used = false;
 
-                if (fillProgram != nullptr && sample >= 0 && canvas != nullptr)
-                {
-                    const auto canvasWidth = static_cast<double> (std::max (1, canvas->width));
-                    const auto canvasHeight = static_cast<double> (std::max (1, canvas->height));
-                    const auto layers = readLayers (r);
+                const auto layers = readLayers (r);
 
-                    glEnable (GL_BLEND);
-                    glBindVertexArray (vertexArray);
+                /*  AN OUTPUT WITH ZONES (namespace draft 40, WY) draws each of
+                    its canvases offscreen, warps each onto an offscreen picture
+                    of the whole output by its blend and its opacity - its own
+                    canvas first - and calibrates that once onto the display. */
+                const auto zoned = mine != nullptr && ! mine->zones.empty() && fillProgram != nullptr && warpProgram != nullptr
+                                     && drawZoned (width, height, *mine, config, layers, sample);
 
-                    /*  THE COMPOSITOR'S ORDER AND ITS BLEND (Compositor.h), on the
-                        GPU: bottom first, each laid over what is under it. */
-                    for (const auto* layer : stackOf (layers, canvasId))
-                    {
-                        const auto a = opacityOf (*layer, sample);
+                /*  A MAPPED OUTPUT draws its canvas offscreen first, at the
+                    canvas's own size, and bends it onto the display after; one
+                    nobody mapped draws straight onto the display, as ever. */
+                const auto mapped = ! zoned && mine != nullptr && canvas != nullptr && fillProgram != nullptr && warpProgram != nullptr
+                                      && (! mine->mesh.isIdentity() || ! mine->cdl.isIdentity())
+                                      && bindTarget (targetAt (canvasTargets, 0), std::max (1, canvas->width), std::max (1, canvas->height));
 
-                        if (! (a > 0.0))
-                            continue;
-
-                        /*  THE LAYER'S BLEND (VD), on premultiplied colour - the
-                            compositor's formulas (Compositor.h) as equations. */
-                        switch (layer->blend)
-                        {
-                            case region::Blend::add:      glBlendFunc (GL_ONE, GL_ONE); break;
-                            case region::Blend::screen:   glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
-                            case region::Blend::multiply: glBlendFunc (GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA); break;
-                            case region::Blend::normal:   glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
-                        }
-
-                        if (layer->source == region::Source::fill)
-                        {
-                            fillProgram->use();
-                            colour->set (static_cast<GLfloat> ((layer->paint >> 16) & 0xffu) / 255.0f,
-                                         static_cast<GLfloat> ((layer->paint >> 8) & 0xffu) / 255.0f,
-                                         static_cast<GLfloat> (layer->paint & 0xffu) / 255.0f,
-                                         static_cast<GLfloat> (a));
-                            drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
-                                      1.0, 0.0);
-                        }
-                        else if (layer->source == region::Source::picture)
-                        {
-                            if (pictureProgram == nullptr)
-                                continue;
-
-                            auto* texture = textureFor (layer->file);
-
-                            if (texture == nullptr)
-                                continue;
-
-                            const auto& held = textures[layer->file];
-                            const auto uMax = static_cast<double> (held.width) / std::max (1, texture->getWidth());
-                            const auto vMin = 1.0 - static_cast<double> (held.height) / std::max (1, texture->getHeight());
-
-                            pictureProgram->use();
-                            glActiveTexture (GL_TEXTURE0);
-                            texture->bind();
-                            glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                            glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                            pictureUniform->set (0);
-                            opacityUniform->set (static_cast<GLfloat> (a));
-                            setGrade (pictureGrade, *layer);
-                            drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight,
-                                                   static_cast<double> (held.width), static_cast<double> (held.height)),
-                                      uMax, vMin);
-                            texture->unbind();
-                        }
-                        else if (layer->source == region::Source::movie)
-                        {
-                            drawMovie (*layer, sample, canvasWidth, canvasHeight, a);
-                        }
-                        else if (layer->source == region::Source::mask && maskProgram != nullptr)
-                        {
-                            GLfloat corners[2 * mask::maxPoints] {};
-
-                            for (int n = 0; n < layer->shape.count; ++n)
-                            {
-                                corners[2 * n] = layer->shape.x[n];
-                                corners[2 * n + 1] = layer->shape.y[n];
-                            }
-
-                            maskProgram->use();
-                            maskUniforms["colour"]->set (static_cast<GLfloat> ((layer->paint >> 16) & 0xffu) / 255.0f,
-                                                         static_cast<GLfloat> ((layer->paint >> 8) & 0xffu) / 255.0f,
-                                                         static_cast<GLfloat> (layer->paint & 0xffu) / 255.0f,
-                                                         static_cast<GLfloat> (a));
-                            maskUniforms["canvas"]->set (static_cast<GLfloat> (canvasWidth), static_cast<GLfloat> (canvasHeight));
-                            maskUniforms["feather"]->set (layer->shape.feather);
-                            maskUniforms["invert"]->set (layer->shape.invert ? 1.0f : 0.0f);
-                            maskUniforms["count"]->set (static_cast<GLint> (layer->shape.count));
-                            glUniform2fv (maskUniforms["corners"]->uniformID, mask::maxPoints, corners);
-                            drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
-                                      1.0, 0.0);
-                        }
-                    }
-
-                    /*  THE CANVAS'S LEVEL (namespace draft §38, WT): the whole
-                        composite taken towards black, once, over every layer -
-                        so two layers stacked go down together as one picture,
-                        never each turning see-through over the other. Before
-                        the mapping and the test pattern, which are the
-                        output's and not the canvas's. */
-                    if (const auto level = region::canvasLevelOf (r, canvasId); level < 1.0)
-                    {
-                        fillProgram->use();
-                        glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-                        colour->set (0.0f, 0.0f, 0.0f, static_cast<GLfloat> (1.0 - level));
-
-                        Placement whole;
-                        whole.canvasWidth = canvasWidth;
-                        whole.canvasHeight = canvasHeight;
-                        whole.pictureWidth = canvasWidth;
-                        whole.pictureHeight = canvasHeight;
-                        whole.fit = static_cast<int> (region::Fit::stretch);
-                        drawQuad (whole, 1.0, 0.0);
-                    }
-
-                    glBindVertexArray (0);
-                    glDisable (GL_BLEND);
-                }
+                if (! zoned && canvas != nullptr)
+                    compositeCanvas (canvasId, *canvas, layers, sample);
 
                 if (mapped)
                     warpOnto (width, height, *mine);
+
 
                 /*  A PICTURE NO LAYER DREW THIS FRAME is let go from this
                     context; the store keeps it while it is wanted. */
@@ -1192,17 +1089,248 @@ namespace wfg::video
                     drawTestPattern (width, height);
             }
 
-            /*  THE OFFSCREEN CANVAS: a half-float texture of the canvas's size
-                and its framebuffer, made or made again when the size changes,
-                bound, and cleared to black. False when the driver will not
-                give one - and the output is then drawn unmapped. */
-            bool bindCanvasTarget (int canvasWidth, int canvasHeight)
+            /*  ONE CANVAS'S LAYERS, bottom first, into whatever is bound - the
+                display, or an offscreen picture for a mapped output or a zone. */
+            void compositeCanvas (const std::string& canvasId, const region::CanvasReading& canvas,
+                                  const std::vector<region::LayerReading>& layers, std::int64_t sample)
             {
                 using namespace juce::gl;
 
-                if (canvasFrame == 0 || targetWidth != canvasWidth || targetHeight != canvasHeight)
+                if (fillProgram == nullptr || sample < 0)
+                    return;
+
+                const auto canvasWidth = static_cast<double> (std::max (1, canvas.width));
+                const auto canvasHeight = static_cast<double> (std::max (1, canvas.height));
+
+                glEnable (GL_BLEND);
+                glBindVertexArray (vertexArray);
+
+                /*  THE COMPOSITOR'S ORDER AND ITS BLEND (Compositor.h), on the
+                    GPU: bottom first, each laid over what is under it. */
+                for (const auto* layer : stackOf (layers, canvasId))
                 {
-                    releaseCanvasTarget();
+                    const auto a = opacityOf (*layer, sample);
+
+                    if (! (a > 0.0))
+                        continue;
+
+                    /*  THE LAYER'S BLEND (VD), on premultiplied colour - the
+                        compositor's formulas (Compositor.h) as equations. */
+                    switch (layer->blend)
+                    {
+                        case region::Blend::add:      glBlendFunc (GL_ONE, GL_ONE); break;
+                        case region::Blend::screen:   glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
+                        case region::Blend::multiply: glBlendFunc (GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA); break;
+                        case region::Blend::normal:   glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
+                    }
+
+                    if (layer->source == region::Source::fill)
+                    {
+                        fillProgram->use();
+                        colour->set (static_cast<GLfloat> ((layer->paint >> 16) & 0xffu) / 255.0f,
+                                     static_cast<GLfloat> ((layer->paint >> 8) & 0xffu) / 255.0f,
+                                     static_cast<GLfloat> (layer->paint & 0xffu) / 255.0f,
+                                     static_cast<GLfloat> (a));
+                        drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
+                                  1.0, 0.0);
+                    }
+                    else if (layer->source == region::Source::picture)
+                    {
+                        if (pictureProgram == nullptr)
+                            continue;
+
+                        auto* texture = textureFor (layer->file);
+
+                        if (texture == nullptr)
+                            continue;
+
+                        const auto& held = textures[layer->file];
+                        const auto uMax = static_cast<double> (held.width) / std::max (1, texture->getWidth());
+                        const auto vMin = 1.0 - static_cast<double> (held.height) / std::max (1, texture->getHeight());
+
+                        pictureProgram->use();
+                        glActiveTexture (GL_TEXTURE0);
+                        texture->bind();
+                        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                        pictureUniform->set (0);
+                        opacityUniform->set (static_cast<GLfloat> (a));
+                        setGrade (pictureGrade, *layer);
+                        drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                               static_cast<double> (held.width), static_cast<double> (held.height)),
+                                  uMax, vMin);
+                        texture->unbind();
+                    }
+                    else if (layer->source == region::Source::movie)
+                    {
+                        drawMovie (*layer, sample, canvasWidth, canvasHeight, a);
+                    }
+                    else if (layer->source == region::Source::mask && maskProgram != nullptr)
+                    {
+                        GLfloat corners[2 * mask::maxPoints] {};
+
+                        for (int n = 0; n < layer->shape.count; ++n)
+                        {
+                            corners[2 * n] = layer->shape.x[n];
+                            corners[2 * n + 1] = layer->shape.y[n];
+                        }
+
+                        maskProgram->use();
+                        maskUniforms["colour"]->set (static_cast<GLfloat> ((layer->paint >> 16) & 0xffu) / 255.0f,
+                                                     static_cast<GLfloat> ((layer->paint >> 8) & 0xffu) / 255.0f,
+                                                     static_cast<GLfloat> (layer->paint & 0xffu) / 255.0f,
+                                                     static_cast<GLfloat> (a));
+                        maskUniforms["canvas"]->set (static_cast<GLfloat> (canvasWidth), static_cast<GLfloat> (canvasHeight));
+                        maskUniforms["feather"]->set (layer->shape.feather);
+                        maskUniforms["invert"]->set (layer->shape.invert ? 1.0f : 0.0f);
+                        maskUniforms["count"]->set (static_cast<GLint> (layer->shape.count));
+                        glUniform2fv (maskUniforms["corners"]->uniformID, mask::maxPoints, corners);
+                        drawQuad (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
+                                  1.0, 0.0);
+                    }
+                }
+
+                /*  THE CANVAS'S LEVEL (namespace draft §38, WT): the whole
+                    composite taken towards black, once, over every layer -
+                    so two layers stacked go down together as one picture,
+                    never each turning see-through over the other. Before
+                    the mapping and the test pattern, which are the
+                    output's and not the canvas's. */
+                if (const auto level = region::canvasLevelOf (r, canvasId); level < 1.0)
+                {
+                    fillProgram->use();
+                    glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+                    colour->set (0.0f, 0.0f, 0.0f, static_cast<GLfloat> (1.0 - level));
+
+                    Placement whole;
+                    whole.canvasWidth = canvasWidth;
+                    whole.canvasHeight = canvasHeight;
+                    whole.pictureWidth = canvasWidth;
+                    whole.pictureHeight = canvasHeight;
+                    whole.fit = static_cast<int> (region::Fit::stretch);
+                    drawQuad (whole, 1.0, 0.0);
+                }
+
+                glBindVertexArray (0);
+                glDisable (GL_BLEND);
+            }
+
+            /*  THE ZONED OUTPUT (namespace draft 40, WY): its own canvas through
+                its own mesh, then each zone's canvas through the zone's, each
+                laid by its blend and its opacity onto an offscreen picture of
+                the whole output; then that picture onto the display once, with
+                the output's CDL and the dither. False when the driver gives no
+                offscreen picture, and the output is drawn as before. */
+            bool drawZoned (int width, int height, const region::OutputReading& output,
+                            const region::ConfigReading& config, const std::vector<region::LayerReading>& layers,
+                            std::int64_t sample)
+            {
+                using namespace juce::gl;
+
+                if (! bindTarget (outputTarget, width, height))
+                    return false;
+
+                struct Pass
+                {
+                    std::string canvas;
+                    region::Blend blend;
+                    double opacity;
+                    const Mesh* mesh;
+                };
+
+                std::vector<Pass> passes;
+                passes.push_back ({ output.canvas, region::Blend::normal, 1.0, &output.mesh });
+
+                for (const auto& zone : output.zones)
+                    passes.push_back ({ zone.canvas, zone.blend, zone.opacity, &zone.mesh });
+
+                for (std::size_t n = 0; n < passes.size(); ++n)
+                {
+                    const auto& pass = passes[n];
+                    const auto* canvas = canvasIn (config, pass.canvas);
+
+                    if (canvas == nullptr || ! (pass.opacity > 0.0))
+                        continue;
+
+                    auto& target = targetAt (canvasTargets, n);
+
+                    if (! bindTarget (target, std::max (1, canvas->width), std::max (1, canvas->height)))
+                        continue;
+
+                    compositeCanvas (pass.canvas, *canvas, layers, sample);
+
+                    glBindFramebuffer (GL_FRAMEBUFFER, outputTarget.frame);
+                    glViewport (0, 0, width, height);
+                    glEnable (GL_BLEND);
+
+                    switch (pass.blend)
+                    {
+                        case region::Blend::add:      glBlendFunc (GL_ONE, GL_ONE); break;
+                        case region::Blend::screen:   glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
+                        case region::Blend::multiply: glBlendFunc (GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA); break;
+                        case region::Blend::normal:   glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
+                    }
+
+                    warpProgram->use();
+                    warpUniforms["opacity"]->set (static_cast<GLfloat> (pass.opacity));
+                    warpUniforms["calibrate"]->set (0.0f);
+                    drawThroughMesh (targetAt (geometries, n + 1), *pass.mesh, target.texture);
+                    glDisable (GL_BLEND);
+                }
+
+                //  The whole output onto the display, calibrated once.
+                glBindFramebuffer (GL_FRAMEBUFFER, context.getFrameBufferID());
+                glViewport (0, 0, width, height);
+                glDisable (GL_BLEND);
+                glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
+                glClear (GL_COLOR_BUFFER_BIT);
+
+                warpProgram->use();
+                setCalibration (output.cdl);
+                drawThroughMesh (targetAt (geometries, 0), identityMesh, outputTarget.texture);
+                return true;
+            }
+
+            void setCalibration (const Cdl& cdl)
+            {
+                warpUniforms["opacity"]->set (1.0f);
+                warpUniforms["calibrate"]->set (1.0f);
+                warpUniforms["slope"]->set (static_cast<GLfloat> (cdl.slope[0]), static_cast<GLfloat> (cdl.slope[1]), static_cast<GLfloat> (cdl.slope[2]));
+                warpUniforms["offset"]->set (static_cast<GLfloat> (cdl.offset[0]), static_cast<GLfloat> (cdl.offset[1]), static_cast<GLfloat> (cdl.offset[2]));
+                warpUniforms["power"]->set (static_cast<GLfloat> (cdl.power[0]), static_cast<GLfloat> (cdl.power[1]), static_cast<GLfloat> (cdl.power[2]));
+                warpUniforms["saturation"]->set (static_cast<GLfloat> (cdl.saturation));
+            }
+
+            /*  AN OFFSCREEN PICTURE: a half-float texture and its framebuffer,
+                made or made again when the size changes, bound, and cleared to
+                black. False when the driver will not give one - and the output
+                is then drawn unmapped. One per canvas a zoned output draws, one
+                for the whole output, so none is made again every frame. */
+            struct Target
+            {
+                GLuint frame = 0, texture = 0;
+                int width = 0, height = 0;
+            };
+
+            template <typename Slot>
+            static Slot& targetAt (std::vector<Slot>& slots, std::size_t at)
+            {
+                if (slots.size() <= at)
+                    slots.resize (at + 1);
+
+                return slots[at];
+            }
+
+            bool bindTarget (Target& target, int canvasWidth, int canvasHeight)
+            {
+                using namespace juce::gl;
+
+                if (target.frame == 0 || target.width != canvasWidth || target.height != canvasHeight)
+                {
+                    releaseTarget (target);
+
+                    auto& canvasTexture = target.texture;
+                    auto& canvasFrame = target.frame;
 
                     glGenTextures (1, &canvasTexture);
                     glBindTexture (GL_TEXTURE_2D, canvasTexture);
@@ -1222,44 +1350,48 @@ namespace wfg::video
 
                     if (! complete)
                     {
-                        releaseCanvasTarget();
+                        releaseTarget (target);
                         return false;
                     }
 
-                    targetWidth = canvasWidth;
-                    targetHeight = canvasHeight;
+                    target.width = canvasWidth;
+                    target.height = canvasHeight;
                 }
 
-                glBindFramebuffer (GL_FRAMEBUFFER, canvasFrame);
+                glBindFramebuffer (GL_FRAMEBUFFER, target.frame);
                 glViewport (0, 0, canvasWidth, canvasHeight);
                 glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
                 glClear (GL_COLOR_BUFFER_BIT);
                 return true;
             }
 
-            void releaseCanvasTarget()
+            static void releaseTarget (Target& target)
             {
                 using namespace juce::gl;
 
-                if (canvasFrame != 0)
-                    glDeleteFramebuffers (1, &canvasFrame);
+                if (target.frame != 0)
+                    glDeleteFramebuffers (1, &target.frame);
 
-                if (canvasTexture != 0)
-                    glDeleteTextures (1, &canvasTexture);
+                if (target.texture != 0)
+                    glDeleteTextures (1, &target.texture);
 
-                canvasFrame = 0;
-                canvasTexture = 0;
-                targetWidth = targetHeight = 0;
+                target = Target {};
             }
 
-            /*  THE CANVAS ONTO THE DISPLAY THROUGH THE MESH: a grid of 64 by 64
-                quads, each corner where the mesh sends that point of the canvas
-                (Mapping.h), made again when the mesh changes. */
+            void releaseTargets()
+            {
+                for (auto& target : canvasTargets)
+                    releaseTarget (target);
+
+                releaseTarget (outputTarget);
+                canvasTargets.clear();
+            }
+
+            /*  THE CANVAS ONTO THE DISPLAY THROUGH THE MESH, calibrated: the
+                unzoned output's one pass. */
             void warpOnto (int width, int height, const region::OutputReading& output)
             {
                 using namespace juce::gl;
-
-                constexpr int steps = 64;
 
                 glBindFramebuffer (GL_FRAMEBUFFER, context.getFrameBufferID());
                 glViewport (0, 0, width, height);
@@ -1267,13 +1399,53 @@ namespace wfg::video
                 glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
                 glClear (GL_COLOR_BUFFER_BIT);
 
-                if (warpArray == 0)
+                warpProgram->use();
+                setCalibration (output.cdl);
+                drawThroughMesh (targetAt (geometries, 0), output.mesh, targetAt (canvasTargets, 0).texture);
+            }
+
+            /*  A PICTURE THROUGH A MESH: a grid of 64 by 64 quads, each corner
+                where the mesh sends that point (Mapping.h), its vertices made
+                again only when its mesh changes - one geometry per pass, so a
+                zoned output's several meshes are not remade every frame. The
+                program and its uniforms are the caller's. */
+            struct WarpGeometry
+            {
+                GLuint array = 0, buffer = 0;
+                Mesh drawn;
+            };
+
+            void drawThroughMesh (WarpGeometry& geometry, const Mesh& mesh, GLuint texture)
+            {
+                using namespace juce::gl;
+
+                constexpr int steps = 64;
+
+                if (warpIndices == 0)
                 {
-                    glGenVertexArrays (1, &warpArray);
-                    glGenBuffers (1, &warpBuffer);
+                    std::vector<GLuint> indices;
+                    constexpr GLuint across = static_cast<GLuint> (steps) + 1u;
+
+                    for (GLuint row = 0; row + 1u < across; ++row)
+                        for (GLuint column = 0; column + 1u < across; ++column)
+                        {
+                            const auto at = row * across + column;
+                            indices.insert (indices.end(), { at, at + 1u, at + across, at + 1u, at + across + 1u, at + across });
+                        }
+
                     glGenBuffers (1, &warpIndices);
-                    glBindVertexArray (warpArray);
-                    glBindBuffer (GL_ARRAY_BUFFER, warpBuffer);
+                    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, warpIndices);
+                    glBufferData (GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr> (indices.size() * sizeof (GLuint)),
+                                  indices.data(), GL_STATIC_DRAW);
+                    glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, 0);
+                }
+
+                if (geometry.array == 0)
+                {
+                    glGenVertexArrays (1, &geometry.array);
+                    glGenBuffers (1, &geometry.buffer);
+                    glBindVertexArray (geometry.array);
+                    glBindBuffer (GL_ARRAY_BUFFER, geometry.buffer);
                     glBufferData (GL_ARRAY_BUFFER, sizeof (GLfloat) * 4 * (steps + 1) * (steps + 1), nullptr, GL_DYNAMIC_DRAW);
 
                     const auto position = juce::OpenGLShaderProgram::Attribute (*warpProgram, "position").attributeID;
@@ -1284,26 +1456,13 @@ namespace wfg::video
                     glVertexAttribPointer (texel, 2, GL_FLOAT, GL_FALSE, sizeof (GLfloat) * 4,
                                            reinterpret_cast<const void*> (sizeof (GLfloat) * 2));
 
-                    std::vector<GLuint> indices;
-
-                    constexpr GLuint across = static_cast<GLuint> (steps) + 1u;
-
-                    for (GLuint row = 0; row + 1u < across; ++row)
-                        for (GLuint column = 0; column + 1u < across; ++column)
-                        {
-                            const auto at = row * across + column;
-                            indices.insert (indices.end(), { at, at + 1u, at + across, at + 1u, at + across + 1u, at + across });
-                        }
-
                     glBindBuffer (GL_ELEMENT_ARRAY_BUFFER, warpIndices);
-                    glBufferData (GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr> (indices.size() * sizeof (GLuint)),
-                                  indices.data(), GL_STATIC_DRAW);
                     glBindVertexArray (0);
-                    meshDrawn = Mesh {};
+                    geometry.drawn = Mesh {};
                 }
 
-                if (meshDrawn.columns != output.mesh.columns || meshDrawn.rows != output.mesh.rows
-                      || meshDrawn.x != output.mesh.x || meshDrawn.y != output.mesh.y)
+                if (geometry.drawn.columns != mesh.columns || geometry.drawn.rows != mesh.rows
+                      || geometry.drawn.x != mesh.x || geometry.drawn.y != mesh.y)
                 {
                     std::vector<GLfloat> vertices;
                     vertices.reserve (4 * (steps + 1) * (steps + 1));
@@ -1314,7 +1473,7 @@ namespace wfg::video
                             const auto s = static_cast<double> (column) / steps;
                             const auto t = static_cast<double> (row) / steps;
                             double x = 0.0, y = 0.0;
-                            meshAt (output.mesh, s, t, x, y);
+                            meshAt (mesh, s, t, x, y);
 
                             vertices.push_back (static_cast<GLfloat> (2.0 * x - 1.0));
                             vertices.push_back (static_cast<GLfloat> (1.0 - 2.0 * y));
@@ -1322,22 +1481,16 @@ namespace wfg::video
                             vertices.push_back (static_cast<GLfloat> (1.0 - t));
                         }
 
-                    glBindBuffer (GL_ARRAY_BUFFER, warpBuffer);
+                    glBindBuffer (GL_ARRAY_BUFFER, geometry.buffer);
                     glBufferSubData (GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr> (vertices.size() * sizeof (GLfloat)), vertices.data());
-                    meshDrawn = output.mesh;
+                    geometry.drawn = mesh;
                 }
 
-                const auto& cdl = output.cdl;
-                warpProgram->use();
                 glActiveTexture (GL_TEXTURE0);
-                glBindTexture (GL_TEXTURE_2D, canvasTexture);
+                glBindTexture (GL_TEXTURE_2D, texture);
                 warpUniforms["canvas"]->set (0);
-                warpUniforms["slope"]->set (static_cast<GLfloat> (cdl.slope[0]), static_cast<GLfloat> (cdl.slope[1]), static_cast<GLfloat> (cdl.slope[2]));
-                warpUniforms["offset"]->set (static_cast<GLfloat> (cdl.offset[0]), static_cast<GLfloat> (cdl.offset[1]), static_cast<GLfloat> (cdl.offset[2]));
-                warpUniforms["power"]->set (static_cast<GLfloat> (cdl.power[0]), static_cast<GLfloat> (cdl.power[1]), static_cast<GLfloat> (cdl.power[2]));
-                warpUniforms["saturation"]->set (static_cast<GLfloat> (cdl.saturation));
 
-                glBindVertexArray (warpArray);
+                glBindVertexArray (geometry.array);
                 glDrawElements (GL_TRIANGLES, steps * steps * 6, GL_UNSIGNED_INT, nullptr);
                 glBindVertexArray (0);
                 glBindTexture (GL_TEXTURE_2D, 0);
@@ -1502,16 +1655,21 @@ namespace wfg::video
                 movieTextures.clear();
                 maskUniforms.clear();
                 maskProgram.reset();
-                releaseCanvasTarget();
+                releaseTargets();
 
-                if (warpArray != 0)
-                {
-                    glDeleteBuffers (1, &warpBuffer);
+                for (auto& geometry : geometries)
+                    if (geometry.array != 0)
+                    {
+                        glDeleteBuffers (1, &geometry.buffer);
+                        glDeleteVertexArrays (1, &geometry.array);
+                    }
+
+                geometries.clear();
+
+                if (warpIndices != 0)
                     glDeleteBuffers (1, &warpIndices);
-                    glDeleteVertexArrays (1, &warpArray);
-                }
 
-                warpArray = warpBuffer = warpIndices = 0;
+                warpIndices = 0;
                 warpUniforms.clear();
                 warpProgram.reset();
 
@@ -1638,10 +1796,11 @@ namespace wfg::video
 
             std::unique_ptr<juce::OpenGLShaderProgram> warpProgram;
             std::map<std::string, std::unique_ptr<juce::OpenGLShaderProgram::Uniform>> warpUniforms;
-            GLuint canvasFrame = 0, canvasTexture = 0;
-            int targetWidth = 0, targetHeight = 0;
-            GLuint warpArray = 0, warpBuffer = 0, warpIndices = 0;
-            Mesh meshDrawn;
+            std::vector<Target> canvasTargets;
+            Target outputTarget;
+            std::vector<WarpGeometry> geometries;
+            GLuint warpIndices = 0;
+            const Mesh identityMesh = Mesh::identity();
 
             struct GradeTable
             {
@@ -1699,7 +1858,24 @@ namespace wfg::video
                 if (region::readConfig (r, config) && (config.seq != boundSeq || displaysMoved))
                 {
                     boundSeq = config.seq;
-                    bind (config);
+
+                    /*  THE WINDOWS ARE MADE AGAIN ONLY WHEN WHICH OUTPUT IS ON
+                        WHICH DISPLAY CHANGED (namespace draft 40): a mesh, a
+                        zone, a calibration or a canvas is read by every frame
+                        from the configuration, so a corner dragged in the warp
+                        editor moves the picture without the projector going
+                        black for a moment, each step of the drag. */
+                    std::string key;
+
+                    for (const auto& output : config.outputs)
+                        key += output.id + "|" + (output.enabled ? "1" : "0") + "|" + output.display + "|"
+                             + output.displayId + ";";
+
+                    if (displaysMoved || key != boundKey || windows.empty() != config.outputs.empty())
+                    {
+                        boundKey = key;
+                        bind (config);
+                    }
                 }
 
                 //  Each window over its display's pixels, half a second after the display check (§39).
@@ -1748,8 +1924,81 @@ namespace wfg::video
                 {
                     tintTicks = 0;
                     writeTints (config, layers);
+
+                    //  And each canvas small, while a monitor wants them (namespace draft 40).
+                    if (r.previewWanted.load (std::memory_order_acquire) != 0)
+                        writePreviews (config, layers);
                 }
             }
+
+            /*  THE MONITOR'S PICTURES (namespace draft 40, the author's "video
+                monitor window for the canvases"): every canvas, through the same
+                compositor the probe and the tints use, at most 256 by 144 and its
+                own shape, its level in it - one read a pixel of what the stores
+                already hold, nothing back from the graphics card. A tenth of a
+                second apart, and only while a window asks. */
+            void writePreviews (const region::ConfigReading& config, const std::vector<region::LayerReading>& layers)
+            {
+                const auto now = clock.sampleAt (r, steadyNanos());
+
+                if (now < 0)
+                    return;
+
+                const auto count = std::min<std::size_t> (config.canvases.size(), region::maxCanvases);
+
+                for (std::size_t n = 0; n < static_cast<std::size_t> (region::maxCanvases); ++n)
+                {
+                    auto& slot = r.previews[n];
+
+                    if (n >= count)
+                    {
+                        if (slot.id[0] != 0)
+                        {
+                            region::beginWrite (slot.seq);
+                            region::writeText (slot.id, std::string {});
+                            region::endWrite (slot.seq);
+                        }
+
+                        continue;
+                    }
+
+                    const auto& canvas = config.canvases[n];
+                    const auto canvasWidth = static_cast<double> (std::max (1, canvas.width));
+                    const auto canvasHeight = static_cast<double> (std::max (1, canvas.height));
+                    const auto across = canvasWidth / canvasHeight >= static_cast<double> (region::previewWidth) / region::previewHeight;
+                    const auto width = across ? region::previewWidth
+                                              : std::max (1, static_cast<int> (std::lround (region::previewHeight * canvasWidth / canvasHeight)));
+                    const auto height = across ? std::max (1, static_cast<int> (std::lround (region::previewWidth * canvasHeight / canvasWidth)))
+                                               : region::previewHeight;
+                    const auto stack = stackOf (layers, canvas.id);
+                    const auto level = region::canvasLevelOf (r, canvas.id);
+
+                    previewScratch.resize (static_cast<std::size_t> (3 * width * height));
+
+                    for (int row = 0; row < height; ++row)
+                        for (int column = 0; column < width; ++column)
+                        {
+                            const auto x = ((column + 0.5) / width - 0.5) * canvasWidth;
+                            const auto y = (0.5 - (row + 0.5) / height) * canvasHeight;
+                            const auto rgb = stack.empty() ? 0u
+                                                           : scaledColour (colourAt (stack, now, canvasWidth, canvasHeight, x, y, &sampler), level);
+                            auto* pixel = previewScratch.data() + 3 * (row * width + column);
+                            pixel[0] = static_cast<std::uint8_t> ((rgb >> 16) & 0xffu);
+                            pixel[1] = static_cast<std::uint8_t> ((rgb >> 8) & 0xffu);
+                            pixel[2] = static_cast<std::uint8_t> (rgb & 0xffu);
+                        }
+
+                    region::beginWrite (slot.seq);
+                    region::writeText (slot.id, canvas.id);
+                    slot.width.store (width, std::memory_order_relaxed);
+                    slot.height.store (height, std::memory_order_relaxed);
+                    slot.sample.store (now, std::memory_order_relaxed);
+                    std::copy (previewScratch.begin(), previewScratch.end(), slot.rgb);
+                    region::endWrite (slot.seq);
+                }
+            }
+
+            std::vector<std::uint8_t> previewScratch;
 
             /*  THE TINTS, through the compositor the probe uses, from the
                 pictures and frames the stores already hold: each layer alone
@@ -1923,6 +2172,7 @@ namespace wfg::video
             std::int64_t parentPid = 0;
             bool windowed = true;
             std::int64_t ticks = 0;
+            std::string boundKey;
             int tintTicks = 0;
             std::uint32_t boundSeq = 0xffffffffu;
 

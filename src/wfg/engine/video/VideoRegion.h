@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 10;
+    constexpr std::uint32_t version = 11;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -80,6 +80,15 @@ namespace wfg::video::region
     constexpr int maxOutputs = 16;
     constexpr int maxDisplays = 16;
     constexpr int maxLayers = 64;
+
+    /** Zones on one output over its own canvas, at most (namespace draft 40, WY). */
+    constexpr int maxZones = 8;
+
+    /*  THE MONITOR'S PICTURE OF A CANVAS (namespace draft 40, the author's
+        "video monitor window for the canvases"), at most this many pixels
+        across and down - drawn small, on the CPU, while a window wants it. */
+    constexpr int previewWidth = 256;
+    constexpr int previewHeight = 144;
 
     /*  ONE MOVING VALUE'S POINTS, at most, held at once; a power of two. A
         ring per value, so a fade placing a point a tick on one never pushes
@@ -140,6 +149,20 @@ namespace wfg::video::region
         std::atomic<std::int32_t> height;
     };
 
+    /*  A FURTHER CANVAS ON AN OUTPUT (namespace draft 40, WY): which canvas,
+        how it lies on what is under it, how solid, and the warp that places it
+        on the display - a mesh as the output's own. */
+    struct Zone
+    {
+        char canvas[idChars];
+        std::atomic<std::uint32_t> blend;
+        std::atomic<float> opacity;
+        std::atomic<std::int32_t> meshColumns;
+        std::atomic<std::int32_t> meshRows;
+        float meshX[Mesh::maxPoints * Mesh::maxPoints];
+        float meshY[Mesh::maxPoints * Mesh::maxPoints];
+    };
+
     struct Output
     {
         char id[idChars];
@@ -157,6 +180,10 @@ namespace wfg::video::region
         float meshX[Mesh::maxPoints * Mesh::maxPoints];
         float meshY[Mesh::maxPoints * Mesh::maxPoints];
         double cdl[10];
+
+        /*  AND ITS ZONES, bottom first, each over what is under it (40). */
+        std::atomic<std::uint32_t> zoneCount;
+        Zone zones[maxZones];
     };
 
     /*  THE SHOW'S CANVASES AND OUTPUTS, rewritten whole when the show changes,
@@ -191,6 +218,20 @@ namespace wfg::video::region
         std::atomic<std::uint32_t> seq;
         char id[idChars];
         std::atomic<std::uint32_t> rgb;
+    };
+
+    /*  A CANVAS AS THE MONITOR SEES IT (namespace draft 40): its picture,
+        small, as 8-bit RGB rows from the top-left, written by the renderer
+        about ten times a second under its own `seq` while `previewWanted` is
+        up, by the canvas's identifier. */
+    struct Preview
+    {
+        std::atomic<std::uint32_t> seq;
+        char id[idChars];
+        std::atomic<std::int32_t> width;
+        std::atomic<std::int32_t> height;
+        std::atomic<std::int64_t> sample;
+        std::uint8_t rgb[previewWidth * previewHeight * 3];
     };
 
     struct PointSlot
@@ -333,6 +374,12 @@ namespace wfg::video::region
             colour (namespace draft §38, WR) - a DCA strip's ring. */
         Tint layerTints[maxLayers];
         Tint canvasTints[maxCanvases];
+
+        /** Engine to renderer: 1 while a monitor window wants the canvases drawn (40). */
+        std::atomic<std::uint32_t> previewWanted;
+
+        /** Renderer to engine: each canvas, small, while it is wanted (40). */
+        Preview previews[maxCanvases];
     };
 
     static_assert (std::atomic<std::uint32_t>::is_always_lock_free
@@ -375,6 +422,8 @@ namespace wfg::video::region
         mix (pointsPerLayer);
         mix (static_cast<std::uint32_t> (sizeof (CanvasLevel)));
         mix (static_cast<std::uint32_t> (sizeof (Tint)));
+        mix (static_cast<std::uint32_t> (sizeof (Zone)));
+        mix (static_cast<std::uint32_t> (sizeof (Preview)));
         return hash;
     }
 
@@ -679,6 +728,14 @@ namespace wfg::video::region
         int height = 1080;
     };
 
+    struct ZoneReading
+    {
+        std::string canvas;
+        Blend blend = Blend::normal;
+        double opacity = 1.0;       ///< 0..1
+        Mesh mesh;
+    };
+
     struct OutputReading
     {
         std::string id;
@@ -690,6 +747,7 @@ namespace wfg::video::region
         bool testPattern = false;
         Mesh mesh;
         Cdl cdl;
+        std::vector<ZoneReading> zones {};
     };
 
     struct ConfigReading
@@ -755,7 +813,7 @@ namespace wfg::video::region
                 OutputReading entry { readText (o.id), readText (o.canvas), readText (o.name),
                                       readText (o.display), readText (o.displayId),
                                       o.enabled.load (std::memory_order_relaxed) != 0,
-                                      o.testPattern.load (std::memory_order_relaxed) != 0, {}, {} };
+                                      o.testPattern.load (std::memory_order_relaxed) != 0, {}, {}, {} };
 
                 entry.mesh.columns = std::clamp (static_cast<int> (o.meshColumns.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
                 entry.mesh.rows = std::clamp (static_cast<int> (o.meshRows.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
@@ -763,6 +821,24 @@ namespace wfg::video::region
                 entry.mesh.x.assign (o.meshX, o.meshX + points);
                 entry.mesh.y.assign (o.meshY, o.meshY + points);
                 entry.cdl = Cdl::from (std::vector<double> (o.cdl, o.cdl + 10));
+
+                const auto zones = std::min<std::uint32_t> (o.zoneCount.load (std::memory_order_relaxed), maxZones);
+
+                for (std::uint32_t z = 0; z < zones; ++z)
+                {
+                    const auto& in = o.zones[z];
+                    ZoneReading zone;
+                    zone.canvas = readText (in.canvas);
+                    zone.blend = static_cast<Blend> (std::min<std::uint32_t> (in.blend.load (std::memory_order_relaxed), 3u));
+                    zone.opacity = std::clamp (static_cast<double> (in.opacity.load (std::memory_order_relaxed)), 0.0, 1.0);
+                    zone.mesh.columns = std::clamp (static_cast<int> (in.meshColumns.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
+                    zone.mesh.rows = std::clamp (static_cast<int> (in.meshRows.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
+                    const auto count = static_cast<std::size_t> (zone.mesh.columns * zone.mesh.rows);
+                    zone.mesh.x.assign (in.meshX, in.meshX + count);
+                    zone.mesh.y.assign (in.meshY, in.meshY + count);
+                    entry.zones.push_back (std::move (zone));
+                }
+
                 out.outputs.push_back (std::move (entry));
             }
         });
@@ -816,6 +892,25 @@ namespace wfg::video::region
             }
 
             o.cdl[9] = cdl.saturation;
+
+            const auto zoneCount = std::min<std::size_t> (outputs[n].zones.size(), maxZones);
+
+            for (std::size_t z = 0; z < zoneCount; ++z)
+            {
+                const auto& from = outputs[n].zones[z];
+                auto& into = o.zones[z];
+                writeText (into.canvas, from.canvas);
+                into.blend.store (static_cast<std::uint32_t> (from.blend), std::memory_order_relaxed);
+                into.opacity.store (static_cast<float> (std::clamp (from.opacity, 0.0, 1.0)), std::memory_order_relaxed);
+
+                const auto zoneMesh = from.mesh.isValid() ? from.mesh : Mesh::identity();
+                into.meshColumns.store (zoneMesh.columns, std::memory_order_relaxed);
+                into.meshRows.store (zoneMesh.rows, std::memory_order_relaxed);
+                std::copy (zoneMesh.x.begin(), zoneMesh.x.end(), into.meshX);
+                std::copy (zoneMesh.y.begin(), zoneMesh.y.end(), into.meshY);
+            }
+
+            o.zoneCount.store (static_cast<std::uint32_t> (zoneCount), std::memory_order_relaxed);
         }
 
         r.config.outputCount.store (static_cast<std::uint32_t> (outputCount), std::memory_order_relaxed);

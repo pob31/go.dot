@@ -2,6 +2,7 @@
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/Look.h>
+#include <wfg/client/ui/WarpEditorWindow.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
@@ -5111,7 +5112,7 @@ namespace wfg::client::ui
                                                           { return a.id == b.id && a.name == b.name && a.canvas == b.canvas
                                                                      && a.display == b.display && a.enabled == b.enabled
                                                                      && a.bound == b.bound && a.problem == b.problem
-                                                                     && a.testPattern == b.testPattern; });
+                                                                     && a.testPattern == b.testPattern && a.zones == b.zones; });
 
                 const auto sameLock = locked == ! editable;
 
@@ -5191,6 +5192,8 @@ namespace wfg::client::ui
 
                 for (auto at = 0; at < 6; ++at)
                     g.drawText (outputNames[at], outputCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
+
+                g.drawText ("Warp, zones", outputCells[7], juce::Justification::centredLeft);
             }
 
         private:
@@ -5206,16 +5209,17 @@ namespace wfg::client::ui
                 return { area, width, height, level, dca, cross };
             }
 
-            static std::array<juce::Rectangle<int>, 7> outputCellsFor (juce::Rectangle<int> row)
+            static std::array<juce::Rectangle<int>, 8> outputCellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
                 const auto cross = area.removeFromRight (24);
-                const auto state = area.removeFromRight (240);
+                const auto warp = area.removeFromRight (110);
+                const auto state = area.removeFromRight (220);
                 const auto identify = area.removeFromRight (72);
                 const auto on = area.removeFromRight (48);
                 const auto display = area.removeFromRight (240);
                 const auto shows = area.removeFromRight (180);
-                return { area, shows, display, on, identify, state, cross };
+                return { area, shows, display, on, identify, state, cross, warp };
             }
 
             static int cellIndexAt (const juce::Rectangle<int>* cells, int count, int x)
@@ -5351,6 +5355,14 @@ namespace wfg::client::ui
                         g.setColour (Look::colour (page.theme, "ink-dim"));
                         g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[6], juce::Justification::centred);
                     }
+
+                    /*  ITS WARPS (namespace draft 40, WY): a door to the editor,
+                        saying how many zones lie over its own canvas. Open under
+                        the lock too, to look; it refuses changes there. */
+                    g.setColour (Look::colour (page.theme, "ink"));
+                    g.drawText (entry.zones == 0 ? juce::String ("Warp...")
+                                                 : "Warp... + " + juce::String (entry.zones) + (entry.zones == 1 ? " zone" : " zones"),
+                                cells[7], juce::Justification::centredLeft, true);
                 }
 
                 void listBoxItemClicked (int row, const juce::MouseEvent& event) override
@@ -5363,7 +5375,13 @@ namespace wfg::client::ui
                     const auto cells = outputCellsFor ({ 0, 0, width, page.outputList.getRowHeight() });
                     const auto& entry = page.outputs[static_cast<std::size_t> (row)];
                     const auto base = "/godot/videoOutput/" + entry.id + "/";
-                    const auto cell = cellIndexAt (cells.data(), 7, event.x);
+                    const auto cell = cellIndexAt (cells.data(), 8, event.x);
+
+                    if (cell == 7)
+                    {
+                        page.openWarps (entry.id);
+                        return;
+                    }
 
                     /*  IDENTIFY IS TONIGHT'S, and is answered under the lock
                         too: finding a projector is not editing the show. */
@@ -5609,6 +5627,32 @@ namespace wfg::client::ui
 
                 return {};
             }
+
+        public:
+            /*  THE WARP EDITOR (namespace draft 40), one window for whichever
+                output it was last opened on, fed every pass from the snapshot. */
+            void follow (const tree::TreeSnapshot& snapshot)
+            {
+                if (! pendingWarps.empty())
+                {
+                    if (warps == nullptr)
+                        warps = std::make_unique<WarpEditorWindow> (theme, send);
+
+                    warps->open (pendingWarps, snapshot);
+                    pendingWarps.clear();
+                }
+                else if (warps != nullptr)
+                {
+                    warps->refresh (snapshot);
+                }
+            }
+
+            //  Opened on the next pass, with that pass's snapshot.
+            void openWarps (const std::string& outputId) { pendingWarps = outputId; }
+
+        private:
+            std::string pendingWarps;
+            std::unique_ptr<WarpEditorWindow> warps;
 
             template <typename Row>
             static std::string freeName (const std::vector<Row>& rows, const char* stem)
@@ -6345,6 +6389,7 @@ namespace wfg::client::ui
                 the renderer's state, the engine's - re-read every pass, since
                 every cell lands at once and a projector plugged in has to reach
                 the menu without the show being edited (Phase 8a). */
+            video->follow (snapshot);
             video->show (model::readCanvases (snapshot), model::readVideoOutputs (snapshot),
                          model::readDisplays (snapshot), model::text (snapshot, "/godot/videoOutput/renderer"),
                          model::text (snapshot, "/godot/videoOutput/rendererProblem"),

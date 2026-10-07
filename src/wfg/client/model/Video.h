@@ -66,6 +66,7 @@ namespace wfg::client::model
         bool testPattern = false;
         std::int64_t framesPresented = 0;
         std::int64_t framesLate = 0;
+        int zones = 0;              ///< how many zones lie over its own canvas (namespace draft 40)
 
         std::string label() const;
     };
@@ -75,6 +76,51 @@ namespace wfg::client::model
 
     /** Every video output, in /godot/videoOutput/order. */
     std::vector<VideoOutputRow> readVideoOutputs (const tree::TreeSnapshot&);
+
+    //==============================================================================
+    /*  A WARP AS THE WINDOW HOLDS IT (namespace draft 40): its grid of control
+        points - the four corners, and the extra splits between them - each
+        where it lands on the display, x right and y down in 0..1, row by row
+        from the top-left. The output's own mesh and every zone's are one. */
+    struct WarpPoints
+    {
+        int columns = 2;
+        int rows = 2;
+        std::vector<double> x, y;
+
+        static WarpPoints whole (int columns = 2, int rows = 2);
+        bool isWhole() const;
+        std::size_t index (int column, int row) const { return static_cast<std::size_t> (row * columns + column); }
+    };
+
+    /*  The warp at `base` ("/godot/videoOutput/<id>/" or "/godot/zone/<id>/"):
+        its `meshColumns`, `meshRows` and `mesh`; the whole output when the
+        mesh is empty or the wrong size for its grid, as the renderer reads it. */
+    WarpPoints readWarp (const tree::TreeSnapshot&, const std::string& base);
+
+    /** The mesh row's text: "x y x y ...", four decimals, '.' always. */
+    std::string warpText (const WarpPoints&);
+
+    /*  THE SAME SHAPE ON ANOTHER GRID: a split added or taken away keeps where
+        the picture lands, each new point read off the warp as it is drawn
+        (Mapping.h's curve through the points), so adding splits never moves
+        anything until one is dragged. */
+    WarpPoints regridded (const WarpPoints&, int columns, int rows);
+
+    /*  A ZONE ON AN OUTPUT (namespace draft 40, WY): a further canvas through
+        a warp of its own, by its blend and its opacity, bottom first. */
+    struct ZoneRow
+    {
+        std::string id;
+        std::string name;
+        std::string canvas;
+        std::string blend = "normal";
+        double opacity = 100.0;
+        WarpPoints warp;
+    };
+
+    /** An output's zones, in /godot/videoOutput/<id>/zones order. */
+    std::vector<ZoneRow> readZones (const tree::TreeSnapshot&, const std::string& outputId);
 
     /** The displays this machine has, by the names the system gives them. */
     std::vector<std::string> readDisplays (const tree::TreeSnapshot&);

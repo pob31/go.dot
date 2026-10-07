@@ -52,6 +52,7 @@
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/Icons.h>
+#include <wfg/client/model/Video.h>
 #include <wfg/client/model/Traffic.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/client/model/Inspector.h>
@@ -10267,4 +10268,60 @@ TEST_CASE ("client: a DCA's strip says A, V or AV for what is assigned to it, an
     CHECK (lettersOf (both.id) == "AV");
     CHECK (lettersOf (empty.id).empty());
     CHECK (lettersOf (outer.id) == "V");
+}
+
+TEST_CASE ("client: an output's zones are read bottom first, a warp the wrong size is the whole output, and a split keeps the shape (§40)")
+{
+    Rig rig;
+
+    const auto canvas = rig.document.createCanvas ("Stage");
+    REQUIRE (canvas.ok);
+    const auto output = rig.document.createVideoOutput ("Face", canvas.id);
+    REQUIRE (output.ok);
+    const auto first = rig.document.createZone (output.id, canvas.id);
+    const auto second = rig.document.createZone (output.id, {});
+    REQUIRE (first.ok);
+    REQUIRE (second.ok);
+
+    REQUIRE (rig.document.setAttribute ("/godot/zone/" + first.id + "/blend", "screen").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/zone/" + first.id + "/opacity", "40").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/zone/" + first.id + "/mesh", "0.1 0.1 0.5 0 0 1 0.5 0.9").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/zone/" + second.id + "/mesh", "0 0 1").ok);
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+
+    CHECK (model::text (*snapshot, "/godot/zone/" + first.id + "/output") == output.id);
+
+    const auto zones = model::readZones (*snapshot, output.id);
+    REQUIRE (zones.size() == 2);
+    CHECK (zones[0].id == first.id);
+    CHECK (zones[0].canvas == canvas.id);
+    CHECK (zones[0].blend == "screen");
+    CHECK (zones[0].opacity == doctest::Approx (40.0));
+    CHECK (zones[0].warp.x[0] == doctest::Approx (0.1));
+    CHECK_FALSE (zones[0].warp.isWhole());
+
+    //  Three numbers for a two by two grid: the whole output, as the renderer reads it.
+    CHECK (zones[1].warp.isWhole());
+    CHECK (zones[1].blend == "normal");
+
+    const auto outputs = model::readVideoOutputs (*snapshot);
+    REQUIRE (outputs.size() == 1);
+    CHECK (outputs[0].zones == 2);
+
+    //  The mesh row's text round-trips.
+    CHECK (model::warpText (zones[0].warp) == "0.1 0.1 0.5 0 0 1 0.5 0.9");
+
+    //  A split added keeps the corners where they were and puts the new points on the warp.
+    const auto finer = model::regridded (zones[0].warp, 3, 2);
+    REQUIRE (finer.x.size() == 6);
+    CHECK (finer.x[finer.index (0, 0)] == doctest::Approx (0.1));
+    CHECK (finer.x[finer.index (2, 0)] == doctest::Approx (0.5));
+    CHECK (finer.y[finer.index (2, 1)] == doctest::Approx (0.9));
+    CHECK (finer.x[finer.index (1, 0)] > 0.1);
+    CHECK (finer.x[finer.index (1, 0)] < 0.5);
+
+    //  The whole output regridded is still the whole output.
+    CHECK (model::regridded (model::WarpPoints::whole(), 4, 3).isWhole());
 }

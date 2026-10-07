@@ -195,7 +195,7 @@ TEST_CASE ("video region: the configuration written whole and read back, and tex
     auto& r = *memory.region;
 
     std::vector<video::region::CanvasReading> canvases { { "CANVAS01", 3840, 2160 }, { "CANVAS02", 1920, 1080 } };
-    std::vector<video::region::OutputReading> outputs { { "OUTPUT01", "CANVAS01", "Face", "EPSON PJ", "\\\\?\\DISPLAY#EPS", true, false, {}, {} } };
+    std::vector<video::region::OutputReading> outputs { { "OUTPUT01", "CANVAS01", "Face", "EPSON PJ", "\\\\?\\DISPLAY#EPS", true, false, {}, {}, {} } };
 
     video::region::writeConfig (r, canvases, outputs);
 
@@ -1298,4 +1298,121 @@ TEST_CASE ("video region: the renderer's tints reach the engine by name, and a s
 
     video::region::writeTint (region.layerTints[1], {}, 0);
     CHECK (video::region::readTints (region.layerTints).size() == 1);
+}
+
+//==============================================================================
+/*  NAMESPACE DRAFT 40 (WY): several canvases on one output, each through a
+    warp of its own; and the canvases drawn small for the video monitor. */
+TEST_CASE ("video host: an output's zones reach the region bottom first, by their canvas, blend, opacity and warp (§40)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-zones-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = "no renderer is started by this test";
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/enabled", "false").ok);
+
+    const auto left = document.createZone ("VD000021", "VD000011");
+    const auto right = document.createZone ("VD000021", {});
+    REQUIRE (left.ok);
+    REQUIRE (right.ok);
+
+    //  Not on a canvas, nor on anything but an output.
+    CHECK_FALSE (document.createZone ("VD000011", {}).ok);
+    CHECK_FALSE (document.createZone ("VD000021", "VD000021").ok);
+
+    REQUIRE (document.setAttribute ("/godot/zone/" + left.id + "/blend", "add").ok);
+    REQUIRE (document.setAttribute ("/godot/zone/" + left.id + "/opacity", "50").ok);
+    REQUIRE (document.setAttribute ("/godot/zone/" + left.id + "/mesh", "0 0 0.5 0 0 1 0.5 1").ok);
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+
+        video::region::ConfigReading config;
+        REQUIRE (video::region::readConfig (*host.regionForTests(), config));
+        REQUIRE (config.outputs.size() == 1);
+
+        const auto& zones = config.outputs.front().zones;
+        REQUIRE (zones.size() == 2);
+        CHECK (zones[0].canvas == "VD000011");
+        CHECK (zones[0].blend == video::region::Blend::add);
+        CHECK (zones[0].opacity == doctest::Approx (0.5));
+        REQUIRE (zones[0].mesh.x.size() == 4);
+        CHECK (zones[0].mesh.x[1] == doctest::Approx (0.5f));
+        CHECK_FALSE (zones[0].mesh.isIdentity());
+
+        //  A new zone is the whole output, normal and solid, until moved.
+        CHECK (zones[1].canvas.empty());
+        CHECK (zones[1].blend == video::region::Blend::normal);
+        CHECK (zones[1].opacity == doctest::Approx (1.0));
+        CHECK (zones[1].mesh.isIdentity());
+
+        //  Taken away, it goes from the region with the next configuration.
+        REQUIRE (document.remove (right.id).ok);
+        host.configure (document);
+        REQUIRE (video::region::readConfig (*host.regionForTests(), config));
+        CHECK (config.outputs.front().zones.size() == 1);
+    }
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("video host: while a monitor watches, a renderer with no window draws every canvas small, its shape kept (§40)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-monitor-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        REQUIRE (host.isOpen());
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        const auto at = clock.now();
+        host.sink().show (fill ("RUN00001", "VD000011", 0, 1, 0x2040A0));
+        host.sink().opacity ("RUN00001", { at, 1.0 });
+
+        //  Nobody watching: nothing is drawn for anybody.
+        for (int n = 0; n < 30; ++n)
+            tickUntil (host, clock, [] { return false; }, 10);
+
+        CHECK (host.canvasPictures().empty());
+
+        host.setMonitoring (true);
+
+        std::vector<video::VideoHost::CanvasPicture> pictures;
+        CHECK (tickUntil (host, clock, [&]
+                          {
+                              pictures = host.canvasPictures();
+                              return ! pictures.empty() && pictures.front().rgb.size() >= 3
+                                       && pictures.front().rgb[0] == 0x20 && pictures.front().rgb[1] == 0x40
+                                       && pictures.front().rgb[2] == 0xA0;
+                          }));
+
+        REQUIRE_FALSE (pictures.empty());
+        CHECK (pictures.front().canvasId == "VD000011");
+        CHECK (pictures.front().width <= video::region::previewWidth);
+        CHECK (pictures.front().height <= video::region::previewHeight);
+        CHECK (pictures.front().rgb.size() == static_cast<std::size_t> (3 * pictures.front().width * pictures.front().height));
+
+        host.setMonitoring (false);
+    }
+
+    folder.deleteRecursively();
 }

@@ -451,6 +451,14 @@ namespace wfg::doc
         EditResult createVideoOutput (const std::string& name, const std::string& canvasId,
                                       const std::string& id = {});
 
+        /*  AND A ZONE ON AN OUTPUT (namespace draft 40, WY): a further canvas
+            laid over the output's own, through a warp of its own, at the end of
+            the output's zones - so on top. Its warp starts as the whole output.
+            The canvas may be empty; one that is not a canvas is refused, as is
+            an output that is not one. */
+        EditResult createZone (const std::string& outputId, const std::string& canvasId,
+                               const std::string& id = {});
+
         /*  PHASE 9a: an entry in the show's plugin set - name, the scan's
             identifier, format and path, all four explicit so a replay on a
             machine that has never scanned needs no known list. <Plugins> is

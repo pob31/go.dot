@@ -487,6 +487,7 @@ namespace wfg::doc
         if (element == "Canvas")                    return "canvas";
         if (element == "VideoOutputs")              return "videoOutputs";
         if (element == "VideoOutput")               return "videoOutput";
+        if (element == "Zone")                      return "zone";
 
         /*  NAMESPACE DRAFT §38. The cue templates and their container. */
         if (element == "CueTemplates")              return "cueTemplates";
@@ -2941,6 +2942,39 @@ namespace wfg::doc
 
         return insertObject (videoContainer ("VideoOutputs", true), endOfSequence, "VideoOutput", id,
                              attributes);
+    }
+
+    EditResult ShowDocument::createZone (const std::string& outputId, const std::string& canvasId,
+                                         const std::string& id)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        const auto output = findById (outputId);
+
+        if (! output.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! output.hasType ("VideoOutput"))
+            return EditResult::failed (reason::typeMismatch);
+
+        if (! canvasId.empty())
+        {
+            const auto canvas = findById (canvasId);
+
+            if (! canvas.isValid())
+                return EditResult::failed (reason::unknownId);
+
+            if (! canvas.hasType ("Canvas"))
+                return EditResult::failed (reason::typeMismatch);
+        }
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! canvasId.empty())
+            attributes.push_back ({ "canvas", canvasId });
+
+        return insertObject (output, endOfSequence, "Zone", id, attributes);
     }
 
     EditResult ShowDocument::createPlugin (const std::string& name, const std::string& identifier,

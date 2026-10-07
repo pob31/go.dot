@@ -779,6 +779,29 @@ namespace wfg::doc
                                                   osc::Value::string (edit.id) });
                         } });
 
+        /*  A ZONE ON AN OUTPUT (namespace draft 40, WY): a further canvas over
+            the output's own, through a warp of its own, on top of the zones it
+            has. Taken away with `object.delete`, changed with `node.set`. */
+        registry.add ({ "zone.create",
+                        "Lays a further canvas on a video output, through a warp of its own, over"
+                        " what the output already shows. The canvas may be empty.",
+                        { { "output", 's', false }, { "canvas", 's', true }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto output = args[0].getString();
+                            const auto canvas = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+                            const auto edit = document.createZone (output, canvas, id);
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok ({ osc::Value::string (output),
+                                                  osc::Value::string (canvas),
+                                                  osc::Value::string (edit.id) });
+                        } });
+
         //----------------------------------------------------------------------
         /*  PHASE 9a'S PLUGIN SET (decision AE): the processors every voice
             carries, declared once as the tracks are. All four words are

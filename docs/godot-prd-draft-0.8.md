@@ -1604,6 +1604,14 @@ its own mapping, which picks the part of the canvas it shows — two projectors 
 the stage picture repeated on a monitor. This replaces the first bullet below. One output still
 shows one canvas.
 
+*Amended 2026-10-07, at the author's direction* (namespace draft §40, WY): **an output may show
+several canvases**, each in a **zone** of its own - a further canvas laid over the output's own,
+through a warp of its own (the four corners and the extra splits, the whole output until they are
+moved), apart from the others or overlapping them, stacked in order with a blend and an opacity.
+This replaces "One output still shows one canvas" above. The warps are edited in a drawn editor
+that the projector follows while a point is dragged, with the numbers typable too, as the bullet on
+the mesh editor below asks.
+
 - **One display per internal surface** (v1). No surface spanning multiple
   outputs.
 - **Bezier mesh warp**, not just four-corner keystone: the mesh subdivides
@@ -1638,6 +1646,11 @@ source / capture
 
 Compositing happens in **undistorted space**; the whole canvas is warped once.
 Faster and correct.
+
+*Amended 2026-10-07* (namespace draft §40): with zones (§3.19a), each canvas is still composited in
+its own undistorted space and warped once into its zone; the zones are then laid over one another
+**on the output, in display space**, by their blend and opacity, and the per-display grade is applied
+once, after all of them - so a calibration never sees a zone alone.
 
 *Amended 2026-10-06, at the author's direction* (namespace draft §36, VN-VQ): a cue's grade is
 **contrast, saturation, gamma, hue and four curves** (luminosity, red, green, blue); **ASC CDL stays for
