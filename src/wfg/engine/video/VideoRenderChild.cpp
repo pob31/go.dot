@@ -19,8 +19,11 @@
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/video/Compositor.h>
 #include <wfg/engine/video/Displays.h>
+#include <wfg/engine/video/Ffmpeg.h>
 #include <wfg/engine/video/Hap.h>
 #include <wfg/engine/video/Movie.h>
+#include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoRegion.h>
 
@@ -224,6 +227,13 @@ namespace wfg::video
             int width = 0;
             int height = 0;
             int index = -1;
+
+            /*  A PREVIEW'S FRAME (namespace draft 37.5, WF): straight RGBA, rows
+                from the top, as FFmpeg decoded it - for a movie that is not HAP
+                and is played until it is converted. Empty for a HAP frame. */
+            std::vector<std::uint8_t> rgba;
+
+            bool drawable() const noexcept  { return texture != hap::Texture::none || ! rgba.empty(); }
         };
 
         class MovieStore final : private juce::Thread
@@ -295,9 +305,122 @@ namespace wfg::video
                 std::map<int, std::shared_ptr<const MovieFrame>> frames;
             };
 
+            /*  A MOVIE THAT IS NOT HAP, PLAYED AS A PREVIEW (namespace draft
+                37.5, WF; 37.6, F.6): FFmpeg decodes it to raw RGBA down a pipe,
+                at most 1280 wide, at its own rate from where the playhead is;
+                a jump back, or one more than two seconds ahead, starts it again
+                from there. Slower to seek than HAP, which is what a preview is. */
+            struct Preview
+            {
+                ffmpeg::Tools tools;
+                std::string path;
+                int width = 0, height = 0;
+                int rateOver = 25, rateUnder = 1;
+                std::unique_ptr<PipedChild> decoder;
+                int next = -1;          ///< the frame the decoder sends next
+                bool ended = false;
+
+                double rate() const noexcept  { return static_cast<double> (rateOver) / std::max (1, rateUnder); }
+
+                void startAt (int index)
+                {
+                    decoder = std::make_unique<PipedChild>();
+                    const auto seconds = static_cast<double> (std::max (0, index)) / rate();
+
+                    if (! decoder->start ({ tools.ffmpeg, "-nostdin", "-v", "error", "-ss", osc::formatDouble (seconds),
+                                            "-i", path, "-map", "0:v:0", "-an", "-sn",
+                                            "-vf", "scale=" + std::to_string (width) + ":" + std::to_string (height),
+                                            "-fps_mode", "cfr", "-r", std::to_string (rateOver) + "/" + std::to_string (rateUnder),
+                                            "-f", "rawvideo", "-pix_fmt", "rgba", "-" }))
+                        decoder.reset();
+
+                    next = std::max (0, index);
+                    ended = decoder == nullptr;
+                }
+            };
+
+            /*  OPENED AS A PREVIEW: its size scaled for a preview, its frames
+                as the rate and the length make them. False when FFmpeg is not
+                here or cannot read it. */
+            static bool openPreview (const std::string& path, Preview& preview, movie::Info& info)
+            {
+                preview.tools = ffmpeg::find();
+
+                if (! preview.tools.found())
+                    return false;
+
+                const auto probed = ffmpeg::probe (preview.tools, path);
+
+                if (! probed.ok || ! (probed.duration > 0.0) || probed.width <= 0 || probed.height <= 0)
+                    return false;
+
+                const auto scale = std::min (1.0, 1280.0 / probed.width);
+                preview.path = path;
+                preview.width = std::max (2, static_cast<int> (std::lround (probed.width * scale / 2.0)) * 2);
+                preview.height = std::max (2, static_cast<int> (std::lround (probed.height * scale / 2.0)) * 2);
+                preview.rateOver = probed.rateOver > 0 ? probed.rateOver : 25;
+                preview.rateUnder = probed.rateOver > 0 ? std::max (1, probed.rateUnder) : 1;
+
+                info = {};
+                info.codec = "preview";
+                info.width = preview.width;
+                info.height = preview.height;
+                info.duration = probed.duration;
+
+                const auto count = std::max (1, static_cast<int> (std::floor (probed.duration * preview.rate())));
+
+                for (int n = 0; n < count; ++n)
+                    info.frames.push_back ({ 0, 0, static_cast<double> (n) / preview.rate() });
+
+                return true;
+            }
+
+            /*  THE PREVIEW'S FRAMES from the playhead's and three after, read
+                from the decoder; started again where the playhead jumped. */
+            bool feedPreview (const std::string& path, Preview& preview, int current, int count)
+            {
+                const auto rateNow = preview.rate();
+
+                if (preview.decoder == nullptr || current < preview.next - 1
+                      || current > preview.next + static_cast<int> (rateNow * 2.0))
+                    preview.startAt (current);
+
+                auto worked = false;
+                const auto bytes = static_cast<std::size_t> (preview.width) * static_cast<std::size_t> (preview.height) * 4;
+
+                while (! preview.ended && preview.decoder != nullptr && preview.next <= current + 3
+                       && preview.next < count && ! threadShouldExit())
+                {
+                    auto frame = std::make_shared<MovieFrame>();
+                    frame->index = preview.next;
+                    frame->width = preview.width;
+                    frame->height = preview.height;
+                    frame->rgba.resize (bytes);
+
+                    if (! preview.decoder->readExactly (frame->rgba.data(), bytes))
+                    {
+                        preview.ended = true;
+                        break;
+                    }
+
+                    ++preview.next;
+                    worked = true;
+
+                    const std::lock_guard<std::mutex> hold (lock);
+                    auto& entry = held[path];
+                    entry.frames[frame->index] = frame;
+
+                    for (auto at = entry.frames.begin(); at != entry.frames.end();)
+                        at = at->first < current - 1 || at->first > current + 8 ? entry.frames.erase (at) : std::next (at);
+                }
+
+                return worked;
+            }
+
             void run() override
             {
                 std::map<std::string, std::unique_ptr<movie::MovieFile>> files;
+                std::map<std::string, Preview> previews;
                 std::vector<std::uint8_t> bytes;
 
                 while (! threadShouldExit())
@@ -312,6 +435,9 @@ namespace wfg::video
                     for (auto at = files.begin(); at != files.end();)
                         at = now.count (at->first) > 0 ? std::next (at) : files.erase (at);
 
+                    for (auto at = previews.begin(); at != previews.end();)
+                        at = now.count (at->first) > 0 ? std::next (at) : previews.erase (at);
+
                     bool worked = false;
 
                     for (const auto& [path, current] : now)
@@ -322,7 +448,20 @@ namespace wfg::video
                         {
                             file = std::make_unique<movie::MovieFile>();
                             std::string why;
-                            const auto opened = file->open (path, why) && file->info().isHap();
+                            auto opened = file->open (path, why) && file->info().isHap();
+                            movie::Info info = opened ? file->info() : movie::Info {};
+
+                            /*  NOT HAP: a preview, where FFmpeg is here. */
+                            if (! opened)
+                            {
+                                Preview preview;
+
+                                if (openPreview (path, preview, info))
+                                {
+                                    opened = true;
+                                    previews[path] = std::move (preview);
+                                }
+                            }
 
                             const std::lock_guard<std::mutex> hold (lock);
                             auto& entry = held[path];
@@ -330,7 +469,21 @@ namespace wfg::video
                             entry.failed = ! opened;
 
                             if (opened)
-                                entry.info = file->info();
+                                entry.info = info;
+                        }
+
+                        if (const auto preview = previews.find (path); preview != previews.end())
+                        {
+                            int count = 0;
+
+                            {
+                                const std::lock_guard<std::mutex> hold (lock);
+                                count = static_cast<int> (held[path].info.frames.size());
+                            }
+
+                            worked = feedPreview (path, preview->second, std::clamp (current, 0, std::max (0, count - 1)), count)
+                                  || worked;
+                            continue;
                         }
 
                         if (file->info().frames.empty())
@@ -404,8 +557,22 @@ namespace wfg::video
             {
                 const auto frame = movies.frame (path, movies.frameAt (path, seconds));
 
-                if (frame == nullptr || frame->texture == hap::Texture::none)
+                if (frame == nullptr || ! frame->drawable())
                     return false;
+
+                /*  A PREVIEW'S FRAME: straight RGBA, rows from the top. */
+                if (! frame->rgba.empty())
+                {
+                    const auto px = std::clamp (static_cast<int> (u * frame->width), 0, frame->width - 1);
+                    const auto py = std::clamp (static_cast<int> ((1.0 - v) * frame->height), 0, frame->height - 1);
+                    const auto* at = frame->rgba.data() + (static_cast<std::size_t> (py) * static_cast<std::size_t> (frame->width)
+                                                           + static_cast<std::size_t> (px)) * 4;
+                    red = at[0];
+                    green = at[1];
+                    blue = at[2];
+                    alpha = at[3] / 255.0;
+                    return true;
+                }
 
                 const auto padded = (frame->width + 3) / 4 * 4;
                 const auto x = std::clamp (static_cast<int> (u * frame->width), 0, frame->width - 1);
@@ -1224,14 +1391,15 @@ namespace wfg::video
                 const auto seconds = valueOf (layer, Property::time, sample, 0.0);
                 const auto frame = movies.frame (layer.file, movies.frameAt (layer.file, seconds));
 
-                if (frame == nullptr || frame->texture == hap::Texture::none || frame->width <= 0)
+                if (frame == nullptr || ! frame->drawable() || frame->width <= 0)
                     return;
 
                 auto& held = movieTextures[layer.file];
                 held.used = true;
 
-                const auto paddedWidth = (frame->width + 3) / 4 * 4;
-                const auto paddedHeight = (frame->height + 3) / 4 * 4;
+                const auto raw = ! frame->rgba.empty();
+                const auto paddedWidth = raw ? frame->width : (frame->width + 3) / 4 * 4;
+                const auto paddedHeight = raw ? frame->height : (frame->height + 3) / 4 * 4;
 
                 if (held.id == 0)
                     glGenTextures (1, &held.id);
@@ -1241,11 +1409,22 @@ namespace wfg::video
 
                 if (held.index != frame->index || held.width != frame->width)
                 {
-                    const auto format = frame->texture == hap::Texture::dxt1 ? GL_COMPRESSED_RGB_S3TC_DXT1_EXT
-                                                                             : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+                    if (raw)
+                    {
+                        /*  A PREVIEW'S FRAME, as it is: RGBA, a row at a time. */
+                        glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
+                        glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, frame->width, frame->height, 0,
+                                      GL_RGBA, GL_UNSIGNED_BYTE, frame->rgba.data());
+                    }
+                    else
+                    {
+                        const auto format = frame->texture == hap::Texture::dxt1 ? GL_COMPRESSED_RGB_S3TC_DXT1_EXT
+                                                                                 : GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
 
-                    glCompressedTexImage2D (GL_TEXTURE_2D, 0, format, paddedWidth, paddedHeight, 0,
-                                            static_cast<GLsizei> (frame->blocks.size()), frame->blocks.data());
+                        glCompressedTexImage2D (GL_TEXTURE_2D, 0, format, paddedWidth, paddedHeight, 0,
+                                                static_cast<GLsizei> (frame->blocks.size()), frame->blocks.data());
+                    }
+
                     glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
                     glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
                     glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1254,7 +1433,7 @@ namespace wfg::video
                     held.width = frame->width;
                 }
 
-                const auto q = frame->texture == hap::Texture::ycocgDxt5;
+                const auto q = ! raw && frame->texture == hap::Texture::ycocgDxt5;
 
                 if ((q ? movieQProgram : movieProgram) == nullptr)
                 {

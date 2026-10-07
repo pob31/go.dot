@@ -21107,6 +21107,11 @@ all (proposed) unless marked the author's.
   and its six items, "Convert this movie to HAP?", "Bring in this movie's sound?", "Convert the whole
   file", "Later", "Bring the sound in", "Not now", "Hap Q - finer, about twice the size", and the
   transport's sentences.
-- **Not built**: the preview of a movie that is not HAP (F.6) - until it is, such a movie's cue
-  shows nothing until it is converted, and its length is not known, so its Ranges cannot be drawn
-  against it; shipping FFmpeg (F.7).
+- **The preview (F.6)**: a movie the HAP reader cannot open is played by the renderer through FFmpeg
+  - decoded to raw RGBA down a pipe, at most 1280 wide, at its own rate from where the playhead is,
+  started again when the playhead jumps back or more than two seconds ahead; uploaded as it is and
+  drawn as a HAP frame is, so its geometry, grade, blend and opacity are a movie's. Its length is
+  FFmpeg's (`movie::durationOf` falls back to `ffprobe`), so the Runner ends and loops it and its
+  Ranges are drawn against it. A `.mp4` named by a sound cue is now a movie to the analyser, and is
+  not drawn as a waveform; `.m4a` stays a sound.
+- **Not built**: shipping FFmpeg (F.7).

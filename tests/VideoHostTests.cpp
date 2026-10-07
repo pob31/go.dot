@@ -38,8 +38,11 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/Compositor.h>
+#include <wfg/engine/video/Ffmpeg.h>
 #include <wfg/engine/video/Geometry.h>
 #include <wfg/engine/video/Mapping.h>
+#include <wfg/engine/video/Movie.h>
+#include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/RegionSink.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoHost.h>
@@ -813,6 +816,89 @@ TEST_CASE ("video host: a HAP movie read by a renderer with no window, its frame
 
         host.sink().move ("RUN00001", video::Property::time, { clock.now(), 2.5 });
         CHECK (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x00FF00u; }));
+    }
+
+    folder.deleteRecursively();
+}
+
+/*  A MOVIE THAT IS NOT HAP, PLAYED AS A PREVIEW (namespace draft 37.5, WF;
+    37.6, F.6): an MPEG-4 movie FFmpeg makes - a second red, a second blue, a
+    second green - read by a renderer with no window through FFmpeg, its frame
+    chosen by the playhead, forwards and back. Skipped where FFmpeg is not. */
+TEST_CASE ("video host: a movie that is not HAP plays as a preview through FFmpeg, its frame chosen by the playhead")
+{
+    const auto tools = video::ffmpeg::find();
+
+    if (! tools.found())
+        return;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-preview-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+    const auto movie = folder.getChildFile ("three.mp4");
+
+    video::PipedChild maker;
+    REQUIRE (maker.start ({ tools.ffmpeg, "-nostdin", "-v", "error", "-y",
+                            "-f", "lavfi", "-i", "color=c=red:s=64x32:r=25:d=1",
+                            "-f", "lavfi", "-i", "color=c=blue:s=64x32:r=25:d=1",
+                            "-f", "lavfi", "-i", "color=c=lime:s=64x32:r=25:d=1",
+                            "-filter_complex", "[0][1][2]concat=n=3:v=1:a=0",
+                            "-c:v", "mpeg4", "-q:v", "1", movie.getFullPathName().toStdString() }));
+    maker.readAll();
+    REQUIRE (maker.wait (60000) == 0);
+
+    CHECK (video::movie::durationOf (movie.getFullPathName().toStdString()) == doctest::Approx (3.0).epsilon (0.05));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    const auto is = [] (std::uint32_t colour, int channel)
+    {
+        const int parts[3] { static_cast<int> ((colour >> 16) & 0xffu), static_cast<int> ((colour >> 8) & 0xffu),
+                             static_cast<int> (colour & 0xffu) };
+
+        for (int c = 0; c < 3; ++c)
+            if (c == channel ? parts[c] < 180 : parts[c] > 80)
+                return false;
+
+        return true;
+    };
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "movie";
+        layer.file = movie.getFullPathName().toStdString();
+
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { clock.now(), 1.0 });
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 0.2 });
+
+        std::int64_t seen = -1;
+        CHECK (tickUntil (host, clock, [&] { return is (probeOf (r, 0, seen), 0); }));
+
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 2.5 });
+        CHECK (tickUntil (host, clock, [&] { return is (probeOf (r, 0, seen), 1); }));
+
+        /*  AND BACK: the decoder started again from there. */
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 1.5 });
+        CHECK (tickUntil (host, clock, [&] { return is (probeOf (r, 0, seen), 2); }));
     }
 
     folder.deleteRecursively();

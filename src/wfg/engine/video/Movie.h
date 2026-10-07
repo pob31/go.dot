@@ -100,18 +100,25 @@ namespace wfg::video::movie
     double durationOf (const std::string& path);
 
     /*  WHETHER A NAME IS A MOVIE'S, by its extension: a QuickTime `.mov`, the
-        container HAP comes in (VY). */
+        container HAP comes in (VY) - and since namespace draft 37.5 (WF) the
+        movies FFmpeg reads as a preview, the window's list (client/model/Video). */
     inline bool isMovieName (const std::string& name)
     {
-        if (name.size() < 4)
+        const auto dot = name.find_last_of ('.');
+
+        if (dot == std::string::npos)
             return false;
 
-        auto extension = name.substr (name.size() - 4);
+        auto extension = name.substr (dot + 1);
 
         for (auto& c : extension)
             if (c >= 'A' && c <= 'Z')
                 c = static_cast<char> (c - 'A' + 'a');
 
-        return extension == ".mov";
+        for (const auto* known : { "mov", "mp4", "m4v", "mkv", "avi", "mxf", "webm", "mpg", "mpeg" })
+            if (extension == known)
+                return true;
+
+        return false;
     }
 }

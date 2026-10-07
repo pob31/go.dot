@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/video/Movie.h>
+#include <wfg/engine/video/Ffmpeg.h>
 
 #include <juce_core/juce_core.h>
 
@@ -358,6 +359,16 @@ namespace wfg::video::movie
     {
         MovieFile file;
         std::string why;
-        return file.open (path, why) ? file.info().duration : -1.0;
+
+        if (file.open (path, why) && file.info().duration > 0.0)
+            return file.info().duration;
+
+        /*  A MOVIE THAT IS NOT HAP (namespace draft 37.5, WF): its length as
+            FFmpeg says it, where FFmpeg is here - what its preview plays for. */
+        if (const auto tools = ffmpeg::find(); tools.found())
+            if (const auto probed = ffmpeg::probe (tools, path); probed.ok && probed.duration > 0.0)
+                return probed.duration;
+
+        return -1.0;
     }
 }
