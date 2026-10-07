@@ -21010,3 +21010,32 @@ decision in the implementer's words; the rest is marked (proposed).
   keeps its own level, routing, EQ and DCA, which are the sound's. Deleting the movie's cue clears the
   mark, in the same edit.
 
+- **WK - Go.dot writes the HAP; FFmpeg only reads** (proposed): FFmpeg decodes the source's frames
+  and takes out its sound; Go.dot's own encoder makes the DXT textures, packs them with Snappy and
+  writes the QuickTime file - the reverse of its reader (§37.4). Because the FFmpeg builds that can
+  write HAP are not the same on the three systems (HAP needs Snappy compiled in: BtbN's Windows and
+  Linux builds have it, Homebrew's macOS one does not, evermeet's is Intel only), and a show must
+  convert the same way wherever it is built. Checked first: Go.dot's reader decodes FFmpeg's own
+  HAP files - Hap, Hap Alpha, Hap Q, chunked, uncompressed - within two steps of 255 of FFmpeg's
+  decode (`movie: a real encoder's HAP files`, skipped unless `WFG_HAP_DIR` is set).
+
+### 37.6 Stages for WE-WK
+
+- **F.0 - WE, the DCA on opacity**: built, `951b9f8`.
+- **F.1 - Finding FFmpeg and asking it about a file**: `ffmpeg` and `ffprobe` beside `wfg`, else
+  where `WFG_FFMPEG` says, else on the path; what a file holds - its codec, size, frame rate,
+  length, whether it has alpha and sound - from `ffprobe`'s JSON.
+- **F.2 - The encoder**: DXT1, DXT5 and scaled-YCoCg DXT5 blocks, a Snappy compressor, a QuickTime
+  writer that streams frames to disk; tested by reading back with Go.dot's reader and FFmpeg's.
+- **F.3 - The conversion**: a background job in `serve`, one at a time, of the whole file or the
+  part used with ten seconds either side (WI); its progress a readout; the edit (WH) when it is done;
+  the sound taken out beside it when asked (WJ).
+- **F.4 - The window**: a movie that is not HAP, dropped or chosen, asks: convert the whole file or
+  later, Hap or Hap Q, its sound as a locked cue or not; a cue's menu offers the conversion of what
+  it uses.
+- **F.5 - The lock (WJ)**: `media/lockedTo`; shared rows written to both; fired, stopped, taken
+  back and aborted with its movie; detach.
+- **F.6 - The preview (WF)**: the renderer plays a movie that is not HAP through FFmpeg, its frames
+  raw, restarted from where the playhead jumps to.
+- **F.7 - Shipping FFmpeg**: in the Windows installer, the `.deb` and the macOS app, with its licence
+  and where its source is.

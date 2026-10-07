@@ -28,8 +28,10 @@
 #include "HapMovieWriter.h"
 #include "TestSupport.h"
 
+#include <wfg/engine/video/Ffmpeg.h>
 #include <wfg/engine/video/Hap.h>
 #include <wfg/engine/video/Movie.h>
+#include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/Snappy.h>
 
 #include <juce_core/juce_core.h>
@@ -276,4 +278,84 @@ TEST_CASE ("movie: a real encoder's HAP files read, frame for frame as FFmpeg de
         CHECK (mean < 1.0);
         CHECK (worst < 8.0);
     }
+}
+
+//==============================================================================
+/*  FFMPEG, ASKED WHAT A FILE HOLDS (namespace draft 37.6, F.1): ffprobe's
+    JSON read - the first video stream, not a cover picture; whether it has
+    alpha and sound; a rate written as a fraction; a length from the format
+    when the stream has none. */
+TEST_CASE ("movie: ffprobe's answer read - the picture, its alpha, its sound, its rate and length")
+{
+    const auto movie = video::ffmpeg::parseProbe (R"({
+        "streams": [
+            { "codec_type": "video", "codec_name": "mjpeg", "width": 600, "height": 600,
+              "avg_frame_rate": "0/0", "disposition": { "attached_pic": 1 } },
+            { "codec_type": "video", "codec_name": "prores", "width": 1920, "height": 1080,
+              "pix_fmt": "yuva444p12le", "avg_frame_rate": "30000/1001", "duration": "12.512500",
+              "disposition": { "attached_pic": 0 } },
+            { "codec_type": "audio", "codec_name": "pcm_s24le", "channels": 2, "sample_rate": "48000" }
+        ],
+        "format": { "duration": "12.600000" } })");
+
+    REQUIRE (movie.ok);
+    CHECK (movie.codec == "prores");
+    CHECK (movie.width == 1920);
+    CHECK (movie.height == 1080);
+    CHECK (movie.frameRate == doctest::Approx (29.97).epsilon (0.001));
+    CHECK (movie.duration == doctest::Approx (12.5125));
+    CHECK (movie.alpha);
+    CHECK (movie.sound);
+    CHECK (movie.soundChannels == 2);
+    CHECK (movie.soundRate == 48000);
+    CHECK_FALSE (movie.isHap());
+
+    const auto plain = video::ffmpeg::parseProbe (R"({ "streams": [
+        { "codec_type": "video", "codec_name": "h264", "width": 1280, "height": 720,
+          "pix_fmt": "yuv420p", "avg_frame_rate": "25/1" } ],
+        "format": { "duration": "4.000000" } })");
+
+    REQUIRE (plain.ok);
+    CHECK_FALSE (plain.alpha);
+    CHECK_FALSE (plain.sound);
+    CHECK (plain.duration == doctest::Approx (4.0));
+
+    CHECK_FALSE (video::ffmpeg::parseProbe (R"({ "streams": [ { "codec_type": "audio", "channels": 2 } ] })").ok);
+    CHECK_FALSE (video::ffmpeg::parseProbe ("not json").ok);
+}
+
+/*  AND ASKED FOR REAL, where FFmpeg is on this machine: skipped where it is
+    not, which is CI until F.7 ships it. A movie FFmpeg makes, then asks. */
+TEST_CASE ("movie: FFmpeg, where it is found, describes a movie it made")
+{
+    const auto tools = video::ffmpeg::find();
+
+    if (! tools.found())
+        return;
+
+    const auto folder = juce::File::createTempFile ("ffmpeg");
+    REQUIRE (folder.createDirectory());
+    const auto movie = folder.getChildFile ("made.mov");
+
+    video::PipedChild maker;
+    REQUIRE (maker.start ({ tools.ffmpeg, "-nostdin", "-v", "error", "-y",
+                            "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=1",
+                            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1",
+                            "-c:v", "mpeg4", "-c:a", "pcm_s16le", movie.getFullPathName().toStdString() }));
+    maker.readAll();
+    REQUIRE (maker.wait (30000) == 0);
+
+    const auto probed = video::ffmpeg::probe (tools, movie.getFullPathName().toStdString());
+    REQUIRE (probed.ok);
+    CHECK (probed.codec == "mpeg4");
+    CHECK (probed.width == 320);
+    CHECK (probed.height == 240);
+    CHECK (probed.frameRate == doctest::Approx (25.0));
+    CHECK (probed.duration == doctest::Approx (1.0).epsilon (0.05));
+    CHECK (probed.sound);
+
+    const auto missing = video::ffmpeg::probe (tools, folder.getChildFile ("none.mov").getFullPathName().toStdString());
+    CHECK_FALSE (missing.ok);
+
+    folder.deleteRecursively();
 }
