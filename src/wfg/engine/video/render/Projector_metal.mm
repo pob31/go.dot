@@ -192,6 +192,9 @@ namespace wfg::video::render
         layer.displaySyncEnabled = YES;
         layer.maximumDrawableCount = 3;
 
+        //  Black until the device's first frame (the flash Windows showed, 2026-10-08).
+        layer.backgroundColor = CGColorGetConstantColor (kCGColorBlack);
+
         if (auto* screen = [[parent window] screen])
             made.display = [[[screen deviceDescription] objectForKey: @"NSScreenNumber"] unsignedIntValue];
 

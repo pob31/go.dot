@@ -578,7 +578,10 @@ TEST_CASE ("video bench: a real window on a real display, its frames counted")
         return output != nullptr ? output->framesPresented : std::uint64_t {};
     };
 
+    const auto bound = juce::Time::getMillisecondCounterHiRes();
     REQUIRE (tickUntil (host, clock, [&framesOf] { return framesOf() > 0; }, 10000));
+    MESSAGE ("the first frame " << juce::roundToInt (juce::Time::getMillisecondCounterHiRes() - bound)
+                                << " ms after the window was made");
 
     const auto first = framesOf();
     const auto at = clock.now();

@@ -1906,6 +1906,7 @@ namespace wfg::video
 
                 coverDisplay (getWindowHandle(), covering, overhang);
                 view = render::makeNativeView (getWindowHandle(), pixelWidth(), pixelHeight());
+                render::fitNativeView (view, getWindowHandle(), pixelWidth(), pixelHeight());
             }
 
             ~ProjectorWindow() override

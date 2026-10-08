@@ -44,6 +44,7 @@
 #include <vector>
 
 #pragma comment (lib, "user32.lib")
+#pragma comment (lib, "gdi32.lib")
 
 namespace wfg::video::render
 {
@@ -55,9 +56,28 @@ namespace wfg::video::render
         {
             switch (message)
             {
-                //  Nothing painted by the system: the swap chain covers it all.
-                case WM_ERASEBKGND:  return 1;
-                case WM_PAINT:       ValidateRect (window, nullptr); return 0;
+                /*  BLACK UNTIL THE DEVICE DRAWS: the swap chain's first frame
+                    comes a moment after the window - a graphics card waking,
+                    the shaders compiled - and a view that painted nothing
+                    meanwhile showed whatever the system had, a flash the
+                    author saw on 2026-10-08. Once the swap chain shows a frame
+                    this painting is never seen. */
+                case WM_ERASEBKGND:
+                {
+                    RECT area {};
+                    GetClientRect (window, &area);
+                    FillRect (reinterpret_cast<HDC> (wParam), &area, static_cast<HBRUSH> (GetStockObject (BLACK_BRUSH)));
+                    return 1;
+                }
+
+                case WM_PAINT:
+                {
+                    PAINTSTRUCT paint {};
+                    const auto dc = BeginPaint (window, &paint);
+                    FillRect (dc, &paint.rcPaint, static_cast<HBRUSH> (GetStockObject (BLACK_BRUSH)));
+                    EndPaint (window, &paint);
+                    return 0;
+                }
 
                 //  The pointer and the clicks go to the JUCE window under it.
                 case WM_NCHITTEST:   return HTTRANSPARENT;
@@ -78,6 +98,7 @@ namespace wfg::video::render
                 wc.hInstance = GetModuleHandleW (nullptr);
                 wc.lpszClassName = className;
                 wc.hCursor = nullptr;
+                wc.hbrBackground = static_cast<HBRUSH> (GetStockObject (BLACK_BRUSH));
                 return RegisterClassExW (&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
             }();
 
@@ -262,16 +283,25 @@ namespace wfg::video::render
         return nullptr;
     }
 
-    NativeView makeNativeView (void* parentWindow, int width, int height)
+    NativeView makeNativeView (void* parentWindow, int, int)
     {
         NativeView made;
 
         if (parentWindow == nullptr || ! registerClass())
             return made;
 
+        /*  THE WINDOW'S OWN PIXELS from the start, never JUCE's idea of its
+            size: on a display scaled otherwise than the main one the two
+            differ, and a view made at the smaller showed the picture in a
+            rectangle at the top left until the next check fitted it (the
+            author's report of 2026-10-08). */
+        RECT client {};
+        GetClientRect (static_cast<HWND> (parentWindow), &client);
+
         made.handle = CreateWindowExW (WS_EX_NOPARENTNOTIFY, className, L"", WS_CHILD | WS_VISIBLE | WS_DISABLED,
-                                       0, 0, std::max (1, width), std::max (1, height), static_cast<HWND> (parentWindow),
-                                       nullptr, GetModuleHandleW (nullptr), nullptr);
+                                       0, 0, std::max (1, static_cast<int> (client.right - client.left)),
+                                       std::max (1, static_cast<int> (client.bottom - client.top)),
+                                       static_cast<HWND> (parentWindow), nullptr, GetModuleHandleW (nullptr), nullptr);
         return made;
     }
 
