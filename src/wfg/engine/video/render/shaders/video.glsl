@@ -186,19 +186,20 @@ in vec2 at;
 out vec4 frag_colour;
 
 vec2 corner(int n) {
-    vec4 pair = corners[n / 2];
-    return (n % 2) == 0 ? pair.xy : pair.zw;
+    vec4 pair = corners[n >> 1];
+    return (n & 1) == 0 ? pair.xy : pair.zw;
 }
 
 void main() {
     vec2 canvas = shape.xy;
-    int points = int(count.x);
+    int points = clamp(int(count.x), 0, 64);
     vec2 p = vec2(at.x * canvas.x, (1.0 - at.y) * canvas.y);
     bool inside = false;
     float nearest = 1.0e30;
     int previous = points - 1;
-    for (int n = 0; n < 64; ++n) {
-        if (n >= points) break;
+    //  Bounded by the shape's own corners, never a fixed 64 a compiler may
+    //  unroll: Mesa's software rasteriser ran out of memory doing so (CI, 2026-10-08).
+    for (int n = 0; n < points; ++n) {
         vec2 a = corner(previous) * canvas;
         vec2 b = corner(n) * canvas;
         if (((b.y > p.y) != (a.y > p.y)) && (p.x < (a.x - b.x) * (p.y - b.y) / (a.y - b.y) + b.x)) inside = !inside;
