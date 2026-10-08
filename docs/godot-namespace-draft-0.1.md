@@ -22706,3 +22706,22 @@ there would be nothing to aim. A page already up follows the new aim, and the fo
 it. `client/model/Dual` says which cue a pick aims (`aimForPick`) and which two cues are one movie and its
 sound (`dualOf`), by the list's own rule: the sound locked to the movie, straight after it in the same
 section of the same container.
+
+### 47.4 The dial's grain (AAB, mine)
+
+The dial wrote the plain result of its arithmetic, and the window prints the shortest text that reads a
+number back exactly - so a tenth of a second three times over read 0.30000000000000004, and a level
+moved along the fader -7.2345678 dB. Two things changed:
+
+- **Every number a dial turn writes sits on a short decimal.** Rounding to a tenth by multiplying by ten
+  rather than dividing by a tenth gives the double nearest the decimal, which prints as the decimal; the
+  EQ pages' laws and the dial's seconds round that way now, as the loop points always did. A row with two ends and
+  no law of its own moves a hundred-and-twenty-eighth of its travel a detent, kept to the power of ten at
+  or below that step and never finer than a whole number once the step is one or more: a 0-100 %
+  opacity keeps tenths, a hue, a position, a scale and a contrast whole numbers. A row with no ends keeps
+  thousandths. A grain coarser than the step can never round a detent away: a turn that would land
+  where it began moves one grain the way it went.
+- **The window shows no long tail, whatever wrote the number** - a fade, a script, a show from before:
+  an inspector box and the dial's line in the title show three decimals for a time and a speed, two for
+  anything else, and as many more as four figures need below one, the zeros at the end left off. The box
+  still writes exactly what is typed into it.

@@ -205,6 +205,13 @@ namespace wfg::client::model
             field.boolean = node.typeTags == "T" || node.typeTags == "F";
             field.value = text (&node);
 
+            /*  A DECIDED NUMBER WITHOUT ITS LONG TAIL (namespace draft §47,
+                AAB): what a dial turn, a fade or a sum left as 0.30000000000000004
+                reads "0.3". The box still writes what is typed into it. */
+            if (node.typeTags == "d")
+                if (const auto sole = node.soleValue(); sole.has_value() && sole->type() == osc::Value::Type::float64)
+                    field.value = shownNumber (sole->getFloat64(), node.unit);
+
             if (const auto found = labels().find (name); found != labels().end())
                 field.label = found->second;
             else
@@ -1183,7 +1190,12 @@ namespace wfg::client::model
 
         if (const auto* node = snapshot.find (address))
         {
-            if (const auto value = text (node); ! value.empty())
+            auto value = text (node);
+
+            if (const auto sole = node->soleValue(); sole.has_value() && sole->type() == osc::Value::Type::float64)
+                value = shownNumber (sole->getFloat64(), node->unit);
+
+            if (! value.empty())
                 line += " " + value + (node->unit.empty() ? std::string {} : " " + node->unit);
         }
 

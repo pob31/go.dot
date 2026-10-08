@@ -18,6 +18,9 @@
 
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <string>
 #include <string_view>
@@ -91,6 +94,44 @@ namespace wfg::client::model
             return {};
 
         return "\xc3\x97" + osc::formatDouble (rounded);
+    }
+
+    std::string shownNumber (double value, std::string_view unit)
+    {
+        if (! std::isfinite (value))
+            return osc::formatDouble (value);
+
+        auto decimals = unit == "s" || unit == "x" ? 3 : 2;
+        const auto size = std::abs (value);
+
+        if (size > 0.0 && size < 1.0)
+            decimals = std::max (decimals, 3 - static_cast<int> (std::floor (std::log10 (size))));
+
+        decimals = std::min (decimals, 12);
+
+        std::array<char, 64> buffer {};
+        const auto written = std::to_chars (buffer.data(), buffer.data() + buffer.size(), value,
+                                            std::chars_format::fixed, decimals);
+
+        if (written.ec != std::errc {})
+            return osc::formatDouble (value);
+
+        std::string out (buffer.data(), written.ptr);
+
+        if (out.find ('.') != std::string::npos)
+        {
+            while (! out.empty() && out.back() == '0')
+                out.pop_back();
+
+            if (! out.empty() && out.back() == '.')
+                out.pop_back();
+        }
+
+        //  A tail rounded away from a small negative number is nought, not "-0".
+        if (out == "-0")
+            out = "0";
+
+        return out;
     }
 
     std::vector<std::string> words (std::string_view line)

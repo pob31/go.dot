@@ -74,4 +74,13 @@ namespace wfg::client::model
         thousandth and in no locale's spelling - and nothing at all at one,
         which is not worth a word beside every run. */
     std::string speedText (double rate);
+
+    /*  A DECIDED NUMBER AS THE WINDOW SHOWS IT (namespace draft §47, AAB):
+        never a long tail. The author, 2026-10-09: "at times the values have a
+        long trailing number. Limit the show trailling numbers to something
+        meaningful." Three decimals for a time (the millisecond) and a speed
+        (as "×1.059" writes it), two for anything else - and as many more as four significant figures need for
+        a number below one, so a speed of 0.04961 keeps its figures - with the
+        zeros at the end left off. In no locale's spelling. */
+    std::string shownNumber (double value, std::string_view unit);
 }

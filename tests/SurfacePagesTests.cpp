@@ -22,6 +22,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/document/Schema.h>
+#include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
@@ -432,6 +433,94 @@ TEST_CASE ("surface pages: the master dial turns a number by what its own row sa
     {
         CHECK (near (turned ("sound", "level", -6.0, 0), -6.0));
     }
+}
+
+TEST_CASE ("surface pages: a dial turn leaves no long tail, and never stands still on a detent (§47, AAB)")
+{
+    /*  The author, 2026-10-09: "at times the values have a long trailing
+        number". Every row a dial turns is turned two hundred detents up from
+        its floor and back: each value written reads back as a short decimal,
+        each detent moves it until an end holds it, and it reaches its ends. */
+    const auto law = surface::FaderLaw::d700;
+
+    const auto rangeOf = [] (std::string_view owner, std::string_view name)
+    {
+        surface::DialRange range;
+
+        for (const auto* row : doc::Schema::rowsForOwner (owner))
+            if (row->name == name)
+            {
+                range.integer = row->type == doc::ValueType::integer;
+                range.hasMinimum = row->hasMin;
+                range.minimum = row->minimum;
+                range.hasMaximum = row->hasMax;
+                range.maximum = row->maximum;
+                range.unit = row->unit;
+                return range;
+            }
+
+        FAIL ("no such row");
+        return range;
+    };
+
+    //  The text the window and the log print: the shortest that reads back exactly.
+    const auto decimalsOf = [] (double value)
+    {
+        const auto text = osc::formatDouble (value);
+        const auto dot = text.find ('.');
+        return dot == std::string::npos ? 0 : static_cast<int> (text.size() - dot - 1);
+    };
+
+    /*  A level stops where the D700's fader does, +7 dB, short of the row's
+        +12: the dial moves along the fader (§17.18). */
+    struct Swept { const char* owner; const char* name; int decimals; bool reachesTop; };
+
+    for (const auto& row : { Swept { "sound", "level", 1, false }, Swept { "sound", "eqB1Freq", 1, true },
+                             Swept { "sound", "eqB2Gain", 1, true }, Swept { "sound", "eqB1Q", 2, true },
+                             Swept { "video", "opacity", 1, true }, Swept { "video", "hue", 0, true },
+                             Swept { "video", "offsetX", 0, true }, Swept { "video", "gamma", 2, true },
+                             Swept { "video", "contrast", 0, true }, Swept { "video", "scale", 0, true } })
+    {
+        CAPTURE (row.owner);
+        CAPTURE (row.name);
+
+        const auto range = rangeOf (row.owner, row.name);
+        auto at = range.minimum;
+
+        for (int detent = 0; detent < 200; ++detent)
+        {
+            const auto next = surface::dialTurned (range, at, 1, law);
+
+            CAPTURE (next);
+            CHECK (decimalsOf (next) <= row.decimals);
+
+            if (row.reachesTop)
+                CHECK ((next > at || near (at, range.maximum)));
+
+            at = next;
+        }
+
+        if (row.reachesTop)
+            CHECK (near (at, range.maximum));
+
+        for (int detent = 0; detent < 200; ++detent)
+        {
+            const auto next = surface::dialTurned (range, at, -1, law);
+            CHECK (decimalsOf (next) <= row.decimals);
+            CHECK ((next < at || near (at, range.minimum)));
+            at = next;
+        }
+    }
+
+    //  Three tenths are "0.3", not 0.30000000000000004.
+    const auto preWait = rangeOf ("cue", "preWait");
+    CHECK (osc::formatDouble (surface::dialTurned (preWait, 0.0, 3, law)) == "0.3");
+    CHECK (osc::formatDouble (surface::dialTurned (rangeOf ("sound", "eqB2Gain"), 0.0, -3, law)) == "-1.5");
+
+    //  A number typed with a long tail joins the grain at the first detent, the way the turn goes.
+    const auto opacity = rangeOf ("video", "opacity");
+    CHECK (near (surface::dialTurned (opacity, 50.123456, 1, law), 50.9));
+    CHECK (near (surface::dialTurned (opacity, 50.123456, -1, law), 49.3));
 }
 
 TEST_CASE ("surface pages: a loop point turns ten milliseconds a detent, fifty while the hand spins, and reads to the millisecond")

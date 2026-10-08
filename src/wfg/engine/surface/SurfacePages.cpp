@@ -60,9 +60,52 @@ namespace wfg::surface
             }
         }
 
+        /*  A VALUE ON A STEP'S GRID, and for a step under one through its
+            whole reciprocal (namespace draft §47, AAB). The author, 2026-10-09:
+            "at times the values have a long trailing number". Rounding to a
+            tenth as `round (v / 0.1) * 0.1` gives three times the double
+            nearest a tenth, 0.30000000000000004, which the window prints in
+            full because it prints the shortest text that reads back exactly;
+            `round (v * 10) / 10` gives the double nearest 0.3, which prints as
+            "0.3". A step that is not a whole fraction keeps the old reading. */
         double roundedTo (double value, double step) noexcept
         {
+            if (step > 0.0 && step < 1.0)
+            {
+                const auto per = std::round (1.0 / step);
+
+                if (per > 0.0 && std::abs (per * step - 1.0) < 1.0e-9)
+                    return std::round (value * per) / per;
+            }
+
             return std::round (value / step) * step;
+        }
+
+        /*  THE GRAIN A DIAL TURN IS KEPT TO, for a law that moves by `step` a
+            detent with no grid of its own: the power of ten at or below the
+            step, and never finer than a whole number once the step is one or
+            more - so a 0..100 % row (0.78 a detent) keeps a tenth, a hue (2.8
+            degrees) and a position (15.6 %) whole numbers. */
+        double grainFor (double step) noexcept
+        {
+            if (! (step > 0.0) || step >= 1.0)
+                return 1.0;
+
+            return std::pow (10.0, std::floor (std::log10 (step)));
+        }
+
+        /*  ON THE GRAIN, and moved by at least one of it the way the turn
+            went: a grain coarser than a step would otherwise round a detent
+            away, and a hand turning a dial that does not move would think it
+            broken. */
+        double keptToGrain (double value, double moved, int steps, double grain) noexcept
+        {
+            auto next = roundedTo (moved, grain);
+
+            if (steps != 0 && std::abs (next - value) < grain * 0.5)
+                next = roundedTo (value + (steps > 0 ? grain : -grain), grain);
+
+            return next;
         }
 
         /*  A SPEED TURNED A SEMITONE A DETENT (namespace draft §22.7, EF),
@@ -321,11 +364,16 @@ namespace wfg::surface
             return turned (Law::width, std::max (value, low), steps, low, high, fader);
 
         /*  Anything else with two ends: a hundred-and-twenty-eighth of its
-            travel. With none: one a detent. */
+            travel, kept to the grain that step reads at (AAB). With none: one
+            a detent, kept to a thousandth, so a number typed with a long tail
+            loses it at the first detent. */
         if (low > -unbounded && high < unbounded && high > low)
-            return std::clamp (value + detents * (high - low) * pageParameterTravelPerDetent, low, high);
+        {
+            const auto step = (high - low) * pageParameterTravelPerDetent;
+            return std::clamp (keptToGrain (value, value + detents * step, steps, grainFor (step)), low, high);
+        }
 
-        return std::clamp (value + detents, low, high);
+        return std::clamp (keptToGrain (value, value + detents, steps, 0.001), low, high);
     }
 
     Ring d700ParameterRing (double value, bool bipolar) noexcept

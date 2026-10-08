@@ -10633,3 +10633,19 @@ TEST_CASE ("client: a pick in the window aims the surfaces at a sound, a mic, or
     CHECK (model::aimForPick (*snapshot, memo.id).empty());
     CHECK (model::aimForPick (*snapshot, "").empty());
 }
+
+TEST_CASE ("client: a decided number is shown without a long tail, a time to the millisecond, a small one to four figures (§47, AAB)")
+{
+    CHECK (model::shownNumber (0.30000000000000004, "") == "0.3");
+    CHECK (model::shownNumber (-7.234567891, "dB") == "-7.23");
+    CHECK (model::shownNumber (-6.0, "dB") == "-6");
+    CHECK (model::shownNumber (12.3456, "s") == "12.346");
+    CHECK (model::shownNumber (100.0, "%") == "100");
+    CHECK (model::shownNumber (50.78125, "%") == "50.78");
+    CHECK (model::shownNumber (0.04961, "x") == "0.04961");
+    CHECK (model::shownNumber (1.0594630943592953, "x") == "1.059");
+    CHECK (model::shownNumber (-0.001, "dB") == "-0.001");
+    CHECK (model::shownNumber (-0.0000001, "") == "-0.0000001");
+    CHECK (model::shownNumber (0.0, "") == "0");
+    CHECK (model::shownNumber (1234567.25, "Hz") == "1234567.25");
+}
