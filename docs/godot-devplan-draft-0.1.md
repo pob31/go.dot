@@ -927,6 +927,39 @@ undo takes both back, a mix with no send becomes one, and CI is green.
 the send a mix lacked made in the same step; the driver hears a level and a send ridden in one pass,
 the send under the level's ride.
 
+### OSC cues with several messages, bundles and recorded curves · L
+
+*Added on 2026-10-08*, at the author's direction: an OSC cue sends several messages of several values,
+a device may take them in bundles, and every number may follow a curve on the cue's own time, recorded
+from what the device reports (heard, or asked with OSCQuery's LISTEN) or from a SpaceMouse (namespace
+draft §45). The author's decisions are YP-YV; YW-ZM are the implementer's, the author's to overrule.
+Not a phase: it follows the flipped faders, and no later phase is renumbered. It brings forward two
+things listed later - the SpaceMouse as a rate endpoint (Phase 11) and a device's Rx processed
+(namespace draft §15.1, D4) - for the one use the author named.
+
+| Stage | What | Depends on |
+|---|---|---|
+| O.0 | Docs: namespace §45, PRD §3.10, §3.11, §3.12, §3.16, §3.24, §6.9, §6.11, this | - |
+| O.1 | Several values in a message: the value as a list, the device's door, the sender, the read-back, the solver | O.0 |
+| O.2 | Several messages in a cue: `<Message>`, one device per cue, waits across messages, never prepared ahead | O.1 |
+| O.3 | Bundles per device: `mount/bundles`, the sender's datagrams of 1200 bytes, the Network tab's column | O.1 |
+| O.4 | Curves played: `<Curve>`, the cue's clock, duration and loop, sent when changed; the mounted values apart from the shape, M9 taken again | O.2 |
+| O.5 | The window: a cue's messages and their values, the target menu moving them all | O.2, O.3 |
+| O.6 | The level lane's drawing taken out of the waveform editor, nothing changed on screen | - |
+| O.7 | The window: the curve editor in the foot panel, one curve at a time | O.4-O.6 |
+| O.8 | Heard values: `mount.heard`, a device's reports never echoed | O.1 |
+| O.9 | A pass recorded from heard values: `curve.*`, latch, one step of undo | O.4, O.8 |
+| O.10 | LISTEN: a WebSocket client per device, while a curve on it is armed | O.9 |
+| O.11 | The SpaceMouse: hidapi pinned, the engine's reader, `curve.ride`, the 3DxWare question | O.9, O.7 |
+| O.12 | The drivers, the logs, M51-M53, the close-out | all |
+
+**Done when:** a cue moving a source's x, y and z leaves in one bundle a tick, a curve is recorded from
+a source dragged on a device that reports it and another from the SpaceMouse, one undo takes a pass
+back, an old show saves unchanged, and CI is green.
+
+**Needs from the author:** WFS-DIY live - bundles, LISTEN, no echo, one machine and two; the
+SpaceMouse Compact on each system, with and without 3DxWare; the window's words.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M
@@ -1164,7 +1197,9 @@ PRD §3.32, the inventory in namespace draft §24.2*; the Esc-as-pause decision
   place, and a cue-list view for the processor. Here because a capture is a solved
   state written down, so it wants §3.13 finished.
 - **Stream Deck** profile (bitmap renderable, triggering role); **SpaceMouse**
-  as a rate endpoint; further surface profiles.
+  as a rate endpoint; further surface profiles. *(2026-10-08: the SpaceMouse
+  arrives first as what records an OSC cue's curves - the item before Phase 10,
+  namespace draft §45.)*
 - **OSC and MIDI processing cues as persistent processes** (PRD §3.29): the
   state-machine phase §3.5 deferred, arriving as rows in the persistent section;
   a stateful process restarts at its resting state, and no fixed pool is needed

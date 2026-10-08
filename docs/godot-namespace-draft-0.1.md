@@ -22029,3 +22029,197 @@ Mine (proposed):
   fastest; a receiving program on the other card finds the sender and reads nothing. Said here and owed
   to a setting if a show meets it - the card to draw on, by name. `WFG_VIDEO_SOFTWARE=1` puts the renderer
   on WARP, which a test's receiver shares.
+
+## 45. An OSC cue with several messages, bundles, and curves recorded from the device or a SpaceMouse
+
+Written 2026-10-08. The author: *"I would like to add the possibility to build OSC bundles in cues and
+also have a single or multiple OSC paths within a single cue with automation recorded. This might need
+to have OSC query listening for incoming data to record for instance the position of a moving sound
+object in a spatial sound processor. This is only an example, but this should give you a hint of what
+this is for. We can reuse the level and sends lanes from the audio cues to have a similar UI. We can
+also have a Spacemouse as a 6df controller for parameters that can't be recorded from the controlled
+unit (spatial processor)."*
+
+### 45.1 What it is, before its names
+
+An OSC cue sent one value to one address. Now it sends **several messages**, each with **several values**
+- `/adm/obj/1/xyz 0.5 2 1.2` is one message with three - and every number in them may **follow a
+curve**: a line drawn, or recorded, over the cue's own time, the way the level lane follows a sound.
+While a cue's curves play, Go.dot sends each value again whenever it changes, every 20 ms at most, and
+holds the last one when the curve ends. A cue can loop its curves until it is stopped.
+
+A device can be told to take its messages **in bundles**: everything Go.dot sends it in the same 20 ms
+leaves in one datagram, so a source's x, y and z arrive together rather than as three moves, even when
+two cues move them.
+
+A curve can be **recorded**. Pressing Rec plays the cue and writes, into each curve armed for it, what
+moves that number:
+
+- **the device itself**, when it reports the value: a source dragged on WFS-DIY's map is reported back
+  to Go.dot and written into the curve. Go.dot asks the device to report the numbers it is recording
+  (OSCQuery's LISTEN), and also hears a device that reports them by plain OSC to Go.dot's port;
+- **a SpaceMouse**, for a value the device cannot report: pushing the puck moves the number - the
+  further the push, the faster it goes - and Go.dot sends it to the device as it moves, so the source
+  is heard travelling while the curve is written.
+
+One pass is one step of undo. The curves are drawn in the foot panel, one at a time with a menu, on the
+cue's own time - the level lane's editor without a waveform under it.
+
+### 45.2 Decisions
+
+The author's (2026-10-08; each took the option I recommended, and the words of every option were mine):
+
+- **YP** The existing OSC cue grows: a cue of one message and one value is exactly what it was, and a show
+  written before opens unchanged. Offered as against "a new kind of cue".
+- **YQ** Whether messages leave in bundles is **the device's** setting, off by default, so a device that
+  cannot read a bundle keeps working. Offered as against "the cue's".
+- **YR** A curve holds **the value itself**, in the number's own units - metres, degrees - not an offset on
+  a written value; recording writes what the device reports. Offered as against an offset, the level
+  lane's way (CZ).
+- **YS** The SpaceMouse: **each curve picks the movement that drives it**, how fast it goes at a full push,
+  and which way round, saved with the show; Go.dot guesses when the curve is made. Offered as against
+  "armed curves take the movements in order".
+- **YT** The foot panel draws **one curve at a time, with a menu**, the cue's other curves faint behind.
+  Offered as against "a message's curves together".
+- **YU** A **top view** of a position - an x curve and a y curve seen from above - comes **later**
+  *(proposed, PRD §6.9)*.
+- **YV** **One device per cue**: every message of a cue goes to the device of its first. Offered as against
+  "each message picks its device".
+
+Mine (proposed):
+
+- **YW The cue's clock.** A curve's seconds count from the moment the cue begins sending - after its
+  pre-wait - at one second a second, counted in ticks so a replay lands on the same ones. `duration`
+  nought (the default) is the last point of the longest curve; a duration set longer holds the last
+  values to its end, one set shorter cuts the curves there. `loop` wraps the clock at the duration until
+  the cue is stopped, counting `run/iteration`. At the end the last values are sent and the run is done by
+  its `wait`: `none` at the end, `sent` once the last datagram has left, `verified` once the device reads
+  back the last values. A cue with no curve is sent once at GO, as always.
+- **YX Sent when it changes.** Each tick a curve's message is sent only if a value in it changed, through
+  the same door and queue as any write to a device: the device's rate cap thins it, `tx` off sends
+  nothing, a described device checks and coerces each value. Nothing is read ahead: a device has no
+  glide of Go.dot's to meet.
+- **YY A curve is known by its identifier**: its undo step, its ride, its place in a pass and the address
+  it is heard at all go by it.
+- **YZ Heard values.** A datagram from the host of a device whose `rx` is on, at an address under that
+  device's prefix, is what the device says: logged as `mount.heard`, kept as the device's observed value,
+  and **never written back to the device**. Until now it was taken as a write and sent straight back. Every
+  other sender - a tablet relaying `/wfs/...` through Go.dot - keeps the old road, written and forwarded.
+  This is the processing of Rx the author kept for later on 2026-09-22 (§15.1, D4).
+- **ZA LISTEN only while recording.** Go.dot subscribes to a device's values only while a curve on it is
+  armed, and only to those curves' addresses. What a subscription yields is in the log as `mount.heard`,
+  so a replay needs no subscription - which answers the reason LISTEN was left out in Phase 2
+  (`godot-phase2-closeout-0.1.md`).
+- **ZB A bundle leaves at once**: time tag 1, "immediately". A datagram is filled in the order the messages
+  were queued and closed at 1200 bytes - WFS-DIY's own ceiling - and a message too big for one goes alone.
+  Bundles timed a tick ahead for Go.dot's own processors (PRD §3.12) stay unbuilt: spatcore's parser drops
+  the time tag.
+- **ZC A device's values are published apart from its shape.** Every write to a described device moved
+  the table's one revision, and the tree rebuilt every mounted node for it - 2487 for the WFS-DIY capture,
+  3.13 ms in Release and 78 ms in Debug (M9). A curve writing every tick would pay that every tick. The
+  table counts a change of shape and a change of value apart, and the tree rebuilds only for the first.
+- **ZD A table of its own for recording curves**, beside the faders' (`LaneTable`, §34) rather than inside
+  it: the faders' is about one media cue's level and mixes, and its log stays as it is. The arithmetic -
+  sampling a ride, thinning it, splicing it into the old curve - is shared.
+- **ZE The SpaceMouse is read by the engine**, on a thread of Go.dot's own over hidapi, and its pushes are
+  turned into movement on the tick, one logged `curve.ride` a tick. Every report stamps a time; a puck
+  silent for 100 ms - unplugged, or a thread stalled - counts as let go. spatcore's driver is not used
+  as it stands: it hands axes to the message thread, and only when they change, so a push held steady
+  could read as no push.
+- **ZF 3DxWare is never closed without asking.** When 3Dconnexion's driver holds the puck, the window says
+  so and offers to close it. Go.dot opens the puck only while a curve with a movement is armed, and lets
+  go of it afterwards (§4.9).
+- **ZG Each curve thins to its own scale**: `tolerance`, or nought for 0.1% of the curve's span - its
+  `range`, else the device's range for that value, else what the pass covered. Values are rounded to a
+  tenth of that. The joins into the old curve stay 50 ms.
+- **ZH A cue with several messages or a curve is never prepared ahead** of its GO (PRD §3.12). A cue of
+  one message is prepared exactly as before.
+- **ZI A heard value is sampled at the tick it arrives in**, and after more than three ticks of silence a
+  point holding the previous value goes in first - WFS-DIY pushes every 30 ms, Go.dot ticks every 20.
+- **ZJ Who moves an armed curve.** A curve the device reports is **not sent** while it is being recorded:
+  the device is the one moving it. A curve the SpaceMouse moves **is sent**, so the device follows the
+  hand. When both act on one curve, the last to act wins. Curves not armed play back as drawn.
+- **ZK A heavy stream cannot crowd out a GO.** Heard values wait in a box of their own, the newest per
+  address, and at most 256 addresses a tick enter the engine's queue - only those a curve is armed on or
+  that a described device has. The queue drops its oldest when full, and the oldest could be a GO.
+- **ZL Latch, and the three stops.** A curve is written from the first value heard, or the first push,
+  in a pass, and holds the last after (as the faders' DH). Esc keeps the pass; double Esc and Doh! drop
+  it; the lock refuses it. The curves of one pass are written in one step of undo.
+- **ZM** *(proposed)* The SpaceMouse's left button starts and stops a pass while curves are armed.
+
+### 45.3 The rows
+
+- `osc,value` is now **a list of values**, space-separated in the log's spelling - `i:3 f:0.5 s:"left"`.
+  One value reads as it always did.
+- `osc,duration` (`d`, seconds, nought) and `osc,loop` (`T`, false). `osc,messages` and `osc,curves`
+  (read-only): the identifiers of the cue's further messages, and of the curves on its own message, in
+  order.
+- `<Message>` at `/godot/message/<id>`: `address`, `value` (as the cue's), and read-only `cue`, `index`
+  and `curves`. Its messages follow the cue's own, in this order, in the bundle and on the wire.
+- `<Curve>` at `/godot/curve/<id>`, under the `<Osc>` for the cue's own message or under a `<Message>`:
+  `arg` (which value of the message, from nought), `points` (`d*`: seconds and values in pairs, the
+  seconds climbing from nought), `range` (`d*`: empty, or the lowest and highest it may hold), `tolerance`,
+  `axis` (`none`, `tx`, `ty`, `tz`, `rx`, `ry`, `rz`), `speed` (units a second at a full push, 1),
+  `invert`; read-only `cue`, `message` (empty for the cue's own) and `ride` (what is moving it now).
+- `/godot/curves/` - what is armed: `cue`, `rec` (the armed curves), `recording`, `pass` (how the last
+  pass ended).
+- `mount,bundles` (`T`, false), `mount,heard` (how many values the device has said), `mount,listen`
+  (`off`, `connecting`, `listening`, `unsupported`, `unreachable`).
+- `engine,spaceMouse` (`off`, `searching`, `connected`, `driver`) and `engine,spaceMouseName`.
+
+### 45.4 Commands
+
+- `message.create <cue> [index] [id] [address] [value]`; `message.promote <id>` - that message
+  becomes the cue's own, with its curves, the old one taken away, in one step (how the window removes the
+  first message); `curve.create <cue|message> <arg> [id]`; `object.delete` and `object.move` as for any
+  child.
+- `curve.arm <cue>` (empty lets go), `curve.free`, `curve.rec <curve> <on>`, `curve.record [from] [run]`,
+  `curve.stop [how ...]`, `curve.ride <curve> <value> [<curve> <value> ...]`.
+- `mount.heard <mount> <address> <values...>`.
+- `spacemouse.closeDriver`.
+- The end of a pass is one `node.setMany` of the curves' `points`.
+
+### 45.5 Refused
+
+When the show is read and at the door: a message under another device than the cue's (YV); a message on a
+cue with no address; a curve on a value the message does not have, or on one that is not a number; points
+whose seconds do not climb, or a value outside the curve's `range`; `loop` with neither curves nor a
+duration is a warning.
+
+### 45.6 Measurements
+
+- **M51** a curve on the wire against its drawing: the largest difference at each datagram's tick, and
+  the datagrams a second.
+- **M52** from a value pushed by a device to its sample in the written curve, and how many pushes a
+  second WFS-DIY's 30 ms gives at 50 Hz.
+- **M53** from a push of the puck to its datagram, and what an integration of a constant push gives
+  against the arithmetic.
+
+### 45.7 Stages
+
+| Stage | What the author sees |
+|---|---|
+| O.0 | This section; PRD §3.10, §3.11, §3.12, §3.16, §3.24, §6.9 and §6.11; the devplan's item |
+| O.1 | Several values in one message, sent, checked and read back |
+| O.2 | Several messages in one cue |
+| O.3 | Bundles, switched on per device in the Network tab |
+| O.4 | Curves played: the cue's clock, duration, loop; a device's values published apart from its shape |
+| O.5 | The window: the messages and their values |
+| O.6 | Nothing: the level lane's drawing taken out of the waveform editor to be shared |
+| O.7 | The window: the curve editor |
+| O.8 | Heard values: a device's own reports kept, never echoed |
+| O.9 | Recording a pass from heard values |
+| O.10 | LISTEN |
+| O.11 | The SpaceMouse |
+| O.12 | The drivers, the logs, M51-M53, the close-out |
+
+### 45.8 Not built
+
+*(Proposed, PRD §6.9.)* The top view of a position; Ranges on curves (§3.24 - only a loop here); speed on
+an OSC cue; the SpaceMouse moving a value outside a pass, as a live binding; messages of one cue to
+several devices; preparing a cue with curves ahead of its GO; curve cues placed by load-to-time inside
+their curves; the copy of a cue's messages as a foot part.
+
+### 45.9 Built so far
+
+Nothing yet.

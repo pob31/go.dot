@@ -958,6 +958,19 @@ latched from its first touch, in one step of undo, and the faders stay flipped
 until the window flips them back. It replaces taking one fader by touch
 (namespace draft §34).
 
+*Added in 0.8, at the author's direction (2026-10-08).* **An OSC cue carries
+curves.** Every number in its messages may follow a curve drawn, or recorded,
+over the cue's own time - counted from the moment it begins sending - and the
+curve holds the value itself, in the number's own units, never an offset. While
+it plays, a value is sent again whenever it changes, at most once a tick, and the
+last one holds when the curve ends; a cue may loop its curves until it is
+stopped. A curve is recorded in latch from what moves the number: the device
+itself, which reports it (asked with OSCQuery's LISTEN, or heard on Go.dot's
+port), or a SpaceMouse for a value the device cannot report, which Go.dot then
+sends as it moves (§3.16). One pass is one step of undo. The curves are drawn
+one at a time in the foot panel, on the cue's own time; a top view of a
+position is proposed (§6.9). Namespace draft §45.
+
 **Curve editor:** breakpoint lists with numeric entry, not only draggable
 pixels.
 
@@ -995,6 +1008,16 @@ there is sent exactly as it was written with no coercion, and it can never be
 asked — so `verified` against one is refused when the show is read, by the same
 rule and in the same sentence as a device that declares no read-back.
 
+*Added in 0.8, at the author's direction (2026-10-08).* **An OSC cue sends
+several messages, each with several values** - `/adm/obj/1/xyz` takes three - and
+**all of a cue's messages go to one device**, the one its target menu names. A
+device whose `rx` is on is **heard**: what it sends to Go.dot under its own
+prefix is kept as what the device said, never taken as a write and sent back to
+it, which it was until this date; another sender relaying to the device's
+addresses is still forwarded. A device that runs an OSCQuery server is asked to
+report the values a cue is recording (LISTEN), and only while it records.
+Namespace draft §45.
+
 ### 3.12 Prepare / commit
 
 Anticipation is a property of the **parameter**, not the cue. A value is
@@ -1008,6 +1031,12 @@ armed-verified`.
 
 Own processors may receive tick N+1 values during tick N as OSC bundles with
 timetags, erasing network jitter. Third parties get plain send-on-change.
+
+*Added in 0.8, at the author's direction (2026-10-08).* **A device may take its
+messages in bundles** - its own setting, off by default: everything Go.dot sends
+it in one tick leaves as one bundle, time-tagged "immediately", so values that
+move together arrive together. The tick-ahead half above is still not built
+(namespace draft §13.15, §45).
 
 A generous prepare horizon is also what gives **Doh!** (§4.4, §3.32)
 something to recover.
@@ -1202,6 +1231,15 @@ so off keeps the number. How a locked show takes these edits is §3.27's.
 
 A 6DOF controller driving a WFS source position is better than two faders —
 three axes plus orientation is what the parameter actually is.
+
+*Added in 0.8, at the author's direction (2026-10-08).* **The SpaceMouse is the
+first rate endpoint built**, recording an OSC cue's curves (§3.10). Each curve
+picks the movement that drives it - one of the puck's three pushes, two tilts or
+its twist - how fast it goes at a full push, and which way round, saved with the
+show. A push past the dead zone moves the number and is written; letting go in
+the middle of a push holds it where it is. Go.dot holds the puck only while such
+a curve is armed, and never closes 3Dconnexion's driver without asking.
+Namespace draft §45.
 
 #### Display as a renderable
 
@@ -1960,6 +1998,9 @@ iteration counts, `stop after current iteration`, a visible `3/8`.
 
 Applies to **media cues (audio, video)** and to **OSC/MIDI cues entered as
 curves** (fades and lanes, §3.10).
+
+*(2026-10-08: an OSC cue's curves loop as a whole, by a switch on the cue, with
+no range list; ranges on curves are proposed, §6.9. Namespace draft §45.)*
 
 #### Ranges
 
@@ -3648,6 +3689,21 @@ DT-EH in §22.1 are the author's to overrule; these are what the work left out:
   now sits below its resampler and its stretcher, and a stretched loop passes its wraps with no gap
   and no click (namespace draft §22.12).
 
+Added 2026-10-08 *(proposed)*, with an OSC cue's curves (namespace draft §45). The implementer's
+calls YW-ZM in §45.2 are the author's to overrule; these are what the work left out:
+
+- **A top view of a position** - an x curve and a y curve of one cue drawn as a path seen from
+  above, a dot following playback, its points dragged (§3.10's 2D paths; the author: later, YU).
+- **Ranges on an OSC cue's curves** (§3.24): a loop of the whole only, today.
+- **Speed on an OSC cue**, as a media cue has.
+- **The SpaceMouse as a live binding**, moving a value outside a pass.
+- **Messages of one cue to several devices**, Doh! worked out per device inside the cue (YV keeps
+  one).
+- **A cue with curves prepared ahead of its GO** (§3.12).
+- **Load-to-time inside a cue's curves** (§3.13): the solve plans a curve at its last point.
+- **An OSC cue's messages as a foot part** to copy and paste (namespace draft §38).
+- **The SpaceMouse's left button** starting and stopping a pass (ZM).
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -3764,6 +3820,11 @@ Mackie vs HUI first — first week with the D700.
   drawn - a step on a send is the coefficient's 50 ms ramp, straight in gain, begun at the tick
   whose read-ahead first reaches it, and a ramp straight in gain passes its middle in decibels a
   quarter of the way along: 18 to 38 ms early by that arithmetic. Judged within one glide.
+- **An OSC cue's curves** (§3.10, 2026-10-08, namespace draft §45): **M51** - a curve on the wire
+  against its drawing, and the datagrams a second; **M52** - from a value a device pushes to its
+  sample in the written curve, and how many of WFS-DIY's 30 ms pushes a 50 Hz tick takes; **M53** -
+  from a push of the SpaceMouse to its datagram, and a constant push integrated against the
+  arithmetic.
 
 ---
 
