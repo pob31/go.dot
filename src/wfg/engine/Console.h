@@ -155,7 +155,7 @@ namespace wfg
             folder. Empty when the launch asked for nothing to be remembered:
             only the launchers pass the flag, so a driver's window never writes
             the author's. */
-        std::string rememberIn;
+        std::string rememberIn {};
 
         /*  THE FOURTH DOOR (author, 2026-09-30: a network monitor "similar to
             the one in WFS-DIY"): what crossed the wire, OSC and MIDI, in and
