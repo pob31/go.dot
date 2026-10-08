@@ -2161,6 +2161,56 @@ namespace
                                        .getChildFile (args.getValueForOption ("--engine-folder"));
     }
 
+    /*  THE SHOW TO REOPEN (author, 2026-10-08: "Can the app reload the last
+        opened show?"): one line in Go.dot's own folder, beside the engine
+        folder and following `--engine-folder` as the audio defaults do - a
+        fact about this machine, never about a show (PRD §4.10). Written by a
+        window started with `--remember`, which only the launchers pass, so a
+        driver opening a fixture in a window never becomes the show the
+        author's next launch opens. */
+    juce::File lastShowFile()
+    {
+        return engineCacheFolder().getSiblingFile ("last-show.txt");
+    }
+
+    /*  The remembered show, when it is still a show this launch can open:
+        there, not open in another window, and loading - checked by loading
+        it, so a show that has gone bad sends the launch to the empty show
+        rather than to an alert and an exit, which the next launch would meet
+        again. Empty otherwise, said in the log. */
+    juce::File lastShowToReopen()
+    {
+        const auto said = lastShowFile().loadFileAsString().trim();
+
+        if (said.isEmpty() || ! juce::File::isAbsolutePath (said))
+            return {};
+
+        const auto folder = wfg::doc::Bundle::folderFor (juce::File (said));
+
+        if (folder == juce::File())
+        {
+            std::cerr << "wfg: the last show is no longer at " << said.toStdString() << std::endl;
+            return {};
+        }
+
+        if (wfg::app::OpenShow::heldElsewhere (folder))
+        {
+            std::cerr << "wfg: the last show is open in another window; the empty show instead" << std::endl;
+            return {};
+        }
+
+        wfg::doc::ShowDocument probe;
+
+        if (! wfg::doc::Bundle::open (folder, probe).ok)
+        {
+            std::cerr << "wfg: the last show, " << folder.getFullPathName().toStdString()
+                      << ", does not load; the empty show instead" << std::endl;
+            return {};
+        }
+
+        return folder;
+    }
+
     /*  `wfg plugins`: what this machine has, and finding out (Phase 9a, §17.7).
         --scan[=vst3|au|lv2] [--path=<dir>] scans out of process and keeps the
         result where serve reads it; --list prints it; nothing scanned is a
@@ -2806,6 +2856,38 @@ namespace
             }
         }
 
+        /*  `--remember`: THE LAST SHOW, NOT THE EMPTY ONE (author, 2026-10-08:
+            "Can the app reload the last opened show? It's constantly bringing
+            me back to a folder I can't access by default"). A launch that
+            would have opened the empty show opens the show a window of this
+            machine last opened (lastShowFile), as the handed-over one does,
+            settings and all - unless the empty show has work a crash left in
+            it, whose offer would otherwise be met only by somebody who went
+            looking for it. */
+        const auto remember = wantWindow && args.containsOption ("--remember");
+        auto reopenedLast = false;
+
+        if (remember && args.containsOption ("--yield-to-opened") && openedAtLaunchCount == 0)
+        {
+            const auto empty = wfg::doc::Bundle::folderFor (juce::File::getCurrentWorkingDirectory().getChildFile (path));
+
+            if (empty != juce::File() && wfg::doc::Bundle::offeredRecovery (empty) != juce::File())
+            {
+                std::cerr << "wfg: the empty show has work to recover; it opens instead of the last show" << std::endl;
+            }
+            else if (const auto last = lastShowToReopen(); last != juce::File())
+            {
+                path = last.getFullPathName();
+                showSettingsAtStart = false;
+                reopenedLast = true;
+                std::cerr << "wfg: reopening the last show" << std::endl;
+            }
+        }
+
+        //  The launcher's empty show, still (Console.h, `emptyShowAtStart`).
+        const auto onTheEmptyShow = args.containsOption ("--yield-to-opened")
+                                      && openedAtLaunchCount == 0 && ! reopenedLast;
+
         /*  `--midi-in=<device>`, repeatable, because a rig has a surface and a
             foot switch and they are two devices.
 
@@ -2989,6 +3071,15 @@ namespace
                 std::cerr << "    " << problem << std::endl;
 
             return 2;
+        }
+
+        /*  THE SHOW THE NEXT LAUNCH REOPENS (lastShowFile): this one, once it
+            has loaded - the last a window opened, whichever closes last. Never
+            the empty show, which is what a launch falls back to anyway. */
+        if (remember && ! onTheEmptyShow)
+        {
+            lastShowFile().getParentDirectory().createDirectory();
+            lastShowFile().replaceWithText (target.getFullPathName());
         }
 
         /*  THE SESSION: which folder `document.save` writes to, and which
@@ -5590,9 +5681,13 @@ namespace
                 clientHost.takes = &takePictures;
                 clientHost.openSettingsAtStart = showSettingsAtStart;
 
-                //  Not when a show handed over at launch has already taken its place.
-                clientHost.emptyShowAtStart = args.containsOption ("--yield-to-opened")
-                                                && openedAtLaunchCount == 0;
+                //  Not when a show handed over at launch, or the last show, has taken its place.
+                clientHost.emptyShowAtStart = onTheEmptyShow;
+
+                //  Where the window remembers the folder sounds were last picked from.
+                if (remember)
+                    clientHost.rememberIn = lastShowFile().getParentDirectory().getFullPathName().toStdString();
+
                 clientHost.traffic = &traffic;
 
                 //  The fifth door (Console.h): the canvases, small, for the video monitor.
@@ -5976,7 +6071,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--hosted [--render=<wav>] [--input-wav=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
-                      " [--window [--theme=<file>] [--show-settings] [--yield-to-opened]] [--engine-folder=<dir>]"
+                      " [--window [--theme=<file>] [--show-settings] [--yield-to-opened] [--remember]] [--engine-folder=<dir>]"
                       " [--no-video-window]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},

@@ -33,7 +33,9 @@
       - nothing: the empty show, copied once to %APPDATA%\Go.dot\Untitled
         and opened from there with its show settings (--show-settings), and
         giving way (--yield-to-opened): while nothing has been done in it, the
-        first show New or Open starts takes its window's place.
+        first show New or Open starts takes its window's place. With
+        --remember, which every launch passes, wfg opens the show this
+        machine last opened in its place, when that show still loads.
         Copied because beside this file is Program Files once installed,
         where a save would be refused - the Mac copies it out of its bundle
         for the same reason.
@@ -221,7 +223,8 @@ int WINAPI WinMain (HINSTANCE instance, HINSTANCE previous, LPSTR ignored, int s
 
     //  --- wfg.exe, with no console ------------------------------------------------
     //  --ui is resolved against the working directory, which is set to here as well.
-    _snwprintf_s (command, PATH_CHARS * 2, _TRUNCATE, L"\"%s\" serve \"%s\" --window \"--ui=%s\\console\"%s",
+    //  --remember: the show opened is the one the next launch with nothing reopens.
+    _snwprintf_s (command, PATH_CHARS * 2, _TRUNCATE, L"\"%s\" serve \"%s\" --window \"--ui=%s\\console\" --remember%s",
                   wfg, chosen, here, extra);
 
     ZeroMemory (&startup, sizeof (startup));

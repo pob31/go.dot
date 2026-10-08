@@ -148,6 +148,15 @@ namespace wfg
             pass the flag, and only for the empty show they chose. */
         bool emptyShowAtStart = false;
 
+        /*  GO.DOT'S OWN FOLDER, WHERE THIS WINDOW REMEMBERS (`--remember`,
+            author, 2026-10-08): the folder sounds were last picked from, which
+            the media dialogs start in when the show's own media folder is no
+            place to send anybody - the empty show's is in Go.dot's hidden
+            folder. Empty when the launch asked for nothing to be remembered:
+            only the launchers pass the flag, so a driver's window never writes
+            the author's. */
+        std::string rememberIn;
+
         /*  THE FOURTH DOOR (author, 2026-09-30: a network monitor "similar to
             the one in WFS-DIY"): what crossed the wire, OSC and MIDI, in and
             out. Not a reach past the tick thread either - it is a ring the

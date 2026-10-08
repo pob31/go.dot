@@ -21762,3 +21762,51 @@ Mine (proposed):
 the inspector drops the row; `CueParts`' `mix` part drops it; the parameter table says it is retired.
 §3.9b of the PRD carries the amendment, and so does the 2026-09-22 note *"a direct out is not an
 exception to it"*, whose fold-on-request it replaces.
+
+## 43. The last show, reopened, and the media dialogs out of Go.dot's own folder
+
+Written 2026-10-08. The author: *"Can the app reload the last opened show? It's constantly bringing me back
+to a folder I can't access by default."*
+
+### 43.1 What it is, before its names
+
+Go.dot started with nothing - from the Start menu, the Dock, the applications menu - opened the empty show,
+which lives in Go.dot's own folder (`%APPDATA%\Go.dot\Untitled`, hidden on Windows). Every launch began
+there, and on that show "+ media" and a cue's file cell opened their dialogs inside it, a folder Explorer
+does not show. Now a launch with nothing opens the show this machine last opened. The empty show still
+opens the first time, or when the last show has gone, will not load, or is open in another window. And
+on the empty show the media dialogs start in the folder a sound was last picked from, never inside
+Go.dot's own.
+
+### 43.2 Decisions
+
+- **The author's picks** (my wording of both): a launch with nothing reopens the **last show**; on the
+  empty show the media dialogs start in the **last media folder** (Music, then Documents, the first time).
+
+Mine (proposed):
+
+- **XT** Only a launcher's window remembers: `--remember`, passed by `Go.dot.exe`, `launch.sh` and
+  `go.dot.sh` and carried to every window opened from one. A black-box driver opens fixtures in windows;
+  without the flag one of them would become the show the author's next launch opens.
+- **XU** The last show is the last one a window **opened** (and loaded), written at the load - not the
+  last one closed. Never the empty show, which is what a launch falls back to anyway. One line,
+  `last-show.txt`, beside the engine folder and following `--engine-folder` as `audio-defaults.xml` does:
+  a fact about the machine, never about a show (PRD §4.10).
+- **XV** The remembered show is **loaded once to check it** before it is chosen, so a show that has gone
+  bad sends the launch to the empty show rather than to an alert and an exit the next launch would meet
+  again. One already open in another window does the same: the empty show, as before, rather than raising
+  that window and opening nothing.
+- **XW** The empty show **with work a crash left in it** opens instead of the last show, so its recovery
+  offer is met rather than hidden.
+- **XX** On the empty show, New, Open and Save start **beside the last show** rather than in Documents
+  (the author's 2026-10-01 rule sent them to Documents), Documents when there is none. On a show of its own, the
+  media dialogs still start in its `media/`, and in the last media folder while it has none.
+
+### 43.3 What changed
+
+`serve` reads `last-show.txt` when `--remember` and `--yield-to-opened` are both given and nothing was
+handed over at launch (`lastShowToReopen`), and writes it after a load that is not the empty show's. The
+log says which: *"reopening the last show"*, *"the last show is no longer at ..."*, *"... does not load;
+the empty show instead"*. `ClientHost::rememberIn` hands the window Go.dot's own folder, where it keeps
+`last-media-folder.txt` (`mediaDialogFolder`, `rememberMediaFolder`). The three launchers pass the flag;
+`packaging/README.txt` says what a launch opens.

@@ -3104,8 +3104,8 @@ namespace wfg::client
 
                 chooser = std::make_unique<juce::FileChooser> (
                             picture ? "Choose the picture or movie this cue shows" : "Choose the media this cue plays",
-                            mediaFolder(), picture ? juce::String (model::pictureWildcard())
-                                                   : formats.getWildcardForAllFormats());
+                            mediaDialogFolder(), picture ? juce::String (model::pictureWildcard())
+                                                         : formats.getWildcardForAllFormats());
 
                 chooser->launchAsync (juce::FileBrowserComponent::openMode
                                         | juce::FileBrowserComponent::canSelectFiles,
@@ -3114,8 +3114,11 @@ namespace wfg::client
                                       {
                                           const auto chosen = answered.getResult();
 
-                                          if (safe != nullptr && chosen.existsAsFile())
-                                              linkMedia (cueId, chosen.getFullPathName());
+                                          if (safe == nullptr || ! chosen.existsAsFile())
+                                              return;
+
+                                          rememberMediaFolder (chosen);
+                                          linkMedia (cueId, chosen.getFullPathName());
                                       });
             }
 
@@ -3628,16 +3631,78 @@ namespace wfg::client
                 is on - where a person's shows are, once they have one - except
                 on the launcher's empty show, which lives in Go.dot's own folder
                 (Application Support, %APPDATA%, ~/.local/share), a place nobody
-                should be sent to keep their work: then the Documents folder. */
+                should be sent to keep their work: then the folder of the show
+                this machine last opened (Console.h, `rememberIn`), or the
+                Documents folder. */
             juce::File showsFolder() const
             {
                 const auto documents = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
 
                 if (host.emptyShowAtStart)
+                {
+                    if (! host.rememberIn.empty())
+                    {
+                        const auto said = juce::File (juce::String::fromUTF8 (host.rememberIn.c_str()))
+                                            .getChildFile ("last-show.txt").loadFileAsString().trim();
+
+                        if (juce::File::isAbsolutePath (said))
+                            if (const auto beside = juce::File (said).getParentDirectory(); beside.isDirectory())
+                                return beside;
+                    }
+
                     return documents;
+                }
 
                 const auto beside = mediaFolder().getParentDirectory().getParentDirectory();
                 return beside.isDirectory() ? beside : documents;
+            }
+
+            /*  WHERE A MEDIA DIALOG STARTS (author, 2026-10-08: "It's constantly
+                bringing me back to a folder I can't access by default"). The
+                show's own media folder, where its sounds are - except on the
+                launcher's empty show, whose media folder is inside Go.dot's own
+                hidden one, and on a show with no media folder yet: then the
+                folder a sound was last picked from on this machine, or Music,
+                or Documents. */
+            juce::File mediaDialogFolder() const
+            {
+                if (const auto own = mediaFolder(); ! host.emptyShowAtStart && own.isDirectory())
+                    return own;
+
+                if (const auto remembered = lastMediaFolderFile(); remembered.existsAsFile())
+                    if (const auto said = remembered.loadFileAsString().trim(); juce::File::isAbsolutePath (said))
+                        if (const auto folder = juce::File (said); folder.isDirectory())
+                            return folder;
+
+                const auto music = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+                return music.isDirectory() ? music
+                                           : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+            }
+
+            /*  `<Go.dot's own folder>/last-media-folder.txt`, or nothing when
+                the launch asked for nothing to be remembered (Console.h,
+                `rememberIn`). */
+            juce::File lastMediaFolderFile() const
+            {
+                return host.rememberIn.empty() ? juce::File()
+                                               : juce::File (juce::String::fromUTF8 (host.rememberIn.c_str()))
+                                                   .getChildFile ("last-media-folder.txt");
+            }
+
+            /*  The folder a sound or a picture was just picked from - unless it
+                is inside the empty show itself, the place nobody is to be sent. */
+            void rememberMediaFolder (const juce::File& picked) const
+            {
+                const auto file = lastMediaFolderFile();
+                const auto folder = picked.getParentDirectory();
+                const auto ownFolder = mediaFolder().getParentDirectory();
+
+                if (file == juce::File()
+                      || (host.emptyShowAtStart && (folder == ownFolder || folder.isAChildOf (ownFolder))))
+                    return;
+
+                file.getParentDirectory().createDirectory();
+                file.replaceWithText (folder.getFullPathName());
             }
 
             /*  SAVE: in place - except on the launcher's empty show, which is
@@ -4188,7 +4253,7 @@ namespace wfg::client
 
                 chooser = std::make_unique<juce::FileChooser> (
                             "Choose the media for the new cue",
-                            mediaFolder(), formats.getWildcardForAllFormats());
+                            mediaDialogFolder(), formats.getWildcardForAllFormats());
 
                 chooser->launchAsync (juce::FileBrowserComponent::openMode
                                         | juce::FileBrowserComponent::canSelectFiles
@@ -4205,8 +4270,11 @@ namespace wfg::client
                                               if (file.existsAsFile())
                                                   files.add (file.getFullPathName());
 
-                                          if (! files.isEmpty())
-                                              importMedia (parent, index, files, cueTemplate);
+                                          if (files.isEmpty())
+                                              return;
+
+                                          rememberMediaFolder (juce::File (files[0]));
+                                          importMedia (parent, index, files, cueTemplate);
                                       });
             }
 

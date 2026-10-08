@@ -16,10 +16,12 @@ Starting it
 -----------
 
 On Windows and Linux a launcher sits beside the binary; on macOS the launcher
-is the app. With nothing else it opens the empty show "Untitled", in a window,
-on your system's default audio interface, with its show settings open so you
-can pick another. On Windows and Linux, give the launcher a show folder, or
-the show's .wfg, to open that instead.
+is the app. With nothing else it opens the show you last had open on this
+computer. The very first time - or when that show has been moved, will not
+load, or is already open in another window - it opens the empty show
+"Untitled" instead, in a window, on your system's default audio interface,
+with its show settings open so you can pick another. On Windows and Linux,
+give the launcher a show folder, or the show's .wfg, to open that instead.
 
 In the window, "New show...", "Open show..." and "Save as..." work on show
 folders anywhere you like; "Show settings..." picks the audio interface, and

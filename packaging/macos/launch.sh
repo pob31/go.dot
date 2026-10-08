@@ -54,6 +54,10 @@ log="$logs/go.dot-$(date +%Y%m%d-%H%M%S).log"
 # empty show goes on giving way after that: while nothing has been done in it,
 # the first show New or Open starts takes its window's place.
 #
+# AND UNLESS THERE IS A LAST SHOW (--remember): with nothing handed over, wfg
+# opens the show this Mac last opened instead, when it still loads, and
+# remembers each show a window opens.
+#
 # --ui is resolved against the working directory, so run from Resources.
 cd "$resources"
-exec "$contents/MacOS/wfg" serve "$support/Untitled" --window --ui=console --show-settings --yield-to-opened >"$log" 2>&1
+exec "$contents/MacOS/wfg" serve "$support/Untitled" --window --ui=console --show-settings --yield-to-opened --remember >"$log" 2>&1

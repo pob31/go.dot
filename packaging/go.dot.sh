@@ -47,7 +47,8 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}/Go.dot"
 # starting from nothing needs is the interface to play through. And it gives
 # way (--yield-to-opened): while nothing has been done in it, the first show
 # New or Open starts takes its window's place. A show of your own opens as it
-# was saved.
+# was saved. With --remember, given to every launch below, wfg opens the show
+# this machine last opened in the empty one's place, when it still loads.
 show="$data/Untitled"
 first=(--show-settings --yield-to-opened)
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
@@ -91,6 +92,6 @@ fi
 # --ui is resolved against the working directory, so run from beside the binary.
 cd "$here"
 if command -v pw-jack >/dev/null 2>&1; then
-    exec pw-jack ./wfg serve "$show" --window --ui=console ${first[@]+"${first[@]}"} "$@"
+    exec pw-jack ./wfg serve "$show" --window --ui=console --remember ${first[@]+"${first[@]}"} "$@"
 fi
-exec ./wfg serve "$show" --window --ui=console ${first[@]+"${first[@]}"} "$@"
+exec ./wfg serve "$show" --window --ui=console --remember ${first[@]+"${first[@]}"} "$@"
