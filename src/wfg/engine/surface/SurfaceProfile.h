@@ -209,6 +209,18 @@ namespace wfg::surface
     inline constexpr double dialCoarseSeconds = 1.0;
     inline constexpr double dialCoarseFromSeconds = 10.0;
 
+    /*  THE D700'S MASTER DIAL IS A POSITION, NOT A STEP (the bench, 2026-10-08:
+        Mackie mode with the dial set to jog wheel sends pitch bend E8 - the
+        master fader - never the jog's CC 0x3C). Its detent is taken as
+        `d700DialPerDetent` of the fourteen bits, the steps the bench saw.
+        A move of more than `d700DialJump` at once is not a hand - it is the
+        dial answering a return to the middle sent after it moved - and turns
+        nothing. Outside the middle half of its travel the dial is sent back
+        to `d700DialMiddle`, so it never reaches an end. */
+    inline constexpr int d700DialPerDetent = 128;
+    inline constexpr int d700DialJump = 2048;
+    inline constexpr int d700DialMiddle = 8192;
+
     /*  THE MASTER DIAL'S DETENT on a speed (namespace draft §22.7, decision
         EF): a semitone, along the equal-tempered grid, so varispeed's steps
         are musical and twelve detents are an octave. The grid's lowest step

@@ -141,7 +141,7 @@ namespace wfg::surface
         enum class Kind
         {
             fader,                          // `strip` 0..7, `value` 0..16383: pitch bend E0..E7
-            masterFader,                    // `value` 0..16383: pitch bend E8, the D700's volume knob
+            masterFader,                    // `value` 0..16383: pitch bend E8, the D700's master dial
             touch,                          // `strip` 0..7, `down`: note 0x68 + strip
             masterTouch,                    // `down`: note 0x70, which the D700 never sends
             encoder,                        // `strip` 0..7, `value` a signed step: CC 0x10 + strip

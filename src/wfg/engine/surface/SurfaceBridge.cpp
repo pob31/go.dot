@@ -100,6 +100,7 @@ namespace wfg::surface
         constexpr int eqButtonNote = 0x2c;      // EQ, lit while its page is up
         constexpr int recordButtonNote = 0x5f;  // the transport's Rec: the aimed take records, or lays a layer
         constexpr int masterDialNote = 0x38;    // the D700's master dial: its colour, as its press (McuCodec)
+        constexpr int masterDialFader = 8;      // and its turn, as the master fader's pitch bend E8
 
         constexpr int ringFillMode = 2;         // MCU "wrap" and the D700's channel 3: fill from the left
         constexpr int d700RingSteps = 127;      // a D700 ring's value, 0..127 (control guide §4.3)
@@ -684,6 +685,13 @@ namespace wfg::surface
                 and its light as last sent. */
             int dialSteps = 0;
             bool dialRest = false;
+
+            /*  A D700's dial as a position (`d700DialPerDetent`): where it
+                last said it was, -1 for not known, what was left of a detent,
+                and whether it is to be sent back to the middle. */
+            int dialAt = -1;
+            int dialPart = 0;
+            bool dialRecentre = false;
             bool dialColourKnown = false;
             Rgb dialColourLevel;
             std::int64_t dialColourTick = std::numeric_limits<std::int64_t>::min() / 2;
@@ -1505,15 +1513,51 @@ namespace wfg::surface
                     box.dialSteps += event.value;
                     break;
 
-                /*  The D700's volume knob and the master touch: nothing in
-                    Go.dot is under them yet. And no reply to the handshake is
-                    ever sent (plan decision 6), so its answers do not come. */
+                /*  A D700's master dial says where it is, as a master fader
+                    would (the bench, 2026-10-08): the steps are its moves. A
+                    Mackie's master fader is a fader, and nothing in Go.dot is
+                    under it yet. */
                 case McuEvent::Kind::masterFader:
+                    if (box.profile == Profile::d700)
+                        dialMoved (box, event.value);
+                    break;
+
+                /*  The master touch: nothing is under it. And no reply to the
+                    handshake is ever sent (plan decision 6), so its answers do
+                    not come. */
                 case McuEvent::Kind::masterTouch:
                 case McuEvent::Kind::hostConnectionConfirmation:
                 case McuEvent::Kind::hostConnectionError:
                     break;
             }
+        }
+
+        /*  THE D700'S DIAL AS A POSITION: its move since it last spoke, in
+            detents, the part of one left over kept for the next move. Where it
+            was is not known until it speaks, or until it has been sent to the
+            middle; a jump is where it is now and turns nothing. */
+        static void dialMoved (Surface& box, int position)
+        {
+            const auto moved = position - box.dialAt;
+
+            if (box.dialAt < 0 || std::abs (moved) > d700DialJump)
+            {
+                box.dialPart = 0;
+            }
+            else
+            {
+                box.dialPart += moved;
+                const auto detents = box.dialPart / d700DialPerDetent;
+                box.dialPart -= detents * d700DialPerDetent;
+                box.dialSteps += detents;
+            }
+
+            box.dialAt = position;
+
+            constexpr auto quarter = (faderTop + 1) / 4;
+
+            if (position < quarter || position > faderTop + 1 - quarter)
+                box.dialRecentre = true;
         }
 
         void touch (const Surface& box, Strip& strip, bool down, const Submit& submit)
@@ -2456,6 +2500,7 @@ namespace wfg::surface
                     forgetShown (strip);
 
                 box.dialColourKnown = false;
+                box.dialRecentre = box.profile == Profile::d700;
             }
 
             /*  A PAGE WITH NOTHING TO SHOW - its cue let go of, or gone - is
@@ -2518,6 +2563,16 @@ namespace wfg::surface
 
             if (box.topology.hasRgb && ! box.banks.empty())
                 paintDial (box, tick);
+
+            /*  A D700'S DIAL BACK TO THE MIDDLE, where it is known to be from
+                then on (`d700DialMiddle`). */
+            if (box.dialRecentre && ! box.banks.empty())
+            {
+                send (box.banks.front().port, faderPosition (masterDialFader, d700DialMiddle));
+                box.dialAt = d700DialMiddle;
+                box.dialPart = 0;
+                box.dialRecentre = false;
+            }
 
             releaseScreens();
         }

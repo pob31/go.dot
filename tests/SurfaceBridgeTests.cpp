@@ -4028,6 +4028,58 @@ TEST_CASE ("surface bridge: the master dial turns the number last clicked, its c
         CHECK (desk.submitted[0].args[1].asDouble() < -6.0);
     }
 
+    SUBCASE ("the D700's dial says where it is, as the master fader: its moves are the steps, and it is kept off its ends")
+    {
+        /*  The bench, 2026-10-08: Mackie mode, the dial set to jog wheel -
+            "E8 00 0B", "E8 00 09", "E8 00 07", never CC 0x3C. */
+        const auto at = [] (int position) -> midi::Bytes
+        {
+            return { 0xe8, static_cast<std::uint8_t> (position & 0x7f), static_cast<std::uint8_t> (position >> 7) };
+        };
+
+        const auto middle = surface::d700DialMiddle;
+
+        //  Sent to the middle when the surface was first painted.
+        CHECK (contains (sentOn (desk.sink, "PORTBNK1"), at (middle)));
+
+        dialOn();
+        desk.publish();
+
+        //  Two detents up, then one down, a write a tick.
+        desk.hands ({ { "PORTBNK1", at (middle + 2 * surface::d700DialPerDetent) } });
+        REQUIRE (desk.submitted.size() == 1u);
+        CHECK (desk.submitted[0].command == "node.set");
+        CHECK (desk.submitted[0].args[0].getString() == level);
+        CHECK (desk.submitted[0].args[1].asDouble()
+                 == doctest::Approx (surface::turned (surface::Law::level, -6.0, 2, -120.0, 12.0,
+                                                      surface::FaderLaw::d700)));
+
+        desk.submitted.clear();
+        desk.hands ({ { "PORTBNK1", at (middle + surface::d700DialPerDetent) } });
+        REQUIRE (desk.submitted.size() == 1u);
+        CHECK (desk.submitted[0].args[1].asDouble() < -6.0);
+
+        //  Less than a detent is kept for the next move.
+        desk.submitted.clear();
+        desk.hands ({ { "PORTBNK1", at (middle + surface::d700DialPerDetent + 64) } });
+        CHECK (desk.submitted.empty());
+        desk.hands ({ { "PORTBNK1", at (middle + 2 * surface::d700DialPerDetent) } });
+        CHECK (desk.submitted.size() == 1u);
+
+        //  A jump is not a hand.
+        desk.submitted.clear();
+        desk.hands ({ { "PORTBNK1", at (1000) } });
+        CHECK (desk.submitted.empty());
+
+        //  And outside the middle half the dial is sent back to the middle.
+        desk.sink.sent.clear();
+        desk.publish();
+        CHECK (contains (sentOn (desk.sink, "PORTBNK1"), at (middle)));
+
+        desk.hands ({ { "PORTBNK1", at (middle - surface::d700DialPerDetent) } });
+        CHECK (desk.submitted.size() == 1u);
+    }
+
     SUBCASE ("the double click puts it back to its rest, and at its rest writes nothing")
     {
         dialOn();
