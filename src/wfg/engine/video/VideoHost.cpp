@@ -262,6 +262,11 @@ namespace wfg::video
             if (spec.headless)
                 command.push_back ("--no-window");
 
+            /*  THE OLD OPENGL RENDERER, asked for by name while the new one
+                (namespace draft §44) is being proved on the projectors. */
+            if (juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_RENDERER", {}) == "gl")
+                command.push_back ("--renderer=gl");
+
             child = std::make_unique<plugin::ChildLaunch>();
 
             if (! child->start (command))

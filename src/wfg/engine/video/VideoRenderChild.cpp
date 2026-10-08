@@ -26,6 +26,9 @@
 #include <wfg/engine/video/PipedChild.h>
 #include <wfg/engine/video/VideoClock.h>
 #include <wfg/engine/video/VideoRegion.h>
+#include <wfg/engine/video/render/Gpu.h>
+#include <wfg/engine/video/render/Painter.h>
+#include <wfg/engine/video/render/Projector.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_opengl/juce_opengl.h>
@@ -34,6 +37,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -218,23 +222,10 @@ namespace wfg::video
             opened once, on a thread of its own, and its frames read and
             unpacked a few ahead of where each playhead is - a disk read and a
             copy each, which is what HAP is for. A frame is handed out whole and
-            never changed, so a window's drawing thread holds it without a lock
-            while it uploads it. */
-        struct MovieFrame
-        {
-            hap::Texture texture = hap::Texture::none;
-            std::vector<std::uint8_t> blocks;
-            int width = 0;
-            int height = 0;
-            int index = -1;
-
-            /*  A PREVIEW'S FRAME (namespace draft 37.5, WF): straight RGBA, rows
-                from the top, as FFmpeg decoded it - for a movie that is not HAP
-                and is played until it is converted. Empty for a HAP frame. */
-            std::vector<std::uint8_t> rgba;
-
-            bool drawable() const noexcept  { return texture != hap::Texture::none || ! rgba.empty(); }
-        };
+            never changed, so the drawing thread holds it without a lock while
+            it uploads it (render/Painter.h's MovieFrame: HAP's blocks, or a
+            preview's straight RGBA, namespace draft 37.5, WF). */
+        using MovieFrame = render::MovieFrame;
 
         class MovieStore final : private juce::Thread
         {
@@ -1872,15 +1863,389 @@ namespace wfg::video
         };
 
         //==============================================================================
+        /*  THE STORES AS THE NEW RENDERER READS THEM (render/Painter.h). */
+        struct StoreSources final : render::Sources
+        {
+            StoreSources (const PictureStore& picturesToRead, const MovieStore& moviesToRead)
+                : pictures (picturesToRead), movies (moviesToRead) {}
+
+            juce::Image picture (const std::string& path, std::uint64_t& version) const override
+            {
+                return pictures.get (path, version);
+            }
+
+            std::shared_ptr<const render::MovieFrame> movieFrame (const std::string& path, double seconds) const override
+            {
+                return movies.frame (path, movies.frameAt (path, seconds));
+            }
+
+            const PictureStore& pictures;
+            const MovieStore& movies;
+        };
+
+        /*  A PROJECTOR'S WINDOW ON THE NEW RENDERER (namespace draft §44.4):
+            black, covering its display as §39 places it - a pixel past an edge
+            no other display touches, which the author confirmed on screen on
+            2026-10-08 - never the focus, never a button on the task bar; and in
+            it the native view the device draws into, which JUCE never paints. */
+        class ProjectorWindow final : public juce::Component
+        {
+        public:
+            ProjectorWindow (const DisplayInfo& display, const Overhang& overhangToUse)
+                : covering (display), overhang (overhangToUse)
+            {
+                setOpaque (true);
+                setWantsKeyboardFocus (false);
+                setMouseCursor (juce::MouseCursor::NoCursor);
+                setBounds (display.x, display.y, display.width, display.height);
+
+                addToDesktop (juce::ComponentPeer::windowIsTemporary
+                                | juce::ComponentPeer::windowIgnoresKeyPresses);
+                setAlwaysOnTop (true);
+                setVisible (true);
+
+                coverDisplay (getWindowHandle(), covering, overhang);
+                view = render::makeNativeView (getWindowHandle(), pixelWidth(), pixelHeight());
+            }
+
+            ~ProjectorWindow() override
+            {
+                render::destroyNativeView (view);
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                g.fillAll (juce::Colours::black);
+            }
+
+            void resized() override
+            {
+                render::fitNativeView (view, getWindowHandle(), pixelWidth(), pixelHeight());
+            }
+
+            //  Asked each second (§39): back over its display's pixels, its view with it.
+            void keepCovering()
+            {
+                coverDisplay (getWindowHandle(), covering, overhang);
+                render::fitNativeView (view, getWindowHandle(), pixelWidth(), pixelHeight());
+            }
+
+            render::NativeView view;
+
+        private:
+            int pixelWidth() const
+            {
+                return std::max (1, juce::roundToInt (static_cast<float> (getWidth()) * juce::Component::getApproximateScaleFactorForComponent (this)));
+            }
+
+            int pixelHeight() const
+            {
+                return std::max (1, juce::roundToInt (static_cast<float> (getHeight()) * juce::Component::getApproximateScaleFactorForComponent (this)));
+            }
+
+            DisplayInfo covering;
+            Overhang overhang;
+
+            JUCE_DECLARE_NON_COPYABLE (ProjectorWindow)
+        };
+
+        /*  A PROJECTOR AS THE RENDER THREAD IS GIVEN IT: which output, its
+            frames' slot, the view to draw into, where the display's own pixels
+            are inside it, its refresh, and a pixel of its display - the graphics
+            card driving it is the one drawn on. */
+        struct ProjectorSpec
+        {
+            std::string outputId;
+            int slot = 0;
+            render::NativeView view;
+            Overhang overhang;
+            double refreshHz = 60.0;
+            int pointX = 0;
+            int pointY = 0;
+        };
+
+        //==============================================================================
+        /*  THE NEW RENDERER'S THREAD (namespace draft §44.4): the one device,
+            the painter, a surface on each projector's view; woken by its
+            displays' refreshes (YJ), it reads the configuration and the layers
+            once, draws each projector that is due - each canvas composited once
+            for them all - commits, shows them and counts their frames. Never on
+            the message thread, so a window being made or moved never holds a
+            frame up. */
+        class RenderLoop final : private juce::Thread
+        {
+        public:
+            RenderLoop (region::Region& regionToDraw, const PictureStore& pictures, const MovieStore& movies)
+                : juce::Thread ("video render"), r (regionToDraw), sources (pictures, movies)
+            {
+                startThread (juce::Thread::Priority::high);
+            }
+
+            ~RenderLoop() override
+            {
+                signalThreadShouldExit();
+                changed.notify_all();
+                stopThread (4000);
+            }
+
+            /*  THE PROJECTORS TO DRAW, in place of those before - returning once
+                the render thread has let go of the old ones' surfaces, so their
+                windows may go. */
+            void setProjectors (std::vector<ProjectorSpec> specs)
+            {
+                std::unique_lock<std::mutex> hold (lock);
+                wanted = std::move (specs);
+                ++generation;
+                changed.notify_all();
+                changed.wait_for (hold, std::chrono::seconds (2), [this] { return taken == generation || stopped; });
+            }
+
+        private:
+            struct Frames
+            {
+                std::int64_t last = 0;
+                double jitterMs = 0.0;
+            };
+
+            void run() override
+            {
+                std::vector<ProjectorSpec> specs;
+                std::vector<std::unique_ptr<render::Surface>> surfaces;
+                std::vector<Frames> frames;
+                std::unique_ptr<render::Painter> painter;
+                std::uint64_t have = 0;
+                std::string deviceProblem;
+                ClockReader clock;
+
+                while (! threadShouldExit())
+                {
+                    render::FramePool pool;
+
+                    //  THE PROJECTORS CHANGED: the old surfaces let go first, and said so.
+                    auto rebuilt = false;
+
+                    {
+                        std::unique_lock<std::mutex> hold (lock);
+
+                        if (generation != have)
+                        {
+                            surfaces.clear();
+                            specs = wanted;
+                            have = generation;
+                            taken = generation;
+                            rebuilt = true;
+                            changed.notify_all();
+                        }
+                        else if (surfaces.empty())
+                        {
+                            changed.wait_for (hold, std::chrono::milliseconds (100),
+                                              [this, have] { return generation != have || threadShouldExit(); });
+                            continue;
+                        }
+                    }
+
+                    if (rebuilt)
+                    {
+                        /*  THE DEVICE, the first time there is something to draw:
+                            on the card driving the first projector's display. */
+                        if (! specs.empty() && ! gpu::isOpen())
+                        {
+                            gpu::OpenOptions options;
+                            options.hasPoint = true;
+                            options.pointX = specs.front().pointX;
+                            options.pointY = specs.front().pointY;
+                            options.nativeDisplay = render::nativeDisplay();
+
+                            painter.reset();
+                            deviceProblem.clear();
+
+                            if (gpu::open (options, deviceProblem))
+                            {
+                                painter = std::make_unique<render::Painter> (sources);
+
+                                if (! painter->make (deviceProblem))
+                                    painter.reset();
+                            }
+                            else
+                            {
+                                deviceProblem = "the graphics device would not start: " + deviceProblem;
+                            }
+                        }
+
+                        frames.assign (specs.size(), Frames {});
+
+                        for (const auto& spec : specs)
+                        {
+                            std::string why = deviceProblem;
+                            std::unique_ptr<render::Surface> surface;
+
+                            if (painter != nullptr)
+                                surface = render::makeSurface (spec.view, why);
+
+                            if (surface == nullptr)
+                                sayProblem (spec.slot, why);
+
+                            surfaces.push_back (std::move (surface));
+                        }
+
+                        continue;
+                    }
+
+                    if (painter == nullptr)
+                    {
+                        std::unique_lock<std::mutex> hold (lock);
+                        changed.wait_for (hold, std::chrono::milliseconds (100),
+                                          [this, have] { return generation != have || threadShouldExit(); });
+                        continue;
+                    }
+
+                    /*  EACH DISPLAY AT ITS OWN REFRESH (YJ): woken when one is
+                        ready for a frame. */
+                    std::vector<render::Surface*> live;
+                    double fastest = 24.0;
+
+                    for (std::size_t n = 0; n < surfaces.size(); ++n)
+                        if (surfaces[n] != nullptr)
+                        {
+                            live.push_back (surfaces[n].get());
+                            fastest = std::max (fastest, specs[n].refreshHz);
+                        }
+
+                    if (live.empty() || ! render::waitForRefresh (live, fastest, 50))
+                        continue;
+
+                    const auto began = steadyNanos();
+                    region::ConfigReading config;
+                    region::readConfig (r, config);
+                    painter->beginFrame (config, readLayers (r),
+                                         [this] (const std::string& id) { return region::canvasLevelOf (r, id); });
+
+                    std::vector<std::size_t> drawn;
+
+                    for (std::size_t n = 0; n < surfaces.size(); ++n)
+                    {
+                        auto* surface = surfaces[n].get();
+
+                        if (surface == nullptr || ! surface->due)
+                            continue;
+
+                        surface->due = false;
+                        const auto& spec = specs[n];
+                        const region::OutputReading* output = nullptr;
+
+                        for (const auto& reading : config.outputs)
+                            if (reading.id == spec.outputId)
+                                output = &reading;
+
+                        sg_swapchain swapchain {};
+
+                        if (output == nullptr || ! surface->acquire (swapchain))
+                            continue;
+
+                        /*  THE SAMPLE THIS FRAME IS SEEN AT: its own display's
+                            next refresh, a period on. */
+                        const auto period = 1.0e9 / std::max (24.0, spec.refreshHz);
+                        const auto sample = clock.sampleAt (r, began + static_cast<std::int64_t> (period));
+
+                        render::Target target;
+                        target.swapchain = swapchain;
+                        target.format = swapchain.color_format;
+                        target.width = swapchain.width;
+                        target.height = swapchain.height;
+                        target.viewX = spec.overhang.left;
+                        target.viewY = spec.overhang.top;
+                        target.viewWidth = std::max (1, swapchain.width - spec.overhang.left - spec.overhang.right);
+                        target.viewHeight = std::max (1, swapchain.height - spec.overhang.top - spec.overhang.bottom);
+
+                        painter->drawOutput (*output, sample, target);
+                        drawn.push_back (n);
+                    }
+
+                    sg_commit();
+
+                    for (const auto n : drawn)
+                    {
+                        surfaces[n]->present();
+                        countFrame (specs[n], frames[n], began);
+                    }
+
+                    painter->endFrame();
+                }
+
+                surfaces.clear();
+                painter.reset();
+                gpu::close();
+
+                const std::lock_guard<std::mutex> hold (lock);
+                stopped = true;
+                changed.notify_all();
+            }
+
+            void sayProblem (int slot, const std::string& why)
+            {
+                if (slot < 0 || slot >= static_cast<int> (region::maxOutputs))
+                    return;
+
+                auto& state = r.outputs[static_cast<std::size_t> (slot)];
+                region::beginWrite (state.seq);
+                state.bound.store (0u, std::memory_order_relaxed);
+                region::writeText (state.problem, why);
+                region::endWrite (state.seq);
+            }
+
+            /*  THE OUTPUT'S FRAMES AS NUMBERS (§35.7): every frame counted, one
+                begun more than half a period late counted late, and how far
+                each strays from its period, smoothed. */
+            void countFrame (const ProjectorSpec& spec, Frames& counted, std::int64_t began)
+            {
+                if (spec.slot < 0 || spec.slot >= static_cast<int> (region::maxOutputs))
+                    return;
+
+                auto& state = r.outputs[static_cast<std::size_t> (spec.slot)];
+                const auto period = 1.0e9 / std::max (24.0, spec.refreshHz);
+
+                if (counted.last > 0)
+                {
+                    const auto interval = static_cast<double> (began - counted.last);
+
+                    if (interval > 1.5 * period)
+                        state.framesLate.fetch_add (1, std::memory_order_relaxed);
+
+                    counted.jitterMs = counted.jitterMs * 0.95 + 0.05 * std::abs (interval - period) * 1.0e-6;
+                    state.jitterMs.store (static_cast<float> (counted.jitterMs), std::memory_order_relaxed);
+                }
+
+                counted.last = began;
+                state.framesPresented.fetch_add (1, std::memory_order_relaxed);
+            }
+
+            region::Region& r;
+            StoreSources sources;
+
+            std::mutex lock;
+            std::condition_variable changed;
+            std::vector<ProjectorSpec> wanted;
+            std::uint64_t generation = 0;
+            std::uint64_t taken = 0;
+            bool stopped = false;
+        };
+
+        //==============================================================================
         /*  THE RENDERER'S MESSAGE THREAD, a hundred times a second: alive, the
             parent still there, the displays and the configuration followed,
             and - with no window - the probes. */
         class Session final : private juce::Timer
         {
         public:
-            Session (region::Region& regionToServe, std::int64_t parentPidToWatch, bool windowedToUse)
+            Session (region::Region& regionToServe, std::int64_t parentPidToWatch, bool windowedToUse, bool nativeToUse)
                 : r (regionToServe), parentPid (parentPidToWatch), windowed (windowedToUse), sampler (pictures, movies)
             {
+                /*  THE NEW RENDERER (namespace draft §44), unless the old
+                    OpenGL one is asked for (`--renderer=gl`) - kept until the
+                    author has seen the new on the projectors. */
+                if (windowed && nativeToUse)
+                    loop = std::make_unique<RenderLoop> (r, pictures, movies);
+
                 followDisplays (true);
                 startTimer (10);
             }
@@ -1888,6 +2253,12 @@ namespace wfg::video
             ~Session() override
             {
                 stopTimer();
+
+                if (loop != nullptr)
+                    loop->setProjectors ({});
+
+                projectors.clear();
+                loop.reset();
                 windows.clear();
             }
 
@@ -1925,7 +2296,7 @@ namespace wfg::video
                         key += output.id + "|" + (output.enabled ? "1" : "0") + (output.hidden ? "h" : "") + "|"
                              + output.display + "|" + output.displayId + ";";
 
-                    if (displaysMoved || key != boundKey || windows.empty() != config.outputs.empty())
+                    if (displaysMoved || key != boundKey || (windows.empty() && projectors.empty()) != config.outputs.empty())
                     {
                         boundKey = key;
                         bind (config);
@@ -1934,8 +2305,13 @@ namespace wfg::video
 
                 //  Each window over its display's pixels, half a second after the display check (§39).
                 if (ticks % 100 == 50)
+                {
                     for (auto& window : windows)
                         window->keepCovering();
+
+                    for (auto& projector : projectors)
+                        projector->keepCovering();
+                }
 
                 /*  THE PICTURES WANTED: every layer's, and the standby's the
                     engine named - read before GO, so GO only shows them (VX). */
@@ -2153,7 +2529,14 @@ namespace wfg::video
                 display came or went. */
             void bind (const region::ConfigReading& config)
             {
+                //  The render thread lets go of the old surfaces before their windows go.
+                if (loop != nullptr)
+                    loop->setProjectors ({});
+
+                projectors.clear();
                 windows.clear();
+
+                std::vector<ProjectorSpec> specs;
 
                 const auto count = std::min<std::size_t> (config.outputs.size(), region::maxOutputs);
 
@@ -2183,10 +2566,33 @@ namespace wfg::video
                     if (display >= 0)
                     {
                         const auto& on = displays[static_cast<std::size_t> (display)];
-                        windows.push_back (std::make_unique<OutputWindow> (r, pictures, movies, output.id, static_cast<int> (n),
-                                                                           on, windowOverhang (on, displays)));
+
+                        if (loop != nullptr)
+                        {
+                            const auto overhang = windowOverhang (on, displays);
+                            auto window = std::make_unique<ProjectorWindow> (on, overhang);
+
+                            ProjectorSpec spec;
+                            spec.outputId = output.id;
+                            spec.slot = static_cast<int> (n);
+                            spec.view = window->view;
+                            spec.overhang = overhang;
+                            spec.refreshHz = static_cast<double> (on.refreshHz);
+                            spec.pointX = on.physicalWidth > 0 ? on.physicalX + on.physicalWidth / 2 : on.x + on.width / 2;
+                            spec.pointY = on.physicalHeight > 0 ? on.physicalY + on.physicalHeight / 2 : on.y + on.height / 2;
+                            specs.push_back (std::move (spec));
+                            projectors.push_back (std::move (window));
+                        }
+                        else
+                        {
+                            windows.push_back (std::make_unique<OutputWindow> (r, pictures, movies, output.id, static_cast<int> (n),
+                                                                               on, windowOverhang (on, displays)));
+                        }
                     }
                 }
+
+                if (loop != nullptr)
+                    loop->setProjectors (std::move (specs));
 
                 for (std::size_t n = count; n < static_cast<std::size_t> (region::maxOutputs); ++n)
                 {
@@ -2241,6 +2647,8 @@ namespace wfg::video
             StoreSampler sampler;
             std::set<std::string> lastWanted;
             std::vector<std::unique_ptr<OutputWindow>> windows;
+            std::unique_ptr<RenderLoop> loop;
+            std::vector<std::unique_ptr<ProjectorWindow>> projectors;
             ClockReader clock;
         };
     }
@@ -2251,6 +2659,7 @@ namespace wfg::video
         const auto regionPath = optionFrom (args, "--region");
         const auto parentPid = static_cast<std::int64_t> (std::atoll (optionFrom (args, "--parent-pid").c_str()));
         const auto windowed = ! hasFlag (args, "--no-window");
+        const auto native = optionFrom (args, "--renderer") != "gl";
 
         if (regionPath.empty())
         {
@@ -2290,7 +2699,7 @@ namespace wfg::video
        #endif
 
         {
-            Session session (r, parentPid, windowed);
+            Session session (r, parentPid, windowed, native);
             r.ready.store (1, std::memory_order_release);
             juce::MessageManager::getInstance()->runDispatchLoop();
         }

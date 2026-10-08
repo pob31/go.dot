@@ -35,9 +35,13 @@
     layer's opacity is read off its points there - never stepped at fifty
     hertz, never on the window's vsync alone (PRD §3.19d).
 
-    OpenGL, through JUCE (UX): the window is the output sink of V.1; the
-    offscreen canvas a mesh warps arrives with the mesh (V.5), and a DeckLink
-    card is another sink.
+    EACH SYSTEM'S OWN GRAPHICS (namespace draft §44, XZ): one device through
+    sokol_gfx - Direct3D 11, Metal, OpenGL through EGL - on a render thread of
+    its own, each canvas composited once a frame for every projector, each
+    display drawn at its own refresh (render/). `--renderer=gl` keeps the
+    first renderer - OpenGL through JUCE, a context a window - until the new
+    one has been seen on the projectors; WFG_VIDEO_RENDERER=gl in the engine's
+    environment asks for it.
 
     `--no-window` is everything but the windows, for a machine with no screen:
     the same reading of the region at a clock, through the CPU compositor, the

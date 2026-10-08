@@ -57,8 +57,10 @@ namespace
     {
         Device()
         {
+            /*  WFG_GPU_HARDWARE=1 draws on the machine's own card instead -
+                how a booth's driver is checked against the reference. */
             video::gpu::OpenOptions options;
-            options.software = true;
+            options.software = juce::SystemStats::getEnvironmentVariable ("WFG_GPU_HARDWARE", {}) != "1";
             open = video::gpu::open (options, why);
 
            #if JUCE_WINDOWS

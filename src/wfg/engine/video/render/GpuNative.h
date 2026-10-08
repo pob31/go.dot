@@ -36,6 +36,13 @@ namespace wfg::video::gpu::native
 
     void close();
 
+   #if defined(SOKOL_GLCORE)
+    /*  THE ONE CONTEXT, for a window surface made on its display. */
+    void* eglDisplay() noexcept;
+    void* eglContext() noexcept;
+    void* eglConfig() noexcept;
+   #endif
+
     /** The system's graphics, as the readout names it: "Direct3D 11". */
     const char* backendName() noexcept;
 

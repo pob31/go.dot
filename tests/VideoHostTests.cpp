@@ -568,6 +568,19 @@ TEST_CASE ("video bench: a real window on a real display, its frames counted")
                             return output != nullptr && output->bound;
                         }, 5000));
 
+    /*  COUNTED FROM THE FIRST FRAME DRAWN, not from the window: the graphics
+        card may be waking from its sleep (a laptop's second card takes two
+        seconds), which is no frame late. */
+    const auto framesOf = [&host]
+    {
+        const auto said = host.readouts();
+        const auto* output = said.output ("VD000021");
+        return output != nullptr ? output->framesPresented : std::uint64_t {};
+    };
+
+    REQUIRE (tickUntil (host, clock, [&framesOf] { return framesOf() > 0; }, 10000));
+
+    const auto first = framesOf();
     const auto at = clock.now();
     host.sink().show (fill ("RUN00001", "VD000011", 0, 1, 0x2040A0));
     host.sink().opacity ("RUN00001", { at, 0.0 });
@@ -579,9 +592,9 @@ TEST_CASE ("video bench: a real window on a real display, its frames counted")
     const auto* output = said.output ("VD000021");
     REQUIRE (output != nullptr);
 
-    MESSAGE ("frames " << output->framesPresented << ", late " << output->framesLate
+    MESSAGE ("frames " << output->framesPresented - first << " in four seconds, late " << output->framesLate
                        << ", jitter " << output->jitterMs << " ms");
-    CHECK (output->framesPresented > 100u);
+    CHECK (output->framesPresented - first > 100u);
 
     host.sink().remove ("RUN00001", clock.now() + 48000);
     tickUntil (host, clock, [] { return false; }, 1500);

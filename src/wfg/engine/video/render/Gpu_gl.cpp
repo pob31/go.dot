@@ -17,9 +17,11 @@
 /*
     THE DEVICE ON LINUX: OpenGL 4.1 core, through EGL (namespace draft §44.4) -
     one context, made current on no surface at all, which a picture drawn in
-    memory needs and a projector's window is given later. Mesa's surfaceless
-    platform first, the default display after; `software` asks Mesa for its
-    software rasteriser (llvmpipe), which every test draws on.
+    memory needs, and on each projector's window in turn as it is drawn. On
+    the X display the projectors' windows are on when there are windows;
+    without, Mesa's surfaceless platform first, the default display after.
+    `software` asks Mesa for its software rasteriser (llvmpipe), which every
+    test draws on.
 */
 
 #define GL_GLEXT_PROTOTYPES
@@ -41,9 +43,22 @@ namespace wfg::video::gpu::native
     {
         EGLDisplay display = EGL_NO_DISPLAY;
         EGLContext context = EGL_NO_CONTEXT;
+        EGLConfig chosenConfig = nullptr;
 
-        EGLDisplay displayToUse()
+        EGLDisplay displayToUse (void* x11)
         {
+            if (x11 != nullptr)
+            {
+               #ifdef EGL_PLATFORM_X11_KHR
+                const auto onX = eglGetPlatformDisplay (EGL_PLATFORM_X11_KHR, x11, nullptr);
+
+                if (onX != EGL_NO_DISPLAY)
+                    return onX;
+               #endif
+
+                return eglGetDisplay (reinterpret_cast<EGLNativeDisplayType> (x11));
+            }
+
            #ifdef EGL_PLATFORM_SURFACELESS_MESA
             const auto surfaceless = eglGetPlatformDisplay (EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
 
@@ -65,7 +80,7 @@ namespace wfg::video::gpu::native
         if (options.software)
             setenv ("LIBGL_ALWAYS_SOFTWARE", "1", 1);
 
-        display = displayToUse();
+        display = displayToUse (options.nativeDisplay);
 
         if (display == EGL_NO_DISPLAY || eglInitialize (display, nullptr, nullptr) != EGL_TRUE)
         {
@@ -81,9 +96,12 @@ namespace wfg::video::gpu::native
             return false;
         }
 
-        //  Any surface type: the context is made current on none.
-        const EGLint configWanted[] { EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_SURFACE_TYPE, 0,
-                                      EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+        /*  With windows, one that draws into them - an X window's default
+            visual has no alpha; without, any: the context is made current on
+            no surface. */
+        const auto windowed = options.nativeDisplay != nullptr;
+        const EGLint configWanted[] { EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_SURFACE_TYPE, windowed ? EGL_WINDOW_BIT : 0,
+                                      EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, windowed ? 0 : 8,
                                       EGL_NONE };
         EGLConfig config = nullptr;
         EGLint configs = 0;
@@ -108,6 +126,8 @@ namespace wfg::video::gpu::native
             return false;
         }
 
+        chosenConfig = config;
+
         if (const auto* renderer = reinterpret_cast<const char*> (glGetString (GL_RENDERER)))
             adapter = renderer;
 
@@ -129,7 +149,12 @@ namespace wfg::video::gpu::native
 
         context = EGL_NO_CONTEXT;
         display = EGL_NO_DISPLAY;
+        chosenConfig = nullptr;
     }
+
+    void* eglDisplay() noexcept  { return display; }
+    void* eglContext() noexcept  { return context; }
+    void* eglConfig() noexcept   { return chosenConfig; }
 
     bool readBack (sg_image image, int width, int height, sg_pixel_format, std::vector<float>& rgba)
     {

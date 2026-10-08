@@ -16,9 +16,11 @@
 
 /*
     THE DEVICE ON WINDOWS: Direct3D 11 (namespace draft §44.4), the API Spout
-    shares its pictures in. The default adapter - the one Windows gives a
-    program it has no preference for - or WARP, Microsoft's software
-    rasteriser, which every Windows has and every test draws on.
+    shares its pictures in. On the graphics card driving the first projector's
+    display - on a laptop with two, the one it is wired to, so no picture
+    crosses from one card to the other - or, with no projector, the fastest;
+    or WARP, Microsoft's software rasteriser, which every Windows has and
+    every test draws on.
 */
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -29,7 +31,7 @@
 #endif
 #include <windows.h>
 #include <d3d11.h>
-#include <dxgi.h>
+#include <dxgi1_6.h>
 
 #include <wfg/engine/video/render/GpuNative.h>
 
@@ -56,6 +58,64 @@ namespace wfg::video::gpu::native
             std::string out (static_cast<std::size_t> (bytes - 1), '\0');
             WideCharToMultiByte (CP_UTF8, 0, wide, -1, out.data(), bytes, nullptr, nullptr);
             return out;
+        }
+
+        /*  THE CARD DRIVING THE DISPLAY AT (x, y), or with none named the one
+            Windows calls the fastest; null for Windows's own choice. */
+        IDXGIAdapter1* adapterFor (const OpenOptions& options)
+        {
+            IDXGIFactory1* factory = nullptr;
+
+            if (FAILED (CreateDXGIFactory1 (__uuidof (IDXGIFactory1), reinterpret_cast<void**> (&factory))))
+                return nullptr;
+
+            IDXGIAdapter1* chosen = nullptr;
+
+            if (options.hasPoint)
+            {
+                IDXGIAdapter1* adapter = nullptr;
+
+                for (UINT n = 0; chosen == nullptr && factory->EnumAdapters1 (n, &adapter) != DXGI_ERROR_NOT_FOUND; ++n)
+                {
+                    IDXGIOutput* output = nullptr;
+
+                    for (UINT m = 0; chosen == nullptr && adapter->EnumOutputs (m, &output) != DXGI_ERROR_NOT_FOUND; ++m)
+                    {
+                        DXGI_OUTPUT_DESC desc {};
+
+                        if (SUCCEEDED (output->GetDesc (&desc)))
+                        {
+                            const auto& r = desc.DesktopCoordinates;
+
+                            if (options.pointX >= r.left && options.pointX < r.right
+                                  && options.pointY >= r.top && options.pointY < r.bottom)
+                            {
+                                adapter->AddRef();
+                                chosen = adapter;
+                            }
+                        }
+
+                        output->Release();
+                    }
+
+                    adapter->Release();
+                }
+            }
+
+            if (chosen == nullptr)
+            {
+                IDXGIFactory6* six = nullptr;
+
+                if (SUCCEEDED (factory->QueryInterface (__uuidof (IDXGIFactory6), reinterpret_cast<void**> (&six))))
+                {
+                    six->EnumAdapterByGpuPreference (0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, __uuidof (IDXGIAdapter1),
+                                                     reinterpret_cast<void**> (&chosen));
+                    six->Release();
+                }
+            }
+
+            factory->Release();
+            return chosen;
         }
 
         std::string adapterOf (ID3D11Device* made)
@@ -99,13 +159,18 @@ namespace wfg::video::gpu::native
             not run on. */
         const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 
-        auto made = D3D11CreateDevice (nullptr, options.software ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE,
-                                       nullptr, flags, levels, 2, D3D11_SDK_VERSION, &device, &got, &context);
+        auto* card = options.software ? nullptr : adapterFor (options);
+        const auto type = options.software ? D3D_DRIVER_TYPE_WARP
+                                           : (card != nullptr ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE);
+
+        auto made = D3D11CreateDevice (card, type, nullptr, flags, levels, 2, D3D11_SDK_VERSION, &device, &got, &context);
 
         //  An older runtime that does not know 11.1 is asked for 11.0 alone.
         if (made == E_INVALIDARG)
-            made = D3D11CreateDevice (nullptr, options.software ? D3D_DRIVER_TYPE_WARP : D3D_DRIVER_TYPE_HARDWARE,
-                                      nullptr, flags, levels + 1, 1, D3D11_SDK_VERSION, &device, &got, &context);
+            made = D3D11CreateDevice (card, type, nullptr, flags, levels + 1, 1, D3D11_SDK_VERSION, &device, &got, &context);
+
+        if (card != nullptr)
+            card->Release();
 
         if (FAILED (made) || device == nullptr || context == nullptr)
         {

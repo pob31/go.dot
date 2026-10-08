@@ -42,6 +42,19 @@ namespace wfg::video::gpu
     struct OpenOptions
     {
         bool software = false;
+
+        /*  A POINT ON THE FIRST PROJECTOR'S DISPLAY, in the system's pixels:
+            Windows draws on the graphics card driving it - on a laptop with
+            two, the one the projector is wired to - and with none, on the
+            fastest card it has. */
+        bool hasPoint = false;
+        int pointX = 0;
+        int pointY = 0;
+
+        /*  Linux: the X display the projectors' windows are on (Projector.h's
+            nativeDisplay), so the one context draws into them too; null draws
+            in memory only. */
+        void* nativeDisplay = nullptr;
     };
 
     /** The device made and sokol_gfx set up on it; false and why not. */
