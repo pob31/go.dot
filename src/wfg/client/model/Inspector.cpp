@@ -89,7 +89,8 @@ namespace wfg::client::model
                 /*  A VIDEO CUE (Phase 8a): what it shows, where, how high in
                     the stack, how solid and in what colour, then how it comes
                     in. */
-                { "video",   { "source", "canvas", "file", "fit", "layer", "blend", "opacity", "dca", "paint", "fadeIn",
+                { "video",   { "source", "canvas", "videoInput", "file", "fit", "layer", "blend", "opacity", "dca",
+                               "videoInsert", "paint", "fadeIn",
                                "startOffset", "rate",
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
                                "contrast", "saturation", "gamma", "hue",
@@ -164,6 +165,11 @@ namespace wfg::client::model
                 { "doh", "on Doh!" },
                 /*  A MOVIE'S SOUND (namespace draft 37.5, WJ). */
                 { "lockedTo", "locked to movie" },
+                /*  A CAPTURE'S INPUT AND A CUE'S INSERT (namespace draft §44):
+                    the author's words, the rows' names kept apart from a
+                    sound's `input` and `insert`. */
+                { "videoInput", "input" },
+                { "videoInsert", "insert" },
                 { "dohRollback", "rollback" },
             };
 
@@ -688,12 +694,26 @@ namespace wfg::client::model
         {
             for (auto& field : decided)
             {
-                if (field.name != "canvas" || ! field.writable)
+                if (! field.writable)
                     continue;
 
-                field.control = Control::canvasRef;
-                field.choices = canvasChoices (readCanvases (snapshot));
-                return;
+                if (field.name == "canvas")
+                {
+                    field.control = Control::canvasRef;
+                    field.choices = canvasChoices (readCanvases (snapshot));
+                }
+                else if (field.name == "videoInput")
+                {
+                    //  A CAPTURE'S INPUT (§44, YC), from the show's video inputs.
+                    field.control = Control::videoInputRef;
+                    field.choices = videoInputChoices (readVideoInputs (snapshot));
+                }
+                else if (field.name == "videoInsert")
+                {
+                    //  AND THE INSERT ITS PICTURE GOES THROUGH (§44, YE).
+                    field.control = Control::videoInsertRef;
+                    field.choices = videoInsertChoices (readVideoInserts (snapshot));
+                }
             }
         }
 

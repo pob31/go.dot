@@ -68,8 +68,73 @@ namespace wfg::client::model
         std::int64_t framesLate = 0;
         int zones = 0;              ///< how many zones lie over its own canvas (namespace draft 40)
 
+        /*  WHAT IT DOES WITH ITS CANVAS (namespace draft §44, YA): shows it on
+            a display, or sends it - ndi, spout, syphon - under a name, at a
+            rate. */
+        std::string kind = "display";
+        std::string sendName;
+        double frameRate = 60.0;
+
+        bool sends() const { return ! kind.empty() && kind != "display"; }
         std::string label() const;
     };
+
+    /*  A VIDEO INPUT (namespace draft §44, YB): a picture another program
+        sends, the show's - its name, kind and sender - and what arrives
+        tonight, the machine's. */
+    struct VideoInputRow
+    {
+        std::string id;
+        std::string name;
+        std::string kind = "ndi";
+        std::string sender;
+        bool enabled = true;
+        bool connected = false;
+        int width = 0;
+        int height = 0;
+        double frameRate = 0.0;
+        std::string problem;
+
+        std::string label() const;
+    };
+
+    /*  A VIDEO INSERT (§44, YE): a cue's picture to another program and back. */
+    struct VideoInsertRow
+    {
+        std::string id;
+        std::string name;
+        std::string kind = "spout";
+        std::string sendName;
+        std::string returnSender;
+        bool connected = false;
+        double frameRate = 0.0;
+        double returnAge = 0.0;
+        std::string problem;
+
+        std::string label() const;
+    };
+
+    /*  A PICTURE ANOTHER PROGRAM OFFERS NOW (§44, YB), as
+        /godot/videoInput/available lists it. */
+    struct OfferedSender
+    {
+        std::string kind;
+        std::string name;
+    };
+
+    std::vector<VideoInputRow> readVideoInputs (const tree::TreeSnapshot&);
+    std::vector<VideoInsertRow> readVideoInserts (const tree::TreeSnapshot&);
+    std::vector<OfferedSender> readOfferedSenders (const tree::TreeSnapshot&);
+
+    /*  THE KINDS THIS SYSTEM SENDS AND TAKES IN: NDI everywhere, Spout on
+        Windows, Syphon on macOS - and each one's name on screen. */
+    std::vector<std::string> pictureKindsHere();
+    std::string pictureKindWord (const std::string& kind);
+
+    /*  A MENU OF THE SHOW'S VIDEO INPUTS AND OF ITS INSERTS, "(none)" first,
+        identifier and label apart, as the canvases' menu is. */
+    std::vector<std::pair<std::string, std::string>> videoInputChoices (const std::vector<VideoInputRow>&);
+    std::vector<std::pair<std::string, std::string>> videoInsertChoices (const std::vector<VideoInsertRow>&);
 
     /** Every canvas, in /godot/canvas/order. */
     std::vector<CanvasRow> readCanvases (const tree::TreeSnapshot&);

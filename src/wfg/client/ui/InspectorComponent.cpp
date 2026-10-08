@@ -652,6 +652,8 @@ namespace wfg::client::ui
                 case model::Control::canvasRef:
                 case model::Control::groupRef:
                 case model::Control::movieRef:
+                case model::Control::videoInputRef:
+                case model::Control::videoInsertRef:
                     /*  THE ITEMS THEMSELVES CAN HAVE MOVED, which no other
                         control here has to think about: a `choice`'s options
                         come from the parameter table and are fixed for the
@@ -1012,7 +1014,9 @@ namespace wfg::client::ui
                         || field.control == model::Control::channelRef
                         || field.control == model::Control::canvasRef
                         || field.control == model::Control::groupRef
-                        || field.control == model::Control::movieRef)
+                        || field.control == model::Control::movieRef
+                        || field.control == model::Control::videoInputRef
+                        || field.control == model::Control::videoInsertRef)
                        && field.writable)
             {
                 /*  A MENU THE SHOW WROTE, not one the parameter table
@@ -1345,7 +1349,9 @@ namespace wfg::client::ui
                                   || line->field.control == model::Control::channelRef
                                   || line->field.control == model::Control::canvasRef
                                   || line->field.control == model::Control::groupRef
-                                  || line->field.control == model::Control::movieRef;
+                                  || line->field.control == model::Control::movieRef
+                                  || line->field.control == model::Control::videoInputRef
+                                  || line->field.control == model::Control::videoInsertRef;
 
             line->box.setVisible (! hidden && ! line->isHeading
                                     && line->field.control != model::Control::toggle

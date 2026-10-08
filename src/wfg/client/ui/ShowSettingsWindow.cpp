@@ -5051,9 +5051,9 @@ namespace wfg::client::ui
         public:
             VideoPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
                 : theme (themeToUse), send (std::move (dispatch)),
-                  canvasModel (*this), outputModel (*this)
+                  canvasModel (*this), outputModel (*this), inputModel (*this), insertModel (*this)
             {
-                for (auto* list : { &canvasList, &outputList })
+                for (auto* list : { &canvasList, &outputList, &inputList, &insertList })
                 {
                     list->setRowHeight (34);
                     list->setOutlineThickness (0);
@@ -5063,9 +5063,29 @@ namespace wfg::client::ui
 
                 canvasList.setModel (&canvasModel);
                 outputList.setModel (&outputModel);
+                inputList.setModel (&inputModel);
+                insertList.setModel (&insertModel);
 
                 addAndMakeVisible (addCanvas);
                 addAndMakeVisible (addOutput);
+                addAndMakeVisible (addInput);
+                addAndMakeVisible (addInsert);
+                addInput.setTooltip ("A video input: a picture another program sends - over NDI, or on this machine"
+                                     " over Spout or Syphon - which a capture cue shows.");
+                addInsert.setTooltip ("A video insert: a cue's picture sent to another program and what comes back"
+                                      " shown in its place. A cue switches it in, in the inspector.");
+
+                addInput.onClick = [this]
+                {
+                    if (send)
+                        send (gesture::createVideoInput (freeName (inputs, "Input"), model::pictureKindsHere().front()));
+                };
+
+                addInsert.onClick = [this]
+                {
+                    if (send)
+                        send (gesture::createVideoInsert (freeName (inserts, "Insert"), model::pictureKindsHere().front()));
+                };
                 addCanvas.setTooltip ("A canvas: the flat picture video cues are laid onto, 1920 by 1080 until"
                                       " you say otherwise. Name it for where it is seen - Stage, Cyclo.");
                 addOutput.setTooltip ("An output: a display on this machine - a projector, a monitor - showing"
@@ -5094,8 +5114,22 @@ namespace wfg::client::ui
 
             void show (std::vector<model::CanvasRow> canvasRows, std::vector<model::VideoOutputRow> outputRows,
                        std::vector<std::string> displaysNow, std::string renderer, std::string rendererProblem,
-                       bool editable, std::vector<std::pair<std::string, std::string>> dcaChoicesToShow)
+                       bool editable, std::vector<std::pair<std::string, std::string>> dcaChoicesToShow,
+                       std::vector<model::VideoInputRow> inputRows, std::vector<model::VideoInsertRow> insertRows,
+                       std::vector<model::OfferedSender> offeredNow)
             {
+                /*  THE INPUTS AND INSERTS (namespace draft §44), drawn again each
+                    pass: their states move while nothing about the show does. */
+                inputs = std::move (inputRows);
+                inserts = std::move (insertRows);
+                offered = std::move (offeredNow);
+                addInput.setVisible (editable);
+                addInsert.setVisible (editable);
+                inputList.updateContent();
+                insertList.updateContent();
+                inputList.repaint();
+                insertList.repaint();
+
                 const auto sameCanvases = canvasRows.size() == canvases.size()
                                             && dcaChoicesToShow == dcaChoices
                                             && std::equal (canvasRows.begin(), canvasRows.end(), canvases.begin(),
@@ -5112,7 +5146,9 @@ namespace wfg::client::ui
                                                           { return a.id == b.id && a.name == b.name && a.canvas == b.canvas
                                                                      && a.display == b.display && a.enabled == b.enabled
                                                                      && a.bound == b.bound && a.problem == b.problem
-                                                                     && a.testPattern == b.testPattern && a.zones == b.zones; });
+                                                                     && a.testPattern == b.testPattern && a.zones == b.zones
+                                                                     && a.kind == b.kind && a.sendName == b.sendName
+                                                                     && std::abs (a.frameRate - b.frameRate) < 1e-9; });
 
                 const auto sameLock = locked == ! editable;
 
@@ -5165,15 +5201,26 @@ namespace wfg::client::ui
 
                 addCanvas.setBounds (bar.removeFromLeft (128).reduced (3, 0));
                 addOutput.setBounds (bar.removeFromLeft (128).reduced (3, 0));
+                addInput.setBounds (bar.removeFromLeft (128).reduced (3, 0));
+                addInsert.setBounds (bar.removeFromLeft (128).reduced (3, 0));
 
                 summary.setBounds (area.removeFromBottom (40));
 
+                /*  FOUR LISTS, the outputs given the most: canvases, outputs,
+                    then the pictures other programs send and the inserts. */
+                const auto share = area.getHeight();
                 area.removeFromTop (6);
                 canvasHeading = area.removeFromTop (20);
-                canvasList.setBounds (area.removeFromTop (juce::jmax (80, area.getHeight() / 3)));
-                area.removeFromTop (10);
+                canvasList.setBounds (area.removeFromTop (juce::jmax (70, share / 5)));
+                area.removeFromTop (8);
                 outputHeading = area.removeFromTop (20);
-                outputList.setBounds (area);
+                outputList.setBounds (area.removeFromTop (juce::jmax (80, share * 3 / 10)));
+                area.removeFromTop (8);
+                inputHeading = area.removeFromTop (20);
+                inputList.setBounds (area.removeFromTop (juce::jmax (70, share / 5)));
+                area.removeFromTop (8);
+                insertHeading = area.removeFromTop (20);
+                insertList.setBounds (area);
             }
 
             void paint (juce::Graphics& g) override
@@ -5194,6 +5241,18 @@ namespace wfg::client::ui
                     g.drawText (outputNames[at], outputCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
 
                 g.drawText ("Warp, zones", outputCells[7], juce::Justification::centredLeft);
+
+                const auto inputCells = inputCellsFor (inputHeading.withWidth (inputList.getWidth()));
+                const char* inputNames[] { "Input", "Kind", "Sender", "On", "State" };
+
+                for (auto at = 0; at < 5; ++at)
+                    g.drawText (inputNames[at], inputCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
+
+                const auto insertCells = insertCellsFor (insertHeading.withWidth (insertList.getWidth()));
+                const char* insertNames[] { "Insert", "Kind", "Sent as", "Comes back from", "State" };
+
+                for (auto at = 0; at < 5; ++at)
+                    g.drawText (insertNames[at], insertCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
             }
 
         private:
@@ -5220,6 +5279,28 @@ namespace wfg::client::ui
                 const auto display = area.removeFromRight (240);
                 const auto shows = area.removeFromRight (180);
                 return { area, shows, display, on, identify, state, cross, warp };
+            }
+
+            static std::array<juce::Rectangle<int>, 6> inputCellsFor (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+                const auto cross = area.removeFromRight (24);
+                const auto state = area.removeFromRight (260);
+                const auto on = area.removeFromRight (48);
+                const auto sender = area.removeFromRight (260);
+                const auto kind = area.removeFromRight (90);
+                return { area, kind, sender, on, state, cross };
+            }
+
+            static std::array<juce::Rectangle<int>, 6> insertCellsFor (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+                const auto cross = area.removeFromRight (24);
+                const auto state = area.removeFromRight (240);
+                const auto back = area.removeFromRight (220);
+                const auto sent = area.removeFromRight (200);
+                const auto kind = area.removeFromRight (90);
+                return { area, kind, sent, back, state, cross };
             }
 
             static int cellIndexAt (const juce::Rectangle<int>* cells, int count, int x)
@@ -5330,9 +5411,22 @@ namespace wfg::client::ui
                     g.drawText (entry.canvas.empty() ? dash : juce::String (page.canvasLabel (entry.canvas)),
                                 cells[1], juce::Justification::centredLeft, true);
 
-                    g.setColour (Look::colour (page.theme, entry.display.empty() ? "ink-off" : "ink-dim"));
-                    g.drawText (entry.display.empty() ? dash : juce::String (entry.display),
-                                cells[2], juce::Justification::centredLeft, true);
+                    /*  A SENDING OUTPUT (namespace draft §44, YA) says what it is
+                        sent over, under which name, at what rate. */
+                    if (entry.sends())
+                    {
+                        g.setColour (Look::colour (page.theme, "ink-dim"));
+                        g.drawText (juce::String (model::pictureKindWord (entry.kind)) + juce::String::fromUTF8 ("  \xc2\xb7  ")
+                                      + juce::String (entry.sendName.empty() ? "Go.dot - " + entry.label() : entry.sendName)
+                                      + juce::String::fromUTF8 ("  \xc2\xb7  ") + juce::String (entry.frameRate, 0) + " fps",
+                                    cells[2], juce::Justification::centredLeft, true);
+                    }
+                    else
+                    {
+                        g.setColour (Look::colour (page.theme, entry.display.empty() ? "ink-off" : "ink-dim"));
+                        g.drawText (entry.display.empty() ? dash : juce::String (entry.display),
+                                    cells[2], juce::Justification::centredLeft, true);
+                    }
 
                     g.setColour (Look::colour (page.theme, entry.enabled ? "ink" : "ink-off"));
                     g.drawText (entry.enabled ? "ON" : "OFF", cells[3], juce::Justification::centredLeft);
@@ -5398,7 +5492,7 @@ namespace wfg::client::ui
                     {
                         case 0: page.editCell (page.outputList, row, cells[0], base + "name", entry.name); return;
                         case 1: page.chooseCanvas (row, cells[1]); return;
-                        case 2: page.chooseDisplay (row, cells[2]); return;
+                        case 2: page.chooseWhere (row, cells[2]); return;
                         case 3: page.send (gesture::setNode (base + "enabled", entry.enabled ? "false" : "true")); return;
                         case 6: page.send (gesture::deleteObject (entry.id)); return;
                         default: return;
@@ -5407,6 +5501,293 @@ namespace wfg::client::ui
 
                 VideoPage& page;
             };
+
+            /*  A VIDEO INPUT'S ROW (namespace draft §44, YB): its name, its kind,
+                the sender it takes in - picked from what other programs offer
+                now - whether it is taken in, and how it is going, in words. */
+            struct InputModel final : juce::ListBoxModel
+            {
+                explicit InputModel (VideoPage& pageToServe) : page (pageToServe) {}
+
+                int getNumRows() override { return static_cast<int> (page.inputs.size()); }
+
+                void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+                {
+                    if (row < 0 || static_cast<std::size_t> (row) >= page.inputs.size())
+                        return;
+
+                    const auto& entry = page.inputs[static_cast<std::size_t> (row)];
+                    const auto cells = inputCellsFor ({ 0, 0, width, height });
+                    const auto dash = juce::String::fromUTF8 ("\xe2\x80\x93");
+
+                    g.setColour (Look::colour (page.theme, row % 2 == 0 ? "panel" : "panel-in"));
+                    g.fillRect (0, 0, width, height - 1);
+
+                    g.setFont (Look::font (page.theme, 13.0f));
+                    g.setColour (Look::colour (page.theme, "ink"));
+                    g.drawText (juce::String (entry.label()), cells[0], juce::Justification::centredLeft, true);
+
+                    g.setFont (Look::font (page.theme, 12.0f));
+                    g.setColour (Look::colour (page.theme, "ink-dim"));
+                    g.drawText (juce::String (model::pictureKindWord (entry.kind)), cells[1], juce::Justification::centredLeft);
+
+                    g.setColour (Look::colour (page.theme, entry.sender.empty() ? "ink-off" : "ink-dim"));
+                    g.drawText (entry.sender.empty() ? dash : juce::String (entry.sender), cells[2], juce::Justification::centredLeft, true);
+
+                    g.setColour (Look::colour (page.theme, entry.enabled ? "ink" : "ink-off"));
+                    g.drawText (entry.enabled ? "ON" : "OFF", cells[3], juce::Justification::centredLeft);
+
+                    //  In words, never a colour alone (§4.8).
+                    const auto arriving = entry.connected && entry.problem.empty();
+                    g.setColour (Look::colour (page.theme, arriving || ! entry.enabled ? "ink-dim" : "failed"));
+                    g.drawText (arriving ? juce::String (entry.width) + juce::String::fromUTF8 (" \xc3\x97 ") + juce::String (entry.height)
+                                             + ", " + juce::String (entry.frameRate, 0) + " a second"
+                                         : juce::String (entry.problem.empty() ? std::string ("nothing arriving") : entry.problem),
+                                cells[4], juce::Justification::centredLeft, true);
+
+                    if (! page.locked)
+                    {
+                        g.setColour (Look::colour (page.theme, "ink-dim"));
+                        g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[5], juce::Justification::centred);
+                    }
+                }
+
+                void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+                {
+                    if (page.locked || row < 0 || static_cast<std::size_t> (row) >= page.inputs.size() || ! page.send)
+                        return;
+
+                    const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                       : page.inputList.getWidth();
+                    const auto cells = inputCellsFor ({ 0, 0, width, page.inputList.getRowHeight() });
+                    const auto& entry = page.inputs[static_cast<std::size_t> (row)];
+                    const auto base = "/godot/videoInput/" + entry.id + "/";
+
+                    switch (cellIndexAt (cells.data(), 6, event.x))
+                    {
+                        case 0: page.editCell (page.inputList, row, cells[0], base + "name", entry.name); return;
+                        case 1: page.chooseKind (base + "kind", entry.kind); return;
+                        case 2: page.chooseSender (page.inputList, row, cells[2], base + "sender", entry.kind, entry.sender); return;
+                        case 3: page.send (gesture::setNode (base + "enabled", entry.enabled ? "false" : "true")); return;
+                        case 5: page.send (gesture::deleteObject (entry.id)); return;
+                        default: return;
+                    }
+                }
+
+                VideoPage& page;
+            };
+
+            /*  A VIDEO INSERT'S ROW (§44, YE): its name, its kind, the name the
+                cue's picture is sent under, the sender it comes back from, and
+                how the round trip goes. */
+            struct InsertModel final : juce::ListBoxModel
+            {
+                explicit InsertModel (VideoPage& pageToServe) : page (pageToServe) {}
+
+                int getNumRows() override { return static_cast<int> (page.inserts.size()); }
+
+                void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+                {
+                    if (row < 0 || static_cast<std::size_t> (row) >= page.inserts.size())
+                        return;
+
+                    const auto& entry = page.inserts[static_cast<std::size_t> (row)];
+                    const auto cells = insertCellsFor ({ 0, 0, width, height });
+                    const auto dash = juce::String::fromUTF8 ("\xe2\x80\x93");
+
+                    g.setColour (Look::colour (page.theme, row % 2 == 0 ? "panel" : "panel-in"));
+                    g.fillRect (0, 0, width, height - 1);
+
+                    g.setFont (Look::font (page.theme, 13.0f));
+                    g.setColour (Look::colour (page.theme, "ink"));
+                    g.drawText (juce::String (entry.label()), cells[0], juce::Justification::centredLeft, true);
+
+                    g.setFont (Look::font (page.theme, 12.0f));
+                    g.setColour (Look::colour (page.theme, "ink-dim"));
+                    g.drawText (juce::String (model::pictureKindWord (entry.kind)), cells[1], juce::Justification::centredLeft);
+                    g.drawText (juce::String (entry.sendName.empty() ? "Go.dot - insert " + entry.label() : entry.sendName),
+                                cells[2], juce::Justification::centredLeft, true);
+
+                    g.setColour (Look::colour (page.theme, entry.returnSender.empty() ? "ink-off" : "ink-dim"));
+                    g.drawText (entry.returnSender.empty() ? dash : juce::String (entry.returnSender),
+                                cells[3], juce::Justification::centredLeft, true);
+
+                    const auto backNow = entry.connected && entry.problem.empty();
+                    g.setColour (Look::colour (page.theme, backNow ? "ink-dim" : "failed"));
+                    g.drawText (backNow ? "back " + juce::String (entry.frameRate, 0) + " a second, "
+                                            + juce::String (entry.returnAge * 1000.0, 0) + " ms ago"
+                                        : juce::String (entry.problem.empty() ? std::string ("nothing coming back") : entry.problem),
+                                cells[4], juce::Justification::centredLeft, true);
+
+                    if (! page.locked)
+                    {
+                        g.setColour (Look::colour (page.theme, "ink-dim"));
+                        g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[5], juce::Justification::centred);
+                    }
+                }
+
+                void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+                {
+                    if (page.locked || row < 0 || static_cast<std::size_t> (row) >= page.inserts.size() || ! page.send)
+                        return;
+
+                    const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                       : page.insertList.getWidth();
+                    const auto cells = insertCellsFor ({ 0, 0, width, page.insertList.getRowHeight() });
+                    const auto& entry = page.inserts[static_cast<std::size_t> (row)];
+                    const auto base = "/godot/videoInsert/" + entry.id + "/";
+
+                    switch (cellIndexAt (cells.data(), 6, event.x))
+                    {
+                        case 0: page.editCell (page.insertList, row, cells[0], base + "name", entry.name); return;
+                        case 1: page.chooseKind (base + "kind", entry.kind); return;
+                        case 2: page.editCell (page.insertList, row, cells[2], base + "sendName", entry.sendName); return;
+                        case 3: page.chooseSender (page.insertList, row, cells[3], base + "returnSender", entry.kind, entry.returnSender); return;
+                        case 5: page.send (gesture::deleteObject (entry.id)); return;
+                        default: return;
+                    }
+                }
+
+                VideoPage& page;
+            };
+
+            /*  A KIND FROM A MENU of what this system has (§44): NDI everywhere,
+                Spout on Windows, Syphon on the Mac. */
+            void chooseKind (const std::string& address, const std::string& current)
+            {
+                const auto kinds = model::pictureKindsHere();
+                juce::PopupMenu menu;
+
+                for (std::size_t at = 0; at < kinds.size(); ++at)
+                    menu.addItem (static_cast<int> (at) + 1, juce::String (model::pictureKindWord (kinds[at])), true,
+                                  kinds[at] == current);
+
+                menu.showMenuAsync (juce::PopupMenu::Options(),
+                                    [safe = juce::Component::SafePointer<VideoPage> (this), address, kinds] (int chosen)
+                                    {
+                                        if (safe != nullptr && chosen > 0 && safe->send != nullptr)
+                                            safe->send (gesture::setNode (address, kinds[static_cast<std::size_t> (chosen - 1)]));
+                                    });
+            }
+
+            /*  A SENDER FROM A MENU of what other programs offer now over that
+                kind (§44, YB), or a name typed - one not sending yet. */
+            void chooseSender (juce::ListBox& list, int row, juce::Rectangle<int> cell, const std::string& address,
+                               const std::string& kind, const std::string& current)
+            {
+                std::vector<std::string> names;
+
+                for (const auto& one : offered)
+                    if (one.kind == kind)
+                        names.push_back (one.name);
+
+                juce::PopupMenu menu;
+                menu.addItem (1, "(none)", true, current.empty());
+
+                if (names.empty())
+                    menu.addItem (2, "nothing is sending over " + juce::String (model::pictureKindWord (kind)) + " now", false);
+
+                for (std::size_t at = 0; at < names.size(); ++at)
+                    menu.addItem (static_cast<int> (at) + 10, juce::String (names[at]), true, names[at] == current);
+
+                menu.addSeparator();
+                menu.addItem (3, "Type a name...");
+
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                menu.showMenuAsync (juce::PopupMenu::Options(),
+                                    [safe = juce::Component::SafePointer<VideoPage> (this), address, names, current,
+                                     listPointer = &list, row, cell] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || safe->send == nullptr)
+                                            return;
+
+                                        if (chosen == 1)
+                                            safe->send (gesture::setNode (address, {}));
+                                        else if (chosen == 3)
+                                            safe->editCell (*listPointer, row, cell, address, current);
+                                        else if (chosen >= 10 && static_cast<std::size_t> (chosen - 10) < names.size())
+                                            safe->send (gesture::setNode (address, names[static_cast<std::size_t> (chosen - 10)]));
+                                    });
+            }
+
+            /*  WHERE AN OUTPUT'S PICTURE GOES (§44, YA): one of this machine's
+                displays, or sent over a kind this system has - and, sent, the
+                name it goes under and its rate. */
+            void chooseWhere (int row, juce::Rectangle<int> cell)
+            {
+                const auto entry = outputs[static_cast<std::size_t> (row)];
+                const auto base = "/godot/videoOutput/" + entry.id + "/";
+                const auto kinds = model::pictureKindsHere();
+
+                juce::PopupMenu menu;
+                menu.addSectionHeader ("Shown on a display");
+                menu.addItem (1, "(none)", true, ! entry.sends() && entry.display.empty());
+
+                for (std::size_t at = 0; at < displays.size(); ++at)
+                    menu.addItem (static_cast<int> (at) + 100, juce::String (displays[at]), true,
+                                  ! entry.sends() && displays[at] == entry.display);
+
+                /*  A DISPLAY THE SHOW NAMES AND THIS MACHINE LACKS stays in the
+                    menu, marked, as a MIDI device does: the show travelled. */
+                if (! entry.display.empty() && std::find (displays.begin(), displays.end(), entry.display) == displays.end())
+                    menu.addItem (99, juce::String (entry.display) + "  (not on this machine)", false, ! entry.sends());
+
+                menu.addSectionHeader ("Sent to other programs");
+
+                for (std::size_t at = 0; at < kinds.size(); ++at)
+                    menu.addItem (static_cast<int> (at) + 10, "Sent over " + juce::String (model::pictureKindWord (kinds[at])), true,
+                                  entry.kind == kinds[at]);
+
+                if (entry.sends())
+                {
+                    menu.addSeparator();
+                    menu.addItem (2, "Sent as...");
+                    menu.addItem (3, "Frames a second...");
+                }
+
+                menu.showMenuAsync (juce::PopupMenu::Options(),
+                                    [safe = juce::Component::SafePointer<VideoPage> (this), base, kinds, entry, row, cell] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || safe->send == nullptr)
+                                            return;
+
+                                        if (chosen == 2)
+                                        {
+                                            safe->editCell (safe->outputList, row, cell, base + "sendName", entry.sendName);
+                                            return;
+                                        }
+
+                                        if (chosen == 3)
+                                        {
+                                            safe->editCell (safe->outputList, row, cell, base + "frameRate",
+                                                            juce::String (entry.frameRate, 0).toStdString());
+                                            return;
+                                        }
+
+                                        if (chosen >= 10 && chosen < 100)
+                                        {
+                                            safe->send (gesture::setNode (base + "kind", kinds[static_cast<std::size_t> (chosen - 10)]));
+                                            return;
+                                        }
+
+                                        //  A display: shown, no longer sent - and chosen as the old menu chose it.
+                                        if (entry.sends())
+                                            safe->send (gesture::setNode (base + "kind", "display"));
+
+                                        safe->choosingOutput = entry.id;
+                                        safe->choosingDisplay = true;
+                                        safe->chooser.clear (juce::dontSendNotification);
+                                        safe->chooser.addItem ("(none)", 1);
+
+                                        for (std::size_t at = 0; at < safe->displays.size(); ++at)
+                                            safe->chooser.addItem (juce::String (safe->displays[at]), static_cast<int> (at) + 2);
+
+                                        safe->chooser.setSelectedId (chosen == 1 ? 1 : chosen - 100 + 2, juce::dontSendNotification);
+                                        safe->commitChoice();
+                                    });
+            }
 
             //==============================================================================
             std::string canvasLabel (const std::string& id) const
@@ -5509,37 +5890,6 @@ namespace wfg::client::ui
 
                     if (canvases[at].id == entry.canvas)
                         selected = static_cast<int> (at) + 2;
-                }
-
-                openChooser (outputList, row, cell, selected);
-            }
-
-            void chooseDisplay (int row, juce::Rectangle<int> cell)
-            {
-                const auto& entry = outputs[static_cast<std::size_t> (row)];
-
-                choosingOutput = entry.id;
-                choosingDisplay = true;
-                chooser.clear (juce::dontSendNotification);
-                chooser.addItem ("(none)", 1);
-
-                auto selected = 1;
-
-                for (std::size_t at = 0; at < displays.size(); ++at)
-                {
-                    chooser.addItem (juce::String (displays[at]), static_cast<int> (at) + 2);
-
-                    if (displays[at] == entry.display)
-                        selected = static_cast<int> (at) + 2;
-                }
-
-                /*  A DISPLAY THE SHOW NAMES AND THIS MACHINE LACKS stays in the
-                    menu, marked, as a MIDI device does: the show travelled. */
-                if (selected == 1 && ! entry.display.empty())
-                {
-                    const auto at = static_cast<int> (displays.size()) + 2;
-                    chooser.addItem (juce::String (entry.display) + "  (not on this machine)", at);
-                    selected = at;
                 }
 
                 openChooser (outputList, row, cell, selected);
@@ -5673,10 +6023,12 @@ namespace wfg::client::ui
 
             CanvasModel canvasModel;
             OutputModel outputModel;
-            juce::ListBox canvasList, outputList;
-            juce::TextButton addCanvas { "+ canvas" }, addOutput { "+ output" };
+            InputModel inputModel;
+            InsertModel insertModel;
+            juce::ListBox canvasList, outputList, inputList, insertList;
+            juce::TextButton addCanvas { "+ canvas" }, addOutput { "+ output" }, addInput { "+ input" }, addInsert { "+ insert" };
             juce::Label summary;
-            juce::Rectangle<int> canvasHeading, outputHeading;
+            juce::Rectangle<int> canvasHeading, outputHeading, inputHeading, insertHeading;
 
             juce::Label cellEditor;
             juce::ComboBox chooser;
@@ -5685,6 +6037,9 @@ namespace wfg::client::ui
 
             std::vector<model::CanvasRow> canvases;
             std::vector<model::VideoOutputRow> outputs;
+            std::vector<model::VideoInputRow> inputs;
+            std::vector<model::VideoInsertRow> inserts;
+            std::vector<model::OfferedSender> offered;
             std::vector<std::string> displays;
             bool locked = false;
 
@@ -6394,7 +6749,9 @@ namespace wfg::client::ui
                          model::readDisplays (snapshot), model::text (snapshot, "/godot/videoOutput/renderer"),
                          model::text (snapshot, "/godot/videoOutput/rendererProblem"),
                          ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
-                         model::dcaChoices (model::readDcas (snapshot)));
+                         model::dcaChoices (model::readDcas (snapshot)),
+                         model::readVideoInputs (snapshot), model::readVideoInserts (snapshot),
+                         model::readOfferedSenders (snapshot));
 
             templates->show (model::readCueTemplates (snapshot),
                              ! model::isYes (model::flag (snapshot, "/godot/document/locked")));

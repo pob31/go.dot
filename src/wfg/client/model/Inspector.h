@@ -173,6 +173,12 @@ namespace wfg::client::model
             sound. Written as the identifier, read by number and name. */
         movieRef,
 
+        /*  A MENU OF THE SHOW'S VIDEO INPUTS, and one of its VIDEO INSERTS
+            (namespace draft §44, YC, YE): identifiers written, names read, as
+            the canvases' menu. */
+        videoInputRef,
+        videoInsertRef,
+
         /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
             2026-09-21: "it would be great if the controls to show the
             waveform, the send levels, the EQ, the group timeline were in the

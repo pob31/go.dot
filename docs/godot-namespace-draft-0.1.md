@@ -22016,6 +22016,14 @@ Mine (proposed):
   Linux runner Mesa's software rasteriser ran out of memory compiling the shaders late in the long run
   (twice, the second after the mask's loop was bounded), and a process of their own says whether that is
   the device or the run.
+- **N.5, the window** (2026-10-08): the Video tab has four lists - canvases, outputs, then **Inputs** (name,
+  kind, sender picked from what other programs offer now or typed, on, state in words) and **Inserts** (name,
+  kind, sent as, comes back from, state) - with *+ input* and *+ insert*. An output's Display cell is a menu:
+  one of this machine's displays, or *Sent over* each kind this system has, and while sent *Sent as...* and
+  *Frames a second...*; the cell then reads *Spout · Go.dot - Face · 60 fps*. The inspector offers a video
+  cue's `videoInput` (shown as *input*) and `videoInsert` (*insert*) as menus of the show's, and *+ video*
+  offers a *Capture of* each input on each canvas. The words are the author's yes of 2026-10-08 (*capture*,
+  *insert*, *video inputs*); *Sent over*, *Sent as*, *Comes back from* and *Frames a second* are mine.
 - **YM** (mine, proposed): **Spout shares only between programs on the same graphics card.** On a laptop
   with two, the renderer draws on the card driving the first projector's display, and with none on the
   fastest; a receiving program on the other card finds the sender and reads nothing. Said here and owed

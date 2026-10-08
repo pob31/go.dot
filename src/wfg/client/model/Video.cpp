@@ -41,6 +41,11 @@ namespace wfg::client::model
         constexpr std::string_view outputPrefix = "/godot/videoOutput/";
         constexpr std::string_view outputOrderAddress = "/godot/videoOutput/order";
         constexpr std::string_view displaysAddress = "/godot/videoOutput/displays";
+        constexpr std::string_view inputPrefix = "/godot/videoInput/";
+        constexpr std::string_view inputOrderAddress = "/godot/videoInput/order";
+        constexpr std::string_view offeredAddress = "/godot/videoInput/available";
+        constexpr std::string_view insertPrefix = "/godot/videoInsert/";
+        constexpr std::string_view insertOrderAddress = "/godot/videoInsert/order";
 
         std::int64_t integerOf (const tree::Node* node, std::int64_t fallback)
         {
@@ -340,6 +345,9 @@ namespace wfg::client::model
             else if (name == "framesPresented") row.framesPresented = integerOf (node, 0);
             else if (name == "framesLate")      row.framesLate = integerOf (node, 0);
             else if (name == "zones")           row.zones = static_cast<int> (words (text (node)).size());
+            else if (name == "kind")            row.kind = text (node).empty() ? std::string ("display") : text (node);
+            else if (name == "sendName")        row.sendName = text (node);
+            else if (name == "frameRate")       row.frameRate = numberOf (node, 60.0);
         }
 
         return inOrder (found, words (order));
@@ -544,6 +552,149 @@ namespace wfg::client::model
     const char* pictureWildcard()
     {
         return "*.png;*.jpg;*.jpeg;*.gif;*.mov;*.mp4;*.m4v;*.mkv;*.avi;*.mxf;*.webm;*.mpg;*.mpeg";
+    }
+
+    std::string VideoInputRow::label() const
+    {
+        return name.empty() ? id : name;
+    }
+
+    std::string VideoInsertRow::label() const
+    {
+        return name.empty() ? id : name;
+    }
+
+    std::vector<VideoInputRow> readVideoInputs (const tree::TreeSnapshot& snapshot)
+    {
+        std::map<std::string, VideoInputRow> found;
+        std::string order;
+
+        for (const auto* node : snapshot.all())
+        {
+            if (node->address == inputOrderAddress)
+            {
+                order = text (node);
+                continue;
+            }
+
+            std::string id, name;
+
+            if (! splitAddress (node->address, inputPrefix, id, name))
+                continue;
+
+            auto& row = found[id];
+            row.id = id;
+
+            if (name == "name")            row.name = text (node);
+            else if (name == "kind")       row.kind = text (node).empty() ? std::string ("ndi") : text (node);
+            else if (name == "sender")     row.sender = text (node);
+            else if (name == "enabled")    row.enabled = truthOf (node, true);
+            else if (name == "connected")  row.connected = truthOf (node, false);
+            else if (name == "width")      row.width = static_cast<int> (integerOf (node, 0));
+            else if (name == "height")     row.height = static_cast<int> (integerOf (node, 0));
+            else if (name == "frameRate")  row.frameRate = numberOf (node, 0.0);
+            else if (name == "problem")    row.problem = text (node);
+        }
+
+        return inOrder (found, words (order));
+    }
+
+    std::vector<VideoInsertRow> readVideoInserts (const tree::TreeSnapshot& snapshot)
+    {
+        std::map<std::string, VideoInsertRow> found;
+        std::string order;
+
+        for (const auto* node : snapshot.all())
+        {
+            if (node->address == insertOrderAddress)
+            {
+                order = text (node);
+                continue;
+            }
+
+            std::string id, name;
+
+            if (! splitAddress (node->address, insertPrefix, id, name))
+                continue;
+
+            auto& row = found[id];
+            row.id = id;
+
+            if (name == "name")               row.name = text (node);
+            else if (name == "kind")          row.kind = text (node).empty() ? std::string ("spout") : text (node);
+            else if (name == "sendName")      row.sendName = text (node);
+            else if (name == "returnSender")  row.returnSender = text (node);
+            else if (name == "connected")     row.connected = truthOf (node, false);
+            else if (name == "frameRate")     row.frameRate = numberOf (node, 0.0);
+            else if (name == "returnAge")     row.returnAge = numberOf (node, 0.0);
+            else if (name == "problem")       row.problem = text (node);
+        }
+
+        return inOrder (found, words (order));
+    }
+
+    std::vector<OfferedSender> readOfferedSenders (const tree::TreeSnapshot& snapshot)
+    {
+        //  The kind, a tab, the name, a line each.
+        std::vector<OfferedSender> out;
+        const auto all = text (snapshot, offeredAddress);
+        std::size_t at = 0;
+
+        while (at < all.size())
+        {
+            const auto end = all.find ('\n', at);
+            const auto line = all.substr (at, end == std::string::npos ? std::string::npos : end - at);
+            const auto tab = line.find ('\t');
+
+            if (tab != std::string::npos && tab + 1 < line.size())
+                out.push_back ({ line.substr (0, tab), line.substr (tab + 1) });
+
+            if (end == std::string::npos)
+                break;
+
+            at = end + 1;
+        }
+
+        return out;
+    }
+
+    std::vector<std::string> pictureKindsHere()
+    {
+       #if defined (_WIN32)
+        return { "spout", "ndi" };
+       #elif defined (__APPLE__)
+        return { "syphon", "ndi" };
+       #else
+        return { "ndi" };
+       #endif
+    }
+
+    std::string pictureKindWord (const std::string& kind)
+    {
+        if (kind == "ndi")     return "NDI";
+        if (kind == "spout")   return "Spout";
+        if (kind == "syphon")  return "Syphon";
+        return "a display";
+    }
+
+    std::vector<std::pair<std::string, std::string>> videoInputChoices (const std::vector<VideoInputRow>& inputs)
+    {
+        std::vector<std::pair<std::string, std::string>> choices { { "", "(none)" } };
+
+        for (const auto& input : inputs)
+            choices.push_back ({ input.id, input.label() + " \xc2\xb7 " + pictureKindWord (input.kind) });
+
+        return choices;
+    }
+
+    std::vector<std::pair<std::string, std::string>> videoInsertChoices (const std::vector<VideoInsertRow>& inserts)
+    {
+        std::vector<std::pair<std::string, std::string>> choices { { "", "(none)" } };
+
+        for (const auto& insert : inserts)
+            choices.push_back ({ insert.id, insert.label() + " \xc2\xb7 " + pictureKindWord (insert.kind) });
+
+        return choices;
     }
 
     std::vector<std::pair<std::string, std::string>> canvasChoices (const std::vector<CanvasRow>& canvases)

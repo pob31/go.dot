@@ -263,6 +263,14 @@ namespace wfg::client::model
                                  { { "source", "mask" }, { "canvas", canvas.id }, { "layer", "100" },
                                    { "shape", "0.25 0.25 0.75 0.25 0.75 0.75 0.25 0.75" } },
                                  "On " + canvas.label(), false, false, {} });
+
+            /*  A CAPTURE OF EACH VIDEO INPUT (namespace draft §44, YC): the
+                picture another program sends, born showing it. */
+            for (const auto& input : readVideoInputs (snapshot))
+                choices.push_back ({ "Capture of " + input.label(), "the picture " + pictureKindWord (input.kind)
+                                                                      + " brings in, shown as a picture is", "video",
+                                     { { "source", "capture" }, { "canvas", canvas.id }, { "videoInput", input.id } },
+                                     "On " + canvas.label(), false, false, {} });
         }
 
         choices.push_back ({ "Fill, on no canvas yet", "set it in the inspector", "video",
