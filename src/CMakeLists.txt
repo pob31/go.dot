@@ -577,6 +577,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Reorder.cpp
     wfg/client/model/Selection.h
     wfg/client/model/Selection.cpp
+    wfg/client/model/Dual.h
+    wfg/client/model/Dual.cpp
     wfg/client/model/Icons.h
     wfg/client/model/Icons.cpp
     wfg/client/model/Inspector.h

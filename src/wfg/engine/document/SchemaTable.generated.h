@@ -3343,7 +3343,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "The media cue a surface-s rotaries edit on its EQ and Send pages, by identifier, or empty. One cue for every surface, set by surface.aim - a SELECT on a sample strip, or a click on a running cue-s name in the window (author, 2026-09-25). Not the window-s pick and not the list GO acts on: picking a row in the cue list does not move it. Empty when the cue it named is gone. What the hands are on tonight, so never stored (PRD 4.10)." },
+          "The media or mic cue a surface-s rotaries edit on its EQ, Send and FX pages, by identifier, or empty. One cue for every surface, set by surface.aim - a SELECT on a sample strip, a click on a running cue-s name in the window (author, 2026-09-25), or a pick in the window of a sound, a mic, or a movie (its locked sound) (author, 2026-10-09, namespace draft 47, AAA): the last hand to aim wins. Not the list GO acts on. Empty when the cue it named is gone. What the hands are on tonight, so never stored (PRD 4.10)." },
         { "surfaces", "dial",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

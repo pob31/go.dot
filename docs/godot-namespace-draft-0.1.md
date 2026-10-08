@@ -10632,7 +10632,7 @@ the samples are not playing." The page model of `docs/godot-surface-pages-draft-
 
 | | the question | the author's answer | recommended? |
 |---|---|---|---|
-| **AJ** | what aims the rotaries | SELECT on a sample strip, or a click on a running cue's name in the window - and not the cue list's pick; while a page is up the foot shows the surface's cue | yes |
+| **AJ** | what aims the rotaries | SELECT on a sample strip, or a click on a running cue's name in the window - and not the cue list's pick; while a page is up the foot shows the surface's cue. *Overruled by the author on 2026-10-09 (§47, AAA): the window's pick aims them too, the last hand winning* | yes |
 | **AK** | how a press switches a band or a send | a new saved switch each (`eqB<n>On`, `send/on`): off keeps the number | yes |
 | **AL** | what SELECT's light says | the pick - the D700's white bar - and no longer that the strip sounds | yes |
 | **AM** | the pages under the show lock | **EQ and sends ride live, unsaved**, like a fader's trim | no - closing the pages under the lock was recommended |
@@ -22643,3 +22643,66 @@ validate` calls it valid.
 the triggers; what QLab's S-curve and parametric shapes are, measured, rather than a raised cosine
 sampled at nine points; a comparison of an imported show with what QLab reports over OSC, which the
 extraction (§9.2) did by hand; and a run through an imported show's first scenes against the rig.
+
+## 47. Movies on a strip, a picture panel, a movie edited from its sound, inserts by kind, and the surfaces on the window's pick
+
+Written 2026-10-09. The author's notes after using the video side: *"Video files should display
+something similar to the waveform with a toggle at the top of the inspector to allow the user to specify
+in and out points, make loops like with audio. I couldn't figure out how to do this. We need to open the
+monitor window for the media when adjusting. Could we try to have scene detection and show a strip of
+thumbnails an equivalent manner to the audio waveform?"*; *"Could we have another foot panel with all
+colour and geometry adjustments rather listing them in the inspector. When this panel is open the video
+monitor window could also be open."*; on inserts, *"Could we say we add a Syphon/Spout insert and the I/O
+get generated automatically?"*; *"linked audio tracks should also enable to edit the video track so it
+doesn't require the user to switch back and forth"*; *"at times the values have a long trailing number"*
+on the dial; and *"when a cue is selected for editing, the controller's EQ, sends, FX buttons should act
+as physical short cuts and enable adjustments on the surface. Right now this is only possible on sampler
+group media cues. Expand it to other media cue and direct UI selection."*
+
+### 47.1 What it is, before its names
+
+A movie gets the panel a sound has: its length drawn across the foot, its in and out points and loops
+dragged on it, a play button and a playhead. Where a sound's panel draws the waveform, a movie's draws a
+strip of small pictures, one at each cut Go.dot finds in it and more between, with the sound locked to
+it drawn underneath. While the strip, or the new picture panel, is open, the video monitor shows the
+cue picked, alone and large, as it will look on its canvas - at the playhead, or at the frame under an
+in or out point while it is dragged - whether the cue is playing or not.
+
+The picture panel holds what was a long list in the inspector: where the picture sits on its canvas and
+how large, its turn and flips, its colour, its four curves and its mask, drawn and dragged. A cue that is
+playing follows each change at once, on the projector, as a playing sound follows its EQ.
+
+A movie and the sound locked to it are one cue of two lines; either line now shows both halves. Inserts
+are made in one step by kind, numbered, with the names each side uses written once. And a pick in the
+window aims the control surface's EQ, Send and FX pages, as a SELECT on a sampler strip always has.
+
+### 47.2 Decisions
+
+The author's (2026-10-09; the first three each the option I recommended, the words of each option mine):
+
+- **AAA** A pick in the window **aims the surfaces**: a sound or a mic at itself, a movie at the sound
+  locked to it, anything else leaving the aim where it is (that last part mine). The last hand to aim
+  wins - a SELECT, a running cue's name, or a pick. Overrules AJ's "not the cue list's pick" (§17.14).
+- **AAD** Either line of a movie and its locked sound shows **both halves**: the picture's rows and the
+  sound's in two drawers, and the panel buttons of both, each acting on its own half.
+- **AAE** A **playing cue's picture follows its edits at once**, on the projector, as a playing sound's
+  EQ does; refused under the lock like every edit.
+- **AAH** The video monitor shows **the picked cue alone**, large, playing or not, with the canvas tiles
+  beneath; it opens with the strip or the picture panel and never takes the keyboard from GO.
+- **AAJ** Inserts **stay the show's** (YE): *"I wouldn't try to create the piping from the cue since
+  Aftereffects or Touch Designer would lose the connection, but make incremental insert with the type
+  (Syphon/Spout; NDI) and leave it as is."*
+
+Mine, proposed: AAB (the dial's grain), AAC (a movie's seek and playhead), AAF (opacity follows too),
+AAG (the picture panel's rows), AAI (cuts and thumbnails), AAK (the insert's names) - each written with
+the stage that builds it below.
+
+### 47.3 The surfaces on the window's pick (AAA)
+
+When the pick in the window moves to a sound, a mic, or a movie with a locked sound, the window sends
+`surface.aim` for it, once, when the pick moves - so a SELECT pressed afterwards keeps its aim until a
+hand picks again. Nothing is sent to a show with no surface declared: the aim is a logged command, and
+there would be nothing to aim. A page already up follows the new aim, and the foot panel it holds with
+it. `client/model/Dual` says which cue a pick aims (`aimForPick`) and which two cues are one movie and its
+sound (`dualOf`), by the list's own rule: the sound locked to the movie, straight after it in the same
+section of the same container.

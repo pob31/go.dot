@@ -47,6 +47,7 @@
 
 #include <wfg/client/model/Curve.h>
 #include <wfg/client/model/DirectOuts.h>
+#include <wfg/client/model/Dual.h>
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Devices.h>
@@ -10567,4 +10568,68 @@ TEST_CASE ("client: an OSC cue's curves read with an axis each, and edited on it
     CHECK (elsewhere.armedElsewhere);
     CHECK_FALSE (elsewhere.curves[0].armed);
     rig.parameters.setCurves (nullptr);
+}
+
+//==============================================================================
+/*  THE VIDEO FIXES OF 2026-10-09 (namespace draft §47). */
+TEST_CASE ("client: a movie and the sound straight after it, locked to it, are one pair from either line (§47, AAD)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto movie = rig.document.createCue (list, 0, "video", "Sunrise", {}, { { "source", "movie" } });
+    REQUIRE (movie.ok);
+    const auto sound = rig.document.createCue (list, 1, "media", "Sunrise sound", {}, { { "lockedTo", movie.id } });
+    REQUIRE (sound.ok);
+    const auto memo = rig.document.createCue (list, 2, "memo", "Note");
+    REQUIRE (memo.ok);
+    const auto apart = rig.document.createCue (list, 3, "video", "Moon", {}, { { "source", "movie" } });
+    REQUIRE (apart.ok);
+    const auto between = rig.document.createCue (list, 4, "memo", "Between");
+    REQUIRE (between.ok);
+    const auto later = rig.document.createCue (list, 5, "media", "Moon sound", {}, { { "lockedTo", apart.id } });
+    REQUIRE (later.ok);
+
+    const auto snapshot = rig.publish (1);
+
+    const auto fromMovie = model::dualOf (*snapshot, movie.id);
+    CHECK (fromMovie.isPair());
+    CHECK (fromMovie.movie == movie.id);
+    CHECK (fromMovie.sound == sound.id);
+
+    const auto fromSound = model::dualOf (*snapshot, sound.id);
+    CHECK (fromSound.movie == movie.id);
+    CHECK (fromSound.sound == sound.id);
+
+    //  Locked, but not on the line below its movie: two cues, as the list draws them.
+    CHECK_FALSE (model::dualOf (*snapshot, apart.id).isPair());
+    CHECK_FALSE (model::dualOf (*snapshot, later.id).isPair());
+    CHECK_FALSE (model::dualOf (*snapshot, memo.id).isPair());
+    CHECK_FALSE (model::dualOf (*snapshot, "").isPair());
+}
+
+TEST_CASE ("client: a pick in the window aims the surfaces at a sound, a mic, or a movie's sound, and leaves the aim alone otherwise (§47, AAA)")
+{
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto movie = rig.document.createCue (list, 0, "video", "Sunrise", {}, { { "source", "movie" } });
+    REQUIRE (movie.ok);
+    const auto sound = rig.document.createCue (list, 1, "media", "Sunrise sound", {}, { { "lockedTo", movie.id } });
+    REQUIRE (sound.ok);
+    const auto rain = rig.document.createCue (list, 2, "media", "Rain");
+    REQUIRE (rain.ok);
+    const auto still = rig.document.createCue (list, 3, "video", "Logo");
+    REQUIRE (still.ok);
+    const auto memo = rig.document.createCue (list, 4, "memo", "Note");
+    REQUIRE (memo.ok);
+
+    const auto snapshot = rig.publish (1);
+
+    CHECK (model::aimForPick (*snapshot, rain.id) == rain.id);
+    CHECK (model::aimForPick (*snapshot, sound.id) == sound.id);
+    CHECK (model::aimForPick (*snapshot, movie.id) == sound.id);     // the half with an EQ
+    CHECK (model::aimForPick (*snapshot, still.id).empty());          // a picture has none
+    CHECK (model::aimForPick (*snapshot, memo.id).empty());
+    CHECK (model::aimForPick (*snapshot, "").empty());
 }

@@ -49,6 +49,7 @@
 #include <wfg/client/Client.h>
 
 #include <wfg/client/model/Video.h>
+#include <wfg/client/model/Dual.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/LoadToTime.h>
@@ -1961,14 +1962,41 @@ namespace wfg::client
                 if (shutCurveFor != selection.anchor())
                     shutCurveFor.clear();
 
+                /*  A PICK IN THE WINDOW AIMS THE SURFACES (author, 2026-10-09,
+                    namespace draft §47, AAA: "when a cue is selected for
+                    editing, the controller's EQ, sends, FX buttons should act
+                    as physical short cuts ... Expand it to other media cue and
+                    direct UI selection"). Until then only a strip's SELECT and
+                    a running cue's name aimed them (2026-09-25's first answer,
+                    which this overrules). When the pick MOVES, and only then,
+                    so a SELECT pressed afterwards keeps its aim until the hand
+                    picks again: the last hand to aim wins. A sound or a mic
+                    aims at itself, a movie at its locked sound, anything else
+                    leaves the aim alone (`model::aimForPick`). Sent only to a
+                    show with a surface declared - the aim is a logged command,
+                    and a show with no surface has nothing to aim. */
+                if (selection.anchor() != pickAimSeen)
+                {
+                    pickAimSeen = selection.anchor();
+
+                    if (! model::text (*snapshot, "/godot/surface/order").empty())
+                    {
+                        const auto aim = model::aimForPick (*snapshot, pickAimSeen);
+
+                        if (! aim.empty() && aim != model::text (*snapshot, "/godot/surface/aim"))
+                            send (gesture::aimSurfaces (aim));
+                    }
+                }
+
                 /*  A SURFACE ADJUSTING A CUE HOLDS THE FOOT ON IT (author,
                     2026-09-25: "When adjusting either EQ or send levels
                     display the footer on screen"): the aimed cue's EQ panel
                     for an EQ page, its send mixer for a Send page, from the
                     press that puts the page up (2026-10-05, namespace draft
-                    §30.5) - and not the list's pick, which the rotaries do not
-                    follow. When the page comes down the foot goes back to what
-                    it was showing. */
+                    §30.5). Since 2026-10-09 the list's pick aims the surfaces
+                    too (just above), so the held foot follows a new pick by
+                    way of the aim. When the page comes down the foot goes back
+                    to what it was showing. */
                 const auto page = model::readSurfacePage (*snapshot);
                 const auto held = model::footForSurface (page.up, page.word, page.aim);
 
@@ -2672,6 +2700,10 @@ namespace wfg::client
             bool surfaceHoldsFoot = false;
             model::Subject footBeforeSurface;
             std::string lastSurfaceEdit;
+
+            /*  The pick the surfaces were last aimed from (§47, AAA): the aim
+                is sent when the pick moves, not every pass. */
+            std::string pickAimSeen;
 
             void rememberOutsOf (const std::string& cueId)
             {
