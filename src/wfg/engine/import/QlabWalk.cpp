@@ -653,10 +653,14 @@ namespace wfg::import::qlab
                 const auto target = targetKind (cue.target);
                 const auto found = byId.find (cue.target);
 
-                if (target.empty() || found == byId.end())
+                if (found == byId.end())
                     return placeholder (cue, "its target is not imported", displayName (cue));
 
                 const auto& aimed = *found->second;
+
+                if (target.empty())
+                    return placeholder (cue, "its target, a " + aimed.type + " cue, is not imported", displayName (cue));
+
                 const auto main = std::find_if (cue.fadeLevels.begin(), cue.fadeLevels.end(),
                                                 [] (const FadeLevel& f) { return f.row == 0 && f.column == 0; });
                 const auto others = cue.fadeLevels.size() - (main == cue.fadeLevels.end() ? 0u : 1u);
@@ -702,8 +706,11 @@ namespace wfg::import::qlab
                         auto& trim = trims[cue.target];
                         trim = offset <= silence ? silence : std::clamp (trim + offset, silence, 12.0);
                         level = trim;
-                        note (Note::Kind::approximated, cue, "a relative fade of " + number (offset, 2) + " dB on a group, "
-                              "imported as its trim to " + number (level, 2) + " dB - the offsets summed in show order");
+                        note (Note::Kind::approximated, cue, (offset <= silence ? std::string ("a relative fade to silence")
+                                                                                : "a relative fade of " + number (offset, 2) + " dB")
+                              + " on a group, imported as its trim to " + (level <= silence ? std::string ("silence")
+                                                                                               : number (level, 2) + " dB")
+                              + " - the offsets summed in show order");
                     }
                     else
                     {

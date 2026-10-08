@@ -108,6 +108,7 @@ add_executable(wfg_tests
     QlabFixture.h
     QlabReaderTests.cpp
     QlabWalkTests.cpp
+    QlabImportTests.cpp
     LaneRecordTests.cpp
     SpaceMouseTests.cpp
     RateClockTests.cpp
@@ -1336,6 +1337,23 @@ add_test(NAME blackbox.lane-send.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lane_send.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.lane-send.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# A QLAB WORKSPACE IMPORTED BY THE SHIPPED BINARY (namespace draft §46.3,
+# QL.6): a QLab 5 workspace written by the harness with plistlib, in a folder
+# whose name is not ASCII, beside a WAV it finds and copies; the bundle accepted
+# by `wfg validate` and validate-show.py's RELAX NG, the same bytes twice, a
+# folder holding a show refused untouched, a QLab 3 workspace refused in words,
+# and the report saying what did not come over.
+add_test(NAME blackbox.import-qlab.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/import_qlab.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.import-qlab.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.import-qlab.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/import_qlab.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.import-qlab.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # AN ABLETON LIVE SET IMPORTED BY THE SHIPPED BINARY (namespace draft §29.3):

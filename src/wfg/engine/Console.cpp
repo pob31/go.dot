@@ -25,6 +25,7 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/Template.h>
 #include <wfg/engine/import/AlsImport.h>
+#include <wfg/engine/import/QlabImport.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
@@ -1699,6 +1700,61 @@ namespace
         }
 
         return anything ? 1 : 0;
+    }
+
+    /*  A QLAB WORKSPACE IMPORTED INTO A NEW SHOW (namespace draft §46.3). Exit
+        codes: 0 imported with nothing to report, 1 imported with something to
+        read - the report says what - and 2 a workspace that could not be read,
+        a version neither 4 nor 5 among them, or a show that could not be
+        written. */
+    int runImportQlab (const juce::ArgumentList& args)
+    {
+        const auto cwd = juce::File::getCurrentWorkingDirectory();
+        juce::File workspace;
+
+        for (int at = 1; at < args.size(); ++at)
+            if (! args.arguments[at].text.startsWith ("-"))
+                workspace = cwd.getChildFile (args.arguments[at].text);
+
+        if (workspace == juce::File() || ! args.containsOption ("--into"))
+        {
+            std::cerr << "wfg import-qlab: <workspace.qlab4|.qlab5> --into=<folder> [--lists=1-2,4] [--no-media]" << std::endl;
+            return 2;
+        }
+
+        wfg::import::qlab::ImportOptions options;
+        options.into = cwd.getChildFile (args.getValueForOption ("--into"));
+        options.copyMedia = ! args.containsOption ("--no-media");
+        options.progress = [] (const std::string& sentence) { std::cout << "wfg import-qlab: " << sentence << std::endl; };
+
+        if (args.containsOption ("--lists"))
+        {
+            const auto lists = wfg::import::qlab::parseLists (args.getValueForOption ("--lists").toStdString());
+
+            if (! lists.has_value())
+            {
+                std::cerr << "wfg import-qlab: --lists takes cue list numbers and ranges, such as 1-2,4" << std::endl;
+                return 2;
+            }
+
+            options.lists = *lists;
+        }
+
+        const auto outcome = wfg::import::qlab::importWorkspace (workspace, options);
+
+        if (! outcome.ok)
+        {
+            std::cerr << "wfg import-qlab: " << outcome.error << std::endl;
+            return 2;
+        }
+
+        std::cout << "wfg import-qlab: " << outcome.lists << " cue list(s), " << outcome.cues << " cue(s) into "
+                  << outcome.show.getFullPathName() << "; " << outcome.placeholders << " memo(s) in place of a kind "
+                  << "Go.dot has not got, " << outcome.approximated << " approximated, " << outcome.dropped
+                  << " not imported, " << outcome.missingMedia.size() << " sound(s) not found - see "
+                  << outcome.report.getFullPathName() << std::endl;
+
+        return outcome.approximated + outcome.dropped > 0 || ! outcome.missingMedia.empty() ? 1 : 0;
     }
 
     int runAssociate (const juce::ArgumentList& args)
@@ -6086,6 +6142,17 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 
+    app.addCommand ({ "import-qlab",
+                      "import-qlab <workspace.qlab4|.qlab5> --into=<folder> [--lists=1-2,4] [--no-media]",
+                      "A QLab 4 or 5 workspace imported into a new show: its cue lists, groups, sounds, fades and"
+                      " network cues, its sounds copied into media/",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runImportQlab (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
     app.addCommand ({ "associate",
                       "associate [--remove]",
                       "Linux: makes .wfg shows open with this copy of Go.dot, for this user - or takes that back",
@@ -6195,5 +6262,19 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 
+    /*  THE ARGUMENTS AS UTF-8, which is what macOS and Linux hand a program:
+        JUCE's own reading takes each one as seven-bit text, so a path through
+        "Histoire(s) du Théâtre" arrived as "ThÃ©Ã¢tre" and no file of that name
+        was found (found importing a QLab workspace, namespace draft §46).
+        Windows hands the ANSI code page instead, and keeps JUCE's reading. */
+   #if JUCE_WINDOWS
     return app.findAndRunCommand (argc, argv);
+   #else
+    juce::StringArray arguments;
+
+    for (int at = 1; at < argc; ++at)
+        arguments.add (juce::String::fromUTF8 (argv[at]));
+
+    return app.findAndRunCommand (juce::ArgumentList (juce::String::fromUTF8 (argv[0]), arguments));
+   #endif
 }
