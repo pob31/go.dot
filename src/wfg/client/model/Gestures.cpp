@@ -485,6 +485,11 @@ namespace wfg::client::gesture
         return { origin::window, "videoOutput.identify", { osc::Value::string (outputId), osc::Value::boolean (on) } };
     }
 
+    Event hideProjectors (bool on)
+    {
+        return { origin::window, "video.hideProjectors", { osc::Value::boolean (on) } };
+    }
+
     Event convertMovie (const std::string& file, const std::string& scope, const std::string& format, bool sound)
     {
         return { origin::window, "media.convert", { osc::Value::string (file), osc::Value::string (scope),

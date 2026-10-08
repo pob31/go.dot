@@ -55,16 +55,41 @@ namespace wfg::video
 
     std::vector<DisplayInfo> listDisplays();
 
-    /*  A WINDOW MADE TO COVER ITS DISPLAY EXACTLY, IN THE DISPLAY'S OWN PIXELS
+    /*  HOW FAR A PROJECTOR'S WINDOW REACHES PAST ITS DISPLAY, in pixels on each
+        side (§39, the author's report of 2026-10-08: "a lot of window
+        flickering", both screens going black). An OpenGL window covering a
+        display EXACTLY is taken by the graphics driver for a full-screen
+        program, and each time something passes over it or it is moved the
+        driver switches the display's mode - on a laptop with two graphics
+        chips every screen goes black for a moment. A window one pixel larger
+        is an ordinary window. So it reaches one pixel past an edge no other
+        display touches - below, then right, above, left - and the renderer
+        draws the picture on the display's own pixels inside it. */
+    struct Overhang
+    {
+        int left = 0, top = 0, right = 0, bottom = 0;
+    };
+
+    /*  The edge for `display` among `all` (itself included), by their pixels;
+        below when every edge touches another display. Nothing when its pixels
+        are not known. */
+    Overhang overhangAmong (const DisplayInfo& display, const std::vector<DisplayInfo>& all);
+
+    /*  What a projector's window on `display` is given here: the above on
+        Windows, where the window is put on the pixels; nothing elsewhere. */
+    Overhang windowOverhang (const DisplayInfo& display, const std::vector<DisplayInfo>& all);
+
+    /*  A WINDOW MADE TO COVER ITS DISPLAY, IN THE DISPLAY'S OWN PIXELS
         (namespace draft §39, the author's niggle of 2026-10-07: "on an
         external screen with a scaling the video output window doesn't always
         match the display size"). On Windows a window is born on the main
         display and sized with that display's scale, then moved, and the size
         it ends with depended on how the move's change of scale was handled.
-        So the window is put straight on the display's pixel rectangle, and
-        asked again each second; true when it had to be moved. Elsewhere -
-        and with no pixels known - it does nothing and answers false. */
-    bool coverDisplay (void* nativeWindow, const DisplayInfo& display);
+        So the window is put straight on the display's pixel rectangle, grown
+        by `overhang`, and asked again each second; true when it had to be
+        moved. Elsewhere - and with no pixels known - it does nothing and
+        answers false. */
+    bool coverDisplay (void* nativeWindow, const DisplayInfo& display, const Overhang& overhang);
 
     /*  WHICH DISPLAY AN OUTPUT MEANS: its identifier first, then its name - the
         port's rule (§15). -1 with a reason when there is none, or when the name

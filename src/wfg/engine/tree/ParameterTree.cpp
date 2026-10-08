@@ -3516,6 +3516,8 @@ namespace wfg::tree
                         text = found.renderer;
                     else if (name == "rendererProblem")
                         text = found.rendererProblem;
+                    else if (name == "projectorsHidden")
+                        text = videoHost != nullptr && videoHost->projectorsHidden() ? "true" : "false";
                     else if (name == "ffmpeg")
                         text = converter != nullptr ? converter->ffmpegPath() : std::string {};
                     else if (name == "ffmpegInstall")

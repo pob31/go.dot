@@ -76,7 +76,7 @@ namespace wfg::video
 
                                    return x.id == y.id && x.canvas == y.canvas && x.name == y.name
                                        && x.display == y.display && x.displayId == y.displayId
-                                       && x.enabled == y.enabled && x.testPattern == y.testPattern
+                                       && x.enabled == y.enabled && x.testPattern == y.testPattern && x.hidden == y.hidden
                                        && x.mesh.columns == y.mesh.columns && x.mesh.rows == y.mesh.rows
                                        && x.mesh.x == y.mesh.x && x.mesh.y == y.mesh.y && sameCdl (x.cdl, y.cdl)
                                        && sameZones;
@@ -376,6 +376,8 @@ namespace wfg::video
         std::vector<region::OutputReading> outputs;
         bool configured = false;
         std::set<std::string> identified;
+        bool hideProjectors = false;
+        bool locked = false;    // the show's lock, as `configure` last read it
 
         std::atomic<bool> wantRenderer { false };
         std::atomic<bool> stopping { false };
@@ -440,6 +442,7 @@ namespace wfg::video
 
         std::vector<region::CanvasReading> canvases;
         std::vector<region::OutputReading> outputs;
+        impl->locked = document.isLocked();
 
         const auto text = [&document] (const std::string& address)
         {
@@ -483,6 +486,7 @@ namespace wfg::video
             entry.displayId = text (base + "displayId");
             entry.enabled = text (base + "enabled") != "false";
             entry.testPattern = impl->identified.count (id) > 0;
+            entry.hidden = impl->hideProjectors && ! impl->locked;
 
             /*  ITS MAPPING: the mesh as the show says it - a grid the wrong
                 size for its columns and rows is the identity - and the CDL. */
@@ -613,6 +617,25 @@ namespace wfg::video
     bool VideoHost::identifying (const std::string& outputId) const
     {
         return impl->identified.count (outputId) > 0;
+    }
+
+    void VideoHost::hideProjectors (bool on)
+    {
+        impl->hideProjectors = on;
+
+        if (impl->r == nullptr || ! impl->configured)
+            return;
+
+        //  At once, as the pattern is; the lock overrules it (§39).
+        for (auto& output : impl->outputs)
+            output.hidden = on && ! impl->locked;
+
+        region::writeConfig (*impl->r, impl->canvases, impl->outputs);
+    }
+
+    bool VideoHost::projectorsHidden() const noexcept
+    {
+        return impl->hideProjectors;
     }
 
     Readouts VideoHost::readouts() const

@@ -709,9 +709,9 @@ namespace wfg::video
         {
         public:
             OutputWindow (region::Region& regionToRead, const PictureStore& picturesToDraw, const MovieStore& moviesToDraw,
-                          std::string outputIdToShow, int stateSlot, const DisplayInfo& display)
+                          std::string outputIdToShow, int stateSlot, const DisplayInfo& display, const Overhang& overhangToUse)
                 : r (regionToRead), pictures (picturesToDraw), movies (moviesToDraw), outputId (std::move (outputIdToShow)), slot (stateSlot),
-                  periodNanos (1.0e9 / std::max (24.0, static_cast<double> (display.refreshHz)))
+                  periodNanos (1.0e9 / std::max (24.0, static_cast<double> (display.refreshHz))), overhang (overhangToUse)
             {
                 setOpaque (true);
                 setWantsKeyboardFocus (false);
@@ -734,8 +734,10 @@ namespace wfg::video
                 setAlwaysOnTop (true);
                 setVisible (true);
 
-                //  And on the display's own pixels, whatever its scale (Displays.h, §39).
-                coverDisplay (getWindowHandle(), covering);
+                /*  And on the display's own pixels, whatever its scale, reaching
+                    a pixel past one edge so the driver never takes it for a
+                    full-screen program (Displays.h, §39). */
+                coverDisplay (getWindowHandle(), covering, overhang);
             }
 
             /*  ASKED EACH SECOND (§39): a window the system resized - a change
@@ -743,7 +745,7 @@ namespace wfg::video
                 over its display's pixels. */
             void keepCovering()
             {
-                coverDisplay (getWindowHandle(), covering);
+                coverDisplay (getWindowHandle(), covering, overhang);
             }
 
             ~OutputWindow() override
@@ -1043,11 +1045,14 @@ namespace wfg::video
                     period on. */
                 const auto sample = clock.sampleAt (r, began + static_cast<std::int64_t> (periodNanos));
 
+                /*  THE DISPLAY'S OWN PIXELS within the window, which reaches a
+                    pixel past it (Displays.h): what is drawn is the display's
+                    size, and the pixel beyond stays black. */
                 const auto scale = context.getRenderingScale();
-                const auto width = juce::roundToInt (getWidth() * scale);
-                const auto height = juce::roundToInt (getHeight() * scale);
+                const auto width = std::max (1, juce::roundToInt (getWidth() * scale) - overhang.left - overhang.right);
+                const auto height = std::max (1, juce::roundToInt (getHeight() * scale) - overhang.top - overhang.bottom);
 
-                glViewport (0, 0, width, height);
+                onTheDisplay (width, height);
                 glDisable (GL_SCISSOR_TEST);
                 glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
                 glClear (GL_COLOR_BUFFER_BIT);
@@ -1126,7 +1131,7 @@ namespace wfg::video
                 }
 
                 if (testPattern)
-                    drawTestPattern (width, height);
+                    drawTestPattern (overhang.left, overhang.bottom, width, height);
             }
 
             /*  ONE CANVAS'S LAYERS, bottom first, into whatever is bound - the
@@ -1320,7 +1325,7 @@ namespace wfg::video
 
                 //  The whole output onto the display, calibrated once.
                 glBindFramebuffer (GL_FRAMEBUFFER, context.getFrameBufferID());
-                glViewport (0, 0, width, height);
+                onTheDisplay (width, height);
                 glDisable (GL_BLEND);
                 glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
                 glClear (GL_COLOR_BUFFER_BIT);
@@ -1434,7 +1439,7 @@ namespace wfg::video
                 using namespace juce::gl;
 
                 glBindFramebuffer (GL_FRAMEBUFFER, context.getFrameBufferID());
-                glViewport (0, 0, width, height);
+                onTheDisplay (width, height);
                 glDisable (GL_BLEND);
                 glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
                 glClear (GL_COLOR_BUFFER_BIT);
@@ -1747,14 +1752,14 @@ namespace wfg::video
                 cross through the middle, drawn by clearing thin rectangles -
                 no text, no geometry. The output's name is said on the Video
                 tab beside the switch that turns this on. */
-            static void drawTestPattern (int width, int height)
+            static void drawTestPattern (int left, int bottom, int width, int height)
             {
                 using namespace juce::gl;
 
                 const auto line = std::max (2, std::min (width, height) / 200);
-                const auto bar = [] (int x, int y, int w, int h)
+                const auto bar = [left, bottom] (int x, int y, int w, int h)
                 {
-                    glScissor (x, y, w, h);
+                    glScissor (left + x, bottom + y, w, h);
                     glClear (GL_COLOR_BUFFER_BIT);
                 };
 
@@ -1767,6 +1772,14 @@ namespace wfg::video
                 bar (0, height / 2 - line / 2, width, line);
                 bar (width / 2 - line / 2, 0, line, height);
                 glDisable (GL_SCISSOR_TEST);
+            }
+
+            /*  THE DISPLAY'S PIXELS AS THE VIEWPORT, in the window's own - whose
+                origin is its bottom-left corner, under the pixel it reaches
+                past the display, if that is below. */
+            void onTheDisplay (int width, int height) const
+            {
+                juce::gl::glViewport (overhang.left, overhang.bottom, width, height);
             }
 
             /*  THE OUTPUT'S FRAMES AS NUMBERS (§35.7): every frame counted, a
@@ -1798,6 +1811,7 @@ namespace wfg::video
             int slot = 0;
             double periodNanos = 1.0e9 / 60.0;
             DisplayInfo covering;
+            Overhang overhang;
 
             juce::OpenGLContext context;
             std::unique_ptr<juce::OpenGLShaderProgram> fillProgram, pictureProgram;
@@ -1908,8 +1922,8 @@ namespace wfg::video
                     std::string key;
 
                     for (const auto& output : config.outputs)
-                        key += output.id + "|" + (output.enabled ? "1" : "0") + "|" + output.display + "|"
-                             + output.displayId + ";";
+                        key += output.id + "|" + (output.enabled ? "1" : "0") + (output.hidden ? "h" : "") + "|"
+                             + output.display + "|" + output.displayId + ";";
 
                     if (displaysMoved || key != boundKey || windows.empty() != config.outputs.empty())
                     {
@@ -2153,6 +2167,8 @@ namespace wfg::video
 
                     if (! output.enabled)
                         why = "switched off";
+                    else if (output.hidden)
+                        why = "put away while the show is unlocked";
                     else if (! windowed)
                         why = "the renderer has no window (--no-window)";
                     else
@@ -2165,8 +2181,11 @@ namespace wfg::video
                     region::endWrite (state.seq);
 
                     if (display >= 0)
+                    {
+                        const auto& on = displays[static_cast<std::size_t> (display)];
                         windows.push_back (std::make_unique<OutputWindow> (r, pictures, movies, output.id, static_cast<int> (n),
-                                                                           displays[static_cast<std::size_t> (display)]));
+                                                                           on, windowOverhang (on, displays)));
+                    }
                 }
 
                 for (std::size_t n = count; n < static_cast<std::size_t> (region::maxOutputs); ++n)

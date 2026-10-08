@@ -120,7 +120,7 @@ namespace wfg::client
             menuImportAls,
             menuConvertUsed, menuConvertWhole, menuConvertUsedQuality, menuConvertWholeQuality,
             menuMovieSound, menuCancelConversion, menuDownloadFfmpeg,
-            menuSaveTemplate, menuVideoMonitor,
+            menuSaveTemplate, menuVideoMonitor, menuHideProjectors,
 
             /*  THE TEMPLATES APPLY TEMPLATE OFFERS, numbered from here in the
                 order the show keeps them (namespace draft §38). */
@@ -764,6 +764,7 @@ namespace wfg::client
                     case menuSurfaces:
                     case menuNetworkMonitor:
                     case menuVideoMonitor:
+                    case menuHideProjectors:
                     case menuAssociate:
                     case menuNewPerformance:
                     case menuUpdateTemplate:
@@ -847,6 +848,10 @@ namespace wfg::client
                         changes nothing, under the lock or not. */
                     case menuNetworkMonitor: return host.traffic != nullptr;
                     case menuVideoMonitor: return static_cast<bool> (host.canvasPictures);
+
+                    /*  Whenever there is an engine to ask; under the lock too,
+                        where it waits for the unlock rather than acting (§39). */
+                    case menuHideProjectors: return latest != nullptr;
 
                     //  Linux's, where the console gives one (Console.h, `associate`).
                     case menuAssociate: return host.associate != nullptr;
@@ -1022,6 +1027,19 @@ namespace wfg::client
                         monitor window for the canvases ... opened by an item in
                         the show menu"). */
                     addMenuItem (menu, menuVideoMonitor, "Video monitor...");
+
+                    /*  THE EXTERNAL SCREENS GIVEN BACK WHILE EDITING (author,
+                        2026-10-08: "a toggle to not show the external screen
+                        ... when the show is unlocked"; "once locked, in show
+                        mode, then the video output has all its reasons" to
+                        cover it): ticked while asked, and the lock overrules it. */
+                    {
+                        juce::PopupMenu::Item hide { "Hide the projectors while unlocked" };
+                        hide.itemID = menuHideProjectors;
+                        hide.isEnabled = menuItemEnabled (menuHideProjectors);
+                        hide.isTicked = projectorsHidden();
+                        menu.addItem (hide);
+                    }
                 }
 
                 return menu;
@@ -1079,6 +1097,9 @@ namespace wfg::client
                         break;
                     case menuVideoMonitor:
                         openVideoMonitor();
+                        break;
+                    case menuHideProjectors:
+                        send (gesture::hideProjectors (! projectorsHidden()));
                         break;
                     case menuAssociate:
                         if (host.associate)
@@ -2930,6 +2951,12 @@ namespace wfg::client
                         offer.tooltip = "The last conversion failed: " + juce::String (row.problem);
 
                 return offer;
+            }
+
+            //  Whether the engine holds the projectors away while unlocked (§39).
+            bool projectorsHidden() const
+            {
+                return latest != nullptr && model::isYes (model::flag (*latest, "/godot/videoOutput/projectorsHidden"));
             }
 
             std::string pickedMovieFile() const

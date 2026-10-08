@@ -134,7 +134,63 @@ namespace wfg::video
        #endif
     }
 
-    bool coverDisplay (void* nativeWindow, const DisplayInfo& display)
+    Overhang overhangAmong (const DisplayInfo& display, const std::vector<DisplayInfo>& all)
+    {
+        if (display.physicalWidth <= 0 || display.physicalHeight <= 0)
+            return {};
+
+        const auto left = display.physicalX;
+        const auto top = display.physicalY;
+        const auto right = left + display.physicalWidth;
+        const auto bottom = top + display.physicalHeight;
+
+        //  Whether the strip [x0, x1) x [y0, y1) lies on another display.
+        const auto touched = [&] (int x0, int y0, int x1, int y1)
+        {
+            for (const auto& other : all)
+            {
+                if (other.physicalWidth <= 0 || other.physicalHeight <= 0)
+                    continue;
+
+                if (other.physicalX == display.physicalX && other.physicalY == display.physicalY
+                      && other.physicalWidth == display.physicalWidth && other.physicalHeight == display.physicalHeight)
+                    continue;
+
+                if (x0 < other.physicalX + other.physicalWidth && other.physicalX < x1
+                      && y0 < other.physicalY + other.physicalHeight && other.physicalY < y1)
+                    return true;
+            }
+
+            return false;
+        };
+
+        Overhang out;
+
+        if (! touched (left, bottom, right, bottom + 1))
+            out.bottom = 1;
+        else if (! touched (right, top, right + 1, bottom))
+            out.right = 1;
+        else if (! touched (left, top - 1, right, top))
+            out.top = 1;
+        else if (! touched (left - 1, top, left, bottom))
+            out.left = 1;
+        else
+            out.bottom = 1;
+
+        return out;
+    }
+
+    Overhang windowOverhang (const DisplayInfo& display, const std::vector<DisplayInfo>& all)
+    {
+       #if defined (_WIN32)
+        return overhangAmong (display, all);
+       #else
+        juce::ignoreUnused (display, all);
+        return {};
+       #endif
+    }
+
+    bool coverDisplay (void* nativeWindow, const DisplayInfo& display, const Overhang& overhang)
     {
        #if defined (_WIN32)
         auto* window = static_cast<HWND> (nativeWindow);
@@ -142,18 +198,22 @@ namespace wfg::video
         if (window == nullptr || display.physicalWidth <= 0 || display.physicalHeight <= 0)
             return false;
 
+        const auto x = display.physicalX - overhang.left;
+        const auto y = display.physicalY - overhang.top;
+        const auto width = display.physicalWidth + overhang.left + overhang.right;
+        const auto height = display.physicalHeight + overhang.top + overhang.bottom;
+
         RECT now {};
 
-        if (GetWindowRect (window, &now) && now.left == display.physicalX && now.top == display.physicalY
-              && now.right - now.left == display.physicalWidth && now.bottom - now.top == display.physicalHeight)
+        if (GetWindowRect (window, &now) && now.left == x && now.top == y
+              && now.right - now.left == width && now.bottom - now.top == height)
             return false;
 
-        SetWindowPos (window, HWND_TOPMOST, display.physicalX, display.physicalY,
-                      display.physicalWidth, display.physicalHeight,
-                      SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        //  No SWP_FRAMECHANGED: a borderless window has no frame to work out again.
+        SetWindowPos (window, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE | SWP_NOOWNERZORDER);
         return true;
        #else
-        juce::ignoreUnused (nativeWindow, display);
+        juce::ignoreUnused (nativeWindow, display, overhang);
         return false;
        #endif
     }

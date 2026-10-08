@@ -3940,6 +3940,11 @@ namespace
             only then. */
         std::uint64_t videoRevisionSeen = document.showRevision();
 
+        /*  And the lock it was read under: a projector put away while the show
+            is unlocked comes back when it is locked (§39), and the lock is
+            engine state, which moves no show revision. */
+        bool videoLockSeen = document.isLocked();
+
         /*  WHAT THE SHOW DECLARES ABOUT ITS SURFACES, read off the document -
             at start and whenever the show changes - and what this machine has
             behind each port they name. */
@@ -4475,9 +4480,11 @@ namespace
                                      waits. */
                                  videoHost.tick (runner.videoClockNow(), runner.videoSampleRate());
 
-                                 if (const auto revision = document.showRevision(); revision != videoRevisionSeen)
+                                 if (const auto revision = document.showRevision();
+                                     revision != videoRevisionSeen || document.isLocked() != videoLockSeen)
                                  {
                                      videoRevisionSeen = revision;
+                                     videoLockSeen = document.isLocked();
                                      videoHost.configure (document);
                                  }
 

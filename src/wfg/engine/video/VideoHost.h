@@ -137,6 +137,16 @@ namespace wfg::video
         void identify (const std::string& outputId, bool on);
         bool identifying (const std::string& outputId) const;
 
+        /*  THE PROJECTORS' WINDOWS PUT AWAY, so their displays show the desktop
+            again (`video.hideProjectors`, §39, the author's request of
+            2026-10-08): only while the show is unlocked - locked, the show is
+            running and every projector is shown whatever this says. Tonight's,
+            held here and never in the show; the renderer keeps running, so the
+            video monitor still has its pictures. `configure` reads the lock,
+            and is called again when it moves. Tick thread. */
+        void hideProjectors (bool on);
+        bool projectorsHidden() const noexcept;
+
         /** What the renderer found, as of the host thread's last look. Any thread. */
         Readouts readouts() const;
 

@@ -21501,6 +21501,41 @@ With WW, the banner is now what it was meant to be: the trace of a crash, a kill
   said for ever. The author's answer: "Check of notes, fades and such don't have the same notice."
 - **A video monitor window** for the canvases, from the Show menu, is §40.6.
 
+### 39.13 Both screens black, and the projectors put away while editing (2026-10-08)
+
+The author, the morning after: "the window size fix causes a lot of window flickering now". During a
+bench run of §35.7's test on the author's laptop (an Intel and an NVIDIA chip) **both screens went
+black several times**. An OpenGL window that covers its display exactly is taken by the graphics
+driver for a full-screen program, and the driver switches the display into and out of that mode as
+the window is made, moved, or passed over; with two graphics chips every screen goes black each time.
+On a scaled display §39.5 had made the window exact where it had been a little wrong before, and a
+display at the main display's scale had been exact all along.
+
+- **A projector's window reaches one pixel past its display** (`video::overhangAmong`,
+  `Displays.h`), on an edge no other display touches - below, then right, above, left; below when
+  every edge has a neighbour, over that neighbour's edge row. The renderer draws on the display's own
+  pixels inside the window (`onTheDisplay`), so the picture, the mapping and the test pattern are
+  unchanged and the extra pixel stays black. Windows only; elsewhere the window is what it was.
+- `SWP_FRAMECHANGED` is gone from the second's check: a borderless window has no frame to recompute.
+- *Owed to the bench:* the same test on the laptop, with the author's leave, and on the scaled
+  projector; if a screen still goes black the next suspect is the window being always on top.
+
+The author, in the same message: "can we also have a toggle to not show the external screen to avoid
+blanking out what is on it when we need to access it when the show is unlocked?", and "once locked,
+in show mode, then the video output has all its reasons not to show the desktop on the external
+screen."
+
+- **`video.hideProjectors <on>`** puts every projector's window away while the show is unlocked, so
+  each display shows the desktop; a locked show shows every projector whatever it says, and an unlock
+  puts them away again if it is still asked. Tonight's, like Identify: held by the video host, never
+  in the show, read back at `/godot/videoOutput/projectorsHidden` (`T`, r, persist none). The
+  renderer keeps running - pictures stay loaded and the video monitor keeps its tiles - and an output
+  put away says why: "put away while the show is unlocked". The region carries it per output
+  (version 12), and the console tick configures the host again when the lock moves, which moves no
+  show revision.
+- **Show > Hide the projectors while unlocked**, ticked while asked; offered under the lock too,
+  where it waits for the unlock. *The words are mine.*
+
 ## 40. Several canvases on one output, their warps drawn, and a monitor for the canvases
 
 Written 2026-10-08, overnight. Two of the author's niggles of 2026-10-07 (§39): *"A canvas should be

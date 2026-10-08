@@ -38,5 +38,19 @@ namespace wfg::video
 
                             return Outcome::ok (args);
                         } });
+
+        registry.add ({ "video.hideProjectors",
+                        "Puts every projector's window away, so its display shows the desktop again, or brings"
+                        " them back - only while the show is unlocked: a locked show shows every projector"
+                        " whatever this says. Tonight's, never saved.",
+                        { { "on", 'T', false } },
+                        false,
+                        [host] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (host != nullptr)
+                                host->hideProjectors (args[0].isBool() && args[0].getBool());
+
+                            return Outcome::ok (args);
+                        } });
     }
 }

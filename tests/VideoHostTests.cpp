@@ -38,6 +38,7 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/video/Compositor.h>
+#include <wfg/engine/video/Displays.h>
 #include <wfg/engine/video/Ffmpeg.h>
 #include <wfg/engine/video/Geometry.h>
 #include <wfg/engine/video/Mapping.h>
@@ -413,6 +414,54 @@ TEST_CASE ("video host: a renderer with no window draws the scene the region hol
             CHECK_FALSE (config.outputs.front().testPattern);
         }
 
+        /*  THE PROJECTORS PUT AWAY (§39, the author's request of 2026-10-08):
+            at once, through an edit of the show, the renderer saying why its
+            output has no window - and never under the lock, which shows
+            every projector whatever was asked. Asked still, they go away
+            again at the unlock. */
+        {
+            const auto said = [&host]
+            {
+                const auto readouts = host.readouts();
+                const auto* output = readouts.output ("VD000021");
+                return output != nullptr ? output->problem : std::string {};
+            };
+
+            video::region::ConfigReading config;
+            host.hideProjectors (true);
+            REQUIRE (video::region::readConfig (r, config));
+            CHECK (config.outputs.front().hidden);
+            CHECK (host.projectorsHidden());
+            CHECK (tickUntil (host, clock, [&said] { return said() == "put away while the show is unlocked"; }));
+
+            REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/name", "Face right").ok);
+            host.configure (document);
+            REQUIRE (video::region::readConfig (r, config));
+            CHECK (config.outputs.front().hidden);
+
+            REQUIRE (document.setAttribute ("/godot/document/locked", "true").ok);
+            host.configure (document);
+            REQUIRE (video::region::readConfig (r, config));
+            CHECK_FALSE (config.outputs.front().hidden);
+            CHECK (host.projectorsHidden());
+            CHECK (tickUntil (host, clock, [&said] { return said() != "put away while the show is unlocked"; }));
+
+            host.hideProjectors (true);
+            REQUIRE (video::region::readConfig (r, config));
+            CHECK_FALSE (config.outputs.front().hidden);
+
+            REQUIRE (document.setAttribute ("/godot/document/locked", "false").ok);
+            host.configure (document);
+            REQUIRE (video::region::readConfig (r, config));
+            CHECK (config.outputs.front().hidden);
+
+            host.hideProjectors (false);
+            REQUIRE (video::region::readConfig (r, config));
+            CHECK_FALSE (config.outputs.front().hidden);
+            CHECK_FALSE (host.projectorsHidden());
+            CHECK (tickUntil (host, clock, [&said] { return said() != "put away while the show is unlocked"; }));
+        }
+
         /*  A FILL OF #2040A0 PUT UP NOW, on the fixture's canvas - the first in
             the configuration - and the renderer says the middle of it is that
             colour, at a sample after the point. */
@@ -536,6 +585,54 @@ TEST_CASE ("video bench: a real window on a real display, its frames counted")
 
     host.sink().remove ("RUN00001", clock.now() + 48000);
     tickUntil (host, clock, [] { return false; }, 1500);
+}
+
+//==============================================================================
+/*  A PROJECTOR'S WINDOW NEVER COVERS ITS DISPLAY EXACTLY (§39, the author's
+    report of 2026-10-08): the driver takes such a window for a full-screen
+    program and every screen goes black as it switches. It reaches one pixel
+    past an edge no other display touches. */
+TEST_CASE ("video displays: a projector's window reaches a pixel past an edge nothing else is on")
+{
+    const auto at = [] (int x, int y, int width, int height)
+    {
+        video::DisplayInfo display;
+        display.physicalX = x;
+        display.physicalY = y;
+        display.physicalWidth = width;
+        display.physicalHeight = height;
+        return display;
+    };
+
+    const auto is = [] (const video::Overhang& overhang, int left, int top, int right, int bottom)
+    {
+        return overhang.left == left && overhang.top == top && overhang.right == right && overhang.bottom == bottom;
+    };
+
+    //  The author's two: a laptop and a screen to its left, set a little higher.
+    const auto laptop = at (0, 0, 2560, 1440);
+    const auto screen = at (-2560, -169, 2560, 1440);
+    CHECK (is (video::overhangAmong (screen, { laptop, screen }), 0, 0, 0, 1));
+    CHECK (is (video::overhangAmong (laptop, { laptop, screen }), 0, 0, 0, 1));
+
+    //  One display under another: the upper reaches right, the lower below.
+    const auto upper = at (0, 0, 1920, 1080);
+    const auto lower = at (0, 1080, 1920, 1080);
+    CHECK (is (video::overhangAmong (upper, { upper, lower }), 0, 0, 1, 0));
+    CHECK (is (video::overhangAmong (lower, { upper, lower }), 0, 0, 0, 1));
+
+    //  Under and right taken: above.
+    const auto right = at (1920, 1080, 1920, 1080);
+    CHECK (is (video::overhangAmong (lower, { lower, right, at (0, 2160, 1920, 1080) }), 0, 1, 0, 0));
+
+    //  Walled in on every side: below all the same, over a neighbour's top row.
+    const auto middle = at (0, 0, 100, 100);
+    const std::vector<video::DisplayInfo> wall { middle, at (0, 100, 100, 100), at (100, 0, 100, 100),
+                                                 at (0, -100, 100, 100), at (-100, 0, 100, 100) };
+    CHECK (is (video::overhangAmong (middle, wall), 0, 0, 0, 1));
+
+    //  No pixels known: nothing.
+    CHECK (is (video::overhangAmong (video::DisplayInfo {}, { laptop }), 0, 0, 0, 0));
 }
 
 //==============================================================================

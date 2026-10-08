@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 11;
+    constexpr std::uint32_t version = 12;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -172,6 +172,10 @@ namespace wfg::video::region
         char displayId[nameChars];
         std::atomic<std::uint32_t> enabled;
         std::atomic<std::uint32_t> testPattern;
+
+        /*  KEPT OFF ITS DISPLAY while the show is unlocked and the operator
+            asked for the screen back (`video.hideProjectors`, §39). */
+        std::atomic<std::uint32_t> hidden;
 
         /*  ITS MAPPING (Mapping.h): the mesh's size and points, and the
             calibration's ten numbers. */
@@ -748,6 +752,7 @@ namespace wfg::video::region
         Mesh mesh;
         Cdl cdl;
         std::vector<ZoneReading> zones {};
+        bool hidden = false;
     };
 
     struct ConfigReading
@@ -813,7 +818,8 @@ namespace wfg::video::region
                 OutputReading entry { readText (o.id), readText (o.canvas), readText (o.name),
                                       readText (o.display), readText (o.displayId),
                                       o.enabled.load (std::memory_order_relaxed) != 0,
-                                      o.testPattern.load (std::memory_order_relaxed) != 0, {}, {}, {} };
+                                      o.testPattern.load (std::memory_order_relaxed) != 0, {}, {}, {},
+                                      o.hidden.load (std::memory_order_relaxed) != 0 };
 
                 entry.mesh.columns = std::clamp (static_cast<int> (o.meshColumns.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
                 entry.mesh.rows = std::clamp (static_cast<int> (o.meshRows.load (std::memory_order_relaxed)), 2, Mesh::maxPoints);
@@ -874,6 +880,7 @@ namespace wfg::video::region
             writeText (o.displayId, outputs[n].displayId);
             o.enabled.store (outputs[n].enabled ? 1u : 0u, std::memory_order_relaxed);
             o.testPattern.store (outputs[n].testPattern ? 1u : 0u, std::memory_order_relaxed);
+            o.hidden.store (outputs[n].hidden ? 1u : 0u, std::memory_order_relaxed);
 
             /*  THE MESH, the identity when the show's is not a full grid. */
             const auto mesh = outputs[n].mesh.isValid() ? outputs[n].mesh : Mesh::identity();

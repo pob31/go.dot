@@ -378,6 +378,9 @@ namespace wfg::client::gesture
     /** An output's test pattern on or off, to find which projector is which: tonight's. */
     Event identifyVideoOutput (const std::string& outputId, bool on);
 
+    /** The projectors' windows put away while the show is unlocked, or brought back: tonight's (§39). */
+    Event hideProjectors (bool on);
+
     /*  A MOVIE CONVERTED TO HAP in the background (namespace draft 37.5,
         WF-WJ): `scope` whole or used, `format` hap, hapq - or none, its sound
         alone - and whether its sound comes in as a cue locked to it. */
