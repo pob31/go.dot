@@ -103,6 +103,8 @@ add_executable(wfg_tests
     AlsReaderTests.cpp
     AlsWalkTests.cpp
     AlsImportTests.cpp
+    BplistTests.cpp
+    PlistWriter.h
     LaneRecordTests.cpp
     SpaceMouseTests.cpp
     RateClockTests.cpp
