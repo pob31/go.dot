@@ -44,7 +44,7 @@ namespace wfg::test::qlab
     using wfg::test::plist::Keyed;
     using wfg::test::plist::Value;
 
-    using Fields = std::vector<std::pair<std::string, Value>>;
+    using Fields = std::vector<wfg::test::plist::Entry>;
 
     inline double gain (double db) { return db <= -150.0 ? 0.0 : std::pow (10.0, db / 20.0); }
 

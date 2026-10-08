@@ -42,6 +42,8 @@
 
 namespace wfg::test::plist
 {
+    struct Entry;
+
     struct Value
     {
         enum class Kind { null, boolean, integer, real, string, data, uid, array, dict } kind = Kind::null;
@@ -51,18 +53,39 @@ namespace wfg::test::plist
         std::string text;
         std::vector<std::uint8_t> bytes;
         std::vector<Value> items;
-        std::vector<std::pair<std::string, Value>> entries;
+        std::vector<Entry> entries;
 
-        static Value null() { return {}; }
-        static Value boolean (bool b) { Value v; v.kind = Kind::boolean; v.flag = b; return v; }
-        static Value integer (std::int64_t i) { Value v; v.kind = Kind::integer; v.whole = i; return v; }
-        static Value number (double d) { Value v; v.kind = Kind::real; v.real = d; return v; }
-        static Value string (std::string s) { Value v; v.kind = Kind::string; v.text = std::move (s); return v; }
-        static Value data (std::vector<std::uint8_t> b) { Value v; v.kind = Kind::data; v.bytes = std::move (b); return v; }
-        static Value uid (std::int64_t u) { Value v; v.kind = Kind::uid; v.whole = u; return v; }
-        static Value array (std::vector<Value> i) { Value v; v.kind = Kind::array; v.items = std::move (i); return v; }
-        static Value dict (std::vector<std::pair<std::string, Value>> e) { Value v; v.kind = Kind::dict; v.entries = std::move (e); return v; }
+        static Value null();
+        static Value boolean (bool b);
+        static Value integer (std::int64_t i);
+        static Value number (double d);
+        static Value string (std::string s);
+        static Value data (std::vector<std::uint8_t> b);
+        static Value uid (std::int64_t u);
+        static Value array (std::vector<Value> i);
+        static Value dict (std::vector<Entry> e);
     };
+
+    /*  A DICTIONARY'S KEY AND VALUE, named as a pair's are - and not a
+        std::pair<std::string, Value>: libstdc++ 14, instantiating that pair,
+        asks whether a Value can be made from {}, which needs the destructor of
+        a vector of the very pair it is still instantiating. Clang 20 refuses
+        the loop (the real-time job); GCC and MSVC let it through. */
+    struct Entry
+    {
+        std::string first;
+        Value second;
+    };
+
+    inline Value Value::null() { return {}; }
+    inline Value Value::boolean (bool b) { Value v; v.kind = Kind::boolean; v.flag = b; return v; }
+    inline Value Value::integer (std::int64_t i) { Value v; v.kind = Kind::integer; v.whole = i; return v; }
+    inline Value Value::number (double d) { Value v; v.kind = Kind::real; v.real = d; return v; }
+    inline Value Value::string (std::string s) { Value v; v.kind = Kind::string; v.text = std::move (s); return v; }
+    inline Value Value::data (std::vector<std::uint8_t> b) { Value v; v.kind = Kind::data; v.bytes = std::move (b); return v; }
+    inline Value Value::uid (std::int64_t u) { Value v; v.kind = Kind::uid; v.whole = u; return v; }
+    inline Value Value::array (std::vector<Value> i) { Value v; v.kind = Kind::array; v.items = std::move (i); return v; }
+    inline Value Value::dict (std::vector<Entry> e) { Value v; v.kind = Kind::dict; v.entries = std::move (e); return v; }
 
     namespace detail
     {
@@ -248,7 +271,7 @@ namespace wfg::test::plist
 
         /*  An object of `className`, its `fields` as given - a UID among them
             pointing at another object. The class is archived once per name. */
-        std::int64_t object (const std::string& className, std::vector<std::pair<std::string, Value>> fields)
+        std::int64_t object (const std::string& className, std::vector<Entry> fields)
         {
             fields.insert (fields.begin(), { "$class", Value::uid (classOf (className)) });
             return add (Value::dict (std::move (fields)));

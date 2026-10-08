@@ -44,7 +44,10 @@ namespace
         return parse (bytes.data(), bytes.size());
     }
 
-    const Object& member (const PropertyList& list, const Object& dict, const std::string& key)
+    /*  The key as a pointer, not a std::string: GCC 13 takes a reference
+        returned beside a temporary string argument for one that may dangle
+        (-Wdangling-reference), and the strict build makes that an error. */
+    const Object& member (const PropertyList& list, const Object& dict, const char* key)
     {
         for (const auto& [k, v] : dict.entries)
             if (list.objects[k].text == key)

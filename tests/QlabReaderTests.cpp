@@ -53,7 +53,10 @@ namespace
         return *result.workspace;
     }
 
-    const Cue& named (const Cue& in, const std::string& name)
+    /*  The name as a pointer, not a std::string: GCC 13 takes a reference
+        returned beside a temporary string argument for one that may dangle
+        (-Wdangling-reference), and the strict build makes that an error. */
+    const Cue& named (const Cue& in, const char* name)
     {
         for (const auto& child : in.children)
         {
