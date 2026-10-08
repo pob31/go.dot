@@ -107,6 +107,7 @@ add_executable(wfg_tests
     PlistWriter.h
     QlabFixture.h
     QlabReaderTests.cpp
+    QlabWalkTests.cpp
     LaneRecordTests.cpp
     SpaceMouseTests.cpp
     RateClockTests.cpp

@@ -317,6 +317,8 @@ add_library(wfg_engine STATIC
     wfg/engine/import/ImportCommon.h
     wfg/engine/import/QlabReader.cpp
     wfg/engine/import/QlabReader.h
+    wfg/engine/import/QlabWalk.cpp
+    wfg/engine/import/QlabWalk.h
     wfg/engine/log/EventLog.cpp
     wfg/engine/log/EventLog.h
     wfg/engine/log/Replay.cpp
