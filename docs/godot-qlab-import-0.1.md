@@ -8,6 +8,14 @@ Go.dot, at the author's direction (namespace draft §29, decision QC). A Live se
 read on its own; this draft's case for an external tool rests on talking to a running QLab over
 OSC, which still stands.
 
+*Note, 2026-10-08:* §7's dump has been run, against a real show. The results are in
+`docs/godot-qlab-extraction-0.1.md`, and where the two disagree, that page is right. It changes
+four things here:
+- §3's addresses are now verified, and the spelling is `cueTargetID`.
+- §5's silence floor must be read from the workspace (it was −80 dB, not −60 dB).
+- The network patch destinations behind §4's `<Osc>` rows can't be read over OSC.
+- §4's "hard part" mostly arrives already grouped by the show's author.
+
 ---
 
 ## 1. The idea in one paragraph
