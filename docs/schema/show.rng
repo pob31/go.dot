@@ -2226,7 +2226,7 @@
       </optional>
       <optional>
         <attribute name="value">
-          <a:documentation>What to write, spelled the way the log spells an argument - f:0.5 for a float, i:3 for an integer, T for true. One atom, because a mounted node holds one value; the type is in the text so that a cue meaning the float and a cue meaning the integer are different cues rather than the same cue read twice by two machines.</a:documentation>
+          <a:documentation>What to write, spelled the way the log spells an argument - f:0.5 for a float, i:3 for an integer, T for true - and a LIST of them, space-separated, for a message of several arguments (namespace draft 45): /adm/obj/1/xyz takes f:0.5 f:2 f:1.2, and a device that describes the node takes exactly as many as it declares, each coerced to its own type. Empty sends the message with no argument at all, which is what /go is to a great many desks. The type is in the text so that a cue meaning the float and a cue meaning the integer are different cues rather than the same cue read twice by two machines.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -2241,8 +2241,31 @@
         </attribute>
       </optional>
       <zeroOrMore>
-        <ref name="Trigger"/>
+        <choice>
+          <ref name="Trigger"/>
+          <ref name="Message"/>
+        </choice>
       </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Message">
+    <element name="Message">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="address">
+          <a:documentation>The node this message writes, as the cue-s own address is - and under the same device (namespace draft 45, YV, the author-s pick): a cue talks to one device, so its target menu moves every message at once and Doh! keeps its per-device setting. A message under another device fails the run at GO with several-devices, and wfg validate warns of it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="value">
+          <a:documentation>What this message sends, spelled as the cue-s own value: a list of atoms, every argument of the message, empty for one that carries nothing.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
     </element>
   </define>
 
@@ -2489,6 +2512,15 @@
       <optional>
         <attribute name="anticipatable">
           <a:documentation>Whether the mounted nodes may be pre-sent before GO. False for third parties.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="bundles">
+          <a:documentation>Whether everything Go.dot sends this device in one tick leaves as one OSC bundle (namespace draft 45, YQ, the author-s pick: the device-s setting rather than the cue-s). On, a cue-s messages and every curve moving at that moment arrive together - a source-s x, y and z in one datagram, even from two cues - time-tagged immediately, a datagram closed at 1200 bytes and a message too big for one sent alone. Off - the default, and what Go.dot always did - each message is a datagram of its own, which every device reads; a device that cannot read a bundle ignores one in silence, so it stays off until somebody knows.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>

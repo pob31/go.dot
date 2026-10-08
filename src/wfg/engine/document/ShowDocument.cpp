@@ -25,8 +25,10 @@
 #include <wfg/engine/document/OutputLayout.h>
 #include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/tree/Mount.h>
 
 #include <map>
+#include <functional>
 #include <cctype>
 #include <cstddef>
 #include <algorithm>
@@ -437,6 +439,10 @@ namespace wfg::doc
         if (element == "Range")                     return "range";
         if (element == "Port")                      return "port";
         if (element == "Trigger")                   return "trigger";
+
+        /*  AN OSC CUE'S FURTHER MESSAGE (namespace draft 45), at
+            /godot/message/<id>. */
+        if (element == "Message")                   return "message";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";
         if (element == "Bus")                       return "bus";
@@ -3044,6 +3050,72 @@ namespace wfg::doc
         return insertObject (output, endOfSequence, "Zone", id, attributes);
     }
 
+    EditResult ShowDocument::createMessage (const std::string& cueId, const std::string& address,
+                                            const std::string& value, const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! cue.hasType ("Osc"))
+            return EditResult::failed (reason::typeMismatch);
+
+        /*  THE FIRST MESSAGE IS THE CUE'S OWN, so a cue with no address has no
+            first message for another to follow - and a run that sent the
+            second with no first would be a cue nobody could read top down. */
+        if (cue[juce::Identifier ("address")].toString().isEmpty())
+            return EditResult::failed (reason::badValue);
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! address.empty())
+            attributes.push_back ({ "address", address });
+
+        if (! value.empty())
+            attributes.push_back ({ "value", value });
+
+        return insertObject (cue, endOfSequence, "Message", id, attributes);
+    }
+
+    EditResult ShowDocument::promoteMessage (const std::string& messageId)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        const auto message = findById (messageId);
+
+        if (! message.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        const auto cue = message.getParent();
+
+        if (! message.hasType ("Message") || ! cue.hasType ("Osc"))
+            return EditResult::failed (reason::typeMismatch);
+
+        const auto cueId = cue[idProperty].toString().toStdString();
+        const auto base = "/godot/cue/" + cueId + "/";
+
+        /*  THE MESSAGE'S WORDS BECOME THE CUE'S, through the cue's own door so
+            the schema reads them as it reads any write, and the message goes -
+            all inside the command's one transaction. */
+        for (const auto* row : { "address", "value" })
+        {
+            const juce::Identifier name { row };
+            const auto edit = setAttribute (base + row, message[name].toString().toStdString());
+
+            if (! edit.ok)
+                return edit;
+        }
+
+        const auto removed = remove (messageId);
+
+        if (! removed.ok)
+            return removed;
+
+        return EditResult::succeeded (cueId);
+    }
+
     EditResult ShowDocument::createPlugin (const std::string& name, const std::string& identifier,
                                           const std::string& format, const std::string& path,
                                           const std::string& id)
@@ -4751,6 +4823,67 @@ namespace wfg::doc
                           + " - so both are summed onto the same interface channels. The output"
                             " list keeps outputs packed; this one was written by hand");
             }
+        }
+
+        /*  ONE DEVICE PER CUE (namespace draft 45, YV, the author's pick): a
+            further message of an OSC cue under another device than the cue's
+            own address. A WARNING, never a load refusal, for the reason a
+            dangling pointer is one: retargeting a cue moves its messages in one
+            set of writes taken one at a time, so the door cannot hold the rule,
+            and a show the door let through must open again. The run fails at
+            GO with `several-devices`; this says so before then. */
+        {
+            std::vector<std::string> prefixRows;
+
+            for (const auto& container : showNode)
+                if (container.hasType ("Mounts"))
+                    for (const auto& mount : container)
+                        prefixRows.push_back (mount[juce::Identifier ("prefix")].toString().toStdString());
+
+            const auto deviceOf = [&prefixRows] (const std::string& address)
+            {
+                std::size_t best = 0;
+                int owner = -1;
+
+                for (std::size_t n = 0; n < prefixRows.size(); ++n)
+                    if (const auto length = tree::prefixMatchLength (address, prefixRows[n]); length > best)
+                    {
+                        best = length;
+                        owner = static_cast<int> (n);
+                    }
+
+                return owner;
+            };
+
+            const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& node)
+            {
+                if (node.hasType ("Osc"))
+                {
+                    const auto device = deviceOf (node[juce::Identifier ("address")].toString().toStdString());
+
+                    for (const auto& child : node)
+                    {
+                        if (! child.hasType ("Message"))
+                            continue;
+
+                        const auto address = child[juce::Identifier ("address")].toString().toStdString();
+
+                        if (deviceOf (address) != device)
+                            problems.push_back ("/Show/.../Osc[" + node[idProperty].toString().toStdString()
+                                                  + "]/Message[" + child[idProperty].toString().toStdString()
+                                                  + "]: \"" + address + "\" is under another device than the"
+                                                    " cue's own address - a cue talks to one device, and this"
+                                                    " one fails at GO");
+                    }
+
+                    return;
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            };
+
+            visit (showNode);
         }
 
         return problems;

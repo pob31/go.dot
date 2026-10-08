@@ -25,7 +25,7 @@
 namespace wfg::tree
 {
     std::uint64_t MountSender::queue (const std::string& mountId, const Destination& destination,
-                                      const std::string& address, const osc::Value& value,
+                                      const std::string& address, const osc::Values& values,
                                       const std::string& owner)
     {
         const auto ticket = nextTicket++;
@@ -54,13 +54,13 @@ namespace wfg::tree
             message.ticket = ticket;
             message.mountId = mountId;
             message.destination = destination;
-            message.value = value;
+            message.values = values;
             message.owner = owner;
             return ticket;
         }
 
         queuedAt[address] = queued.size();
-        queued.push_back (Message { ticket, mountId, destination, address, value, owner });
+        queued.push_back (Message { ticket, mountId, destination, address, values, owner });
         return ticket;
     }
 
@@ -95,11 +95,19 @@ namespace wfg::tree
             in that order. */
         std::vector<Message> waiting;
 
+        /*  WHAT GOES TO A DEVICE THAT TAKES BUNDLES (namespace draft 45, YQ),
+            gathered by device in the order its first message was queued, and
+            sent once the rest have gone. Pointers into `queued`, which stands
+            until the end of this flush. */
+        std::vector<std::pair<std::string, std::vector<const Message*>>> bundled;
+
         for (const auto& message : queued)
         {
             const auto interval = intervalFor (message.destination.rateCap);
             const auto last = lastSentAt.find (message.address);
 
+            /*  A MESSAGE THE RATE CAP HOLDS STAYS OUT OF THE BUNDLE, in its
+                place in the queue: it goes in a later flush's. */
             if (interval > 1 && last != lastSentAt.end()
                  && flushes - last->second < interval)
             {
@@ -107,25 +115,28 @@ namespace wfg::tree
                 continue;
             }
 
-            auto ok = false;
-            std::string error;
-
-            /*  Encoded here rather than at queue time, because a coalesced
-                address is encoded once however many times it was written -
-                which is the point of coalescing, and would be lost if the bytes
-                were built where the value arrived. */
-            if (const auto bytes = osc::encode (osc::Packet::message (message.address,
-                                                                      { message.value }),
-                                                error))
-                if (udp != nullptr && message.destination.port > 0)
-                    ok = udp->send (message.destination.host, message.destination.port, *bytes);
-
-            if (ok)
-                ++sent[message.mountId];
-
             lastSentAt[message.address] = flushes;
-            outcomes.push_back ({ message.ticket, ok ? Outcome::sent : Outcome::failed, false });
+
+            if (message.destination.bundles)
+            {
+                auto device = std::find_if (bundled.begin(), bundled.end(),
+                                            [&message] (const auto& entry) { return entry.first == message.mountId; });
+
+                if (device == bundled.end())
+                {
+                    bundled.push_back ({ message.mountId, {} });
+                    device = std::prev (bundled.end());
+                }
+
+                device->second.push_back (&message);
+                continue;
+            }
+
+            sendAlone (message);
         }
+
+        for (const auto& device : bundled)
+            sendBundled (device.second);
 
         queued = std::move (waiting);
         queuedAt.clear();
@@ -134,6 +145,92 @@ namespace wfg::tree
             queuedAt[queued[index].address] = index;
 
         forgetOldAnswers();
+    }
+
+    void MountSender::sendAlone (const Message& message)
+    {
+        auto ok = false;
+        std::string error;
+
+        /*  Encoded here rather than at queue time, because a coalesced address
+            is encoded once however many times it was written - which is the
+            point of coalescing, and would be lost if the bytes were built where
+            the value arrived. */
+        if (const auto bytes = osc::encode (osc::Packet::message (message.address, message.values), error))
+            if (udp != nullptr && message.destination.port > 0)
+                ok = udp->send (message.destination.host, message.destination.port, *bytes);
+
+        if (ok)
+            ++sent[message.mountId];
+
+        outcomes.push_back ({ message.ticket, ok ? Outcome::sent : Outcome::failed, false });
+    }
+
+    void MountSender::sendBundled (const std::vector<const Message*>& messages)
+    {
+        /*  ONE DEVICE'S MESSAGES OF ONE FLUSH, in their order, as few bundles as
+            fit (namespace draft 45, ZB): each closed before it would pass
+            `bundleBytes`, time-tagged immediately - Go.dot's own processors
+            would be the ones to read a later time, and spatcore's parser drops
+            it (PRD 3.12). A message too big to share a datagram goes alone, as
+            a plain message, and a bundle of one is still a bundle: the device
+            said it reads them. Each message is answered and counted as itself. */
+        constexpr std::size_t header = 16;      // "#bundle\0" and the time tag
+        constexpr std::size_t lengthField = 4;  // each element's size, before it
+
+        std::vector<const Message*> batch;
+        std::vector<osc::Packet> elements;
+        std::size_t size = header;
+
+        const auto close = [this, &batch, &elements, &size]
+        {
+            if (batch.empty())
+                return;
+
+            auto ok = false;
+            std::string error;
+            const auto& to = batch.front()->destination;
+
+            if (const auto bytes = osc::encode (osc::Packet::bundle (osc::TimeTag {}, elements), error))
+                if (udp != nullptr && to.port > 0)
+                    ok = udp->send (to.host, to.port, *bytes);
+
+            for (const auto* message : batch)
+            {
+                if (ok)
+                    ++sent[message->mountId];
+
+                outcomes.push_back ({ message->ticket, ok ? Outcome::sent : Outcome::failed, false });
+            }
+
+            batch.clear();
+            elements.clear();
+            size = header;
+        };
+
+        for (const auto* message : messages)
+        {
+            auto element = osc::Packet::message (message->address, message->values);
+            std::string error;
+            const auto bytes = osc::encode (element, error);
+            const auto length = bytes.has_value() ? bytes->size() : 0u;
+
+            if (! bytes.has_value() || header + lengthField + length > bundleBytes)
+            {
+                close();
+                sendAlone (*message);
+                continue;
+            }
+
+            if (size + lengthField + length > bundleBytes)
+                close();
+
+            elements.push_back (std::move (element));
+            batch.push_back (message);
+            size += lengthField + length;
+        }
+
+        close();
     }
 
     std::size_t MountSender::dropQueued (const std::function<bool (const std::string& owner)>& keep)
@@ -218,17 +315,17 @@ namespace wfg::tree
 
     //==============================================================================
     MountTable::WriteResult writeToDevice (MountTable& mounts, MountSender& sender,
-                                           const std::string& address, const osc::Value& value)
+                                           const std::string& address, const osc::Values& values)
     {
-        const auto written = mounts.write (address, value);
+        const auto written = mounts.write (address, values);
 
         if (! written.ok)
             return written;
 
         if (const auto* declaration = mounts.declarationOf (written.mountId); declaration != nullptr && declaration->tx)
             sender.queue (written.mountId,
-                          { declaration->host, declaration->port, declaration->rateCap },
-                          address, written.value);
+                          { declaration->host, declaration->port, declaration->rateCap, declaration->bundles },
+                          address, written.values);
 
         return written;
     }

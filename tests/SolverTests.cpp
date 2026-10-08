@@ -137,13 +137,13 @@ TEST_CASE ("solve: the last writer wins, and the walk does not stop at a group b
     /*  Two addresses, and the fader is the LATER value. */
     const auto* fader = rig.valueAt (plan, "/desk/fader");
     REQUIRE (fader != nullptr);
-    CHECK (fader->value == osc::Value::float32 (0.8f));
+    CHECK (fader->value == osc::Values { osc::Value::float32 (0.8f) });
     CHECK (fader->writer == later);
 
     /*  And the one written inside a group that has completed is still set. */
     const auto* other = rig.valueAt (plan, "/desk/other");
     REQUIRE (other != nullptr);
-    CHECK (other->value == osc::Value::float32 (0.9f));
+    CHECK (other->value == osc::Values { osc::Value::float32 (0.9f) });
 
     juce::ignoreUnused (early);
 }
@@ -855,4 +855,37 @@ TEST_CASE ("M20: what a solve costs, over a show nobody wants to find out about 
              << plan.confused.size() << " confused entries. The node is capped at 5 Hz and a"
                 " drag re-solves at the drag's own rate, so what this has to fit inside is a"
                 " gesture rather than a tick");
+}
+
+//==============================================================================
+/*  AN OSC CUE OF SEVERAL MESSAGES (namespace draft 45) places every one of
+    them: a jump past it means each address it writes holds what it wrote, the
+    later writer of any one address still winning. */
+TEST_CASE ("solve: every message of an OSC cue is placed, the last writer of each address winning")
+{
+    SolverRig rig;
+
+    const auto both = rig.osc (0, "/desk/fader", "f:0.2");
+    REQUIRE (rig.document.createMessage (both, "/desk/scene", "i:3").ok);
+    REQUIRE (rig.document.createMessage (both, "/desk/xyz", "f:1 f:2 f:3").ok);
+
+    const auto later = rig.osc (1, "/desk/scene", "i:5");
+    const auto target = rig.document.createCue (rig.listId, 2, "memo", "Here").id;
+
+    const auto plan = rig.solve (target, -1.0);
+    REQUIRE (plan.ok);
+
+    const auto* fader = rig.valueAt (plan, "/desk/fader");
+    REQUIRE (fader != nullptr);
+    CHECK (fader->writer == both);
+
+    const auto* xyz = rig.valueAt (plan, "/desk/xyz");
+    REQUIRE (xyz != nullptr);
+    CHECK (xyz->value == osc::Values { osc::Value::float32 (1.0f), osc::Value::float32 (2.0f),
+                                       osc::Value::float32 (3.0f) });
+
+    const auto* scene = rig.valueAt (plan, "/desk/scene");
+    REQUIRE (scene != nullptr);
+    CHECK (scene->value == osc::Values { osc::Value::int32 (5) });
+    CHECK (scene->writer == later);
 }

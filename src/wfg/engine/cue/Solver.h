@@ -162,7 +162,7 @@ namespace wfg::cue
     struct PlannedValue
     {
         std::string address;
-        osc::Value value;
+        osc::Values value;      // every argument of the message (namespace draft §45)
 
         /** The cue that wrote it last, so a client can say where it came from. */
         std::string writer;

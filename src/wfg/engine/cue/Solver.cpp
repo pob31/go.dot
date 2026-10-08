@@ -23,6 +23,9 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace wfg::cue
 {
@@ -33,6 +36,25 @@ namespace wfg::cue
             the file. A speed FADE is not solved - load-to-time puts a cue whose
             speed was faded where its own speed would have taken it, a named
             limitation. */
+        /*  WHAT AN OSC CUE SENDS, as (address, value list) pairs in its order:
+            its own address and value first, then each further message
+            (namespace draft 45). One helper for the three places a plan reads
+            an OSC cue, so a jump, a relaunch and load-to-time all place every
+            message of it. */
+        std::vector<std::pair<std::string, std::string>> messagesOf (const Reader& read,
+                                                                     const juce::ValueTree& cue)
+        {
+            std::vector<std::pair<std::string, std::string>> out {
+                { read.text (cue, "osc", "address"), read.text (cue, "osc", "value") } };
+
+            for (const auto& child : cue)
+                if (child.hasType ("Message"))
+                    out.push_back ({ read.text (child, "message", "address"),
+                                     read.text (child, "message", "value") });
+
+            return out;
+        }
+
         double speedOf (const Reader& read, const juce::ValueTree& cue)
         {
             //  Its size (namespace draft §41): backwards takes as long as forwards.
@@ -1086,37 +1108,39 @@ namespace wfg::cue
             if (! read.flag (entry.node, "cue", "enabled"))
                 continue;
 
-            const auto address = read.text (entry.node, "osc", "address");
-
-            if (address.empty())
-                continue;
-
-            /*  AN EVENT IS NOT A VALUE (§3.13 step 4). "Fire the pyro" has no
-                state to restore to, and a jump that re-sent it would set the
-                theatre alight on the way past a cue that already happened. A
-                mount that has not been loaded says nothing about its nodes, so
-                nothing is excluded - which is the direction that fires, and is
-                why a caller with a mount table hands it over. */
-            if (mounts != nullptr)
-                if (const auto* node = mounts->nodeAt (address);
-                    node != nullptr && node->kind == tree::Kind::event)
+            for (const auto& [address, text] : messagesOf (read, entry.node))
+            {
+                if (address.empty())
                     continue;
 
-            const auto value = osc::Value::fromAtom (read.text (entry.node, "osc", "value"));
+                /*  AN EVENT IS NOT A VALUE (§3.13 step 4). "Fire the pyro" has
+                    no state to restore to, and a jump that re-sent it would set
+                    the theatre alight on the way past a cue that already
+                    happened. A mount that has not been loaded says nothing about
+                    its nodes, so nothing is excluded - which is the direction
+                    that fires, and is why a caller with a mount table hands it
+                    over. */
+                if (mounts != nullptr)
+                    if (const auto* node = mounts->nodeAt (address);
+                        node != nullptr && node->kind == tree::Kind::event)
+                        continue;
 
-            if (! value.has_value())
-                continue;
+                const auto value = osc::valuesFromAtoms (text);
 
-            const auto seen = writtenAt.find (address);
+                if (! value.has_value())
+                    continue;
 
-            if (seen != writtenAt.end())
-            {
-                plan.values[seen->second] = { address, *value, entry.id };
-                continue;
+                const auto seen = writtenAt.find (address);
+
+                if (seen != writtenAt.end())
+                {
+                    plan.values[seen->second] = { address, *value, entry.id };
+                    continue;
+                }
+
+                writtenAt[address] = plan.values.size();
+                plan.values.push_back ({ address, *value, entry.id });
             }
-
-            writtenAt[address] = plan.values.size();
-            plan.values.push_back ({ address, *value, entry.id });
         }
 
         //----------------------------------------------------------------------
@@ -1381,27 +1405,28 @@ namespace wfg::cue
 
             if (entry->element == "Osc")
             {
-                const auto address = read.text (entry->node, "osc", "address");
-
-                if (address.empty())
-                    continue;
-
-                if (mounts != nullptr)
-                    if (const auto* node = mounts->nodeAt (address);
-                        node != nullptr && node->kind == tree::Kind::event)
+                for (const auto& [address, text] : messagesOf (read, entry->node))
+                {
+                    if (address.empty())
                         continue;
 
-                const auto value = osc::Value::fromAtom (read.text (entry->node, "osc", "value"));
+                    if (mounts != nullptr)
+                        if (const auto* node = mounts->nodeAt (address);
+                            node != nullptr && node->kind == tree::Kind::event)
+                            continue;
 
-                if (! value.has_value())
-                    continue;
+                    const auto value = osc::valuesFromAtoms (text);
 
-                if (const auto seen = writtenAt.find (address); seen != writtenAt.end())
-                    plan.values[seen->second] = { address, *value, entry->id };
-                else
-                {
-                    writtenAt[address] = plan.values.size();
-                    plan.values.push_back ({ address, *value, entry->id });
+                    if (! value.has_value())
+                        continue;
+
+                    if (const auto seen = writtenAt.find (address); seen != writtenAt.end())
+                        plan.values[seen->second] = { address, *value, entry->id };
+                    else
+                    {
+                        writtenAt[address] = plan.values.size();
+                        plan.values.push_back ({ address, *value, entry->id });
+                    }
                 }
 
                 continue;
@@ -1656,22 +1681,23 @@ namespace wfg::cue
             }
             else if (element == "Osc")
             {
-                const auto address = read.text (cue, "osc", "address");
-
-                if (address.empty())
-                    continue;
-
-                if (mounts != nullptr)
-                    if (const auto* node = mounts->nodeAt (address);
-                        node != nullptr && node->kind == tree::Kind::event)
+                for (const auto& [address, text] : messagesOf (read, cue))
+                {
+                    if (address.empty())
                         continue;
 
-                const auto value = osc::Value::fromAtom (read.text (cue, "osc", "value"));
+                    if (mounts != nullptr)
+                        if (const auto* node = mounts->nodeAt (address);
+                            node != nullptr && node->kind == tree::Kind::event)
+                            continue;
 
-                if (! value.has_value())
-                    continue;
+                    const auto value = osc::valuesFromAtoms (text);
 
-                plan.values.push_back ({ address, *value, id });
+                    if (! value.has_value())
+                        continue;
+
+                    plan.values.push_back ({ address, *value, id });
+                }
             }
         }
 
@@ -1741,7 +1767,7 @@ namespace wfg::cue
         {
             out += n == 0 ? "" : ", ";
             out += "{\"address\": " + quoted (values[n].address)
-                     + ", \"value\": " + quoted (values[n].value.toAtom())
+                     + ", \"value\": " + quoted (osc::atomsOf (values[n].value))
                      + ", \"from\": " + quoted (values[n].writer) + "}";
         }
 

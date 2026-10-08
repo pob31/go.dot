@@ -85,6 +85,9 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # name: hard, fade, afterMember, afterIteration, advance - the
                 # last of which says "do not stop, move on".
                 "fade", "transport", "osc", "trigger", "midi", "port", "start", "fx",
+                # An OSC cue's further messages (namespace draft 45): the cue's
+                # own address and value are its first, each <Message> one more.
+                "message",
                 # Phase 4's slots (PRD 3.9e). `slot` is what both declared kinds
                 # share and what a Feed refers to; `processorInput` and
                 # `rackChannel` are what each kind adds. There is no `rack`:

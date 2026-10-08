@@ -87,6 +87,9 @@ namespace wfg::client::model
         bool rx = false;
         bool tx = true;
 
+        /** Whether what one tick sends it leaves as one bundle (namespace draft 45). */
+        bool bundles = false;
+
         /** Empty for an opaque device, which is most of them. */
         std::string namespaceFile;
 

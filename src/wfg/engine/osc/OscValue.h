@@ -161,8 +161,31 @@ namespace wfg::osc
         Storage storage;
     };
 
+    /*  THE ARGUMENTS OF ONE MESSAGE, which is what a node holds and what an OSC
+        cue sends (namespace draft §45): `/adm/obj/1/xyz` takes three, and a
+        node of one value is a list of one. An alias rather than a type,
+        because a vector of values is what every layer already passed. */
+    using Values = std::vector<Value>;
+
     /** The OSC type-tag string (without the leading comma) for an argument list. */
     std::string typeTagString (const std::vector<Value>& values);
+
+    /*  A LINE OF ATOMS SPLIT INTO ATOMS, on spaces, a double-quoted run kept
+        whole with its quotes and escapes - which is what lets `s:"left wing"`
+        stay one atom. The reader the event log's lines and an OSC cue's value
+        list share. nullopt for an unterminated quote, so a line is refused
+        rather than half-read. Empty text is no atoms. */
+    std::optional<std::vector<std::string_view>> splitAtoms (std::string_view text);
+
+    /*  A VALUE LIST SPELLED AS ATOMS - `i:3 f:0.5 s:"left"` - read back, every
+        atom or nothing: one malformed atom refuses the whole list, because a
+        message missing its third value is a different message. Empty text is
+        the empty list, a message with no value at all - what `/go` is to a
+        great many desks. */
+    std::optional<Values> valuesFromAtoms (std::string_view text);
+
+    /** The atoms of a value list, space-separated: what `valuesFromAtoms` reads. */
+    std::string atomsOf (const Values& values);
 
     /*  Number formatting for every text surface Go.dot writes — the event log,
         the document, the OSCQuery JSON. One pair of functions, so a value looks

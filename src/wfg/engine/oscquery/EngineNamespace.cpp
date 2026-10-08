@@ -136,7 +136,15 @@ namespace wfg::oscquery
         if (packet.args.empty())
             return;
 
-        args.push_back (packet.args.front());
+        /*  EVERY ARGUMENT FOR A DEVICE'S NODE, the first for one of Go.dot's
+            own (namespace draft §45). A row of the show holds one value, and a
+            sender that tacks something after it has always been read for its
+            first; a device's node may take three, and relaying only the first
+            of `/adm/obj/1/xyz` would move a source along one axis of three. */
+        if (packet.address.rfind ("/godot", 0) == 0)
+            args.push_back (packet.args.front());
+        else
+            args.insert (args.end(), packet.args.begin(), packet.args.end());
 
         engine.submit (Event { origin, "node.set", std::move (args) });
     }

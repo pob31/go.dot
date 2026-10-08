@@ -38,6 +38,7 @@
 #include <limits>
 #include <random>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace wfg::osc;
@@ -379,3 +380,55 @@ TEST_CASE ("osc value: the type tag string is the OSC one")
     CHECK (typeTagString ({}) == "");
 }
 
+
+//==============================================================================
+/*  A LIST OF ATOMS (namespace draft §45): an OSC cue's value is every argument
+    of its message, spelled as the log spells them and split as the log splits
+    its lines - a quoted string kept whole, spaces and escaped quotes inside it. */
+TEST_CASE ("osc value: a list of atoms reads back whole, or not at all")
+{
+    const auto list = valuesFromAtoms ("i:3 f:0.5 s:\"left wing\" T");
+    REQUIRE (list.has_value());
+    CHECK (*list == Values { Value::int32 (3), Value::float32 (0.5f), Value::string ("left wing"),
+                             Value::boolean (true) });
+
+    //  And spelled back the same way, so a cue round-trips through the document.
+    CHECK (atomsOf (*list) == "i:3 f:0.5 s:\"left wing\" T");
+
+    //  Spaces around and between are nothing.
+    const auto spaced = valuesFromAtoms ("  f:1   f:2 ");
+    REQUIRE (spaced.has_value());
+    CHECK (spaced->size() == 2u);
+
+    //  An escaped quote stays inside its string.
+    const auto escaped = valuesFromAtoms ("s:\"a \\\"quoted\\\" word\" i:1");
+    REQUIRE (escaped.has_value());
+    REQUIRE (escaped->size() == 2u);
+    CHECK (escaped->front() == Value::string ("a \"quoted\" word"));
+
+    //  Nothing is a message that carries nothing - `/go` to a great many desks.
+    const auto none = valuesFromAtoms ("");
+    REQUIRE (none.has_value());
+    CHECK (none->empty());
+    CHECK (atomsOf ({}) == "");
+
+    //  One bad atom refuses the list: two values of three are another message.
+    CHECK_FALSE (valuesFromAtoms ("f:1 x:2").has_value());
+    CHECK_FALSE (valuesFromAtoms ("f:1 f:nan").has_value());
+    CHECK_FALSE (valuesFromAtoms ("s:\"open f:1").has_value());
+    CHECK_FALSE (valuesFromAtoms ("1.5").has_value());
+}
+
+TEST_CASE ("osc value: the atom splitter is the log's, quotes and all")
+{
+    const auto atoms = splitAtoms ("A 12 3 cli node.set s:\"/a b\" f:1");
+    REQUIRE (atoms.has_value());
+    CHECK (*atoms == std::vector<std::string_view> { "A", "12", "3", "cli", "node.set", "s:\"/a b\"", "f:1" });
+
+    CHECK_FALSE (splitAtoms ("s:\"never closed").has_value());
+    CHECK_FALSE (splitAtoms ("s:\"ends on an escape\\").has_value());
+
+    const auto empty = splitAtoms ("   ");
+    REQUIRE (empty.has_value());
+    CHECK (empty->empty());
+}

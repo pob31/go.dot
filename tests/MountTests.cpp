@@ -382,7 +382,8 @@ TEST_CASE ("mount: a write to an opaque device goes as it was typed, and to a de
         /*  AS TYPED. There is no declared type to coerce to, so the value that
             goes on the wire is the one the cue spells - which is why the cue's
             own atom carries its type. */
-        CHECK (written.value.isFloat32());
+        REQUIRE (written.values.size() == 1u);
+        CHECK (written.values.front().isFloat32());
 
         /*  AND NOTHING IS STORED. A value nobody can read back is not a fact
             about the device, only about what was sent; `sent` on the mount is
@@ -1038,7 +1039,7 @@ TEST_CASE ("mount: an accepted write lands, and goes no further")
 
     const auto* stored = rig.mounts.valueOf ("/wfs/input/1/positionX");
     REQUIRE (stored != nullptr);
-    CHECK (*stored == osc::Value::float32 (12.5f));
+    CHECK (*stored == osc::Values { osc::Value::float32 (12.5f) });
 
     // And it reaches the tree.
     const auto* published = rig.publish (1)->find ("/wfs/input/1/positionX");
@@ -1061,7 +1062,7 @@ TEST_CASE ("mount: a word cannot get into a number, and an int into a float can"
     const auto coerced = rig.mounts.write ("/wfs/input/1/positionX", osc::Value::int32 (3));
 
     CHECK (coerced.ok);
-    CHECK (*rig.mounts.valueOf ("/wfs/input/1/positionX") == osc::Value::float32 (3.0f));
+    CHECK (*rig.mounts.valueOf ("/wfs/input/1/positionX") == osc::Values { osc::Value::float32 (3.0f) });
 }
 
 TEST_CASE ("mount: a write to an address no mount holds is refused")
@@ -1527,8 +1528,10 @@ TEST_CASE ("M9: what a mounted processor costs on every applied mutation")
     INFO ("mounted rebuilds after " << (publishes + 2) << " publishes");
     CHECK (withMount.parameters.mountRebuilds() == 1u);
 
-    /*  AND IT DOES REBUILD WHEN THE MOUNT MOVES, which is the other half of a
-        cache being right. Written through the table, so the invalidation is the
+    /*  A WRITE DOES NOT REBUILD IT EITHER (namespace draft 45, ZC): an OSC
+        cue's curve writes a node every tick, and the node written is laid over
+        the cached half instead - its new value in the published tree, the half
+        built once. Written through the table, so the invalidation is the
         production path and not a test reaching past it. */
     const auto address = std::string ("/wfs/input/1/positionX");
 
@@ -1536,17 +1539,34 @@ TEST_CASE ("M9: what a mounted processor costs on every applied mutation")
     {
         REQUIRE (withMount.mounts.write (address, osc::Value::float32 (0.25f)).ok);
 
-        withMount.publish (1);
-        CHECK (withMount.parameters.mountRebuilds() == 2u);
+        const auto after = withMount.publish (1);
+        CHECK (withMount.parameters.mountRebuilds() == 1u);
 
         /*  And the new value is in the published tree, which is what the cache
-            existed to keep true. */
-        const auto after = withMount.publish (2);
+            existed to keep true - by the lookup and by the walk alike. */
         const auto* node = after->find (address);
 
         REQUIRE (node != nullptr);
         REQUIRE (node->soleValue().has_value());
         CHECK (node->soleValue()->getFloat32() == doctest::Approx (0.25f));
+
+        const auto walked = after->all();
+        const auto atAddress = std::find_if (walked.begin(), walked.end(),
+                                             [&address] (const Node* n) { return n->address == address; });
+        REQUIRE (atAddress != walked.end());
+        CHECK (*atAddress == node);
+        CHECK (walked.size() == after->size());
+
+        /*  AND IT DOES REBUILD WHEN THE MOUNT MOVES, which is the other half of
+            a cache being right: a write after a change of shape is in the new
+            half, nothing left to lay over it. */
+        REQUIRE (withMount.mounts.write (address, osc::Value::float32 (0.5f)).ok);
+        withMount.mounts.setProblem ("nobody", "a change of shape");
+
+        const auto rebuilt = withMount.publish (2);
+        CHECK (withMount.parameters.mountRebuilds() == 2u);
+        REQUIRE (rebuilt->find (address) != nullptr);
+        CHECK (rebuilt->find (address)->soleValue()->getFloat32() == doctest::Approx (0.5f));
     }
 }
 
@@ -1572,14 +1592,14 @@ TEST_CASE ("observation: kept apart from a read-back, and ended by a write")
     rig.mounts.noteObservation (address, osc::Value::float32 (0.25f));
 
     REQUIRE (rig.mounts.observedOf (address) != nullptr);
-    CHECK (*rig.mounts.observedOf (address) == osc::Value::float32 (0.25f));
+    CHECK (*rig.mounts.observedOf (address) == osc::Values { osc::Value::float32 (0.25f) });
 
     /*  Not a read-back: nobody asked on a cue's behalf. */
     CHECK (rig.mounts.readbackOf (address) == nullptr);
 
     /*  And a read-back is not an observation either. */
     rig.mounts.noteReadback (address, osc::Value::float32 (0.5f));
-    CHECK (*rig.mounts.observedOf (address) == osc::Value::float32 (0.25f));
+    CHECK (*rig.mounts.observedOf (address) == osc::Values { osc::Value::float32 (0.25f) });
 
     /*  A WRITE ENDS IT. The next sweep will say what the target holds after
         this write; until then the written value is the best account there is,
@@ -1689,4 +1709,108 @@ TEST_CASE ("M21: what an observation sweep costs, in the two shapes it could tak
     INFO ("break-even at about " << static_cast<int> (subtreeMs / (fortyMs / written))
            << " written addresses");
     CHECK (nodes > written * 10);
+}
+
+//==============================================================================
+/*  A NODE OF SEVERAL ARGUMENTS (namespace draft §45). ADM-OSC's
+    `/adm/obj/<n>/xyz` takes three numbers, each with its own bounds, and the
+    table takes exactly three - each coerced to its own tag - and keeps each
+    argument's RANGE rather than the first alone. */
+namespace
+{
+    constexpr const char* admJson = R"JSON({
+      "FULL_PATH": "/adm",
+      "CONTENTS": {
+        "xyz": { "FULL_PATH": "/adm/xyz", "TYPE": "fff", "ACCESS": 3,
+                 "RANGE": [ { "MIN": -1, "MAX": 1 }, { "MIN": 0, "MAX": 20 }, { "MIN": -5, "MAX": 5 } ] },
+        "gain": { "FULL_PATH": "/adm/gain", "TYPE": "f", "ACCESS": 3, "RANGE": [ { "MIN": 0, "MAX": 2 } ] }
+      }
+    })JSON";
+
+    MountDeclaration admMount()
+    {
+        MountDeclaration mount;
+        mount.id = "ADM00001";
+        mount.prefix = "/adm";
+        mount.namespaceFile = "namespaces/adm.json";
+        mount.port = 4001;
+        return mount;
+    }
+}
+
+TEST_CASE ("mount: a node of several arguments takes as many values as it has tags, each coerced to its own")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    MountTable mounts;
+    REQUIRE (mounts.load (admMount(), admJson).ok);
+
+    const auto* node = mounts.nodeAt ("/adm/xyz");
+    REQUIRE (node != nullptr);
+    CHECK (node->typeTags == "fff");
+
+    //  Every argument's bounds, the first where every reader of one value reads it.
+    REQUIRE (node->laterRanges.size() == 2u);
+    CHECK (node->rangeOf (0).minimum == doctest::Approx (-1.0));
+    CHECK (node->rangeOf (1).maximum == doctest::Approx (20.0));
+    CHECK (node->rangeOf (2).minimum == doctest::Approx (-5.0));
+    CHECK_FALSE (node->rangeOf (3).hasMinimum);
+
+    SUBCASE ("three values land as three floats, whatever numbers they were")
+    {
+        const auto written = mounts.write ("/adm/xyz", osc::Values { osc::Value::int32 (1),
+                                                                     osc::Value::float32 (2.5f),
+                                                                     osc::Value::float64 (-3.0) });
+        REQUIRE (written.ok);
+        CHECK (written.values == osc::Values { osc::Value::float32 (1.0f), osc::Value::float32 (2.5f),
+                                               osc::Value::float32 (-3.0f) });
+        REQUIRE (mounts.valueOf ("/adm/xyz") != nullptr);
+        CHECK (*mounts.valueOf ("/adm/xyz") == written.values);
+    }
+
+    SUBCASE ("a message missing a value is another message, and is refused")
+    {
+        CHECK (mounts.write ("/adm/xyz", osc::Value::float32 (0.5f)).reason == reason::typeMismatch);
+        CHECK (mounts.write ("/adm/xyz", osc::Values {}).reason == reason::typeMismatch);
+        CHECK (mounts.write ("/adm/xyz", osc::Values (4, osc::Value::float32 (0.0f))).reason
+                 == reason::typeMismatch);
+        CHECK (mounts.write ("/adm/xyz", osc::Values { osc::Value::float32 (0.0f), osc::Value::string ("x"),
+                                                       osc::Value::float32 (0.0f) }).reason
+                 == reason::typeMismatch);
+        CHECK (mounts.valueOf ("/adm/xyz") == nullptr);
+    }
+
+    SUBCASE ("and it goes back out with each argument's RANGE")
+    {
+        const TreeSnapshot snapshot { 0, std::make_shared<const std::vector<Node>>(),
+                                      std::make_shared<const std::vector<Node>> (mounts.allNodes()), {} };
+
+        const auto text = OscQueryJson::describe (snapshot, "/adm/xyz");
+        INFO (text);
+        CHECK (text.find ("\"RANGE\": [{\"MIN\": -1, \"MAX\": 1}, {\"MIN\": 0, \"MAX\": 20}, {\"MIN\": -5, \"MAX\": 5}]")
+                 != std::string::npos);
+
+        //  A node of one is published exactly as before.
+        CHECK (OscQueryJson::describe (snapshot, "/adm/gain").find ("\"RANGE\": [{\"MIN\": 0, \"MAX\": 2}]")
+                 != std::string::npos);
+    }
+}
+
+TEST_CASE ("mount: an opaque device takes the list as it was spelled, nothing at all included")
+{
+    MountTable mounts;
+
+    MountDeclaration desk;
+    desk.id = "DESK0001";
+    desk.prefix = "/lx";
+    desk.port = 10023;
+    REQUIRE (mounts.declare (desk).ok);
+
+    const auto bare = mounts.write ("/lx/go", osc::Values {});
+    REQUIRE (bare.ok);
+    CHECK (bare.values.empty());
+
+    const auto two = mounts.write ("/lx/cmd", osc::Values { osc::Value::string ("Go To Cue"), osc::Value::int32 (11) });
+    REQUIRE (two.ok);
+    CHECK (two.values.size() == 2u);
 }

@@ -459,6 +459,22 @@ namespace wfg::doc
         EditResult createZone (const std::string& outputId, const std::string& canvasId,
                                const std::string& id = {});
 
+        /*  A FURTHER MESSAGE OF AN OSC CUE (namespace draft 45, YP): one more
+            address and value list, sent after the cue's own and the messages
+            before it, at the end of them. Only an OSC cue takes one, and only
+            one that has an address of its own - its first message - since the
+            further ones follow it. Which device the address is under is not
+            asked here: retargeting a cue moves its messages in one set of
+            writes, and the rule (YV) is the run's and a warning's. */
+        EditResult createMessage (const std::string& cueId, const std::string& address,
+                                  const std::string& value, const std::string& id = {});
+
+        /*  A MESSAGE MADE THE CUE'S OWN (namespace draft 45): its address and
+            value become the cue's, and the message is taken away - one edit,
+            one step of undo. What the window does to remove the first message,
+            which has no element of its own to delete. */
+        EditResult promoteMessage (const std::string& messageId);
+
         /*  A VIDEO INPUT (namespace draft 44, YB): a picture another program
             sends under `sender`, over `kind` - ndi, spout or syphon, empty for
             NDI - at the end of the show's video inputs. A kind that is none of

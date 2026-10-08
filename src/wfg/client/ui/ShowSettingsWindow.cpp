@@ -1970,9 +1970,9 @@ namespace wfg::client::ui
                 auto cells = cellsFor (heading.withWidth (rowWidth()));
 
                 const char* names[] { "Name", "Prefix", "IPv4 Address", "Tx Port",
-                                      "Rx", "Tx", "Doh!", "Rollback", "Sent" };
+                                      "Rx", "Tx", "Bundles", "Doh!", "Rollback", "Sent" };
 
-                for (auto at = 0; at < 9; ++at)
+                for (auto at = 0; at < 10; ++at)
                     g.drawText (names[at], cells[static_cast<std::size_t> (at)],
                                 juce::Justification::centredLeft);
             }
@@ -2000,7 +2000,7 @@ namespace wfg::client::ui
                 Doh!'s setting (PRD §3.32), then the two switches, then the
                 numbers; the name takes what is left, because it is the one
                 that wants room. */
-            static std::array<juce::Rectangle<int>, 11> cellsFor (juce::Rectangle<int> row)
+            static std::array<juce::Rectangle<int>, 12> cellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
@@ -2012,6 +2012,10 @@ namespace wfg::client::ui
                     desk's general go-back command, typed in place. */
                 const auto rollback = area.removeFromRight (150);
                 const auto doh = area.removeFromRight (80);
+
+                /*  BUNDLES after the two switches (namespace draft 45, YQ): a
+                    third ON or OFF, whether one tick's messages leave as one. */
+                const auto bundles = area.removeFromRight (62);
                 const auto tx = area.removeFromRight (42);
                 const auto rx = area.removeFromRight (42);
                 const auto port = area.removeFromRight (70);
@@ -2022,22 +2026,22 @@ namespace wfg::client::ui
                     at all. Taken from the name, which has the rest of the row. */
                 const auto prefix = area.removeFromRight (200);
 
-                return { area, prefix, host, port, rx, tx, doh, rollback, sent, problem, cross };
+                return { area, prefix, host, port, rx, tx, bundles, doh, rollback, sent, problem, cross };
             }
 
             /*  What a click at this x is on, by the same arithmetic. Named
                 rather than an index, because a column moving should break a
                 compile and not a gesture. */
-            enum class Cell { name, prefix, host, port, rx, tx, doh, rollback, none, problem, cross };
+            enum class Cell { name, prefix, host, port, rx, tx, bundles, doh, rollback, none, problem, cross };
 
             static Cell cellAt (int x, int width)
             {
                 const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
                 const Cell order[] { Cell::name, Cell::prefix, Cell::host, Cell::port,
-                                     Cell::rx, Cell::tx, Cell::doh, Cell::rollback, Cell::none, Cell::problem,
-                                     Cell::cross };
+                                     Cell::rx, Cell::tx, Cell::bundles, Cell::doh, Cell::rollback, Cell::none,
+                                     Cell::problem, Cell::cross };
 
-                for (auto at = 0; at < 11; ++at)
+                for (auto at = 0; at < 12; ++at)
                     if (x >= cells[static_cast<std::size_t> (at)].getX()
                           && x < cells[static_cast<std::size_t> (at)].getRight())
                         return order[at];
@@ -2088,11 +2092,12 @@ namespace wfg::client::ui
                 g.drawText (entry.port > 0 ? juce::String (entry.port) : juce::String(),
                             cells[3], juce::Justification::centredLeft);
 
-                /*  THE TWO SWITCHES, AS WORDS. WFS-DIY's ON and OFF, and the
-                    word carries it rather than the colour (4.8). */
-                for (auto at = 0; at < 2; ++at)
+                /*  THE THREE SWITCHES, AS WORDS. WFS-DIY's ON and OFF, and the
+                    word carries it rather than the colour (4.8): Rx, Tx and
+                    Bundles (namespace draft 45). */
+                for (auto at = 0; at < 3; ++at)
                 {
-                    const auto on = at == 0 ? entry.rx : entry.tx;
+                    const auto on = at == 0 ? entry.rx : at == 1 ? entry.tx : entry.bundles;
 
                     g.setColour (Look::colour (theme, on ? "ink" : "ink-off"));
                     g.drawText (on ? "ON" : "OFF", cells[static_cast<std::size_t> (4 + at)],
@@ -2102,14 +2107,14 @@ namespace wfg::client::ui
                 /*  DOH!'S SETTING IN WORDS (4.8): Meh, the default, or
                     Undo(h) - the author's words, 2026-10-02. */
                 g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-dim"));
-                g.drawText (juce::String (entry.dohWord()), cells[6], juce::Justification::centredLeft, true);
+                g.drawText (juce::String (entry.dohWord()), cells[7], juce::Justification::centredLeft, true);
 
                 /*  The rollback, faint under Meh, which never reads it. */
                 g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-off"));
-                g.drawText (juce::String (entry.dohRollback), cells[7], juce::Justification::centredLeft, true);
+                g.drawText (juce::String (entry.dohRollback), cells[8], juce::Justification::centredLeft, true);
 
                 g.setColour (Look::colour (theme, "ink-dim"));
-                g.drawText (juce::String (entry.sent), cells[8], juce::Justification::centredLeft);
+                g.drawText (juce::String (entry.sent), cells[9], juce::Justification::centredLeft);
 
                 /*  AND WHAT IS WRONG WITH IT, in the engine's own sentence.
                     This is the whole reason the row exists rather than a line
@@ -2119,14 +2124,14 @@ namespace wfg::client::ui
                 if (! entry.problem.empty())
                 {
                     g.setColour (Look::colour (theme, "failed"));
-                    g.drawText (juce::String (entry.problem), cells[9],
+                    g.drawText (juce::String (entry.problem), cells[10],
                                 juce::Justification::centredLeft, true);
                 }
 
                 if (! locked)
                 {
                     g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[10],
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[11],
                                 juce::Justification::centred);
                 }
             }
@@ -2151,6 +2156,7 @@ namespace wfg::client::ui
                     case Cell::cross:  send (gesture::deleteObject (entry.id)); return;
                     case Cell::rx:     send (gesture::setNode (base + "rx", entry.rx ? "false" : "true")); return;
                     case Cell::tx:     send (gesture::setNode (base + "tx", entry.tx ? "false" : "true")); return;
+                    case Cell::bundles: send (gesture::setNode (base + "bundles", entry.bundles ? "false" : "true")); return;
                     case Cell::doh:    send (gesture::setNode (base + "doh", entry.doh == "takeBack" ? "leave" : "takeBack")); return;
 
                     case Cell::name:
@@ -2180,6 +2186,7 @@ namespace wfg::client::ui
 
                     case Cell::rx:
                     case Cell::tx:
+                    case Cell::bundles:
                     case Cell::doh:
                     case Cell::none:
                     case Cell::problem:
@@ -2201,7 +2208,7 @@ namespace wfg::client::ui
 
                 const auto cells = cellsFor (place.withWidth (width).withX (list.getX()));
                 const auto index = cell == Cell::name ? 0 : cell == Cell::prefix ? 1
-                                 : cell == Cell::host ? 2 : cell == Cell::rollback ? 7 : 3;
+                                 : cell == Cell::host ? 2 : cell == Cell::rollback ? 8 : 3;
 
                 editing = entry.id;
                 editingCell = cell;

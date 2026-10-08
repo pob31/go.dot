@@ -360,8 +360,9 @@ namespace wfg::cue
 
         if (kind == "osc")
         {
-            /*  THE ADDRESS, THEN THE ATOM - the rest of the line, which a
-                string's own spaces may be part of. */
+            /*  THE ADDRESS, THEN THE ATOMS - the rest of the line, which a
+                string's own spaces may be part of, read as a value list
+                (namespace draft §45). */
             const auto& address = words.front();
 
             if (address.front() != '/')
@@ -374,7 +375,7 @@ namespace wfg::cue
             while (! atom.empty() && std::isspace (static_cast<unsigned char> (atom.back())))
                 atom.pop_back();
 
-            const auto value = osc::Value::fromAtom (atom);
+            const auto value = osc::valuesFromAtoms (atom);
 
             if (! value.has_value())
                 return out;

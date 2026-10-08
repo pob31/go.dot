@@ -40,6 +40,7 @@
 
 #include <wfg/engine/osc/OscValue.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -86,6 +87,35 @@ namespace wfg::tree
 
         /** A closed set of legal values, when the table declares one. */
         std::vector<std::string> enumValues;
+
+        /*  THE RANGE OF EACH ARGUMENT AFTER THE FIRST, for a node that takes
+            several - `/adm/obj/1/xyz` has three, each with its own bounds
+            (namespace draft §45). The first stays in `hasMinimum` and its
+            neighbours above, which every node of Go.dot's own is read by;
+            this is empty for a node of one argument, and holds one entry per
+            later type tag where a description gave them. `rangeOf` reads
+            either. */
+        struct ArgumentRange
+        {
+            bool hasMinimum = false;
+            double minimum = 0.0;
+            bool hasMaximum = false;
+            double maximum = 0.0;
+        };
+
+        std::vector<ArgumentRange> laterRanges;
+
+        /** The bounds of one argument, from nought: unbounded where none were given. */
+        ArgumentRange rangeOf (std::size_t argument) const
+        {
+            if (argument == 0)
+                return { hasMinimum, minimum, hasMaximum, maximum };
+
+            if (argument - 1 < laterRanges.size())
+                return laterRanges[argument - 1];
+
+            return {};
+        }
 
         /** `s`, `Hz`, `dB`, `samples`, … Empty when the value is not a quantity. */
         std::string unit;

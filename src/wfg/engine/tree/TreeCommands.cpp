@@ -97,6 +97,8 @@ namespace wfg::tree
             document.getAttribute (base + "rx").value_or (std::string ("false")) == "true";
         declaration.tx =
             document.getAttribute (base + "tx").value_or (std::string ("true")) == "true";
+        declaration.bundles =
+            document.getAttribute (base + "bundles").value_or (std::string ("false")) == "true";
 
         /*  WHERE IT SENDS. `transport` was declared in Phase 1 and read by
             nobody; from Phase 2 it decides whether anything can be sent at all,
@@ -301,7 +303,7 @@ namespace wfg::tree
                         "What a mounted target said one of its nodes currently holds.",
                         { { "mount", 's', false }, { "address", 's', false },
                           { "value", '*', false }, { "observed", 'T', true },
-                          { "writes", 'h', true } },
+                          { "writes", 'h', true }, { "more", '*', true, true } },
                         true,
                         [&mounts] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
@@ -323,13 +325,21 @@ namespace wfg::tree
                                 and a replay runs none, so what this keeps
                                 changes nothing a replay reproduces; the record
                                 is applied as it came either way. */
+                            /*  AND THE REST OF A NODE OF SEVERAL ARGUMENTS
+                                after the two flags (namespace draft §45), so a
+                                record of one value reads as it always did. */
+                            osc::Values values { args[2] };
+
+                            if (args.size() > 5)
+                                values.insert (values.end(), args.begin() + 5, args.end());
+
                             if (args.size() > 3 && args[3].getBool())
-                                mounts.noteObservation (args[1].getString(), args[2],
+                                mounts.noteObservation (args[1].getString(), values,
                                                         context.tick,
                                                         args.size() > 4 && args[4].isInt64()
                                                           ? args[4].getInt64() : -1);
                             else
-                                mounts.noteReadback (args[1].getString(), args[2]);
+                                mounts.noteReadback (args[1].getString(), values);
 
                             return Outcome::ok (args);
                         } });

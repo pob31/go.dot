@@ -107,6 +107,15 @@ namespace wfg::cue
             return { osc::Value::string (text) };
         }
 
+        /*  A `node.set` of a device's address: the address, then every value of
+            the message (namespace draft §45) - one for a node of one. */
+        std::vector<osc::Value> addressAnd (const std::string& address, const osc::Values& values)
+        {
+            std::vector<osc::Value> args { osc::Value::string (address) };
+            args.insert (args.end(), values.begin(), values.end());
+            return args;
+        }
+
         /** The numbers of a gains list, in the document's own spelling. */
         std::vector<double> gainsOf (const juce::ValueTree& route)
         {
@@ -993,6 +1002,13 @@ namespace wfg::cue
         if (element != "Osc")
             return false;
 
+        /*  NOR A CUE OF SEVERAL MESSAGES (namespace draft 45, ZH): its first
+            alone would be read back and pre-sent, the rest left for its GO -
+            half a cue sent early. One of one message is prepared as it was. */
+        for (const auto& child : cue)
+            if (child.hasType ("Message"))
+                return false;
+
         /*  AN OSC CUE ONLY WHERE THERE IS SOMETHING TO PUT BACK.
 
             §13.1, and it is a condition rather than a preference: a value
@@ -1372,7 +1388,9 @@ namespace wfg::cue
         const std::function<void (const juce::ValueTree&)> visit
             = [&] (const juce::ValueTree& node)
         {
-            if (node.getType().toString() == "Osc")
+            /*  AND AN OSC CUE'S FURTHER MESSAGES, each an address it writes
+                (namespace draft 45). */
+            if (node.getType().toString() == "Osc" || node.getType().toString() == "Message")
             {
                 const auto address = node[juce::Identifier ("address")].toString().toStdString();
 
@@ -10417,7 +10435,7 @@ namespace wfg::cue
 
         for (const auto& presend : committed)
         {
-            const auto restore = osc::Value::fromAtom (presend.restore);
+            const auto restore = osc::valuesFromAtoms (presend.restore);
 
             if (! restore.has_value())
                 continue;
@@ -10431,7 +10449,7 @@ namespace wfg::cue
                 continue;
             }
 
-            const auto written = osc::Value::fromAtom (presend.written);
+            const auto written = osc::valuesFromAtoms (presend.written);
 
             if (! written.has_value())
                 continue;
@@ -10742,7 +10760,8 @@ namespace wfg::cue
         goChanges.takes.push_back ({ channel, verb, before.state, after.state, before.layers, after.layers });
     }
 
-    void Runner::deskBeforeWrite (const OscJob& job, std::optional<osc::Value>& held, bool& captured)
+    void Runner::deskBeforeWrite (const OscJob& job, const std::string& address,
+                                  std::optional<osc::Values>& held, bool& captured)
     {
         captured = false;
 
@@ -10753,10 +10772,10 @@ namespace wfg::cue
             forgets it (red team m9): a later cue, a pre-send of the next scene.
             Only while the tree still holds the GO's write - an echo of anybody
             else's is not the desk's answer to the GO. */
-        if (const auto* now = mounts->valueOf (job.address))
+        if (const auto* now = mounts->valueOf (address))
             for (auto& entry : goChanges.desk)
-                if (entry.address == job.address && ! entry.echo.has_value() && *now == entry.lastWritten)
-                    if (const auto* first = mounts->firstObservedOf (job.address))
+                if (entry.address == address && ! entry.echo.has_value() && *now == entry.lastWritten)
+                    if (const auto* first = mounts->firstObservedOf (address))
                         entry.echo = *first;
 
         /*  A WRITE OF THE GO'S, and never a pre-send (GY): the next scene's,
@@ -10777,14 +10796,15 @@ namespace wfg::cue
 
         captured = true;
 
-        if (const auto* seen = mounts->observedOf (job.address))
+        if (const auto* seen = mounts->observedOf (address))
             held = *seen;
-        else if (const auto* value = mounts->valueOf (job.address))
+        else if (const auto* value = mounts->valueOf (address))
             held = *value;
     }
 
-    void Runner::deskAfterWrite (const OscJob& job, const std::optional<osc::Value>& held,
-                                 const std::string& mountId, const osc::Value& value)
+    void Runner::deskAfterWrite (const OscJob& job, const std::string& address,
+                                 const std::optional<osc::Values>& held,
+                                 const std::string& mountId, const osc::Values& values)
     {
         const auto* writer = runs.find (job.self);
 
@@ -10792,7 +10812,7 @@ namespace wfg::cue
             return;
 
         const auto device = writer->sentTo.empty() ? mountId : writer->sentTo;
-        const auto* node = mounts->nodeAt (job.address);
+        const auto* node = mounts->nodeAt (address);
 
         /*  NOTHING TO READ BACK - an event, which has no value, or a device
             that describes nothing: named, never put back (L13). */
@@ -10808,7 +10828,7 @@ namespace wfg::cue
         }
 
         auto entry = std::find_if (goChanges.desk.begin(), goChanges.desk.end(),
-                                   [&job] (const DeskBefore& before) { return before.address == job.address; });
+                                   [&address] (const DeskBefore& before) { return before.address == address; });
 
         if (entry == goChanges.desk.end())
         {
@@ -10820,7 +10840,7 @@ namespace wfg::cue
 
             /*  THE FIRST GO WRITE HERE says what was there before the GO. */
             DeskBefore made;
-            made.address = job.address;
+            made.address = address;
             made.before = held;
             goChanges.desk.push_back (made);
             entry = std::prev (goChanges.desk.end());
@@ -10828,7 +10848,7 @@ namespace wfg::cue
 
         /*  EVERY ONE SAYS WHAT IS THERE NOW, and who put it there: the address
             follows its last writer (L33). */
-        entry->lastWritten = value;
+        entry->lastWritten = values;
         entry->echo.reset();
         entry->lastWriter = writer->cue;
         entry->device = device;
@@ -11504,7 +11524,7 @@ namespace wfg::cue
         {
             const auto node = document.findById (wants);
             const auto address = textOf (node, "address");
-            const auto value = osc::Value::fromAtom (textOf (node, "value"));
+            const auto value = osc::valuesFromAtoms (textOf (node, "value"));
 
             /*  Every one here takes back: `left` was read at the Doh, once (L35),
                 and those it names are not among them. */
@@ -11735,7 +11755,7 @@ namespace wfg::cue
 
         /*  WHAT THE DESK WILL HOLD after this tick's give-backs: what they
             restore, else what it was seen to hold, else what Go.dot wrote. */
-        const auto willHold = [this] (const std::string& address) -> std::optional<osc::Value>
+        const auto willHold = [this] (const std::string& address) -> std::optional<osc::Values>
         {
             if (const auto restored = restoredThisTick.find (address); restored != restoredThisTick.end())
                 return restored->second;
@@ -11783,7 +11803,7 @@ namespace wfg::cue
                 continue;
 
             if (rollback.kind == "osc")
-                engine.submit (origin::engine, "node.set", { osc::Value::string (message.address), message.value });
+                engine.submit (origin::engine, "node.set", addressAnd (message.address, message.value));
             else if (midiOut != nullptr
                        && document.getAttribute ("/godot/port/" + rollback.device + "/tx").value_or (std::string {}) != "false")
                 if (const auto problem = midiOut->send (rollback.device, message.bytes); ! problem.empty())
@@ -11823,7 +11843,7 @@ namespace wfg::cue
                 else if (! entry.before.has_value())
                     items.push_back (entry.address + ": what it held before the GO is not known - left as it is");
                 else
-                    engine.submit (origin::engine, "node.set", { osc::Value::string (entry.address), *entry.before });
+                    engine.submit (origin::engine, "node.set", addressAnd (entry.address, *entry.before));
             }
 
         /*  THE VALUES A JUMP OR A RELAUNCH WANTS ON THE DESK: a minimal
@@ -11838,7 +11858,7 @@ namespace wfg::cue
             if (const auto now = willHold (address); now.has_value() && *now == value)
                 continue;
 
-            engine.submit (origin::engine, "node.set", { osc::Value::string (address), value });
+            engine.submit (origin::engine, "node.set", addressAnd (address, value));
         }
 
         /*  THE REPORT, ONE RECORD. A Doh's replaces the readout - when it has
@@ -12175,14 +12195,46 @@ namespace wfg::cue
             grammar is worth more than the four lines it saves. A document, a
             log record and a value on the wire then say the same thing the same
             way - so a cue can be written by copying the atom out of a log of
-            the night somebody got it right by hand. */
-        const auto value = osc::Value::fromAtom (atom);
+            the night somebody got it right by hand.
+
+            A LIST OF THEM (namespace draft §45): every argument of the
+            message, `i:3 f:0.5`, one for a node of one, none for a message
+            that carries nothing - `/go` to a great many desks. */
+        const auto value = osc::valuesFromAtoms (atom);
 
         if (! value.has_value())
         {
             job.failure = reason::typeMismatch;
             sending.push_back (job);
             return;
+        }
+
+        /*  AND ITS FURTHER MESSAGES (namespace draft 45, YP), in their order:
+            one whose values do not spell fails the cue as the first's would. */
+        for (const auto& child : cue)
+        {
+            if (! child.hasType ("Message"))
+                continue;
+
+            /*  READ AT ITS OWN ADDRESS, /godot/message/<id> - `textOf` reads a
+                cue's, and a message is not one. */
+            const auto base = "/godot/message/" + child[idProperty].toString().toStdString() + "/";
+
+            OscJob::Further next;
+            next.address = document.getAttribute (base + "address").value_or (std::string {});
+
+            const auto values = osc::valuesFromAtoms (document.getAttribute (base + "value")
+                                                        .value_or (std::string {}));
+
+            if (! values.has_value())
+            {
+                job.failure = reason::typeMismatch;
+                sending.push_back (job);
+                return;
+            }
+
+            next.pending = *values;
+            job.further.push_back (std::move (next));
         }
 
         /*  NO MOUNT TABLE IS A COMPLETE CONFIGURATION. A replay has none and
@@ -12197,6 +12249,23 @@ namespace wfg::cue
 
         job.address = address;
         job.pending = *value;
+
+        /*  ONE DEVICE PER CUE (namespace draft 45, YV, the author's pick): a
+            further message under another device than the first's fails the
+            run before anything is written - asked here, at GO, because the
+            door cannot (see `oscError::severalDevices`). */
+        if (! job.further.empty())
+        {
+            const auto device = mounts->mountOf (address);
+
+            for (const auto& next : job.further)
+                if (mounts->mountOf (next.address) != device)
+                {
+                    job.failure = oscError::severalDevices;
+                    sending.push_back (job);
+                    return;
+                }
+        }
 
         const auto seconds = numberOf (cue, "timeout");
         job.ticksAllowed = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
@@ -12214,7 +12283,7 @@ namespace wfg::cue
             remembered answer at the moment it writes and asks afterwards,
             because what it wants to know is whether the device took what it was
             given. Same two operations, opposite order, different question. */
-        if (selfRun->prepare.empty())
+        if (selfRun->prepare.empty() || ! job.further.empty())
         {
             writeOscNow (job);
             sending.push_back (job);
@@ -12259,9 +12328,9 @@ namespace wfg::cue
             forgets it, and - for a write of the GO's own - what the address
             held before it. Hook-consumed, both: they shape the flush's
             put-back and nothing a handler decides. */
-        std::optional<osc::Value> held;
+        std::optional<osc::Values> held;
         auto captured = false;
-        deskBeforeWrite (job, held, captured);
+        deskBeforeWrite (job, job.address, held, captured);
 
         const auto written = mounts->write (job.address, job.pending);
 
@@ -12272,7 +12341,36 @@ namespace wfg::cue
         }
 
         if (captured)
-            deskAfterWrite (job, held, written.mountId, written.value);
+            deskAfterWrite (job, job.address, held, written.mountId, written.values);
+
+        /*  AND THE CUE'S FURTHER MESSAGES, after its own and in their order
+            (namespace draft 45), each into the tree as the first went - its
+            put-back kept for Doh! the same way - before anything is queued, so
+            a device switched off still holds every value the cue asked for.
+            A refusal stops there and fails the run naming it; what was written
+            before it is still sent below, so the tree and the wire agree on
+            every value that landed. */
+        std::vector<osc::Values> furtherWritten;
+
+        for (auto& next : job.further)
+        {
+            std::optional<osc::Values> heldNext;
+            auto capturedNext = false;
+            deskBeforeWrite (job, next.address, heldNext, capturedNext);
+
+            const auto writtenNext = mounts->write (next.address, next.pending);
+
+            if (! writtenNext.ok)
+            {
+                job.failure = writtenNext.reason;
+                break;
+            }
+
+            if (capturedNext)
+                deskAfterWrite (job, next.address, heldNext, writtenNext.mountId, writtenNext.values);
+
+            furtherWritten.push_back (writtenNext.values);
+        }
 
         /*  IT REACHED THE TREE; NOW IT REACHES THE WIRE. The two are separate
             on purpose: the tree is what a client reads back and what a replay
@@ -12305,15 +12403,37 @@ namespace wfg::cue
         /*  Queued in the run's name, which is how a double Esc knows a
             pre-send of the standby it spares from what it drops (§23.10). */
         if (sender_ != nullptr && declaration != nullptr)
+        {
             job.ticket = sender_->queue (written.mountId,
                                          { declaration->host, declaration->port,
-                                           declaration->rateCap },
-                                         job.address, written.value, job.self);
+                                           declaration->rateCap, declaration->bundles },
+                                         job.address, written.values, job.self);
+
+            /*  In their order after the first, the order the queue keeps -
+                one bundle where the device takes them (namespace draft 45). */
+            for (std::size_t n = 0; n < furtherWritten.size(); ++n)
+                job.further[n].ticket = sender_->queue (written.mountId,
+                                                        { declaration->host, declaration->port,
+                                                          declaration->rateCap, declaration->bundles },
+                                                        job.further[n].address, furtherWritten[n], job.self);
+        }
 
         if (job.wait == OscWait::verified)
         {
             job.mountId = written.mountId;
-            job.expected = written.value;
+            job.expected = written.values;
+
+            /*  EVERY ADDRESS IS ASKED, each forgotten first for the reason the
+                first is below (namespace draft 45). */
+            for (std::size_t n = 0; n < furtherWritten.size(); ++n)
+            {
+                auto& next = job.further[n];
+                next.expected = furtherWritten[n];
+                mounts->forgetReadback (next.address);
+
+                if (const auto* node = mounts->nodeAt (next.address))
+                    next.typeTag = node->typeTags;
+            }
 
             /*  FORGOTTEN BEFORE IT IS ASKED FOR, and this line is the whole
                 difference between verifying and appearing to. Without it an
@@ -12507,7 +12627,7 @@ namespace wfg::cue
                     if (auto* run = runs.find (job.self))
                     {
                         run->restoreAddress = job.address;
-                        run->restoreAtom = held->toAtom();
+                        run->restoreAtom = osc::atomsOf (*held);
                     }
 
                     job.reading = false;
@@ -12520,7 +12640,7 @@ namespace wfg::cue
                     if (job.failure.empty() && ! job.left)
                         if (auto* writer = runs.find (job.self))
                             if (const auto* written = mounts->valueOf (job.address))
-                                writer->preSentAtom = written->toAtom();
+                                writer->preSentAtom = osc::atomsOf (*written);
 
                     if (! job.failure.empty())
                         continue;
@@ -12603,7 +12723,16 @@ namespace wfg::cue
                 it gets here; this is for a drop that reaches a run nobody
                 killed, so that it reads as what happened rather than as
                 `send-failed`. */
-            if (sender_->wasDropped (job.ticket))
+            /*  ANY OF ITS MESSAGES (namespace draft 45): the press dropped the
+                cue, whichever of them it caught still waiting. */
+            const auto dropped = sender_->wasDropped (job.ticket)
+                                   || std::any_of (job.further.begin(), job.further.end(),
+                                                   [this] (const OscJob::Further& next)
+                                                   {
+                                                       return next.ticket != 0 && sender_->wasDropped (next.ticket);
+                                                   });
+
+            if (dropped)
             {
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 job.finished = true;
@@ -12624,23 +12753,41 @@ namespace wfg::cue
             {
                 ++job.ticksWaited;
 
-                if (const auto* answered = mounts != nullptr
-                                             ? mounts->readbackOf (job.address) : nullptr)
-                {
-                    /*  COMPARED AS THE NODE'S OWN TYPE, exactly. osc::Value's
-                        equality is identity and not numeric equivalence, so a
-                        float32 0.5 and a double 0.5 are different answers - and
-                        that is right: the client coerced what the target said
-                        to the type the node declared, so anything that still
-                        differs is a difference the device made. */
-                    const auto matched = *answered == job.expected;
+                /*  EVERY ADDRESS THE CUE WROTE (namespace draft 45): the first
+                    to disagree fails it at once, and it is done when all have
+                    answered with what they were given.
 
+                    COMPARED AS THE NODE'S OWN TYPE, exactly. osc::Value's
+                    equality is identity and not numeric equivalence, so a
+                    float32 0.5 and a double 0.5 are different answers - and
+                    that is right: the client coerced what the target said
+                    to the type the node declared, so anything that still
+                    differs is a difference the device made. */
+                auto answered = 0u;
+                auto disagreed = false;
+
+                const auto judge = [&] (const std::string& address, const osc::Values& expected)
+                {
+                    if (const auto* said = mounts != nullptr ? mounts->readbackOf (address) : nullptr)
+                    {
+                        ++answered;
+                        disagreed = disagreed || *said != expected;
+                    }
+                };
+
+                judge (job.address, job.expected);
+
+                for (const auto& next : job.further)
+                    judge (next.address, next.expected);
+
+                if (disagreed || answered == job.further.size() + 1)
+                {
                     engine.submit (origin::engine,
-                                   matched ? "run.ended" : "run.failed",
-                                   matched ? one (job.self)
-                                           : std::vector<osc::Value> {
-                                               osc::Value::string (job.self),
-                                               osc::Value::string (oscError::disagreed) });
+                                   disagreed ? "run.failed" : "run.ended",
+                                   disagreed ? std::vector<osc::Value> {
+                                                   osc::Value::string (job.self),
+                                                   osc::Value::string (oscError::disagreed) }
+                                             : one (job.self));
 
                     job.finished = true;
                     continue;
@@ -12657,10 +12804,19 @@ namespace wfg::cue
 
                 /*  Asked again every tick, and the probe drops the duplicate
                     unless the last question has come back. "Keep one question
-                    outstanding" rather than "ask fifty times a second". */
+                    outstanding" rather than "ask fifty times a second" - one
+                    for each address still to answer. */
                 if (asker != nullptr)
-                    asker->ask ({ job.mountId, job.host, job.queryPort,
-                                  job.address, job.typeTag });
+                {
+                    if (mounts == nullptr || mounts->readbackOf (job.address) == nullptr)
+                        asker->ask ({ job.mountId, job.host, job.queryPort,
+                                      job.address, job.typeTag });
+
+                    for (const auto& next : job.further)
+                        if (mounts == nullptr || mounts->readbackOf (next.address) == nullptr)
+                            asker->ask ({ job.mountId, job.host, job.queryPort,
+                                          next.address, next.typeTag });
+                }
 
                 continue;
             }
@@ -12671,7 +12827,33 @@ namespace wfg::cue
                 not something to keep waiting on. Either way the cue reports
                 what happened rather than what was asked for, which is the whole
                 difference between this wait and the one above. */
-            const auto outcome = sender_->outcomeOf (job.ticket);
+            /*  EVERY MESSAGE OF THE CUE (namespace draft 45): one that failed
+                fails it, one still queued keeps it waiting, and it is done when
+                all have left. */
+            auto outcome = sender_->outcomeOf (job.ticket);
+            auto queuedStill = outcome == tree::MountSender::Outcome::pending
+                                 && sender_->stillQueued (job.ticket);
+
+            for (const auto& next : job.further)
+            {
+                if (next.ticket == 0 || outcome == tree::MountSender::Outcome::failed)
+                    continue;
+
+                const auto its = sender_->outcomeOf (next.ticket);
+
+                if (its == tree::MountSender::Outcome::failed)
+                    outcome = its;
+                else if (its == tree::MountSender::Outcome::pending)
+                {
+                    if (sender_->stillQueued (next.ticket))
+                        queuedStill = true;
+                    else
+                        outcome = tree::MountSender::Outcome::failed;
+                }
+            }
+
+            if (queuedStill && outcome != tree::MountSender::Outcome::failed)
+                outcome = tree::MountSender::Outcome::pending;
 
             /*  STILL WAITING FOR A FLUSH THAT WILL TAKE IT, which a rate cap
                 makes an ordinary thing rather than a wiring fault: the message
@@ -12679,8 +12861,7 @@ namespace wfg::cue
                 and it will go. What the cue asked for was that the value reach
                 the target, so it keeps waiting - up to its own timeout, which
                 is the same patience a `verified` cue has. */
-            if (outcome == tree::MountSender::Outcome::pending
-                 && sender_->stillQueued (job.ticket))
+            if (outcome == tree::MountSender::Outcome::pending && queuedStill)
             {
                 ++job.ticksWaited;
 
@@ -14980,8 +15161,8 @@ namespace wfg::cue
                 if (run == nullptr || run->restoreAddress.empty())
                     continue;
 
-                const auto restore = osc::Value::fromAtom (run->restoreAtom);
-                const auto preSent = osc::Value::fromAtom (run->preSentAtom);
+                const auto restore = osc::valuesFromAtoms (run->restoreAtom);
+                const auto preSent = osc::valuesFromAtoms (run->preSentAtom);
                 const auto* now = mounts != nullptr ? mounts->valueOf (run->restoreAddress) : nullptr;
 
                 const auto forget = [run]
@@ -14999,8 +15180,7 @@ namespace wfg::cue
 
                 if (! preSent.has_value() || mounts == nullptr)
                 {
-                    engine.submit (origin::engine, "node.set",
-                                   { osc::Value::string (run->restoreAddress), *restore });
+                    engine.submit (origin::engine, "node.set", addressAnd (run->restoreAddress, *restore));
                     restoredThisTick.insert_or_assign (run->restoreAddress, *restore);
                     submitted = true;
                     forget();
@@ -15015,8 +15195,7 @@ namespace wfg::cue
 
                 if (now != nullptr && *now == *preSent)
                 {
-                    engine.submit (origin::engine, "node.set",
-                                   { osc::Value::string (run->restoreAddress), *restore });
+                    engine.submit (origin::engine, "node.set", addressAnd (run->restoreAddress, *restore));
                     restoredThisTick.insert_or_assign (run->restoreAddress, *restore);
                     submitted = true;
                     owes = true;
@@ -15069,10 +15248,9 @@ namespace wfg::cue
             if (run->restoreAddress.empty())
                 continue;
 
-            if (const auto value = osc::Value::fromAtom (run->restoreAtom))
+            if (const auto value = osc::valuesFromAtoms (run->restoreAtom))
             {
-                engine.submit (origin::engine, "node.set",
-                               { osc::Value::string (run->restoreAddress), *value });
+                engine.submit (origin::engine, "node.set", addressAnd (run->restoreAddress, *value));
 
                 /*  AND WHAT THE DESK WILL HOLD after this tick's give-backs
                     (2026-10-03, Doh! D3): read by the flush, which runs after

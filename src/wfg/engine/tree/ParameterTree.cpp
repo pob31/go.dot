@@ -625,6 +625,34 @@ namespace wfg::tree
             }
         }
 
+        /*  AN OSC CUE'S FURTHER MESSAGE (namespace draft 45, YP), flat at
+            /godot/message/<id> for the Route argument: a client editing one
+            message's value writes one node. `cue` and `index` are the
+            containment read back - the index counted among messages alone, the
+            cue's own address and value being its first. */
+        void collectMessage (const juce::ValueTree& node, const std::string& cueId,
+                             int index, std::vector<Node>& out)
+        {
+            const auto id = node[idProperty].toString().toStdString();
+
+            if (id.empty())
+                return;
+
+            const auto base = std::string (godot) + "/message/" + id;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("message"))
+            {
+                const doc::Attribute attribute { "Message", row };
+                const auto name = std::string (row->name);
+
+                const auto text = name == "cue"   ? cueId
+                                : name == "index" ? std::to_string (index)
+                                                  : storedText (attribute, node);
+
+                out.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
+        }
+
         /*  A TRIGGER, at a top level address of its own.
 
             Flat rather than nested under the cue, which is the Route precedent
@@ -1086,6 +1114,14 @@ namespace wfg::tree
                 {
                     text = sendsOf (node, id, live);
                 }
+                /*  AN OSC CUE'S FURTHER MESSAGES, in their order (namespace
+                    draft 45): the containment read back, as `zones` is. */
+                else if (name == "messages")
+                {
+                    for (const auto& child : node)
+                        if (child.hasType ("Message") && child.hasProperty (idProperty))
+                            text += (text.empty() ? "" : " ") + child[idProperty].toString().toStdString();
+                }
                 else if (isMedia && live != nullptr && name.rfind ("eq", 0) == 0
                            && live->rowOf (id, name) != nullptr)
                 {
@@ -1124,6 +1160,7 @@ namespace wfg::tree
 
             int childIndex = 0;
             int rangeIndex = 0;
+            int messageIndex = 0;
 
             for (const auto& child : node)
             {
@@ -1222,6 +1259,15 @@ namespace wfg::tree
                         }
                     }
 
+                    continue;
+                }
+
+                /*  AN OSC CUE'S FURTHER MESSAGE (namespace draft 45), at
+                    /godot/message/<id>: its cue and its place among the
+                    cue's messages derived, as a range's are. */
+                if (childElement == "Message")
+                {
+                    collectMessage (child, id, messageIndex++, out);
                     continue;
                 }
 
@@ -2639,6 +2685,28 @@ namespace wfg::tree
         mountPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
         mountRevision = mounts.revision();
         ++mountRebuildCount;
+
+        /*  BUILT FROM THE VALUES THE NODES HOLD NOW, so nothing written is
+            left to lay over it. */
+        mountWritten.reset();
+        mountValueRevision = mounts.valueRevision();
+    }
+
+    void ParameterTree::copyMountWritten()
+    {
+        /*  ONLY THE NODES A WRITE HAS TOUCHED SINCE THE HALF WAS BUILT (ZC):
+            an OSC cue's curve writes a handful of addresses a tick, and copying
+            those is what a curve costs the tree - not the 2487 nodes of a
+            mounted capture. The table's set is in address order, which is the
+            snapshot's. */
+        auto copies = std::make_shared<std::vector<Node>>();
+
+        for (const auto& address : mounts.writtenSinceShape())
+            if (const auto* node = mounts.nodeAt (address))
+                copies->push_back (*node);
+
+        mountWritten = std::move (copies);
+        mountValueRevision = mounts.valueRevision();
     }
 
     namespace
@@ -2795,6 +2863,8 @@ namespace wfg::tree
             `markStale` would have been the first time one was. */
         if (mountPart == nullptr || mounts.revision() != mountRevision)
             rebuildMountPart();
+        else if (mounts.valueRevision() != mountValueRevision)
+            copyMountWritten();
 
         std::vector<Node> runtime;
 
@@ -3907,7 +3977,7 @@ namespace wfg::tree
         sortByAddress (runtime);
 
         auto result = std::make_shared<const TreeSnapshot> (tick, documentPart, mountPart,
-                                                            std::move (runtime));
+                                                            std::move (runtime), mountWritten);
 
         {
             const std::lock_guard<std::mutex> lock { publishMutex };

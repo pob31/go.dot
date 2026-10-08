@@ -144,6 +144,103 @@ namespace wfg::osc
     }
 
     //==============================================================================
+    /*  Splits on spaces, a double-quoted run one token with its quotes and
+        escapes - the atom grammar quotes strings, and this is its reader. It
+        was the event log's own until an OSC cue's value became a list of atoms
+        (namespace draft §45), and one reader is what keeps a cue's value and a
+        log record spelling the same thing the same way. */
+    std::optional<std::vector<std::string_view>> splitAtoms (std::string_view text)
+    {
+        std::vector<std::string_view> tokens;
+        std::size_t i = 0;
+
+        while (i < text.size())
+        {
+            while (i < text.size() && text[i] == ' ')
+                ++i;
+
+            if (i >= text.size())
+                break;
+
+            const std::size_t start = i;
+            bool inQuotes = false;
+
+            for (; i < text.size(); ++i)
+            {
+                const char c = text[i];
+
+                if (inQuotes)
+                {
+                    if (c == '\\')
+                    {
+                        ++i;                       // skip the escaped character
+
+                        if (i >= text.size())
+                            return std::nullopt;
+                    }
+                    else if (c == '"')
+                    {
+                        inQuotes = false;
+                    }
+                }
+                else if (c == '"')
+                {
+                    inQuotes = true;
+                }
+                else if (c == ' ')
+                {
+                    break;
+                }
+            }
+
+            if (inQuotes)
+                return std::nullopt;
+
+            tokens.push_back (text.substr (start, i - start));
+        }
+
+        return tokens;
+    }
+
+    std::optional<Values> valuesFromAtoms (std::string_view text)
+    {
+        const auto atoms = splitAtoms (text);
+
+        if (! atoms.has_value())
+            return std::nullopt;
+
+        Values values;
+        values.reserve (atoms->size());
+
+        for (const auto atom : *atoms)
+        {
+            auto value = Value::fromAtom (atom);
+
+            if (! value.has_value())
+                return std::nullopt;
+
+            values.push_back (std::move (*value));
+        }
+
+        return values;
+    }
+
+    std::string atomsOf (const Values& values)
+    {
+        std::string text;
+
+        for (const auto& value : values)
+        {
+            if (! text.empty())
+                text.push_back (' ');
+
+            text += value.toAtom();
+        }
+
+        return text;
+    }
+
+    //==============================================================================
     /*  SHORTEST ROUND-TRIP, and it had to be measured rather than assumed.
 
         Over 19 993 random finite doubles, four writer/reader pairs were tried:

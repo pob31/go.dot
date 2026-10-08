@@ -621,6 +621,13 @@ namespace wfg::tree
         std::shared_ptr<const std::vector<Node>> mountPart;
         std::uint64_t mountRevision = 0;
 
+        /*  THE MOUNTED NODES WRITTEN SINCE THE HALF ABOVE WAS BUILT, copied
+            from the table (namespace draft 45, ZC), and the value revision they
+            were copied at. Read over the half by the snapshot. */
+        std::shared_ptr<const std::vector<Node>> mountWritten;
+        std::uint64_t mountValueRevision = 0;
+        void copyMountWritten();
+
         /*  The plugin table's revision the document half was built from: the
             proxy host writes that table on the message thread, which must not
             mark the tree stale, so the tree asks instead (Phase 9a). */

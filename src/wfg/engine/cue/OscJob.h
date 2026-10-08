@@ -44,6 +44,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace wfg::cue
 {
@@ -85,6 +86,13 @@ namespace wfg::cue
             the parameter, a channel somebody re-patched. It is worth its own
             word because it sends a different person to look. */
         inline constexpr const char* disagreed = "disagreed";
+
+        /*  A further message under another device than the cue's first
+            (namespace draft 45, YV, the author's pick: one device per cue).
+            Refused at GO rather than at the door: retargeting a cue moves its
+            messages in one set of writes, one at a time, and no order of them
+            would pass a door that checked each. `wfg validate` warns of it. */
+        inline constexpr const char* severalDevices = "several-devices";
     }
 
     //==============================================================================
@@ -148,9 +156,10 @@ namespace wfg::cue
             restore value is not optional. */
         bool reading = false;
 
-        /*  What is to be written once the read has come back. Empty otherwise:
-            an ordinary cue writes at once and has nothing to remember. */
-        osc::Value pending;
+        /*  What is to be written: every argument of the message (namespace
+            draft §45), held here until the read has come back for a prepared
+            cue, and written at once otherwise. */
+        osc::Values pending;
 
         /*  Whether the read has been asked for. ASKED ONCE, which is the
             opposite of what the verify does and is the difference between the
@@ -175,7 +184,7 @@ namespace wfg::cue
         std::string address;
         std::string mountId;
         std::string typeTag;
-        osc::Value expected;
+        osc::Values expected;
 
         /** Where to ask, copied so a reload cannot move the question. */
         std::string host;
@@ -188,5 +197,22 @@ namespace wfg::cue
         int ticksAllowed = 250;
 
         bool finished = false;
+
+        /*  THE CUE'S FURTHER MESSAGES (namespace draft 45, YP), written after
+            its own in their order in the same tick, all to its device (YV).
+            Each is queued and waited for as the first is: a `sent` cue is done
+            when every one has left, a `verified` one when every address reads
+            back what it was given. A cue that has any is never prepared ahead
+            (ZH), so none of them ever reads before it writes. */
+        struct Further
+        {
+            std::string address;
+            osc::Values pending;
+            std::uint64_t ticket = 0;
+            std::string typeTag;
+            osc::Values expected;
+        };
+
+        std::vector<Further> further;
     };
 }

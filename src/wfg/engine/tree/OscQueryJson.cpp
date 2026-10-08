@@ -16,6 +16,7 @@
 
 #include <wfg/engine/tree/OscQueryJson.h>
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
@@ -182,15 +183,38 @@ namespace wfg::tree
             out += "}";
         }
 
-        /*  RANGE, as the proposal spells it: one entry per argument. Every node
-            here carries one value, so there is one entry.
+        /*  RANGE, as the proposal spells it: one entry per argument. A node of
+            Go.dot's own carries one value, so one entry; a device's node of
+            several - `/adm/obj/1/xyz` - is republished with each of its
+            arguments' bounds (namespace draft §45), an empty object for one
+            given none.
 
             An enumerated node gets VALS and no bounds - the closed set IS the
             range, and a MIN alongside it would be a second, weaker statement of
             the same thing. */
+        void writeBounds (const Node::ArgumentRange& bounds, std::string& out)
+        {
+            if (bounds.hasMinimum)
+                out += "\"MIN\": " + osc::formatDouble (bounds.minimum);
+
+            if (bounds.hasMaximum)
+            {
+                if (bounds.hasMinimum)
+                    out += ", ";
+
+                out += "\"MAX\": " + osc::formatDouble (bounds.maximum);
+            }
+        }
+
         bool writeRange (const Node& node, int depth, std::string& out)
         {
-            if (node.enumValues.empty() && ! node.hasMinimum && ! node.hasMaximum)
+            const auto laterBounded = std::any_of (node.laterRanges.begin(), node.laterRanges.end(),
+                                                   [] (const Node::ArgumentRange& later)
+                                                   {
+                                                       return later.hasMinimum || later.hasMaximum;
+                                                   });
+
+            if (node.enumValues.empty() && ! node.hasMinimum && ! node.hasMaximum && ! laterBounded)
                 return false;
 
             out += indent (depth) + "\"RANGE\": [{";
@@ -211,19 +235,19 @@ namespace wfg::tree
             }
             else
             {
-                if (node.hasMinimum)
-                    out += "\"MIN\": " + osc::formatDouble (node.minimum);
-
-                if (node.hasMaximum)
-                {
-                    if (node.hasMinimum)
-                        out += ", ";
-
-                    out += "\"MAX\": " + osc::formatDouble (node.maximum);
-                }
+                writeBounds (node.rangeOf (0), out);
             }
 
-            out += "}]";
+            out += "}";
+
+            for (const auto& later : node.laterRanges)
+            {
+                out += ", {";
+                writeBounds (later, out);
+                out += "}";
+            }
+
+            out += "]";
             return true;
         }
 

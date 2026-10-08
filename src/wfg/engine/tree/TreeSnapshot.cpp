@@ -56,11 +56,13 @@ namespace wfg::tree
     TreeSnapshot::TreeSnapshot (std::int64_t tickIndex,
                                 std::shared_ptr<const std::vector<Node>> documentNodes,
                                 std::shared_ptr<const std::vector<Node>> mountedNodes,
-                                std::vector<Node> runtimeNodes)
+                                std::vector<Node> runtimeNodes,
+                                std::shared_ptr<const std::vector<Node>> mountedWritten)
         : tickAt (tickIndex),
           document (std::move (documentNodes)),
           mounted (std::move (mountedNodes)),
-          runtime (std::move (runtimeNodes))
+          runtime (std::move (runtimeNodes)),
+          written (std::move (mountedWritten))
     {
     }
 
@@ -79,7 +81,12 @@ namespace wfg::tree
 
         /*  The mounted half LAST, and it is the biggest: a lookup that found
             its answer in the show's own nodes has already returned, and a
-            client polling /godot is not polling somebody else's namespace. */
+            client polling /godot is not polling somebody else's namespace.
+            What has been written since it was built is read first (ZC). */
+        if (written != nullptr)
+            if (const auto* node = findIn (*written, address))
+                return node;
+
         return mounted != nullptr ? findIn (*mounted, address) : nullptr;
     }
 
@@ -108,6 +115,12 @@ namespace wfg::tree
         auto b = runtime.begin();
         auto c = mountNodes.begin();
 
+        /*  AND THE WRITTEN MOUNTED NODES, each in the place of its copy in the
+            mounted half (ZC): both in address order, so one walks beside the
+            other. */
+        const auto& writtenNodes = written != nullptr ? *written : empty;
+        auto w = writtenNodes.begin();
+
         for (;;)
         {
             const auto* least = static_cast<const Node*> (nullptr);
@@ -123,6 +136,15 @@ namespace wfg::tree
 
             if (from < 0)
                 break;
+
+            if (from == 2)
+            {
+                while (w != writtenNodes.end() && w->address < c->address)
+                    ++w;
+
+                if (w != writtenNodes.end() && w->address == c->address)
+                    least = &*w;
+            }
 
             result.push_back (least);
 

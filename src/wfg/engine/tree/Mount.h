@@ -102,6 +102,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -172,6 +173,12 @@ namespace wfg::tree
             plays the show instead of printing a column of failures. */
         bool rx = false;
         bool tx = true;
+
+        /*  WHETHER WHAT ONE TICK SENDS IT LEAVES AS ONE BUNDLE (namespace draft
+            45, YQ, the author's pick: the device's setting). Off by default:
+            a device that cannot read a bundle ignores one in silence. See
+            `MountSender::flush`. */
+        bool bundles = false;
 
         /*  NO INTERFACE HERE, AND THAT IS A DECISION (2026-09-22). Which
             network card an outgoing message leaves by is the operating
@@ -365,8 +372,21 @@ namespace wfg::tree
 
             A number rather than a flag, because the reader is a cache asking
             "is what I have still current" rather than a consumer clearing a
-            signal it has taken. */
+            signal it has taken.
+
+            THE SHAPE AND THE VALUES COUNTED APART (namespace draft 45, ZC). A
+            load, an unload or a declaration changes what is mounted; a write
+            changes one node's values and nothing else. An OSC cue's curve
+            writes every tick, and the mounted half rebuilt for each - 2487
+            nodes of the WFS-DIY capture, 3.13 ms of a tick in Release and 78 ms
+            in Debug - would cost a curve a tick in every six. So `revision`
+            moves with the shape alone, `valueRevision` with every write, and
+            `writtenSinceShape` names the addresses a write has touched since the
+            shape last moved: the tree copies those nodes over the cached half
+            rather than rebuilding it. */
         std::uint64_t revision() const noexcept { return version; }
+        std::uint64_t valueRevision() const noexcept { return valueVersion; }
+        const std::set<std::string>& writtenSinceShape() const noexcept { return written; }
 
         //======================================================================
         /*  A write to a mounted node.
@@ -380,18 +400,30 @@ namespace wfg::tree
             bool ok = false;
             std::string reason;
 
-            /*  Which mount took it, and the value AS COERCED - both so the
+            /*  Which mount took it, and the values AS COERCED - both so the
                 caller can put the same thing on the wire that went into the
                 tree. A sender that re-read the node would be reading a value
                 somebody else might already have overwritten in the same tick. */
             std::string mountId;
-            osc::Value value;
+            osc::Values values;
         };
 
-        WriteResult write (const std::string& address, const osc::Value& value);
+        /*  EVERY ARGUMENT OF THE MESSAGE (namespace draft §45): a described
+            node takes exactly as many as it has type tags, each coerced to its
+            own, and anything else is `type-mismatch` - a message missing its
+            third value is a different message, and the device would read it as
+            one. An opaque device takes whatever the cue spells, nothing at all
+            included. */
+        WriteResult write (const std::string& address, const osc::Values& values);
 
-        /** The current value of a mounted node, if it has been written. */
-        const osc::Value* valueOf (const std::string& address) const;
+        /** One value: a node of one argument, which is most of them. */
+        WriteResult write (const std::string& address, const osc::Value& value)
+        {
+            return write (address, osc::Values { value });
+        }
+
+        /** The current values of a mounted node, if it has been written. */
+        const osc::Values* valueOf (const std::string& address) const;
 
         /*  One mounted node, or nullptr. What a caller wants from it is
             almost always the declared TYPE - a value read back off a
@@ -410,8 +442,15 @@ namespace wfg::tree
 
             Cleared when the address is written, so a stale answer from an
             earlier cue cannot satisfy a later one without anybody being asked. */
-        void noteReadback (const std::string& address, const osc::Value& value);
-        const osc::Value* readbackOf (const std::string& address) const;
+        void noteReadback (const std::string& address, const osc::Values& values);
+
+        /** One value: a node of one argument. */
+        void noteReadback (const std::string& address, const osc::Value& value)
+        {
+            noteReadback (address, osc::Values { value });
+        }
+
+        const osc::Values* readbackOf (const std::string& address) const;
         void forgetReadback (const std::string& address);
 
         /*  WHAT THE TARGET SAID WHEN NOBODY WAS WAITING FOR IT - the periodic
@@ -440,15 +479,23 @@ namespace wfg::tree
             no longer matches is dropped, the written value standing as the
             best account until the next sweep. -1, a caller that does not say,
             is kept as before. */
-        void noteObservation (const std::string& address, const osc::Value& value,
+        void noteObservation (const std::string& address, const osc::Values& values,
                               std::int64_t tick = 0, std::int64_t writesWhenAsked = -1);
+
+        /** One value: a node of one argument. */
+        void noteObservation (const std::string& address, const osc::Value& value,
+                              std::int64_t tick = 0, std::int64_t writesWhenAsked = -1)
+        {
+            noteObservation (address, osc::Values { value }, tick, writesWhenAsked);
+        }
+
 
         /*  HOW MANY TIMES GO.DOT HAS WRITTEN THE ADDRESS since the table was
             made: what an observation's question carries, so that its answer
             can be told from one that crossed a write. Never reset - a count
             that went back could match a question from before. */
         std::int64_t writesOf (const std::string& address) const;
-        const osc::Value* observedOf (const std::string& address) const;
+        const osc::Values* observedOf (const std::string& address) const;
         void forgetObservation (const std::string& address);
 
         /*  THE DESK'S FIRST ANSWER AFTER GO.DOT'S LAST WRITE OF THE ADDRESS
@@ -458,7 +505,7 @@ namespace wfg::tree
             float - made of the value it was sent, which is not bit-equal to it:
             Doh! reads a later answer differing from both as a hand on the desk,
             and this one as the desk's own echo. Nothing else reads it. */
-        const osc::Value* firstObservedOf (const std::string& address) const;
+        const osc::Values* firstObservedOf (const std::string& address) const;
 
         /*  WHEN the observation was taken, or -1 when there is none - so that a
             reader waiting for the sweep it just asked for can tell a fresh
@@ -486,22 +533,29 @@ namespace wfg::tree
 
         Node* findNode (const std::string& address);
 
-        /** Bumped by every mutation, whatever kind. See `revision`. */
+        /** A change of shape: the version moves and the written set is let go. */
+        void bumpShape();
+
+        /** Bumped by every change of shape. See `revision`. */
         std::uint64_t version = 1;
+
+        /** Bumped by every write, and the addresses written since the shape moved. */
+        std::uint64_t valueVersion = 1;
+        std::set<std::string> written;
 
         std::map<std::string, Entry> mounts;   // by mount id, so the order is stable
 
         /*  Read-backs, by address, separate from the nodes because they are a
             different fact about the same thing and because a reload of the
             namespace must not carry one across. */
-        std::map<std::string, osc::Value> readbacks;
+        std::map<std::string, osc::Values> readbacks;
 
         /** Observations, by address, and the tick each was taken on. See `noteObservation`. */
-        std::map<std::string, osc::Value> observations;
+        std::map<std::string, osc::Values> observations;
         std::map<std::string, std::int64_t> observedTicks;
 
         /** The first observation since the last write, by address. See `firstObservedOf`. */
-        std::map<std::string, osc::Value> firstObservations;
+        std::map<std::string, osc::Values> firstObservations;
 
         /** The writes made to each address. See `writesOf`. */
         std::map<std::string, std::int64_t> writeCounts;

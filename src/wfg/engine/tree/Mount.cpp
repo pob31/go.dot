@@ -213,10 +213,33 @@ namespace wfg::tree
             if (range == nullptr || ! range->isArray() || range->size() == 0)
                 return;
 
-            /*  The first entry only. RANGE carries one per argument and every
-                node this engine publishes has one value; a multi-argument node
-                keeps its type tags and loses the bounds of arguments two
-                onwards, which is honest about what we can represent. */
+            /*  ONE ENTRY PER ARGUMENT. The first fills the node's own bounds and
+                its VALS, which every reader of a node of one value reads; the
+                rest are kept as `laterRanges` (namespace draft §45), so a curve
+                on the third value of `/adm/obj/1/xyz` is drawn and thinned to
+                its own bounds. Arguments two onwards keep no VALS: a closed set
+                of words is a property of a single-valued node in every
+                description this has met. */
+            for (std::size_t i = 1; i < range->size(); ++i)
+            {
+                Node::ArgumentRange later;
+                const auto& entry = *range->at (i);
+
+                if (const auto* minimum = property (entry, "MIN"); minimum != nullptr)
+                {
+                    later.hasMinimum = true;
+                    later.minimum = minimum->asNumber();
+                }
+
+                if (const auto* maximum = property (entry, "MAX"); maximum != nullptr)
+                {
+                    later.hasMaximum = true;
+                    later.maximum = maximum->asNumber();
+                }
+
+                out.laterRanges.push_back (later);
+            }
+
             const auto& first = *range->at (0);
 
             if (const auto* vals = property (first, "VALS"); vals != nullptr && vals->isArray())
@@ -399,20 +422,23 @@ namespace wfg::tree
                     return;
                 }
 
-                /*  THE FIRST ARGUMENT'S RANGE ONLY, as `applyRange` keeps only
-                    the first entry of RANGE. Compared against the number the
-                    file wrote, not its float, so a bound of 0.1 holds a PANIC of
-                    0.1 on an `f` node. */
+                /*  EACH ARGUMENT AGAINST ITS OWN RANGE (namespace draft §45:
+                    `applyRange` keeps one per argument now), compared against
+                    the number the file wrote, not its float, so a bound of 0.1
+                    holds a PANIC of 0.1 on an `f` node. The VALS are the first
+                    argument's alone. */
+                const auto bounds = out.rangeOf (i);
+
+                if (element.isNumber()
+                      && ((bounds.hasMinimum && element.asNumber() < bounds.minimum)
+                          || (bounds.hasMaximum && element.asNumber() > bounds.maximum)))
+                {
+                    ignore (where + "is outside the node's RANGE");
+                    return;
+                }
+
                 if (i == 0)
                 {
-                    if (element.isNumber()
-                          && ((out.hasMinimum && element.asNumber() < out.minimum)
-                              || (out.hasMaximum && element.asNumber() > out.maximum)))
-                    {
-                        ignore (where + "is outside the node's RANGE");
-                        return;
-                    }
-
                     if (! out.enumValues.empty()
                           && std::find (out.enumValues.begin(), out.enumValues.end(), asText (element))
                                == out.enumValues.end())
@@ -690,12 +716,12 @@ namespace wfg::tree
                 would publish a namespace nobody has, and the operator would be
                 looking at nodes that are no longer described. */
             mounts.erase (mount.id);
-            ++version;
+            bumpShape();
             return result;
         }
 
         mounts[mount.id] = Entry { mount, result.nodes, result.warnings };
-        ++version;
+        bumpShape();
         return result;
     }
 
@@ -717,7 +743,7 @@ namespace wfg::tree
         result.ok = true;
 
         mounts[mount.id] = Entry { mount, {}, {} };
-        ++version;
+        bumpShape();
 
         return result;
     }
@@ -736,7 +762,7 @@ namespace wfg::tree
             at the same list of nodes. The caller decides that a changed prefix
             or namespace file needs a reload; this is for everything else. */
         found->second.declaration = mount;
-        ++version;
+        bumpShape();
 
         return true;
     }
@@ -753,7 +779,7 @@ namespace wfg::tree
         else
             problems[mountId] = std::move (problem);
 
-        ++version;
+        bumpShape();
     }
 
     std::string MountTable::problemOf (const std::string& mountId) const
@@ -774,14 +800,14 @@ namespace wfg::tree
 
     bool MountTable::unload (const std::string& mountId)
     {
-        ++version;
+        bumpShape();
         problems.erase (mountId);
         return mounts.erase (mountId) > 0;
     }
 
     void MountTable::clear()
     {
-        ++version;
+        bumpShape();
         mounts.clear();
         problems.clear();
     }
@@ -816,18 +842,18 @@ namespace wfg::tree
         return const_cast<MountTable*> (this)->findNode (address);
     }
 
-    void MountTable::noteReadback (const std::string& address, const osc::Value& value)
+    void MountTable::noteReadback (const std::string& address, const osc::Values& values)
     {
-        readbacks[address] = value;
+        readbacks[address] = values;
     }
 
-    const osc::Value* MountTable::readbackOf (const std::string& address) const
+    const osc::Values* MountTable::readbackOf (const std::string& address) const
     {
         const auto found = readbacks.find (address);
         return found == readbacks.end() ? nullptr : &found->second;
     }
 
-    void MountTable::noteObservation (const std::string& address, const osc::Value& value,
+    void MountTable::noteObservation (const std::string& address, const osc::Values& values,
                                       std::int64_t tick, std::int64_t writesWhenAsked)
     {
         /*  ASKED BEFORE GO.DOT'S LAST WRITE HERE (2026-10-03, §24.13, OU): an
@@ -836,14 +862,14 @@ namespace wfg::tree
         if (writesWhenAsked >= 0 && writesWhenAsked != writesOf (address))
             return;
 
-        observations.insert_or_assign (address, value);
+        observations.insert_or_assign (address, values);
         observedTicks.insert_or_assign (address, tick);
 
         /*  THE FIRST SINCE GO.DOT LAST WROTE THE ADDRESS, kept apart (2026-10-03,
             Doh! D3, namespace draft §24.13): what a desk made of that write - a
             motor fader's step, a dB-mapped float - rather than what a hand did
             to it after. Set only while unset; the write below forgets it. */
-        firstObservations.emplace (address, value);
+        firstObservations.emplace (address, values);
     }
 
     std::int64_t MountTable::writesOf (const std::string& address) const
@@ -858,7 +884,7 @@ namespace wfg::tree
         return found == observedTicks.end() ? -1 : found->second;
     }
 
-    const osc::Value* MountTable::observedOf (const std::string& address) const
+    const osc::Values* MountTable::observedOf (const std::string& address) const
     {
         const auto found = observations.find (address);
         return found == observations.end() ? nullptr : &found->second;
@@ -871,7 +897,7 @@ namespace wfg::tree
         firstObservations.erase (address);
     }
 
-    const osc::Value* MountTable::firstObservedOf (const std::string& address) const
+    const osc::Values* MountTable::firstObservedOf (const std::string& address) const
     {
         const auto found = firstObservations.find (address);
         return found == firstObservations.end() ? nullptr : &found->second;
@@ -950,7 +976,7 @@ namespace wfg::tree
         return nullptr;
     }
 
-    MountTable::WriteResult MountTable::write (const std::string& address, const osc::Value& value)
+    MountTable::WriteResult MountTable::write (const std::string& address, const osc::Values& values)
     {
         auto* node = findNode (address);
 
@@ -981,26 +1007,43 @@ namespace wfg::tree
             if (declaration == nullptr || ! declaration->opaque())
                 return { false, reason::badAddress, {}, {} };
 
-            return { true, {}, owner, value };
+            return { true, {}, owner, values };
         }
 
         if (node->access != Access::write && node->access != Access::readWrite)
             return { false, reason::readOnly, {}, {} };
 
-        if (node->typeTags.empty())
+        /*  AS MANY VALUES AS THE NODE HAS TYPE TAGS, each coerced to its own
+            (namespace draft §45). One value to a node of two was sent as one
+            argument until this was written - `/wfs/input/positionX` takes the
+            channel and the metres, and a message carrying only the first is
+            one the device reads as something else, or refuses. */
+        if (node->typeTags.empty() || values.size() != node->typeTags.size())
             return { false, reason::typeMismatch, {}, {} };
 
-        const auto coerced = CommandRegistry::coerceToTag (node->typeTags.front(), value);
+        osc::Values coerced;
+        coerced.reserve (values.size());
 
-        if (! coerced.has_value())
-            return { false, reason::typeMismatch, {}, {} };
+        for (std::size_t i = 0; i < values.size(); ++i)
+        {
+            auto one = CommandRegistry::coerceToTag (node->typeTags[i], values[i]);
+
+            if (! one.has_value())
+                return { false, reason::typeMismatch, {}, {} };
+
+            coerced.push_back (std::move (*one));
+        }
 
         /*  It lands here and goes no further. There is no transport in Phase 1,
             and that is the whole extent of what a stub does NOT do - the value
             is in the tree, the event is in the log, and a replay reproduces
             both. Phase 2 puts a socket after this line. */
-        node->values = { *coerced };
-        ++version;
+        node->values = coerced;
+
+        /*  A VALUE, NOT A SHAPE (ZC): the tree copies this node over its cached
+            half rather than rebuilding all of it. */
+        ++valueVersion;
+        written.insert (address);
 
         /*  AND WHAT THE TARGET WAS SEEN TO HOLD IS NOW HISTORY. The next
             observation will say what it holds after this write; until then the
@@ -1020,14 +1063,23 @@ namespace wfg::tree
             names no socket, which is what lets every rule above be tested
             against a string literal. The mount id and the coerced value are
             handed back so the caller has both without looking anything up. */
-        return { true, {}, mountOf (address), *coerced };
+        return { true, {}, mountOf (address), std::move (coerced) };
     }
 
-    const osc::Value* MountTable::valueOf (const std::string& address) const
+    void MountTable::bumpShape()
+    {
+        ++version;
+
+        /*  The tree rebuilds the whole half from the values the nodes hold now,
+            so what was written before is in it. */
+        written.clear();
+    }
+
+    const osc::Values* MountTable::valueOf (const std::string& address) const
     {
         auto* self = const_cast<MountTable*> (this);
         const auto* node = self->findNode (address);
 
-        return (node != nullptr && ! node->values.empty()) ? &node->values.front() : nullptr;
+        return (node != nullptr && ! node->values.empty()) ? &node->values : nullptr;
     }
 }

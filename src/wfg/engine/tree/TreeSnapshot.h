@@ -71,7 +71,8 @@ namespace wfg::tree
         TreeSnapshot (std::int64_t tickIndex,
                       std::shared_ptr<const std::vector<Node>> documentNodes,
                       std::shared_ptr<const std::vector<Node>> mountedNodes,
-                      std::vector<Node> runtimeNodes);
+                      std::vector<Node> runtimeNodes,
+                      std::shared_ptr<const std::vector<Node>> mountedWritten = {});
 
         /** The tick this was published at. */
         std::int64_t tick() const noexcept { return tickAt; }
@@ -94,6 +95,13 @@ namespace wfg::tree
         std::shared_ptr<const std::vector<Node>> document;
         std::shared_ptr<const std::vector<Node>> mounted;
         std::vector<Node> runtime;
+
+        /*  THE MOUNTED NODES WRITTEN SINCE THE MOUNTED HALF WAS BUILT (namespace
+            draft 45, ZC), sorted, each an address that half holds: read in
+            place of its copy there. An OSC cue's curve writes a node every tick,
+            and this is what spares the half its rebuild. Empty for most of a
+            show's life. */
+        std::shared_ptr<const std::vector<Node>> written;
     };
 
     //==============================================================================

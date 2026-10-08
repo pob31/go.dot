@@ -147,7 +147,7 @@ namespace wfg::tree
 
                 A reply that arrived is a state transition and goes in the log,
                 whether or not it is the value anybody hoped for. */
-            if (! value.has_value())
+            if (! value.has_value() || value->empty())
                 continue;
 
             if (engine == nullptr)
@@ -162,18 +162,30 @@ namespace wfg::tree
                 before this existed still replays. */
             std::vector<osc::Value> args { osc::Value::string (question.mountId),
                                            osc::Value::string (question.address),
-                                           *value };
+                                           value->front() };
 
-            if (question.observation)
+            /*  A NODE OF SEVERAL ARGUMENTS ANSWERS SEVERAL (namespace draft §45),
+                and the rest follow the two trailing flags, which must then be
+                spelled: a verify says it is not an observation, and a count of
+                -1 says it carries none. After them rather than after the first
+                value, so every log written before this replays as it was. */
+            const auto more = value->size() > 1;
+
+            if (question.observation || more)
             {
-                args.push_back (osc::Value::boolean (true));
+                args.push_back (osc::Value::boolean (question.observation));
 
                 /*  AND THE WRITES IT WAS ASKED AFTER (OU), so the handler can
                     tell an answer from before Go.dot's last write here - asked
                     a tick before it, answered a tick after - from one since. */
-                if (question.writesWhenAsked >= 0)
+                if (question.observation && question.writesWhenAsked >= 0)
                     args.push_back (osc::Value::int64 (question.writesWhenAsked));
+                else if (more)
+                    args.push_back (osc::Value::int64 (-1));
             }
+
+            if (more)
+                args.insert (args.end(), value->begin() + 1, value->end());
 
             engine->submit ("mount:" + question.mountId, "mount.readback", std::move (args));
         }

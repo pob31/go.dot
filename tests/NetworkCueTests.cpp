@@ -380,14 +380,16 @@ namespace
             /*  (2026-10-03, D3: through the door itself, `tree::writeToDevice`,
                 rather than a copy of it - so a case about that door tests
                 `serve`'s.) */
-            return [this] (const std::string& address, const osc::Value& value)
+            return [this] (const std::string& address, const osc::Values& values)
             {
-                const auto written = tree::writeToDevice (mounts, sender, address, value);
+                const auto written = tree::writeToDevice (mounts, sender, address, values);
 
                 if (! written.ok)
                     return Outcome::rejected (written.reason);
 
-                return Outcome::ok ({ osc::Value::string (address), written.value });
+                std::vector<osc::Value> applied { osc::Value::string (address) };
+                applied.insert (applied.end(), written.values.begin(), written.values.end());
+                return Outcome::ok (std::move (applied));
             };
         }
 
@@ -463,7 +465,7 @@ TEST_CASE ("network cue: firing one writes the node and puts it on the wire")
         reproduces... */
     const auto* value = rig.mounts.valueOf ("/desk/fader");
     REQUIRE (value != nullptr);
-    CHECK (*value == osc::Value::float32 (0.75f));
+    CHECK (*value == osc::Values { osc::Value::float32 (0.75f) });
 
     /*  ...AND IT REACHED THE WIRE, which is what the console hears. The two are
         separate on purpose: a cue that moved one and not the other would be a
@@ -505,7 +507,7 @@ TEST_CASE ("network cue: with tx off the cue runs and nothing leaves the machine
         DECIDED, and turning a device off decides nothing about the cue. */
     const auto* value = rig.mounts.valueOf ("/desk/fader");
     REQUIRE (value != nullptr);
-    CHECK (*value == osc::Value::float32 (0.75f));
+    CHECK (*value == osc::Values { osc::Value::float32 (0.75f) });
 
     //  AND IT DID NOT REACH THE WIRE.
     rig.tickOnce();
@@ -750,7 +752,7 @@ TEST_CASE ("node.set on a mounted address is the same command, and it sends too"
 
     const auto* value = rig.mounts.valueOf ("/desk/fader");
     REQUIRE (value != nullptr);
-    CHECK (*value == osc::Value::float32 (0.25f));
+    CHECK (*value == osc::Values { osc::Value::float32 (0.25f) });
 
     REQUIRE (rig.listener.waitFor (1));
 
@@ -1090,7 +1092,7 @@ TEST_CASE ("double Esc: a value the rate cap is holding never leaves, and the cu
     /*  The tree keeps what the cue wrote, and the desk never heard it: the
         world left in a state nobody declared, which §4.4 names as the price. */
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.75f) });
 }
 
 TEST_CASE ("double Esc: a group member's held value is dropped, and the member ends rather than failing")
@@ -2274,7 +2276,7 @@ TEST_CASE ("node.set: a write to a device switched off changes the tree and puts
     rig.tickOnce();
 
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.25f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.25f) });
     CHECK (rig.sender.sentFor ("K3PV7WRB") == 0u);
 
     std::this_thread::sleep_for (std::chrono::milliseconds (50));
@@ -2340,7 +2342,7 @@ TEST_CASE ("go.doh: a desk value the GO wrote goes back, as one engine node.set 
     CHECK (last.origin == origin::engine);
     CHECK (last.args[1] == expected);
     REQUIRE (rig.mounts.valueOf (address) != nullptr);
-    CHECK (*rig.mounts.valueOf (address) == expected);
+    CHECK (*rig.mounts.valueOf (address) == osc::Values { expected });
     CHECK_FALSE (says (reportOf (rig), "changed since the GO"));
 
     replaysTheSame (rig);
@@ -2426,7 +2428,7 @@ TEST_CASE ("go.doh: a desk left to its operator is not put back, and the report 
     if (back)
     {
         CHECK (engineSetsOn (rig, address) == 1u);
-        CHECK (*rig.mounts.valueOf (address) == osc::Value::float32 (0.25f));
+        CHECK (*rig.mounts.valueOf (address) == osc::Values { osc::Value::float32 (0.25f) });
         CHECK_FALSE (says (said, "left to its operator"));
 
         REQUIRE (rig.press ("go").rejected == 0);
@@ -2443,7 +2445,7 @@ TEST_CASE ("go.doh: a desk left to its operator is not put back, and the report 
     CHECK_FALSE (says (said, "could not be taken back"));
 
     if (address == "/desk/fader")
-        CHECK (*rig.mounts.valueOf (address) == osc::Value::float32 (0.75f));
+        CHECK (*rig.mounts.valueOf (address) == osc::Values { osc::Value::float32 (0.75f) });
 
     REQUIRE (rig.press ("go").rejected == 0);
     rig.ticks (2);
@@ -2492,7 +2494,7 @@ TEST_CASE ("go.doh: an address two of the GO's cues wrote follows the last write
     rig.park (scene);
     REQUIRE (rig.press ("go").rejected == 0);
     rig.ticks (20);
-    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.75f) });
 
     REQUIRE (rig.press ("go.doh").rejected == 0);
     rig.ticks (2);
@@ -2504,13 +2506,13 @@ TEST_CASE ("go.doh: an address two of the GO's cues wrote follows the last write
     if (back)
     {
         CHECK (engineSetsOn (rig, "/desk/fader") == 1u);
-        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.25f));
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.25f) });
         CHECK (says (said, "First - left to its operator, not sent again"));
     }
     else
     {
         CHECK (engineSetsOn (rig, "/desk/fader") == 0u);
-        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.75f) });
         CHECK (says (said, "Last - left to its operator, not sent again"));
     }
 }
@@ -2626,7 +2628,7 @@ TEST_CASE ("go.doh: after an Esc the desk and the pointer go back, nothing is re
     rig.ticks (5);
 
     CHECK (engineSetsOn (rig, "/desk/fader") == 1u);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.25f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.25f) });
     CHECK (rig.newestRunOf (playing)->id == scene);
     CHECK (says (reportOf (rig), "Esc since the GO"));
 
@@ -2665,7 +2667,7 @@ TEST_CASE ("go.doh: what an act's footer wrote because the GO ended it goes back
         rig.ticks (8);
     }
 
-    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.0f));
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.0f) });
     rig.ticks (10);
 
     REQUIRE (rig.press ("go.doh").rejected == 0);
@@ -2674,12 +2676,12 @@ TEST_CASE ("go.doh: what an act's footer wrote because the GO ended it goes back
     rig.ticks (2);
 
     CHECK (engineSetsOn (rig, "/desk/fader") == 1u);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.25f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.25f) });
 
     REQUIRE (rig.press ("go").rejected == 0);
     rig.ticks (10);
 
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.0f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.0f) });
     CHECK (rig.received ("/desk/fader") == 3u);                 // 0, put back 0.25, 0
 }
 
@@ -3074,7 +3076,7 @@ TEST_CASE ("jump: a value the jump puts on the desk lands before a member its se
 
     INFO (rig.engine.log().contents());
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 }
 
 TEST_CASE ("go.doh: a jump in the Doh's own drain wins the desk over the Doh's put-back")
@@ -3094,7 +3096,7 @@ TEST_CASE ("go.doh: a jump in the Doh's own drain wins the desk over the Doh's p
     rig.park (cue);
     REQUIRE (rig.press ("go").rejected == 0);
     rig.ticks (2);
-    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.75f) });
 
     REQUIRE (rig.press ("list.aim", { osc::Value::string (rig.listId), osc::Value::string (cue),
                                       osc::Value::float64 (0.0) }).rejected == 0);
@@ -3104,7 +3106,7 @@ TEST_CASE ("go.doh: a jump in the Doh's own drain wins the desk over the Doh's p
     rig.tickOnce();
     rig.ticks (3);
 
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.75f) });
 }
 
 TEST_CASE ("go.doh: what was left with a desk's operator survives a GO into its act cut short by Esc before the cue was spawned")
@@ -3152,4 +3154,378 @@ TEST_CASE ("go.doh: what was left with a desk's operator survives a GO into its 
     rig.ticks (20);
 
     CHECK (rig.received ("/lx/go") == 1u);
+}
+
+//==============================================================================
+/*  SEVERAL VALUES IN ONE MESSAGE (namespace draft §45). An OSC cue's value is
+    a list of atoms - every argument of the message - and what arrives is one
+    message carrying all of them: ADM-OSC moves an object with
+    `/adm/obj/<n>/xyz x y z`, and three messages would be three moves. */
+namespace
+{
+    constexpr const char* objectJson = R"JSON({
+      "FULL_PATH": "/obj",
+      "CONTENTS": {
+        "xyz": { "FULL_PATH": "/obj/xyz", "TYPE": "fff", "ACCESS": 3 }
+      }
+    })JSON";
+
+    tree::MountDeclaration objectMount (int port)
+    {
+        tree::MountDeclaration mount;
+        mount.id = "0BJ4CT00";
+        mount.prefix = "/obj";
+        mount.namespaceFile = "namespaces/obj.json";
+        mount.host = "127.0.0.1";
+        mount.port = port;
+        return mount;
+    }
+
+    tree::MountDeclaration opaqueMount (int port)
+    {
+        tree::MountDeclaration mount;
+        mount.id = "LX000001";
+        mount.prefix = "/lx";
+        mount.host = "127.0.0.1";
+        mount.port = port;
+        return mount;
+    }
+
+    osc::Packet decodedFrom (const osc::Datagram& datagram)
+    {
+        const auto decoded = osc::decode (datagram.bytes.data(), datagram.bytes.size());
+        REQUIRE (decoded.ok);
+        return decoded.packet;
+    }
+}
+
+TEST_CASE ("network cue: several values in one message leave as that message's arguments")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    NetworkRig rig;
+    REQUIRE (rig.mounts.load (objectMount (rig.listener.port()), objectJson).ok);
+
+    const auto cueId = rig.makeOsc ("/obj/xyz", "i:1 f:2.5 d:-3", "none");
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    CHECK (rig.runOf (cueId)->state == cue::runState::done);
+
+    //  Coerced each to its own tag, in the tree and on the wire.
+    const auto three = osc::Values { osc::Value::float32 (1.0f), osc::Value::float32 (2.5f),
+                                     osc::Value::float32 (-3.0f) };
+    REQUIRE (rig.mounts.valueOf ("/obj/xyz") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/obj/xyz") == three);
+
+    REQUIRE (rig.listener.waitFor (1));
+    const auto packet = decodedFrom (rig.listener.all().front());
+    CHECK (packet.address == "/obj/xyz");
+    CHECK (packet.args == three);
+}
+
+TEST_CASE ("network cue: a described node refuses a message missing a value")
+{
+    NetworkRig rig;
+    REQUIRE (rig.mounts.load (objectMount (rig.listener.port()), objectJson).ok);
+
+    const auto cueId = rig.makeOsc ("/obj/xyz", "f:0.5 f:1", "none");
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    CHECK (rig.runOf (cueId)->state == cue::runState::failed);
+    CHECK (rig.runOf (cueId)->error == reason::typeMismatch);
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
+}
+
+TEST_CASE ("network cue: an opaque device is sent the list as spelled, nothing at all included")
+{
+    NetworkRig rig;
+    REQUIRE (rig.mounts.declare (opaqueMount (rig.listener.port())).ok);
+
+    SUBCASE ("an empty value is a message that carries nothing")
+    {
+        const auto cueId = rig.makeOsc ("/lx/go", "", "none");
+        rig.fire (cueId);
+        rig.tickOnce();
+
+        CHECK (rig.runOf (cueId)->state == cue::runState::done);
+        REQUIRE (rig.listener.waitFor (1));
+
+        const auto packet = decodedFrom (rig.listener.all().front());
+        CHECK (packet.address == "/lx/go");
+        CHECK (packet.args.empty());
+    }
+
+    SUBCASE ("a string with spaces and a number are two arguments")
+    {
+        const auto cueId = rig.makeOsc ("/lx/cmd", "s:\"Go To Cue\" i:11", "none");
+        rig.fire (cueId);
+        REQUIRE (rig.listener.waitFor (1));
+
+        const auto packet = decodedFrom (rig.listener.all().front());
+        CHECK (packet.args == osc::Values { osc::Value::string ("Go To Cue"), osc::Value::int32 (11) });
+    }
+
+    SUBCASE ("a value that does not spell is the run's failure, as one atom always was")
+    {
+        const auto cueId = rig.makeOsc ("/lx/cmd", "i:11 nonsense", "none");
+        rig.fire (cueId);
+        rig.tickOnce();
+
+        CHECK (rig.runOf (cueId)->state == cue::runState::failed);
+        CHECK (rig.runOf (cueId)->error == reason::typeMismatch);
+    }
+}
+
+TEST_CASE ("node.set: a device's node of several takes them all, and a row of the show takes one")
+{
+    NetworkRig rig;
+    REQUIRE (rig.mounts.load (objectMount (rig.listener.port()), objectJson).ok);
+
+    rig.engine.submit ("udp:10.0.0.5:9000", "node.set",
+                       { osc::Value::string ("/obj/xyz"), osc::Value::float32 (0.5f),
+                         osc::Value::float32 (1.5f), osc::Value::float32 (2.5f) });
+    rig.tickOnce();
+
+    REQUIRE (rig.listener.waitFor (1));
+    CHECK (decodedFrom (rig.listener.all().front()).args
+             == osc::Values { osc::Value::float32 (0.5f), osc::Value::float32 (1.5f), osc::Value::float32 (2.5f) });
+
+    /*  A ROW OF THE SHOW holds one value, and a write that tacks a second on
+        is refused rather than read for its first. */
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0.5", "none");
+    const auto result = rig.engine.submit ("cli", "node.set",
+                                           { osc::Value::string ("/godot/cue/" + cueId + "/timeout"),
+                                             osc::Value::float64 (2.0), osc::Value::float64 (3.0) });
+    CHECK (result);
+    const auto tick = rig.engine.processTick (rig.tick++);
+    CHECK (tick.rejected == 1u);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + cueId + "/timeout").value_or ("") != "2");
+}
+
+//==============================================================================
+/*  SEVERAL MESSAGES IN ONE CUE (namespace draft 45, YP): the cue's own address
+    and value first, then each <Message> in its order, all in the tick it
+    fires, all to one device (YV). */
+TEST_CASE ("network cue: several messages leave in their order, in the tick it fires")
+{
+    NetworkRig rig;
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0.25", "sent");
+    REQUIRE (rig.document.createMessage (cueId, "/desk/scene", "i:3").ok);
+
+    rig.fire (cueId);
+    REQUIRE (rig.listener.waitFor (2));
+
+    const auto arrived = rig.listener.all();
+    CHECK (decodedFrom (arrived[0]).address == "/desk/fader");
+    CHECK (decodedFrom (arrived[1]).address == "/desk/scene");
+    CHECK (decodedFrom (arrived[1]).args == osc::Values { osc::Value::int32 (3) });
+
+    //  A `sent` wait is done when every message has left.
+    rig.tickOnce();
+    CHECK (rig.runOf (cueId)->state == cue::runState::done);
+}
+
+TEST_CASE ("network cue: a further message under another device fails the run before anything is written")
+{
+    NetworkRig rig;
+    REQUIRE (rig.mounts.load (objectMount (rig.listener.port()), objectJson).ok);
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0.25", "none");
+    REQUIRE (rig.document.createMessage (cueId, "/obj/xyz", "f:1 f:2 f:3").ok);
+
+    //  And the show says so before anybody presses GO, from the devices it declares.
+    REQUIRE (rig.document.createMount ("/desk", "namespaces/desk.json", "K3PV7WRB").ok);
+    REQUIRE (rig.document.createMount ("/obj", "namespaces/obj.json", "0BJ4CT00").ok);
+    const auto warnings = rig.document.warnings();
+    CHECK (std::any_of (warnings.begin(), warnings.end(),
+                        [] (const std::string& w) { return w.find ("under another device") != std::string::npos; }));
+
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    CHECK (rig.runOf (cueId)->state == cue::runState::failed);
+    CHECK (rig.runOf (cueId)->error == cue::oscError::severalDevices);
+    CHECK (rig.mounts.valueOf ("/desk/fader") == nullptr);
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
+}
+
+TEST_CASE ("network cue: a refused further message fails the run, and what was written before it still leaves")
+{
+    NetworkRig rig;
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0.25", "none");
+    REQUIRE (rig.document.createMessage (cueId, "/desk/meter", "f:0.5").ok);
+
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    CHECK (rig.runOf (cueId)->state == cue::runState::failed);
+    CHECK (rig.runOf (cueId)->error == reason::readOnly);
+
+    //  The tree and the wire agree on the one that landed.
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    REQUIRE (rig.listener.waitFor (1));
+    CHECK (decodedFrom (rig.listener.all().front()).address == "/desk/fader");
+}
+
+TEST_CASE ("network cue: with tx off every message lands in the tree and none leaves")
+{
+    NetworkRig rig;
+
+    auto declaration = consoleMount (rig.listener.port());
+    declaration.tx = false;
+    REQUIRE (rig.mounts.updateDeclaration (declaration));
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0.25", "none");
+    REQUIRE (rig.document.createMessage (cueId, "/desk/scene", "i:3").ok);
+
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    CHECK (rig.runOf (cueId)->state == cue::runState::done);
+    CHECK (rig.runOf (cueId)->warning == std::string (cue::runWarning::notSent));
+    CHECK (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (rig.mounts.valueOf ("/desk/scene") != nullptr);
+    CHECK_FALSE (rig.listener.waitFor (1, 150));
+}
+
+//==============================================================================
+/*  BUNDLES, THE DEVICE'S SETTING (namespace draft 45, YQ). What one flush sends
+    a device that takes them leaves as one bundle, in the order it was queued,
+    time-tagged immediately; a datagram is closed at 1200 bytes and a message
+    too big to share one goes alone; a message the rate cap holds stays out. */
+namespace
+{
+    tree::MountSender::Destination bundling (int port, double rateCap = 0.0)
+    {
+        return { "127.0.0.1", port, rateCap, true };
+    }
+
+    std::vector<osc::Packet> elementsOf (const osc::Datagram& datagram)
+    {
+        const auto packet = decodedFrom (datagram);
+        REQUIRE (packet.isBundle());
+        CHECK (packet.time.raw == 1u);
+        return packet.elements;
+    }
+}
+
+TEST_CASE ("mount sender: a device that takes bundles gets one tick's messages as one, in their order")
+{
+    Listener listener;
+    tree::MountSender sender { listener.endpoint };
+
+    const auto x = sender.queue ("W0RKS000", bundling (listener.port()), "/wfs/input/1/positionX", osc::Value::float32 (1.0f));
+    const auto y = sender.queue ("W0RKS000", bundling (listener.port()), "/wfs/input/1/positionY", osc::Value::float32 (2.0f));
+    const auto z = sender.queue ("W0RKS000", bundling (listener.port()), "/wfs/input/1/positionZ", osc::Value::float32 (3.0f));
+    sender.flush();
+
+    REQUIRE (listener.waitFor (1));
+    CHECK_FALSE (listener.waitFor (2, 150));
+
+    const auto elements = elementsOf (listener.all().front());
+    REQUIRE (elements.size() == 3u);
+    CHECK (elements[0].address == "/wfs/input/1/positionX");
+    CHECK (elements[1].address == "/wfs/input/1/positionY");
+    CHECK (elements[2].address == "/wfs/input/1/positionZ");
+    CHECK (elements[2].args == osc::Values { osc::Value::float32 (3.0f) });
+
+    //  Each message is answered, and counted, as itself.
+    for (const auto ticket : { x, y, z })
+        CHECK (sender.outcomeOf (ticket) == tree::MountSender::Outcome::sent);
+
+    CHECK (sender.sentFor ("W0RKS000") == 3u);
+}
+
+TEST_CASE ("mount sender: a bundle is closed at 1200 bytes, and a message too big for one goes alone")
+{
+    Listener listener;
+    tree::MountSender sender { listener.endpoint };
+
+    //  Forty messages of about sixty bytes: more than one datagram's worth.
+    for (int n = 0; n < 40; ++n)
+        sender.queue ("W0RKS000", bundling (listener.port()),
+                      "/wfs/input/" + std::to_string (n + 1) + "/positionX/and/some/more/words",
+                      osc::Value::float32 (static_cast<float> (n)));
+
+    //  And one that no bundle could hold.
+    sender.queue ("W0RKS000", bundling (listener.port()), "/wfs/big", osc::Value::string (std::string (1300, 'x')));
+    sender.flush();
+
+    REQUIRE (listener.waitFor (3));
+    std::this_thread::sleep_for (std::chrono::milliseconds (100));
+
+    std::vector<std::string> addresses;
+    auto plain = 0;
+
+    for (const auto& datagram : listener.all())
+    {
+        const auto packet = decodedFrom (datagram);
+
+        if (! packet.isBundle())
+        {
+            ++plain;
+            CHECK (packet.address == "/wfs/big");
+            continue;
+        }
+
+        CHECK (datagram.bytes.size() <= tree::MountSender::bundleBytes);
+
+        for (const auto& element : packet.elements)
+            addresses.push_back (element.address);
+    }
+
+    CHECK (plain == 1);
+    REQUIRE (addresses.size() == 40u);
+    CHECK (addresses.front() == "/wfs/input/1/positionX/and/some/more/words");
+    CHECK (addresses.back() == "/wfs/input/40/positionX/and/some/more/words");
+    CHECK (sender.sentFor ("W0RKS000") == 41u);
+}
+
+TEST_CASE ("mount sender: a message the rate cap holds stays out of the bundle and goes in a later one")
+{
+    Listener listener;
+    tree::MountSender sender { listener.endpoint };
+
+    //  Ten a second is a send every fifth flush.
+    sender.queue ("W0RKS000", bundling (listener.port(), 10.0), "/wfs/slow", osc::Value::float32 (1.0f));
+    sender.flush();
+    REQUIRE (listener.waitFor (1));
+
+    sender.queue ("W0RKS000", bundling (listener.port(), 10.0), "/wfs/slow", osc::Value::float32 (2.0f));
+    sender.queue ("W0RKS000", bundling (listener.port(), 10.0), "/wfs/other", osc::Value::float32 (3.0f));
+    sender.flush();
+
+    REQUIRE (listener.waitFor (2));
+    const auto second = elementsOf (listener.all()[1]);
+    REQUIRE (second.size() == 1u);
+    CHECK (second.front().address == "/wfs/other");
+    CHECK (sender.pending() == 1u);
+}
+
+TEST_CASE ("mount sender: a device that does not take bundles is sent each message alone, beside one that does")
+{
+    Listener listener;
+    tree::MountSender sender { listener.endpoint };
+
+    sender.queue ("W0RKS000", bundling (listener.port()), "/wfs/a", osc::Value::float32 (1.0f));
+    sender.queue ("DESK0001", { "127.0.0.1", listener.port(), 0.0, false }, "/desk/a", osc::Value::float32 (1.0f));
+    sender.queue ("W0RKS000", bundling (listener.port()), "/wfs/b", osc::Value::float32 (1.0f));
+    sender.queue ("DESK0001", { "127.0.0.1", listener.port(), 0.0, false }, "/desk/b", osc::Value::float32 (1.0f));
+    sender.flush();
+
+    REQUIRE (listener.waitFor (3));
+    CHECK_FALSE (listener.waitFor (4, 150));
+
+    auto bundles = 0;
+    auto plain = 0;
+
+    for (const auto& datagram : listener.all())
+        (decodedFrom (datagram).isBundle() ? bundles : plain)++;
+
+    CHECK (bundles == 1);
+    CHECK (plain == 2);
 }

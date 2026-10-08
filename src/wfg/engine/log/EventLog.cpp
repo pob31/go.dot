@@ -26,65 +26,11 @@ namespace wfg
 {
     namespace
     {
-        /*  Splits a line into tokens on spaces, treating a double-quoted run as
-            one token, quotes and escapes included. That is what lets a cue name
-            with a space in it survive a round trip through the log: the atom
-            grammar quotes strings, and this is the matching reader.
-
-            An unterminated quote yields no tokens at all, so the line is
-            reported as malformed rather than half-read.  */
-        std::optional<std::vector<std::string_view>> tokenise (std::string_view line)
-        {
-            std::vector<std::string_view> tokens;
-            std::size_t i = 0;
-
-            while (i < line.size())
-            {
-                while (i < line.size() && line[i] == ' ')
-                    ++i;
-
-                if (i >= line.size())
-                    break;
-
-                const std::size_t start = i;
-                bool inQuotes = false;
-
-                for (; i < line.size(); ++i)
-                {
-                    const char c = line[i];
-
-                    if (inQuotes)
-                    {
-                        if (c == '\\')
-                        {
-                            ++i;                       // skip the escaped character
-
-                            if (i >= line.size())
-                                return std::nullopt;
-                        }
-                        else if (c == '"')
-                        {
-                            inQuotes = false;
-                        }
-                    }
-                    else if (c == '"')
-                    {
-                        inQuotes = true;
-                    }
-                    else if (c == ' ')
-                    {
-                        break;
-                    }
-                }
-
-                if (inQuotes)
-                    return std::nullopt;
-
-                tokens.push_back (line.substr (start, i - start));
-            }
-
-            return tokens;
-        }
+        /*  A line's tokens are its atoms: `osc::splitAtoms` splits on spaces and
+            keeps a double-quoted run whole, which is what lets a cue name with a
+            space in it survive a round trip through the log. An unterminated
+            quote yields no tokens at all, so the line is reported as malformed
+            rather than half-read. */
 
         template <typename Int>
         std::optional<Int> parseInt (std::string_view text)
@@ -146,7 +92,7 @@ namespace wfg
 
     std::optional<LogRecord> LogRecord::fromLine (std::string_view line)
     {
-        const auto tokens = tokenise (line);
+        const auto tokens = osc::splitAtoms (line);
 
         if (! tokens)
             return std::nullopt;

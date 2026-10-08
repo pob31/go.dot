@@ -144,13 +144,14 @@ namespace wfg::cue
     /*  The same, the device found as the engine routes the cue now. */
     std::string rollbackOf (const doc::ShowDocument& document, const std::string& cueId);
 
-    /*  A ROLLBACK READ BACK INTO WHAT LEAVES: an OSC one's address and value,
-        a MIDI one's bytes - or `ok` false when the text is not a message. */
+    /*  A ROLLBACK READ BACK INTO WHAT LEAVES: an OSC one's address and values
+        (a list since namespace draft §45, one as ever for a node of one), a
+        MIDI one's bytes - or `ok` false when the text is not a message. */
     struct RollbackMessage
     {
         bool ok = false;
         std::string address;
-        osc::Value value;
+        osc::Values value;
         midi::Bytes bytes;
     };
 

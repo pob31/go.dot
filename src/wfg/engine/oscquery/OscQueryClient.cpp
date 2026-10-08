@@ -207,8 +207,8 @@ namespace wfg::oscquery
     }
 
     //==============================================================================
-    std::optional<osc::Value> OscQueryClient::valueFromReply (std::string_view json,
-                                                              const std::string& typeTag)
+    std::optional<osc::Values> OscQueryClient::valueFromReply (std::string_view json,
+                                                               const std::string& typeTags)
     {
         const auto parsed = wfg::json::parse (json);
 
@@ -220,34 +220,53 @@ namespace wfg::oscquery
         if (values == nullptr || ! values->isArray() || values->asArray().empty())
             return std::nullopt;
 
-        const auto& first = values->asArray().front();
+        /*  EVERY ELEMENT, each against its own tag (namespace draft §45): a
+            node of three arguments answers three, and a verify of
+            `/adm/obj/1/xyz` compares all of them. One that cannot be read
+            refuses the whole answer - two values of three are not what the
+            device holds. */
+        osc::Values read;
 
-        /*  JSON HAS THREE SCALAR TYPES AND OSC HAS TEN, so the node's declared
-            tag is what decides. Without it a `1` in a reply is an integer, a
-            `1.0` is a double, and neither compares equal to the float32 that
-            was written - so a verified cue would time out against a device that
-            was doing exactly what it was told. */
-        osc::Value asRead;
+        for (std::size_t i = 0; i < values->asArray().size(); ++i)
+        {
+            const auto& element = values->asArray()[i];
 
-        if (first.isNumber())
-            asRead = osc::Value::float64 (first.asNumber());
-        else if (first.isString())
-            asRead = osc::Value::string (first.asString());
-        else if (first.isBool())
-            asRead = osc::Value::boolean (first.asBool());
-        else
-            return std::nullopt;
+            /*  JSON HAS THREE SCALAR TYPES AND OSC HAS TEN, so the node's
+                declared tag is what decides. Without it a `1` in a reply is an
+                integer, a `1.0` is a double, and neither compares equal to the
+                float32 that was written - so a verified cue would time out
+                against a device that was doing exactly what it was told. */
+            osc::Value asRead;
 
-        if (typeTag.empty())
-            return asRead;
+            if (element.isNumber())
+                asRead = osc::Value::float64 (element.asNumber());
+            else if (element.isString())
+                asRead = osc::Value::string (element.asString());
+            else if (element.isBool())
+                asRead = osc::Value::boolean (element.asBool());
+            else
+                return std::nullopt;
 
-        return CommandRegistry::coerceToTag (typeTag.front(), asRead);
+            if (i < typeTags.size())
+            {
+                auto coerced = CommandRegistry::coerceToTag (typeTags[i], asRead);
+
+                if (! coerced.has_value())
+                    return std::nullopt;
+
+                asRead = std::move (*coerced);
+            }
+
+            read.push_back (std::move (asRead));
+        }
+
+        return read;
     }
 
-    std::optional<osc::Value> OscQueryClient::readValue (const std::string& host, int port,
-                                                         const std::string& address,
-                                                         const std::string& typeTag,
-                                                         int timeoutMs)
+    std::optional<osc::Values> OscQueryClient::readValue (const std::string& host, int port,
+                                                          const std::string& address,
+                                                          const std::string& typeTag,
+                                                          int timeoutMs)
     {
         const auto reply = get (host, port, address, "VALUE", timeoutMs);
 

@@ -2942,9 +2942,9 @@ namespace wfg::cue
         struct DeskBefore
         {
             std::string address, device;
-            std::optional<osc::Value> before;
-            osc::Value lastWritten;
-            std::optional<osc::Value> echo;
+            std::optional<osc::Values> before;
+            osc::Values lastWritten;
+            std::optional<osc::Values> echo;
             std::string lastWriter;
             bool leftToOperator = false;
         };
@@ -3054,9 +3054,11 @@ namespace wfg::cue
             GO's last write to the address kept (the write is about to forget
             it) and, for a write of the GO's, what the address held; after it,
             what the GO wrote. */
-        void deskBeforeWrite (const OscJob& job, std::optional<osc::Value>& held, bool& captured);
-        void deskAfterWrite (const OscJob& job, const std::optional<osc::Value>& held,
-                             const std::string& mountId, const osc::Value& value);
+        void deskBeforeWrite (const OscJob& job, const std::string& address,
+                              std::optional<osc::Values>& held, bool& captured);
+        void deskAfterWrite (const OscJob& job, const std::string& address,
+                             const std::optional<osc::Values>& held,
+                             const std::string& mountId, const osc::Values& values);
 
         /*  A SCENE THE GO STOPPED THAT HAD NOT ENDED AT THE DOH, put back once
             it has (§24.13): handler state - the hook only watches for the end,
@@ -3085,7 +3087,7 @@ namespace wfg::cue
             std::int64_t tick = -1;
             std::string list;
             std::vector<DeskBefore> desk;
-            std::vector<std::pair<std::string, osc::Value>> values;
+            std::vector<std::pair<std::string, osc::Values>> values;
             std::vector<std::string> items;
             bool report = false;
 
@@ -3111,7 +3113,7 @@ namespace wfg::cue
         /*  HOOK MEMORY: what this tick's give-backs put back on the desk, by
             address - filled by `submitRestores`, whichever hook called it, read
             by the flush, which runs after them. */
-        std::map<std::string, osc::Value> restoredThisTick;
+        std::map<std::string, osc::Values> restoredThisTick;
 
         /*  THE HOOK THAT SENDS IT (§24.13), after `armStandby` in `beforeTick`. */
         void flushDohWrites (Engine& engine);

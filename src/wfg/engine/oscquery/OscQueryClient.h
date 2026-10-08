@@ -102,16 +102,16 @@ namespace wfg::oscquery
             nullopt when the exchange failed, when the server answered anything
             but 200, or when the reply carried no VALUE. Each is a different
             thing and none of them is "the value is zero". */
-        static std::optional<osc::Value> readValue (const std::string& host, int port,
-                                                    const std::string& address,
-                                                    const std::string& typeTag,
-                                                    int timeoutMs);
+        static std::optional<osc::Values> readValue (const std::string& host, int port,
+                                                     const std::string& address,
+                                                     const std::string& typeTag,
+                                                     int timeoutMs);
 
         /*  The VALUE out of an OSCQuery attribute reply, for a test or a caller
             that already has the bytes. Exposed because the parsing is the part
             worth checking against a string literal rather than against a
             socket. */
-        static std::optional<osc::Value> valueFromReply (std::string_view json,
-                                                         const std::string& typeTag);
+        static std::optional<osc::Values> valueFromReply (std::string_view json,
+                                                          const std::string& typeTag);
     };
 }

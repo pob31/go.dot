@@ -2108,10 +2108,10 @@ namespace
         LockRig()
         {
             registerDocumentCommands (engine.commands(), document,
-                                      [this] (const std::string&, const osc::Value& value)
+                                      [this] (const std::string&, const osc::Values& values)
                                       {
                                           ++foreignWrites;
-                                          return Outcome::ok ({ value });
+                                          return Outcome::ok (values);
                                       });
 
             cue::registerCueCommands (engine.commands(), document, focus);
@@ -2796,18 +2796,30 @@ TEST_CASE ("the Doh! rollback: the cue's own, else its device's, else the previo
         const auto osc = cue::parseRollback ("osc", "/lx/go i:11");
         REQUIRE (osc.ok);
         CHECK (osc.address == "/lx/go");
-        CHECK (osc.value == osc::Value::int32 (11));
+        CHECK (osc.value == osc::Values { osc::Value::int32 (11) });
 
         const auto spaced = cue::parseRollback ("osc", "/lx/cmd s:\"Go To Cue 11\"");
         REQUIRE (spaced.ok);
-        CHECK (spaced.value == osc::Value::string ("Go To Cue 11"));
+        CHECK (spaced.value == osc::Values { osc::Value::string ("Go To Cue 11") });
 
         CHECK (cue::parseRollback ("midi", "programChange 1 4").bytes == midi::Bytes { 0xc0, 0x04 });
         CHECK (cue::parseRollback ("midi", "noteOn 2 60 0").bytes == midi::Bytes { 0x91, 60, 0 });
         CHECK (cue::parseRollback ("midi", "sysex F0 7F 01 02 01 01 31 31 F7").bytes
                  == midi::Bytes { 0xf0, 0x7f, 0x01, 0x02, 0x01, 0x01, 0x31, 0x31, 0xf7 });
 
-        for (const auto* bad : { "", "lx/go i:11", "/lx/go", "/lx/go 11" })
+        /*  A LIST OF VALUES since namespace draft §45, none at all included:
+            `/lx/go` alone is a message that carries nothing, as a cue whose
+            value is empty sends one. */
+        const auto bare = cue::parseRollback ("osc", "/lx/go");
+        REQUIRE (bare.ok);
+        CHECK (bare.value.empty());
+
+        const auto several = cue::parseRollback ("osc", "/adm/obj/1/xyz f:0 f:1.5 f:-2");
+        REQUIRE (several.ok);
+        CHECK (several.value == osc::Values { osc::Value::float32 (0.0f), osc::Value::float32 (1.5f),
+                                              osc::Value::float32 (-2.0f) });
+
+        for (const auto* bad : { "", "lx/go i:11", "/lx/go 11", "/lx/go i:11 12" })
         {
             INFO ("osc: [" << bad << "]");
             CHECK_FALSE (cue::parseRollback ("osc", bad).ok);

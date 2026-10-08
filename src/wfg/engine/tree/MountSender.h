@@ -111,7 +111,19 @@ namespace wfg::tree
                 ordinary mount is capped by the queue's own coalescing and this
                 changes nothing for it. */
             double rateCap = 0.0;
+
+            /*  WHETHER WHAT A FLUSH SENDS THIS DEVICE LEAVES AS ONE BUNDLE, from
+                `mount/@bundles` (namespace draft 45). Copied at queue time with
+                the rest, for the same reason. */
+            bool bundles = false;
         };
+
+        /*  A BUNDLE'S DATAGRAM IS CLOSED AT THIS MANY BYTES (namespace draft
+            45, ZB): WFS-DIY's own ceiling for the bundles it sends, under the
+            1500 of an Ethernet frame with room for the headers, so a bundle is
+            never split by the network on its way - a fragment lost on Wi-Fi
+            loses the whole datagram. */
+        static constexpr std::size_t bundleBytes = 1200;
 
         /*  The socket is a reference and is not owned. In `wfg serve` it is the
             one endpoint the process has, already bound, so every outbound
@@ -145,8 +157,16 @@ namespace wfg::tree
             made - a client's `node.set`, a restore. Only `dropQueued` reads it,
             and a re-written address takes its newest writer's. */
         std::uint64_t queue (const std::string& mountId, const Destination&,
-                             const std::string& address, const osc::Value&,
+                             const std::string& address, const osc::Values&,
                              const std::string& owner = {});
+
+        /** One value: a node of one argument. */
+        std::uint64_t queue (const std::string& mountId, const Destination& destination,
+                             const std::string& address, const osc::Value& value,
+                             const std::string& owner = {})
+        {
+            return queue (mountId, destination, address, osc::Values { value }, owner);
+        }
 
         /*  Sends everything queued and empties the queue. Tick thread, once per
             tick, AFTER the tick's commands have been applied - anything else
@@ -200,9 +220,14 @@ namespace wfg::tree
             std::string mountId;
             Destination destination;
             std::string address;
-            osc::Value value;
+            osc::Values values;     // every argument of the message (§45)
             std::string owner;
         };
+
+        /*  One message as a datagram of its own, and one device's messages of
+            a flush as bundles (namespace draft 45). Each answers its tickets. */
+        void sendAlone (const Message& message);
+        void sendBundled (const std::vector<const Message*>& messages);
 
         osc::UdpEndpoint* udp = nullptr;
 
@@ -257,5 +282,5 @@ namespace wfg::tree
         and Doh!'s put-back all went out on the wire to a device the operator
         had switched off. */
     MountTable::WriteResult writeToDevice (MountTable& mounts, MountSender& sender,
-                                           const std::string& address, const osc::Value& value);
+                                           const std::string& address, const osc::Values& values);
 }

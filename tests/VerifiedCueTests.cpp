@@ -90,7 +90,20 @@ namespace
         /** What the device will say it holds. Empty for "nothing to say". */
         void says (std::vector<osc::Value> values)
         {
+            faderSays = values;
             rebuild (std::move (values));
+        }
+
+        /*  What its node of three, `/desk/xyz`, will say (namespace draft §45):
+            a position, verified on all three of its values. */
+        void saysXyz (std::vector<osc::Value> values)
+        {
+            {
+                const std::lock_guard<std::mutex> lock { guard };
+                xyzSays = std::move (values);
+            }
+
+            rebuild (faderSays);
         }
 
         void rebuild (std::vector<osc::Value> values)
@@ -118,6 +131,17 @@ namespace
             level.address = "/desk/level";
             level.values = std::move (values);
             nodes->push_back (level);
+
+            auto xyz = fader;
+            xyz.address = "/desk/xyz";
+            xyz.typeTags = "fff";
+
+            {
+                const std::lock_guard<std::mutex> lock { guard };
+                xyz.values = xyzSays;
+            }
+
+            nodes->push_back (xyz);
 
             /*  Sorted, because TreeSnapshot::find is a lower_bound and says so
                 as a precondition. Three entries here, but the rule does not have
@@ -155,6 +179,7 @@ namespace
         mutable std::mutex guard;
         std::shared_ptr<const tree::TreeSnapshot> published;
         std::atomic<bool> holding { false };
+        std::vector<osc::Value> faderSays, xyzSays;
     };
 
     /** The scripted target, served over HTTP on a port of its own. */
@@ -189,7 +214,7 @@ TEST_CASE ("oscquery client: it reads a value back off a real server")
                                                             "/desk/fader", "f", 4000);
 
     REQUIRE (value.has_value());
-    CHECK (*value == osc::Value::float32 (0.5f));
+    CHECK (*value == osc::Values { osc::Value::float32 (0.5f) });
 }
 
 TEST_CASE ("oscquery client: the query string arrives unmangled")
@@ -280,15 +305,15 @@ TEST_CASE ("oscquery client: what comes back is coerced to what the node declare
 
     const auto asFloat = Client::valueFromReply (R"({"VALUE": [1]})", "f");
     REQUIRE (asFloat.has_value());
-    CHECK (*asFloat == osc::Value::float32 (1.0f));
+    CHECK (*asFloat == osc::Values { osc::Value::float32 (1.0f) });
 
     const auto asInt = Client::valueFromReply (R"({"VALUE": [1.0]})", "i");
     REQUIRE (asInt.has_value());
-    CHECK (*asInt == osc::Value::int32 (1));
+    CHECK (*asInt == osc::Values { osc::Value::int32 (1) });
 
     const auto asString = Client::valueFromReply (R"({"VALUE": ["scene 4"]})", "s");
     REQUIRE (asString.has_value());
-    CHECK (*asString == osc::Value::string ("scene 4"));
+    CHECK (*asString == osc::Values { osc::Value::string ("scene 4") });
 
     /*  And the refusals, each of which is "no answer" rather than a zero. */
     CHECK_FALSE (Client::valueFromReply (R"({"VALUE": []})", "f").has_value());
@@ -303,7 +328,8 @@ namespace
       "FULL_PATH": "/desk",
       "CONTENTS": {
         "fader": { "FULL_PATH": "/desk/fader", "TYPE": "f", "ACCESS": 3 },
-        "level": { "FULL_PATH": "/desk/level", "TYPE": "f", "ACCESS": 3 }
+        "level": { "FULL_PATH": "/desk/level", "TYPE": "f", "ACCESS": 3 },
+        "xyz": { "FULL_PATH": "/desk/xyz", "TYPE": "fff", "ACCESS": 3 }
       }
     })JSON";
 
@@ -338,9 +364,9 @@ namespace
                 restore IS one of these writes. */
             doc::registerDocumentCommands (
                 engine.commands(), document,
-                [this] (const std::string& address, const osc::Value& value)
+                [this] (const std::string& address, const osc::Values& values)
                 {
-                    const auto written = mounts.write (address, value);
+                    const auto written = mounts.write (address, values);
 
                     if (! written.ok)
                         return Outcome::rejected (written.reason);
@@ -349,9 +375,11 @@ namespace
                         sender.queue (written.mountId,
                                       { declaration->host, declaration->port,
                                         declaration->rateCap },
-                                      address, written.value);
+                                      address, written.values);
 
-                    return Outcome::ok ({ osc::Value::string (address), written.value });
+                    std::vector<osc::Value> applied { osc::Value::string (address) };
+                    applied.insert (applied.end(), written.values.begin(), written.values.end());
+                    return Outcome::ok (std::move (applied));
                 });
             cue::registerCueCommands (engine.commands(), document, focus);
             cue::registerRunCommands (engine.commands(), runs);
@@ -818,7 +846,7 @@ TEST_CASE ("prepare: the value that was there is read before the new one is writ
     for (int n = 0; n < 600; ++n)
     {
         if (const auto* now = rig.mounts.valueOf ("/desk/fader");
-            now != nullptr && *now == osc::Value::float32 (0.8f))
+            now != nullptr && *now == osc::Values { osc::Value::float32 (0.8f) })
             break;
 
         rig.tickOnce();
@@ -827,7 +855,7 @@ TEST_CASE ("prepare: the value that was there is read before the new one is writ
 
     const auto* written = rig.mounts.valueOf ("/desk/fader");
     REQUIRE (written != nullptr);
-    CHECK (*written == osc::Value::float32 (0.8f));
+    CHECK (*written == osc::Values { osc::Value::float32 (0.8f) });
 }
 
 TEST_CASE ("prepare: the pointer leaving puts the desk back, as an ordinary write")
@@ -847,7 +875,7 @@ TEST_CASE ("prepare: the pointer leaving puts the desk back, as an ordinary writ
     for (int n = 0; n < 600; ++n)
     {
         if (const auto* now = rig.mounts.valueOf ("/desk/fader");
-            now != nullptr && *now == osc::Value::float32 (0.8f))
+            now != nullptr && *now == osc::Values { osc::Value::float32 (0.8f) })
             break;
 
         rig.tickOnce();
@@ -855,7 +883,7 @@ TEST_CASE ("prepare: the pointer leaving puts the desk back, as an ordinary writ
     }
 
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
     /*  Away. */
     rig.setStandby (scene.after);
@@ -864,7 +892,7 @@ TEST_CASE ("prepare: the pointer leaving puts the desk back, as an ordinary writ
 
     const auto* restored = rig.mounts.valueOf ("/desk/fader");
     REQUIRE (restored != nullptr);
-    CHECK (*restored == osc::Value::float32 (0.2f));
+    CHECK (*restored == osc::Values { osc::Value::float32 (0.2f) });
 
     /*  AND THE RESTORE IS IN THE LOG AS A WRITE, which is what makes a replay
         of a rehearsal put the desk back too. */
@@ -899,7 +927,7 @@ namespace
         for (int n = 0; n < 600; ++n)
         {
             if (const auto* now = rig.mounts.valueOf ("/desk/fader");
-                now != nullptr && *now == osc::Value::float32 (wanted))
+                now != nullptr && *now == osc::Values { osc::Value::float32 (wanted) })
                 return;
 
             rig.tickOnce();
@@ -963,7 +991,7 @@ TEST_CASE ("prepare: Esc on a running act takes back the scene prepared inside i
 
         tickUntilDeskHolds (rig, 0.8f);
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
         const auto* ready = rig.runs.preparedRunOf (scene);
         REQUIRE (ready != nullptr);
@@ -980,7 +1008,7 @@ TEST_CASE ("prepare: Esc on a running act takes back the scene prepared inside i
             rig.tickOnce();
 
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.2f) });
         CHECK (rig.runs.find (sceneRun)->warning == cue::runWarning::revoked);
         CHECK (rig.runOf (release) == nullptr);
 
@@ -1014,7 +1042,7 @@ TEST_CASE ("prepare: a scene stopped while only prepared puts the desk back and 
         rig.setStandby (scene.group);
         tickUntilDeskHolds (rig, 0.8f);
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
         const auto* block = rig.runs.preparedRunOf (scene.group);
         REQUIRE (block != nullptr);
@@ -1029,7 +1057,7 @@ TEST_CASE ("prepare: a scene stopped while only prepared puts the desk back and 
                 rig.tickOnce();
 
             REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-            CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+            CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.2f) });
             CHECK (rig.runs.find (blockId)->warning == cue::runWarning::revoked);
             CHECK (rig.runOf (release) == nullptr);
             continue;
@@ -1042,7 +1070,7 @@ TEST_CASE ("prepare: a scene stopped while only prepared puts the desk back and 
             rig.tickOnce();
 
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
         REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
         CHECK (rig.runs.preparedRunOf (scene.group)->id == blockId);
 
@@ -1295,7 +1323,7 @@ TEST_CASE ("double Esc: the standby's pre-send already on its way still leaves")
 
     CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
     /*  And the scene is still the standby's, made ready. */
     REQUIRE (rig.runs.find (blockId) != nullptr);
@@ -1390,7 +1418,7 @@ TEST_CASE ("Esc and double Esc: a scene made ready under an act that has finishe
 
         CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
         //  And the scene is still the standby's, made ready.
         CHECK_FALSE (rig.runs.find (blockId)->isFinished());
@@ -1579,7 +1607,7 @@ TEST_CASE ("observation: a step asks the desk what it holds, and the answer is n
     REQUIRE (rig.observed());
 
     CHECK (rig.runner.observationsAsked() == 1u);
-    CHECK (*rig.mounts.observedOf ("/desk/fader") == osc::Value::float32 (0.2f));
+    CHECK (*rig.mounts.observedOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.2f) });
 
     /*  Not a read-back: no cue was waiting, and a verify that found this lying
         about would report a device agreeing with something it never said. */
@@ -1587,7 +1615,7 @@ TEST_CASE ("observation: a step asks the desk what it holds, and the answer is n
 
     /*  And what Go.dot WROTE is still the write, untouched by what was seen. */
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.75f) });
 
     /*  The record says which it was, so a replay puts it in the same store. */
     const auto log = rig.engine.log().contents();
@@ -1700,7 +1728,7 @@ TEST_CASE ("jump: a value the desk was seen to hold is what the diff is against"
 
     INFO ("log: " << rig.engine.log().contents());
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.75f) });
     CHECK (rig.mounts.observedOf ("/desk/fader") == nullptr);
 }
 
@@ -1935,7 +1963,7 @@ TEST_CASE ("go.doh: the next scene the horizon prepared inside the GO's own act 
     CHECK (recordsOf (rig, "run.revoke", blockId) == 1u);
     CHECK (rig.runs.find (blockId)->warning == cue::runWarning::revoked);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.2f) });
 }
 
 TEST_CASE ("go.doh: an act the GO entered, nobody heard, the next scene's block under it - given back, its pre-send put back once")
@@ -2006,7 +2034,7 @@ TEST_CASE ("go.doh: an act the GO entered, nobody heard, the next scene's block 
     CHECK (recordsOf (rig, "node.set", "/desk/fader") == 1u);
     CHECK (rig.runs.find (blockId)->warning == cue::runWarning::revoked);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.2f) });
 }
 
 TEST_CASE ("go.doh: an unheard scene's pre-send that takes back is put back before the horizon prepares the scene again, however long the scene's own fade runs")
@@ -2071,7 +2099,7 @@ TEST_CASE ("go.doh: an unheard scene's pre-send that takes back is put back befo
     CHECK (rig.runs.find (block)->state != cue::runState::preparing);
     CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 }
 
 TEST_CASE ("go.doh: a pre-send whose read-back had not come back by the Doh is not counted as left, and is pre-sent again")
@@ -2123,7 +2151,7 @@ TEST_CASE ("go.doh: a pre-send whose read-back had not come back by the Doh is n
 
     CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 }
 
 //==============================================================================
@@ -2208,7 +2236,7 @@ TEST_CASE ("prepare: a GO on a scene's row inside a running act adopts the scene
     //  The horizon makes scene two ready under the act, its header pre-sent.
     tickUntilDeskHolds (rig, 0.8f);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
     const auto* ready = rig.runs.preparedRunOf (shape.scene);
     REQUIRE (ready != nullptr);
@@ -2233,7 +2261,7 @@ TEST_CASE ("prepare: a GO on a scene's row inside a running act adopts the scene
     CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
     CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 }
 
 TEST_CASE ("prepare: the pointer leaving a scene made ready inside a running act gives it back, the desk put back first")
@@ -2251,7 +2279,7 @@ TEST_CASE ("prepare: the pointer leaving a scene made ready inside a running act
 
         tickUntilDeskHolds (rig, 0.8f);
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
         const auto* ready = rig.runs.preparedRunOf (shape.scene);
         REQUIRE (ready != nullptr);
@@ -2264,7 +2292,7 @@ TEST_CASE ("prepare: the pointer leaving a scene made ready inside a running act
             rig.tickOnce();
 
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.2f) });
         CHECK (rig.runs.find (block)->isFinished());
         CHECK (rig.runs.find (block)->warning == cue::runWarning::revoked);
 
@@ -2307,7 +2335,7 @@ TEST_CASE ("prepare: a GO on a scene's row while its act fades out keeps the des
 
     tickUntilDeskHolds (rig, 0.8f);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
     const auto actRun = rig.runs.liveRunOf (shape.act)->id;
     REQUIRE (rig.runs.preparedRunOf (shape.scene) != nullptr);
@@ -2333,7 +2361,7 @@ TEST_CASE ("prepare: a GO on a scene's row while its act fades out keeps the des
 
     CHECK (rig.runs.find (actRun)->isFinished());
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 }
 
 TEST_CASE ("prepare: a scene adopted under a running act whose header settles in the tick after the GO stays adopted")
@@ -2391,7 +2419,7 @@ TEST_CASE ("prepare: a scene adopted under a running act whose header settles in
     CHECK (rig.runs.find (block)->warning != cue::runWarning::revoked);
     CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 }
 
 /*  THE SAME SCENE AS THE ACT'S FIRST, THE GO ENTERING THE ACT ON ITS ROW
@@ -2436,7 +2464,7 @@ TEST_CASE ("prepare: a GO entering an act on its first scene's row plays the sce
     rig.setStandby (scene);
     tickUntilDeskHolds (rig, 0.8f);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
     const auto* actReady = rig.runs.preparedRunOf (act);
     const auto* ready = rig.runs.preparedRunOf (scene);
@@ -2467,7 +2495,7 @@ TEST_CASE ("prepare: a GO entering an act on its first scene's row plays the sce
     CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
     CHECK (recordsOf (rig, "node.set", "/desk/fader") == 0u);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
     //  And it plays: its line comes, under the block.
     for (int n = 0; n < 200 && rig.runOf (line) == nullptr; ++n)
@@ -2588,7 +2616,7 @@ TEST_CASE ("prepare: a clock move or a settings operation puts back what the sta
         const auto show = doc::CanonicalXml::write (rig.document);
         tickUntilDeskHolds (rig, 0.8f);
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 
         REQUIRE (rig.runs.preparedRunOf (scene.group) != nullptr);
         const auto block = rig.runs.preparedRunOf (scene.group)->id;
@@ -2703,7 +2731,7 @@ TEST_CASE ("prepare: a clock move or a settings operation puts back what the sta
         }
 
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
         CHECK (rig.runOf (release) == nullptr);
 
         //  And the next GO is instant again: it adopts that block.
@@ -2756,7 +2784,7 @@ TEST_CASE ("prepare: a clock move or a settings operation puts back what the sta
             last write the log has, and in the cases below with no pre-send
             after the put-back, against the session's desk itself. */
         REQUIRE (again.mounts.valueOf ("/desk/fader") != nullptr);
-        CHECK (*again.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+        CHECK (*again.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.2f) });
     }
 }
 
@@ -2822,7 +2850,7 @@ namespace
         bool deskHolds (float value) const
         {
             const auto* now = rig.mounts.valueOf ("/desk/fader");
-            return now != nullptr && *now == osc::Value::float32 (value);
+            return now != nullptr && *now == osc::Values { osc::Value::float32 (value) };
         }
 
         /*  The finished header pre-send of a block of `group` made after the
@@ -3171,7 +3199,7 @@ TEST_CASE ("go.doh: a prepared scene fired early and caught before its first sou
         CHECK (recordsOf (rig, "node.set", "/desk/fader") == setsBefore);
         CHECK (recordsOf (rig, "run.revoke", block) == 0u);
         REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+        CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
         CHECK (rig.sender.sentFor ("K3PV7WRB") == 1u);
 
         //  The corrected GO adopts it again, and the line waits its two seconds.
@@ -3422,7 +3450,7 @@ TEST_CASE ("jump: a value a jump sends replays record for record")
 
     CHECK (engineSets (rig, "/desk/fader") == 1u);
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.75f) });
 
     const auto show = doc::CanonicalXml::write (rig.document);
     const auto original = LogFile::parse (rig.engine.log().contents());
@@ -3544,7 +3572,7 @@ TEST_CASE ("go.doh: a value the next scene pre-sent after the GO goes back to wh
     REQUIRE (lastEngineSet (rig, "/desk/fader").has_value());
     CHECK (*lastEngineSet (rig, "/desk/fader") == osc::Value::float32 (0.2f));
     REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.2f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.2f) });
     CHECK (dohSaid (rig).find ("changed since the GO") == std::string::npos);
 }
 
@@ -3588,7 +3616,7 @@ TEST_CASE ("go.doh: a desk that echoes a quantised value still gets its value ba
     REQUIRE (rig.engine.submit ("cli", "go", {}));
     rig.tickOnce();
     REQUIRE (rig.observed());
-    REQUIRE (*rig.mounts.observedOf ("/desk/fader") == osc::Value::float32 (0.7498f));
+    REQUIRE (*rig.mounts.observedOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.7498f) });
 
     if (later)
         rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.5f));
@@ -3790,7 +3818,7 @@ TEST_CASE ("go.doh: a paused scene's pre-sends go back only for a cue that takes
     CHECK (*lastEngineSet (rig, "/desk/fader") == osc::Value::float32 (0.2f));
     CHECK (engineSets (rig, "/desk/level") == 0u);
     REQUIRE (rig.mounts.valueOf ("/desk/level") != nullptr);
-    CHECK (*rig.mounts.valueOf ("/desk/level") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/level") == osc::Values { osc::Value::float32 (0.8f) });
     CHECK (dohSaid (rig).find ("Level - left to its operator, not sent again") != std::string::npos);
 
     if (loops)
@@ -3818,7 +3846,7 @@ TEST_CASE ("go.doh: a paused scene's pre-sends go back only for a cue that takes
     ticksOf (rig, 10);
 
     CHECK (rig.sender.sentFor ("K3PV7WRB") == 4u);               // two pre-sends, the put-back, the fader again
-    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Values { osc::Value::float32 (0.8f) });
 }
 
 //==============================================================================
@@ -4021,4 +4049,98 @@ TEST_CASE ("go.doh: a scene forgotten by a second press, or over inside the wind
     REQUIRE (entry != nullptr);
     CHECK (entry->warning == std::string (takeBack ? "" : cue::runWarning::leftToOperator));
     CHECK (rig.sender.sentFor ("K3PV7WRB") == (takeBack ? 3u : 1u));
+}
+
+//==============================================================================
+/*  A NODE OF THREE IS VERIFIED ON ALL THREE (namespace draft §45). The probe
+    reads every element of VALUE, the read-back record carries them after its
+    flags, and the cue compares the whole list: a position that agrees on two
+    axes of three is a position the device does not hold. */
+TEST_CASE ("verified: a node of several values agrees on all of them, or disagrees")
+{
+    VerifiedRig rig;
+
+    const auto makeXyz = [&rig]
+    {
+        const auto id = rig.makeVerified ("f:1 f:2.5 f:-3");
+        rig.document.setAttribute ("/godot/cue/" + id + "/address", "/desk/xyz");
+        return id;
+    };
+
+    SUBCASE ("the device holds all three")
+    {
+        rig.device.target.saysXyz ({ osc::Value::float32 (1.0f), osc::Value::float32 (2.5f),
+                                     osc::Value::float32 (-3.0f) });
+
+        const auto cueId = makeXyz();
+        rig.fire (cueId);
+
+        const auto* run = rig.runUntilFinished (cueId);
+        REQUIRE (run != nullptr);
+        INFO ("state " << run->state << ", error " << run->error);
+        CHECK (run->state == cue::runState::done);
+
+        //  And the answer is in the log whole, so a replay reaches the same verdict.
+        const auto* answer = rig.mounts.readbackOf ("/desk/xyz");
+        CHECK ((answer == nullptr || answer->size() == 3u));
+    }
+
+    SUBCASE ("the device holds two of them")
+    {
+        rig.device.target.saysXyz ({ osc::Value::float32 (1.0f), osc::Value::float32 (2.5f),
+                                     osc::Value::float32 (4.0f) });
+
+        const auto cueId = makeXyz();
+        rig.fire (cueId);
+
+        const auto* run = rig.runUntilFinished (cueId);
+        REQUIRE (run != nullptr);
+        CHECK (run->state == cue::runState::failed);
+        CHECK (run->error == cue::oscError::disagreed);
+    }
+}
+
+TEST_CASE ("oscquery client: a VALUE of several elements is read whole, each against its own tag")
+{
+    using Client = oscquery::OscQueryClient;
+
+    const auto three = Client::valueFromReply (R"({"VALUE": [1, 2.5, "left"]})", "ffs");
+    REQUIRE (three.has_value());
+    CHECK (*three == osc::Values { osc::Value::float32 (1.0f), osc::Value::float32 (2.5f),
+                                   osc::Value::string ("left") });
+
+    //  One element that cannot be its tag refuses the answer.
+    CHECK_FALSE (Client::valueFromReply (R"({"VALUE": [1, "two", 3]})", "fff").has_value());
+}
+
+TEST_CASE ("verified: a cue of several messages asks every address")
+{
+    VerifiedRig rig;
+
+    //  The scripted desk says the same of its fader and its level.
+    rig.device.target.says ({ osc::Value::float32 (0.75f) });
+
+    SUBCASE ("both agree")
+    {
+        const auto cueId = rig.makeVerified ("f:0.75");
+        REQUIRE (rig.document.createMessage (cueId, "/desk/level", "f:0.75").ok);
+        rig.fire (cueId);
+
+        const auto* run = rig.runUntilFinished (cueId);
+        REQUIRE (run != nullptr);
+        INFO ("state " << run->state << ", error " << run->error);
+        CHECK (run->state == cue::runState::done);
+    }
+
+    SUBCASE ("the second disagrees")
+    {
+        const auto cueId = rig.makeVerified ("f:0.75");
+        REQUIRE (rig.document.createMessage (cueId, "/desk/level", "f:0.5").ok);
+        rig.fire (cueId);
+
+        const auto* run = rig.runUntilFinished (cueId);
+        REQUIRE (run != nullptr);
+        CHECK (run->state == cue::runState::failed);
+        CHECK (run->error == cue::oscError::disagreed);
+    }
 }

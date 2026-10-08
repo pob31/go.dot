@@ -851,6 +851,42 @@ namespace wfg::doc
                                                   osc::Value::string (edit.id) });
                         } });
 
+        /*  AN OSC CUE'S FURTHER MESSAGE (namespace draft 45, YP): one more
+            address and value list after the cue's own, at the end of its
+            messages. Changed with `node.set` at /godot/message/<id>, taken
+            away with `object.delete` - or made the cue's own, which is how
+            the first message is removed. */
+        registry.add ({ "message.create",
+                        "Adds a message to an OSC cue, after its own and the messages it has: an address and a"
+                        " list of values, either of which may be empty.",
+                        { { "cue", 's', false }, { "address", 's', true }, { "value", 's', true },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto cue = args[0].getString();
+                            const auto address = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto value = args.size() > 2 ? args[2].getString() : std::string {};
+                            const auto id = args.size() > 3 ? args[3].getString() : std::string {};
+                            const auto edit = document.createMessage (cue, address, value, id);
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok ({ osc::Value::string (cue), osc::Value::string (address),
+                                                  osc::Value::string (value), osc::Value::string (edit.id) });
+                        } });
+
+        registry.add ({ "message.promote",
+                        "Makes a message its OSC cue's own - its address and values the cue's - and takes the"
+                        " message away, in one edit.",
+                        { { "id", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.promoteMessage (args[0].getString()), args);
+                        } });
+
         //----------------------------------------------------------------------
         /*  PHASE 9a'S PLUGIN SET (decision AE): the processors every voice
             carries, declared once as the tracks are. All four words are
@@ -1122,7 +1158,13 @@ namespace wfg::doc
                     claim an address - but asking the show first means a mount
                     could never shadow it even if that rule were ever relaxed. */
                 if (foreign && address.rfind ("/godot", 0) != 0)
-                    return foreign (address, args[1]);
+                    return foreign (address, osc::Values (args.begin() + 1, args.end()));
+
+                /*  ONE VALUE FOR A ROW OF THE SHOW: the tail `node.set` takes is
+                    a device's (namespace draft §45), and a row given three
+                    values has been given a list it cannot hold. */
+                if (args.size() != 2)
+                    return Outcome::rejected (reason::typeMismatch);
 
                 const auto text = canonicalText (args[1]);
 
@@ -1142,8 +1184,9 @@ namespace wfg::doc
             });
 
         registry.add ({ "node.set",
-                        "Sets one value, by its address in the parameter tree.",
-                        { { "address", 's', false }, { "value", '*', false } },
+                        "Sets one value, by its address in the parameter tree; a device's node of several"
+                        " arguments takes them all, the first as the value and the rest after it.",
+                        { { "address", 's', false }, { "value", '*', false }, { "more", '*', true, true } },
                         true,
                         [writeOne] (CommandContext&, const std::vector<osc::Value>& args)
                         {

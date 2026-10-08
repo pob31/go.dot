@@ -17594,7 +17594,7 @@ TEST_CASE ("double Esc: nothing Go.dot started keeps writing, for fifty ticks af
         const auto ratePoints = rig.audio.ratePoints.size();
         const auto launches = rig.audio.launches.size();
         const auto arms = rig.armsAsked;
-        const auto revision = rig.mounts.revision();
+        const auto revision = rig.mounts.valueRevision();
         const auto trim = rig.dcas.trimOf (rig.band);
 
         for (int n = 0; n < 20; ++n)
@@ -17604,7 +17604,7 @@ TEST_CASE ("double Esc: nothing Go.dot started keeps writing, for fifty ticks af
         REQUIRE (rig.audio.ratePoints.size() > ratePoints); // the speed fade, on the voice
         REQUIRE (rig.audio.launches.size() > launches);     // the stream's media cue, launched again
         REQUIRE (rig.armsAsked > arms);                     // ... and armed again before it
-        REQUIRE (rig.mounts.revision() > revision);         // the stream, on the desk's tree
+        REQUIRE (rig.mounts.valueRevision() > revision);         // the stream, on the desk's tree
         REQUIRE (rig.dcas.trimOf (rig.band) < trim);        // the DCA fade, going down
         REQUIRE (rig.runner.fades().size() == 3u);          // level, speed and DCA, all still running
         REQUIRE (rig.sender.pending() == 1u);               // a value the cap is holding back
@@ -17644,7 +17644,7 @@ TEST_CASE ("double Esc: nothing Go.dot started keeps writing, for fifty ticks af
     const auto sweeps = audio.sweeps.size();
     const auto levels = audio.levels.size();
     const auto trim = rig.dcas.trimOf (rig.band);
-    const auto revision = rig.mounts.revision();
+    const auto revision = rig.mounts.valueRevision();
 
     //  The value the cap was holding went with the press (H4).
     CHECK (rig.sender.pending() == 0u);
@@ -17703,7 +17703,7 @@ TEST_CASE ("double Esc: nothing Go.dot started keeps writing, for fifty ticks af
     CHECK (same (rig.dcas.trimOf (rig.band), trim));
 
     //  Nothing more reached the desk's tree, and nothing waits to reach the desk.
-    CHECK (rig.mounts.revision() == revision);
+    CHECK (rig.mounts.valueRevision() == revision);
     CHECK (rig.sender.pending() == 0u);
 
     CHECK (rig.runner.fades().empty());

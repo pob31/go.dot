@@ -768,14 +768,16 @@ namespace
                 there is no sender here, and the absence is the feature. */
             wfg::doc::registerDocumentCommands (
                 engine.commands(), document,
-                [&mounts] (const std::string& address, const wfg::osc::Value& value)
+                [&mounts] (const std::string& address, const wfg::osc::Values& values)
                 {
-                    const auto written = mounts.write (address, value);
+                    const auto written = mounts.write (address, values);
 
-                    return written.ok
-                             ? wfg::Outcome::ok ({ wfg::osc::Value::string (address),
-                                                   written.value })
-                             : wfg::Outcome::rejected (written.reason);
+                    if (! written.ok)
+                        return wfg::Outcome::rejected (written.reason);
+
+                    std::vector<wfg::osc::Value> applied { wfg::osc::Value::string (address) };
+                    applied.insert (applied.end(), written.values.begin(), written.values.end());
+                    return wfg::Outcome::ok (std::move (applied));
                 },
                 /*  AND A RIDE ON A LIVE ROW, replayed through the same door the
                     session wrote it through - a fader's trim or a DCA's - so the
@@ -3308,7 +3310,7 @@ namespace
 
         wfg::doc::registerDocumentCommands (
             engine.commands(), document,
-            [&mounts, &sender] (const std::string& address, const wfg::osc::Value& value)
+            [&mounts, &sender] (const std::string& address, const wfg::osc::Values& values)
             {
                 /*  A WRITE TO SOMEBODY ELSE'S NODE, arriving through the same
                     command as a write to one of ours (PRD 4.11) - one named
@@ -3324,16 +3326,19 @@ namespace
                     the wire does not - a cue's own write never went out to a
                     device with its `tx` off, and a client's write, a scene's
                     restore and Doh!'s put-back now keep the same promise. */
-                const auto written = wfg::tree::writeToDevice (mounts, sender, address, value);
+                const auto written = wfg::tree::writeToDevice (mounts, sender, address, values);
 
                 if (! written.ok)
                     return wfg::Outcome::rejected (written.reason);
 
-                /*  Logged AS APPLIED, so the record carries the value that
-                    actually landed rather than the one that was offered - an
+                /*  Logged AS APPLIED, so the record carries the values that
+                    actually landed rather than the ones that were offered - an
                     integer 1 written to a float node is `f:1` in the log, and a
-                    replay puts the same bytes on the wire. */
-                return wfg::Outcome::ok ({ wfg::osc::Value::string (address), written.value });
+                    replay puts the same bytes on the wire. Every one of them,
+                    for a node of several (namespace draft §45). */
+                std::vector<wfg::osc::Value> applied { wfg::osc::Value::string (address) };
+                applied.insert (applied.end(), written.values.begin(), written.values.end());
+                return wfg::Outcome::ok (std::move (applied));
             },
             /*  A RIDE ON A LIVE ROW (Phase 6): a strip's fader on the run it
                 holds, or a DCA's. What a hand is doing tonight, so answered in

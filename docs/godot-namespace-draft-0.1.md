@@ -22181,10 +22181,18 @@ Mine (proposed):
 
 ### 45.5 Refused
 
-When the show is read and at the door: a message under another device than the cue's (YV); a message on a
-cue with no address; a curve on a value the message does not have, or on one that is not a number; points
-whose seconds do not climb, or a value outside the curve's `range`; `loop` with neither curves nor a
-duration is a warning.
+- **At the door:** a message on a cue that is not an OSC cue, or on one with no address of its own; a curve
+  on a value the message does not have, or on one that is not a number; points whose seconds do not climb,
+  or a value outside the curve's `range`. `node.set` of a row of the show given more than one value.
+- **At GO, and warned of by `wfg validate`:** a message under another device than the cue's own address (YV)
+  fails the run with `several-devices` before anything is written. Not refused at the door: retargeting a
+  cue moves its messages in one set of writes taken one at a time, and no order of them would pass a door
+  that checked each; and not refused when the show is read, since a show the door let through must open
+  again.
+- **By a described device, as ever:** a message whose values are not as many as its node's type tags, or
+  one that cannot be coerced to its tag - `type-mismatch`. A cue is refused at its first such message;
+  those written before it are still sent, so the tree and the wire agree on every value that landed.
+- `loop` with neither curves nor a duration is a warning.
 
 ### 45.6 Measurements
 
@@ -22222,4 +22230,31 @@ their curves; the copy of a cue's messages as a foot part.
 
 ### 45.9 Built so far
 
-Nothing yet.
+- **O.1, several values in a message** (2026-10-08). `osc::Values` is a message's arguments; `valuesFromAtoms`
+  and `atomsOf` read and spell a value list, through `splitAtoms` - the event log's quote-aware splitter,
+  moved beside the atom grammar so a cue's value and a log line split alike. `MountTable::write` takes a list:
+  a described node exactly as many as its type tags, each coerced to its own; an opaque device anything,
+  nothing at all included - **an empty value is a message that carries nothing** (mine), what `/go` is to a
+  great many desks, where before it failed the run. A mounted node keeps **every argument's RANGE**
+  (`Node::laterRanges`, `rangeOf`) and republishes them; its PANIC is checked argument by argument. The
+  sender, the read-back and observation stores, the Doh! records, the restores and the solver's planned
+  values all carry lists. `node.set` takes a variadic tail, which only a device's address may use - a row of
+  the show given two values is refused rather than read for its first - and a message arriving on the OSC
+  port for a device's address relays every argument (one of Go.dot's own is still read for its first).
+  `OscQueryClient` reads every element of VALUE; `mount.readback` carries the rest of a node's values after
+  its two trailing flags, so every log written before reads as it did. The open item of §14 - *a list sent
+  as N arguments is written as its first* - is answered for a device's nodes.
+- **O.2, several messages in a cue** (2026-10-08). `<Message>` under `<Osc>` (`address`, `value`; `cue`,
+  `index` derived; `osc/messages` lists them), `message.create` and `message.promote`. The Runner writes the
+  cue's own message, then each further one in order, into the tree and onto the wire in the tick it fires; a
+  `sent` cue is done when every message has left, a `verified` one when every address reads back what it
+  was given, the first to disagree failing it. One device per cue is held at GO and warned of (45.5). A cue
+  of several messages is never prepared ahead (ZH). The solver, the observation sweep and the persistent
+  re-send place and watch every message. Doh!'s put-back records each address the GO wrote, as before.
+- **O.3, bundles per device** (2026-10-08). `mount/bundles`, off by default, and a **Bundles** ON/OFF cell in
+  the Network tab after Rx and Tx (the word mine). `MountSender::flush` gathers what one flush sends a device
+  that takes bundles, by device in the order its first message was queued, and sends them as bundles
+  time-tagged immediately, each closed before 1200 bytes (`MountSender::bundleBytes`); a message too big to
+  share one goes alone as a plain message, and a bundle of one is still a bundle. A message the rate cap
+  holds stays out, in its place, and goes in a later flush's. Each message is answered and counted as itself,
+  so `sent`, a `sent` wait and a double Esc's drop read as they did.

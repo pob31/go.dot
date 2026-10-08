@@ -1295,6 +1295,9 @@ namespace
         the rollback 150, then Doh! 80 and Sound 56 (2026-10-03: the rollback
         column, OV-OX, moved both). */
     int networkDohAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 54 - 150 - 80 / 2; }
+
+    /*  And Bundles, left of Doh! (namespace draft 45): 62 wide. */
+    int networkBundlesAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 54 - 150 - 80 - 62 / 2; }
     int midiDohAt (const juce::ListBox& list)    { return list.getWidth() - 8 - 24 - 190 - 150 - 80 / 2; }
     int midiSoundAt (const juce::ListBox& list)  { return list.getWidth() - 8 - 24 - 190 - 150 - 80 - 56 / 2; }
 
@@ -1348,6 +1351,41 @@ TEST_CASE ("show settings UI: a network device's Doh! cell switches between leav
     rig.sent.clear();
     clickAt (*list, networkDohAt (*list));
     CHECK (rig.sent.empty());
+}
+
+/*  WHETHER ONE TICK'S MESSAGES LEAVE AS ONE BUNDLE (namespace draft 45, YQ):
+    the device's own switch, a third ON or OFF after Rx and Tx. */
+TEST_CASE ("show settings UI: a network device's Bundles cell switches its messages into bundles and back")
+{
+    Rig rig;
+    REQUIRE (rig.document.createMount ("/wfs", "", "QX7DESK0").ok);
+
+    const auto first = rig.publish();
+    client::ui::ShowSettingsWindow panel (rig.theme, *first,
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setSize (1400, 800);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
+
+    auto* list = listOn (*tabs->getCurrentContentComponent());
+    REQUIRE (list != nullptr);
+    REQUIRE (list->getListBoxModel()->getNumRows() == 1);
+
+    //  Off by default, and one click asks for bundles.
+    CHECK_FALSE (client::model::readDevices (*first).front().bundles);
+    clickAt (*list, networkBundlesAt (*list));
+    CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/mount/QX7DESK0/bundles", "true" });
+
+    REQUIRE (rig.document.setAttribute ("/godot/mount/QX7DESK0/bundles", "true").ok);
+    const auto bundling = rig.publish();
+    panel.refresh (*bundling);
+    CHECK (client::model::readDevices (*bundling).front().bundles);
+
+    rig.sent.clear();
+    clickAt (*list, networkBundlesAt (*list));
+    CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/mount/QX7DESK0/bundles", "false" });
 }
 
 TEST_CASE ("show settings UI: a MIDI port says whether it plays sound and what Doh! does with it")

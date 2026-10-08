@@ -54,8 +54,12 @@ namespace wfg::doc
         A callback rather than a MountTable& because the layering is the point:
         this file knows about a show and a schema, and `wfg tree`, `wfg canon`
         and every document test register these commands with no mounts at all.
-        Absent, a foreign address is refused exactly as it was in Phase 1. */
-    using ForeignWrite = std::function<Outcome (const std::string& address, const osc::Value&)>;
+        Absent, a foreign address is refused exactly as it was in Phase 1.
+
+        EVERY VALUE THE WRITE CARRIED (namespace draft §45): a device's node may
+        take several arguments - `/adm/obj/1/xyz` three - and `node.set` hands
+        them all on, where a node of the show takes exactly one. */
+    using ForeignWrite = std::function<Outcome (const std::string& address, const osc::Values&)>;
 
     /*  AND WHERE A WRITE GOES WHEN THE ADDRESS IS GO.DOT'S BUT NOT THE SHOW'S
         (Phase 6). A fader rides `/godot/run/<id>/trim` and `/godot/dca/<id>/trim`

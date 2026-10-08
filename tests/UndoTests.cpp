@@ -1327,3 +1327,53 @@ TEST_CASE ("undo: a suppressed scope writes nothing onto the stack")
     CHECK (document.getAttribute ("/godot/list/" + mainList + "/name")
              == std::string ("Outer"));
 }
+
+//==============================================================================
+/*  AN OSC CUE'S FURTHER MESSAGE (namespace draft 45): made by one command,
+    made the cue's own by one - and one undo takes the promotion back whole, the
+    cue's first message and the further one both as they were. */
+TEST_CASE ("undo: a message made the cue's own is taken back in one step")
+{
+    Rig rig;
+
+    const std::string message = "M3SS4G01";
+
+    REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+    REQUIRE (rig.apply (1, "cue.create", { text (mainList), osc::Value::int32 (0),
+                                           text ("osc"), text ("Move"), text (firstCue) }).applied == 1);
+
+    const auto cue = "/godot/cue/" + firstCue + "/";
+    REQUIRE (rig.apply (10, "node.set", { text (cue + "address"), text ("/desk/fader") }).applied == 1);
+    REQUIRE (rig.apply (200, "node.set", { text (cue + "value"), text ("f:0.5") }).applied == 1);
+
+    REQUIRE (rig.apply (400, "message.create", { text (firstCue), text ("/desk/xyz"),
+                                                 text ("f:1 f:2 f:3"), text (message) }).applied == 1);
+    CHECK (rig.document.getAttribute ("/godot/message/" + message + "/value") == std::string ("f:1 f:2 f:3"));
+
+    REQUIRE (rig.apply (600, "message.promote", { text (message) }).applied == 1);
+    CHECK (rig.document.getAttribute (cue + "address") == std::string ("/desk/xyz"));
+    CHECK (rig.document.getAttribute (cue + "value") == std::string ("f:1 f:2 f:3"));
+    CHECK_FALSE (rig.document.findById (message).isValid());
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("message.promote"));
+    CHECK (rig.document.getAttribute (cue + "address") == std::string ("/desk/fader"));
+    CHECK (rig.document.getAttribute (cue + "value") == std::string ("f:0.5"));
+    CHECK (rig.document.findById (message).isValid());
+}
+
+TEST_CASE ("undo: a message is refused on a cue that cannot take one")
+{
+    Rig rig;
+
+    REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+    REQUIRE (rig.apply (1, "cue.create", { text (mainList), osc::Value::int32 (0),
+                                           text ("osc"), text ("Nowhere yet"), text (firstCue) }).applied == 1);
+    REQUIRE (rig.apply (2, "cue.create", { text (mainList), osc::Value::int32 (1),
+                                           text ("memo"), text ("A memo"), text (inGroupA) }).applied == 1);
+
+    //  An OSC cue with no address has no first message for another to follow.
+    CHECK (rig.apply (10, "message.create", { text (firstCue), text ("/desk/scene") }).rejected == 1);
+
+    //  And a memo sends nothing at all.
+    CHECK (rig.apply (20, "message.create", { text (inGroupA), text ("/desk/scene") }).rejected == 1);
+}

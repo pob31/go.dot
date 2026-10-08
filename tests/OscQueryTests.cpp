@@ -62,8 +62,11 @@
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/cue/Run.h>
 #include <wfg/engine/osc/OscCodec.h>
+#include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/tree/ParameterTree.h>
@@ -1748,4 +1751,43 @@ TEST_CASE ("oscquery: go.doh is /godot/cmd/go/doh, and /godot/cmd/go is still GO
     const auto* contents = described.value->find ("CONTENTS");
     REQUIRE (contents != nullptr);
     CHECK (contents->find ("doh") != nullptr);
+}
+
+//==============================================================================
+/*  A DEVICE'S MESSAGE KEEPS EVERY ARGUMENT (namespace draft §45). What arrives
+    on the OSC port for an address that is not Go.dot's is a write to a device's
+    node, and a node may take three - relaying only the first of
+    `/obj/xyz x y z` would move a source along one axis of three. A row of
+    Go.dot's own holds one value, and is still read for its first. */
+TEST_CASE ("oscquery: a message for a device keeps every argument, one for Go.dot its first")
+{
+    Engine engine;
+    engine.log().openInMemory ({});
+
+    std::vector<std::vector<osc::Value>> seen;
+    engine.commands().add ({ "node.set", "Records what it was given.",
+                             { { "address", 's', false }, { "value", '*', false }, { "more", '*', true, true } },
+                             true,
+                             [&seen] (CommandContext&, const std::vector<osc::Value>& args)
+                             {
+                                 seen.push_back (args);
+                                 return Outcome::ok (args);
+                             } });
+
+    doc::ShowDocument document;
+    tree::MountTable mounts;
+    cue::RunTable runs;
+    tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    tree::TouchTable touches;
+    osc::UdpEndpoint udp;
+    EngineNamespace nameSpace { engine, parameters, touches, udp };
+
+    const osc::Values three { osc::Value::float32 (1.0f), osc::Value::float32 (2.0f), osc::Value::float32 (3.0f) };
+    nameSpace.write ("udp:10.0.0.5:9000", osc::Packet::message ("/obj/xyz", three));
+    nameSpace.write ("udp:10.0.0.5:9000", osc::Packet::message ("/godot/engine/x", three));
+    engine.processTick (0);
+
+    REQUIRE (seen.size() == 2u);
+    CHECK (seen[0] == std::vector<osc::Value> { osc::Value::string ("/obj/xyz"), three[0], three[1], three[2] });
+    CHECK (seen[1] == std::vector<osc::Value> { osc::Value::string ("/godot/engine/x"), three[0] });
 }
