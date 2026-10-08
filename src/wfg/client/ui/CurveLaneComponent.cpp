@@ -33,6 +33,11 @@ namespace wfg::client::ui
         constexpr int axisWidth = 54;
         constexpr int rulerHeight = 16;
 
+        /*  THE HEAD'S WIDTH ON ONE ROW: the curve, its REC, the picked point,
+            the puck's three and the transport. Narrower - a laptop's foot - the
+            puck's three go to a second row rather than over each other. */
+        constexpr int oneRowWidth = 780;
+
         bool samePoints (const std::vector<model::LanePoint>& a, const std::vector<model::LanePoint>& b)
         {
             if (a.size() != b.size())
@@ -452,13 +457,14 @@ namespace wfg::client::ui
     //==============================================================================
     juce::Rectangle<int> CurveLaneComponent::headArea() const
     {
-        return getLocalBounds().removeFromTop (juce::roundToInt (theme.row * theme.type));
+        const auto rows = getWidth() < oneRowWidth ? 2 : 1;
+        return getLocalBounds().removeFromTop (rows * juce::roundToInt (theme.row * theme.type));
     }
 
     juce::Rectangle<int> CurveLaneComponent::pictureArea() const
     {
         auto area = getLocalBounds();
-        area.removeFromTop (juce::roundToInt (theme.row * theme.type));
+        area.removeFromTop (headArea().getHeight());
         area.removeFromBottom (rulerHeight);
         area.removeFromLeft (axisWidth);
         return area.reduced (4, 4);
@@ -517,7 +523,10 @@ namespace wfg::client::ui
     //==============================================================================
     void CurveLaneComponent::resized()
     {
-        auto head = headArea().reduced (2, 3);
+        auto whole = headArea();
+        const auto rowHeight = juce::roundToInt (theme.row * theme.type);
+        auto head = whole.removeFromTop (rowHeight).reduced (2, 3);
+        auto second = whole.isEmpty() ? head : whole.reduced (2, 3);
 
         recordAll.setBounds (head.removeFromRight (70));
         head.removeFromRight (2);
@@ -536,11 +545,14 @@ namespace wfg::client::ui
         head.removeFromLeft (4);
         pointValue.setBounds (head.removeFromLeft (90));
         head.removeFromLeft (12);
-        puckAxis.setBounds (head.removeFromLeft (70));
-        head.removeFromLeft (4);
-        puckSpeed.setBounds (head.removeFromLeft (52));
-        head.removeFromLeft (4);
-        puckInvert.setBounds (head.removeFromLeft (40));
+
+        //  The puck's three: after the point on one row, or a row of their own.
+        auto& puckRow = whole.isEmpty() ? head : second;
+        puckAxis.setBounds (puckRow.removeFromLeft (70));
+        puckRow.removeFromLeft (4);
+        puckSpeed.setBounds (puckRow.removeFromLeft (52));
+        puckRow.removeFromLeft (4);
+        puckInvert.setBounds (puckRow.removeFromLeft (40));
     }
 
     void CurveLaneComponent::paint (juce::Graphics& g)

@@ -4655,4 +4655,12 @@ TEST_CASE ("curve lane: the picked curve's puck - its axis, speed and turn - eac
     lane.puckInvertButton().onClick();
     REQUIRE (written.size() == 3u);
     CHECK (written.back() == std::pair<std::string, std::string> { "/godot/curve/C0RVE001/invert", "true" });
+
+    //  On one row at its width; narrower, the puck's three take a row of their own rather than overlap.
+    CHECK (lane.puckAxisMenu().getY() == lane.pointValueBox().getY());
+
+    lane.setSize (600, 220);
+    CHECK (lane.puckAxisMenu().getY() > lane.pointValueBox().getBottom());
+    CHECK_FALSE (lane.puckInvertButton().getBounds().intersects (lane.pointValueBox().getBounds()));
+    CHECK (lane.puckInvertButton().getRight() <= lane.getWidth());
 }
