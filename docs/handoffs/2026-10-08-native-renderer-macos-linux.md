@@ -48,6 +48,13 @@ wfg_tests "--test-case=video*" "--test-case-exclude=video gpu:*"
 - **Known CI problem:** on the GitHub Linux runner, Mesa's software rasteriser (llvmpipe) ran out of memory
   compiling these shaders ("LLVM ERROR: out of memory", then SIGABRT). It may not happen on the NUC's real
   GPU. Please report what both commands above do there.
+- **Known CI problem, Mac:** on the GitHub macOS runner, whose GPU is a virtual machine's ("Apple
+  Paravirtual device"), Metal would not compile the shaders (`METAL_SHADER_COMPILATION_FAILED`). The
+  Metal source looks ordinary, so this is most likely the virtual device, but nothing has proved it.
+  **Run the first command before anything else on the Mac mini.** If it fails, the message now names the
+  program ("the fill shader would not compile on Metal on Apple M…") and gives the Metal compiler's own
+  words: send those back. Since `8984614` both runners skip these cases (`GITHUB_ACTIONS`), so CI no
+  longer checks the GPU's pixels on Linux or macOS. The Mac mini and the NUC are where it is checked.
 - **The Mac's NDI case** runs only if an NDI runtime is installed (NDI Tools). Without one it says so and
   checks that the refusal is in words.
 

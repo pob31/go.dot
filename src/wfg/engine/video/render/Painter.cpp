@@ -211,6 +211,7 @@ namespace wfg::video::render
             const sg_shader_desc* descs[] { video_fill_shader_desc (backend), video_picture_shader_desc (backend),
                                             video_movie_shader_desc (backend), video_movie_q_shader_desc (backend),
                                             video_mask_shader_desc (backend), video_warp_shader_desc (backend) };
+            const char* names[] { "fill", "picture", "movie", "movie_q", "mask", "warp" };
 
             for (std::size_t n = 0; n < shaders.size(); ++n)
             {
@@ -224,7 +225,8 @@ namespace wfg::video::render
 
                 if (sg_query_shader_state (shaders[n]) != SG_RESOURCESTATE_VALID)
                 {
-                    why = "a shader would not compile on " + gpu::describe() + ": " + gpu::lastMessage();
+                    why = "the " + std::string (names[n]) + " shader would not compile on " + gpu::describe() + ": "
+                        + gpu::lastMessage();
                     return false;
                 }
             }

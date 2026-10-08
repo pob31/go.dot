@@ -33,14 +33,44 @@ namespace wfg::video::gpu
         std::mutex messageLock;
         std::string message;
 
+        /*  The compiler's own words, which sokol logs as information straight
+            after the error they explain - "shader compilation failed (metal)"
+            alone names no line (the macOS runner, 2026-10-08). */
+        bool explainsTheError (std::uint32_t item) noexcept
+        {
+            switch (item)
+            {
+                case SG_LOGITEM_GL_SHADER_COMPILATION_FAILED:
+                case SG_LOGITEM_GL_SHADER_LINKING_FAILED:
+                case SG_LOGITEM_D3D11_SHADER_COMPILATION_OUTPUT:
+                case SG_LOGITEM_METAL_SHADER_COMPILATION_OUTPUT:
+                case SG_LOGITEM_METAL_CREATE_CPS_OUTPUT:
+                case SG_LOGITEM_METAL_CREATE_RPS_OUTPUT:
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
         void logged (const char* /*tag*/, std::uint32_t level, std::uint32_t item, const char* text,
                      std::uint32_t line, const char* /*file*/, void* /*user*/)
         {
-            //  Errors and warnings; sokol's information is not a fault.
+            const std::lock_guard<std::mutex> hold (messageLock);
+
             if (level > 2)
+            {
+                //  Information is not a fault, save the compiler explaining one.
+                if (text != nullptr && explainsTheError (item))
+                    message += (message.empty() ? "" : ": ") + std::string (text);
+
+                return;
+            }
+
+            //  Direct3D warns, with nothing to say, between its error and its output.
+            if (level == 2 && explainsTheError (item))
                 return;
 
-            const std::lock_guard<std::mutex> hold (messageLock);
             message = text != nullptr ? std::string (text)
                                       : "sokol_gfx item " + std::to_string (item) + " at line " + std::to_string (line);
         }
