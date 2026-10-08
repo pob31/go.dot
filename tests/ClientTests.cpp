@@ -5962,6 +5962,21 @@ TEST_CASE ("client: the show's devices are read out of the tree")
     CHECK (wfs->name.empty());
     CHECK (wfs->label() == "/wfs");
 
+    //  Nothing heard yet, and no LISTEN with nothing armed (O.8, O.10).
+    CHECK (wfs->heard == 0);
+    CHECK (wfs->listen == "off");
+
+    /*  The listener's word, published on the runtime half every publish -
+        moved with no command. */
+    const auto wfsId = wfs->id;
+    rig.parameters.setListenStatus ([wfsId] (const std::string& id)
+                                    { return id == wfsId ? std::string ("listening") : std::string ("off"); });
+
+    for (const auto& row : model::readDevices (*rig.publish (1)))
+        CHECK (row.listen == (row.id == wfsId ? "listening" : "off"));
+
+    rig.parameters.setListenStatus (nullptr);
+
     rig.apply (1, "window", "node.set",
                { osc::Value::string ("/godot/mount/" + wfs->id + "/name"),
                  osc::Value::string ("The WFS") });
@@ -10520,8 +10535,17 @@ TEST_CASE ("client: an OSC cue's curves read with an axis each, and edited on it
     curves.startPass ("RUN00001");
     curves.lastPass = "40 " + cue + " untouched";
 
-    const auto armed = model::readOscCurves (*rig.publish (10), cue);
+    const auto armedTree = rig.publish (10);
+    const auto armed = model::readOscCurves (*armedTree, cue);
     REQUIRE (armed.curves.size() == 2u);
+
+    //  The ride's node joins its curve's container, and no address is published twice.
+    {
+        std::set<std::string> seen;
+
+        for (const auto* node : armedTree->all())
+            CHECK (seen.insert (node->address).second);
+    }
     CHECK (armed.armedHere);
     CHECK_FALSE (armed.armedElsewhere);
     CHECK (armed.recording);

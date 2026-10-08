@@ -112,6 +112,8 @@ namespace wfg::client::model
             else if (name == "bundles")    row.bundles = text (node) == "true";
             else if (name == "namespace")  row.namespaceFile = text (node);
             else if (name == "sent")       row.sent = number (text (node), 0);
+            else if (name == "heard")      row.heard = number (text (node), 0);
+            else if (name == "listen")     row.listen = text (node).empty() ? std::string ("off") : text (node);
             else if (name == "problem")    row.problem = text (node);
 
             /*  FAIL-SAFE, as the engine reads it (PRD §3.32): only the exact

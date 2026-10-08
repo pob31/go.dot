@@ -65,6 +65,7 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -325,6 +326,14 @@ namespace wfg::tree
             for `/godot/curves/` and each armed curve's `ride`. */
         void setCurves (const cue::CurveTable* curvesToRead) noexcept { curveTable = curvesToRead; }
 
+        /*  What each device's LISTEN is doing (O.10), for `mount/listen`: the
+            listener's word, asked every publish since it moves with no command.
+            Unset, every device is `off`. */
+        void setListenStatus (std::function<std::string (const std::string&)> statusOf)
+        {
+            listenStatusOf = std::move (statusOf);
+        }
+
         /*  WHAT THE RENDERER FOUND (Phase 8a): the displays, whether each video
             output is bound, how its frames are going. Absent - a replay, a tree
             dump - and the outputs read unbound, the renderer stopped. */
@@ -464,6 +473,7 @@ namespace wfg::tree
         const cue::TakeTable* takes = nullptr;
         const cue::LaneTable* lanes = nullptr;
         const cue::CurveTable* curveTable = nullptr;
+        std::function<std::string (const std::string&)> listenStatusOf;
         const video::VideoHost* videoHost = nullptr;
         const video::Converter* converter = nullptr;
         const video::ffmpeg::Installer* installer = nullptr;
@@ -584,6 +594,9 @@ namespace wfg::tree
             published against from the runtime half (2026-09-25), because a
             page moves with no command and the document half is a cache. */
         std::vector<std::string> declaredSurfaces;
+
+        /** The devices the show declares, for the runtime half's `listen`. */
+        std::vector<std::string> declaredMounts;
         const cue::RunTable& runs;
 
         /*  Which cues can be holding one slot at once, and every dangling

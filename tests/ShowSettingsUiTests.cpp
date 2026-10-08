@@ -1290,14 +1290,14 @@ namespace
         right: the row's 8 px of padding, then each cell's width. Written out
         here so a column that moves fails a case rather than a show.
 
-        The Network tab: the cross 24, the problem 150, the sent count 54, the
-        rollback 150, then Doh! 80. The MIDI tab: the cross 24, the state 190,
+        The Network tab: the cross 24, the problem 150, the heard count 54 (O.8),
+        the sent count 54, the rollback 150, then Doh! 80. The MIDI tab: the cross 24, the state 190,
         the rollback 150, then Doh! 80 and Sound 56 (2026-10-03: the rollback
         column, OV-OX, moved both). */
-    int networkDohAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 54 - 150 - 80 / 2; }
+    int networkDohAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 54 - 54 - 150 - 80 / 2; }
 
     /*  And Bundles, left of Doh! (namespace draft 45): 62 wide. */
-    int networkBundlesAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 54 - 150 - 80 - 62 / 2; }
+    int networkBundlesAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 54 - 54 - 150 - 80 - 62 / 2; }
     int midiDohAt (const juce::ListBox& list)    { return list.getWidth() - 8 - 24 - 190 - 150 - 80 / 2; }
     int midiSoundAt (const juce::ListBox& list)  { return list.getWidth() - 8 - 24 - 190 - 150 - 80 - 56 / 2; }
 

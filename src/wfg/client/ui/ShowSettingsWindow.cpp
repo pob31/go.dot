@@ -1897,6 +1897,8 @@ namespace wfg::client::ui
                                                                && a.doh == b.doh
                                                                && a.dohRollback == b.dohRollback
                                                                && a.sent == b.sent
+                                                               && a.heard == b.heard
+                                                               && a.listen == b.listen
                                                                && a.problem == b.problem;
                                                        });
 
@@ -1970,9 +1972,9 @@ namespace wfg::client::ui
                 auto cells = cellsFor (heading.withWidth (rowWidth()));
 
                 const char* names[] { "Name", "Prefix", "IPv4 Address", "Tx Port",
-                                      "Rx", "Tx", "Bundles", "Doh!", "Rollback", "Sent" };
+                                      "Rx", "Tx", "Bundles", "Doh!", "Rollback", "Sent", "Heard" };
 
-                for (auto at = 0; at < 10; ++at)
+                for (auto at = 0; at < 11; ++at)
                     g.drawText (names[at], cells[static_cast<std::size_t> (at)],
                                 juce::Justification::centredLeft);
             }
@@ -2000,12 +2002,17 @@ namespace wfg::client::ui
                 Doh!'s setting (PRD §3.32), then the two switches, then the
                 numbers; the name takes what is left, because it is the one
                 that wants room. */
-            static std::array<juce::Rectangle<int>, 12> cellsFor (juce::Rectangle<int> row)
+            static std::array<juce::Rectangle<int>, 13> cellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
                 const auto cross = area.removeFromRight (24);
                 const auto problem = area.removeFromRight (150);
+
+                /*  HEARD beside Sent (O.8): whether the device is talking at
+                    all - the first thing to look at when a recording catches
+                    nothing. */
+                const auto heard = area.removeFromRight (54);
                 const auto sent = area.removeFromRight (54);
 
                 /*  DOH!'S ROLLBACK after its setting (2026-10-03, OV-OX): the
@@ -2026,7 +2033,7 @@ namespace wfg::client::ui
                     at all. Taken from the name, which has the rest of the row. */
                 const auto prefix = area.removeFromRight (200);
 
-                return { area, prefix, host, port, rx, tx, bundles, doh, rollback, sent, problem, cross };
+                return { area, prefix, host, port, rx, tx, bundles, doh, rollback, sent, heard, problem, cross };
             }
 
             /*  What a click at this x is on, by the same arithmetic. Named
@@ -2039,9 +2046,9 @@ namespace wfg::client::ui
                 const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
                 const Cell order[] { Cell::name, Cell::prefix, Cell::host, Cell::port,
                                      Cell::rx, Cell::tx, Cell::bundles, Cell::doh, Cell::rollback, Cell::none,
-                                     Cell::problem, Cell::cross };
+                                     Cell::none, Cell::problem, Cell::cross };
 
-                for (auto at = 0; at < 12; ++at)
+                for (auto at = 0; at < 13; ++at)
                     if (x >= cells[static_cast<std::size_t> (at)].getX()
                           && x < cells[static_cast<std::size_t> (at)].getRight())
                         return order[at];
@@ -2115,6 +2122,7 @@ namespace wfg::client::ui
 
                 g.setColour (Look::colour (theme, "ink-dim"));
                 g.drawText (juce::String (entry.sent), cells[9], juce::Justification::centredLeft);
+                g.drawText (juce::String (entry.heard), cells[10], juce::Justification::centredLeft);
 
                 /*  AND WHAT IS WRONG WITH IT, in the engine's own sentence.
                     This is the whole reason the row exists rather than a line
@@ -2124,14 +2132,26 @@ namespace wfg::client::ui
                 if (! entry.problem.empty())
                 {
                     g.setColour (Look::colour (theme, "failed"));
-                    g.drawText (juce::String (entry.problem), cells[10],
+                    g.drawText (juce::String (entry.problem), cells[11],
+                                juce::Justification::centredLeft, true);
+                }
+
+                /*  With nothing wrong, what its LISTEN is doing while a curve is
+                    armed on it (O.10), in the engine's word: a word that fails
+                    is drawn as a failure, so the word carries it and not only
+                    the colour (4.8). */
+                else if (entry.listen != "off")
+                {
+                    const auto failing = entry.listen == "unreachable" || entry.listen == "unsupported";
+                    g.setColour (Look::colour (theme, failing ? "failed" : "ink-dim"));
+                    g.drawText ("LISTEN " + juce::String (entry.listen), cells[11],
                                 juce::Justification::centredLeft, true);
                 }
 
                 if (! locked)
                 {
                     g.setColour (Look::colour (theme, "ink-dim"));
-                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[11],
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[12],
                                 juce::Justification::centred);
                 }
             }

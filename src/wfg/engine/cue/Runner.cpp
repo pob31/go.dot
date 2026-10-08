@@ -3202,6 +3202,37 @@ namespace wfg::cue
         return made;
     }
 
+    tree::MountListener::Wanted Runner::listenWanted() const
+    {
+        tree::MountListener::Wanted out;
+
+        if (curveTable == nullptr || mounts == nullptr || ! curveTable->armed() || document.isLocked())
+            return out;
+
+        for (const auto& id : curveTable->armedCurves())
+        {
+            const auto curve = document.findById (id);
+
+            if (! curve.isValid())
+                continue;
+
+            //  A curve's message is its parent: a further one, or the cue's own.
+            const auto address = curve.getParent()[juce::Identifier ("address")].toString().toStdString();
+            const auto mountId = address.empty() ? std::string {} : mounts->mountOf (address);
+            const auto* declaration = mountId.empty() ? nullptr : mounts->declarationOf (mountId);
+
+            if (declaration == nullptr || ! declaration->rx || ! declaration->canBeAsked())
+                continue;
+
+            auto& device = out[mountId];
+            device.host = declaration->host;
+            device.queryPort = declaration->queryPort;
+            device.addresses.insert (address);
+        }
+
+        return out;
+    }
+
     void Runner::recordCurves (Engine& engine, std::int64_t tick)
     {
         if (curveTable == nullptr || ! curveTable->armed())
@@ -3264,7 +3295,23 @@ namespace wfg::cue
                         {
                             const auto when = mounts->heardAtTick (target.address);
 
-                            if (when >= curveTable->startTick && when > ride.sampledTick
+                            /*  NOT GO.DOT'S OWN VALUE COMING BACK (O.10, mine): a
+                                device that reports every change - a motor fader,
+                                a server that pushes to every listener - sends the
+                                curve's value straight back while it plays, and
+                                that is no hand. Before a curve is latched, a
+                                report of exactly what was last sent is passed
+                                over; once latched, every report counts. */
+                            const auto echo = ! ride.latched && lane.arg < target.written.size()
+                                                && lane.arg < said->size() && (*said)[lane.arg].isNumber()
+                                                && target.written[lane.arg].isNumber()
+                                                && std::abs ((*said)[lane.arg].asDouble() - target.written[lane.arg].asDouble())
+                                                     <= 1.0e-6 * std::max (1.0, std::abs (target.written[lane.arg].asDouble()));
+
+                            if (echo && when > ride.sampledTick)
+                                ride.sampledTick = when;
+
+                            if (! echo && when >= curveTable->startTick && when > ride.sampledTick
                                   && lane.arg < said->size() && (*said)[lane.arg].isNumber())
                             {
                                 ride.value = (*said)[lane.arg].asDouble();

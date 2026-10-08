@@ -62,6 +62,7 @@
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/RelaxNg.h>
+#include <wfg/engine/tree/MountListener.h>
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/OscQueryJson.h>
@@ -3793,6 +3794,11 @@ namespace
             endpoint for the gate's reason. */
         wfg::tree::HeardBox heardBox;
 
+        /*  AND WHAT A DEVICE THAT CAN BE ASKED PUSHES (O.10): LISTEN on its
+            OSCQuery socket, for the curves armed on it, into the same box.
+            Declared after the box, so it stops first. */
+        wfg::tree::MountListener listener { heardBox };
+
         /*  THE NETWORK MONITOR'S TAP (monitor/TrafficTap.h), declared before
             every socket and port that records into it for the reason given
             above: each has a thread of its own, and the tap must outlive them
@@ -4009,6 +4015,7 @@ namespace
         parameters.setSurfaces (&surfaceTable);
         parameters.setLanes (&lanes);
         parameters.setCurves (&curveTable);
+        parameters.setListenStatus ([&listener] (const std::string& mountId) { return listener.statusOf (mountId); });
 
         /*  THE PICTURES (Phase 8a, namespace draft 35.4): the region the scene
             lives in, made now and held for the session, and a renderer kept
@@ -4137,6 +4144,7 @@ namespace
         sender.setSocket (udp);
         parameters.setSender (&sender);
         probe.start();
+        listener.start();
 
         /*  A SAVED SHOW LOOKS LIKE ONE (app/FolderIcon.h): after a save or a
             copy lands, on the writer's thread, its folder gets the show icon.
@@ -4600,6 +4608,11 @@ namespace
                                      heardArgs.insert (heardArgs.end(), said.values.begin(), said.values.end());
                                      engine.submit ("mount:" + said.mountId, "mount.heard", std::move (heardArgs));
                                  }
+
+                                 /*  WHAT TO LISTEN TO, from what is armed: the
+                                     listener's thread connects and tells the
+                                     devices, and lets them go when nothing is. */
+                                 listener.want (runner.listenWanted());
 
                                  if (audioState.settingsStatus != "applying")
                                      runner.beforeTick (engine, tickIndex);
@@ -5926,6 +5939,7 @@ namespace
 
         server.stop();
         probe.stop();
+        listener.stop();
 
         /*  Between two frames, or a few kilobytes into a hash: a Ctrl-C does
             not sit through a gigabyte of WAV. What it had not reached is

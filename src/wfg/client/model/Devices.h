@@ -96,6 +96,12 @@ namespace wfg::client::model
         /** How many messages have left for it since the show opened. */
         int sent = 0;
 
+        /*  How many reports it has been heard making (O.8), and what Go.dot's
+            LISTEN on its OSCQuery socket is doing (O.10): off, connecting,
+            listening, unsupported or unreachable - the engine's words. */
+        int heard = 0;
+        std::string listen = "off";
+
         /*  Why the engine cannot use it as declared, in the engine's own
             sentence, and empty when it can. Never rewritten here: a client that
             invented its own words for a refusal would be a second place for

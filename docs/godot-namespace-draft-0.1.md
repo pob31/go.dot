@@ -22349,3 +22349,24 @@ their curves; the copy of a cue's messages as a foot part.
   report is still submitted, at most 256 a tick: an address Go.dot writes is one Doh! and the Jumps read reports
   of, whether a curve is armed on it or not, and the count `mount/heard` would stop saying whether the device
   talks at all. Whether a device streaming all night makes the log too heavy is for the bench (M52).
+- **O.10, LISTEN** (2026-10-08). `tree/MountListener`, a thread of its own in `serve` (MountProbe's shape): the
+  tick thread says what it wants - `Runner::listenWanted`, the addresses of the armed curves, by device, for each
+  device that can be asked (`readback` oscquery and a `queryPort`) **and whose `rx` is on** (mine: a push is the
+  device being heard, and `rx` is the switch for that) - nothing while no curve is armed or under the lock (YB).
+  For a device wanted, the thread asks `?HOST_INFO`, needs `EXTENSIONS.LISTEN` true, takes `WS_PORT` (else the
+  query port - WFS-DIY's is its HTTP port), opens juce_simpleweb's raw WebSocket client on an io context of its
+  own read by a thread of its own, sends `{"COMMAND":"LISTEN","DATA":...}` for each address and `IGNORE` for each
+  one no longer wanted, and pings a quiet socket every five seconds so a device unplugged without a word is found
+  out. A device no longer wanted has its socket closed, and the server forgets what it was told with it. Every
+  binary frame is decoded as OSC - a message or a bundle - and each message goes into the HeardBox as that
+  device's report (`HeardBox::takeFrom`: the socket says whose it is), and from there into the log as
+  `mount.heard`, so a replay needs no socket. A text frame (PATH_CHANGED) is passed over. Tried again after a
+  second, two, then every five. `mount/listen` - `off`, `connecting`, `listening`, `unsupported`,
+  `unreachable` - is the listener's word, on the tree's runtime half since it moves with no command. **A
+  report of exactly what Go.dot last sent is not a hand** (mine): before a curve is latched, a report equal to
+  the value last sent for it (to a millionth) is passed over - a motor fader, or a server that pushes to every
+  listener as Go.dot's own does, would otherwise latch the curve on its own playback. WFS-DIY never pushes to
+  the IP whose write caused the change, so this costs it nothing. The Network tab gains **Heard** beside Sent,
+  and, on a row with nothing wrong, `LISTEN <word>` where the problem goes while a curve is armed on it -
+  `unreachable` and `unsupported` drawn as failures (Heard and the LISTEN line are mine, to put to the author).
+  Against Go.dot's own OSCQuery server in OscQueryTests; against WFS-DIY, the bench.

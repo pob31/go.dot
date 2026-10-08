@@ -56,6 +56,7 @@
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/CurveJob.h>
 #include <wfg/engine/cue/CurveTable.h>
+#include <wfg/engine/tree/MountListener.h>
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/Solver.h>
@@ -583,6 +584,11 @@ namespace wfg::cue
             `startLanePass` is `lane.record`'s. Empty when nothing could fire. */
         std::string startCurvePass (Engine& engine, std::int64_t tick, const std::string& cueId,
                                     double from, const std::string& runId);
+
+        /*  WHAT TO LISTEN TO (O.10, YB): the addresses of the armed curves, by
+            device, for each device that can be asked over OSCQuery and whose
+            `rx` is on - nothing while no curve is armed, or under the lock. */
+        tree::MountListener::Wanted listenWanted() const;
         void resetAudioPreparation() { armedStandby.clear(); }
 
         /*  WHAT A CLOCK MOVE GAVE BACK, handed to the hooks to put back

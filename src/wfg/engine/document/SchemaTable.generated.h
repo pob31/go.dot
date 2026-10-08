@@ -65,6 +65,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_mount_transport[] = { "udp", "tcp", "ws" };
     inline constexpr std::string_view enum_mount_panic[] = { "park", "snap" };
     inline constexpr std::string_view enum_mount_readback[] = { "none", "oscquery" };
+    inline constexpr std::string_view enum_mount_listen[] = { "off", "connecting", "listening", "unsupported", "unreachable" };
     inline constexpr std::string_view enum_mount_doh[] = { "takeBack", "leave" };
     inline constexpr std::string_view enum_audio_settingsStatus[] = { "ready", "applying", "error" };
     inline constexpr std::string_view enum_audio_status[] = { "stopped", "running", "noClock" };
@@ -2421,6 +2422,14 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "How many reports this device has been heard making since the show opened (namespace draft 45, O.8): values it sent from its host under its own prefix with rx on. The first thing to look at when a recording catches nothing - whether the device is talking to Go.dot at all." },
+        { "mount", "listen",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          true, "off",
+          false, 0.0, false, 0.0,
+          enum_mount_listen, 5,
+          "", 1.0, false, "park",
+          "",
+          "What Go.dot-s LISTEN on this device-s OSCQuery socket is doing (namespace draft 45, O.10): off while no curve is armed on it - or it cannot be asked, or its rx is off - connecting, listening (its armed curves-addresses asked for, and every value it pushes heard as a report of its own), unsupported when it answers but does not offer LISTEN, unreachable when it does not answer. Tried again after a second, two, then every five. What the machine is doing, never stored." },
         { "mount", "name",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",

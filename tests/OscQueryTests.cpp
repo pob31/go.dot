@@ -1879,3 +1879,77 @@ TEST_CASE ("heard: the namespace keeps a device's report out of node.set, and ta
     REQUIRE (heard.size() == 1u);
     CHECK (heard.front().values == position);
 }
+
+//==============================================================================
+/*  LISTENING TO A DEVICE (namespace draft 45, O.10): the listener asks the
+    device's HOST_INFO, opens its socket, LISTENs to what is wanted, and every
+    value pushed lands in the heard box as that device's report - against
+    Go.dot's own server, which offers LISTEN as WFS-DIY's does. */
+TEST_CASE ("mount listener: LISTENs to what is wanted, hears what is pushed, and lets go when nothing is")
+{
+    Rig rig;
+    REQUIRE (rig.started);
+
+    tree::HeardBox box;
+    tree::MountListener listener { box };
+    REQUIRE (listener.start());
+
+    CHECK (listener.statusOf ("W0RKS000") == tree::listenStatus::off);
+
+    listener.want ({ { "W0RKS000", { "127.0.0.1", rig.port(), { "/godot/engine/tick" } } } });
+
+    REQUIRE (waitUntil ([&] { return listener.statusOf ("W0RKS000") == tree::listenStatus::listening; }));
+    REQUIRE (waitUntil ([&rig] { return rig.server.connectionCount() == 1; }));
+
+    tree::TreeDiff diff;
+    diff.valueChanged.push_back ("/godot/engine/tick");
+    rig.server.publishChanges (diff, *rig.nameSpace.tree, "cli");
+
+    std::vector<tree::HeardBox::Heard> heard;
+    REQUIRE (waitUntil ([&] {
+        auto more = box.drain (8);
+        heard.insert (heard.end(), more.begin(), more.end());
+        return ! heard.empty();
+    }));
+
+    CHECK (heard.front().mountId == "W0RKS000");
+    CHECK (heard.front().address == "/godot/engine/tick");
+    REQUIRE (heard.front().values.size() == 1u);
+    CHECK (heard.front().values[0] == osc::Value::int64 (12));
+
+    //  Nothing wanted: the socket closed, and the server forgets the subscription with it.
+    listener.want ({});
+    REQUIRE (waitUntil ([&] { return listener.statusOf ("W0RKS000") == tree::listenStatus::off; }));
+    REQUIRE (waitUntil ([&rig] { return rig.server.connectionCount() == 0; }));
+
+    listener.stop();
+}
+
+TEST_CASE ("mount listener: a device that does not answer is unreachable, and tried again")
+{
+    tree::HeardBox box;
+    tree::MountListener listener { box };
+    listener.setRetryDelays (std::chrono::milliseconds { 50 }, std::chrono::milliseconds { 50 },
+                             std::chrono::milliseconds { 50 });
+    REQUIRE (listener.start());
+
+    //  A port nothing listens on: an ephemeral one, bound and let go.
+    int closedPort = 0;
+    {
+        juce::StreamingSocket probe;
+        REQUIRE (probe.createListener (0, "127.0.0.1"));
+        closedPort = probe.getBoundPort();
+    }
+
+    listener.want ({ { "W0RKS000", { "127.0.0.1", closedPort, { "/wfs/input/1/positionX" } } } });
+    REQUIRE (waitUntil ([&] { return listener.statusOf ("W0RKS000") == tree::listenStatus::unreachable; }));
+
+    //  A server appears there: the next try finds it.
+    Rig rig;
+    REQUIRE (rig.started);
+    listener.want ({ { "W0RKS000", { "127.0.0.1", rig.port(), { "/godot/engine/tick" } } } });
+    REQUIRE (waitUntil ([&] { return listener.statusOf ("W0RKS000") == tree::listenStatus::listening; }));
+
+    listener.stop();
+    CHECK (listener.statusOf ("W0RKS000") == tree::listenStatus::off);
+}

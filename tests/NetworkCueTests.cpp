@@ -61,6 +61,7 @@
 #include <algorithm>
 #include <chrono>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -4031,4 +4032,56 @@ TEST_CASE ("curve record: the commands refuse what is not theirs")
 
     REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
     CHECK (refusal ("curve.record") == reason::locked);
+}
+
+TEST_CASE ("curve record: a report of exactly what Go.dot sent is its own value coming back, and latches nothing")
+{
+    CurveRig rig;
+    std::string curveId;
+    armedPass (rig, "0 0 4 4", curveId);
+
+    rig.ticks (10);
+
+    //  The device answering with the value it was just sent - a motor fader, a server pushing to every listener.
+    rig.hear (faderOf (rig));
+    rig.tickOnce();
+    CHECK_FALSE (rig.curves.rides[curveId].latched);
+
+    //  A value of its own is a hand.
+    rig.hear (3.5f);
+    rig.ticks (2);
+    CHECK (rig.curves.rides[curveId].latched);
+    CHECK (rig.curves.rides[curveId].value == doctest::Approx (3.5));
+}
+
+TEST_CASE ("curve record: what to listen to is the armed curves' addresses, on a device that can be asked and is heard")
+{
+    CurveRig rig;
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0", "none");
+    const auto curveId = curveOn (rig, cueId, 0, "0 0 1 1");
+
+    auto declaration = consoleMount (rig.listener.port());
+    declaration.readback = "oscquery";
+    declaration.queryPort = 5005;
+    declaration.rx = true;
+    REQUIRE (rig.mounts.updateDeclaration (declaration));
+
+    //  Nothing armed, nothing wanted.
+    CHECK (rig.runner.listenWanted().empty());
+
+    REQUIRE (rig.submit ("curve.arm", { osc::Value::string (cueId) }));
+    REQUIRE (rig.submit ("curve.rec", { osc::Value::string (curveId), osc::Value::boolean (true) }));
+    rig.tickOnce();
+
+    const auto wanted = rig.runner.listenWanted();
+    REQUIRE (wanted.size() == 1u);
+    REQUIRE (wanted.count ("K3PV7WRB") == 1u);
+    CHECK (wanted.at ("K3PV7WRB").queryPort == 5005);
+    CHECK (wanted.at ("K3PV7WRB").addresses == std::set<std::string> { "/desk/fader" });
+
+    //  A device that is not heard is not listened to.
+    declaration.rx = false;
+    REQUIRE (rig.mounts.updateDeclaration (declaration));
+    CHECK (rig.runner.listenWanted().empty());
 }

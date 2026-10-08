@@ -1499,6 +1499,7 @@ namespace wfg::tree
 
         /*  And every surface, for the page its rotaries show (2026-09-25). */
         std::vector<std::string> surfaceOrder;
+        std::vector<std::string> mountOrder;
 
         for (const auto& container : showNode)
         {
@@ -1616,11 +1617,16 @@ namespace wfg::tree
                         continue;
 
                     const auto base = std::string (godot) + "/mount/" + id;
+                    mountOrder.push_back (id);
 
                     for (const auto* row : doc::Schema::rowsForOwner ("mount"))
                     {
                         const doc::Attribute attribute { "Mount", row };
                         const auto name = std::string (row->name);
+
+                        //  LISTEN moves with no command: the runtime half's.
+                        if (name == "listen")
+                            continue;
 
                         /*  `loaded` and `nodeCount` describe what the engine did
                             with the mount rather than what the file says, so
@@ -2576,6 +2582,7 @@ namespace wfg::tree
         declaredInputs = std::move (inputOrder);
         declaredStrips = std::move (stripOrder);
         declaredSurfaces = std::move (surfaceOrder);
+        declaredMounts = std::move (mountOrder);
         declaredLaneKeys = cue::flippedLanes (document);
 
         //----------------------------------------------------------------------
@@ -3509,6 +3516,13 @@ namespace wfg::tree
             runtime.push_back (makeLeaf (std::string (godot) + "/run/" + std::string (row->name),
                                          *row, runOrder));
 
+        /*  WHAT EACH DEVICE'S LISTEN IS DOING (O.10): off until a curve is armed
+            on a device that can be asked, then the listener's word. */
+        if (const auto* listenRow = rowNamed ("mount", "listen"))
+            for (const auto& mountId : declaredMounts)
+                runtime.push_back (makeLeaf (std::string (godot) + "/mount/" + mountId + "/listen", *listenRow,
+                                             listenStatusOf ? listenStatusOf (mountId) : std::string ("off")));
+
         /*  WHAT EACH SURFACE'S ROTARIES ARE SHOWING (author, 2026-09-25): its
             page, which of them, how many, and what it last wrote. Every
             publish, because a page moves with no command - the surface's own
@@ -4075,6 +4089,30 @@ namespace wfg::tree
 
         for (const auto& id : declaredSurfaces)
             ownedByTheDocument.push_back (std::string (godot) + "/surface/" + id);
+
+        /*  `/godot/mount` and each device's, since O.10: the show's half
+            publishes what a device is, this half what its LISTEN is doing. */
+        if (! declaredMounts.empty())
+            ownedByTheDocument.push_back (std::string (godot) + "/mount");
+
+        for (const auto& id : declaredMounts)
+            ownedByTheDocument.push_back (std::string (godot) + "/mount/" + id);
+
+        /*  And each armed curve's, since O.9: its `ride` is this half's. */
+        if (curveTable != nullptr)
+        {
+            auto any = false;
+
+            for (const auto& id : curveTable->armedCurves())
+                if (document.findById (id).isValid())
+                {
+                    ownedByTheDocument.push_back (std::string (godot) + "/curve/" + id);
+                    any = true;
+                }
+
+            if (any)
+                ownedByTheDocument.push_back (std::string (godot) + "/curve");
+        }
 
         addContainers (runtime, ownedByTheDocument, false);
         sortByAddress (runtime);

@@ -112,6 +112,21 @@ namespace wfg::tree
             return true;
         }
 
+        /*  A REPORT FROM A DEVICE ALREADY KNOWN (O.10): a value pushed down the
+            socket Go.dot opened to that device's OSCQuery server, which says
+            whose it is better than any host could. Kept as `take` keeps one.
+            The listener's thread. */
+        void takeFrom (const std::string& mountId, const std::string& address, const osc::Values& values)
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+            auto& kept = waiting[address];
+            kept.mountId = mountId;
+            kept.address = address;
+            kept.values = values;
+            kept.serial = ++serials;
+            ++total;
+        }
+
         struct Heard
         {
             std::string mountId;
