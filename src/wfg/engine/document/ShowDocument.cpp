@@ -409,6 +409,7 @@ namespace wfg::doc
         /*  And namespace draft §44's: `/godot/videoInput/available` beside
             `/godot/videoInput/<id>/sender`. */
         if (element == "VideoInputs")  return "videoInput";
+        if (element == "VideoInserts") return "videoInsert";
 
         /*  And namespace draft §38's: `/godot/cueTemplate/order` beside
             `/godot/cueTemplate/<id>/name`. */
@@ -496,6 +497,8 @@ namespace wfg::doc
         /*  NAMESPACE DRAFT §44. The video inputs and their container. */
         if (element == "VideoInputs")               return "videoInputs";
         if (element == "VideoInput")                return "videoInput";
+        if (element == "VideoInserts")              return "videoInserts";
+        if (element == "VideoInsert")               return "videoInsert";
 
         /*  NAMESPACE DRAFT §38. The cue templates and their container. */
         if (element == "CueTemplates")              return "cueTemplates";
@@ -789,6 +792,7 @@ namespace wfg::doc
         if (segment == "canvas")   return showNode.getChildWithName ("Canvases");
         if (segment == "videoOutput") return showNode.getChildWithName ("VideoOutputs");
         if (segment == "videoInput")  return showNode.getChildWithName ("VideoInputs");
+        if (segment == "videoInsert") return showNode.getChildWithName ("VideoInserts");
         if (segment == "cueTemplate") return showNode.getChildWithName ("CueTemplates");
         return {};
     }
@@ -2895,7 +2899,8 @@ namespace wfg::doc
                 const auto type = showNode.getChild (i).getType().toString();
 
                 if (type == "Dcas" || (element != "Canvases" && type == "Canvases")
-                      || (element == "VideoInputs" && type == "VideoOutputs"))
+                      || ((element == "VideoInputs" || element == "VideoInserts") && type == "VideoOutputs")
+                      || (element == "VideoInserts" && type == "VideoInputs"))
                     at = i + 1;
             }
 
@@ -2977,6 +2982,33 @@ namespace wfg::doc
             attributes.push_back ({ "sender", sender });
 
         return insertObject (videoContainer ("VideoInputs", true), endOfSequence, "VideoInput", id, attributes);
+    }
+
+    EditResult ShowDocument::createVideoInsert (const std::string& name, const std::string& kind,
+                                                const std::string& sendName, const std::string& returnSender,
+                                                const std::string& id)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        if (! kind.empty() && kind != "ndi" && kind != "spout" && kind != "syphon")
+            return EditResult::failed (reason::badValue);
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        if (! kind.empty())
+            attributes.push_back ({ "kind", kind });
+
+        if (! sendName.empty())
+            attributes.push_back ({ "sendName", sendName });
+
+        if (! returnSender.empty())
+            attributes.push_back ({ "returnSender", returnSender });
+
+        return insertObject (videoContainer ("VideoInserts", true), endOfSequence, "VideoInsert", id, attributes);
     }
 
     EditResult ShowDocument::createZone (const std::string& outputId, const std::string& canvasId,

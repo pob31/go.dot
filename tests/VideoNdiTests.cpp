@@ -55,7 +55,7 @@ namespace
     };
 }
 
-TEST_CASE ("video: an output sent over NDI is found by its name and reads as its canvas (N.2)")
+TEST_CASE ("video gpu: an output sent over NDI is found by its name and reads as its canvas (N.2)")
 {
     video::gpu::OpenOptions options;
     options.software = true;

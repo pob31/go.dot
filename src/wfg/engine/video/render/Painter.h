@@ -116,6 +116,21 @@ namespace wfg::video::render
             an invalid view takes one away. */
         void setInputPicture (const std::string& inputId, sg_view picture, int width, int height);
 
+        /*  WHAT CAME BACK THROUGH EACH INSERT (§44, YE): the other program's
+            picture, by insert, drawn in the place of the cue that holds it. An
+            invalid view takes it away, and that cue shows black. */
+        void setInsertReturn (const std::string& insertId, sg_view picture, int width, int height);
+
+        /*  THE PICTURE AN INSERT SENDS this frame (YF): its cue's alone, after
+            its source and grade, at its own size, before its geometry, opacity
+            and blend - of two cues through one insert, the later's (YG). False
+            when no cue goes through it now. After beginFrame, outside a pass. */
+        bool drawInsertPicture (const std::string& insertId, std::int64_t sample, sg_pixel_format format);
+        sg_image insertImage (const std::string& insertId) const;
+
+        /** How many cues go through `insertId` this frame: more than one is the YG warning. */
+        int insertUsers (const std::string& insertId) const;
+
         /*  The frame's reading: the configuration, the layers, and each
             canvas's level (1 for one nobody moved). */
         void beginFrame (const region::ConfigReading& config, std::vector<region::LayerReading> layers,

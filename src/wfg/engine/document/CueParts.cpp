@@ -629,7 +629,8 @@ namespace wfg::doc
             {
                 const auto type = showNode.getChild (i).getType().toString();
 
-                if (type == "Dcas" || type == "Canvases" || type == "VideoOutputs" || type == "VideoInputs")
+                if (type == "Dcas" || type == "Canvases" || type == "VideoOutputs" || type == "VideoInputs"
+                      || type == "VideoInserts")
                     at = i + 1;
             }
 

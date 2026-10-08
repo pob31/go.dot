@@ -802,6 +802,32 @@ namespace wfg::doc
                                                   osc::Value::string (sender), osc::Value::string (edit.id) });
                         } });
 
+        /*  A VIDEO INSERT (namespace draft 44, YE): a cue's picture to another
+            program and back - its kind, the name it is sent under, the name
+            it comes back under; the drawn identifier last. */
+        registry.add ({ "videoInsert.create",
+                        "Declares a video insert: a cue's picture sent to another program over Spout,"
+                        " Syphon or NDI, and what comes back shown in its place. A cue switches it in.",
+                        { { "name", 's', true }, { "kind", 's', true }, { "sendName", 's', true },
+                          { "returnSender", 's', true }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto word = [&args] (std::size_t at)
+                            {
+                                return args.size() > at ? args[at].getString() : std::string {};
+                            };
+
+                            const auto edit = document.createVideoInsert (word (0), word (1), word (2), word (3), word (4));
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok ({ osc::Value::string (word (0)), osc::Value::string (word (1)),
+                                                  osc::Value::string (word (2)), osc::Value::string (word (3)),
+                                                  osc::Value::string (edit.id) });
+                        } });
+
         /*  A ZONE ON AN OUTPUT (namespace draft 40, WY): a further canvas over
             the output's own, through a warp of its own, on top of the zones it
             has. Taken away with `object.delete`, changed with `node.set`. */

@@ -63,6 +63,9 @@ namespace
             options.software = juce::SystemStats::getEnvironmentVariable ("WFG_GPU_HARDWARE", {}) != "1";
             open = video::gpu::open (options, why);
 
+            if (open)
+                MESSAGE ("drawing on " << video::gpu::describe());
+
            #if JUCE_WINDOWS
             REQUIRE_MESSAGE (open, why);
            #else
@@ -277,7 +280,7 @@ TEST_CASE ("video: the shader header was made from the shader source")
     CHECK (stamp == "// source-sha256: " + hash);
 }
 
-TEST_CASE ("video: the GPU composites a canvas as the reference compositor says (R.1)")
+TEST_CASE ("video gpu: the GPU composites a canvas as the reference compositor says (R.1)")
 {
     Device device;
 
@@ -372,7 +375,7 @@ TEST_CASE ("video: the GPU composites a canvas as the reference compositor says 
     }
 }
 
-TEST_CASE ("video: an output warps and calibrates the canvas once composited, and lays its zones (R.1)")
+TEST_CASE ("video gpu: an output warps and calibrates the canvas once composited, and lays its zones (R.1)")
 {
     Device device;
 
@@ -460,7 +463,7 @@ TEST_CASE ("video: an output warps and calibrates the canvas once composited, an
     CHECK (near (at (laid, width - 10, height / 2), 0xC04020u));
 }
 
-TEST_CASE ("video: a HAP frame is drawn still compressed, one upload for every output (R.1)")
+TEST_CASE ("video gpu: a HAP frame is drawn still compressed, one upload for every output (R.1)")
 {
     Device device;
 
@@ -520,7 +523,7 @@ TEST_CASE ("video: a HAP frame is drawn still compressed, one upload for every o
     CHECK ((middle & 0xffu) <= 2u);
 }
 
-TEST_CASE ("video: a Hap Q frame turned back from YCoCg, and a preview's straight RGBA (R.1)")
+TEST_CASE ("video gpu: a Hap Q frame turned back from YCoCg, and a preview's straight RGBA (R.1)")
 {
     Device device;
 

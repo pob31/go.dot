@@ -91,7 +91,7 @@ namespace
     }
 }
 
-TEST_CASE ("video: an output sent over Spout is found by its name and reads as its canvas (N.1)")
+TEST_CASE ("video gpu: an output sent over Spout is found by its name and reads as its canvas (N.1)")
 {
     video::gpu::OpenOptions options;
     options.software = true;
@@ -170,7 +170,7 @@ TEST_CASE ("video: an output sent over Spout is found by its name and reads as i
     CHECK (std::abs (static_cast<int> (received & 0xffu) - 0x60) <= 1);
 }
 
-TEST_CASE ("video: a picture taken in over Spout is what a capture cue shows (N.3)")
+TEST_CASE ("video gpu: a picture taken in over Spout is what a capture cue shows (N.3)")
 {
     video::gpu::OpenOptions options;
     options.software = true;
@@ -258,4 +258,153 @@ TEST_CASE ("video: a picture taken in over Spout is what a capture cue shows (N.
     CHECK (std::abs (middle[0] * 255.0f - 64.0f) <= 2.0f);
     CHECK (std::abs (middle[1] * 255.0f - 160.0f) <= 2.0f);
     CHECK (std::abs (middle[2] * 255.0f - 96.0f) <= 2.0f);
+}
+
+TEST_CASE ("video gpu: a cue through an insert shows what the other program sends back, and black before it does (N.4)")
+{
+    video::gpu::OpenOptions options;
+    options.software = true;
+    std::string why;
+    REQUIRE_MESSAGE (video::gpu::open (options, why), why);
+
+    const auto pid = std::to_string (GetCurrentProcessId());
+    const std::string out = "Go.dot test insert out " + pid;
+    const std::string back = "Go.dot test insert back " + pid;
+
+    std::uint32_t first = 0xFFFFFFFFu;
+    std::uint32_t last = 0xFFFFFFFFu;
+
+    {
+        NoPictures pictures;
+        video::render::Painter painter (pictures);
+        REQUIRE_MESSAGE (painter.make (why), why);
+
+        auto sender = video::render::makeSender (video::region::OutputKind::spout, out, 60.0, why);
+        REQUIRE_MESSAGE (sender != nullptr, why);
+        auto returns = video::render::makeReceiver (video::region::OutputKind::spout, back, why);
+        REQUIRE_MESSAGE (returns != nullptr, why);
+
+        /*  THE OTHER PROGRAM: takes Go.dot's picture in, and sends back its
+            middle colour turned inside out - proof the picture went round. */
+        auto* device = static_cast<ID3D11Device*> (const_cast<void*> (sg_d3d11_device()));
+        auto* context = static_cast<ID3D11DeviceContext*> (const_cast<void*> (sg_d3d11_device_context()));
+        spoutDX echoIn, echoOut;
+        REQUIRE (echoIn.OpenDirectX11 (device));
+        REQUIRE (echoOut.OpenDirectX11 (device));
+        echoIn.SetReceiverName (out.c_str());
+        echoOut.SetSenderName (back.c_str());
+
+        video::region::LayerReading fill;
+        fill.id = "L1";
+        fill.canvas = "C1";
+        fill.source = video::region::Source::fill;
+        fill.paint = 0x204080u;
+        fill.insert = "IS1";
+        fill.fit = video::region::Fit::stretch;
+        fill.rings[static_cast<int> (video::Property::opacity)].count = 1;
+        fill.rings[static_cast<int> (video::Property::opacity)].points[0] = { 0, 1.0 };
+
+        video::region::ConfigReading config;
+        config.canvases.push_back ({ "C1", 32, 32 });
+
+        for (int frame = 0; frame < 40; ++frame)
+        {
+            returns->update();
+            sg_reset_state_cache();
+            painter.setInsertReturn ("IS1", returns->picture(), returns->width(), returns->height());
+
+            painter.beginFrame (config, { fill }, {});
+            const auto drew = painter.drawInsertPicture ("IS1", 100, video::render::senderFormat());
+            painter.canvas ("C1", 100);
+            sg_commit();
+
+            if (drew)
+                sender->send (painter.insertImage ("IS1"), 32, 32);
+
+            std::vector<float> rgba;
+            int w = 0, h = 0;
+            REQUIRE (video::gpu::readBack (painter.canvasImage ("C1"), rgba, w, h));
+            const auto* middle = rgba.data() + 4 * (static_cast<std::size_t> (h / 2) * static_cast<std::size_t> (w) + static_cast<std::size_t> (w / 2));
+            last = (static_cast<std::uint32_t> (std::lround (middle[0] * 255.0f)) << 16)
+                 | (static_cast<std::uint32_t> (std::lround (middle[1] * 255.0f)) << 8)
+                 | static_cast<std::uint32_t> (std::lround (middle[2] * 255.0f));
+
+            if (frame == 0)
+                first = last;
+
+            painter.endFrame();
+
+            //  The echo: what came in, its middle inverted, sent back as a 16 by 16 picture.
+            if (echoIn.ReceiveTexture() && ! echoIn.IsUpdated())
+                if (auto* texture = echoIn.GetSenderTexture())
+                {
+                    D3D11_TEXTURE2D_DESC desc {};
+                    texture->GetDesc (&desc);
+                    desc.Usage = D3D11_USAGE_STAGING;
+                    desc.BindFlags = 0;
+                    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                    desc.MiscFlags = 0;
+                    ID3D11Texture2D* staging = nullptr;
+
+                    if (SUCCEEDED (device->CreateTexture2D (&desc, nullptr, &staging)))
+                    {
+                        context->CopyResource (staging, texture);
+                        D3D11_MAPPED_SUBRESOURCE mapped {};
+
+                        if (SUCCEEDED (context->Map (staging, 0, D3D11_MAP_READ, 0, &mapped)))
+                        {
+                            const auto* p = static_cast<const std::uint8_t*> (mapped.pData) + (desc.Height / 2) * mapped.RowPitch + 4 * (desc.Width / 2);
+                            std::vector<std::uint8_t> inverted (16 * 16 * 4);
+
+                            for (std::size_t at = 0; at < inverted.size(); at += 4)
+                            {
+                                inverted[at] = static_cast<std::uint8_t> (255 - p[0]);
+                                inverted[at + 1] = static_cast<std::uint8_t> (255 - p[1]);
+                                inverted[at + 2] = static_cast<std::uint8_t> (255 - p[2]);
+                                inverted[at + 3] = 255;
+                            }
+
+                            context->Unmap (staging, 0);
+
+                            D3D11_TEXTURE2D_DESC made {};
+                            made.Width = made.Height = 16;
+                            made.MipLevels = made.ArraySize = 1;
+                            made.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                            made.SampleDesc.Count = 1;
+                            made.Usage = D3D11_USAGE_DEFAULT;
+                            made.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                            D3D11_SUBRESOURCE_DATA data {};
+                            data.pSysMem = inverted.data();
+                            data.SysMemPitch = 16 * 4;
+                            ID3D11Texture2D* reply = nullptr;
+
+                            if (SUCCEEDED (device->CreateTexture2D (&made, &data, &reply)))
+                            {
+                                echoOut.SendTexture (reply);
+                                reply->Release();
+                            }
+                        }
+
+                        staging->Release();
+                    }
+                }
+
+            sg_reset_state_cache();
+            std::this_thread::sleep_for (std::chrono::milliseconds (20));
+        }
+
+        echoOut.ReleaseSender();
+        echoIn.ReleaseReceiver();
+        echoIn.CloseDirectX11();
+        echoOut.CloseDirectX11();
+    }
+
+    video::gpu::close();
+
+    //  Black until anything came back; then the fill inside out: 0x204080 -> 0xDFBF7F.
+    INFO ("first " << first << ", last " << last);
+    CHECK (first == 0u);
+    CHECK (std::abs (static_cast<int> ((last >> 16) & 0xffu) - 0xDF) <= 2);
+    CHECK (std::abs (static_cast<int> ((last >> 8) & 0xffu) - 0xBF) <= 2);
+    CHECK (std::abs (static_cast<int> (last & 0xffu) - 0x7F) <= 2);
 }

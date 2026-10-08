@@ -59,6 +59,11 @@ namespace wfg::video::render
         }
     }
 
+    double ArrivalRate::age (double nowSeconds) const noexcept
+    {
+        return lastArrival >= 0.0 ? nowSeconds - lastArrival : 0.0;
+    }
+
     double ArrivalRate::rate (double nowSeconds) const noexcept
     {
         //  Nothing for two seconds is nothing arriving, whatever the last count said.

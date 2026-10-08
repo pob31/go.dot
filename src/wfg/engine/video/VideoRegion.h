@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 14;
+    constexpr std::uint32_t version = 15;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -86,6 +86,9 @@ namespace wfg::video::region
 
     /** Video inputs a show declares, at most (namespace draft 44, YB). */
     constexpr int maxInputs = 16;
+
+    /** Video inserts a show declares, at most (namespace draft 44, YE). */
+    constexpr int maxInserts = 8;
 
     /** Room for what other programs offer, one line each (`videoInputs/available`). */
     constexpr int availableChars = 8192;
@@ -228,6 +231,16 @@ namespace wfg::video::region
         std::atomic<std::uint32_t> enabled;
     };
 
+    /*  A VIDEO INSERT (§44, YE): how the picture goes and comes back, the
+        name it is sent under and the name it comes back under. */
+    struct Insert
+    {
+        char id[idChars];
+        std::atomic<std::uint32_t> kind;
+        char sendName[nameChars];
+        char returnSender[nameChars];
+    };
+
     /*  THE SHOW'S CANVASES AND OUTPUTS, rewritten whole when the show changes,
         under `seq` (odd while being written). */
     struct Config
@@ -239,6 +252,8 @@ namespace wfg::video::region
         Output outputs[maxOutputs];
         std::atomic<std::uint32_t> inputCount;
         Input inputs[maxInputs];
+        std::atomic<std::uint32_t> insertCount;
+        Insert inserts[maxInserts];
     };
 
     /*  A CANVAS'S LEVEL (namespace draft §38, WT): how much of the composited
@@ -380,6 +395,19 @@ namespace wfg::video::region
         char problem[textChars];
     };
 
+    /*  WHAT A VIDEO INSERT IS DOING TONIGHT (§44, YE, YH): whether what comes
+        back arrives, how often, how long since the last, and why a cue shows
+        black. */
+    struct InsertState
+    {
+        std::atomic<std::uint32_t> seq;
+        char insertId[idChars];
+        std::atomic<std::uint32_t> connected;
+        std::atomic<float> frameRate;
+        std::atomic<float> returnAge;
+        char problem[textChars];
+    };
+
     struct Region
     {
         std::atomic<std::uint32_t> magic;
@@ -449,6 +477,9 @@ namespace wfg::video::region
         InputState inputs[maxInputs];
         std::atomic<std::uint32_t> availableSeq;
         char available[availableChars];
+
+        /** Renderer to engine (§44, YE): each video insert, in the configuration's order. */
+        InsertState inserts[maxInserts];
     };
 
     static_assert (std::atomic<std::uint32_t>::is_always_lock_free
@@ -837,12 +868,21 @@ namespace wfg::video::region
         bool enabled = true;
     };
 
+    struct InsertReading
+    {
+        std::string id;
+        OutputKind kind = OutputKind::spout;
+        std::string sendName;
+        std::string returnSender;
+    };
+
     struct ConfigReading
     {
         std::uint32_t seq = 0;
         std::vector<CanvasReading> canvases;
         std::vector<OutputReading> outputs;
         std::vector<InputReading> inputs {};
+        std::vector<InsertReading> inserts {};
     };
 
     /*  THE PICTURES TO HAVE READY, the engine's side and the renderer's. */
@@ -947,13 +987,28 @@ namespace wfg::video::region
                 entry.enabled = in.enabled.load (std::memory_order_relaxed) != 0;
                 out.inputs.push_back (std::move (entry));
             }
+
+            out.inserts.clear();
+            const auto inserts = std::min<std::uint32_t> (r.config.insertCount.load (std::memory_order_relaxed), maxInserts);
+
+            for (std::uint32_t n = 0; n < inserts; ++n)
+            {
+                const auto& in = r.config.inserts[n];
+                InsertReading entry;
+                entry.id = readText (in.id);
+                entry.kind = static_cast<OutputKind> (std::min<std::uint32_t> (in.kind.load (std::memory_order_relaxed), 3u));
+                entry.sendName = readText (in.sendName);
+                entry.returnSender = readText (in.returnSender);
+                out.inserts.push_back (std::move (entry));
+            }
         });
     }
 
     /*  THE ENGINE'S SIDE: the whole configuration, rewritten under the lock. */
     inline void writeConfig (Region& r, const std::vector<CanvasReading>& canvases,
                              const std::vector<OutputReading>& outputs,
-                             const std::vector<InputReading>& inputs = {}) noexcept
+                             const std::vector<InputReading>& inputs = {},
+                             const std::vector<InsertReading>& inserts = {}) noexcept
     {
         beginWrite (r.config.seq);
 
@@ -1038,7 +1093,37 @@ namespace wfg::video::region
         }
 
         r.config.inputCount.store (static_cast<std::uint32_t> (inputCount), std::memory_order_relaxed);
+
+        const auto insertCount = std::min<std::size_t> (inserts.size(), maxInserts);
+
+        for (std::size_t n = 0; n < insertCount; ++n)
+        {
+            auto& in = r.config.inserts[n];
+            writeText (in.id, inserts[n].id);
+            in.kind.store (static_cast<std::uint32_t> (inserts[n].kind), std::memory_order_relaxed);
+            writeText (in.sendName, inserts[n].sendName);
+            writeText (in.returnSender, inserts[n].returnSender);
+        }
+
+        r.config.insertCount.store (static_cast<std::uint32_t> (insertCount), std::memory_order_relaxed);
         endWrite (r.config.seq);
+    }
+
+    /*  THE RENDERER'S SIDE OF AN INSERT (§44, YE): slot `n` names `id`. */
+    inline void writeInsertState (Region& r, std::size_t n, std::string_view id, bool connected, double frameRate,
+                                  double returnAge, std::string_view problem) noexcept
+    {
+        if (n >= static_cast<std::size_t> (maxInserts))
+            return;
+
+        auto& state = r.inserts[n];
+        beginWrite (state.seq);
+        writeText (state.insertId, id);
+        state.connected.store (connected ? 1u : 0u, std::memory_order_relaxed);
+        state.frameRate.store (static_cast<float> (frameRate), std::memory_order_relaxed);
+        state.returnAge.store (static_cast<float> (returnAge), std::memory_order_relaxed);
+        writeText (state.problem, problem);
+        endWrite (state.seq);
     }
 
     /*  THE RENDERER'S SIDE OF AN INPUT (§44, YB): slot `n` names `id`, and

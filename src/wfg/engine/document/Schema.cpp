@@ -117,7 +117,8 @@ namespace wfg::doc
         {
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts", "Network",
-                                     "Surfaces", "Dcas", "Canvases", "VideoOutputs", "VideoInputs", "CueTemplates" },
+                                     "Surfaces", "Dcas", "Canvases", "VideoOutputs", "VideoInputs", "VideoInserts",
+                                     "CueTemplates" },
                                                                           { "document" } },
                 /*  THE CONTAINER CARRIES A VALUE, which is why it is no
                     longer an empty pair of brackets. `focus` is a fact about
@@ -439,6 +440,12 @@ namespace wfg::doc
                     so no show written before them gains a line. */
                 { "VideoInputs",  false, { "VideoInput" },  { "videoInputs" } },
                 { "VideoInput",   true,  {},                { "videoInput" } },
+
+                /*  AND ITS VIDEO INSERTS (namespace draft 44, YE): a cue's
+                    picture sent to another program and taken back, switched in
+                    by a cue as a plugin of the set is. After the inputs. */
+                { "VideoInserts", false, { "VideoInsert" }, { "videoInserts" } },
+                { "VideoInsert",  true,  {},                { "videoInsert" } },
 
                 /*  THE SHOW'S CUE TEMPLATES (namespace draft §38): a set of a
                     cue's settings kept under a name, its parts held as the

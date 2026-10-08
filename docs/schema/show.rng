@@ -68,6 +68,9 @@
         <ref name="VideoInputs"/>
       </optional>
       <optional>
+        <ref name="VideoInserts"/>
+      </optional>
+      <optional>
         <ref name="CueTemplates"/>
       </optional>
     </element>
@@ -1560,6 +1563,12 @@
       <optional>
         <attribute name="videoInput">
           <a:documentation>The video input a capture shows, by identifier (namespace draft 44, YC): the picture another program sends, placed, graded, faded and blended as a picture is. Many cues may show one input. Read by nothing but a capture. Not `input`, which is a mic cue&apos;s rack input at the same cue address.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="videoInsert">
+          <a:documentation>The video insert the cue&apos;s picture goes through, by identifier, or empty for none (namespace draft 44, YE): the picture after its source and grade, at its own size, sent to another program, and what comes back shown in its place - placed, faded and blended as the cue says (YF). Switched on and off by this row, as a sound switches in a plugin of the set. One cue at a time: of two through one insert the later has it and the other shows black (YG); black too while nothing comes back. Not `insert`, a sound&apos;s plugin&apos;s.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -3520,6 +3529,50 @@
       <optional>
         <attribute name="sender">
           <a:documentation>The name the other program sends under, as videoInputs/available lists it - for NDI the machine&apos;s name and the source&apos;s, MACHINE (Source). Empty takes nothing.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="VideoInserts">
+    <element name="VideoInserts">
+      <zeroOrMore>
+        <ref name="VideoInsert"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="VideoInsert">
+    <element name="VideoInsert">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="kind">
+          <a:documentation>How the picture goes and comes back: spout to and from another program on this Windows machine, syphon on this Mac, ndi over the network.</a:documentation>
+          <choice>
+            <value>ndi</value>
+            <value>spout</value>
+            <value>syphon</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the show calls this insert - Kaleidoscope, Key - in the menu a cue picks one from. An insert sends a cue&apos;s picture to another program and shows what comes back (namespace draft 44, YE).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="returnSender">
+          <a:documentation>The name the other program sends the picture back under, as videoInput/available lists it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="sendName">
+          <a:documentation>The name the cue&apos;s picture is sent under, which the other program takes it in by; empty for Go.dot - insert and the insert&apos;s name.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

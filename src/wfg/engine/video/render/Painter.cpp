@@ -565,6 +565,171 @@ namespace wfg::video::render
             return held.view;
         }
 
+        /*  NO GRADE, at an opacity: what came back through an insert, its
+            grade already in it, drawn opaque as a capture is. */
+        static video_grade_t neutralGrade (double opacity) noexcept
+        {
+            video_grade_t uniforms {};
+            uniforms.grade_a[0] = 1.0f;
+            uniforms.grade_a[1] = 1.0f;
+            uniforms.grade_a[2] = 1.0f;
+            uniforms.grade_b[0] = 1.0f;
+            uniforms.grade_b[2] = static_cast<float> (opacity);
+            uniforms.grade_b[3] = 1.0f;
+            return uniforms;
+        }
+
+        /*  A LAYER'S PICTURE'S OWN SIZE: a picture's, a movie frame's, an
+            input's - and a fill's or a mask's, its canvas's. What an insert
+            sends it at, and where black stands for it. */
+        void sourceSizeOf (const region::LayerReading& layer, std::int64_t sample, int& width, int& height)
+        {
+            width = 0;
+            height = 0;
+
+            if (layer.source == region::Source::picture)
+            {
+                if (const auto* held = picture (layer.file))
+                {
+                    width = held->width;
+                    height = held->height;
+                }
+            }
+            else if (layer.source == region::Source::movie)
+            {
+                if (const auto frame = sources.movieFrame (layer.file, valueOf (layer, Property::time, sample, 0.0)))
+                {
+                    width = frame->width;
+                    height = frame->height;
+                }
+            }
+            else if (layer.source == region::Source::capture)
+            {
+                if (const auto found = inputs.find (layer.input); found != inputs.end())
+                {
+                    width = found->second.width;
+                    height = found->second.height;
+                }
+            }
+
+            if (width <= 0 || height <= 0)
+                for (const auto& canvasReading : config.canvases)
+                    if (canvasReading.id == layer.canvas)
+                    {
+                        width = std::max (1, canvasReading.width);
+                        height = std::max (1, canvasReading.height);
+                    }
+
+            width = std::max (1, width);
+            height = std::max (1, height);
+        }
+
+        /*  THE CUE'S PICTURE ALONE (YF), filling `width` by `height`: its
+            source, graded, at full opacity - no geometry, no blend. */
+        bool drawAlone (const region::LayerReading& layer, std::int64_t sample, Offscreen& into)
+        {
+            const auto format = into.format;
+            const auto width = static_cast<double> (into.width);
+            const auto height = static_cast<double> (into.height);
+
+            Placement whole;
+            whole.canvasWidth = whole.pictureWidth = width;
+            whole.canvasHeight = whole.pictureHeight = height;
+            whole.fit = static_cast<int> (region::Fit::stretch);
+
+            sg_begin_pass (passInto (into.colour));
+            auto drawn = true;
+
+            if (layer.source == region::Source::fill || layer.source == region::Source::mask)
+            {
+                const auto colour = [&layer] (float* into4)
+                {
+                    into4[0] = static_cast<float> ((layer.paint >> 16) & 0xffu) / 255.0f;
+                    into4[1] = static_cast<float> ((layer.paint >> 8) & 0xffu) / 255.0f;
+                    into4[2] = static_cast<float> (layer.paint & 0xffu) / 255.0f;
+                    into4[3] = 1.0f;
+                };
+
+                if (layer.source == region::Source::fill)
+                {
+                    sg_apply_pipeline (pipeline (Program::fill, Lay::none, format));
+                    apply (UB_video_quad, quadOf (whole, 1.0, 0.0, 1.0));
+                    video_fill_t fill {};
+                    colour (fill.colour);
+                    apply (UB_video_fill, fill);
+                }
+                else
+                {
+                    sg_apply_pipeline (pipeline (Program::mask, Lay::normal, format));
+                    apply (UB_video_quad, quadOf (whole, 1.0, 0.0, 1.0));
+                    video_mask_t uniforms {};
+                    colour (uniforms.colour);
+                    uniforms.shape[0] = static_cast<float> (width);
+                    uniforms.shape[1] = static_cast<float> (height);
+                    uniforms.shape[2] = layer.shape.feather;
+                    uniforms.shape[3] = layer.shape.invert ? 1.0f : 0.0f;
+                    uniforms.count[0] = static_cast<float> (layer.shape.count);
+
+                    for (int n = 0; n < layer.shape.count && n < mask::maxPoints; ++n)
+                    {
+                        uniforms.corners[n / 2][(n % 2) * 2] = layer.shape.x[n];
+                        uniforms.corners[n / 2][(n % 2) * 2 + 1] = layer.shape.y[n];
+                    }
+
+                    apply (UB_video_mask, uniforms);
+                }
+
+                sg_draw (0, 4, 1);
+            }
+            else if (layer.source == region::Source::picture)
+            {
+                auto* held = picture (layer.file);
+                drawn = held != nullptr;
+
+                if (drawn)
+                {
+                    sg_apply_pipeline (pipeline (Program::picture, Lay::normal, format));
+                    bindPicture (held->view, layer);
+                    apply (UB_video_quad, quadOf (whole, 1.0, 1.0, 0.0));
+                    apply (UB_video_grade, gradeOf (layer, 1.0));
+                    sg_draw (0, 4, 1);
+                }
+            }
+            else if (layer.source == region::Source::movie)
+            {
+                const auto frame = sources.movieFrame (layer.file, valueOf (layer, Property::time, sample, 0.0));
+                auto* held = frame != nullptr && frame->drawable() ? movie (layer.file, *frame) : nullptr;
+                drawn = held != nullptr;
+
+                if (drawn)
+                {
+                    sg_apply_pipeline (pipeline (held->q ? Program::movieQ : Program::movie, Lay::normal, format));
+                    bindPicture (held->view, layer);
+                    apply (UB_video_quad, quadOf (whole, static_cast<double> (held->width) / held->paddedWidth,
+                                                  static_cast<double> (held->height) / held->paddedHeight, 0.0));
+                    apply (UB_video_grade, gradeOf (layer, 1.0));
+                    sg_draw (0, 4, 1);
+                }
+            }
+            else if (layer.source == region::Source::capture)
+            {
+                const auto found = inputs.find (layer.input);
+                drawn = found != inputs.end() && found->second.view.id != SG_INVALID_ID;
+
+                if (drawn)
+                {
+                    sg_apply_pipeline (pipeline (Program::movie, Lay::normal, format));
+                    bindPicture (found->second.view, layer);
+                    apply (UB_video_quad, quadOf (whole, 1.0, 1.0, 0.0));
+                    apply (UB_video_grade, gradeOf (layer, 1.0, true));
+                    sg_draw (0, 4, 1);
+                }
+            }
+
+            sg_end_pass();
+            return drawn;
+        }
+
         static video_grade_t gradeOf (const region::LayerReading& layer, double opacity, bool opaque = false) noexcept
         {
             const auto& grade = layer.grade;
@@ -601,7 +766,48 @@ namespace wfg::video::render
 
                 const auto lay = layOf (layer->blend);
 
-                if (layer->source == region::Source::fill)
+                if (! layer->insert.empty())
+                {
+                    /*  THROUGH AN INSERT (§44, YE): what came back, placed,
+                        faded and blended as the cue says - its grade already in
+                        it (YF). Black where it would be while nothing comes
+                        back, or while a later cue holds the insert (YG). */
+                    const auto returned = returns.find (layer->insert);
+                    const auto holder = holders.find (layer->insert);
+                    const auto holds = holder != holders.end() && holder->second == layer;
+
+                    if (holds && returned != returns.end() && returned->second.view.id != SG_INVALID_ID
+                          && returned->second.width > 0 && returned->second.height > 0)
+                    {
+                        const auto& back = returned->second;
+                        sg_apply_pipeline (pipeline (Program::movie, lay, format));
+                        sg_bindings bindings {};
+                        bindings.views[VIEW_video_picture] = back.view;
+                        bindings.samplers[SMP_video_picture_smp] = linear;
+                        bindings.views[VIEW_video_grade_tables] = identityTableView;
+                        bindings.samplers[SMP_video_grade_smp] = nearest;
+                        sg_apply_bindings (bindings);
+                        apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                                                   static_cast<double> (back.width), static_cast<double> (back.height)),
+                                                      1.0, 1.0, 0.0));
+                        apply (UB_video_grade, neutralGrade (a));
+                        sg_draw (0, 4, 1);
+                    }
+                    else
+                    {
+                        int w = 0, h = 0;
+                        sourceSizeOf (*layer, sample, w, h);
+                        sg_apply_pipeline (pipeline (Program::fill, lay, format));
+                        apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                                                   static_cast<double> (w), static_cast<double> (h)),
+                                                      1.0, 0.0, 1.0));
+                        video_fill_t black {};
+                        black.colour[3] = static_cast<float> (a);
+                        apply (UB_video_fill, black);
+                        sg_draw (0, 4, 1);
+                    }
+                }
+                else if (layer->source == region::Source::fill)
                 {
                     sg_apply_pipeline (pipeline (Program::fill, lay, format));
                     apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
@@ -995,6 +1201,12 @@ namespace wfg::video::render
         };
 
         std::map<std::string, InputPicture> inputs;
+        std::map<std::string, InputPicture> returns;
+
+        /*  WHICH CUE HOLDS EACH INSERT this frame (YG): the latest brought up
+            of those going through it - and how many go through it. */
+        std::map<std::string, const region::LayerReading*> holders;
+        std::map<std::string, int> users;
 
         bool originTopLeft = true;
         sg_pixel_format canvasFormat = SG_PIXELFORMAT_RGBA16;
@@ -1029,6 +1241,58 @@ namespace wfg::video::render
         impl->layers = std::move (layers);
         impl->levelOf = std::move (levelOf);
         impl->drawnAt.clear();
+
+        //  Of the cues through each insert, the later brought up holds it (YG).
+        impl->holders.clear();
+        impl->users.clear();
+
+        for (const auto& layer : impl->layers)
+        {
+            if (layer.insert.empty())
+                continue;
+
+            ++impl->users[layer.insert];
+            auto& holder = impl->holders[layer.insert];
+
+            if (holder == nullptr || layer.order > holder->order)
+                holder = &layer;
+        }
+    }
+
+    void Painter::setInsertReturn (const std::string& insertId, sg_view picture, int width, int height)
+    {
+        if (picture.id == SG_INVALID_ID)
+        {
+            impl->returns.erase (insertId);
+            return;
+        }
+
+        impl->returns[insertId] = { picture, width, height };
+    }
+
+    bool Painter::drawInsertPicture (const std::string& insertId, std::int64_t sample, sg_pixel_format format)
+    {
+        const auto holder = impl->holders.find (insertId);
+
+        if (holder == impl->holders.end() || holder->second == nullptr)
+            return false;
+
+        int width = 0, height = 0;
+        impl->sourceSizeOf (*holder->second, sample, width, height);
+        auto& into = impl->offscreen ("own:insert:" + insertId, width, height, format);
+        return impl->drawAlone (*holder->second, sample, into);
+    }
+
+    sg_image Painter::insertImage (const std::string& insertId) const
+    {
+        const auto found = impl->targets.find ("own:insert:" + insertId);
+        return found != impl->targets.end() ? found->second.image : sg_image {};
+    }
+
+    int Painter::insertUsers (const std::string& insertId) const
+    {
+        const auto found = impl->users.find (insertId);
+        return found != impl->users.end() ? found->second : 0;
     }
 
     sg_view Painter::canvas (const std::string& id, std::int64_t sample)

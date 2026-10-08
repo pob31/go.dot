@@ -4394,6 +4394,9 @@ namespace wfg::cue
             if (job.spec.source == "capture")
                 job.spec.input = textOf (cue, "videoInput");
 
+            //  AND THE INSERT ITS PICTURE GOES THROUGH, if any (§44, YE).
+            job.spec.insert = textOf (cue, "videoInsert");
+
             /*  A MOVIE'S PLAYHEAD (§37): from its start offset at its speed,
                 or from its first Range's in point (WL). */
             if (job.spec.source == "movie")

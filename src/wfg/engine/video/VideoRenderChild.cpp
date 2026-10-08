@@ -2034,6 +2034,19 @@ namespace wfg::video
                 std::int64_t retryAt = 0;
             };
 
+            /*  A VIDEO INSERT AS THE RENDER THREAD HOLDS IT (§44, YE): what it
+                was made for, how the cue's picture goes and how it comes back,
+                why either is not there, and when to try again. */
+            struct Inserting
+            {
+                std::string key;
+                std::unique_ptr<render::Sender> sender;
+                std::unique_ptr<render::Receiver> receiver;
+                std::string why;
+                std::int64_t retryAt = 0;
+                bool sendNow = false;
+            };
+
             /*  A SENDER AS THE RENDER THREAD HOLDS IT: what sends, when it is
                 next due, and the projector whose refresh it rides, if one has
                 its rate (YJ). */
@@ -2053,12 +2066,14 @@ namespace wfg::video
                 std::vector<Frames> frames;
                 std::vector<Sending> sending;
                 std::map<std::string, Taking> taking;
+                std::map<std::string, Inserting> inserting;
                 std::unique_ptr<render::Painter> painter;
                 std::uint64_t have = 0;
                 std::string deviceProblem;
                 ClockReader clock;
                 std::int64_t nextStates = 0;
                 std::int64_t nextDiscovery = 0;
+                auto sayInsertsLater = false;
 
                 /*  THE DEVICE, the first time there is something to draw or to
                     take in: on the card driving the first projector's display. */
@@ -2160,6 +2175,7 @@ namespace wfg::video
                     if (now >= nextStates)
                     {
                         nextStates = now + 250'000'000;
+                        sayInsertsLater = true;
                         std::size_t n = 0;
 
                         for (; n < config.inputs.size() && n < static_cast<std::size_t> (region::maxInputs); ++n)
@@ -2184,6 +2200,104 @@ namespace wfg::video
                         nextDiscovery = now + 1'000'000'000;
                         region::writeAvailable (r, render::discoverSenders());
                     }
+
+                    /*  THE INSERTS (§44, YE): a sender for the cue's picture and a
+                        receiver for what comes back, made when declared; what
+                        came back handed to the painter, before anything draws. */
+                    std::set<std::string> declared;
+
+                    for (const auto& insert : config.inserts)
+                    {
+                        declared.insert (insert.id);
+                        auto& held = inserting[insert.id];
+                        const auto key = std::to_string (static_cast<int> (insert.kind)) + "|" + insert.sendName + "|"
+                                       + insert.returnSender;
+
+                        if (held.key != key || ((held.sender == nullptr || held.receiver == nullptr) && now >= held.retryAt))
+                        {
+                            if (painter != nullptr)
+                                painter->releaseOffscreen ("insert:" + insert.id);
+
+                            held.sender.reset();
+                            held.receiver.reset();
+                            held.key = key;
+                            held.why.clear();
+                            held.retryAt = now + 2'000'000'000;
+
+                            if (painter == nullptr)
+                            {
+                                held.why = deviceProblem;
+                            }
+                            else
+                            {
+                                held.sender = render::makeSender (insert.kind, insert.sendName, 60.0, held.why);
+                                std::string back;
+                                held.receiver = render::makeReceiver (insert.kind, insert.returnSender, back);
+
+                                if (held.why.empty())
+                                    held.why = back;
+                            }
+                        }
+
+                        if (held.receiver != nullptr)
+                        {
+                            held.receiver->update();
+
+                            if (painter != nullptr)
+                                painter->setInsertReturn (insert.id, held.receiver->picture(),
+                                                          held.receiver->width(), held.receiver->height());
+                        }
+                        else if (painter != nullptr)
+                        {
+                            painter->setInsertReturn (insert.id, {}, 0, 0);
+                        }
+                    }
+
+                    for (auto at = inserting.begin(); at != inserting.end();)
+                    {
+                        if (declared.count (at->first) > 0)
+                        {
+                            ++at;
+                            continue;
+                        }
+
+                        if (painter != nullptr)
+                        {
+                            painter->setInsertReturn (at->first, {}, 0, 0);
+                            painter->releaseOffscreen ("insert:" + at->first);
+                        }
+
+                        at = inserting.erase (at);
+                    }
+                };
+
+                /*  EACH INSERT'S STATE, a few times a second: what comes back, how
+                    often, how long since, and why a cue shows black. */
+                const auto sayInserts = [&] (const region::ConfigReading& config)
+                {
+                    std::size_t n = 0;
+
+                    for (; n < config.inserts.size() && n < static_cast<std::size_t> (region::maxInserts); ++n)
+                    {
+                        const auto& insert = config.inserts[n];
+                        const auto& held = inserting[insert.id];
+                        const auto* back = held.receiver.get();
+                        std::string why = held.why;
+
+                        if (why.empty() && back != nullptr)
+                            why = back->problem();
+
+                        if (why.empty() && painter != nullptr && painter->insertUsers (insert.id) > 1)
+                            why = "two cues go through it at once: the later has it, the other shows black";
+
+                        region::writeInsertState (r, n, insert.id, back != nullptr && back->connected(),
+                                                  back != nullptr ? back->frameRate() : 0.0,
+                                                  back != nullptr ? back->age() : 0.0, why);
+                    }
+
+                    for (; n < static_cast<std::size_t> (region::maxInserts); ++n)
+                        if (r.inserts[n].insertId[0] != 0)
+                            region::writeInsertState (r, n, {}, false, 0.0, 0.0, {});
                 };
 
                 while (! threadShouldExit())
@@ -2343,6 +2457,22 @@ namespace wfg::video
                     painter->beginFrame (config, readLayers (r),
                                          [this] (const std::string& id) { return region::canvasLevelOf (r, id); });
 
+                    /*  EACH INSERT'S PICTURE (YF): the holding cue's alone, for
+                        the sample a frame on, sent once the frame is committed. */
+                    {
+                        const auto sample = clock.sampleAt (r, began + static_cast<std::int64_t> (1.0e9 / std::max (24.0, fastest)));
+
+                        for (auto& [insertId, held] : inserting)
+                            held.sendNow = held.sender != nullptr
+                                         && painter->drawInsertPicture (insertId, sample, render::senderFormat());
+                    }
+
+                    if (sayInsertsLater)
+                    {
+                        sayInserts (config);
+                        sayInsertsLater = false;
+                    }
+
                     std::vector<std::size_t> drawn;
 
                     for (std::size_t n = 0; n < surfaces.size(); ++n)
@@ -2426,6 +2556,15 @@ namespace wfg::video
                         countFrame (specs[n], frames[n], began);
                     }
 
+                    for (auto& [insertId, held] : inserting)
+                        if (held.sendNow)
+                        {
+                            const auto image = painter->insertImage (insertId);
+                            const auto desc = sg_query_image_desc (image);
+                            held.sender->send (image, desc.width, desc.height);
+                            held.sendNow = false;
+                        }
+
                     for (auto* one : sent)
                     {
                         const auto image = painter->offscreenImage ("send:" + one->spec.outputId);
@@ -2446,6 +2585,7 @@ namespace wfg::video
                 surfaces.clear();
                 sending.clear();
                 taking.clear();
+                inserting.clear();
                 painter.reset();
                 gpu::close();
 

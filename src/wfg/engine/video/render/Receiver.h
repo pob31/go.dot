@@ -57,6 +57,10 @@ namespace wfg::video::render
         virtual bool connected() const = 0;
         virtual double frameRate() const = 0;
         virtual std::string problem() const = 0;
+
+        /*  How long ago the last picture arrived, in seconds; nought before
+            any has. An insert's round trip shows here (YH). */
+        virtual double age() const = 0;
     };
 
     /*  A receiver of `kind` for what `sender` sends; null and why where this
@@ -84,6 +88,7 @@ namespace wfg::video::render
     public:
         void arrived (double nowSeconds) noexcept;
         double rate (double nowSeconds) const noexcept;
+        double age (double nowSeconds) const noexcept;
 
     private:
         double since = -1.0;

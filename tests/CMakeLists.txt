@@ -217,8 +217,14 @@ endif()
 # be a red build and not a quiet pass. On the Linux runner that means
 # `locale-gen fr_FR.UTF-8` is a hard prerequisite, and ci.yml runs it.
 # -----------------------------------------------------------------------------
-add_test(NAME unit.C     COMMAND wfg_tests --wfg-locale=C)
-add_test(NAME unit.fr_FR COMMAND wfg_tests --wfg-locale=${WFG_LOCALE_FR})
+add_test(NAME unit.C     COMMAND wfg_tests --wfg-locale=C "--test-case-exclude=video gpu:*")
+add_test(NAME unit.fr_FR COMMAND wfg_tests --wfg-locale=${WFG_LOCALE_FR} "--test-case-exclude=video gpu:*")
+
+# THE VIDEO RENDERER ON THE GRAPHICS DEVICE (namespace draft §44), in a process
+# of its own: the system's software rasteriser where there is no card - WARP,
+# llvmpipe - starts from a clean slate rather than after two thousand cases,
+# and a fault there is named as the device's, not as the whole suite's.
+add_test(NAME video.gpu.C COMMAND wfg_tests --wfg-locale=C "--test-case=video gpu:*")
 
 # -----------------------------------------------------------------------------
 # THE REAL-TIME SANITIZER'S CONTROL (2026-09-30), built only where it means

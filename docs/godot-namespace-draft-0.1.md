@@ -21884,7 +21884,7 @@ Mine (proposed):
   the audio clock, and nothing pretends it is.
 - **YE** **Inserts are the video plugin set.** The show declares them, `<VideoInserts><VideoInsert>`:
   a name, a kind, the `sendName` it sends under and the `returnSender` it takes back. A video cue's
-  `insert` row names one or is empty; switching it on or off is that row - in the inspector, across a
+  `videoInsert` row names one or is empty; switching it on or off is that row - in the inspector, across a
   multi-select, from a set cue - as a media cue switches in a plugin of the set (PRD §3.18, AD).
 - **YF** What an insert sends is the cue's picture **after its source and grade, at its own size,
   before its geometry, opacity and blend**. The other program works on the clean picture and Go.dot
@@ -22003,6 +22003,19 @@ Mine (proposed):
   connected, size, frames a second, why not - a few times a second, and `videoInput/available` once a
   second: the kind, a tab, the name, a line each, Syphon's as the application, " - " and the server.
   An input keeps the renderer running, as an output does, so `available` is there to pick from.
+- **N.4, video inserts** (2026-10-08): `videoInsert.create <name> [kind] [sendName] [returnSender] [id]`
+  declares one after the video inputs - Spout when no kind is said, sent as *Go.dot - insert* and its name
+  when no send name is - and a cue's `video/videoInsert` switches it in. Each frame the renderer draws the
+  holding cue's picture alone - its source and grade, at its own size: a picture's, a movie frame's, an
+  input's, a fill's or a mask's canvas's - and sends it once the frame is committed; what comes back is drawn
+  in the cue's place by its geometry, opacity and blend, opaque as a capture is, its grade already in it.
+  Black, at the cue's opacity where its picture would stand, before anything comes back, and for the earlier
+  of two cues through one insert (YG). `videoInsert/connected`, `frameRate`, `returnAge` (YH) and `problem`
+  say how the round trip goes. *Not built:* `wfg validate`'s warning where two cues may meet on one insert.
+- The GPU's cases run as `video.gpu.C`, a process of their own, and the unit runs leave them out: on the
+  Linux runner Mesa's software rasteriser ran out of memory compiling the shaders late in the long run
+  (twice, the second after the mask's loop was bounded), and a process of their own says whether that is
+  the device or the run.
 - **YM** (mine, proposed): **Spout shares only between programs on the same graphics card.** On a laptop
   with two, the renderer draws on the card driving the first projector's display, and with none on the
   fastest; a receiving program on the other card finds the sender and reads nothing. Said here and owed

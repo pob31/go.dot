@@ -132,6 +132,7 @@ namespace wfg::video::render
             int height() const override          { return pictureHeight; }
             bool connected() const override      { return client != nil && textureView.id != SG_INVALID_ID; }
             double frameRate() const override    { return arrivals.rate (secondsNow()); }
+            double age() const override          { return arrivals.age (secondsNow()); }
 
             std::string problem() const override
             {

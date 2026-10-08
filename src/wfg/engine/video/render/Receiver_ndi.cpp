@@ -175,6 +175,12 @@ namespace wfg::video::render
                 return trouble;
             }
 
+            double age() const override
+            {
+                const std::lock_guard<std::mutex> hold (lock);
+                return arrivals.age (secondsNow());
+            }
+
         private:
             void say (const std::string& text)
             {

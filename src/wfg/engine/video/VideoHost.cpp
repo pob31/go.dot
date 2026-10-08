@@ -49,6 +49,16 @@ namespace wfg::video
                                { return x.id == y.id && x.width == y.width && x.height == y.height; });
         }
 
+        bool sameInserts (const std::vector<region::InsertReading>& a, const std::vector<region::InsertReading>& b)
+        {
+            return std::equal (a.begin(), a.end(), b.begin(), b.end(),
+                               [] (const region::InsertReading& x, const region::InsertReading& y)
+                               {
+                                   return x.id == y.id && x.kind == y.kind && x.sendName == y.sendName
+                                       && x.returnSender == y.returnSender;
+                               });
+        }
+
         bool sameInputs (const std::vector<region::InputReading>& a, const std::vector<region::InputReading>& b)
         {
             return std::equal (a.begin(), a.end(), b.begin(), b.end(),
@@ -379,6 +389,25 @@ namespace wfg::video
 
             auto offered = region::readAvailable (*r);
 
+            std::vector<Readouts::InsertEntry> foundInserts;
+
+            for (auto& state : r->inserts)
+            {
+                Readouts::InsertEntry entry;
+
+                region::readConsistent (state.seq, [&]
+                {
+                    entry.id = region::readText (state.insertId);
+                    entry.connected = state.connected.load (std::memory_order_relaxed) != 0;
+                    entry.frameRate = static_cast<double> (state.frameRate.load (std::memory_order_relaxed));
+                    entry.returnAge = static_cast<double> (state.returnAge.load (std::memory_order_relaxed));
+                    entry.problem = region::readText (state.problem);
+                });
+
+                if (! entry.id.empty())
+                    foundInserts.push_back (std::move (entry));
+            }
+
             /*  A RENDERER NOT RUNNING HAS FOUND NOTHING: its last words are not
                 tonight's. */
             const auto running = child != nullptr && child->isRunning()
@@ -392,6 +421,7 @@ namespace wfg::video
                 latest.outputs = std::move (foundOutputs);
                 latest.inputs = std::move (foundInputs);
                 latest.available = std::move (offered);
+                latest.inserts = std::move (foundInserts);
                 latest.layerTints = region::readTints (r->layerTints);
                 latest.canvasTints = region::readTints (r->canvasTints);
             }
@@ -400,6 +430,7 @@ namespace wfg::video
                 latest.outputs.clear();
                 latest.inputs.clear();
                 latest.available.clear();
+                latest.inserts.clear();
                 latest.layerTints.clear();
                 latest.canvasTints.clear();
             }
@@ -417,6 +448,7 @@ namespace wfg::video
         std::vector<region::CanvasReading> canvases;
         std::vector<region::OutputReading> outputs;
         std::vector<region::InputReading> inputs;
+        std::vector<region::InsertReading> inserts;
         bool configured = false;
         std::set<std::string> identified;
         bool hideProjectors = false;
@@ -633,13 +665,46 @@ namespace wfg::video
             inputs.push_back (std::move (entry));
         }
 
-        if (! impl->configured || ! sameCanvases (canvases, impl->canvases) || ! sameOutputs (outputs, impl->outputs)
-              || ! sameInputs (inputs, impl->inputs))
+        /*  THE VIDEO INSERTS (§44, YE): how each sends and takes back, under
+            which names - the send name Go.dot - insert and the insert's name
+            when the show names none. */
+        std::vector<region::InsertReading> inserts;
+
+        for (const auto& insert : root.getChildWithName ("VideoInserts"))
         {
-            region::writeConfig (*impl->r, canvases, outputs, inputs);
+            const auto id = insert["id"].toString().toStdString();
+
+            if (id.empty())
+                continue;
+
+            const auto base = "/godot/videoInsert/" + id + "/";
+            region::InsertReading entry;
+            entry.id = id;
+            entry.kind = region::outputKindFrom (text (base + "kind"));
+
+            if (entry.kind == region::OutputKind::display)
+                entry.kind = region::OutputKind::spout;
+
+            entry.sendName = text (base + "sendName");
+
+            if (entry.sendName.empty())
+            {
+                const auto name = text (base + "name");
+                entry.sendName = "Go.dot - insert " + (name.empty() ? id : name);
+            }
+
+            entry.returnSender = text (base + "returnSender");
+            inserts.push_back (std::move (entry));
+        }
+
+        if (! impl->configured || ! sameCanvases (canvases, impl->canvases) || ! sameOutputs (outputs, impl->outputs)
+              || ! sameInputs (inputs, impl->inputs) || ! sameInserts (inserts, impl->inserts))
+        {
+            region::writeConfig (*impl->r, canvases, outputs, inputs, inserts);
             impl->canvases = std::move (canvases);
             impl->outputs = std::move (outputs);
             impl->inputs = std::move (inputs);
+            impl->inserts = std::move (inserts);
             impl->configured = true;
         }
 
@@ -694,7 +759,7 @@ namespace wfg::video
         for (auto& output : impl->outputs)
             output.testPattern = impl->identified.count (output.id) > 0;
 
-        region::writeConfig (*impl->r, impl->canvases, impl->outputs, impl->inputs);
+        region::writeConfig (*impl->r, impl->canvases, impl->outputs, impl->inputs, impl->inserts);
     }
 
     bool VideoHost::identifying (const std::string& outputId) const
@@ -713,7 +778,7 @@ namespace wfg::video
         for (auto& output : impl->outputs)
             output.hidden = on && ! impl->locked;
 
-        region::writeConfig (*impl->r, impl->canvases, impl->outputs, impl->inputs);
+        region::writeConfig (*impl->r, impl->canvases, impl->outputs, impl->inputs, impl->inserts);
     }
 
     bool VideoHost::projectorsHidden() const noexcept

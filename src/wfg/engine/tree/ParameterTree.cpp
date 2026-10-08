@@ -1386,6 +1386,7 @@ namespace wfg::tree
         std::vector<std::string> canvasOrder;
         std::vector<std::string> videoOutputOrder;
         std::vector<std::string> videoInputOrder;
+        std::vector<std::string> videoInsertOrder;
         std::vector<std::string> pluginOrder;
         std::vector<DeclaredInput> inputOrder;
 
@@ -1839,16 +1840,21 @@ namespace wfg::tree
                     }
                 }
             }
-            else if (containerName == "VideoInputs")
+            else if (containerName == "VideoInputs" || containerName == "VideoInserts")
             {
-                /*  THE SHOW'S VIDEO INPUTS (namespace draft §44, YB): what the
-                    show decided - each one's name, kind and sender. Whether
-                    pictures arrive tonight, and what other programs offer, is
-                    the runtime half's, as an output's frames are. */
-                for (const auto* row : doc::Schema::rowsForOwner ("videoInputs"))
+                /*  THE SHOW'S VIDEO INPUTS AND INSERTS (namespace draft §44, YB,
+                    YE): what the show decided - each one's name, kind and the
+                    names it takes in and sends under. Whether pictures arrive
+                    tonight, and what other programs offer, is the runtime
+                    half's, as an output's frames are. */
+                const auto isInputs = containerName == "VideoInputs";
+                const auto segment = std::string (isInputs ? "videoInput" : "videoInsert");
+                const char* const element = isInputs ? "VideoInput" : "VideoInsert";
+
+                for (const auto* row : doc::Schema::rowsForOwner (isInputs ? "videoInputs" : "videoInserts"))
                     if (row->name == "order")
-                        nodes.push_back (makeLeaf (std::string (godot) + "/videoInput/order", *row,
-                                                   orderOf (container, "VideoInput")));
+                        nodes.push_back (makeLeaf (std::string (godot) + "/" + segment + "/order", *row,
+                                                   orderOf (container, element)));
 
                 for (const auto& object : container)
                 {
@@ -1857,19 +1863,19 @@ namespace wfg::tree
                     if (id.empty())
                         continue;
 
-                    const auto base = std::string (godot) + "/videoInput/" + id;
+                    const auto base = std::string (godot) + "/" + segment + "/" + id;
 
-                    for (const auto* row : doc::Schema::rowsForOwner ("videoInput"))
+                    for (const auto* row : doc::Schema::rowsForOwner (segment))
                     {
                         if (row->persist == doc::Persist::none)
                             continue;
 
-                        const doc::Attribute attribute { "VideoInput", row };
+                        const doc::Attribute attribute { element, row };
                         nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
                                                    storedText (attribute, object)));
                     }
 
-                    videoInputOrder.push_back (id);
+                    (isInputs ? videoInputOrder : videoInsertOrder).push_back (id);
                 }
             }
             else if (containerName == "Canvases" || containerName == "VideoOutputs")
@@ -2459,6 +2465,7 @@ namespace wfg::tree
         declaredCanvases = std::move (canvasOrder);
         declaredVideoOutputs = std::move (videoOutputOrder);
         declaredVideoInputs = std::move (videoInputOrder);
+        declaredVideoInserts = std::move (videoInsertOrder);
         declaredPlugins = std::move (pluginOrder);
         declaredInputs = std::move (inputOrder);
         declaredStrips = std::move (stripOrder);
@@ -3652,6 +3659,38 @@ namespace wfg::tree
                 }
             }
 
+            /*  AND EACH VIDEO INSERT (§44, YE, YH): what comes back, how often,
+                how long since the last, and why a cue shows black. */
+            for (const auto& insertId : declaredVideoInserts)
+            {
+                const auto* entry = found.insert (insertId);
+                const auto base = std::string (godot) + "/videoInsert/" + insertId + "/";
+
+                for (const auto* row : doc::Schema::rowsForOwner ("videoInsert"))
+                {
+                    if (row->persist != doc::Persist::none)
+                        continue;
+
+                    const auto name = std::string (row->name);
+                    std::string text;
+
+                    if (name == "connected")
+                        text = entry != nullptr && entry->connected ? "true" : "false";
+                    else if (name == "frameRate")
+                        text = osc::formatDouble (entry != nullptr ? entry->frameRate : 0.0);
+                    else if (name == "returnAge")
+                        text = osc::formatDouble (entry != nullptr ? entry->returnAge : 0.0);
+                    else if (name == "problem")
+                        text = entry != nullptr ? entry->problem
+                                                : (found.renderer == "running" ? std::string ("the renderer has not reached it yet")
+                                                                               : std::string ("the renderer is not running"));
+                    else
+                        continue;
+
+                    runtime.push_back (makeLeaf (base + name, *row, text));
+                }
+            }
+
             /*  WHAT EACH CANVAS SHOWS, as one colour (namespace draft §38, WR):
                 a DCA strip's ring, for a canvas the DCA rides. */
             for (const auto& [canvasId, rgb] : found.canvasTints)
@@ -3836,6 +3875,9 @@ namespace wfg::tree
 
         for (const auto& id : declaredVideoInputs)
             ownedByTheDocument.push_back (std::string (godot) + "/videoInput/" + id);
+
+        for (const auto& id : declaredVideoInserts)
+            ownedByTheDocument.push_back (std::string (godot) + "/videoInsert/" + id);
 
         for (const auto& id : declaredPlugins)
             ownedByTheDocument.push_back (std::string (godot) + "/plugin/" + id);

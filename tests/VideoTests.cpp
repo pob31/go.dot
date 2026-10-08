@@ -326,6 +326,27 @@ TEST_CASE ("video: a video input is declared by its command after the outputs, a
     CHECK (rig.exists ("/godot/videoInput/MC000050/name"));
 }
 
+TEST_CASE ("video: a video insert is declared by its command after the inputs, its send name made when none is said (namespace draft §44, N.4)")
+{
+    Rig rig { noPictureBundle() };
+
+    REQUIRE (rig.applied ("videoInsert.create", { text ("Kaleidoscope"), text ("spout"), text (""), text ("TD out"), text ("MC000060") }));
+    REQUIRE (rig.applied ("videoInput.create", { text ("Camera"), text ("ndi"), text (""), text ("MC000061") }));
+
+    const auto children = rig.showChildren();
+    const auto inputs = std::find (children.begin(), children.end(), "VideoInputs");
+    const auto inserts = std::find (children.begin(), children.end(), "VideoInserts");
+    REQUIRE (inputs != children.end());
+    REQUIRE (inserts != children.end());
+    CHECK (inserts == inputs + 1);
+
+    CHECK (rig.at ("/godot/videoInsert/MC000060/name") == "Kaleidoscope");
+    CHECK (rig.at ("/godot/videoInsert/MC000060/kind") == "spout");
+    CHECK (rig.at ("/godot/videoInsert/MC000060/returnSender") == "TD out");
+    CHECK (rig.at ("/godot/videoInsert/MC000060/connected") == "false");
+    CHECK_FALSE (rig.applied ("videoInsert.create", { text ("Wrong"), text ("hdmi"), text (""), text (""), text ("MC000062") }));
+}
+
 TEST_CASE ("video: wfg validate says a video cue on no canvas shows nothing, and a canvas row naming a cue")
 {
     Rig rig;

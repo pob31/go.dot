@@ -105,6 +105,27 @@ namespace wfg::video
         std::vector<InputEntry> inputs;
         std::string available;
 
+        /*  AND EACH VIDEO INSERT (§44, YE, YH). */
+        struct InsertEntry
+        {
+            std::string id;
+            bool connected = false;
+            double frameRate = 0.0;
+            double returnAge = 0.0;
+            std::string problem;
+        };
+
+        std::vector<InsertEntry> inserts;
+
+        const InsertEntry* insert (const std::string& id) const noexcept
+        {
+            for (const auto& entry : inserts)
+                if (entry.id == id)
+                    return &entry;
+
+            return nullptr;
+        }
+
         const InputEntry* input (const std::string& id) const noexcept
         {
             for (const auto& entry : inputs)

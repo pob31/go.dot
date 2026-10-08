@@ -466,6 +466,12 @@ namespace wfg::doc
         EditResult createVideoInput (const std::string& name, const std::string& kind,
                                      const std::string& sender, const std::string& id = {});
 
+        /*  A VIDEO INSERT (namespace draft 44, YE): a cue's picture sent under
+            `sendName` to another program over `kind` - spout when empty - and
+            taken back from `returnSender`, at the end of the show's inserts. */
+        EditResult createVideoInsert (const std::string& name, const std::string& kind, const std::string& sendName,
+                                      const std::string& returnSender, const std::string& id = {});
+
         /*  PHASE 9a: an entry in the show's plugin set - name, the scan's
             identifier, format and path, all four explicit so a replay on a
             machine that has never scanned needs no known list. <Plugins> is
