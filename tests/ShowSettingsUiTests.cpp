@@ -1612,3 +1612,34 @@ TEST_CASE ("show settings UI: a strip's Role is one menu of Sampler and the DCAs
     target->itemDropped (toFourth);
     CHECK (rig.sent.empty());
 }
+
+TEST_CASE ("show settings UI: the SpaceMouse's line, and the driver's button only while the driver holds the puck")
+{
+    /*  (O.11, ZF) The engine's word, read from the tree every refresh: the
+        button to close 3Dconnexion's driver is there only while it holds the
+        puck - and asks before it sends anything, which an async alert does. */
+    Rig rig;
+
+    const auto first = rig.publish();
+    client::ui::ShowSettingsWindow panel (rig.theme, *first,
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setSize (1400, 800);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Surfaces"));
+
+    auto* closeDriver = button (panel, "Close 3DxWare...");
+    REQUIRE (closeDriver != nullptr);
+    CHECK_FALSE (closeDriver->isVisible());
+
+    rig.state.spaceMouse = "driver";
+    panel.refresh (*rig.publish());
+    CHECK (closeDriver->isVisible());
+
+    rig.state.spaceMouse = "connected";
+    rig.state.spaceMouseName = "SpaceMouse Compact";
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (closeDriver->isVisible());
+    CHECK (rig.sent.empty());
+}

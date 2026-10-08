@@ -33,6 +33,7 @@
 namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
+    inline constexpr std::string_view enum_engine_spaceMouse[] = { "off", "searching", "connected", "driver" };
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
@@ -50,6 +51,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_transport_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
     inline constexpr std::string_view enum_osc_doh[] = { "device", "takeBack", "leave" };
+    inline constexpr std::string_view enum_curve_axis[] = { "none", "tx", "ty", "tz", "rx", "ry", "rz" };
     inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
     inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
     inline constexpr std::string_view enum_midi_doh[] = { "device", "takeBack", "leave" };
@@ -262,6 +264,22 @@ namespace wfg::doc::generated
           "", 5.0, false, "park",
           "",
           "Lines of the engine log made and not yet flushed to its file by the low-priority writer: what a process killed now would lose. The black-box harness waits for nought before it stops a server, since terminate() on Windows runs no destructor." },
+        { "engine", "spaceMouse",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          true, "off",
+          false, 0.0, false, 0.0,
+          enum_engine_spaceMouse, 4,
+          "", 1.0, false, "park",
+          "",
+          "What the engine-s SpaceMouse reader is doing (namespace draft 45, O.11): off while no curve with a movement is armed - the puck is let go of for any other program - searching for a 3Dconnexion puck, connected to one, or driver when 3Dconnexion-s own driver holds it, which Go.dot closes only when asked (spacemouse.closeDriver)." },
+        { "engine", "spaceMouseName",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "The connected puck-s own name - SpaceMouse Compact, SpaceMouse Wireless - or empty." },
         { "document", "path",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
@@ -1662,6 +1680,30 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "What the curve rides while its cue is armed for recording: its own curve where the cue-s clock is, until the device reports the value or a hand moves it in a pass - latched from then, the last value held, and written into the curve when the pass ends (namespace draft 45, O.9). Published for an armed curve only; tonight-s, never the show-s." },
+        { "curve", "axis",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "none",
+          false, 0.0, false, 0.0,
+          enum_curve_axis, 7,
+          "", 50.0, false, "park",
+          "",
+          "Which of the SpaceMouse-s six axes moves this curve in a pass (namespace draft 45, YS, the author-s pick: chosen per curve): tx, ty, tz its three pushes, rx, ry, rz its three twists, or none. Guessed when the curve is made - a message of three numbers takes the three pushes in order, an address ending in X, Y or Z its push - and changed at will." },
+        { "curve", "speed",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
+          true, "1",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "How far a full push of the puck moves this curve in a second, in the value-s own units (namespace draft 45, O.11): held at half, half as fast; let go, it stops where it is. Two when the movement was guessed." },
+        { "curve", "invert",
+          ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show,
+          true, "false",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "Whether the puck-s push is turned round for this curve: the puck-s own y points at the hand and its z down, so a guessed Y or Z is inverted (spatcore-s default profile)." },
         { "curves", "cue",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

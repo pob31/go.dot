@@ -4611,3 +4611,48 @@ TEST_CASE ("curve lane: the recorder arms the cue, starts a pass at the playhead
     REQUIRE (lane.trailOf ("C0RVE001") != nullptr);
     CHECK (lane.trailOf ("C0RVE001")->size() == 1u);
 }
+
+TEST_CASE ("curve lane: the picked curve's puck - its axis, speed and turn - each one node.set of its row")
+{
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::CurveLaneComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value) { written.emplace_back (address, value); };
+
+    ui::CurveLaneComponent lane (model::Theme {}, actions);
+    lane.setSize (900, 220);
+
+    model::OscCurvesReading reading;
+    reading.cueId = "CUE00001";
+    reading.drawn = 4.0;
+
+    model::CurveView x;
+    x.id = "C0RVE001";
+    x.parentId = "CUE00001";
+    x.label = "positionX";
+    x.puckAxis = "tx";
+    x.puckSpeed = 2.0;
+    reading.curves = { x };
+    lane.show (reading, false, 0.0, {});
+
+    CHECK (lane.puckAxisMenu().getText() == "tx");
+    CHECK (lane.puckSpeedBox().getText() == "2");
+    CHECK_FALSE (lane.puckInvertButton().getToggleState());
+
+    lane.puckAxisMenu().setSelectedId (3, juce::sendNotificationSync);       // ty
+    REQUIRE (written.size() == 1u);
+    CHECK (written.back() == std::pair<std::string, std::string> { "/godot/curve/C0RVE001/axis", "ty" });
+
+    lane.puckSpeedBox().setText ("0.5", juce::sendNotificationSync);
+    REQUIRE (written.size() == 2u);
+    CHECK (written.back() == std::pair<std::string, std::string> { "/godot/curve/C0RVE001/speed", "0.5" });
+
+    //  A speed that is not a number is put back, and nothing written.
+    lane.puckSpeedBox().setText ("fast", juce::sendNotificationSync);
+    CHECK (written.size() == 2u);
+    CHECK (lane.puckSpeedBox().getText() == "2");
+
+    lane.puckInvertButton().onClick();
+    REQUIRE (written.size() == 3u);
+    CHECK (written.back() == std::pair<std::string, std::string> { "/godot/curve/C0RVE001/invert", "true" });
+}

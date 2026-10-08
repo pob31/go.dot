@@ -100,6 +100,9 @@ namespace wfg::client::ui
         juce::Button& recordButton() noexcept { return recordAll; }
         juce::Button& curveRecButton() noexcept { return curveRec; }
         juce::Button& freeArmingButton() noexcept { return freeArming; }
+        juce::ComboBox& puckAxisMenu() noexcept { return puckAxis; }
+        juce::Label& puckSpeedBox() noexcept { return puckSpeed; }
+        juce::Button& puckInvertButton() noexcept { return puckInvert; }
         const std::vector<model::LanePoint>* trailOf (const std::string& curveId) const;
 
     private:
@@ -148,6 +151,12 @@ namespace wfg::client::ui
         juce::Label pointAt, pointValue;
         juce::TextButton playButton { "Play" }, stopButton { "Stop" };
         juce::TextButton recordAll, curveRec { "REC" }, freeArming;
+
+        /*  THE PICKED CURVE'S PUCK (O.11): which axis moves it, how fast, and
+            turned round or not - each one `node.set` of its row. */
+        juce::ComboBox puckAxis;
+        juce::Label puckSpeed;
+        juce::TextButton puckInvert { "Inv" };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CurveLaneComponent)
     };

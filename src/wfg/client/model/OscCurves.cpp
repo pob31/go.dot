@@ -139,6 +139,12 @@ namespace wfg::client::model
 
                 view.armed = armedCurves.find (" " + view.id + " ") != std::string::npos;
 
+                if (const auto puck = text (snapshot, view.rowAddress ("axis")); ! puck.empty())
+                    view.puckAxis = puck;
+
+                view.puckSpeed = osc::parseDouble (text (snapshot, view.rowAddress ("speed"))).value_or (1.0);
+                view.puckInvert = text (snapshot, view.rowAddress ("invert")) == "true";
+
                 if (const auto* ride = snapshot.find ("/godot/curve/" + view.id + "/ride");
                     out.armedHere && ride != nullptr && ! ride->values.empty() && ride->values[0].isNumber())
                     view.ride = ride->values[0].asDouble();

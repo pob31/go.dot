@@ -22370,3 +22370,29 @@ their curves; the copy of a cue's messages as a foot part.
   and, on a row with nothing wrong, `LISTEN <word>` where the problem goes while a curve is armed on it -
   `unreachable` and `unsupported` drawn as failures (Heard and the LISTEN line are mine, to put to the author).
   Against Go.dot's own OSCQuery server in OscQueryTests; against WFS-DIY, the bench.
+- **O.11, the SpaceMouse** (2026-10-08). hidapi is a pinned submodule (`ThirdParty/hidapi`, hidapi-0.15.0, BSD),
+  its one platform file compiled into `wfg_hidapi` - spatcore_add_hidapi's settings transcribed, Linux on hidraw
+  over libudev (`libudev-dev` to build, `libudev1` in the .deb, which installs a udev rule giving a 3Dconnexion
+  puck to the person at the seat, WFS-DIY's). `surface/SpaceMouse`, a thread of the engine's own (ZE): opens the
+  first puck of vendor 256f, reads its reports twenty milliseconds at a time (`surface/PuckReport`: spatcore's
+  layout and its 350, **transcribed rather than included** - its driver goes through the message thread - and
+  so are its two 3DxWare helpers), and keeps the newest state. **Alive is the thread reading, not the puck
+  talking** (mine, my reading of ZE): every pass of the loop - a report or a quiet twenty milliseconds - stamps
+  the time, and a state older than 100 ms is no push - the puck unplugged or the thread stalled - while a puck
+  held still keeps pushing whether or not it says so again. Opened only while a curve with a movement is
+  armed (ZF, `cue::puckWanted`), let go otherwise. When 3Dconnexion's driver holds it, `engine/spaceMouse` says
+  `driver`; Show settings › Surfaces then shows **Close 3DxWare...**, which asks before it sends
+  `spacemouse.closeDriver` - the kill on a thread of its own, then a search straight away; a replay does nothing.
+  During a pass, `serve`'s before-tick turns each push into movement (`cue::puckRides`, over the pure
+  `cue/RateStep`: spatcore's AxisMapping - dead zone 0.05, exponent one, inverted when asked - then the value
+  stepped by push x `speed` x a fiftieth, held to the curve's range or else the device's) and submits **one
+  `curve.ride` a tick**, origin `surface:spacemouse`, logged; a still puck writes nothing, and the latch holds
+  the last value (ZL). Each push steps from what the curve rides, which follows its own drawing where the clock
+  is until something latches it. `curve,axis` (`none`, tx..rz), `curve,speed` (1) and `curve,invert` are rows of
+  the show; **at `curve.create` the movement is guessed** (YS): a message of three numbers takes the three pushes
+  in order, else an address ending in X, Y or Z its push; Y and Z inverted (the puck's y points at the hand and
+  its z down, spatcore's default profile), at two units a second. The curve editor's head gains the picked
+  curve's axis menu, its speed and **Inv**; Surfaces gains the line **SpaceMouse: <word>** with the puck's name.
+  The words Close 3DxWare..., Inv, the axis menu's `none` and the SpaceMouse line are mine, to put to the
+  author. ZM (the left button) stays proposed and unbuilt. The puck itself is the bench's: speeds, letting go
+  and an unplug mid-push, with and without 3DxWare, on all three systems.

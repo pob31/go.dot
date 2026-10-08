@@ -2304,6 +2304,29 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="axis">
+          <a:documentation>Which of the SpaceMouse-s six axes moves this curve in a pass (namespace draft 45, YS, the author-s pick: chosen per curve): tx, ty, tz its three pushes, rx, ry, rz its three twists, or none. Guessed when the curve is made - a message of three numbers takes the three pushes in order, an address ending in X, Y or Z its push - and changed at will.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>tx</value>
+            <value>ty</value>
+            <value>tz</value>
+            <value>rx</value>
+            <value>ry</value>
+            <value>rz</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="invert">
+          <a:documentation>Whether the puck-s push is turned round for this curve: the puck-s own y points at the hand and its z down, so a guessed Y or Z is inverted (spatcore-s default profile).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="points">
           <a:documentation>The curve, as (second, value) pairs: seconds of the CUE, counted from the moment it begins sending, climbing from nought, and the VALUE ITSELF in the number-s own units - metres, degrees (namespace draft 45, YR, the author-s pick: never an offset). Straight between two points; before the first and after the last it holds what they say. Empty plays the message-s written value. Inside range when the curve has one.</a:documentation>
           <list>
@@ -2321,6 +2344,14 @@
               <data type="double"/>
             </zeroOrMore>
           </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="speed">
+          <a:documentation>How far a full push of the puck moves this curve in a second, in the value-s own units (namespace draft 45, O.11): held at half, half as fast; let go, it stops where it is. Two when the movement was guessed.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
         </attribute>
       </optional>
       <optional>

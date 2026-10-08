@@ -55,6 +55,10 @@ namespace wfg::client::ui
         const char* const recAtRest    = model::laneRecorderName;
         const char* const recReady     = "\xe2\x97\x8f Rec";
         const char* const recRecording = "\xe2\x96\xa0 Stop";
+
+        /*  The puck's axes in the engine's words, `none` first: tx, ty, tz the
+            three pushes, rx, ry, rz the three twists. */
+        const char* const puckAxes[] { "none", "tx", "ty", "tz", "rx", "ry", "rz" };
     }
 
     CurveLaneComponent::CurveLaneComponent (const model::Theme& themeToUse, Actions actionsToUse)
@@ -178,6 +182,58 @@ namespace wfg::client::ui
         };
         addChildComponent (freeArming);
 
+        puckAxis.setTooltip ("Which of the SpaceMouse's axes moves this curve in a pass: tx, ty, tz its three pushes,"
+                             " rx, ry, rz its three twists, or none");
+
+        for (int at = 0; at < 7; ++at)
+            puckAxis.addItem (puckAxes[at], at + 1);
+
+        puckAxis.onChange = [this]
+        {
+            const auto* drawn = curve();
+            const auto at = puckAxis.getSelectedId() - 1;
+
+            if (drawn != nullptr && at >= 0 && at < 7 && drawn->puckAxis != puckAxes[at] && actions.set)
+                actions.set (drawn->rowAddress ("axis"), puckAxes[at]);
+        };
+        addAndMakeVisible (puckAxis);
+
+        puckSpeed.setEditable (true, true, false);
+        puckSpeed.setTooltip ("How fast a full push moves this curve, in its own units a second");
+        puckSpeed.onTextChange = [this]
+        {
+            const auto* drawn = curve();
+            const auto speed = osc::parseDouble (puckSpeed.getText().toStdString());
+
+            if (drawn == nullptr)
+                return;
+
+            if (! speed.has_value() || *speed < 0.0)
+            {
+                puckSpeed.setText (numberText (drawn->puckSpeed), juce::dontSendNotification);
+
+                if (actions.say)
+                    actions.say ("A speed is a number, nought or more");
+
+                return;
+            }
+
+            if (actions.set)
+                actions.set (drawn->rowAddress ("speed"), osc::formatDouble (*speed));
+        };
+        addAndMakeVisible (puckSpeed);
+
+        puckInvert.setWantsKeyboardFocus (false);
+        puckInvert.setTooltip ("Turns the push round: pushing away moves the curve down");
+        puckInvert.onClick = [this]
+        {
+            const auto* drawn = curve();
+
+            if (drawn != nullptr && actions.set)
+                actions.set (drawn->rowAddress ("invert"), drawn->puckInvert ? "false" : "true");
+        };
+        addAndMakeVisible (puckInvert);
+
         showRecording();
     }
 
@@ -187,7 +243,7 @@ namespace wfg::client::ui
     {
         theme = themeToUse;
 
-        for (auto* box : { &pointAt, &pointValue })
+        for (auto* box : { &pointAt, &pointValue, &puckSpeed })
         {
             box->setFont (Look::font (theme, 12.0f));
             box->setColour (juce::Label::textColourId, Look::colour (theme, "ink"));
@@ -222,6 +278,24 @@ namespace wfg::client::ui
         curveRec.setEnabled (! reading.locked && drawn != nullptr);
         curveRec.setToggleState (drawn != nullptr && reading.armedHere && drawn->armed, juce::dontSendNotification);
         freeArming.setVisible (reading.armedHere && ! reading.recording);
+
+        //  The picked curve's puck, as the tree has it.
+        const auto puckEditable = ! reading.locked && drawn != nullptr;
+        auto axisAt = 0;
+
+        for (int at = 0; at < 7; ++at)
+            if (drawn != nullptr && drawn->puckAxis == puckAxes[at])
+                axisAt = at;
+
+        puckAxis.setSelectedId (axisAt + 1, juce::dontSendNotification);
+        puckAxis.setEnabled (puckEditable);
+        puckSpeed.setEditable (puckEditable, puckEditable, false);
+
+        if (! puckSpeed.isBeingEdited())
+            puckSpeed.setText (drawn != nullptr ? numberText (drawn->puckSpeed) : juce::String(), juce::dontSendNotification);
+
+        puckInvert.setEnabled (puckEditable);
+        puckInvert.setToggleState (drawn != nullptr && drawn->puckInvert, juce::dontSendNotification);
     }
 
     const model::CurveView* CurveLaneComponent::curve() const
@@ -461,6 +535,12 @@ namespace wfg::client::ui
         pointAt.setBounds (head.removeFromLeft (70));
         head.removeFromLeft (4);
         pointValue.setBounds (head.removeFromLeft (90));
+        head.removeFromLeft (12);
+        puckAxis.setBounds (head.removeFromLeft (70));
+        head.removeFromLeft (4);
+        puckSpeed.setBounds (head.removeFromLeft (52));
+        head.removeFromLeft (4);
+        puckInvert.setBounds (head.removeFromLeft (40));
     }
 
     void CurveLaneComponent::paint (juce::Graphics& g)

@@ -62,6 +62,7 @@
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/RelaxNg.h>
+#include <wfg/engine/surface/SpaceMouse.h>
 #include <wfg/engine/tree/MountListener.h>
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
@@ -3273,6 +3274,11 @@ namespace
         wfg::cue::CurveTable curveTable;
         runner.setCurves (&curveTable);
 
+        /*  THE SPACEMOUSE (namespace draft 45, O.11): read by a thread of its
+            own, opened only while a curve with a movement is armed. Serve only:
+            a replay has no puck, and its pushes are `curve.ride` records. */
+        wfg::surface::SpaceMouse spaceMouse;
+
         /*  The touch table, for the fader edges (PRD 3.9a): a fader-start
             counts only from a fader released at the bottom, and released is
             what this table knows. Serve only - a replay runs no hooks, and the
@@ -3475,7 +3481,7 @@ namespace
         };
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
-        wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable);
+        wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable, &spaceMouse);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
@@ -4145,6 +4151,7 @@ namespace
         parameters.setSender (&sender);
         probe.start();
         listener.start();
+        spaceMouse.start();
 
         /*  A SAVED SHOW LOOKS LIKE ONE (app/FolderIcon.h): after a save or a
             copy lands, on the writer's thread, its folder gets the show icon.
@@ -4614,6 +4621,19 @@ namespace
                                      devices, and lets them go when nothing is. */
                                  listener.want (runner.listenWanted());
 
+                                 /*  THE PUCK, wanted while a curve with a
+                                     movement is armed, and during a pass each
+                                     push stepped into one logged `curve.ride` -
+                                     the hardware read there, decided here. */
+                                 spaceMouse.want (wfg::cue::puckWanted (document, curveTable));
+
+                                 if (curveTable.recording)
+                                     if (const auto puck = spaceMouse.read(); puck.live)
+                                         if (auto pushed = wfg::cue::puckRides (document, &mounts, curveTable,
+                                                                                puck.state.axes, 1.0 / 50.0);
+                                             ! pushed.empty())
+                                             engine.submit ("surface:spacemouse", "curve.ride", std::move (pushed));
+
                                  if (audioState.settingsStatus != "applying")
                                      runner.beforeTick (engine, tickIndex);
 
@@ -4759,6 +4779,8 @@ namespace
                                 state.audioGapMax = audioGapMaxSeen.load (std::memory_order_relaxed);
                                 state.audioCallbackMax = audioCallbackMaxSeen.load (std::memory_order_relaxed);
                                 state.logPending = engine.log().pending();
+                                state.spaceMouse = spaceMouse.status();
+                                state.spaceMouseName = spaceMouse.name();
 
                                 /*  THE REFUSAL ITSELF, and not only the count
                                     of them.
@@ -5940,6 +5962,7 @@ namespace
         server.stop();
         probe.stop();
         listener.stop();
+        spaceMouse.stop();
 
         /*  Between two frames, or a few kilobytes into a hash: a Ctrl-C does
             not sit through a gigabyte of WAV. What it had not reached is

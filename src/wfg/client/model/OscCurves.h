@@ -79,6 +79,15 @@ namespace wfg::client::model
         bool armed = false;
         std::optional<double> ride;
 
+        /*  THE PUCK'S MOVEMENT (O.11, YS): which of its six axes moves the
+            curve - `none`, tx, ty, tz, rx, ry, rz - at how many units a second
+            at a full push, and whether the push is turned round. */
+        std::string puckAxis = "none";
+        double puckSpeed = 1.0;
+        bool puckInvert = false;
+
+        std::string rowAddress (const char* row) const { return "/godot/curve/" + id + "/" + row; }
+
         std::string pointsAddress() const { return "/godot/curve/" + id + "/points"; }
     };
 

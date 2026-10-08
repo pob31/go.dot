@@ -108,6 +108,18 @@ for png in "$stage"/icons/go.dot-[0-9]*.png; do
     install -D -m 644 "$png" "$root/usr/share/icons/hicolor/${size}x${size}/apps/go.dot.png"
 done
 
+#  --- the SpaceMouse, for whoever is at the desk (namespace draft 45, O.11) ---
+# hidraw nodes are root's by default: this gives a 3Dconnexion puck to the
+# person logged in at the seat (uaccess) and to plugdev, WFS-DIY's rule. udev
+# reads it when the puck is next plugged in.
+install -d -m 755 "$root/usr/lib/udev/rules.d"
+cat > "$root/usr/lib/udev/rules.d/70-go.dot.rules" <<'EOF'
+# Installed by the go.dot package: a 3Dconnexion SpaceMouse, readable by the person at the seat.
+SUBSYSTEM=="usb",  ATTRS{idVendor}=="256f", MODE="0660", TAG+="uaccess", GROUP="plugdev"
+KERNEL=="hidraw*", ATTRS{idVendor}=="256f", MODE="0660", TAG+="uaccess", GROUP="plugdev"
+EOF
+chmod 644 "$root/usr/lib/udev/rules.d/70-go.dot.rules"
+
 for png in "$stage"/icons/go.dot-document-*.png; do
     size="$(basename "$png" .png)"; size="${size#go.dot-document-}"
     install -D -m 644 "$png" "$root/usr/share/icons/hicolor/${size}x${size}/mimetypes/application-x-go.dot-show.png"
@@ -126,7 +138,7 @@ Version: ${version//-/\~}
 Architecture: amd64
 Maintainer: Pierre-Olivier Boulant <po2528@gmail.com>
 Installed-Size: $(du -sk --exclude=DEBIAN "$root" | cut -f1)
-Depends: libc6 (>= 2.39), libstdc++6, libgcc-s1, libasound2t64 | libasound2, libfreetype6, libfontconfig1, libx11-6, libxext6, libxinerama1, libxrandr2, libxcursor1, libxcomposite1, libxrender1, libgl1, libegl1, libopengl0
+Depends: libc6 (>= 2.39), libstdc++6, libgcc-s1, libasound2t64 | libasound2, libfreetype6, libfontconfig1, libx11-6, libxext6, libxinerama1, libxrandr2, libxcursor1, libxcomposite1, libxrender1, libgl1, libegl1, libopengl0, libudev1
 Recommends: pipewire-jack, ffmpeg
 Section: sound
 Priority: optional

@@ -32,9 +32,15 @@
 */
 
 #include <wfg/engine/command/CommandRegistry.h>
+#include <wfg/engine/osc/OscValue.h>
+
+#include <array>
+#include <vector>
 
 namespace wfg { class Engine; }
 namespace wfg::doc { class ShowDocument; }
+namespace wfg::surface { class SpaceMouse; }
+namespace wfg::tree { class MountTable; }
 
 namespace wfg::cue
 {
@@ -42,5 +48,19 @@ namespace wfg::cue
     class Runner;
 
     void registerCurveCommands (CommandRegistry& registry, Engine& engine, Runner& runner,
-                                doc::ShowDocument& document, CurveTable& curves);
+                                doc::ShowDocument& document, CurveTable& curves,
+                                surface::SpaceMouse* puck = nullptr);
+
+    /*  WHETHER THE PUCK IS WANTED (O.11, ZF): a curve with a movement armed. */
+    bool puckWanted (const doc::ShowDocument& document, const CurveTable& curves);
+
+    /*  WHAT THE PUCK MOVES THIS TICK (O.11), as `curve.ride`'s pairs: each armed
+        curve with a movement whose axis is pushed past the dead zone, stepped
+        from what it rides by its push at its `speed` over `seconds`, held to
+        its range - its own, else the device's for that value. Empty during no
+        pass, and for a puck nobody pushes: letting go writes nothing, and the
+        latch holds the last value. */
+    std::vector<osc::Value> puckRides (const doc::ShowDocument& document, const tree::MountTable* mounts,
+                                       const CurveTable& curves, const std::array<double, 6>& axes,
+                                       double seconds);
 }

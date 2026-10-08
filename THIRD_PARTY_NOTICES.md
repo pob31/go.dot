@@ -371,6 +371,22 @@ own prefix header. Full text: `ThirdParty/Syphon/License.txt`.
 
 ---
 
+## hidapi
+
+- **Website**: https://github.com/libusb/hidapi
+- **Version**: tag `hidapi-0.15.0`, commit `d6b2a974608dec3b76fb1e36c189f22b9cf3650c`
+- **Licence**: BSD 3-Clause style (hidapi offers three; Go.dot takes the BSD one, `LICENSE-bsd.txt`)
+- **Copyright**: Alan Ott, Signal 11 Software, and the hidapi contributors
+
+The SpaceMouse the engine reads itself (namespace draft 45, O.11). A pinned
+submodule at `ThirdParty/hidapi`, of which only the one platform file is
+compiled - `windows/hid.c` with its descriptor reconstruction, `mac/hid.c`, or
+`linux/hid.c` (hidraw, over libudev) - into a static library of its own,
+`wfg_hidapi` (`cmake/WfgThirdParty.cmake`). Full text:
+`ThirdParty/hidapi/LICENSE-bsd.txt`.
+
+---
+
 ## NDI's headers
 
 - **Website**: https://ndi.video/

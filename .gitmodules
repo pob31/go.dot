@@ -16,3 +16,6 @@
 [submodule "ThirdParty/Syphon"]
 	path = ThirdParty/Syphon
 	url = https://github.com/Syphon/Syphon-Framework.git
+[submodule "ThirdParty/hidapi"]
+	path = ThirdParty/hidapi
+	url = https://github.com/libusb/hidapi.git

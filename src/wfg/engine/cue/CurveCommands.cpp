@@ -18,9 +18,15 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CurveTable.h>
+#include <wfg/engine/cue/RateStep.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/document/LevelLane.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/surface/SpaceMouse.h>
+#include <wfg/engine/tree/Mount.h>
+
+#include <optional>
 
 #include <string>
 #include <vector>
@@ -45,11 +51,98 @@ namespace wfg::cue
 
             return parent.isValid() && parent.getProperty (juce::Identifier ("id")).toString().toStdString() == cueId;
         }
+
+        std::string curveRow (const doc::ShowDocument& document, const std::string& curveId, const char* row)
+        {
+            return document.getAttribute ("/godot/curve/" + curveId + "/" + row).value_or (std::string {});
+        }
+    }
+
+    bool puckWanted (const doc::ShowDocument& document, const CurveTable& curves)
+    {
+        if (! curves.armed())
+            return false;
+
+        for (const auto& id : curves.armedCurves())
+            if (puckAxisIndex (curveRow (document, id, "axis")) >= 0)
+                return true;
+
+        return false;
+    }
+
+    std::vector<osc::Value> puckRides (const doc::ShowDocument& document, const tree::MountTable* mounts,
+                                       const CurveTable& curves, const std::array<double, 6>& axes,
+                                       double seconds)
+    {
+        std::vector<osc::Value> pairs;
+
+        if (! curves.recording)
+            return pairs;
+
+        for (const auto& id : curves.armedCurves())
+        {
+            const auto axis = puckAxisIndex (curveRow (document, id, "axis"));
+
+            if (axis < 0)
+                continue;
+
+            const auto deflection = deflectionOf (axes[static_cast<std::size_t> (axis)],
+                                                  curveRow (document, id, "invert") == "true");
+
+            if (deflection == 0.0)
+                continue;
+
+            const auto curve = document.findById (id);
+
+            if (! curve.isValid())
+                continue;
+
+            //  THE BOUNDS: the curve's range, else the device's for this value.
+            std::optional<RateBounds> bounds;
+            std::string problem;
+
+            if (const auto range = doc::readLaneRange (curveRow (document, id, "range"), problem))
+                bounds = RateBounds { range->low, range->high };
+            else if (mounts != nullptr)
+            {
+                const auto address = curve.getParent()[juce::Identifier ("address")].toString().toStdString();
+                const auto arg = static_cast<std::size_t> (std::max (0, static_cast<int> (curve[juce::Identifier ("arg")])));
+
+                if (const auto* node = mounts->nodeAt (address))
+                    if (const auto deviceRange = node->rangeOf (arg); deviceRange.hasMinimum && deviceRange.hasMaximum)
+                        bounds = RateBounds { deviceRange.minimum, deviceRange.maximum };
+            }
+
+            const auto speed = osc::parseDouble (curveRow (document, id, "speed")).value_or (1.0);
+            const auto ridden = curves.rides.find (id);
+            const auto from = ridden != curves.rides.end() ? ridden->second.value : 0.0;
+
+            pairs.push_back (osc::Value::string (id));
+            pairs.push_back (osc::Value::float64 (rateStep (from, deflection, speed, seconds, bounds)));
+        }
+
+        return pairs;
     }
 
     void registerCurveCommands (CommandRegistry& registry, Engine& engine, Runner& runner,
-                                doc::ShowDocument& document, CurveTable& curves)
+                                doc::ShowDocument& document, CurveTable& curves,
+                                surface::SpaceMouse* puck)
     {
+        /*  3DCONNEXION'S DRIVER CLOSED, ASKED BY THE OPERATOR (ZF): the reader
+            kills it on a thread of its own and looks for the puck again. What
+            the machine does, so a replay - which has no puck - does nothing. */
+        registry.add ({ "spacemouse.closeDriver",
+                        "Closes 3Dconnexion's driver, which holds the SpaceMouse, so Go.dot can read it.",
+                        {},
+                        true,
+                        [puck] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (puck != nullptr)
+                                puck->closeDriver();
+
+                            return Outcome::ok (args);
+                        } });
+
         registry.add ({ "curve.arm",
                         "Arms an OSC cue for recording its curves: its curves can then be armed and a pass"
                         " recorded. Empty frees it.",

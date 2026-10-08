@@ -531,6 +531,11 @@ namespace wfg::client::gesture
         return { origin::window, "curve.stop", {} };
     }
 
+    Event spaceMouseCloseDriver()
+    {
+        return { origin::window, "spacemouse.closeDriver", {} };
+    }
+
     Event identifyVideoOutput (const std::string& outputId, bool on)
     {
         return { origin::window, "videoOutput.identify", { osc::Value::string (outputId), osc::Value::boolean (on) } };

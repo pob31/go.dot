@@ -3125,7 +3125,35 @@ namespace wfg::doc
             if (child.hasType ("Curve") && static_cast<int> (child[juce::Identifier ("arg")]) == arg)
                 return EditResult::failed (reason::badValue);
 
-        return insertObject (parent, endOfSequence, "Curve", id, { { "arg", std::to_string (arg) } });
+        /*  THE PUCK'S MOVEMENT, GUESSED (namespace draft 45, YS, O.11): a
+            message of three numbers is a position, its first, second and third
+            the puck's three pushes; else an address ending in X, Y or Z names
+            its push. Y and Z inverted - the puck's own y points at the hand and
+            its z down, spatcore's default profile - at two units a second.
+            Anything else moves with nothing until somebody picks. */
+        std::vector<std::pair<std::string_view, std::string>> attributes { { "arg", std::to_string (arg) } };
+
+        const auto allNumbers = std::all_of (values->begin(), values->end(),
+                                             [] (const osc::Value& value) { return value.isNumber(); });
+        const auto address = parent[juce::Identifier ("address")].toString().toStdString();
+        const auto last = address.empty() ? '\0' : static_cast<char> (std::tolower (static_cast<unsigned char> (address.back())));
+        auto push = -1;
+
+        if (values->size() == 3 && allNumbers)
+            push = arg;
+        else if (last == 'x' || last == 'y' || last == 'z')
+            push = last - 'x';
+
+        if (push >= 0 && push < 3)
+        {
+            attributes.emplace_back ("axis", push == 0 ? "tx" : push == 1 ? "ty" : "tz");
+            attributes.emplace_back ("speed", "2");
+
+            if (push > 0)
+                attributes.emplace_back ("invert", "true");
+        }
+
+        return insertObject (parent, endOfSequence, "Curve", id, attributes);
     }
 
     EditResult ShowDocument::promoteMessage (const std::string& messageId)

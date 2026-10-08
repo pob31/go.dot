@@ -135,6 +135,7 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/CurveTable.h
     wfg/engine/cue/CurveCommands.h
     wfg/engine/cue/CurveCommands.cpp
+    wfg/engine/cue/RateStep.h
     wfg/engine/cue/LiveEdits.h
     wfg/engine/cue/LiveEdits.cpp
     wfg/engine/cue/FxValues.h
@@ -161,6 +162,9 @@ add_library(wfg_engine STATIC
     wfg/engine/surface/McuCodec.cpp
     wfg/engine/surface/FaderCurve.h
     wfg/engine/surface/SurfaceProfile.h
+    wfg/engine/surface/PuckReport.h
+    wfg/engine/surface/SpaceMouse.h
+    wfg/engine/surface/SpaceMouse.cpp
     wfg/engine/surface/SurfaceProfile.cpp
     wfg/engine/surface/SurfacePages.h
     wfg/engine/surface/SurfacePages.cpp

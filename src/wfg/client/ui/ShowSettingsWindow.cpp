@@ -2413,7 +2413,48 @@ namespace wfg::client::ui
 
                 addChildComponent (chooser);
                 chooser.onChange = [this] { commitChoice(); };
+
+                /*  3DCONNEXION'S DRIVER, CLOSED ONLY WHEN ASKED (O.11, ZF): the
+                    button shows while it holds the puck, and asks again before
+                    anything is closed - it is another company's program. */
+                closeDriverButton.setTooltip ("3Dconnexion's driver is holding the SpaceMouse. Close it so Go.dot"
+                                              " can read the puck?");
+                closeDriverButton.onClick = [this]
+                {
+                    juce::AlertWindow::showAsync (
+                        juce::MessageBoxOptions()
+                            .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                            .withTitle ("Close 3Dconnexion's driver?")
+                            .withMessage ("3Dconnexion's driver is holding the SpaceMouse, so Go.dot cannot read"
+                                          " it. Close the driver? Other programs that use the puck through it"
+                                          " will lose it until it is started again.")
+                            .withButton ("Close the driver")
+                            .withButton ("Leave it")
+                            .withAssociatedComponent (this),
+                        [safe = juce::Component::SafePointer<SurfacesPage> (this)] (int result)
+                        {
+                            if (result == 1 && safe != nullptr && safe->send)
+                                safe->send (gesture::spaceMouseCloseDriver());
+                        });
+                };
+                addChildComponent (closeDriverButton);
             }
+
+            /*  WHAT THE ENGINE'S SPACEMOUSE READER IS DOING (O.11), for the line
+                beside the surfaces' title. */
+            void showSpaceMouse (const std::string& statusNow, const std::string& nameNow)
+            {
+                if (statusNow == spaceMouseStatus && nameNow == spaceMouseName)
+                    return;
+
+                spaceMouseStatus = statusNow;
+                spaceMouseName = nameNow;
+                closeDriverButton.setVisible (spaceMouseStatus == "driver");
+                repaint();
+            }
+
+            const std::string& spaceMouseWord() const noexcept { return spaceMouseStatus; }
+            juce::Button& closeDriver() noexcept { return closeDriverButton; }
 
             void show (std::vector<model::SurfaceRow> surfacesNow, std::vector<model::StripRow> stripsNow,
                        std::vector<model::DcaRow> dcasNow, std::vector<model::PortRow> portsNow,
@@ -2508,6 +2549,13 @@ namespace wfg::client::ui
                     titles[at] = bar.removeFromLeft (240);
                     buttons[at]->setBounds (bar.removeFromLeft (128).reduced (3, 1));
 
+                    //  The SpaceMouse's line, right of the surfaces' button (O.11).
+                    if (at == 0)
+                    {
+                        closeDriverButton.setBounds (bar.removeFromRight (150).reduced (3, 1));
+                        spaceMouseLine = bar.reduced (12, 0);
+                    }
+
                     headings[at] = area.removeFromTop (headingHeight);
                     lists[at]->setBounds (area.removeFromTop (heights[at]));
                 }
@@ -2524,6 +2572,26 @@ namespace wfg::client::ui
                                                      : juce::String ("Strips"),
                             titles[1], juce::Justification::centredLeft, true);
                 g.drawText ("DCAs", titles[2], juce::Justification::centredLeft);
+
+                /*  THE SPACEMOUSE, in the engine's word (O.11): off until a curve
+                    with a movement is armed, then searching, connected and its
+                    name, or held by 3Dconnexion's driver - a word that fails is
+                    drawn as one, the word carrying it (4.8). */
+                {
+                    const auto word = spaceMouseStatus.empty() ? std::string ("off") : spaceMouseStatus;
+                    auto line = juce::String ("SpaceMouse: ") + juce::String (word);
+
+                    if (word == "connected" && ! spaceMouseName.empty())
+                        line << " - " << juce::String (spaceMouseName);
+                    else if (word == "driver")
+                        line = "SpaceMouse: held by 3Dconnexion's driver";
+
+                    g.setFont (Look::font (theme, 12.0f));
+                    g.setColour (Look::colour (theme, word == "driver" ? "failed" : "ink-dim"));
+                    g.drawText (line, spaceMouseLine, juce::Justification::centredRight, true);
+                    g.setFont (Look::font (theme, 13.0f));
+                    g.setColour (Look::colour (theme, "ink"));
+                }
 
                 /*  THE COLUMN NAMES, painted and carved from each list's own
                     row width, as the MIDI tab carves them: a scrollbar makes a
@@ -2573,6 +2641,10 @@ namespace wfg::client::ui
             static constexpr int barHeight = 28;
             static constexpr int headingHeight = 18;
             static constexpr int sectionGap = 8;
+
+            std::string spaceMouseStatus = "off", spaceMouseName;
+            juce::Rectangle<int> spaceMouseLine;
+            juce::TextButton closeDriverButton { "Close 3DxWare..." };
 
             enum class Which { surfaces, strips, dcas };
 
@@ -6748,6 +6820,8 @@ namespace wfg::client::ui
             surfaces->show (model::readSurfaces (snapshot), model::readStrips (snapshot),
                             model::readDcas (snapshot), ports,
                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+            surfaces->showSpaceMouse (model::text (snapshot, "/godot/engine/spaceMouse"),
+                                      model::text (snapshot, "/godot/engine/spaceMouseName"));
 
             /*  THE SET AND THE MACHINE'S LIST, re-read every pass for the same
                 reason; the state words are the sandbox's and move when a child

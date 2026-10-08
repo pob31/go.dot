@@ -112,6 +112,10 @@ namespace wfg::tree
         std::int64_t audioGaps = 0, audioGapMax = 0, audioCallbackMax = 0;
         std::int64_t logPending = 0;
 
+        /** The SpaceMouse reader's word and the puck's name (O.11). */
+        std::string spaceMouse = "off";
+        std::string spaceMouseName;
+
         /** `dummy` in Phase 1, `hosted` or `device` from Phase 2. */
         std::string clock = "dummy";
 

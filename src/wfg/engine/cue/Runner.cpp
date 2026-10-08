@@ -3328,6 +3328,17 @@ namespace wfg::cue
                         ride.latched = true;
                     }
 
+                    /*  UNTIL SOMETHING LATCHES IT, a curve rides its own drawing
+                        where the clock is - what `ride` shows, and where a push
+                        of the puck starts from. */
+                    if (! ride.latched)
+                    {
+                        const auto drawn = valuesAt (target, place.seconds);
+
+                        if (lane.arg < drawn.size() && drawn[lane.arg].isNumber())
+                            ride.value = drawn[lane.arg].asDouble();
+                    }
+
                     //  LATCHED: written every tick until the pass stops, the last value held (DH).
                     if (ride.latched)
                         appendRide (ride.segments, place.seconds, ride.value);

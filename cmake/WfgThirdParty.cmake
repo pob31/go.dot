@@ -619,6 +619,35 @@ if(APPLE)
     unset(_file)
     unset(_syphon)
 endif()
+
+# hidapi (BSD-3, libusb/hidapi at hidapi-0.15.0), for the SpaceMouse the engine
+# reads itself (namespace draft 45, O.11, ZE): the one platform file and nothing
+# of hidapi's own CMake - spatcore_add_hidapi's settings, transcribed (static, no
+# hidtest, hidraw on Linux). Windows loads hid.dll and cfgmgr32.dll at run time,
+# so links nothing; macOS needs IOKit and CoreFoundation; Linux libudev, which
+# scripts/install-linux-deps.sh installs. Its headers are reached as
+# <hidapi/hidapi/hidapi.h> through ThirdParty, never ThirdParty/hidapi itself, whose
+# VERSION file would answer `#include <version>` on a case-blind disk.
+set(_hidapi "${CMAKE_SOURCE_DIR}/ThirdParty/hidapi")
+add_library(wfg_hidapi STATIC)
+if(WIN32)
+    target_sources(wfg_hidapi PRIVATE "${_hidapi}/windows/hid.c" "${_hidapi}/windows/hidapi_descriptor_reconstruct.c")
+elseif(APPLE)
+    target_sources(wfg_hidapi PRIVATE "${_hidapi}/mac/hid.c")
+    target_link_libraries(wfg_hidapi PUBLIC "-framework IOKit" "-framework CoreFoundation")
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(WFG_UDEV REQUIRED IMPORTED_TARGET libudev)
+    target_sources(wfg_hidapi PRIVATE "${_hidapi}/linux/hid.c")
+    target_link_libraries(wfg_hidapi PUBLIC PkgConfig::WFG_UDEV)
+endif()
+target_include_directories(wfg_hidapi SYSTEM PRIVATE "${_hidapi}/hidapi")
+target_compile_definitions(wfg_hidapi PUBLIC HID_API_NO_EXPORT_DEFINE)
+target_compile_options(wfg_hidapi PRIVATE $<IF:$<C_COMPILER_ID:MSVC>,/w,-w>)
+set_target_properties(wfg_hidapi PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(wfg_deps INTERFACE wfg_hidapi)
+unset(_hidapi)
+
 add_library(wfg::thirdparty ALIAS wfg_thirdparty)
 
 # The engine will eventually be linked into things that are themselves shared objects

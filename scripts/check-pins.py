@@ -75,6 +75,7 @@ JUCE = "ThirdParty/JUCE"
 TE = "ThirdParty/tracktion_engine"
 SIMPLEWEB = "ThirdParty/juce_simpleweb"
 SPATCORE = "ThirdParty/spatcore"
+HIDAPI = "ThirdParty/hidapi"
 TE_VENDORED_JUCE = "ThirdParty/tracktion_engine/modules/juce"
 SIMPLEWEB_ASIO = "ThirdParty/juce_simpleweb/asio"
 TE_PATCHES = "patches/tracktion_engine"
@@ -87,6 +88,7 @@ FIX_HINT = {
     JUCE: "git submodule update --init " + JUCE,
     TE: "git submodule update --init " + TE,
     SPATCORE: "git submodule update --init " + SPATCORE,
+    HIDAPI: "git submodule update --init " + HIDAPI,
     SIMPLEWEB: "git submodule update --init --recursive " + SIMPLEWEB
                + "   (the --recursive is SCOPED to this path, and required: asio)",
 }
@@ -138,7 +140,7 @@ def checked_out_head(path: str):
 
 def check_a(failures):
     """Every submodule is checked out at the SHA its gitlink names."""
-    for path in (JUCE, TE, SIMPLEWEB, SPATCORE):
+    for path in (JUCE, TE, SIMPLEWEB, SPATCORE, HIDAPI):
         recorded, err = recorded_gitlink(path)
         if err:
             failures.append(err)

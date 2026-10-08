@@ -398,6 +398,10 @@ namespace wfg::client::gesture
     Event curveRecord (double fromSeconds);
     Event curveStop();
 
+    /*  3Dconnexion's driver closed so the engine can read the SpaceMouse - the
+        operator's to ask, always (O.11, ZF). */
+    Event spaceMouseCloseDriver();
+
     /** An output's test pattern on or off, to find which projector is which: tonight's. */
     Event identifyVideoOutput (const std::string& outputId, bool on);
 
