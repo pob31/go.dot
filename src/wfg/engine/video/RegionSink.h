@@ -85,6 +85,8 @@ namespace wfg::video
             slot.paint.store (spec.paint, std::memory_order_relaxed);
             slot.blend.store (static_cast<std::uint32_t> (region::blendFrom (spec.blend)), std::memory_order_relaxed);
             region::writeText (slot.file, spec.file);
+            region::writeText (slot.input, spec.input);
+            region::writeText (slot.insert, spec.insert);
             slot.fit.store (static_cast<std::uint32_t> (region::fitFrom (spec.fit)), std::memory_order_relaxed);
             slot.scale.store (spec.scale, std::memory_order_relaxed);
             slot.offsetX.store (spec.offsetX, std::memory_order_relaxed);

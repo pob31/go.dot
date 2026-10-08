@@ -619,8 +619,8 @@ namespace wfg::doc
 
         if (! container.isValid())
         {
-            /*  AT A FIXED PLACE, after the video outputs, the canvases and the
-                DCAs, whichever there are - and outside the history, as the
+            /*  AT A FIXED PLACE, after the video inputs, the video outputs,
+                the canvases and the DCAs, whichever there are - and outside the history, as the
                 canvases' container is: it carries nothing, and the template
                 that made it is the step Undo takes back. */
             int at = 0;
@@ -629,7 +629,7 @@ namespace wfg::doc
             {
                 const auto type = showNode.getChild (i).getType().toString();
 
-                if (type == "Dcas" || type == "Canvases" || type == "VideoOutputs")
+                if (type == "Dcas" || type == "Canvases" || type == "VideoOutputs" || type == "VideoInputs")
                     at = i + 1;
             }
 

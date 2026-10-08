@@ -529,6 +529,10 @@ namespace wfg::tree
         std::vector<std::string> declaredCanvases;
         std::vector<std::string> declaredVideoOutputs;
 
+        /*  And every video input (namespace draft §44, YB), for what the
+            renderer found of it tonight. */
+        std::vector<std::string> declaredVideoInputs;
+
         /** Every plugin of the set, in document order - the chain's order. */
         std::vector<std::string> declaredPlugins;
 

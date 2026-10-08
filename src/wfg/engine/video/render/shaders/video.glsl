@@ -66,7 +66,7 @@ void main() {
 @block grade_block
 layout(binding=1) uniform grade {
     vec4 grade_a;       // gamma, contrast, saturation, curves (0 or 1)
-    vec4 grade_b;       // cos (hue), sin (hue), opacity, -
+    vec4 grade_b;       // cos (hue), sin (hue), opacity, opaque (a capture: 1)
 };
 
 layout(binding=1) uniform texture2D grade_tables;
@@ -130,7 +130,9 @@ void main() {
 
 //------------------------------------------------------------------------------
 //  A MOVIE'S FRAME: DXT's colour, or a preview's, straight - HAP's alpha is not
-//  premultiplied - graded, then premultiplied by its own alpha.
+//  premultiplied - graded, then premultiplied by its own alpha. And a capture's
+//  picture (namespace draft 44, YC), whose alpha is not read (grade_b.w): many
+//  programs send BGRX, its fourth byte whatever it happens to be.
 @fs movie_fs
 @include_block grade_block
 
@@ -142,7 +144,8 @@ out vec4 frag_colour;
 
 void main() {
     vec4 c = texture(sampler2D(picture, picture_smp), at);
-    frag_colour = vec4(apply_grade(c.rgb) * c.a, c.a) * grade_b.z;
+    float a = grade_b.w > 0.5 ? 1.0 : c.a;
+    frag_colour = vec4(apply_grade(c.rgb) * a, a) * grade_b.z;
 }
 @end
 

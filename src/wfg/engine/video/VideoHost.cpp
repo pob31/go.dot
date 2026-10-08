@@ -49,6 +49,15 @@ namespace wfg::video
                                { return x.id == y.id && x.width == y.width && x.height == y.height; });
         }
 
+        bool sameInputs (const std::vector<region::InputReading>& a, const std::vector<region::InputReading>& b)
+        {
+            return std::equal (a.begin(), a.end(), b.begin(), b.end(),
+                               [] (const region::InputReading& x, const region::InputReading& y)
+                               {
+                                   return x.id == y.id && x.kind == y.kind && x.sender == y.sender && x.enabled == y.enabled;
+                               });
+        }
+
         bool sameOutputs (const std::vector<region::OutputReading>& a, const std::vector<region::OutputReading>& b)
         {
             return std::equal (a.begin(), a.end(), b.begin(), b.end(),
@@ -348,6 +357,28 @@ namespace wfg::video
                 foundOutputs.push_back (std::move (entry));
             }
 
+            std::vector<Readouts::InputEntry> foundInputs;
+
+            for (auto& state : r->inputs)
+            {
+                Readouts::InputEntry entry;
+
+                region::readConsistent (state.seq, [&]
+                {
+                    entry.id = region::readText (state.inputId);
+                    entry.connected = state.connected.load (std::memory_order_relaxed) != 0;
+                    entry.width = state.width.load (std::memory_order_relaxed);
+                    entry.height = state.height.load (std::memory_order_relaxed);
+                    entry.frameRate = static_cast<double> (state.frameRate.load (std::memory_order_relaxed));
+                    entry.problem = region::readText (state.problem);
+                });
+
+                if (! entry.id.empty())
+                    foundInputs.push_back (std::move (entry));
+            }
+
+            auto offered = region::readAvailable (*r);
+
             /*  A RENDERER NOT RUNNING HAS FOUND NOTHING: its last words are not
                 tonight's. */
             const auto running = child != nullptr && child->isRunning()
@@ -359,12 +390,16 @@ namespace wfg::video
             {
                 latest.displays = std::move (foundDisplays);
                 latest.outputs = std::move (foundOutputs);
+                latest.inputs = std::move (foundInputs);
+                latest.available = std::move (offered);
                 latest.layerTints = region::readTints (r->layerTints);
                 latest.canvasTints = region::readTints (r->canvasTints);
             }
             else
             {
                 latest.outputs.clear();
+                latest.inputs.clear();
+                latest.available.clear();
                 latest.layerTints.clear();
                 latest.canvasTints.clear();
             }
@@ -381,6 +416,7 @@ namespace wfg::video
 
         std::vector<region::CanvasReading> canvases;
         std::vector<region::OutputReading> outputs;
+        std::vector<region::InputReading> inputs;
         bool configured = false;
         std::set<std::string> identified;
         bool hideProjectors = false;
@@ -570,11 +606,40 @@ namespace wfg::video
             outputs.push_back (std::move (entry));
         }
 
-        if (! impl->configured || ! sameCanvases (canvases, impl->canvases) || ! sameOutputs (outputs, impl->outputs))
+        /*  THE VIDEO INPUTS (namespace draft §44, YB): what each takes in and
+            from whom. One taken in keeps the renderer running, as an output
+            does - it is what finds what other programs offer, too. */
+        std::vector<region::InputReading> inputs;
+
+        for (const auto& input : root.getChildWithName ("VideoInputs"))
         {
-            region::writeConfig (*impl->r, canvases, outputs);
+            const auto id = input["id"].toString().toStdString();
+
+            if (id.empty())
+                continue;
+
+            const auto base = "/godot/videoInput/" + id + "/";
+            region::InputReading entry;
+            entry.id = id;
+            entry.kind = region::outputKindFrom (text (base + "kind"));
+
+            //  An unknown word is NDI, the default, never a display.
+            if (entry.kind == region::OutputKind::display)
+                entry.kind = region::OutputKind::ndi;
+
+            entry.sender = text (base + "sender");
+            entry.enabled = text (base + "enabled") != "false";
+            anyEnabled = anyEnabled || entry.enabled;
+            inputs.push_back (std::move (entry));
+        }
+
+        if (! impl->configured || ! sameCanvases (canvases, impl->canvases) || ! sameOutputs (outputs, impl->outputs)
+              || ! sameInputs (inputs, impl->inputs))
+        {
+            region::writeConfig (*impl->r, canvases, outputs, inputs);
             impl->canvases = std::move (canvases);
             impl->outputs = std::move (outputs);
+            impl->inputs = std::move (inputs);
             impl->configured = true;
         }
 
@@ -629,7 +694,7 @@ namespace wfg::video
         for (auto& output : impl->outputs)
             output.testPattern = impl->identified.count (output.id) > 0;
 
-        region::writeConfig (*impl->r, impl->canvases, impl->outputs);
+        region::writeConfig (*impl->r, impl->canvases, impl->outputs, impl->inputs);
     }
 
     bool VideoHost::identifying (const std::string& outputId) const
@@ -648,7 +713,7 @@ namespace wfg::video
         for (auto& output : impl->outputs)
             output.hidden = on && ! impl->locked;
 
-        region::writeConfig (*impl->r, impl->canvases, impl->outputs);
+        region::writeConfig (*impl->r, impl->canvases, impl->outputs, impl->inputs);
     }
 
     bool VideoHost::projectorsHidden() const noexcept

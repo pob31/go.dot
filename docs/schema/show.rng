@@ -65,6 +65,9 @@
         <ref name="VideoOutputs"/>
       </optional>
       <optional>
+        <ref name="VideoInputs"/>
+      </optional>
+      <optional>
         <ref name="CueTemplates"/>
       </optional>
     </element>
@@ -1536,12 +1539,13 @@
       </optional>
       <optional>
         <attribute name="source">
-          <a:documentation>What the cue puts on its canvas (namespace draft 35, the author&apos;s words): a fill, one flat colour over the whole canvas, sitting behind; a mask, a shape laid over what is under it; a picture, an image file. Later a movie and a capture. One element for every source (VE), because the canvas, the layer, the opacity and the blend are the same whatever it shows.</a:documentation>
+          <a:documentation>What the cue puts on its canvas (namespace draft 35, the author&apos;s words): a fill, one flat colour over the whole canvas, sitting behind; a mask, a shape laid over what is under it; a picture, an image file; a movie; a capture, the picture a video input brings in from another program (namespace draft 44, YC). One element for every source (VE), because the canvas, the layer, the opacity and the blend are the same whatever it shows.</a:documentation>
           <choice>
             <value>fill</value>
             <value>mask</value>
             <value>picture</value>
             <value>movie</value>
+            <value>capture</value>
           </choice>
         </attribute>
       </optional>
@@ -1551,6 +1555,12 @@
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="videoInput">
+          <a:documentation>The video input a capture shows, by identifier (namespace draft 44, YC): the picture another program sends, placed, graded, faded and blended as a picture is. Many cues may show one input. Read by nothing but a capture. Not `input`, which is a mic cue&apos;s rack input at the same cue address.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <zeroOrMore>
@@ -3464,6 +3474,53 @@
             <param name="minInclusive">0</param>
             <param name="maxInclusive">100</param>
           </data>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="VideoInputs">
+    <element name="VideoInputs">
+      <zeroOrMore>
+        <ref name="VideoInput"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="VideoInput">
+    <element name="VideoInput">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether Go.dot takes it in. It is connected while declared and enabled, never at GO (namespace draft 44, YD), so a cue showing it shows the latest picture that arrived.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="kind">
+          <a:documentation>How the picture arrives: ndi over the network, spout from another program on this Windows machine, syphon from one on this Mac.</a:documentation>
+          <choice>
+            <value>ndi</value>
+            <value>spout</value>
+            <value>syphon</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the show calls this input - TouchDesigner, Camera 2 - in every menu that offers one. A video input is a picture another program sends, which a capture cue shows (namespace draft 44, YB).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="sender">
+          <a:documentation>The name the other program sends under, as videoInputs/available lists it - for NDI the machine&apos;s name and the source&apos;s, MACHINE (Source). Empty takes nothing.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
     </element>

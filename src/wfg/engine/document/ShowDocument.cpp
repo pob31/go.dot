@@ -406,6 +406,10 @@ namespace wfg::doc
         if (element == "Canvases")     return "canvas";
         if (element == "VideoOutputs") return "videoOutput";
 
+        /*  And namespace draft §44's: `/godot/videoInput/available` beside
+            `/godot/videoInput/<id>/sender`. */
+        if (element == "VideoInputs")  return "videoInput";
+
         /*  And namespace draft §38's: `/godot/cueTemplate/order` beside
             `/godot/cueTemplate/<id>/name`. */
         if (element == "CueTemplates") return "cueTemplate";
@@ -488,6 +492,10 @@ namespace wfg::doc
         if (element == "VideoOutputs")              return "videoOutputs";
         if (element == "VideoOutput")               return "videoOutput";
         if (element == "Zone")                      return "zone";
+
+        /*  NAMESPACE DRAFT §44. The video inputs and their container. */
+        if (element == "VideoInputs")               return "videoInputs";
+        if (element == "VideoInput")                return "videoInput";
 
         /*  NAMESPACE DRAFT §38. The cue templates and their container. */
         if (element == "CueTemplates")              return "cueTemplates";
@@ -780,6 +788,7 @@ namespace wfg::doc
         if (segment == "dca")      return showNode.getChildWithName ("Dcas");
         if (segment == "canvas")   return showNode.getChildWithName ("Canvases");
         if (segment == "videoOutput") return showNode.getChildWithName ("VideoOutputs");
+        if (segment == "videoInput")  return showNode.getChildWithName ("VideoInputs");
         if (segment == "cueTemplate") return showNode.getChildWithName ("CueTemplates");
         return {};
     }
@@ -2872,9 +2881,10 @@ namespace wfg::doc
         if (! container.isValid() && make)
         {
             /*  AT A FIXED PLACE - the canvases after the DCAs, the outputs
-                after the canvases - whichever was asked for first, so the
-                canonical bytes of a show do not depend on the order two creates
-                happened in, and a show that has no picture gains no line.
+                after the canvases, the inputs after the outputs - whichever was
+                asked for first, so the canonical bytes of a show do not depend
+                on the order two creates happened in, and a show that has no
+                picture gains no line.
                 Outside the history, as the named inputs' container is: it
                 carries nothing, and the object that made it is the step Undo
                 takes back. */
@@ -2884,7 +2894,8 @@ namespace wfg::doc
             {
                 const auto type = showNode.getChild (i).getType().toString();
 
-                if (type == "Dcas" || (element == "VideoOutputs" && type == "Canvases"))
+                if (type == "Dcas" || (element != "Canvases" && type == "Canvases")
+                      || (element == "VideoInputs" && type == "VideoOutputs"))
                     at = i + 1;
             }
 
@@ -2942,6 +2953,30 @@ namespace wfg::doc
 
         return insertObject (videoContainer ("VideoOutputs", true), endOfSequence, "VideoOutput", id,
                              attributes);
+    }
+
+    EditResult ShowDocument::createVideoInput (const std::string& name, const std::string& kind,
+                                               const std::string& sender, const std::string& id)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        //  The three kinds, and nothing else: a word nobody can send under is no input.
+        if (! kind.empty() && kind != "ndi" && kind != "spout" && kind != "syphon")
+            return EditResult::failed (reason::badValue);
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        if (! kind.empty())
+            attributes.push_back ({ "kind", kind });
+
+        if (! sender.empty())
+            attributes.push_back ({ "sender", sender });
+
+        return insertObject (videoContainer ("VideoInputs", true), endOfSequence, "VideoInput", id, attributes);
     }
 
     EditResult ShowDocument::createZone (const std::string& outputId, const std::string& canvasId,

@@ -459,6 +459,13 @@ namespace wfg::doc
         EditResult createZone (const std::string& outputId, const std::string& canvasId,
                                const std::string& id = {});
 
+        /*  A VIDEO INPUT (namespace draft 44, YB): a picture another program
+            sends under `sender`, over `kind` - ndi, spout or syphon, empty for
+            NDI - at the end of the show's video inputs. A kind that is none of
+            the three is refused; the sender may be empty, and picked after. */
+        EditResult createVideoInput (const std::string& name, const std::string& kind,
+                                     const std::string& sender, const std::string& id = {});
+
         /*  PHASE 9a: an entry in the show's plugin set - name, the scan's
             identifier, format and path, all four explicit so a replay on a
             machine that has never scanned needs no known list. <Plugins> is
@@ -992,8 +999,9 @@ namespace wfg::doc
             (`createPlugin` places its own after the last bus and after this). */
         juce::ValueTree inputsContainer (bool make);
 
-        /*  `<Canvases>` or `<VideoOutputs>`, made when `make` asks and there is
-            none: the canvases after the DCAs, the outputs after the canvases. */
+        /*  `<Canvases>`, `<VideoOutputs>` or `<VideoInputs>`, made when `make`
+            asks and there is none: the canvases after the DCAs, the outputs
+            after the canvases, the inputs after the outputs. */
         juce::ValueTree videoContainer (std::string_view element, bool make);
 
         /*  WHICH LIST A LAYOUT EDIT IS ABOUT. The arithmetic is one; what the

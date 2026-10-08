@@ -1385,6 +1385,7 @@ namespace wfg::tree
         std::vector<std::string> dcaOrder;
         std::vector<std::string> canvasOrder;
         std::vector<std::string> videoOutputOrder;
+        std::vector<std::string> videoInputOrder;
         std::vector<std::string> pluginOrder;
         std::vector<DeclaredInput> inputOrder;
 
@@ -1836,6 +1837,39 @@ namespace wfg::tree
                         nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
                                                    storedText (attribute, object)));
                     }
+                }
+            }
+            else if (containerName == "VideoInputs")
+            {
+                /*  THE SHOW'S VIDEO INPUTS (namespace draft §44, YB): what the
+                    show decided - each one's name, kind and sender. Whether
+                    pictures arrive tonight, and what other programs offer, is
+                    the runtime half's, as an output's frames are. */
+                for (const auto* row : doc::Schema::rowsForOwner ("videoInputs"))
+                    if (row->name == "order")
+                        nodes.push_back (makeLeaf (std::string (godot) + "/videoInput/order", *row,
+                                                   orderOf (container, "VideoInput")));
+
+                for (const auto& object : container)
+                {
+                    const auto id = object[idProperty].toString().toStdString();
+
+                    if (id.empty())
+                        continue;
+
+                    const auto base = std::string (godot) + "/videoInput/" + id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("videoInput"))
+                    {
+                        if (row->persist == doc::Persist::none)
+                            continue;
+
+                        const doc::Attribute attribute { "VideoInput", row };
+                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
+                                                   storedText (attribute, object)));
+                    }
+
+                    videoInputOrder.push_back (id);
                 }
             }
             else if (containerName == "Canvases" || containerName == "VideoOutputs")
@@ -2424,6 +2458,7 @@ namespace wfg::tree
         declaredDcas = std::move (dcaOrder);
         declaredCanvases = std::move (canvasOrder);
         declaredVideoOutputs = std::move (videoOutputOrder);
+        declaredVideoInputs = std::move (videoInputOrder);
         declaredPlugins = std::move (pluginOrder);
         declaredInputs = std::move (inputOrder);
         declaredStrips = std::move (stripOrder);
@@ -3578,6 +3613,45 @@ namespace wfg::tree
                 }
             }
 
+            /*  WHAT EACH VIDEO INPUT IS DOING TONIGHT (namespace draft §44, YB),
+                and what other programs offer this machine now. */
+            if (! declaredVideoInputs.empty() || videoHost != nullptr)
+                for (const auto* row : doc::Schema::rowsForOwner ("videoInputs"))
+                    if (row->name == "available")
+                        runtime.push_back (makeLeaf (std::string (godot) + "/videoInput/available", *row, found.available));
+
+            for (const auto& inputId : declaredVideoInputs)
+            {
+                const auto* entry = found.input (inputId);
+                const auto base = std::string (godot) + "/videoInput/" + inputId + "/";
+
+                for (const auto* row : doc::Schema::rowsForOwner ("videoInput"))
+                {
+                    if (row->persist != doc::Persist::none)
+                        continue;
+
+                    const auto name = std::string (row->name);
+                    std::string text;
+
+                    if (name == "connected")
+                        text = entry != nullptr && entry->connected ? "true" : "false";
+                    else if (name == "width")
+                        text = std::to_string (entry != nullptr ? entry->width : 0);
+                    else if (name == "height")
+                        text = std::to_string (entry != nullptr ? entry->height : 0);
+                    else if (name == "frameRate")
+                        text = osc::formatDouble (entry != nullptr ? entry->frameRate : 0.0);
+                    else if (name == "problem")
+                        text = entry != nullptr ? entry->problem
+                                                : (found.renderer == "running" ? std::string ("the renderer has not reached it yet")
+                                                                               : std::string ("the renderer is not running"));
+                    else
+                        continue;
+
+                    runtime.push_back (makeLeaf (base + name, *row, text));
+                }
+            }
+
             /*  WHAT EACH CANVAS SHOWS, as one colour (namespace draft §38, WR):
                 a DCA strip's ring, for a canvas the DCA rides. */
             for (const auto& [canvasId, rgb] : found.canvasTints)
@@ -3759,6 +3833,9 @@ namespace wfg::tree
 
         for (const auto& id : declaredVideoOutputs)
             ownedByTheDocument.push_back (std::string (godot) + "/videoOutput/" + id);
+
+        for (const auto& id : declaredVideoInputs)
+            ownedByTheDocument.push_back (std::string (godot) + "/videoInput/" + id);
 
         for (const auto& id : declaredPlugins)
             ownedByTheDocument.push_back (std::string (godot) + "/plugin/" + id);

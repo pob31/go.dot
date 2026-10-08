@@ -74,7 +74,7 @@ namespace wfg::video
         std::string canvas;         ///< the canvas it lies on, by identifier
         int layer = 0;              ///< higher is on top (VI)
         std::uint64_t order = 0;    ///< which came up later, for two on one layer
-        std::string source;         ///< fill, mask, picture or movie
+        std::string source;         ///< fill, mask, picture, movie or capture
         std::string blend = "normal";   ///< normal, add, screen or multiply (VD)
 
         /*  The fill's or the mask's colour as 0xRRGGBB - the cue's `paint`,
@@ -103,6 +103,11 @@ namespace wfg::video
         /*  A MASK'S OUTLINE, its feather and whether it is turned inside out
             (UY, VF), parsed once here. */
         mask::Shape shape;
+
+        /*  A CAPTURE'S VIDEO INPUT (namespace draft §44, YC), and the insert
+            the picture goes through, if any (YE) - by identifier. */
+        std::string input {};
+        std::string insert {};
     };
 
     /*  Where a value is at one sample of Go.dot's own clock. A sample below

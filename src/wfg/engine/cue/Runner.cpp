@@ -4390,6 +4390,10 @@ namespace wfg::cue
             if (job.spec.source == "picture" || job.spec.source == "movie")
                 job.spec.file = mediaPathOf (textOf (cue, "file"));
 
+            //  A CAPTURE'S VIDEO INPUT, by identifier (namespace draft §44, YC).
+            if (job.spec.source == "capture")
+                job.spec.input = textOf (cue, "videoInput");
+
             /*  A MOVIE'S PLAYHEAD (§37): from its start offset at its speed,
                 or from its first Range's in point (WL). */
             if (job.spec.source == "movie")

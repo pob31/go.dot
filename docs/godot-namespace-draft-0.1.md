@@ -21875,7 +21875,7 @@ Mine (proposed):
   read by nothing. The Video tab offers only the kinds this system has.
 - **YB** **Video inputs** are declared by the show, `<VideoInputs><VideoInput>`: a name, a kind, the
   far program's `sender` name, and `enabled`. What the renderer finds on the network and the machine
-  is listed at `/godot/videoInputs/available`, to pick from.
+  is listed at `/godot/videoInput/available`, to pick from.
 - **YC** A video cue's source **`capture`** (named in §35's VE) shows a video input, through the cue's
   `input` row. Network and texture feeds are **not exclusive**: many cues may show one input. PRD
   §3.19a's exclusive allocator resource stays for cameras and grabbers, later.
@@ -21912,13 +21912,15 @@ Mine (proposed):
   `frameRate` (1..240, 60).
 - `<VideoInputs><VideoInput>` at `/godot/videoInput/<id>`: `name`, `kind` (`ndi`, `spout`, `syphon`),
   `sender`, `enabled`; readouts `connected`, `width`, `height`, `frameRate`, `problem`.
-  `/godot/videoInputs/order`, `/godot/videoInputs/available` (`kind`:`name` per line).
+  `/godot/videoInput/order`, `/godot/videoInput/available` (the kind, a tab, the name, a line each) - the
+  container's rows beside its members', as `/godot/videoOutput/displays` is.
 - `<VideoInserts><VideoInsert>` at `/godot/videoInsert/<id>`: `name`, `kind`, `sendName`,
   `returnSender`; readouts `connected`, `frameRate`, `returnAge`, `problem`.
-- The cue: `source` gains `capture`; `input` (refers to a video input), `insert` (refers to an insert,
-  empty for none).
-- `/godot/videoOutputs/ndi`: whether the NDI runtime was found, where, and its version.
-- `/godot/videoOutputs/renderer` names the back end and the graphics adapter.
+- The cue: `source` gains `capture`; `videoInput` (refers to a video input), `videoInsert` (refers to an
+  insert, empty for none) - never `input` and `insert`, which a sound's cue already has at the same address.
+- *Not built:* a readout of whether the NDI runtime was found, where and its version - an NDI output or input
+  without it says so in its own `problem` instead.
+- *Not built yet:* the back end and the graphics card named in a readout.
 
 ### 44.4 The renderer
 
@@ -21989,6 +21991,18 @@ Mine (proposed):
   carries NDI's headers only, each under the MIT licence NDI gives open-source projects (`ThirdParty/ndi`).
   The read back waits for the frame (**YN**, mine): a ring a frame late is left for a show that needs the
   render thread's time back.
+- **N.3, video inputs** (2026-10-08): `videoInput.create <name> [kind] [sender] [id]` declares one, after the
+  video outputs in the show (`<VideoInputs><VideoInput kind sender enabled>`), NDI when no kind is said and a
+  word that is no kind refused. A capture cue (`video/source capture`) names one by `video/videoInput` - not `input`, a mic cue's rack
+  input at the same cue address. The
+  renderer keeps a receiver for each input declared and enabled - made when it is declared, never at GO
+  (YD), tried again every two seconds while nothing sends - takes the newest picture in each frame and the
+  painter draws it as a movie's frame is, but opaque: many programs send BGRX, the fourth byte anything
+  (**YO**, mine). Spout's and Syphon's arrive as a texture on the renderer's own device, given to sokol as
+  it is; NDI's are received on a thread of the input's own and uploaded once a frame. Each input's state -
+  connected, size, frames a second, why not - a few times a second, and `videoInput/available` once a
+  second: the kind, a tab, the name, a line each, Syphon's as the application, " - " and the server.
+  An input keeps the renderer running, as an output does, so `available` is there to pick from.
 - **YM** (mine, proposed): **Spout shares only between programs on the same graphics card.** On a laptop
   with two, the renderer draws on the card driving the first projector's display, and with none on the
   fastest; a receiving program on the other card finds the sender and reads nothing. Said here and owed

@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 13;
+    constexpr std::uint32_t version = 14;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -84,6 +84,12 @@ namespace wfg::video::region
     /** Zones on one output over its own canvas, at most (namespace draft 40, WY). */
     constexpr int maxZones = 8;
 
+    /** Video inputs a show declares, at most (namespace draft 44, YB). */
+    constexpr int maxInputs = 16;
+
+    /** Room for what other programs offer, one line each (`videoInputs/available`). */
+    constexpr int availableChars = 8192;
+
     /*  THE MONITOR'S PICTURE OF A CANVAS (namespace draft 40, the author's
         "video monitor window for the canvases"), at most this many pixels
         across and down - drawn small, on the CPU, while a window wants it. */
@@ -99,13 +105,14 @@ namespace wfg::video::region
     /** "Not going": a layer whose removal has not been placed. */
     constexpr std::int64_t notRemoved = std::numeric_limits<std::int64_t>::max();
 
-    enum class Source : std::uint32_t { fill = 0, mask = 1, picture = 2, movie = 3 };
+    enum class Source : std::uint32_t { fill = 0, mask = 1, picture = 2, movie = 3, capture = 4 };
 
     inline Source sourceFrom (std::string_view word) noexcept
     {
         if (word == "mask")    return Source::mask;
         if (word == "picture") return Source::picture;
         if (word == "movie")   return Source::movie;
+        if (word == "capture") return Source::capture;
         return Source::fill;
     }
 
@@ -210,6 +217,17 @@ namespace wfg::video::region
         std::atomic<double> frameRate;
     };
 
+    /*  A VIDEO INPUT (namespace draft §44, YB): which, how it arrives - the
+        output kinds' numbers, never a display - the name it is sent under, and
+        whether it is taken in. */
+    struct Input
+    {
+        char id[idChars];
+        std::atomic<std::uint32_t> kind;
+        char sender[nameChars];
+        std::atomic<std::uint32_t> enabled;
+    };
+
     /*  THE SHOW'S CANVASES AND OUTPUTS, rewritten whole when the show changes,
         under `seq` (odd while being written). */
     struct Config
@@ -219,6 +237,8 @@ namespace wfg::video::region
         Canvas canvases[maxCanvases];
         std::atomic<std::uint32_t> outputCount;
         Output outputs[maxOutputs];
+        std::atomic<std::uint32_t> inputCount;
+        Input inputs[maxInputs];
     };
 
     /*  A CANVAS'S LEVEL (namespace draft §38, WT): how much of the composited
@@ -316,6 +336,11 @@ namespace wfg::video::region
         float shapeX[mask::maxPoints];
         float shapeY[mask::maxPoints];
 
+        /*  A CAPTURE'S VIDEO INPUT, by identifier (§44, YC), and the insert
+            a cue's picture goes through, if any (YE). */
+        char input[idChars];
+        char insert[idChars];
+
         PointRing rings[propertyCount];
         std::atomic<std::int64_t> removeAt;
     };
@@ -340,6 +365,19 @@ namespace wfg::video::region
         std::atomic<std::uint64_t> framesPresented;
         std::atomic<std::uint64_t> framesLate;
         std::atomic<float> jitterMs;
+    };
+
+    /*  WHAT A VIDEO INPUT IS DOING TONIGHT (§44, YB), the renderer's side:
+        whether pictures arrive, their size and rate, and why not. */
+    struct InputState
+    {
+        std::atomic<std::uint32_t> seq;
+        char inputId[idChars];
+        std::atomic<std::uint32_t> connected;
+        std::atomic<std::int32_t> width;
+        std::atomic<std::int32_t> height;
+        std::atomic<float> frameRate;
+        char problem[textChars];
     };
 
     struct Region
@@ -404,6 +442,13 @@ namespace wfg::video::region
 
         /** Renderer to engine: each canvas, small, while it is wanted (40). */
         Preview previews[maxCanvases];
+
+        /*  Renderer to engine (§44): each video input, in the configuration's
+            order; and what other programs offer now, under `availableSeq` -
+            the kind, a tab, the name, a line each. */
+        InputState inputs[maxInputs];
+        std::atomic<std::uint32_t> availableSeq;
+        char available[availableChars];
     };
 
     static_assert (std::atomic<std::uint32_t>::is_always_lock_free
@@ -663,6 +708,8 @@ namespace wfg::video::region
         bool flipV = false;
         Grade grade;
         mask::Shape shape;
+        std::string input;
+        std::string insert;
         std::int64_t removeAt = notRemoved;
         RingReading rings[propertyCount];
 
@@ -713,6 +760,8 @@ namespace wfg::video::region
             out.shape.invert = slot.shapeInvert.load (std::memory_order_relaxed) != 0;
             std::memcpy (out.shape.x, slot.shapeX, sizeof (slot.shapeX));
             std::memcpy (out.shape.y, slot.shapeY, sizeof (slot.shapeY));
+            out.input = readText (slot.input);
+            out.insert = readText (slot.insert);
         });
 
         if (! consistent || ! used)
@@ -780,11 +829,20 @@ namespace wfg::video::region
         bool sends() const noexcept  { return kind != OutputKind::display; }
     };
 
+    struct InputReading
+    {
+        std::string id;
+        OutputKind kind = OutputKind::ndi;
+        std::string sender;
+        bool enabled = true;
+    };
+
     struct ConfigReading
     {
         std::uint32_t seq = 0;
         std::vector<CanvasReading> canvases;
         std::vector<OutputReading> outputs;
+        std::vector<InputReading> inputs {};
     };
 
     /*  THE PICTURES TO HAVE READY, the engine's side and the renderer's. */
@@ -875,12 +933,27 @@ namespace wfg::video::region
 
                 out.outputs.push_back (std::move (entry));
             }
+
+            out.inputs.clear();
+            const auto inputs = std::min<std::uint32_t> (r.config.inputCount.load (std::memory_order_relaxed), maxInputs);
+
+            for (std::uint32_t n = 0; n < inputs; ++n)
+            {
+                const auto& in = r.config.inputs[n];
+                InputReading entry;
+                entry.id = readText (in.id);
+                entry.kind = static_cast<OutputKind> (std::min<std::uint32_t> (in.kind.load (std::memory_order_relaxed), 3u));
+                entry.sender = readText (in.sender);
+                entry.enabled = in.enabled.load (std::memory_order_relaxed) != 0;
+                out.inputs.push_back (std::move (entry));
+            }
         });
     }
 
     /*  THE ENGINE'S SIDE: the whole configuration, rewritten under the lock. */
     inline void writeConfig (Region& r, const std::vector<CanvasReading>& canvases,
-                             const std::vector<OutputReading>& outputs) noexcept
+                             const std::vector<OutputReading>& outputs,
+                             const std::vector<InputReading>& inputs = {}) noexcept
     {
         beginWrite (r.config.seq);
 
@@ -952,6 +1025,54 @@ namespace wfg::video::region
         }
 
         r.config.outputCount.store (static_cast<std::uint32_t> (outputCount), std::memory_order_relaxed);
+
+        const auto inputCount = std::min<std::size_t> (inputs.size(), maxInputs);
+
+        for (std::size_t n = 0; n < inputCount; ++n)
+        {
+            auto& in = r.config.inputs[n];
+            writeText (in.id, inputs[n].id);
+            in.kind.store (static_cast<std::uint32_t> (inputs[n].kind), std::memory_order_relaxed);
+            writeText (in.sender, inputs[n].sender);
+            in.enabled.store (inputs[n].enabled ? 1u : 0u, std::memory_order_relaxed);
+        }
+
+        r.config.inputCount.store (static_cast<std::uint32_t> (inputCount), std::memory_order_relaxed);
         endWrite (r.config.seq);
+    }
+
+    /*  THE RENDERER'S SIDE OF AN INPUT (§44, YB): slot `n` names `id`, and
+        whether pictures arrive, their size and rate, and why not. */
+    inline void writeInputState (Region& r, std::size_t n, std::string_view id, bool connected,
+                                 int width, int height, double frameRate, std::string_view problem) noexcept
+    {
+        if (n >= static_cast<std::size_t> (maxInputs))
+            return;
+
+        auto& state = r.inputs[n];
+        beginWrite (state.seq);
+        writeText (state.inputId, id);
+        state.connected.store (connected ? 1u : 0u, std::memory_order_relaxed);
+        state.width.store (width, std::memory_order_relaxed);
+        state.height.store (height, std::memory_order_relaxed);
+        state.frameRate.store (static_cast<float> (frameRate), std::memory_order_relaxed);
+        writeText (state.problem, problem);
+        endWrite (state.seq);
+    }
+
+    /*  WHAT OTHER PROGRAMS OFFER (§44, YB): the kind, a tab, the name, a line
+        each, cut at the region's room. */
+    inline void writeAvailable (Region& r, std::string_view lines) noexcept
+    {
+        beginWrite (r.availableSeq);
+        writeText (r.available, lines);
+        endWrite (r.availableSeq);
+    }
+
+    inline std::string readAvailable (const Region& r)
+    {
+        std::string out;
+        readConsistent (r.availableSeq, [&] { out = readText (r.available); });
+        return out;
     }
 }

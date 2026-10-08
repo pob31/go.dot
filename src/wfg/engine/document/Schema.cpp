@@ -117,7 +117,7 @@ namespace wfg::doc
         {
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts", "Network",
-                                     "Surfaces", "Dcas", "Canvases", "VideoOutputs", "CueTemplates" },
+                                     "Surfaces", "Dcas", "Canvases", "VideoOutputs", "VideoInputs", "CueTemplates" },
                                                                           { "document" } },
                 /*  THE CONTAINER CARRIES A VALUE, which is why it is no
                     longer an empty pair of brackets. `focus` is a fact about
@@ -432,6 +432,13 @@ namespace wfg::doc
                     output's own canvas in the order the zones sit. A child of its
                     output, as a range is of its cue. */
                 { "Zone",         true,  {},                { "zone" } },
+
+                /*  THE SHOW'S VIDEO INPUTS (namespace draft 44, YB): pictures
+                    other programs send - over NDI, Spout or Syphon - which a
+                    capture cue shows. Made on demand after the video outputs,
+                    so no show written before them gains a line. */
+                { "VideoInputs",  false, { "VideoInput" },  { "videoInputs" } },
+                { "VideoInput",   true,  {},                { "videoInput" } },
 
                 /*  THE SHOW'S CUE TEMPLATES (namespace draft §38): a set of a
                     cue's settings kept under a name, its parts held as the

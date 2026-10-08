@@ -110,6 +110,12 @@ namespace wfg::video::render
             the device will not compile them. */
         bool make (std::string& why);
 
+        /*  WHAT THE VIDEO INPUTS BROUGHT IN (namespace draft §44, YC): each
+            input's newest picture and its size, by identifier - what a
+            capture draws. Set before the frame's draws, kept until set again;
+            an invalid view takes one away. */
+        void setInputPicture (const std::string& inputId, sg_view picture, int width, int height);
+
         /*  The frame's reading: the configuration, the layers, and each
             canvas's level (1 for one nobody moved). */
         void beginFrame (const region::ConfigReading& config, std::vector<region::LayerReading> layers,

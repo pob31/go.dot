@@ -90,6 +90,30 @@ namespace wfg::video
 
         std::vector<OutputEntry> outputs;
 
+        /*  EACH VIDEO INPUT TONIGHT (namespace draft §44, YB), and what other
+            programs offer: the kind, a tab, the name, a line each. */
+        struct InputEntry
+        {
+            std::string id;
+            bool connected = false;
+            int width = 0;
+            int height = 0;
+            double frameRate = 0.0;
+            std::string problem;
+        };
+
+        std::vector<InputEntry> inputs;
+        std::string available;
+
+        const InputEntry* input (const std::string& id) const noexcept
+        {
+            for (const auto& entry : inputs)
+                if (entry.id == id)
+                    return &entry;
+
+            return nullptr;
+        }
+
         /*  WHAT EACH PICTURE RUN AND EACH CANVAS SHOWS, as one colour, by
             identifier (namespace draft §38, WR): 0xRRGGBB. Empty while no
             renderer runs. */

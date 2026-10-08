@@ -29,6 +29,7 @@
 #include <wfg/engine/video/render/Gpu.h>
 #include <wfg/engine/video/render/Painter.h>
 #include <wfg/engine/video/render/Projector.h>
+#include <wfg/engine/video/render/Receiver.h>
 #include <wfg/engine/video/render/Sender.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -2022,6 +2023,17 @@ namespace wfg::video
                 double jitterMs = 0.0;
             };
 
+            /*  A VIDEO INPUT AS THE RENDER THREAD HOLDS IT (§44, YB): what it
+                was made for - its kind and sender - its receiver, why there is
+                none, and when to try again. */
+            struct Taking
+            {
+                std::string key;
+                std::unique_ptr<render::Receiver> receiver;
+                std::string why;
+                std::int64_t retryAt = 0;
+            };
+
             /*  A SENDER AS THE RENDER THREAD HOLDS IT: what sends, when it is
                 next due, and the projector whose refresh it rides, if one has
                 its rate (YJ). */
@@ -2040,10 +2052,139 @@ namespace wfg::video
                 std::vector<std::unique_ptr<render::Surface>> surfaces;
                 std::vector<Frames> frames;
                 std::vector<Sending> sending;
+                std::map<std::string, Taking> taking;
                 std::unique_ptr<render::Painter> painter;
                 std::uint64_t have = 0;
                 std::string deviceProblem;
                 ClockReader clock;
+                std::int64_t nextStates = 0;
+                std::int64_t nextDiscovery = 0;
+
+                /*  THE DEVICE, the first time there is something to draw or to
+                    take in: on the card driving the first projector's display. */
+                const auto openDevice = [&] (bool hasPoint, int pointX, int pointY)
+                {
+                    if (gpu::isOpen())
+                        return;
+
+                    /*  WFG_VIDEO_SOFTWARE=1 draws on the system's software
+                        rasteriser: a test, and a program it hands pictures to,
+                        on the one "card" both are sure to have - Spout shares
+                        only between programs on the same one. */
+                    gpu::OpenOptions options;
+                    options.software = juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_SOFTWARE", {}) == "1";
+                    options.hasPoint = hasPoint;
+                    options.pointX = pointX;
+                    options.pointY = pointY;
+                    options.nativeDisplay = render::nativeDisplay();
+
+                    painter.reset();
+                    deviceProblem.clear();
+
+                    if (gpu::open (options, deviceProblem))
+                    {
+                        painter = std::make_unique<render::Painter> (sources);
+
+                        if (! painter->make (deviceProblem))
+                            painter.reset();
+                    }
+                    else
+                    {
+                        deviceProblem = "the graphics device would not start: " + deviceProblem;
+                    }
+                };
+
+                /*  THE VIDEO INPUTS (§44, YB, YD): a receiver for each declared
+                    and enabled - never made at GO - its newest picture taken in
+                    and handed to the painter; what each is doing written back a
+                    few times a second, and what other programs offer once. */
+                const auto takeIn = [&] (const region::ConfigReading& config)
+                {
+                    const auto now = steadyNanos();
+                    std::set<std::string> present;
+
+                    for (const auto& input : config.inputs)
+                    {
+                        present.insert (input.id);
+                        auto& held = taking[input.id];
+                        const auto key = std::to_string (static_cast<int> (input.kind)) + "|" + input.sender;
+
+                        if (! input.enabled)
+                        {
+                            held.receiver.reset();
+                            held.key.clear();
+                            held.why = "switched off";
+                        }
+                        else if (held.key != key || (held.receiver == nullptr && now >= held.retryAt))
+                        {
+                            held.receiver.reset();
+                            held.key = key;
+                            held.why.clear();
+
+                            if (painter != nullptr)
+                                held.receiver = render::makeReceiver (input.kind, input.sender, held.why);
+                            else
+                                held.why = deviceProblem;
+
+                            held.retryAt = now + 2'000'000'000;
+                        }
+
+                        if (held.receiver != nullptr)
+                        {
+                            held.receiver->update();
+
+                            if (painter != nullptr)
+                                painter->setInputPicture (input.id, held.receiver->picture(),
+                                                          held.receiver->width(), held.receiver->height());
+                        }
+                        else if (painter != nullptr)
+                        {
+                            painter->setInputPicture (input.id, {}, 0, 0);
+                        }
+                    }
+
+                    for (auto at = taking.begin(); at != taking.end();)
+                    {
+                        if (present.count (at->first) > 0)
+                        {
+                            ++at;
+                            continue;
+                        }
+
+                        if (painter != nullptr)
+                            painter->setInputPicture (at->first, {}, 0, 0);
+
+                        at = taking.erase (at);
+                    }
+
+                    if (now >= nextStates)
+                    {
+                        nextStates = now + 250'000'000;
+                        std::size_t n = 0;
+
+                        for (; n < config.inputs.size() && n < static_cast<std::size_t> (region::maxInputs); ++n)
+                        {
+                            const auto& input = config.inputs[n];
+                            const auto& held = taking[input.id];
+                            const auto* receiver = held.receiver.get();
+                            region::writeInputState (r, n, input.id, receiver != nullptr && receiver->connected(),
+                                                     receiver != nullptr ? receiver->width() : 0,
+                                                     receiver != nullptr ? receiver->height() : 0,
+                                                     receiver != nullptr ? receiver->frameRate() : 0.0,
+                                                     receiver != nullptr ? receiver->problem() : held.why);
+                        }
+
+                        for (; n < static_cast<std::size_t> (region::maxInputs); ++n)
+                            if (r.inputs[n].inputId[0] != 0)
+                                region::writeInputState (r, n, {}, false, 0, 0, 0.0, {});
+                    }
+
+                    if (now >= nextDiscovery)
+                    {
+                        nextDiscovery = now + 1'000'000'000;
+                        region::writeAvailable (r, render::discoverSenders());
+                    }
+                };
 
                 while (! threadShouldExit())
                 {
@@ -2051,6 +2192,7 @@ namespace wfg::video
 
                     //  THE PROJECTORS CHANGED: the old surfaces let go first, and said so.
                     auto rebuilt = false;
+                    auto idle = false;
 
                     {
                         std::unique_lock<std::mutex> hold (lock);
@@ -2078,42 +2220,32 @@ namespace wfg::video
                         {
                             changed.wait_for (hold, std::chrono::milliseconds (100),
                                               [this, have] { return generation != have || threadShouldExit(); });
-                            continue;
+                            idle = true;
                         }
+                    }
+
+                    /*  NOTHING TO DRAW: the inputs still taken in, and what other
+                        programs offer still looked for, a few times a second. */
+                    if (idle)
+                    {
+                        region::ConfigReading config;
+                        region::readConfig (r, config);
+
+                        if (std::any_of (config.inputs.begin(), config.inputs.end(),
+                                         [] (const region::InputReading& input) { return input.enabled; }))
+                            openDevice (false, 0, 0);
+
+                        if (gpu::isOpen())
+                            takeIn (config);
+
+                        continue;
                     }
 
                     if (rebuilt)
                     {
-                        /*  THE DEVICE, the first time there is something to draw:
-                            on the card driving the first projector's display. */
-                        if ((! specs.empty() || ! sending.empty()) && ! gpu::isOpen())
-                        {
-                            /*  WFG_VIDEO_SOFTWARE=1 draws on the system's software
-                                rasteriser: a test, and a program it hands pictures
-                                to, on the one "card" both are sure to have - Spout
-                                shares only between programs on the same one. */
-                            gpu::OpenOptions options;
-                            options.software = juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_SOFTWARE", {}) == "1";
-                            options.hasPoint = ! specs.empty();
-                            options.pointX = specs.empty() ? 0 : specs.front().pointX;
-                            options.pointY = specs.empty() ? 0 : specs.front().pointY;
-                            options.nativeDisplay = render::nativeDisplay();
-
-                            painter.reset();
-                            deviceProblem.clear();
-
-                            if (gpu::open (options, deviceProblem))
-                            {
-                                painter = std::make_unique<render::Painter> (sources);
-
-                                if (! painter->make (deviceProblem))
-                                    painter.reset();
-                            }
-                            else
-                            {
-                                deviceProblem = "the graphics device would not start: " + deviceProblem;
-                            }
-                        }
+                        if (! specs.empty() || ! sending.empty())
+                            openDevice (! specs.empty(), specs.empty() ? 0 : specs.front().pointX,
+                                        specs.empty() ? 0 : specs.front().pointY);
 
                         frames.assign (specs.size(), Frames {});
 
@@ -2207,6 +2339,7 @@ namespace wfg::video
 
                     region::ConfigReading config;
                     region::readConfig (r, config);
+                    takeIn (config);
                     painter->beginFrame (config, readLayers (r),
                                          [this] (const std::string& id) { return region::canvasLevelOf (r, id); });
 
@@ -2312,6 +2445,7 @@ namespace wfg::video
 
                 surfaces.clear();
                 sending.clear();
+                taking.clear();
                 painter.reset();
                 gpu::close();
 

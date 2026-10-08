@@ -130,6 +130,12 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # Namespace draft 40 (2026-10-07, WY): a ZONE is a further canvas
                 # on an output through a warp of its own, a child of the output.
                 "zone",
+                # Namespace draft 44 (2026-10-08, YB): a VIDEO INPUT, a picture
+                # another program sends, which a capture cue shows; and a VIDEO
+                # INSERT (YE), a cue's picture to another program and back -
+                # `videoInsert`, since `insert` is a sound's plugin's.
+                # `videoInputs` and `videoInserts` are CONTAINER tokens.
+                "videoInputs", "videoInput", "videoInserts", "videoInsert",
                 # Namespace draft 38 (2026-10-07). The show's CUE TEMPLATES: a
                 # set of a cue's settings kept under a name, a new cue born with
                 # them. `cueTemplates` is a CONTAINER token like `canvases`,

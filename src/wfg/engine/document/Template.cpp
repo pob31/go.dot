@@ -270,6 +270,7 @@ namespace wfg::doc::Template
                 { "MidiPorts", "MIDI ports" }, { "Network", "network" }, { "Surfaces", "control surfaces" },
                 { "Dcas", "DCAs" }, { "Lists", "list settings" }, { "Show", "show settings" },
                 { "Canvases", "video canvases" }, { "VideoOutputs", "video outputs and their mapping" },
+                { "VideoInputs", "video inputs" },
                 { "CueTemplates", "cue templates" },
             };
 

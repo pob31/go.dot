@@ -565,7 +565,7 @@ namespace wfg::video::render
             return held.view;
         }
 
-        static video_grade_t gradeOf (const region::LayerReading& layer, double opacity) noexcept
+        static video_grade_t gradeOf (const region::LayerReading& layer, double opacity, bool opaque = false) noexcept
         {
             const auto& grade = layer.grade;
             const auto turn = grade.hue * 3.14159265358979323846 / 180.0;
@@ -578,6 +578,7 @@ namespace wfg::video::render
             uniforms.grade_b[0] = static_cast<float> (std::cos (turn));
             uniforms.grade_b[1] = static_cast<float> (std::sin (turn));
             uniforms.grade_b[2] = static_cast<float> (opacity);
+            uniforms.grade_b[3] = opaque ? 1.0f : 0.0f;
             return uniforms;
         }
 
@@ -653,6 +654,27 @@ namespace wfg::video::render
                                                   static_cast<double> (held->width) / held->paddedWidth,
                                                   static_cast<double> (held->height) / held->paddedHeight, 0.0));
                     apply (UB_video_grade, gradeOf (*layer, a));
+                    sg_draw (0, 4, 1);
+                }
+                else if (layer->source == region::Source::capture)
+                {
+                    /*  A CAPTURE (§44, YC): its input's newest picture, rows
+                        from the top, drawn as a movie's frame is but opaque -
+                        a sender's fourth byte is often anything. Nothing while
+                        none has arrived. */
+                    const auto found = inputs.find (layer->input);
+
+                    if (found == inputs.end() || found->second.view.id == SG_INVALID_ID
+                          || found->second.width <= 0 || found->second.height <= 0)
+                        continue;
+
+                    const auto& in = found->second;
+                    sg_apply_pipeline (pipeline (Program::movie, lay, format));
+                    bindPicture (in.view, *layer);
+                    apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                                                               static_cast<double> (in.width), static_cast<double> (in.height)),
+                                                  1.0, 1.0, 0.0));
+                    apply (UB_video_grade, gradeOf (*layer, a, true));
                     sg_draw (0, 4, 1);
                 }
                 else if (layer->source == region::Source::mask)
@@ -965,6 +987,15 @@ namespace wfg::video::render
         std::map<std::string, HeldTable> tables;
         std::map<std::string, HeldMesh> meshes;
 
+        struct InputPicture
+        {
+            sg_view view {};
+            int width = 0;
+            int height = 0;
+        };
+
+        std::map<std::string, InputPicture> inputs;
+
         bool originTopLeft = true;
         sg_pixel_format canvasFormat = SG_PIXELFORMAT_RGBA16;
         bool dxtReady = false;
@@ -978,6 +1009,17 @@ namespace wfg::video::render
     bool Painter::make (std::string& why)
     {
         return impl->make (why);
+    }
+
+    void Painter::setInputPicture (const std::string& inputId, sg_view picture, int width, int height)
+    {
+        if (picture.id == SG_INVALID_ID)
+        {
+            impl->inputs.erase (inputId);
+            return;
+        }
+
+        impl->inputs[inputId] = { picture, width, height };
     }
 
     void Painter::beginFrame (const region::ConfigReading& config, std::vector<region::LayerReading> layers,

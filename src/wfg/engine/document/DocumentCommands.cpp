@@ -779,6 +779,29 @@ namespace wfg::doc
                                                   osc::Value::string (edit.id) });
                         } });
 
+        /*  A VIDEO INPUT (namespace draft 44, YB): a picture another program
+            sends, by kind and by the name it sends under; the drawn identifier
+            last, as an output's. */
+        registry.add ({ "videoInput.create",
+                        "Declares a video input: a picture another program sends over NDI, Spout or"
+                        " Syphon, which a capture cue shows. The sender may be empty and picked after.",
+                        { { "name", 's', true }, { "kind", 's', true }, { "sender", 's', true }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto name = args.empty() ? std::string {} : args[0].getString();
+                            const auto kind = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto sender = args.size() > 2 ? args[2].getString() : std::string {};
+                            const auto id = args.size() > 3 ? args[3].getString() : std::string {};
+                            const auto edit = document.createVideoInput (name, kind, sender, id);
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok ({ osc::Value::string (name), osc::Value::string (kind),
+                                                  osc::Value::string (sender), osc::Value::string (edit.id) });
+                        } });
+
         /*  A ZONE ON AN OUTPUT (namespace draft 40, WY): a further canvas over
             the output's own, through a warp of its own, on top of the zones it
             has. Taken away with `object.delete`, changed with `node.set`. */

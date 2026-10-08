@@ -289,6 +289,43 @@ TEST_CASE ("video: a canvas and an output are made by their commands, at a fixed
     CHECK (rig.exists ("/godot/videoOutput/MC000040/name"));
 }
 
+TEST_CASE ("video: a video input is declared by its command after the outputs, and a capture cue names it (namespace draft §44, N.3)")
+{
+    Rig rig { noPictureBundle() };
+
+    /*  THE INPUT, then an output: the inputs' container lands after the
+        outputs' whichever came first, so the bytes do not depend on order. */
+    REQUIRE (rig.applied ("videoInput.create", { text ("TouchDesigner"), text ("spout"), text ("TDSyphonSpoutOut"), text ("MC000050") }));
+    REQUIRE (rig.applied ("videoOutput.create", { text ("Face"), text (""), text ("MC000051") }));
+
+    const auto children = rig.showChildren();
+    const auto outputs = std::find (children.begin(), children.end(), "VideoOutputs");
+    const auto inputs = std::find (children.begin(), children.end(), "VideoInputs");
+    REQUIRE (outputs != children.end());
+    REQUIRE (inputs != children.end());
+    CHECK (inputs == outputs + 1);
+
+    CHECK (rig.at ("/godot/videoInput/MC000050/name") == "TouchDesigner");
+    CHECK (rig.at ("/godot/videoInput/MC000050/kind") == "spout");
+    CHECK (rig.at ("/godot/videoInput/MC000050/sender") == "TDSyphonSpoutOut");
+    CHECK (rig.at ("/godot/videoInput/MC000050/enabled") == "true");
+    CHECK (rig.at ("/godot/videoInput/order") == "MC000050");
+
+    //  NDI when the kind is not said; a word that is no kind is refused at the door.
+    REQUIRE (rig.applied ("videoInput.create", { text ("Camera"), text (""), text (""), text ("MC000052") }));
+    CHECK (rig.at ("/godot/videoInput/MC000052/kind") == "ndi");
+    CHECK_FALSE (rig.applied ("videoInput.create", { text ("Wrong"), text ("hdmi"), text (""), text ("MC000053") }));
+
+    /*  WHAT THE MACHINE FOUND is published and never stored: nothing arriving,
+        with no renderer to say otherwise. */
+    CHECK (rig.at ("/godot/videoInput/MC000050/connected") == "false");
+
+    /*  AND UNDO TAKES IT BACK, one step each. */
+    REQUIRE (rig.applied ("undo"));
+    CHECK_FALSE (rig.exists ("/godot/videoInput/MC000052/name"));
+    CHECK (rig.exists ("/godot/videoInput/MC000050/name"));
+}
+
 TEST_CASE ("video: wfg validate says a video cue on no canvas shows nothing, and a canvas row naming a cue")
 {
     Rig rig;
