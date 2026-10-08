@@ -89,7 +89,7 @@ namespace wfg::cue
             const auto deflection = deflectionOf (axes[static_cast<std::size_t> (axis)],
                                                   curveRow (document, id, "invert") == "true");
 
-            if (deflection == 0.0)
+            if (juce::exactlyEqual (deflection, 0.0))
                 continue;
 
             const auto curve = document.findById (id);
