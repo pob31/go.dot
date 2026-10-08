@@ -684,6 +684,9 @@ live in `packaging/`.
 | JUCE | 8.0.13+7 (on `develop`) | `37c894f83d379179b2070d437ccd0f1cd9af9576` |
 | Tracktion Engine | develop (3.5.0) | `13b51326693e3227ddef91b224114d12af6433ce` |
 | sokol (the video renderer's graphics) | master, 2026-10-06 | `401f21f8b7039258c35fef75c11d9a8a0e616771` |
+| Spout's SpoutDX (vendored in `ThirdParty/spout`, Windows) | master | `c2bcc12147711d12ace7d5f08e869d774d840f8a` |
+| Syphon (`ThirdParty/Syphon`, macOS) | main, 2026-09-21 | `f4761677a45b8034a3c2069ec0f3d2553da81fba` |
+| NDI's headers (vendored in `ThirdParty/ndi`; the runtime is the user's install) | 6.3, from DistroAV | `d34b4cc4c590426464bff4d59f88f68829010b4b` |
 
 The load-bearing fact: **Tracktion Engine develop (3.5.0)'s own `modules/juce` gitlink is
 byte-for-byte our JUCE pin.** We are not guessing at a compatible JUCE — we are

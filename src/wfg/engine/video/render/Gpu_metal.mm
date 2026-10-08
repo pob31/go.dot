@@ -74,7 +74,7 @@ namespace wfg::video::gpu::native
         }
     }
 
-    bool readBack (sg_image image, int width, int height, sg_pixel_format format, std::vector<float>& rgba)
+    bool readBytes (sg_image image, int width, int height, sg_pixel_format format, std::vector<std::uint8_t>& bytes)
     {
         const auto info = sg_mtl_query_image_info (image);
         id<MTLTexture> texture = (__bridge id<MTLTexture>) info.tex[info.active_slot];
@@ -84,7 +84,7 @@ namespace wfg::video::gpu::native
             return false;
 
         const auto bytesPerRow = static_cast<NSUInteger> (width * bytesPerPixel (format));
-        const auto bytes = bytesPerRow * static_cast<NSUInteger> (height);
+        const auto total = bytesPerRow * static_cast<NSUInteger> (height);
 
         @autoreleasepool
         {
@@ -92,7 +92,7 @@ namespace wfg::video::gpu::native
                 GPU reaches, so it is blitted into a shared buffer on the queue
                 sokol draws on - after the frame sokol committed - and waited
                 for. */
-            id<MTLBuffer> buffer = [device newBufferWithLength: bytes options: MTLResourceStorageModeShared];
+            id<MTLBuffer> buffer = [device newBufferWithLength: total options: MTLResourceStorageModeShared];
 
             if (buffer == nil)
                 return false;
@@ -107,17 +107,13 @@ namespace wfg::video::gpu::native
                          toBuffer: buffer
                 destinationOffset: 0
            destinationBytesPerRow: bytesPerRow
-         destinationBytesPerImage: bytes];
+         destinationBytesPerImage: total];
             [blit endEncoding];
             [commands commit];
             [commands waitUntilCompleted];
 
             const auto* data = static_cast<const std::uint8_t*> ([buffer contents]);
-            rgba.assign (static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 4, 0.0f);
-
-            for (int y = 0; y < height; ++y)
-                rowToFloats (data + static_cast<std::size_t> (y) * bytesPerRow, width, format,
-                             rgba.data() + static_cast<std::size_t> (y) * static_cast<std::size_t> (width) * 4);
+            bytes.assign (data, data + total);
 
             WFG_RELEASE (buffer);
         }

@@ -1022,6 +1022,19 @@ namespace wfg::video::render
         return target;
     }
 
+    void Painter::releaseOffscreen (const std::string& key)
+    {
+        const auto found = impl->targets.find ("own:" + key);
+
+        if (found == impl->targets.end())
+            return;
+
+        release (found->second.texture);
+        release (found->second.colour);
+        release (found->second.image);
+        impl->targets.erase (found);
+    }
+
     sg_image Painter::offscreenImage (const std::string& key) const
     {
         const auto found = impl->targets.find ("own:" + key);

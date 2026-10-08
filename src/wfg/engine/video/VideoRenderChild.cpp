@@ -29,6 +29,7 @@
 #include <wfg/engine/video/render/Gpu.h>
 #include <wfg/engine/video/render/Painter.h>
 #include <wfg/engine/video/render/Projector.h>
+#include <wfg/engine/video/render/Sender.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_opengl/juce_opengl.h>
@@ -47,6 +48,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #if JUCE_MAC
@@ -1965,6 +1967,17 @@ namespace wfg::video
             int pointY = 0;
         };
 
+        /*  AN OUTPUT SENT TO OTHER PROGRAMS (namespace draft §44, YA): which,
+            its frames' slot, how, under which name, how often. */
+        struct SenderSpec
+        {
+            std::string outputId;
+            int slot = 0;
+            region::OutputKind kind = region::OutputKind::spout;
+            std::string name;
+            double frameRate = 60.0;
+        };
+
         //==============================================================================
         /*  THE NEW RENDERER'S THREAD (namespace draft §44.4): the one device,
             the painter, a surface on each projector's view; woken by its
@@ -1989,13 +2002,14 @@ namespace wfg::video
                 stopThread (4000);
             }
 
-            /*  THE PROJECTORS TO DRAW, in place of those before - returning once
-                the render thread has let go of the old ones' surfaces, so their
-                windows may go. */
-            void setProjectors (std::vector<ProjectorSpec> specs)
+            /*  THE PROJECTORS AND SENDERS TO DRAW, in place of those before -
+                returning once the render thread has let go of the old ones'
+                surfaces, so their windows may go. */
+            void setOutputs (std::vector<ProjectorSpec> specs, std::vector<SenderSpec> senderSpecs = {})
             {
                 std::unique_lock<std::mutex> hold (lock);
                 wanted = std::move (specs);
+                wantedSenders = std::move (senderSpecs);
                 ++generation;
                 changed.notify_all();
                 changed.wait_for (hold, std::chrono::seconds (2), [this] { return taken == generation || stopped; });
@@ -2008,11 +2022,24 @@ namespace wfg::video
                 double jitterMs = 0.0;
             };
 
+            /*  A SENDER AS THE RENDER THREAD HOLDS IT: what sends, when it is
+                next due, and the projector whose refresh it rides, if one has
+                its rate (YJ). */
+            struct Sending
+            {
+                SenderSpec spec;
+                std::unique_ptr<render::Sender> sender;
+                std::int64_t due = 0;
+                int rides = -1;
+                Frames frames;
+            };
+
             void run() override
             {
                 std::vector<ProjectorSpec> specs;
                 std::vector<std::unique_ptr<render::Surface>> surfaces;
                 std::vector<Frames> frames;
+                std::vector<Sending> sending;
                 std::unique_ptr<render::Painter> painter;
                 std::uint64_t have = 0;
                 std::string deviceProblem;
@@ -2031,13 +2058,23 @@ namespace wfg::video
                         if (generation != have)
                         {
                             surfaces.clear();
+
+                            for (auto& was : sending)
+                                if (painter != nullptr)
+                                    painter->releaseOffscreen ("send:" + was.spec.outputId);
+
+                            sending.clear();
+
+                            for (const auto& spec : wantedSenders)
+                                sending.push_back ({ spec, nullptr, 0, -1, {} });
+
                             specs = wanted;
                             have = generation;
                             taken = generation;
                             rebuilt = true;
                             changed.notify_all();
                         }
-                        else if (surfaces.empty())
+                        else if (surfaces.empty() && sending.empty())
                         {
                             changed.wait_for (hold, std::chrono::milliseconds (100),
                                               [this, have] { return generation != have || threadShouldExit(); });
@@ -2049,12 +2086,17 @@ namespace wfg::video
                     {
                         /*  THE DEVICE, the first time there is something to draw:
                             on the card driving the first projector's display. */
-                        if (! specs.empty() && ! gpu::isOpen())
+                        if ((! specs.empty() || ! sending.empty()) && ! gpu::isOpen())
                         {
+                            /*  WFG_VIDEO_SOFTWARE=1 draws on the system's software
+                                rasteriser: a test, and a program it hands pictures
+                                to, on the one "card" both are sure to have - Spout
+                                shares only between programs on the same one. */
                             gpu::OpenOptions options;
-                            options.hasPoint = true;
-                            options.pointX = specs.front().pointX;
-                            options.pointY = specs.front().pointY;
+                            options.software = juce::SystemStats::getEnvironmentVariable ("WFG_VIDEO_SOFTWARE", {}) == "1";
+                            options.hasPoint = ! specs.empty();
+                            options.pointX = specs.empty() ? 0 : specs.front().pointX;
+                            options.pointY = specs.empty() ? 0 : specs.front().pointY;
                             options.nativeDisplay = render::nativeDisplay();
 
                             painter.reset();
@@ -2089,6 +2131,25 @@ namespace wfg::video
                             surfaces.push_back (std::move (surface));
                         }
 
+                        for (auto& one : sending)
+                        {
+                            std::string why = deviceProblem;
+
+                            if (painter != nullptr)
+                                one.sender = render::makeSender (one.spec.kind, one.spec.name, one.spec.frameRate, why);
+
+                            if (one.sender == nullptr)
+                                sayProblem (one.spec.slot, why);
+
+                            //  At a projector's rate, it rides that projector's refresh (YJ).
+                            for (std::size_t n = 0; n < specs.size(); ++n)
+                                if (surfaces[n] != nullptr && std::abs (specs[n].refreshHz - one.spec.frameRate) < 0.5)
+                                {
+                                    one.rides = static_cast<int> (n);
+                                    break;
+                                }
+                        }
+
                         continue;
                     }
 
@@ -2112,10 +2173,38 @@ namespace wfg::video
                             fastest = std::max (fastest, specs[n].refreshHz);
                         }
 
-                    if (live.empty() || ! render::waitForRefresh (live, fastest, 50))
-                        continue;
+                    /*  A SENDER KEEPING ITS OWN TIME is due at its next frame:
+                        the wait is no longer than that. */
+                    auto waitMs = 50;
+                    const auto now = steadyNanos();
+
+                    for (const auto& one : sending)
+                        if (one.sender != nullptr && one.rides < 0)
+                            waitMs = std::min (waitMs, std::max (0, static_cast<int> ((one.due - now) / 1000000)));
+
+                    const auto refreshed = ! live.empty() && render::waitForRefresh (live, fastest, std::max (1, waitMs));
+
+                    if (live.empty() && waitMs > 0)
+                        std::this_thread::sleep_for (std::chrono::milliseconds (waitMs));
 
                     const auto began = steadyNanos();
+                    std::vector<Sending*> sendNow;
+
+                    for (auto& one : sending)
+                    {
+                        if (one.sender == nullptr)
+                            continue;
+
+                        const auto rideDue = one.rides >= 0 && surfaces[static_cast<std::size_t> (one.rides)] != nullptr
+                                               && surfaces[static_cast<std::size_t> (one.rides)]->due;
+
+                        if (rideDue || (one.rides < 0 && began >= one.due))
+                            sendNow.push_back (&one);
+                    }
+
+                    if (! refreshed && sendNow.empty())
+                        continue;
+
                     region::ConfigReading config;
                     region::readConfig (r, config);
                     painter->beginFrame (config, readLayers (r),
@@ -2162,6 +2251,40 @@ namespace wfg::video
                         drawn.push_back (n);
                     }
 
+                    /*  THE SENDERS DUE, each its output drawn into a picture of
+                        its own at the canvas's size, for the sample a frame on. */
+                    std::vector<Sending*> sent;
+
+                    for (auto* one : sendNow)
+                    {
+                        const region::OutputReading* output = nullptr;
+
+                        for (const auto& reading : config.outputs)
+                            if (reading.id == one->spec.outputId)
+                                output = &reading;
+
+                        const region::CanvasReading* canvas = nullptr;
+
+                        if (output != nullptr)
+                            for (const auto& reading : config.canvases)
+                                if (reading.id == output->canvas)
+                                    canvas = &reading;
+
+                        const auto period = 1.0e9 / std::clamp (one->spec.frameRate, 1.0, 240.0);
+                        one->due = std::max (one->due + static_cast<std::int64_t> (period), began);
+
+                        if (output == nullptr)
+                            continue;
+
+                        const auto width = canvas != nullptr ? std::max (1, canvas->width) : 1920;
+                        const auto height = canvas != nullptr ? std::max (1, canvas->height) : 1080;
+                        const auto sample = clock.sampleAt (r, began + static_cast<std::int64_t> (period));
+
+                        painter->drawOutput (*output, sample, painter->offscreenTarget ("send:" + one->spec.outputId, width, height,
+                                                                                       render::senderFormat()));
+                        sent.push_back (one);
+                    }
+
                     sg_commit();
 
                     for (const auto n : drawn)
@@ -2170,10 +2293,25 @@ namespace wfg::video
                         countFrame (specs[n], frames[n], began);
                     }
 
+                    for (auto* one : sent)
+                    {
+                        const auto image = painter->offscreenImage ("send:" + one->spec.outputId);
+                        const auto desc = sg_query_image_desc (image);
+
+                        if (one->sender->send (image, desc.width, desc.height))
+                        {
+                            ProjectorSpec counted;
+                            counted.slot = one->spec.slot;
+                            counted.refreshHz = one->spec.frameRate;
+                            countFrame (counted, one->frames, began);
+                        }
+                    }
+
                     painter->endFrame();
                 }
 
                 surfaces.clear();
+                sending.clear();
                 painter.reset();
                 gpu::close();
 
@@ -2226,6 +2364,7 @@ namespace wfg::video
             std::mutex lock;
             std::condition_variable changed;
             std::vector<ProjectorSpec> wanted;
+            std::vector<SenderSpec> wantedSenders;
             std::uint64_t generation = 0;
             std::uint64_t taken = 0;
             bool stopped = false;
@@ -2244,7 +2383,9 @@ namespace wfg::video
                 /*  THE NEW RENDERER (namespace draft §44), unless the old
                     OpenGL one is asked for (`--renderer=gl`) - kept until the
                     author has seen the new on the projectors. */
-                if (windowed && nativeToUse)
+                /*  Without windows too: a sending output needs no display, and
+                    a renderer with none (`--no-window`) still sends. */
+                if (nativeToUse)
                     loop = std::make_unique<RenderLoop> (r, pictures, movies);
 
                 followDisplays (true);
@@ -2256,7 +2397,7 @@ namespace wfg::video
                 stopTimer();
 
                 if (loop != nullptr)
-                    loop->setProjectors ({});
+                    loop->setOutputs ({});
 
                 projectors.clear();
                 loop.reset();
@@ -2295,9 +2436,10 @@ namespace wfg::video
 
                     for (const auto& output : config.outputs)
                         key += output.id + "|" + (output.enabled ? "1" : "0") + (output.hidden ? "h" : "") + "|"
-                             + output.display + "|" + output.displayId + ";";
+                             + output.display + "|" + output.displayId + "|" + std::to_string (static_cast<int> (output.kind))
+                             + "|" + output.sendName + "|" + osc::formatDouble (output.frameRate) + ";";
 
-                    if (displaysMoved || key != boundKey || (windows.empty() && projectors.empty()) != config.outputs.empty())
+                    if (displaysMoved || key != boundKey)
                     {
                         boundKey = key;
                         bind (config);
@@ -2532,12 +2674,13 @@ namespace wfg::video
             {
                 //  The render thread lets go of the old surfaces before their windows go.
                 if (loop != nullptr)
-                    loop->setProjectors ({});
+                    loop->setOutputs ({});
 
                 projectors.clear();
                 windows.clear();
 
                 std::vector<ProjectorSpec> specs;
+                std::vector<SenderSpec> senders;
 
                 const auto count = std::min<std::size_t> (config.outputs.size(), region::maxOutputs);
 
@@ -2549,7 +2692,23 @@ namespace wfg::video
                     std::string why;
                     int display = -1;
 
-                    if (! output.enabled)
+                    /*  A SENDER (§44, YA) needs no display, and is never put
+                        away for editing: what it feeds is another program's. */
+                    if (output.sends() && output.enabled && loop != nullptr)
+                    {
+                        senders.push_back ({ output.id, static_cast<int> (n), output.kind, output.sendName, output.frameRate });
+
+                        region::beginWrite (state.seq);
+                        region::writeText (state.outputId, output.id);
+                        state.bound.store (1u, std::memory_order_relaxed);
+                        region::writeText (state.problem, std::string {});
+                        region::endWrite (state.seq);
+                        continue;
+                    }
+
+                    if (output.sends())
+                        why = output.enabled ? "the renderer was asked for OpenGL, which sends nothing" : "switched off";
+                    else if (! output.enabled)
                         why = "switched off";
                     else if (output.hidden)
                         why = "put away while the show is unlocked";
@@ -2593,7 +2752,7 @@ namespace wfg::video
                 }
 
                 if (loop != nullptr)
-                    loop->setProjectors (std::move (specs));
+                    loop->setOutputs (std::move (specs), std::move (senders));
 
                 for (std::size_t n = count; n < static_cast<std::size_t> (region::maxOutputs); ++n)
                 {

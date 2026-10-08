@@ -86,6 +86,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_video_fit[] = { "fit", "fill", "stretch" };
     inline constexpr std::string_view enum_cueTemplate_kind[] = { "media", "movie", "picture", "fill", "mask" };
     inline constexpr std::string_view enum_videoOutputs_renderer[] = { "stopped", "starting", "running", "failed" };
+    inline constexpr std::string_view enum_videoOutput_kind[] = { "display", "ndi", "spout", "syphon" };
     inline constexpr std::string_view enum_zone_blend[] = { "normal", "add", "screen", "multiply" };
 
     inline constexpr AttributeRow attributes[] =
@@ -3946,6 +3947,30 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "The identifier that display had when this machine last found it, tried BEFORE the name - the MIDI port's twin rows exactly (port/outputDeviceId)." },
+        { "videoOutput", "kind",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "display",
+          false, 0.0, false, 0.0,
+          enum_videoOutput_kind, 4,
+          "", 50.0, false, "park",
+          "",
+          "What the output does with its canvas (namespace draft 44, YA): display shows it on a display of this machine, as every output did; ndi sends it over the network, spout to another program on this Windows machine, syphon to another on this Mac - warped and calibrated as an output is, its display rows read by nothing. A kind this system has not got sends nothing and says so." },
+        { "videoOutput", "sendName",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "The name another program finds a sending output by, and empty for Go.dot and the output's name - Go.dot - Face. Read by nothing on a display." },
+        { "videoOutput", "frameRate",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
+          true, "60",
+          true, 1.0, true, 240.0,
+          nullptr, 0,
+          "Hz", 50.0, false, "park",
+          "",
+          "How many frames a second a sending output sends (namespace draft 44, YJ). One at a display's rate rides that display's refresh; any other keeps its own time. Read by nothing on a display, which is drawn at its own refresh." },
         { "videoOutput", "enabled",
           ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show,
           true, "true",

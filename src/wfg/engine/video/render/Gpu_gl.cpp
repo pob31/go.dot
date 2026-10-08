@@ -156,7 +156,7 @@ namespace wfg::video::gpu::native
     void* eglContext() noexcept  { return context; }
     void* eglConfig() noexcept   { return chosenConfig; }
 
-    bool readBack (sg_image image, int width, int height, sg_pixel_format, std::vector<float>& rgba)
+    bool readBytes (sg_image image, int width, int height, sg_pixel_format format, std::vector<std::uint8_t>& bytes)
     {
         const auto info = sg_gl_query_image_info (image);
         const auto texture = info.tex[info.active_slot];
@@ -170,13 +170,20 @@ namespace wfg::video::gpu::native
         glFramebufferTexture2D (GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
 
         const auto complete = glCheckFramebufferStatus (GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
-        std::vector<float> rows;
+        const auto row = static_cast<std::size_t> (width) * static_cast<std::size_t> (bytesPerPixel (format));
+        std::vector<std::uint8_t> rows;
+
+        /*  IN THE FORMAT'S OWN BYTES: OpenGL has no BGRA picture here, so an
+            eight-bit one is RGBA. */
+        const auto type = format == SG_PIXELFORMAT_RGBA16F ? GL_HALF_FLOAT
+                        : format == SG_PIXELFORMAT_RGBA16 ? GL_UNSIGNED_SHORT
+                        : format == SG_PIXELFORMAT_RGBA32F ? GL_FLOAT : GL_UNSIGNED_BYTE;
 
         if (complete)
         {
-            rows.resize (static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 4);
+            rows.resize (row * static_cast<std::size_t> (height));
             glPixelStorei (GL_PACK_ALIGNMENT, 1);
-            glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, rows.data());
+            glReadPixels (0, 0, width, height, GL_RGBA, static_cast<GLenum> (type), rows.data());
         }
 
         glBindFramebuffer (GL_FRAMEBUFFER, 0);
@@ -187,12 +194,11 @@ namespace wfg::video::gpu::native
             return false;
 
         //  OpenGL's first row is the picture's bottom: turned the right way up.
-        const auto rowFloats = static_cast<std::size_t> (width) * 4;
-        rgba.resize (rows.size());
+        bytes.resize (rows.size());
 
         for (int y = 0; y < height; ++y)
-            std::copy_n (rows.data() + static_cast<std::size_t> (height - 1 - y) * rowFloats, rowFloats,
-                         rgba.data() + static_cast<std::size_t> (y) * rowFloats);
+            std::copy_n (rows.data() + static_cast<std::size_t> (height - 1 - y) * row, row,
+                         bytes.data() + static_cast<std::size_t> (y) * row);
 
         return true;
     }

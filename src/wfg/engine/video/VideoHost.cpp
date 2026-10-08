@@ -77,6 +77,8 @@ namespace wfg::video
                                    return x.id == y.id && x.canvas == y.canvas && x.name == y.name
                                        && x.display == y.display && x.displayId == y.displayId
                                        && x.enabled == y.enabled && x.testPattern == y.testPattern && x.hidden == y.hidden
+                                       && x.kind == y.kind && x.sendName == y.sendName
+                                       && std::abs (x.frameRate - y.frameRate) < 1e-9
                                        && x.mesh.columns == y.mesh.columns && x.mesh.rows == y.mesh.rows
                                        && x.mesh.x == y.mesh.x && x.mesh.y == y.mesh.y && sameCdl (x.cdl, y.cdl)
                                        && sameZones;
@@ -492,6 +494,17 @@ namespace wfg::video
             entry.enabled = text (base + "enabled") != "false";
             entry.testPattern = impl->identified.count (id) > 0;
             entry.hidden = impl->hideProjectors && ! impl->locked;
+
+            /*  A SENDER (§44, YA): what it sends under - Go.dot and the
+                output's name, when the show names nothing - and how often. */
+            entry.kind = region::outputKindFrom (text (base + "kind"));
+            entry.sendName = text (base + "sendName");
+
+            if (entry.sendName.empty())
+                entry.sendName = "Go.dot - " + (entry.name.empty() ? id : entry.name);
+
+            if (const auto rate = osc::parseDouble (text (base + "frameRate")); rate.has_value() && *rate > 0.0)
+                entry.frameRate = std::clamp (*rate, 1.0, 240.0);
 
             /*  ITS MAPPING: the mesh as the show says it - a grid the wrong
                 size for its columns and rows is the identity - and the CDL. */

@@ -13,3 +13,6 @@
 [submodule "ThirdParty/sokol"]
 	path = ThirdParty/sokol
 	url = https://github.com/floooh/sokol.git
+[submodule "ThirdParty/Syphon"]
+	path = ThirdParty/Syphon
+	url = https://github.com/Syphon/Syphon-Framework.git

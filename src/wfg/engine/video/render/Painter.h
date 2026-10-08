@@ -137,6 +137,9 @@ namespace wfg::video::render
         Target offscreenTarget (const std::string& key, int width, int height, sg_pixel_format format);
         sg_image offscreenImage (const std::string& key) const;
 
+        /** That picture let go, when its sender goes. */
+        void releaseOffscreen (const std::string& key);
+
     private:
         struct Impl;
         std::unique_ptr<Impl> impl;

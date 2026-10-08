@@ -33,6 +33,7 @@ CMakeLists.txt text eol=lf
 *.h    text eol=lf
 *.cpp  text eol=lf
 *.mm   text eol=lf
+*.glsl text eol=lf
 *.md   text eol=lf
 *.html text eol=lf
 *.js   text eol=lf

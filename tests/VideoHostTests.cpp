@@ -1529,3 +1529,130 @@ TEST_CASE ("video host: while a monitor watches, a renderer with no window draws
 
     folder.deleteRecursively();
 }
+
+#if JUCE_WINDOWS
+//==============================================================================
+/*  AN OUTPUT SENT OVER SPOUT, THE WHOLE WAY (namespace draft §44, YA; N.1): the
+    show sets the fixture's output to spout under a name; the host writes it to
+    the region; a renderer with no window draws it on its render thread, on
+    WARP where the machine has no graphics card, and Spout shares it; this
+    process - as another program would - finds it by that name and reads the
+    fill the engine put up. Spout's headers last: they bring windowsx.h's
+    macros. */
+#ifndef WIN32_LEAN_AND_MEAN
+ #define WIN32_LEAN_AND_MEAN
+#endif
+#include <spout/SpoutDX.h>
+
+TEST_CASE ("video host: an output set to spout is sent by a renderer with no window, and another program reads it (N.1)")
+{
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-spout-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    const auto name = "Go.dot spout test " + std::to_string (GetCurrentProcessId());
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/kind", "spout").ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/sendName", name).ok);
+    REQUIRE (document.setAttribute ("/godot/videoOutput/VD000021/frameRate", "30").ok);
+
+    /*  BOTH ON WARP: Spout shares a picture only between programs on the
+        same graphics card, and this one's receiver is made on WARP. */
+    SetEnvironmentVariableA ("WFG_VIDEO_SOFTWARE", "1");
+
+    TestClock clock;
+    video::VideoHost host { spec };
+    host.configure (document);
+
+    REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+    SetEnvironmentVariableA ("WFG_VIDEO_SOFTWARE", nullptr);
+
+    REQUIRE (tickUntil (host, clock, [&host]
+                        {
+                            const auto said = host.readouts();
+                            const auto* output = said.output ("VD000021");
+                            return output != nullptr && output->bound && output->framesPresented > 3;
+                        }, 15000));
+
+    host.sink().show (fill ("RUN00001", "VD000011", 0, 1, 0x50A020));
+    host.sink().opacity ("RUN00001", { clock.now() - 48000, 1.0 });
+
+    /*  ANOTHER PROGRAM: its own device, the sender found by its name. */
+    ID3D11Device* device = nullptr;
+    ID3D11DeviceContext* context = nullptr;
+    REQUIRE (SUCCEEDED (D3D11CreateDevice (nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+                                           D3D11_SDK_VERSION, &device, nullptr, &context)));
+
+    std::uint32_t received = 0xFFFFFFFFu;
+
+    {
+        spoutDX receiver;
+        REQUIRE (receiver.OpenDirectX11 (device));
+        receiver.SetReceiverName (name.c_str());
+
+        tickUntil (host, clock, [&]
+        {
+            if (! receiver.ReceiveTexture() || receiver.IsUpdated())
+                return false;
+
+            auto* texture = receiver.GetSenderTexture();
+
+            if (texture == nullptr)
+                return false;
+
+            D3D11_TEXTURE2D_DESC desc {};
+            texture->GetDesc (&desc);
+            desc.Usage = D3D11_USAGE_STAGING;
+            desc.BindFlags = 0;
+            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+            desc.MiscFlags = 0;
+
+            ID3D11Texture2D* staging = nullptr;
+
+            if (FAILED (device->CreateTexture2D (&desc, nullptr, &staging)))
+                return false;
+
+            context->CopyResource (staging, texture);
+            D3D11_MAPPED_SUBRESOURCE mapped {};
+
+            if (SUCCEEDED (context->Map (staging, 0, D3D11_MAP_READ, 0, &mapped)))
+            {
+                const auto* pixel = static_cast<const std::uint8_t*> (mapped.pData) + (desc.Height / 2) * mapped.RowPitch + 4 * (desc.Width / 2);
+                const auto bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM;
+                received = (static_cast<std::uint32_t> (pixel[bgra ? 2 : 0]) << 16) | (static_cast<std::uint32_t> (pixel[1]) << 8)
+                         | static_cast<std::uint32_t> (pixel[bgra ? 0 : 2]);
+                context->Unmap (staging, 0);
+            }
+
+            staging->Release();
+
+            //  The fill, once it has reached the picture sent.
+            return std::abs (static_cast<int> ((received >> 8) & 0xffu) - 0xA0) <= 2;
+        }, 10000);
+
+        receiver.ReleaseReceiver();
+        receiver.CloseDirectX11();
+    }
+
+    context->Release();
+    device->Release();
+
+    INFO ("received " << received);
+    CHECK (std::abs (static_cast<int> ((received >> 16) & 0xffu) - 0x50) <= 2);
+    CHECK (std::abs (static_cast<int> ((received >> 8) & 0xffu) - 0xA0) <= 2);
+    CHECK (std::abs (static_cast<int> (received & 0xffu) - 0x20) <= 2);
+
+    const auto said = host.readouts();
+    const auto* output = said.output ("VD000021");
+    REQUIRE (output != nullptr);
+    CHECK (output->bound);
+    CHECK (output->problem.empty());
+}
+#endif

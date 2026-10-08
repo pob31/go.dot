@@ -21955,3 +21955,42 @@ Mine (proposed):
 | N.3 | Video inputs, and the `capture` cue |
 | N.4 | Inserts |
 | N.5 | The Video tab's kinds, inputs and inserts; the inspector's input and insert menus |
+
+### 44.6 Built so far
+
+- **R.1 and R.2** (2026-10-08, pushed): the device, the painter and the projectors, as §44.4 says. The
+  painter's pixels are held to the reference compositor on WARP, llvmpipe and the machine's own card
+  (`WFG_GPU_HARDWARE=1`). Two things writing it found: Direct3D 11 takes **no colour factor for alpha**,
+  so screen and multiply would have drawn nothing - alpha is now laid normally whatever the colour does;
+  and a **half-float canvas does not clamp**, so an added light went on past white where the reference
+  saturates - canvases are 16-bit normalised now (**YL**, mine). On the author's bench - a GeChic 1303 by
+  HDMI and a 3840 by 2400 screen by USB-C, both on the laptop's Intel Arc - 237 to 239 frames in four
+  seconds, two or three late at the start, jitter 0.02 to 0.08 ms. The author first saw the picture in a
+  rectangle at the top left, spreading to the whole screen a moment later: the view the device draws
+  into had been made at JUCE's idea of its window's size, smaller on a display scaled otherwise than
+  the main one. It is made at the window's own pixels now, and black until the first frame; the author
+  saw both screens come up clean.
+- **N.1, Spout** (2026-10-08): an output whose `kind` is `spout` has no window. The render thread draws it
+  at its canvas's size into a picture of its own - zones, warp and calibration as a projector's - and
+  SpoutDX, opened on the renderer's own device, copies it into the texture Spout shares, at `frameRate`,
+  or on a projector's refresh when the rates are within half a hertz (YJ). A renderer with no window
+  sends too. Spout is vendored, eight files of SpoutDX unchanged in `ThirdParty/spout`
+  (`scripts/fetch-spout.py`), the repository being 655 MB.
+- **N.1, Syphon** (2026-10-08, built by CI, never yet run): an output whose `kind` is `syphon` is drawn the
+  same way and handed to Syphon's Metal server on the renderer's own device, by a plain blit - BGRA, one
+  sample, the right way up - into the IOSurface Syphon shares. Owed to the author's Mac mini, with the
+  Mac's projectors, when everything is in place (the author, 2026-10-08: *"We can test on the Mac Mini
+  later once everything is in place and finish up the Syphon work if ever. Same for Linux on the NUC."*).
+- **N.2, NDI** (2026-10-08): an output whose `kind` is `ndi` is drawn the same way, its picture read back
+  from the graphics card - NDI sends pixels from memory - and handed to the NDI runtime the user installed,
+  loaded when first wanted from where `NDI_RUNTIME_DIR_V6` says, then where each system's installers put it.
+  Two buffers take turns, as NDI keeps a frame's pixels until the next is sent. Without the runtime the
+  output says so: *the NDI runtime is not installed - NDI Tools, or the runtime from* its address. Go.dot
+  carries NDI's headers only, each under the MIT licence NDI gives open-source projects (`ThirdParty/ndi`).
+  The read back waits for the frame (**YN**, mine): a ring a frame late is left for a show that needs the
+  render thread's time back.
+- **YM** (mine, proposed): **Spout shares only between programs on the same graphics card.** On a laptop
+  with two, the renderer draws on the card driving the first projector's display, and with none on the
+  fastest; a receiving program on the other card finds the sender and reads nothing. Said here and owed
+  to a setting if a show meets it - the card to draw on, by name. `WFG_VIDEO_SOFTWARE=1` puts the renderer
+  on WARP, which a test's receiver shares.

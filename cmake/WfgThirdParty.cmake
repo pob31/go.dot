@@ -578,6 +578,47 @@ if(APPLE)
 else()
     target_sources(wfg_thirdparty PRIVATE "${CMAKE_SOURCE_DIR}/src/wfg/engine/video/render/SokolGfx.cpp")
 endif()
+# Spout's SpoutDX (BSD-2), vendored in ThirdParty/spout - eight files of a
+# 655 MB repository - for an output sent to other programs on Windows
+# (namespace draft §44, YA).
+if(WIN32)
+    foreach(_spout SpoutDX SpoutCopy SpoutDirectX SpoutFrameCount SpoutSenderNames SpoutSharedMemory SpoutUtils)
+        target_sources(wfg_thirdparty PRIVATE "${CMAKE_SOURCE_DIR}/ThirdParty/spout/${_spout}.cpp")
+    endforeach()
+    unset(_spout)
+endif()
+
+# Syphon (BSD), the Mac's Spout: its Metal server and client and what they need,
+# never its OpenGL half - a library of its own, because Syphon is Objective-C
+# written for ARC with a prefix header of its own, which nothing else here is.
+# The submodule sits at ThirdParty/Syphon so its headers' own <Syphon/...>
+# imports find each other on the include path everything already has.
+if(APPLE)
+    set(_syphon "${CMAKE_SOURCE_DIR}/ThirdParty/Syphon")
+    add_library(wfg_syphon STATIC)
+    foreach(_file SyphonServerBase SyphonServerConnectionManager
+                  SyphonMetalClient SyphonClientBase SyphonClientConnectionManager SyphonServerDirectory
+                  SyphonImageBase SyphonPrivate SyphonMessaging SyphonMessageQueue SyphonMessageSender
+                  SyphonMessageReceiver SyphonCFMessageSender SyphonCFMessageReceiver)
+        target_sources(wfg_syphon PRIVATE "${_syphon}/${_file}.m")
+    endforeach()
+    target_sources(wfg_syphon PRIVATE "${_syphon}/SyphonDispatch.c"
+        # Go.dot's server on Syphon's base class: it only blits, and so never
+        # needs the shaders SyphonMetalServer loads from Syphon.framework's
+        # bundle, which a static library has not got.
+        "${CMAKE_SOURCE_DIR}/src/wfg/engine/video/render/GoDotSyphonServer.m")
+    target_include_directories(wfg_syphon SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/ThirdParty")
+    target_compile_definitions(wfg_syphon PRIVATE SYPHON_CORE_SHARE)
+    target_compile_options(wfg_syphon PRIVATE
+        $<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>
+        "SHELL:-include ${_syphon}/Syphon_Prefix.pch"
+        -w)
+    set_target_properties(wfg_syphon PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_link_libraries(wfg_syphon PUBLIC "-framework Cocoa" "-framework IOSurface" "-framework Metal")
+    target_link_libraries(wfg_deps INTERFACE wfg_syphon)
+    unset(_file)
+    unset(_syphon)
+endif()
 add_library(wfg::thirdparty ALIAS wfg_thirdparty)
 
 # The engine will eventually be linked into things that are themselves shared objects

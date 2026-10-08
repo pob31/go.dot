@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 12;
+    constexpr std::uint32_t version = 13;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -120,6 +120,20 @@ namespace wfg::video::region
     }
 
     enum class Fit : std::uint32_t { fit = 0, fill = 1, stretch = 2 };
+
+    /*  WHAT AN OUTPUT DOES WITH ITS CANVAS (namespace draft §44, YA): shows it
+        on a display, or sends it to other programs - over the network (NDI),
+        or on this machine (Spout on Windows, Syphon on macOS). An unknown word
+        is a display, as every output was before. */
+    enum class OutputKind : std::uint32_t { display = 0, ndi = 1, spout = 2, syphon = 3 };
+
+    inline OutputKind outputKindFrom (std::string_view word) noexcept
+    {
+        if (word == "ndi")     return OutputKind::ndi;
+        if (word == "spout")   return OutputKind::spout;
+        if (word == "syphon")  return OutputKind::syphon;
+        return OutputKind::display;
+    }
 
     inline Fit fitFrom (std::string_view word) noexcept
     {
@@ -188,6 +202,12 @@ namespace wfg::video::region
         /*  AND ITS ZONES, bottom first, each over what is under it (40). */
         std::atomic<std::uint32_t> zoneCount;
         Zone zones[maxZones];
+
+        /*  WHAT IT DOES WITH THE PICTURE (§44, YA): a display, or a sender -
+            under which name, at how many frames a second. */
+        std::atomic<std::uint32_t> kind;
+        char sendName[nameChars];
+        std::atomic<double> frameRate;
     };
 
     /*  THE SHOW'S CANVASES AND OUTPUTS, rewritten whole when the show changes,
@@ -753,6 +773,11 @@ namespace wfg::video::region
         Cdl cdl;
         std::vector<ZoneReading> zones {};
         bool hidden = false;
+        OutputKind kind = OutputKind::display;
+        std::string sendName {};
+        double frameRate = 60.0;
+
+        bool sends() const noexcept  { return kind != OutputKind::display; }
     };
 
     struct ConfigReading
@@ -827,6 +852,9 @@ namespace wfg::video::region
                 entry.mesh.x.assign (o.meshX, o.meshX + points);
                 entry.mesh.y.assign (o.meshY, o.meshY + points);
                 entry.cdl = Cdl::from (std::vector<double> (o.cdl, o.cdl + 10));
+                entry.kind = static_cast<OutputKind> (std::min<std::uint32_t> (o.kind.load (std::memory_order_relaxed), 3u));
+                entry.sendName = readText (o.sendName);
+                entry.frameRate = std::clamp (o.frameRate.load (std::memory_order_relaxed), 1.0, 240.0);
 
                 const auto zones = std::min<std::uint32_t> (o.zoneCount.load (std::memory_order_relaxed), maxZones);
 
@@ -881,6 +909,9 @@ namespace wfg::video::region
             o.enabled.store (outputs[n].enabled ? 1u : 0u, std::memory_order_relaxed);
             o.testPattern.store (outputs[n].testPattern ? 1u : 0u, std::memory_order_relaxed);
             o.hidden.store (outputs[n].hidden ? 1u : 0u, std::memory_order_relaxed);
+            o.kind.store (static_cast<std::uint32_t> (outputs[n].kind), std::memory_order_relaxed);
+            writeText (o.sendName, outputs[n].sendName);
+            o.frameRate.store (std::clamp (outputs[n].frameRate, 1.0, 240.0), std::memory_order_relaxed);
 
             /*  THE MESH, the identity when the show's is not a full grid. */
             const auto mesh = outputs[n].mesh.isValid() ? outputs[n].mesh : Mesh::identity();

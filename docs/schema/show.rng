@@ -3336,6 +3336,26 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="frameRate">
+          <a:documentation>How many frames a second a sending output sends (namespace draft 44, YJ). One at a display&apos;s rate rides that display&apos;s refresh; any other keeps its own time. Read by nothing on a display, which is drawn at its own refresh.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">240</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="kind">
+          <a:documentation>What the output does with its canvas (namespace draft 44, YA): display shows it on a display of this machine, as every output did; ndi sends it over the network, spout to another program on this Windows machine, syphon to another on this Mac - warped and calibrated as an output is, its display rows read by nothing. A kind this system has not got sends nothing and says so.</a:documentation>
+          <choice>
+            <value>display</value>
+            <value>ndi</value>
+            <value>spout</value>
+            <value>syphon</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="mesh">
           <a:documentation>Where each control point of the canvas lands on the display, as (x, y) pairs in 0..1 of the display - x right, y down - row by row from the top-left, meshColumns by meshRows of them. A smooth surface runs through them. Empty, or the wrong count, is the canvas filling the display.</a:documentation>
           <list>
@@ -3366,6 +3386,12 @@
       <optional>
         <attribute name="name">
           <a:documentation>What the show calls this output - Face, Wings monitor. An output is a display on this machine showing one canvas through its own mapping (namespace draft 35, the author&apos;s word).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="sendName">
+          <a:documentation>The name another program finds a sending output by, and empty for Go.dot and the output&apos;s name - Go.dot - Face. Read by nothing on a display.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

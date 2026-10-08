@@ -337,6 +337,57 @@ only when a shader changes. The tool is not shipped; what it writes,
 
 ---
 
+## Spout (SpoutDX)
+
+- **Website**: https://github.com/leadedge/Spout2
+- **Version**: commit `c2bcc12147711d12ace7d5f08e869d774d840f8a` (master)
+- **Licence**: BSD 2-Clause
+- **Copyright**: Lynn Jarvis
+
+Windows only: an output sent to other programs on the machine (namespace draft
+§44, YA). **Vendored, not a submodule**: the eight source files SpoutDX is built
+from (`SpoutDX`, and from `SpoutGL` `SpoutCommon`, `SpoutCopy`, `SpoutDirectX`,
+`SpoutFrameCount`, `SpoutSenderNames`, `SpoutSharedMemory`, `SpoutUtils`) are
+copied unchanged into `ThirdParty/spout`, because the repository they come from
+is 655 MB of binaries and examples every CI job would clone. Fetched from the
+commit above by `scripts/fetch-spout.py`, which says so if a file differs. Full
+text: `ThirdParty/spout/LICENSE`.
+
+---
+
+## Syphon
+
+- **Website**: https://github.com/Syphon/Syphon-Framework
+- **Version**: commit `f4761677a45b8034a3c2069ec0f3d2553da81fba` (main, 2026-09-21)
+- **Licence**: BSD 3-Clause style (the Syphon Framework License)
+- **Copyright**: bangnoise (Tom Butterworth) & vade (Anton Marini)
+
+macOS only: an output sent to other programs on the machine (namespace draft
+§44, YA), and later a picture taken from one. A pinned submodule at
+`ThirdParty/Syphon`, of which only the Metal server and client and what they
+need are compiled - never the OpenGL half - into a static library of its own,
+`wfg_syphon` (`cmake/WfgThirdParty.cmake`), as Objective-C with ARC and Syphon's
+own prefix header. Full text: `ThirdParty/Syphon/License.txt`.
+
+---
+
+## NDI's headers
+
+- **Website**: https://ndi.video/
+- **Version**: the NDI 6.3 SDK's headers, as carried by DistroAV at commit
+  `d34b4cc4c590426464bff4d59f88f68829010b4b` (`lib/ndi`)
+- **Licence**: MIT, file by file, as each header says: *"The following MIT license applies to this file
+  ONLY and not to the SDK as a whole."*
+- **Copyright**: Vizrt NDI AB
+
+Only the headers, in `ThirdParty/ndi`, so Go.dot can load NDI's library at run
+time (namespace draft §44, N.2). **NDI's library is not shipped**: the user
+installs NDI Tools or the NDI runtime, under NDI's own licence
+(http://ndi.link/ndisdk_license), and Go.dot finds it where the installers put
+it. NDI® is a registered trademark of Vizrt NDI AB.
+
+---
+
 ## The LV2 SDK: lilv, serd, sord, sratom, zix and the LV2 headers
 
 Compiled in since 2026-09-26, when LV2 hosting was switched on

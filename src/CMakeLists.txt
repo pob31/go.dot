@@ -385,6 +385,11 @@ add_library(wfg_engine STATIC
     wfg/engine/video/render/Painter.cpp
     wfg/engine/video/render/Painter.h
     wfg/engine/video/render/Projector.h
+    wfg/engine/video/render/Ndi.cpp
+    wfg/engine/video/render/Ndi.h
+    wfg/engine/video/render/Sender.cpp
+    wfg/engine/video/render/Sender.h
+    wfg/engine/video/render/Sender_ndi.cpp
     wfg/engine/video/render/shaders/video.glsl.h)
 add_library(wfg::engine ALIAS wfg_engine)
 
@@ -444,9 +449,11 @@ endif()
 
 # The video renderer's device, each system's own (namespace draft §44.4).
 if(WIN32)
-    target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_d3d11.cpp wfg/engine/video/render/Projector_d3d11.cpp)
+    target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_d3d11.cpp wfg/engine/video/render/Projector_d3d11.cpp
+                                      wfg/engine/video/render/Sender_spout.cpp)
 elseif(APPLE)
-    target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_metal.mm wfg/engine/video/render/Projector_metal.mm)
+    target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_metal.mm wfg/engine/video/render/Projector_metal.mm
+                                      wfg/engine/video/render/Sender_syphon.mm)
 else()
     # Xlib for the projectors' child windows (Projector_gl.cpp): JUCE loads
     # libX11 itself at run time, so nothing else links it.

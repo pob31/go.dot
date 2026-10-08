@@ -116,7 +116,7 @@ namespace wfg::video::gpu
         return sg_query_features().origin_top_left;
     }
 
-    bool readBack (sg_image image, std::vector<float>& rgba, int& width, int& height)
+    bool readBackBytes (sg_image image, std::vector<std::uint8_t>& bytes, int& width, int& height, sg_pixel_format& format)
     {
         if (! opened || sg_query_image_state (image) != SG_RESOURCESTATE_VALID)
             return false;
@@ -124,10 +124,29 @@ namespace wfg::video::gpu
         const auto desc = sg_query_image_desc (image);
         width = desc.width;
         height = desc.height;
+        format = desc.pixel_format;
 
-        if (width <= 0 || height <= 0 || native::bytesPerPixel (desc.pixel_format) == 0)
+        if (width <= 0 || height <= 0 || native::bytesPerPixel (format) == 0)
             return false;
 
-        return native::readBack (image, width, height, desc.pixel_format, rgba);
+        return native::readBytes (image, width, height, format, bytes);
+    }
+
+    bool readBack (sg_image image, std::vector<float>& rgba, int& width, int& height)
+    {
+        std::vector<std::uint8_t> bytes;
+        auto format = SG_PIXELFORMAT_NONE;
+
+        if (! readBackBytes (image, bytes, width, height, format))
+            return false;
+
+        const auto row = static_cast<std::size_t> (width) * static_cast<std::size_t> (native::bytesPerPixel (format));
+        rgba.assign (static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 4, 0.0f);
+
+        for (int y = 0; y < height; ++y)
+            native::rowToFloats (bytes.data() + static_cast<std::size_t> (y) * row, width, format,
+                                 rgba.data() + static_cast<std::size_t> (y) * static_cast<std::size_t> (width) * 4);
+
+        return true;
     }
 }

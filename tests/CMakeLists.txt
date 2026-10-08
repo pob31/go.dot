@@ -115,6 +115,7 @@ add_executable(wfg_tests
     VideoTests.cpp
     VideoHostTests.cpp
     VideoGpuTests.cpp
+    VideoNdiTests.cpp
     MovieTests.cpp
     TakeTests.cpp
     PluginCatalogueTests.cpp
@@ -181,6 +182,11 @@ configure_file(fixtures/lv2/plugin.ttl "${GODOT_TEST_LV2_BUNDLE}/plugin.ttl" COP
 
 add_dependencies(wfg_tests godot_test_lv2)
 target_compile_definitions(wfg_tests PRIVATE WFG_TEST_LV2_BUNDLE="${GODOT_TEST_LV2_BUNDLE}")
+
+# Spout is Windows's (namespace draft §44, N.1): its loopback test is built there alone.
+if(WIN32)
+    target_sources(wfg_tests PRIVATE VideoSpoutTests.cpp)
+endif()
 
 # These native-window checks need a Windows desktop and exercise the actual
 # settings panel with a live device; keep the ordinary unit runner headless.

@@ -34,6 +34,7 @@
 
 #include <sokol/sokol_gfx.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -82,4 +83,9 @@ namespace wfg::video::gpu
         the pixels in memory. Waits for the GPU. Call it outside a pass, after
         sg_commit. */
     bool readBack (sg_image image, std::vector<float>& rgba, int& width, int& height);
+
+    /*  The same as the format's own bytes - four a pixel for RGBA8 and BGRA8
+        - rows from the top, packed: what a sender that hands pixels on (NDI)
+        reads. */
+    bool readBackBytes (sg_image image, std::vector<std::uint8_t>& bytes, int& width, int& height, sg_pixel_format& format);
 }

@@ -172,6 +172,18 @@ namespace wfg::video::gpu::native
         if (card != nullptr)
             card->Release();
 
+        /*  NO CARD WILL START - a driver gone, a machine with none: WARP, so
+            the pictures are still drawn, slowly, and the readout says so. */
+        if (FAILED (made) && ! options.software)
+        {
+            made = D3D11CreateDevice (nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags, levels, 2, D3D11_SDK_VERSION,
+                                      &device, &got, &context);
+
+            if (made == E_INVALIDARG)
+                made = D3D11CreateDevice (nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags, levels + 1, 1, D3D11_SDK_VERSION,
+                                          &device, &got, &context);
+        }
+
         if (FAILED (made) || device == nullptr || context == nullptr)
         {
             close();
@@ -203,7 +215,7 @@ namespace wfg::video::gpu::native
         }
     }
 
-    bool readBack (sg_image image, int width, int height, sg_pixel_format format, std::vector<float>& rgba)
+    bool readBytes (sg_image image, int width, int height, sg_pixel_format format, std::vector<std::uint8_t>& bytes)
     {
         auto* texture = static_cast<ID3D11Texture2D*> (const_cast<void*> (sg_d3d11_query_image_info (image).tex2d));
 
@@ -236,11 +248,12 @@ namespace wfg::video::gpu::native
 
         if (ok)
         {
-            rgba.assign (static_cast<std::size_t> (width) * static_cast<std::size_t> (height) * 4, 0.0f);
+            const auto row = static_cast<std::size_t> (width) * static_cast<std::size_t> (bytesPerPixel (format));
+            bytes.resize (row * static_cast<std::size_t> (height));
 
             for (int y = 0; y < height; ++y)
-                rowToFloats (static_cast<const std::uint8_t*> (mapped.pData) + static_cast<std::size_t> (y) * mapped.RowPitch,
-                             width, format, rgba.data() + static_cast<std::size_t> (y) * static_cast<std::size_t> (width) * 4);
+                std::memcpy (bytes.data() + static_cast<std::size_t> (y) * row,
+                             static_cast<const std::uint8_t*> (mapped.pData) + static_cast<std::size_t> (y) * mapped.RowPitch, row);
 
             context->Unmap (staging, 0);
         }

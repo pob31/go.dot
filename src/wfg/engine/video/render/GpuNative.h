@@ -46,9 +46,9 @@ namespace wfg::video::gpu::native
     /** The system's graphics, as the readout names it: "Direct3D 11". */
     const char* backendName() noexcept;
 
-    /*  `image`'s pixels, `width` by `height` of `format`, as four floats a
-        pixel, rows from the top. */
-    bool readBack (sg_image image, int width, int height, sg_pixel_format format, std::vector<float>& rgba);
+    /*  `image`'s pixels, `width` by `height` of `format`, as that format's
+        bytes, rows from the top and packed. */
+    bool readBytes (sg_image image, int width, int height, sg_pixel_format format, std::vector<std::uint8_t>& bytes);
 
     /*  A HALF-FLOAT'S VALUE (IEEE 754 binary16), for an RGBA16F picture read
         back. */
