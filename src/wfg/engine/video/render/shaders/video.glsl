@@ -26,9 +26,11 @@
 //------------------------------------------------------------------------------
 //  A QUAD WITHOUT A BUFFER: its four corners, as a triangle strip, from the
 //  uniforms - where each lies in the target and which texel it shows. A layer
-//  is one draw, so nothing is written to a buffer between two of them.
+//  is one draw, so nothing is written to a buffer between two of them. The
+//  block is not called "quad": Metal reserves the name, and the vertex shader
+//  every quad shares would not compile on a Mac (2026-10-08, an M4 Pro).
 @vs quad_vs
-layout(binding=0) uniform quad {
+layout(binding=0) uniform corners {
     vec4 corner_xy01;   // x0 y0 x1 y1: bottom-left, bottom-right
     vec4 corner_xy23;   // x2 y2 x3 y3: top-left, top-right
     vec4 corner_uv01;

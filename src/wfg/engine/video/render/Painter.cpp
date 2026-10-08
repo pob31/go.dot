@@ -82,9 +82,9 @@ namespace wfg::video::render
         /*  A QUAD'S UNIFORMS: four corners as the target's coordinates, -1..1
             with y up, and the texel each shows - bottom-left, bottom-right,
             top-left, top-right. */
-        video_quad_t quadFor (const double x[4], const double y[4], const double u[4], const double v[4]) noexcept
+        video_corners_t quadFor (const double x[4], const double y[4], const double u[4], const double v[4]) noexcept
         {
-            video_quad_t quad {};
+            video_corners_t quad {};
 
             for (int n = 0; n < 2; ++n)
             {
@@ -104,7 +104,7 @@ namespace wfg::video::render
         /*  A LAYER'S QUAD (the OpenGL renderer's drawQuad): its four corners on
             the canvas, with the texture's - `uMax` across, and `tBottom`, `tTop`
             where the picture's bottom and top rows are in its texture. */
-        video_quad_t quadOf (const Placement& place, double uMax, double tBottom, double tTop) noexcept
+        video_corners_t quadOf (const Placement& place, double uMax, double tBottom, double tTop) noexcept
         {
             constexpr double corners[4][2] { { -1.0, -1.0 }, { 1.0, -1.0 }, { -1.0, 1.0 }, { 1.0, 1.0 } };
             double x[4], y[4], u[4], v[4];
@@ -128,7 +128,7 @@ namespace wfg::video::render
 
         /*  A rectangle of the target, -1..1 with y up, showing nothing in
             particular: a fill's, the test pattern's bars. */
-        video_quad_t rectangle (double left, double bottom, double right, double top) noexcept
+        video_corners_t rectangle (double left, double bottom, double right, double top) noexcept
         {
             const double x[4] { left, right, left, right };
             const double y[4] { bottom, bottom, top, top };
@@ -653,7 +653,7 @@ namespace wfg::video::render
                 if (layer.source == region::Source::fill)
                 {
                     sg_apply_pipeline (pipeline (Program::fill, Lay::none, format));
-                    apply (UB_video_quad, quadOf (whole, 1.0, 0.0, 1.0));
+                    apply (UB_video_corners, quadOf (whole, 1.0, 0.0, 1.0));
                     video_fill_t fill {};
                     colour (fill.colour);
                     apply (UB_video_fill, fill);
@@ -661,7 +661,7 @@ namespace wfg::video::render
                 else
                 {
                     sg_apply_pipeline (pipeline (Program::mask, Lay::normal, format));
-                    apply (UB_video_quad, quadOf (whole, 1.0, 0.0, 1.0));
+                    apply (UB_video_corners, quadOf (whole, 1.0, 0.0, 1.0));
                     video_mask_t uniforms {};
                     colour (uniforms.colour);
                     uniforms.shape[0] = static_cast<float> (width);
@@ -690,7 +690,7 @@ namespace wfg::video::render
                 {
                     sg_apply_pipeline (pipeline (Program::picture, Lay::normal, format));
                     bindPicture (held->view, layer);
-                    apply (UB_video_quad, quadOf (whole, 1.0, 1.0, 0.0));
+                    apply (UB_video_corners, quadOf (whole, 1.0, 1.0, 0.0));
                     apply (UB_video_grade, gradeOf (layer, 1.0));
                     sg_draw (0, 4, 1);
                 }
@@ -705,7 +705,7 @@ namespace wfg::video::render
                 {
                     sg_apply_pipeline (pipeline (held->q ? Program::movieQ : Program::movie, Lay::normal, format));
                     bindPicture (held->view, layer);
-                    apply (UB_video_quad, quadOf (whole, static_cast<double> (held->width) / held->paddedWidth,
+                    apply (UB_video_corners, quadOf (whole, static_cast<double> (held->width) / held->paddedWidth,
                                                   static_cast<double> (held->height) / held->paddedHeight, 0.0));
                     apply (UB_video_grade, gradeOf (layer, 1.0));
                     sg_draw (0, 4, 1);
@@ -720,7 +720,7 @@ namespace wfg::video::render
                 {
                     sg_apply_pipeline (pipeline (Program::movie, Lay::normal, format));
                     bindPicture (found->second.view, layer);
-                    apply (UB_video_quad, quadOf (whole, 1.0, 1.0, 0.0));
+                    apply (UB_video_corners, quadOf (whole, 1.0, 1.0, 0.0));
                     apply (UB_video_grade, gradeOf (layer, 1.0, true));
                     sg_draw (0, 4, 1);
                 }
@@ -787,7 +787,7 @@ namespace wfg::video::render
                         bindings.views[VIEW_video_grade_tables] = identityTableView;
                         bindings.samplers[SMP_video_grade_smp] = nearest;
                         sg_apply_bindings (bindings);
-                        apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                        apply (UB_video_corners, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
                                                                    static_cast<double> (back.width), static_cast<double> (back.height)),
                                                       1.0, 1.0, 0.0));
                         apply (UB_video_grade, neutralGrade (a));
@@ -798,7 +798,7 @@ namespace wfg::video::render
                         int w = 0, h = 0;
                         sourceSizeOf (*layer, sample, w, h);
                         sg_apply_pipeline (pipeline (Program::fill, lay, format));
-                        apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                        apply (UB_video_corners, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
                                                                    static_cast<double> (w), static_cast<double> (h)),
                                                       1.0, 0.0, 1.0));
                         video_fill_t black {};
@@ -810,7 +810,7 @@ namespace wfg::video::render
                 else if (layer->source == region::Source::fill)
                 {
                     sg_apply_pipeline (pipeline (Program::fill, lay, format));
-                    apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
+                    apply (UB_video_corners, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
                                                   1.0, 0.0, 1.0));
                     video_fill_t fill {};
                     fill.colour[0] = static_cast<float> ((layer->paint >> 16) & 0xffu) / 255.0f;
@@ -831,7 +831,7 @@ namespace wfg::video::render
                         texture's last row. */
                     sg_apply_pipeline (pipeline (Program::picture, lay, format));
                     bindPicture (held->view, *layer);
-                    apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                    apply (UB_video_corners, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
                                                                static_cast<double> (held->width), static_cast<double> (held->height)),
                                                   1.0, 1.0, 0.0));
                     apply (UB_video_grade, gradeOf (*layer, a));
@@ -855,7 +855,7 @@ namespace wfg::video::render
 
                     /*  THE BLOCKS RUN FROM THE TOP ROW: the picture's top is
                         the texture's first row, its bottom `height` rows down. */
-                    apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                    apply (UB_video_corners, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
                                                                static_cast<double> (held->width), static_cast<double> (held->height)),
                                                   static_cast<double> (held->width) / held->paddedWidth,
                                                   static_cast<double> (held->height) / held->paddedHeight, 0.0));
@@ -877,7 +877,7 @@ namespace wfg::video::render
                     const auto& in = found->second;
                     sg_apply_pipeline (pipeline (Program::movie, lay, format));
                     bindPicture (in.view, *layer);
-                    apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
+                    apply (UB_video_corners, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight,
                                                                static_cast<double> (in.width), static_cast<double> (in.height)),
                                                   1.0, 1.0, 0.0));
                     apply (UB_video_grade, gradeOf (*layer, a, true));
@@ -886,7 +886,7 @@ namespace wfg::video::render
                 else if (layer->source == region::Source::mask)
                 {
                     sg_apply_pipeline (pipeline (Program::mask, lay, format));
-                    apply (UB_video_quad, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
+                    apply (UB_video_corners, quadOf (placementOf (*layer, sample, canvasWidth, canvasHeight, canvasWidth, canvasHeight),
                                                   1.0, 0.0, 1.0));
 
                     video_mask_t uniforms {};
@@ -916,7 +916,7 @@ namespace wfg::video::render
             if (const auto level = levelOf ? levelOf (canvasId) : 1.0; level < 1.0)
             {
                 sg_apply_pipeline (pipeline (Program::fill, Lay::normal, format));
-                apply (UB_video_quad, rectangle (-1.0, -1.0, 1.0, 1.0));
+                apply (UB_video_corners, rectangle (-1.0, -1.0, 1.0, 1.0));
                 video_fill_t fill {};
                 fill.colour[3] = static_cast<float> (1.0 - level);
                 apply (UB_video_fill, fill);
@@ -1026,7 +1026,7 @@ namespace wfg::video::render
             {
                 const auto ndcX = [width] (int px) { return 2.0 * px / std::max (1, width) - 1.0; };
                 const auto ndcY = [height] (int py) { return 2.0 * py / std::max (1, height) - 1.0; };
-                apply (UB_video_quad, rectangle (ndcX (x), ndcY (y), ndcX (x + w), ndcY (y + h)));
+                apply (UB_video_corners, rectangle (ndcX (x), ndcY (y), ndcX (x + w), ndcY (y + h)));
                 video_fill_t fill {};
                 fill.colour[0] = fill.colour[1] = fill.colour[2] = fill.colour[3] = 1.0f;
                 apply (UB_video_fill, fill);
