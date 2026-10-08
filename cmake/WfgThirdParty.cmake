@@ -269,6 +269,14 @@ target_compile_definitions(wfg_deps INTERFACE
     # needed to build (libjack-jackd2-dev); JUCE dlopens libjack.so.0 when Go.dot
     # starts, so a machine without JACK still runs it, with no JACK choice.
     JUCE_JACK=$<IF:$<PLATFORM_ID:Linux>,1,0>
+    # 2026-10-08 (namespace draft §44, XZ, the author's pick): the video renderer
+    # draws through sokol_gfx on each system's own graphics - Direct3D 11, Metal,
+    # OpenGL through EGL. HERE, on the interface every translation unit sees: the
+    # shaders' generated header (video.glsl.h) keeps only the backend named, and
+    # the one translation unit that builds sokol (render/SokolGfx.cpp) must agree.
+    $<$<PLATFORM_ID:Windows>:SOKOL_D3D11>
+    $<$<PLATFORM_ID:Darwin>:SOKOL_METAL>
+    $<$<PLATFORM_ID:Linux>:SOKOL_GLCORE>
     JUCE_PLUGINHOST_LADSPA=0        # already the default; explicit because it is what keeps ladspa-sdk off the apt line
     # 2026-09-28 (namespace draft §22, decision DZ): Signalsmith Stretch, the time-
     # stretcher behind a media cue's `timestretch` mode. MIT-licensed, header-only and
@@ -471,6 +479,18 @@ if(APPLE)
     # itself - AudioUnit for the component API, CoreAudioKit for an AU's own
     # window in the editing helper.
     target_link_libraries(wfg_deps INTERFACE "-framework AudioUnit" "-framework CoreAudioKit")
+
+    # The video renderer (namespace draft §44): Metal for the device, QuartzCore
+    # for the layer each projector's window shows it through.
+    target_link_libraries(wfg_deps INTERFACE "-framework Metal" "-framework QuartzCore")
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The video renderer (namespace draft §44) on OpenGL through EGL: EGL for the
+    # context - one, drawing every projector's window and, with no window, a
+    # picture in memory - and libGL for the calls sokol makes.
+    find_package(OpenGL REQUIRED COMPONENTS OpenGL EGL)
+    target_link_libraries(wfg_deps INTERFACE OpenGL::EGL OpenGL::OpenGL)
 endif()
 
 # DECLINED from TE's examples/TestRunner/CMakeLists.txt, so nobody "fixes" it later:
@@ -551,6 +571,13 @@ add_library(wfg_thirdparty STATIC)
 # spatcore's API or pulling a second set of JUCE module sources into the build.
 target_sources(wfg_thirdparty PRIVATE
     "${CMAKE_SOURCE_DIR}/ThirdParty/spatcore/ui/patch/PatchMatrixComponent.cpp")
+# sokol_gfx's implementation, once, under the vendor warning policy (namespace
+# draft §44). Objective-C++ on Apple, where its Metal half is written in it.
+if(APPLE)
+    target_sources(wfg_thirdparty PRIVATE "${CMAKE_SOURCE_DIR}/src/wfg/engine/video/render/SokolGfx.mm")
+else()
+    target_sources(wfg_thirdparty PRIVATE "${CMAKE_SOURCE_DIR}/src/wfg/engine/video/render/SokolGfx.cpp")
+endif()
 add_library(wfg::thirdparty ALIAS wfg_thirdparty)
 
 # The engine will eventually be linked into things that are themselves shared objects

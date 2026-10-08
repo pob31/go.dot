@@ -316,6 +316,27 @@ cannot write `T`/`F` — not because of the JUCE version. Full text:
 
 ---
 
+## sokol_gfx
+
+- **Website**: https://github.com/floooh/sokol
+- **Version**: commit `401f21f8b7039258c35fef75c11d9a8a0e616771` (master, 2026-10-06)
+- **Licence**: zlib
+- **Copyright**: Andre Weissflog
+
+The graphics layer of the video renderer (namespace draft §44, XZ): one API over
+Direct3D 11 on Windows, Metal on macOS and OpenGL on Linux, through which
+`wfg video-render` draws every canvas once a frame. Only `sokol_gfx.h` is
+compiled, once, in `src/wfg/engine/video/render/SokolGfx.cpp`. Full text:
+`ThirdParty/sokol/LICENSE`.
+
+The renderer's shaders are written once (`src/wfg/engine/video/render/shaders/video.glsl`)
+and translated for the three systems by **sokol-shdc** (sokol-tools, MIT,
+Andre Weissflog), fetched at a pinned commit by `scripts/generate-shaders.py`
+only when a shader changes. The tool is not shipped; what it writes,
+`video.glsl.h`, is Go.dot's own shaders in three languages.
+
+---
+
 ## The LV2 SDK: lilv, serd, sord, sratom, zix and the LV2 headers
 
 Compiled in since 2026-09-26, when LV2 hosting was switched on

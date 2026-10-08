@@ -378,7 +378,13 @@ add_library(wfg_engine STATIC
     wfg/engine/video/VideoRegion.h
     wfg/engine/video/VideoRenderChild.cpp
     wfg/engine/video/VideoRenderChild.h
-    wfg/engine/video/VideoSink.h)
+    wfg/engine/video/VideoSink.h
+    wfg/engine/video/render/Gpu.cpp
+    wfg/engine/video/render/Gpu.h
+    wfg/engine/video/render/GpuNative.h
+    wfg/engine/video/render/Painter.cpp
+    wfg/engine/video/render/Painter.h
+    wfg/engine/video/render/shaders/video.glsl.h)
 add_library(wfg::engine ALIAS wfg_engine)
 
 # PUBLIC, and pointed at src/ rather than at src/wfg/ — consumers therefore
@@ -433,6 +439,15 @@ if(APPLE)
         wfg/engine/app/Raise_mac.mm
         wfg/engine/app/WindowApplication_mac.mm
         wfg/engine/video/Displays_mac.mm)
+endif()
+
+# The video renderer's device, each system's own (namespace draft §44.4).
+if(WIN32)
+    target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_d3d11.cpp)
+elseif(APPLE)
+    target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_metal.mm)
+else()
+    target_sources(wfg_engine PRIVATE wfg/engine/video/render/Gpu_gl.cpp)
 endif()
 
 # wfg::thirdparty is PUBLIC on purpose. The engine's own public headers name no

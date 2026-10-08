@@ -94,7 +94,11 @@ $SUDO apt-get install -y --no-install-recommends \
     libxinerama-dev \
     libxrandr-dev \
     libxrender-dev \
-    libgl-dev
+    libgl-dev \
+    libegl-dev \
+    libopengl-dev \
+    libegl-mesa0 \
+    libgl1-mesa-dri
 
 # Per-package reasons, kept next to the list rather than inline so the list
 # stays copy-pasteable into a terminal:
@@ -134,6 +138,11 @@ $SUDO apt-get install -y --no-install-recommends \
 #   libxrender-dev       juce_gui_basics
 #   libgl-dev            juce_opengl (Phase 8a): the video renderer's windows,
 #                        drawn by `wfg video-render` (namespace draft 35)
+#   libegl-dev           the video renderer on sokol_gfx (namespace draft §44):
+#   libopengl-dev        OpenGL through EGL, one context for every window and
+#                        for a picture drawn in memory with none
+#   libegl-mesa0         Mesa's EGL and its software rasteriser (llvmpipe), on
+#   libgl1-mesa-dri      which the GPU tests draw on a machine with no GPU
 #
 # cmake itself is NOT in the list: the runner images and most desktops ship one,
 # and the version we need (3.22+) is older than every supported distro's. If
