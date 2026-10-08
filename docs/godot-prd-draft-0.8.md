@@ -1868,6 +1868,14 @@ no second door into a document. A set is read and never run; each sound is
 flattened onto a cue that owns its outputs (§4.12); and what does not come over
 is said, in a report beside the show.
 
+*Added in 0.8, at the author's direction (2026-10-08).* **A QLab workspace is
+imported the same way** - File > Import QLab workspace... and `wfg
+import-qlab`, QLab 4 and 5 (namespace draft §46) - from its file, never by
+talking to a running QLab. The file holds what somebody decided; what QLab
+derives from a group's mode is QLab's to derive (§4.10). A script cue is read
+and never run, and a kind with no equivalent here stays in its place as a memo,
+so one GO in QLab is still one GO.
+
 ### 3.21 Control-rate dataflow graph
 
 Sources (tree nodes, incoming OSC/MIDI/serial/sACN/PSN) → processors (scaling,

@@ -966,6 +966,35 @@ what the device pushes over LISTEN, and the session replays; M51 and M52 are mea
 everything above under "Needs from the author" are the bench's. The SpaceMouse is built against a puck
 nobody here has pushed.
 
+### Importing a QLab workspace · L
+
+*Added on 2026-10-08*, at the author's direction: import a QLab 4 or QLab 5 workspace from its file, the
+way the Ableton Live set is imported (namespace draft §46), now that §45 gives an OSC cue every message a
+QLab show sends. The author's decisions are ZN-ZR; ZS-ZZ are the implementer's, the author's to overrule.
+Not a phase: it follows the OSC cue's messages and curves, which it needs, and no later phase is
+renumbered.
+
+| Stage | What | Depends on |
+|---|---|---|
+| QL.0 | Docs: namespace §46, PRD §3.20, this, notes in the QLab draft and the extraction | O.4 |
+| QL.1 | The probe set (the author, in QLab 5 and QLab 4): small workspaces holding every kind and mode the walk relies on (ZQ) | - |
+| QL.2 | `import/ImportCommon`: identifiers, the media search and copy, the folder written and the report's shell, taken out of `AlsImport`; the Live import's tests and `import_als.py` unchanged, byte for byte | QL.0 |
+| QL.3 | `import/Bplist`: binary property lists and keyed archives, nested ones included, every offset checked; `BplistTests` on lists made byte by byte | QL.2 |
+| QL.4 | `import/QlabReader`: a workspace read into plain facts, QLab 4 and 5 (§46.5), any other version refused in words; `QlabReaderTests` on the probes | QL.1, QL.3 |
+| QL.5 | `import/QlabWalk`: groups and chains (ZS), audio and routing (ZT, ZU), fades and trims (ZV), devices, messages and curves (ZW), the other kinds (ZX); `QlabWalkTests` | QL.4 |
+| QL.6 | `import/QlabImport`: the show written through the checked writes, the report (ZY, ZZ); `wfg import-qlab`; `blackbox/import_qlab.py` in both locales, the probes validated by both grammars and imported twice to the same bytes | QL.5 |
+| QL.7 | The window: File > Import QLab workspace..., the lists to tick, the import off the message thread, the show and its report opened | QL.6 |
+| QL.8 | The author's two shows imported from the corpus (`WFG_QLAB_CORPUS`), checked against what QLab reports over OSC; the close-out | QL.7 |
+
+**Done when:** the author's QLab 5 show imports with its 126 groups, its 348 network cues as OSC cues -
+those of several values as lists, the three fades as curves - and memos only for the kinds §46.4 names;
+the QLab 4 show's auto-follow chains come back as groups that fire on one GO; both shows pass both
+grammars; and the report names every approximation.
+
+**Needs from the author:** the probe workspaces (QL.1), a QLab 4 one included if QLab 4 still installs;
+a reading of ZS-ZZ; a look at the list ticks and the report; a run through an imported show's first
+scenes against the rig.
+
 ---
 
 ## Phase 10 — Timecode, panic, hardening · M

@@ -19,6 +19,10 @@ four things here:
 The same page's §9 goes further: the `.qlab5` file is a readable keyed archive, it holds what OSC
 can't give, and it is the better primary source. That reverses §2 below.
 
+*Note, 2026-10-08, later:* **superseded by namespace draft §46.** The importer is planned inside Go.dot,
+reading the workspace file, QLab 4 and 5 (decisions ZN-ZR, the author's). What follows is kept as the
+record of where the idea started; §4's mapping and §6's report carry on in §46.2.
+
 ---
 
 ## 1. The idea in one paragraph

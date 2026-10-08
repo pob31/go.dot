@@ -395,6 +395,11 @@ from QLab's UUIDs (8 characters of Crockford base32), with a side file mapping o
 
 ### 10.3 What became a placeholder: 77 cues
 
+*Note, later the same day:* both gaps below are closed by namespace draft §45, built the same day: an
+`Osc` cue's `value` is a list of atoms (O.1) and a `<Curve>` plays a value over the cue's own time (O.4).
+The importer planned in §46 maps the 73 messages as lists and the 3 fades as curves (ZW).
+
+
 These are flagged `Cue`s named `[QLab] …`, carrying the original message in their notes:
 
 - **73 OSC messages with several arguments** (`positionXYZ x y z` ×60, `constraintXYZ`,
