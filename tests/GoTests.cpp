@@ -845,13 +845,10 @@ namespace
         /*  What the file is, which is a fact the cue carries rather than one
             the disk is asked for: the file travels between machines and may be
             absent tonight, and a replay must not depend on it at all. */
-        void setMedia (const std::string& cueId, int channels, bool fold = false)
+        void setMedia (const std::string& cueId, int channels)
         {
             auto cue = document.findById (cueId);
             cue.setProperty (juce::Identifier ("channels"), channels, nullptr);
-
-            if (fold)
-                cue.setProperty (juce::Identifier ("stereoToMono"), true, nullptr);
         }
 
         void aimAt (const std::string& cueId, const std::string& busId)
@@ -1005,23 +1002,25 @@ TEST_CASE ("direct out: a cue's channels spread across the output it is aimed at
         CHECK (problem.empty());
     }
 
-    SUBCASE ("a fold is a downmix somebody asked for: both sides at half")
+    SUBCASE ("a stereo cue onto a mono out is folded: both sides at half")
     {
         /*  BOTH ROWS, which is what makes it a fold rather than a left
             channel at -6 dB: folding is summing the two sides, so each needs
-            its own row into the destination. */
-        rig.setMedia (rig.mediaId, 2, true);
+            its own row into the destination. Asked of nobody since
+            2026-10-08 - it used to wait for `stereoToMono`, and without it the
+            run failed. */
+        rig.setMedia (rig.mediaId, 2);
         rig.aimAt (rig.mediaId, rig.addBus ("Voice", 8, 1));
         CHECK (rig.spreadOf (rig.mediaId, problem) == "0>8@0.500 1>8@0.500");
         CHECK (problem.empty());
     }
 
-    SUBCASE ("and a silent one is refused rather than performed")
+    SUBCASE ("and a wider file is refused rather than guessed at")
     {
-        /*  PRD 3.9b: width is explicit and a quiet downmix is not on offer.
-            The toggle above is the way to ask for one. */
-        rig.setMedia (rig.mediaId, 2);
-        rig.aimAt (rig.mediaId, rig.addBus ("Voice", 8, 1));
+        /*  Six channels onto two is a layout somebody has to say - which
+            side a centre goes to is not a rule. */
+        rig.setMedia (rig.mediaId, 6);
+        rig.aimAt (rig.mediaId, rig.foldback);
         rig.routingOf (rig.mediaId, problem);
         CHECK (problem == "the cue is wider than its direct out");
     }

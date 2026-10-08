@@ -63,7 +63,7 @@ namespace wfg::doc::parts
                 { Part::speed, "speed", { "Media", "Video" }, { "rate", "rateMode" }, {}, {} },
 
                 { Part::mix, "mix", { "Media", "Mic", "Video" },
-                  { "level", "dca", "colour", "directOut", "stereoToMono", "sharedOut" }, {}, {} },
+                  { "level", "dca", "colour", "directOut", "sharedOut" }, {}, {} },
 
                 { Part::play, "play", { "Media" },
                   { "release", "secondPress", "velocity", "velocityFloor", "pressure",

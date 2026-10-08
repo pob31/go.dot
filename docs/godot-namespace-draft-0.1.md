@@ -1376,7 +1376,7 @@ element, all `rw` and `persist = show` except where said:
 | Node | Type | Meaning |
 |---|---|---|
 | `/godot/cue/<id>/channels` | `i`, 0, `0..512` | how many channels the file has, decided at import and written into the cue. The file travels between machines and may be absent tonight, so the routing is shaped by this rather than by the disk. Nought is "nobody has said" |
-| `/godot/cue/<id>/stereoToMono` | `T`, false | fold a two-channel file to one, each side at half, so a stereo recording can play out of a mono direct out. Ignored unless `channels` is 2 |
+| `/godot/cue/<id>/stereoToMono` | `T`, false | *retired 2026-10-08 (§42), read by nothing:* it asked for a two-channel file to be folded onto a mono direct out. The routing now folds a stereo cue onto a one-channel output by itself |
 | `/godot/cue/<id>/directOut` | `s`, "", refers `bus` | the direct out this cue's channels land on. Empty routes it nowhere by this road |
 | `/godot/cue/<id>/sharedOut` | `T`, false | this cue is MEANT to share that out with another (§3.9c). Silences that pair's overlap warning and nothing else |
 | `/godot/send/<id>/bus` | `s`, refers `bus` | the mix channel a `Send` child feeds. One per bus per cue; a second naming the same one is refused at `send.create` |
@@ -2605,6 +2605,11 @@ inference this paragraph refuses and is not. The difference is what the rule is 
 
 That last clause is what keeps §3.9b's *"refuse silent downmix or upmix"* true. A fold is a
 downmix somebody ASKED for, which is a different thing entirely from one that happened.
+
+*Amended 2026-10-08, at the author's request (§42).* Stereo onto a one-channel output is now folded
+without being asked, both sides at half, as one channel onto two was always spread: a bus is a summing
+point and its width does not matter (§3.9b's own table). `stereoToMono` is retired. What a rule still
+cannot cover - a file wider than two onto a narrower output - is still refused.
 
 **`List/Persistent` — a section of its own** (§3.29, and §13.11). An optional identified child of
 `List` holding ordinary cues, the `Header`/`Footer` precedent exactly: identified because
@@ -21201,7 +21206,7 @@ The implementer's, *(proposed)*:
 | `fx` | the `Fx` children in chain order: `plugin`, `enabled`, `values`, `stateFile` | one kind only (WU) |
 | `time` | `startOffset`, `rate`, `rateMode` and the `Range` children (`name`, `in`, `out`, `loops`) | media, video |
 | `speed` | `rate`, `rateMode` | media, video |
-| `mix` | `level`, `dca`, `colour`, `directOut`, `stereoToMono`, `sharedOut` | media, mic, video |
+| `mix` | `level`, `dca`, `colour`, `directOut`, `sharedOut` | media, mic, video |
 | `play` | `release`, `secondPress`, `velocity`, `velocityFloor`, `pressure`, `releaseFade`, `initialLevel` | media |
 | `picture` | `canvas`, `layer`, `blend`, `opacity`, `paint`, `fadeIn`, the geometry, the grade, the mask | video |
 
@@ -21721,3 +21726,39 @@ walk take the size too.
 - Timestretch backwards is Signalsmith fed the file backwards: by ear on the bench.
 - How a backwards read holds up on a slow disk is the bench's question; the cache touches as far behind as
   it touches ahead (48 000 frames).
+
+## 42. A stereo cue onto a mono output is folded, without being asked
+
+Written 2026-10-08. The author: *"Audio cues sending stereo media to mono direct outs are not mixed down
+and cause an error. Can we have mono to stereo and stereo to mono direct outs?"*
+
+### 42.1 What it is, before its names
+
+A mono sound aimed at a stereo output already played out of both sides at full level. A stereo sound aimed
+at a mono output played only if its cue had a switch ticked asking for the two sides to be added together;
+without it the cue did not start, and said *"the cue is wider than its direct out"*. Now the two sides are
+added together by themselves, each at half, onto the one channel - the same law the switch used - so
+either way round just plays. The switch is gone from the inspector. The same holds for a send into a
+one-channel mix, and for a mic cue on a stereo rack channel.
+
+### 42.2 Decisions
+
+- **The author's request:** stereo onto mono and mono onto stereo both play, with no error.
+
+Mine (proposed):
+
+- **XQ** The fold asks nobody. The switch (`sound/stereoToMono`) is **retired** rather than defaulted to
+  on: with it off, its only answer was a failed run. The attribute stays in the schema, read by nothing,
+  so a show that set it still opens; no window offers it and the foot's `mix` copy no longer carries it.
+- **XR** The law stays **each side at half** (-6 dB), the switch's own: a mono-compatible stereo recording
+  comes out at the level of either side, and a hard-panned one 6 dB down.
+- **XS** A file **wider than two** onto a narrower output is **still refused**, with the same words. Six
+  channels onto two is a layout - which side a centre or an LFE goes to - and no rule here knows it; a
+  Route says it coefficient by coefficient. A cue that an insert made wider is folded as before (§17.13).
+
+### 42.3 What changed
+
+`Runner`'s `spreadOf` folds when the cue has two channels and the destination one (it read the switch);
+the inspector drops the row; `CueParts`' `mix` part drops it; the parameter table says it is retired.
+§3.9b of the PRD carries the amendment, and so does the 2026-09-22 note *"a direct out is not an
+exception to it"*, whose fold-on-request it replaces.

@@ -6366,24 +6366,9 @@ TEST_CASE ("client: the direct-out row is a menu of the show's own outputs")
         else in this show lands anywhere, so the one direct out is free. */
     CHECK (directOut->choices[1].second == "Main L/R · Stereo — free");
 
-    /*  AND THE FOLD IS GREYED ON A CUE WHOSE FILE IS NOT STEREO. Drawn rather
-        than hidden: an absence reads as "this program cannot do that". */
-    REQUIRE (fold != nullptr);
-    CHECK (fold->applies == false);
-
-    SUBCASE ("and it applies once the cue says it has two channels")
-    {
-        rig.apply (4, "window", "node.set",
-                   { osc::Value::string ("/godot/cue/" + cue + "/channels"),
-                     osc::Value::string ("2") });
-
-        const auto after = model::inspect (*rig.publish (5), cue);
-
-        for (const auto& block : after.blocks)
-            for (const auto& field : block.fields)
-                if (field.name == "stereoToMono")
-                    CHECK (field.applies);
-    }
+    /*  AND NO FOLD TO ASK FOR (2026-10-08): a stereo cue onto a mono output
+        is folded by the routing itself, so the switch is not offered. */
+    CHECK (fold == nullptr);
 }
 
 TEST_CASE ("client: the menu marks an output taken, undecided, or free - and never hides one")

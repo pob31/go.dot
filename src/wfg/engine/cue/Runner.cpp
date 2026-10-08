@@ -5155,14 +5155,19 @@ namespace wfg::cue
             and a mix channel are the ordinary cases, and the rule for them is
             short enough to be read:
 
-              - stereo folded to one: both channels at half, onto everything
+              - stereo onto one channel: both channels at half, folded
               - a mono cue: its one channel onto everything, at full
               - as wide as the destination, or narrower: channel to channel
-              - wider than the destination: refused, and the run says so
+              - wider than the destination otherwise: refused, and the run says so
 
-            Refusing the last is the point. PRD 3.9b says width is explicit and
-            a silent downmix is not on offer; the fold above is a downmix
-            somebody ASKED for, which is a different thing entirely.
+            THE FOLD ASKS NOBODY (2026-10-08, the author: "Can we have mono to
+            stereo and stereo to mono direct outs?"). It used to wait for the
+            cue's `stereoToMono`, and a stereo cue aimed at a mono out without
+            it failed the run - a switch whose only other answer was an error.
+            A bus is a summing point and its width does not matter (PRD 3.9b's
+            own table), so two sides onto one channel is folded the way one side
+            onto two is spread. Wider files stay refused: six channels onto two
+            is a layout somebody has to say, and no rule here knows it.
 
             `what` is the destination in words, so the refusal names the thing
             the designer was looking at rather than a kind they never chose. */
@@ -5204,11 +5209,7 @@ namespace wfg::cue
             }
 
             const auto channels = fileChannels;
-
-            /*  `flag` and not `text(...) == "true"`: a stored `T` reads back
-                as "1" through `var::toString`, so the text comparison is
-                silently always false. The Reader knows both spellings. */
-            const auto fold = channels == 2 && schema.flag (mediaCue, "sound", "stereoToMono");
+            const auto fold = channels == 2 && width == 1;
 
             if (! fold && channels > width)
             {

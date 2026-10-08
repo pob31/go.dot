@@ -656,6 +656,13 @@ Rules:
   silent one. The routing reads the cue's width after its inserts; where a
   destination has room for fewer sides than the cue now has, they are summed
   into it, which returns the cue to its file's width and never below it. §3.18.)
+  *(Amended 2026-10-08, at the author's request:* on a **bus** - a direct out or
+  a mix channel - a stereo cue onto one channel is folded, both sides at half,
+  without being asked, as a mono cue onto two was always spread; a bus is a
+  summing point and the table above says its width does not matter. The cue's
+  fold switch, whose only other answer was a failed run, is retired. A file wider
+  than two onto a narrower bus is still refused. Slots are unchanged. Namespace
+  draft §42.)
 - **The show declares the processor's inputs as slots** — a name, an address
   prefix, a width and the bus that feeds each *(amended in 0.8, at the author's
   direction, 2026-09-10 — decision P of 2026-09-07,

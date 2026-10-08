@@ -75,7 +75,7 @@ namespace wfg::client::model
                     fades. The speed and its mode sit after where the file
                     starts: two more things said about how the file is played
                     (namespace draft §22.7). */
-                { "media",   { "file", "lockedTo", "channels", "stereoToMono", "directOut",
+                { "media",   { "file", "lockedTo", "channels", "directOut",
                                "level", "startOffset", "rate", "rateMode", "dca", "strip", "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
                                "releaseFade" } },
@@ -83,7 +83,7 @@ namespace wfg::client::model
                 /*  A MIC CUE (Phase 9b): what it takes and through what, how it
                     comes in, then where it goes - a media cue's sound rows with
                     the input and the channel where the file was. */
-                { "mic",     { "input", "channel", "fadeIn", "stereoToMono", "directOut",
+                { "mic",     { "input", "channel", "fadeIn", "directOut",
                                "level", "dca" } },
 
                 /*  A VIDEO CUE (Phase 8a): what it shows, where, how high in
@@ -246,28 +246,14 @@ namespace wfg::client::model
                               });
         }
 
-        /*  THE TWO MEDIA ROWS THAT DEPEND ON THE SHOW RATHER THAN ON THE
-            TABLE, decided after the scan because both need facts the scan has
-            to have finished gathering: how many channels the file has, and
-            which outputs the rig declares. */
+        /*  THE MEDIA ROW THAT DEPENDS ON THE SHOW RATHER THAN ON THE TABLE,
+            decided after the scan because it needs a fact the scan has to have
+            finished gathering: which outputs the rig declares. */
         void fitToTheRig (const tree::TreeSnapshot& snapshot, const std::string& cueId,
                           std::vector<Field>& decided)
         {
-            const auto channels = text (snapshot, "/godot/cue/" + cueId + "/channels");
-
             for (auto& field : decided)
             {
-                if (field.name == "stereoToMono")
-                {
-                    /*  A fold is a statement about a two-channel file and the
-                        engine ignores it otherwise, so the window says so
-                        rather than offering a switch that does nothing. Greyed
-                        and not hidden: an absence reads as "this program does
-                        not do that", which is the wrong thing to say. */
-                    field.applies = channels == "2";
-                    continue;
-                }
-
                 if (field.name != "directOut")
                     continue;
 
@@ -324,7 +310,7 @@ namespace wfg::client::model
             wrong - and what was missing is the panel saying which is which.
 
             SO THE LABEL FOLLOWS THE TYPE, and what the type ignores is GREYED
-            rather than hidden (the rule `stereoToMono` already follows): an
+            rather than hidden (the inspector's rule throughout): an
             absence reads as "this program cannot do that", which is the wrong
             thing to say about a field that would work perfectly well if the
             type above it were different.
@@ -377,7 +363,7 @@ namespace wfg::client::model
 
         /*  WHAT A FADE'S TWO SWITCHES LEAVE ALONE (namespace draft §22.7):
             the level and its drawn curve while `levelOn` is off, the speed
-            while `rateOn` is. Greyed and never hidden - the `stereoToMono`
+            while `rateOn` is. Greyed and never hidden - the inspector's
             rule - so turning a switch on finds its row where it already was.
             The curve is the shape of both, and greyed only with neither on. */
         void greyWhatAFadeLeavesAlone (std::vector<Field>& decided)
@@ -858,7 +844,7 @@ namespace wfg::client::model
             (PRD §3.27). A media cue carries the sampler rows whatever group it
             is in, and they mean something only on a MEMBER of a SAMPLER group:
             anywhere else nothing presses it. Greyed and never hidden - the
-            `stereoToMono` rule - so a designer who moves a cue into a sampler
+            inspector's rule - so a designer who moves a cue into a sampler
             group finds the rows where they already saw them.
 
             A HEADER'S CUES ARE NOT MEMBERS, though the tree names the group as
@@ -1328,6 +1314,13 @@ namespace wfg::client::model
             Waveform opener is the door, and the page keeps the row. */
         if (out.kind == "media")
             std::erase_if (decided, [] (const Field& field) { return field.name == "levelLane"; });
+
+        /*  AND THE FOLD IS NOBODY'S TO ASK FOR ANY MORE (2026-10-08): a stereo
+            cue onto a mono output is folded by the routing itself, so the
+            switch had nothing left to say. Its attribute stays in the schema
+            so a show that set it still opens. */
+        if (out.kind == "media" || out.kind == "mic")
+            std::erase_if (decided, [] (const Field& field) { return field.name == "stereoToMono"; });
 
         /*  AND WHAT ELSE A FADE MOVES IS ITS MIXER'S (namespace draft §26, PG):
             a send, an EQ number or a plugin value is a strip, a box or a
