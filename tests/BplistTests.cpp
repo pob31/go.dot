@@ -35,7 +35,7 @@
 #include <vector>
 
 using namespace wfg::import::plist;
-namespace write = wfg::test::plist;
+namespace writer = wfg::test::plist;
 
 namespace
 {
@@ -57,18 +57,18 @@ namespace
 
 TEST_CASE ("bplist: every kind of object reads back as it was written")
 {
-    const auto bytes = write::write (write::Value::dict ({
-        { "nothing",  write::Value::null() },
-        { "yes",      write::Value::boolean (true) },
-        { "no",       write::Value::boolean (false) },
-        { "minus",    write::Value::integer (-1234567890123LL) },
-        { "real",     write::Value::number (-30.000762688076193) },
-        { "ascii",    write::Value::string ("/channel/110/mute \\T") },
-        { "accented", write::Value::string ("Tod und das M\xC3\xA4" "dchen \xE2\x80\x9C" "Am I Human\xE2\x80\x9D") },
-        { "long",     write::Value::string (std::string (40, 'x')) },
-        { "bytes",    write::Value::data ({ 0, 1, 2, 255 }) },
-        { "uid",      write::Value::uid (70000) },
-        { "list",     write::Value::array ({ write::Value::integer (1), write::Value::string ("two") }) },
+    const auto bytes = writer::write (writer::Value::dict ({
+        { "nothing",  writer::Value::null() },
+        { "yes",      writer::Value::boolean (true) },
+        { "no",       writer::Value::boolean (false) },
+        { "minus",    writer::Value::integer (-1234567890123LL) },
+        { "real",     writer::Value::number (-30.000762688076193) },
+        { "ascii",    writer::Value::string ("/channel/110/mute \\T") },
+        { "accented", writer::Value::string ("Tod und das M\xC3\xA4" "dchen \xE2\x80\x9C" "Am I Human\xE2\x80\x9D") },
+        { "long",     writer::Value::string (std::string (40, 'x')) },
+        { "bytes",    writer::Value::data ({ 0, 1, 2, 255 }) },
+        { "uid",      writer::Value::uid (70000) },
+        { "list",     writer::Value::array ({ writer::Value::integer (1), writer::Value::string ("two") }) },
     }));
 
     const auto read = parsed (bytes);
@@ -98,7 +98,7 @@ TEST_CASE ("bplist: every kind of object reads back as it was written")
 
 TEST_CASE ("bplist: a file that lies about itself is refused in words, never read past its end")
 {
-    const auto good = write::write (write::Value::array ({ write::Value::string ("one"), write::Value::integer (2) }));
+    const auto good = writer::write (writer::Value::array ({ writer::Value::string ("one"), writer::Value::integer (2) }));
     REQUIRE (parsed (good).list.has_value());
 
     SUBCASE ("not a property list at all")
@@ -175,26 +175,26 @@ TEST_CASE ("bplist: a file that lies about itself is refused in words, never rea
 
 TEST_CASE ("keyed archive: UIDs followed to what they name, $null to nothing, cycles harmless")
 {
-    write::Keyed keyed;
+    writer::Keyed keyed;
 
     const auto name = keyed.string ("Console");
     const auto group = keyed.object ("GroupCue", {});
-    const auto child = keyed.object ("OSCCue", { { "parent", write::Value::uid (group) },
-                                                 { "rawString", write::Value::string ("/channel/110/fader 0.") },
-                                                 { "patch", write::Value::integer (3) },
-                                                 { "preWait", write::Value::number (0.5) },
-                                                 { "armed", write::Value::boolean (true) },
-                                                 { "notes", write::Value::uid (0) } });
+    const auto child = keyed.object ("OSCCue", { { "parent", writer::Value::uid (group) },
+                                                 { "rawString", writer::Value::string ("/channel/110/fader 0.") },
+                                                 { "patch", writer::Value::integer (3) },
+                                                 { "preWait", writer::Value::number (0.5) },
+                                                 { "armed", writer::Value::boolean (true) },
+                                                 { "notes", writer::Value::uid (0) } });
     const auto children = keyed.array ({ child });
-    const auto note = keyed.object ("NSAttributedString", { { "NSString", write::Value::uid (keyed.string ("Doors open")) } });
-    const auto names = keyed.dictionary ({ { keyed.add (write::Value::integer (2)), keyed.add (write::Value::string ("WFS")) } });
+    const auto note = keyed.object ("NSAttributedString", { { "NSString", writer::Value::uid (keyed.string ("Doors open")) } });
+    const auto names = keyed.dictionary ({ { keyed.add (writer::Value::integer (2)), keyed.add (writer::Value::string ("WFS")) } });
 
-    keyed.set (group, write::Value::dict ({ { "$class", keyed.at (group).entries.front().second },
-                                            { "name", write::Value::uid (name) },
-                                            { "cues", write::Value::uid (children) },
-                                            { "notes", write::Value::uid (note) },
-                                            { "names", write::Value::uid (names) },
-                                            { "inner", write::Value::uid (keyed.data ({ 1, 2, 3 })) } }));
+    keyed.set (group, writer::Value::dict ({ { "$class", keyed.at (group).entries.front().second },
+                                             { "name", writer::Value::uid (name) },
+                                             { "cues", writer::Value::uid (children) },
+                                             { "notes", writer::Value::uid (note) },
+                                             { "names", writer::Value::uid (names) },
+                                             { "inner", writer::Value::uid (keyed.data ({ 1, 2, 3 })) } }));
 
     const auto bytes = keyed.archive (group);
     auto read = parsed (bytes);
@@ -238,13 +238,13 @@ TEST_CASE ("keyed archive: UIDs followed to what they name, $null to nothing, cy
 
 TEST_CASE ("keyed archive: an archive held as data inside another, as a QLab workspace holds its cues")
 {
-    write::Keyed inner;
-    const auto cue = inner.object ("MemoCue", { { "name", write::Value::string ("TUNE") } });
+    writer::Keyed inner;
+    const auto cue = inner.object ("MemoCue", { { "name", writer::Value::string ("TUNE") } });
     const auto innerBytes = inner.archive (cue);
 
-    write::Keyed outer;
+    writer::Keyed outer;
     const auto data = outer.data (innerBytes);
-    const auto root = outer.dictionary ({ { outer.add (write::Value::string ("cueLists")), data } });
+    const auto root = outer.dictionary ({ { outer.add (writer::Value::string ("cueLists")), data } });
     auto read = parsed (outer.archive (root));
     REQUIRE (read.list.has_value());
 
@@ -271,12 +271,12 @@ TEST_CASE ("keyed archive: a list that is not one is refused in words")
 {
     std::string error;
 
-    auto plain = parsed (write::write (write::Value::array ({})));
+    auto plain = parsed (writer::write (writer::Value::array ({})));
     REQUIRE (plain.list.has_value());
     CHECK_FALSE (Archive::from (std::move (*plain.list), error).has_value());
     CHECK (error == "not a keyed archive: its top is not a dictionary");
 
-    auto noObjects = parsed (write::write (write::Value::dict ({ { "$top", write::Value::dict ({}) } })));
+    auto noObjects = parsed (writer::write (writer::Value::dict ({ { "$top", writer::Value::dict ({}) } })));
     REQUIRE (noObjects.list.has_value());
     CHECK_FALSE (Archive::from (std::move (*noObjects.list), error).has_value());
     CHECK (error == "not a keyed archive: no $objects or no $top");
