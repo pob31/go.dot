@@ -108,7 +108,8 @@ namespace wfg::client::model
                 /*  WHAT DOH! DOES WITH WHAT IT SENT last on both (PRD §3.32,
                     2026-10-01): a question about after the send, so it comes
                     after everything the send itself is. */
-                { "osc",     { "device", "address", "value", "wait", "timeout", "doh", "dohRollback" } },
+                { "osc",     { "device", "address", "value", "wait", "timeout", "duration", "loop", "doh",
+                               "dohRollback" } },
                 { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait", "doh",
                                "dohRollback" } },
 
@@ -990,6 +991,36 @@ namespace wfg::client::model
                                   " Choosing one rewrites the address below it, because"
                                   " the address is where a cue says where it is going.";
 
+                /*  AND EVERY FURTHER MESSAGE WITH IT (namespace draft 45, YV): a
+                    cue talks to one device, so a choice rewrites each message's
+                    address as it rewrites the cue's - built in the order
+                    `targetChoices` builds its keys, none first. */
+                const auto cueBase = field.address.substr (0, field.address.size() - std::string ("address").size());
+                std::vector<std::pair<std::string, std::string>> messages;
+
+                for (const auto& id : words (text (snapshot, cueBase + "messages")))
+                {
+                    const auto row = "/godot/message/" + id + "/address";
+                    messages.push_back ({ row, text (snapshot, row) });
+                }
+
+                if (! messages.empty())
+                {
+                    std::vector<std::string> deviceIds { std::string {} };
+
+                    for (const auto& row : devices)
+                        if (! row.prefixes().empty())
+                            deviceIds.push_back (row.id);
+
+                    for (const auto& deviceId : deviceIds)
+                    {
+                        auto& writes = aim.alongside[retarget (field.value, devices, deviceId)];
+
+                        for (const auto& [row, address] : messages)
+                            writes.push_back ({ row, retarget (address, devices, deviceId) });
+                    }
+                }
+
                 decided.push_back (std::move (aim));
                 return;
             }
@@ -1049,6 +1080,12 @@ namespace wfg::client::model
                 offered either way, because seeing the shape of a sequence is
                 worth the look even where nothing can be dragged. */
             offer ("Timeline, members arranged by dragging", "timeline");
+        }
+        else if (kind == "osc")
+        {
+            /*  AN OSC CUE'S MESSAGES (namespace draft 45): every message it
+                sends, every value of each, and the curves on them. */
+            offer ("Messages, what this cue sends and the curves on it", "messages");
         }
 
         return out;

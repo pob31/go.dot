@@ -22281,3 +22281,31 @@ their curves; the copy of a cue's messages as a foot part.
   **The sends are outputs, not records** (mine): recomputed from the document and the clock on the night, as
   a fade's level is, and never logged; the run's start and end are records like any other run's. The replay
   fixture moves to O.12, with the drivers.
+- **O.5, the window: an OSC cue's messages** (2026-10-08). The inspector offers **Messages** on an OSC cue
+  (`openersFor`, the word mine), a foot subject of its own (`Subject::Kind::messages`, the OSC cue's picture
+  in the head), and lists `duration` and `loop` after the timeout. `model/OscMessages` reads the cue's own
+  message and each further one with every value's type, what it says and the curve on it, in one pass, and
+  answers what a typed value, a changed type, a value added or taken away makes of the `value` row
+  (`atomFor`, `withArgument`, `retyped`...). `ui/OscMessagesComponent` is the table: a row a message - its
+  number, its address - and for each value a type menu (float, integer, double, long, text, true, false, nil,
+  impulse - the words mine), its box, a `~` switch putting a curve on a number and a cross; a plus for one
+  more value (a float at nought), the row's cross for the message - on the first, which has no element, the
+  second is made the cue's own (`message.promote`) - and **+ message** in the head, copying the last message's
+  address and values. A value that does not parse is put back and said; a value carrying a curve keeps its
+  cross until the curve is off, and taking a value away moves the curves after it down one in the same
+  `node.setMany`. The inspector's target menu moves every further message with the cue (`Field::alongside`,
+  one `node.setMany`), so a retargeted cue never fails `several-devices`. The panel opens from the button, as
+  the waveform does, and follows the pick; it does not open by itself (mine).
+- **O.6 folded into O.7** (mine). The curve editor is a component of its own over shared arithmetic, rather
+  than the level lane's drawing carved out of the waveform editor: the waveform editor is untouched, so the
+  level and send lanes cannot be disturbed by it, and the gestures are the same.
+- **O.7, the window: an OSC cue's curves** (2026-10-08). Beside the messages table, in the same panel,
+  `ui/CurveLaneComponent` draws the cue's curves on its own time - one at a time, picked from a menu, the
+  others faint behind it on their own axes (YT) - against the curve's axis: its `range`, else the device's
+  RANGE for that value, else what its points and its written value cover (`model/OscCurves`). A point is
+  picked by how close it looks, dragged - held a millisecond inside its neighbours, inside a ranged axis -
+  and written once when the hand lets go; a double click on the line adds one on it, on a point takes it away;
+  the head's two boxes type the picked point's second and value. Play and Stop, the playhead while the cue
+  plays, and a click on the ruler moving its clock (`run.seek`). The length drawn is the duration or the
+  last point, a second at least; where the duration ends inside it is marked. Values are written at a
+  ten-thousandth of the axis. The picked point is filled and the others hollow (4.8).

@@ -8,6 +8,8 @@
 #include <wfg/client/ui/TakePanelComponent.h>
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/SendMixerComponent.h>
+#include <wfg/client/ui/CurveLaneComponent.h>
+#include <wfg/client/ui/OscMessagesComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
@@ -4282,4 +4284,244 @@ TEST_CASE ("import window: the named scenes that do something are ticked, and Im
 
     CHECK (handed == std::vector<int> { 0, 1 });
     CHECK (into == parent.getChildFile ("Lazzi"));
+}
+
+//==============================================================================
+/*  AN OSC CUE'S MESSAGES, AS A TABLE (namespace draft 45, O.5): every gesture
+    on it is the one write or command the model names - a value list rewritten
+    whole, a curve made or taken off, a message added or the second made the
+    cue's own. */
+TEST_CASE ("osc messages: a value typed, a type changed, a curve and a message each send what the model names")
+{
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::vector<std::pair<std::string, std::string>>> many;
+    std::vector<std::string> said, removed, promoted;
+    std::vector<std::pair<std::string, int>> curved;
+    std::vector<std::tuple<std::string, std::string, std::string>> made;
+
+    ui::OscMessagesComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value) { written.emplace_back (address, value); };
+    actions.setMany = [&] (const std::vector<std::pair<std::string, std::string>>& writes) { many.push_back (writes); };
+    actions.createMessage = [&] (const std::string& cue, const std::string& address, const std::string& value)
+    { made.emplace_back (cue, address, value); };
+    actions.promoteMessage = [&] (const std::string& id) { promoted.push_back (id); };
+    actions.createCurve = [&] (const std::string& parent, int arg) { curved.emplace_back (parent, arg); };
+    actions.removeObject = [&] (const std::string& id) { removed.push_back (id); };
+    actions.say = [&] (const juce::String& sentence) { said.push_back (sentence.toStdString()); };
+
+    model::OscMessagesReading reading;
+    reading.cueId = "CUE00001";
+
+    model::OscMessageRow own;
+    own.base = "/godot/cue/CUE00001/";
+    own.address = "/wfs/source/1/gain";
+    own.value = "f:0.5 i:2";
+    own.args = { { 'f', "0.5", true, {} }, { 'i', "2", true, {} } };
+
+    model::OscMessageRow further;
+    further.id = "M3SS4G01";
+    further.base = "/godot/message/M3SS4G01/";
+    further.address = "/wfs/source/2/xyz";
+    further.value = "f:1 f:2 f:3";
+    further.args = { { 'f', "1", true, {} }, { 'f', "2", true, {} }, { 'f', "3", true, "C0RVE001" } };
+
+    reading.rows = { own, further };
+
+    ui::OscMessagesComponent table (model::Theme {}, actions);
+    table.setSize (1100, 160);
+    table.show (reading);
+
+    {
+        juce::Image picture (juce::Image::ARGB, 1100, 160, true);
+        juce::Graphics g (picture);
+        table.paintEntireComponent (g, false);
+    }
+
+    SUBCASE ("a value typed rewrites the list, and one that cannot be the type is put back")
+    {
+        REQUIRE (table.valueBox (0, 0) != nullptr);
+        table.valueBox (0, 0)->setText ("0.75", juce::sendNotificationSync);
+        REQUIRE (written.size() == 1u);
+        CHECK (written.front() == std::pair<std::string, std::string> { "/godot/cue/CUE00001/value", "f:0.75 i:2" });
+
+        table.valueBox (0, 1)->setText ("2.5", juce::sendNotificationSync);
+        CHECK (written.size() == 1u);
+        CHECK (table.valueBox (0, 1)->getText() == "2");
+        CHECK_FALSE (said.empty());
+    }
+
+    SUBCASE ("a type changed keeps what the value said")
+    {
+        REQUIRE (table.typeMenu (0, 1) != nullptr);
+        table.typeMenu (0, 1)->setSelectedId (1, juce::sendNotificationSync);    // float
+        REQUIRE (written.size() == 1u);
+        CHECK (written.front().second == "f:0.5 f:2");
+    }
+
+    SUBCASE ("a curve is put on a number, and taken off")
+    {
+        table.curveSwitch (0, 0)->onClick();
+        REQUIRE (curved.size() == 1u);
+        CHECK (curved.front() == std::pair<std::string, int> { "CUE00001", 0 });
+
+        table.curveSwitch (1, 2)->onClick();
+        REQUIRE (removed.size() == 1u);
+        CHECK (removed.front() == "C0RVE001");
+    }
+
+    SUBCASE ("a value with a curve after it is taken away with the curve moved down one")
+    {
+        //  The value carrying the curve cannot go until the curve does.
+        CHECK_FALSE (table.removeValue (1, 2)->isEnabled());
+
+        table.removeValue (1, 0)->onClick();
+        REQUIRE (many.size() == 1u);
+        CHECK (many.front() == std::vector<std::pair<std::string, std::string>> {
+                                   { "/godot/message/M3SS4G01/value", "f:2 f:3" },
+                                   { "/godot/curve/C0RVE001/arg", "1" } });
+    }
+
+    SUBCASE ("a message is added after the last, and the first taken away makes the second the cue's own")
+    {
+        table.addMessage()->onClick();
+        REQUIRE (made.size() == 1u);
+        CHECK (made.front() == std::make_tuple (std::string ("CUE00001"), std::string ("/wfs/source/2/xyz"),
+                                                std::string ("f:1 f:2 f:3")));
+
+        table.removeMessage (0)->onClick();
+        REQUIRE (promoted.size() == 1u);
+        CHECK (promoted.front() == "M3SS4G01");
+
+        table.removeMessage (1)->onClick();
+        REQUIRE (removed.size() == 1u);
+        CHECK (removed.front() == "M3SS4G01");
+    }
+
+    SUBCASE ("locked, nothing can be pressed")
+    {
+        reading.locked = true;
+        table.show (reading);
+
+        CHECK_FALSE (table.addMessage()->isEnabled());
+        CHECK_FALSE (table.addValue (0)->isEnabled());
+        CHECK_FALSE (table.curveSwitch (0, 0)->isEnabled());
+        CHECK_FALSE (table.typeMenu (0, 0)->isEnabled());
+    }
+}
+
+//==============================================================================
+/*  AN OSC CUE'S CURVES, EDITED (namespace draft 45, O.7): the level lane's
+    gestures on the cue's own time - a point dragged and written once when the
+    hand lets go, one added with a double click on the line and taken away with
+    one on it, typed in the head's boxes, the ruler moving a playing cue's clock -
+    each a whole curve, held to the judge's rules. */
+TEST_CASE ("curve lane: a point dragged, added, taken away and typed each write the whole curve once")
+{
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::pair<std::string, double>> sought;
+
+    ui::CurveLaneComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value) { written.emplace_back (address, value); };
+    actions.seek = [&] (const std::string& run, double seconds) { sought.emplace_back (run, seconds); };
+
+    ui::CurveLaneComponent lane (model::Theme {}, actions);
+    lane.setSize (800, 220);
+
+    model::OscCurvesReading reading;
+    reading.cueId = "CUE00001";
+    reading.duration = 4.0;
+    reading.drawn = 4.0;
+
+    model::CurveView x;
+    x.id = "C0RVE001";
+    x.parentId = "CUE00001";
+    x.label = "positionX";
+    x.points = { { 0.0, 0.0 }, { 2.0, 5.0 }, { 4.0, 0.0 } };
+    x.axis = { -10.0, 10.0, true };
+
+    model::CurveView y = x;
+    y.id = "C0RVE002";
+    y.label = "positionY";
+    y.points = { { 0.0, 1.0 } };
+
+    reading.curves = { x, y };
+    lane.show (reading, false, 0.0, {});
+
+    {
+        juce::Image picture (juce::Image::ARGB, 800, 220, true);
+        juce::Graphics g (picture);
+        lane.paintEntireComponent (g, false);
+    }
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+
+    const auto mouse = [&] (juce::Point<int> at, int clicks, bool dragged)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        const auto where = at.toFloat();
+        return juce::MouseEvent (source, where, left, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &lane, &lane, now, where, now, clicks, dragged);
+    };
+
+    const auto judged = [] (const std::string& text)
+    {
+        const auto curve = wfg::doc::readLane (text, wfg::doc::LaneRange { -10.0, 10.0 });
+        CHECK (curve.problem.empty());
+        return curve.points;
+    };
+
+    SUBCASE ("a drag writes once, when the hand lets go, held between its neighbours")
+    {
+        const auto from = lane.pointPosition (1);
+        lane.mouseDown (mouse (from, 1, false));
+        lane.mouseDrag (mouse (lane.positionAt (2.5, 8.0), 1, true));
+        lane.mouseDrag (mouse (lane.positionAt (3.0, 9.0), 1, true));
+        CHECK (written.empty());
+
+        lane.mouseUp (mouse (lane.positionAt (3.0, 9.0), 1, true));
+        REQUIRE (written.size() == 1u);
+        CHECK (written.front().first == "/godot/curve/C0RVE001/points");
+
+        const auto points = judged (written.front().second);
+        REQUIRE (points.size() == 3u);
+        CHECK (points[1].seconds == doctest::Approx (3.0).epsilon (0.02));
+        CHECK (points[1].levelDb == doctest::Approx (9.0).epsilon (0.03));
+    }
+
+    SUBCASE ("a double click on the line adds a point on it, and one on a point takes it away")
+    {
+        lane.mouseDoubleClick (mouse (lane.positionAt (1.0, 2.5), 2, false));
+        REQUIRE (written.size() == 1u);
+        CHECK (judged (written.back().second).size() == 4u);
+
+        lane.show (reading, false, 0.0, {});
+        lane.mouseDoubleClick (mouse (lane.pointPosition (2), 2, false));
+        REQUIRE (written.size() == 2u);
+        CHECK (judged (written.back().second).size() == 2u);
+    }
+
+    SUBCASE ("a picked point typed")
+    {
+        lane.mouseDown (mouse (lane.pointPosition (1), 1, false));
+        lane.mouseUp (mouse (lane.pointPosition (1), 1, false));
+        CHECK (written.empty());
+        CHECK (lane.pointAtBox().getText() == "2");
+
+        lane.pointValueBox().setText ("-3.5", juce::sendNotificationSync);
+        REQUIRE (written.size() == 1u);
+        CHECK (judged (written.back().second)[1].levelDb == doctest::Approx (-3.5));
+    }
+
+    SUBCASE ("the other curve is picked from the menu, and the ruler moves a playing cue's clock")
+    {
+        lane.pickCurve (1);
+        CHECK (lane.pickedCurve() == 1u);
+
+        lane.show (reading, true, 1.0, "RUN00001");
+        lane.mouseDown (mouse ({ lane.positionAt (2.0, 0.0).x, lane.getHeight() - 6 }, 1, false));
+        REQUIRE (sought.size() == 1u);
+        CHECK (sought.front().first == "RUN00001");
+        CHECK (sought.front().second == doctest::Approx (2.0).epsilon (0.05));
+    }
 }

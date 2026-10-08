@@ -381,6 +381,14 @@ namespace wfg::client::gesture
     /** A further canvas on an output, through a warp of its own (namespace draft 40, WY). */
     Event createZone (const std::string& outputId, const std::string& canvasId);
 
+    /*  AN OSC CUE'S MESSAGES AND CURVES (namespace draft 45): one more message
+        after the last, a further message made the cue's own, and a curve on
+        one value of a message - under the cue for its own, under a message
+        for that one. */
+    Event createMessage (const std::string& cueId, const std::string& address, const std::string& value);
+    Event promoteMessage (const std::string& messageId);
+    Event createCurve (const std::string& parentId, int arg);
+
     /** An output's test pattern on or off, to find which projector is which: tonight's. */
     Event identifyVideoOutput (const std::string& outputId, bool on);
 

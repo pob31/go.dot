@@ -42,6 +42,7 @@ namespace wfg::client::model
             case Subject::Kind::fx:        return "fx";
             case Subject::Kind::take:      return "take";
             case Subject::Kind::fade:      return "fade";
+            case Subject::Kind::messages:  return "messages";
             case Subject::Kind::none:      break;
         }
 
@@ -52,7 +53,7 @@ namespace wfg::client::model
     {
         for (const auto kind : { Subject::Kind::waveform, Subject::Kind::sends, Subject::Kind::timeline,
                                  Subject::Kind::curve, Subject::Kind::eq, Subject::Kind::fx,
-                                 Subject::Kind::take, Subject::Kind::fade })
+                                 Subject::Kind::take, Subject::Kind::fade, Subject::Kind::messages })
             if (wordFor (kind) == word)
                 return kind;
 
@@ -107,6 +108,11 @@ namespace wfg::client::model
             /*  AND A FADE'S MIXER, for the curve's reason: it opens when a
                 fade is picked (namespace draft §26, PG). */
             case Subject::Kind::fade:      return true;
+
+            /*  AND AN OSC CUE'S MESSAGES, for the waveform's reason: which
+                messages this cue sends is a question about the cue in hand
+                (namespace draft 45). */
+            case Subject::Kind::messages:  return true;
             case Subject::Kind::none:      break;
         }
 
@@ -160,6 +166,7 @@ namespace wfg::client::model
             case Subject::Kind::curve:
             case Subject::Kind::take:
             case Subject::Kind::fade:
+            case Subject::Kind::messages:
             case Subject::Kind::none:      break;
         }
 
@@ -392,6 +399,19 @@ namespace wfg::client::model
 
         if (subject.kind == Subject::Kind::curve)
             out.curve = readCurve (snapshot, out.subject.objectId);
+
+        /*  AN OSC CUE'S MESSAGES (namespace draft 45), with the lock read
+            here, as the waveform reads its own: nothing on the table is
+            written while the show is. */
+        if (subject.kind == Subject::Kind::messages)
+        {
+            out.oscMessages = readOscMessages (snapshot, out.subject.objectId);
+            out.oscCurves = readOscCurves (snapshot, out.subject.objectId);
+            out.locked = out.oscMessages.locked;
+
+            if (out.oscMessages.rows.empty())
+                out.notice = "Not an OSC cue";
+        }
 
         if (subject.kind == Subject::Kind::fade)
         {

@@ -52,6 +52,8 @@
 #include <wfg/client/model/FadeMix.h>
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/Lane.h>
+#include <wfg/client/model/OscCurves.h>
+#include <wfg/client/model/OscMessages.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Surfaces.h>
@@ -66,7 +68,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take, fade };
+        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take, fade, messages };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -230,6 +232,15 @@ namespace wfg::client::model
             (namespace draft §26): a strip for each slider, a row for each EQ
             number and plugin value, a door for each of the target's inserts. */
         FadeMixReading fadeMix;
+
+        /*  AN OSC CUE'S MESSAGES, filled only when they are what is open
+            (namespace draft 45, O.5): the cue's own message first, each value
+            with its type and the curve on it. */
+        OscMessagesReading oscMessages;
+
+        /*  AND ITS CURVES, beside the table (namespace draft 45, O.7): each on
+            the cue's own time, against an axis of its own. */
+        OscCurvesReading oscCurves;
 
         /*  THE CUE'S EQ, filled only when the EQ is what is open (Phase 9a):
             the twenty-three rows as one value, the same value the voice is

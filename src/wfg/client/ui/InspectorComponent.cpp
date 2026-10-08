@@ -784,6 +784,17 @@ namespace wfg::client::ui
 
     void InspectorComponent::commitField (const model::Field& field, const std::string& text)
     {
+        /*  A CHOICE THAT MOVES MORE THAN ITS OWN ROW (namespace draft 45): the
+            cue's address and each further message's, together. */
+        if (const auto along = field.alongside.find (text);
+            field.addresses.empty() && along != field.alongside.end() && ! along->second.empty() && actions.setMany)
+        {
+            std::vector<std::pair<std::string, std::string>> writes { { field.address, text } };
+            writes.insert (writes.end(), along->second.begin(), along->second.end());
+            actions.setMany (writes);
+            return;
+        }
+
         if (field.addresses.empty())
         {
             if (actions.set)

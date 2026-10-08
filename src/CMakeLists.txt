@@ -527,6 +527,10 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Fader.cpp
     wfg/client/model/Lane.h
     wfg/client/model/Lane.cpp
+    wfg/client/model/OscMessages.h
+    wfg/client/model/OscMessages.cpp
+    wfg/client/model/OscCurves.h
+    wfg/client/model/OscCurves.cpp
     wfg/client/model/Sends.h
     wfg/client/model/Sends.cpp
     wfg/client/model/FadeMix.h
@@ -628,6 +632,10 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/LiveBarComponent.cpp
     wfg/client/ui/RangeTableComponent.h
     wfg/client/ui/RangeTableComponent.cpp
+    wfg/client/ui/OscMessagesComponent.h
+    wfg/client/ui/OscMessagesComponent.cpp
+    wfg/client/ui/CurveLaneComponent.h
+    wfg/client/ui/CurveLaneComponent.cpp
     wfg/client/ui/RunPaneComponent.h
     wfg/client/ui/RunPaneComponent.cpp
     wfg/client/ui/CurveEditorComponent.h

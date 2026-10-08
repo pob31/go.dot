@@ -78,6 +78,8 @@
 #include <wfg/client/model/Timeline.h>
 #include <wfg/client/model/Scrub.h>
 #include <wfg/client/model/Selection.h>
+#include <wfg/client/model/OscCurves.h>
+#include <wfg/client/model/OscMessages.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Take.h>
@@ -733,6 +735,10 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::wrapGroup ({ "B3N8R5TW", "P9XKC2WR" }, { { "mode", "timeline" } }),
         gesture::wrapGroup ({ "B3N8R5TW" }, {}),
         gesture::createCue ("7K2QM9X4", 0, "mic", "", { { "input", "N1000001" }, { "channel", "K1000001" } }),
+
+        /*  AN OSC CUE'S MESSAGES AND CURVES (namespace draft 45). */
+        gesture::createMessage ("B3N8R5TW", "/desk/scene", "i:3"), gesture::promoteMessage ("M3SS4G01"),
+        gesture::createCurve ("B3N8R5TW", 0),
     };
 
     std::vector<Event> listed = gestures;
@@ -1578,7 +1584,7 @@ TEST_CASE ("client: every kind wears an icon and an accent the theme declares")
     for (const auto kind : { model::Subject::Kind::waveform, model::Subject::Kind::sends,
                              model::Subject::Kind::timeline, model::Subject::Kind::curve,
                              model::Subject::Kind::eq, model::Subject::Kind::fx, model::Subject::Kind::take,
-                             model::Subject::Kind::fade })
+                             model::Subject::Kind::fade, model::Subject::Kind::messages })
     {
         const auto word = model::wordFor (kind);
         INFO ("panel " << word);
@@ -4570,8 +4576,14 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     CHECK_FALSE (onFade[2].writable);
 
     //  And the kinds with nothing longer to look at still offer nothing.
-    for (const auto* kind : { "wait", "message", "osc" })
+    for (const auto* kind : { "wait", "message" })
         CHECK (model::openersFor (kind, "B3N8R5TW").empty());
+
+    /*  AN OSC CUE OFFERS ITS MESSAGES (namespace draft 45): every message it
+        sends, every value of each, and the curves on them. */
+    const auto onOsc = model::openersFor ("osc", "B3N8R5TW");
+    REQUIRE (onOsc.size() == 1);
+    CHECK (onOsc[0].value == "messages");
 
     /*  AND THEY ARRIVE AS THE PANEL BAR, not among the rows (author,
         2026-09-30: "the toggles for the foot panels in the inspector should be
@@ -10309,4 +10321,187 @@ TEST_CASE ("client: an output's zones are read bottom first, a warp the wrong si
 
     //  The whole output regridded is still the whole output.
     CHECK (model::regridded (model::WarpPoints::whole(), 4, 3).isWhole());
+}
+
+//==============================================================================
+/*  AN OSC CUE'S MESSAGES, AS THE FOOT'S TABLE READS THEM (namespace draft 45,
+    O.5): its own first, then each further one in order, every value with its
+    type and what it says, and the curve moving it. */
+TEST_CASE ("client: an OSC cue's messages read as a table, each value with its type and its curve")
+{
+    Rig rig;
+
+    const std::string cue = "N4T9B2QE";
+    const std::string message = "M3SS4G01";
+    const std::string curve = "C0RVE001";
+
+    rig.apply (1, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0), osc::Value::string ("osc"),
+                 osc::Value::string ("Move"), osc::Value::string (cue) });
+    rig.apply (2, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/address"),
+                                          osc::Value::string ("/wfs/source/1/gain") });
+    rig.apply (3, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/value"),
+                                          osc::Value::string ("f:0.5 i:2") });
+    rig.apply (4, "window", "message.create", { osc::Value::string (cue), osc::Value::string ("/wfs/source/2/xyz"),
+                                                osc::Value::string ("f:1 f:2 s:\"left wing\""),
+                                                osc::Value::string (message) });
+    rig.apply (5, "window", "curve.create", { osc::Value::string (message), osc::Value::int32 (1),
+                                              osc::Value::string (curve) });
+
+    const auto reading = model::readOscMessages (*rig.publish (6), cue);
+    REQUIRE (reading.rows.size() == 2u);
+
+    const auto& own = reading.rows[0];
+    CHECK (own.id.empty());
+    CHECK (own.address == "/wfs/source/1/gain");
+    CHECK (own.valueRow() == "/godot/cue/" + cue + "/value");
+    REQUIRE (own.args.size() == 2u);
+    CHECK (own.args[0].tag == 'f');
+    CHECK (own.args[0].payload == "0.5");
+    CHECK (own.args[1].tag == 'i');
+    CHECK (own.args[1].payload == "2");
+    CHECK (own.parentId (cue) == cue);
+
+    const auto& further = reading.rows[1];
+    CHECK (further.id == message);
+    CHECK (further.addressRow() == "/godot/message/" + message + "/address");
+    REQUIRE (further.args.size() == 3u);
+    CHECK (further.args[1].curveId == curve);
+    CHECK (further.args[0].curveId.empty());
+    CHECK (further.args[2].tag == 's');
+    CHECK (further.args[2].payload == "left wing");
+    CHECK_FALSE (further.args[2].number);
+
+    //  Not an OSC cue: no rows.
+    CHECK (model::readOscMessages (*rig.publish (7), "7K2QM9X4").rows.empty());
+}
+
+TEST_CASE ("client: a value list is rewritten one value at a time, and refused where it cannot be")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CHECK (model::atomFor ('f', "0.5") == std::optional<std::string> ("f:0.5"));
+    CHECK (model::atomFor ('i', "12") == std::optional<std::string> ("i:12"));
+    CHECK_FALSE (model::atomFor ('i', "2.5").has_value());
+    CHECK_FALSE (model::atomFor ('f', "loud").has_value());
+    CHECK (model::atomFor ('s', "left wing") == std::optional<std::string> ("s:\"left wing\""));
+    CHECK (model::atomFor ('T', "anything") == std::optional<std::string> ("T"));
+
+    const std::string list = "f:0.5 i:2 s:\"x\"";
+    CHECK (model::withArgument (list, 1, "i:7") == std::optional<std::string> ("f:0.5 i:7 s:\"x\""));
+    CHECK (model::withArgumentAppended (list, "f:0") == std::optional<std::string> ("f:0.5 i:2 s:\"x\" f:0"));
+    CHECK (model::withoutArgument (list, 0) == std::optional<std::string> ("i:2 s:\"x\""));
+    CHECK_FALSE (model::withoutArgument (list, 3).has_value());
+
+    //  A type changed keeps what the value said where it can, and rests where not.
+    CHECK (model::retyped (list, 0, 'd') == std::optional<std::string> ("d:0.5 i:2 s:\"x\""));
+    CHECK (model::retyped (list, 0, 's') == std::optional<std::string> ("s:\"0.5\" i:2 s:\"x\""));
+    CHECK (model::retyped (list, 2, 'f') == std::optional<std::string> ("f:0.5 i:2 f:0"));
+    CHECK (model::retyped (list, 1, 'T') == std::optional<std::string> ("f:0.5 T s:\"x\""));
+}
+
+TEST_CASE ("client: an OSC cue's target moves every further message to the device it moves the cue to")
+{
+    Rig rig;
+
+    const std::string cue = "N4T9B2QE";
+    const std::string message = "M3SS4G01";
+
+    rig.apply (1, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0), osc::Value::string ("osc"),
+                 osc::Value::string ("Move"), osc::Value::string (cue) });
+    rig.apply (2, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/address"),
+                                          osc::Value::string ("/wfs/source/1/gain") });
+    rig.apply (3, "window", "message.create", { osc::Value::string (cue), osc::Value::string ("/wfs/source/2/gain"),
+                                                osc::Value::string ("f:0"), osc::Value::string (message) });
+
+    const auto inspection = model::inspect (*rig.publish (4), cue);
+    const model::Field* target = nullptr;
+
+    for (const auto& block : inspection.blocks)
+        for (const auto& field : block.fields)
+            if (field.name == "device")
+                target = &field;
+
+    REQUIRE (target != nullptr);
+
+    //  The other device: the cue's address rewritten, and the message's with it.
+    const auto devices = model::readDevices (*rig.publish (5));
+    REQUIRE (devices.size() == 2u);
+    const auto& other = model::deviceOf ("/wfs/source/1/gain", devices) == devices[0].id ? devices[1] : devices[0];
+
+    const auto toDesk = target->alongside.find (model::retarget ("/wfs/source/1/gain", devices, other.id));
+    REQUIRE (toDesk != target->alongside.end());
+    REQUIRE (toDesk->second.size() == 1u);
+    CHECK (toDesk->second.front().first == "/godot/message/" + message + "/address");
+    CHECK (toDesk->second.front().second == model::retarget ("/wfs/source/2/gain", devices, other.id));
+    CHECK (toDesk->second.front().second != "/wfs/source/2/gain");
+
+    //  Every choice carries the messages, none included.
+    CHECK (target->alongside.size() == target->choices.size());
+}
+
+//==============================================================================
+/*  AN OSC CUE'S CURVES, AS THE EDITOR DRAWS THEM (namespace draft 45, O.7):
+    each with its points and an axis of its own - its range, else the device's
+    for that value, else what it covers - and the level lane's edits on a
+    straight axis. */
+TEST_CASE ("client: an OSC cue's curves read with an axis each, and edited on it")
+{
+    Rig rig;
+
+    const std::string cue = "N4T9B2QE";
+    const std::string ranged = "C0RVE001";
+    const std::string free = "C0RVE002";
+
+    rig.apply (1, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0), osc::Value::string ("osc"),
+                 osc::Value::string ("Move"), osc::Value::string (cue) });
+    rig.apply (2, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/address"),
+                                          osc::Value::string ("/wfs/source/1/xyz") });
+    rig.apply (3, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/value"),
+                                          osc::Value::string ("f:0 f:0") });
+    rig.apply (4, "window", "curve.create", { osc::Value::string (cue), osc::Value::int32 (0), osc::Value::string (ranged) });
+    rig.apply (5, "window", "curve.create", { osc::Value::string (cue), osc::Value::int32 (1), osc::Value::string (free) });
+    rig.apply (6, "window", "node.set", { osc::Value::string ("/godot/curve/" + ranged + "/range"), osc::Value::string ("-10 10") });
+    rig.apply (7, "window", "node.set", { osc::Value::string ("/godot/curve/" + ranged + "/points"), osc::Value::string ("0 0 2 5") });
+    rig.apply (8, "window", "node.set", { osc::Value::string ("/godot/curve/" + free + "/points"), osc::Value::string ("0 1 1 3") });
+
+    const auto reading = model::readOscCurves (*rig.publish (9), cue);
+    REQUIRE (reading.curves.size() == 2u);
+
+    const auto& first = reading.curves[0];
+    CHECK (first.id == ranged);
+    CHECK (first.label == "xyz 1");
+    CHECK (first.parentId == cue);
+    CHECK (first.axis.bounded);
+    CHECK (first.axis.low == doctest::Approx (-10.0));
+    CHECK (first.axis.high == doctest::Approx (10.0));
+    REQUIRE (first.points.size() == 2u);
+
+    //  No range of its own and none from the device: a frame around what it covers.
+    const auto& second = reading.curves[1];
+    CHECK_FALSE (second.axis.bounded);
+    CHECK (second.axis.low < 0.0);      // the written nought is inside it
+    CHECK (second.axis.high > 3.0);
+
+    //  The longest curve's last point is how long they play; a second at least is drawn.
+    CHECK (reading.duration == doctest::Approx (2.0));
+    CHECK (reading.drawn == doctest::Approx (2.0));
+
+    //  A drag held between its neighbours, and inside a ranged axis.
+    const auto moved = model::withCurvePoint (first.points, 0, 3.0, 20.0, first.axis);
+    CHECK (moved[0].seconds == doctest::Approx (1.999));
+    CHECK (moved[0].levelDb == doctest::Approx (10.0));
+
+    //  One more point on the line, nothing changed until it moves; none twice at an instant.
+    const auto added = model::insertCurvePoint (first.points, 1.0, first.written);
+    REQUIRE (added.has_value());
+    REQUIRE (added->size() == 3u);
+    CHECK ((*added)[1].levelDb == doctest::Approx (2.5));
+    CHECK_FALSE (model::insertCurvePoint (first.points, 2.0, 0.0).has_value());
+
+    //  Written at a ten-thousandth of the axis, in the locale-free spelling.
+    CHECK (model::stepFor (first.axis) == doctest::Approx (0.001));
+    CHECK (model::writeCurve ({ { 0.5, 1.23456 } }, 0.001) == "0.5 1.235");
 }

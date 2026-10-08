@@ -94,6 +94,9 @@ namespace wfg::client::model
         if (subject == "timeline") return Icon::timeline;
         if (subject == "take")     return Icon::take;
 
+        //  An OSC cue's messages wear the OSC cue's own picture (namespace draft 45).
+        if (subject == "messages") return Icon::osc;
+
         return Icon::none;
     }
 

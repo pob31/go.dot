@@ -66,6 +66,11 @@ namespace wfg::client::ui
                 one gesture, so one `node.setMany`, one step to undo. */
             std::function<void (const std::vector<std::string>& addresses, const std::string& text)> setAll;
 
+            /*  SEVERAL ROWS AS ONE GESTURE, each its own value: an OSC cue's
+                target menu moving the cue and every further message to one
+                device (namespace draft 45), one `node.setMany`. */
+            std::function<void (const std::vector<std::pair<std::string, std::string>>& writes)> setMany;
+
             /*  ASKS THE MACHINE FOR A FILE, which is the one thing a
                 browser cannot do (decision Y) and so the one control here
                 that is the desktop's alone. It is an ACCELERATOR and never a

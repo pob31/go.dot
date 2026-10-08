@@ -32,6 +32,8 @@
 #include <wfg/client/ui/CurveEditorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FadeMixerComponent.h>
+#include <wfg/client/ui/CurveLaneComponent.h>
+#include <wfg/client/ui/OscMessagesComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/Icons.h>
 #include <wfg/client/ui/SendMixerComponent.h>
@@ -70,6 +72,13 @@ namespace wfg::client::ui
 
             /** `range.split` at the playhead. */
             std::function<void (const std::string& cueId, double at)> splitRange;
+
+            /*  AN OSC CUE'S MESSAGES AND CURVES (namespace draft 45): one more
+                message, the second made the cue's own, a curve on a value. */
+            std::function<void (const std::string& cueId, const std::string& address,
+                                const std::string& value)> createMessage;
+            std::function<void (const std::string& messageId)> promoteMessage;
+            std::function<void (const std::string& parentId, int arg)> createCurve;
 
             /** `send.create`, when a silent fader in the mixer is raised. */
             std::function<void (const std::string& cueId, const std::string& busId, double level)> createSend;
@@ -199,6 +208,8 @@ namespace wfg::client::ui
         std::unique_ptr<CurveEditorComponent> curve;
         std::unique_ptr<EqPanelComponent> eq;
         std::unique_ptr<FadeMixerComponent> fadeMixer;
+        std::unique_ptr<OscMessagesComponent> messages;
+        std::unique_ptr<CurveLaneComponent> curves;
 
         std::string dialed;
         std::unique_ptr<FxPanelComponent> fx;

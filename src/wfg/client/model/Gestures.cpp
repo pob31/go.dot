@@ -490,6 +490,22 @@ namespace wfg::client::gesture
         return { origin::window, "zone.create", { osc::Value::string (outputId), osc::Value::string (canvasId) } };
     }
 
+    Event createMessage (const std::string& cueId, const std::string& address, const std::string& value)
+    {
+        return { origin::window, "message.create",
+                 { osc::Value::string (cueId), osc::Value::string (address), osc::Value::string (value) } };
+    }
+
+    Event promoteMessage (const std::string& messageId)
+    {
+        return { origin::window, "message.promote", { osc::Value::string (messageId) } };
+    }
+
+    Event createCurve (const std::string& parentId, int arg)
+    {
+        return { origin::window, "curve.create", { osc::Value::string (parentId), osc::Value::int32 (arg) } };
+    }
+
     Event identifyVideoOutput (const std::string& outputId, bool on)
     {
         return { origin::window, "videoOutput.identify", { osc::Value::string (outputId), osc::Value::boolean (on) } };

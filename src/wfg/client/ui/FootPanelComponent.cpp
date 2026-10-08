@@ -61,6 +61,12 @@ namespace wfg::client::ui
         if (fadeMixer != nullptr)
             fadeMixer->applyTheme (theme);
 
+        if (messages != nullptr)
+            messages->applyTheme (theme);
+
+        if (curves != nullptr)
+            curves->applyTheme (theme);
+
         if (fx != nullptr)
             fx->applyTheme (theme);
 
@@ -115,11 +121,52 @@ namespace wfg::client::ui
         curve.reset();
         eq.reset();
         fadeMixer.reset();
+        messages.reset();
+        curves.reset();
         fx.reset();
         takePanel.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::messages:
+            {
+                /*  AN OSC CUE'S MESSAGES (namespace draft 45, O.5): a table of
+                    them, the cue's own first, every value with its type and a
+                    switch putting a curve on a number. */
+                OscMessagesComponent::Actions editing;
+                editing.set = actions.set;
+                editing.setMany = actions.setMany;
+                editing.createMessage = actions.createMessage;
+                editing.promoteMessage = actions.promoteMessage;
+                editing.createCurve = actions.createCurve;
+                editing.removeObject = actions.removeObject;
+                editing.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                messages = std::make_unique<OscMessagesComponent> (theme, std::move (editing));
+                addAndMakeVisible (*messages);
+
+                /*  AND ITS CURVES BESIDE IT (O.7), one at a time with the
+                    cue's others faint behind (YT), with the cue's transport. */
+                CurveLaneComponent::Actions drawing;
+                drawing.set = actions.set;
+                drawing.play = actions.play;
+                drawing.stop = actions.stop;
+                drawing.seek = actions.seek;
+                drawing.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                curves = std::make_unique<CurveLaneComponent> (theme, std::move (drawing));
+                addAndMakeVisible (*curves);
+                break;
+            }
+
             case model::Subject::Kind::fade:
             {
                 /*  WHAT A FADE MOVES (namespace draft §26, PG): its doors open
@@ -386,6 +433,10 @@ namespace wfg::client::ui
                 wanted = "Fade";
                 break;
 
+            case model::Subject::Kind::messages:
+                wanted = "Messages";
+                break;
+
             case model::Subject::Kind::none:
                 break;
         }
@@ -430,6 +481,12 @@ namespace wfg::client::ui
 
         if (fadeMixer != nullptr)
             fadeMixer->show (reading);
+
+        if (messages != nullptr)
+            messages->show (reading.oscMessages);
+
+        if (curves != nullptr)
+            curves->show (reading.oscCurves, reading.running, reading.position, reading.runId);
 
         if (fx != nullptr)
             fx->show (reading);
@@ -566,6 +623,26 @@ namespace wfg::client::ui
 
         if (fadeMixer != nullptr)
             fadeMixer->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        /*  THE TABLE ON THE LEFT AND THE CURVES ON THE RIGHT, the table as
+            wide as the inspector and the cue list's own column would allow it
+            and never more than half. */
+        if (messages != nullptr)
+        {
+            auto inner = area.withTrimmedTop (2).withTrimmedBottom (2);
+
+            if (curves != nullptr)
+            {
+                const auto tableWidth = juce::jmin (inner.getWidth() / 2, juce::jmax (420, inner.getWidth() * 2 / 5));
+                messages->setBounds (inner.removeFromLeft (tableWidth));
+                inner.removeFromLeft (6);
+                curves->setBounds (inner);
+            }
+            else
+            {
+                messages->setBounds (inner);
+            }
+        }
 
         if (fx != nullptr)
             fx->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));

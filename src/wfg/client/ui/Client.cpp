@@ -341,6 +341,11 @@ namespace wfg::client
                 inspectorActions.setAll = [this] (const std::vector<std::string>& addresses, const std::string& text)
                                           { send (gesture::setAll (addresses, text)); };
 
+                /*  AN OSC CUE AND ITS MESSAGES MOVED TO ONE DEVICE (namespace
+                    draft 45): one `node.setMany`, one step of Undo. */
+                inspectorActions.setMany = [this] (const std::vector<std::pair<std::string, std::string>>& writes)
+                                           { send (gesture::setNodes (writes)); };
+
                 /*  CLOSING THE PANEL IS PICKING NOTHING, which is client state
                     like the folds and never reaches the engine. */
                 inspectorActions.close = [this] { selection.clear(); };
@@ -458,6 +463,16 @@ namespace wfg::client
                     cues is one record a frame and one step of Undo in all. */
                 footActions.setMany = [this] (const std::vector<std::pair<std::string, std::string>>& writes)
                 { send (gesture::setNodes (writes)); };
+
+                /*  AN OSC CUE'S MESSAGES AND CURVES, from its table (namespace
+                    draft 45). */
+                footActions.createMessage = [this] (const std::string& cueId, const std::string& address,
+                                                    const std::string& value)
+                { send (gesture::createMessage (cueId, address, value)); };
+                footActions.promoteMessage = [this] (const std::string& messageId)
+                { send (gesture::promoteMessage (messageId)); };
+                footActions.createCurve = [this] (const std::string& parentId, int arg)
+                { send (gesture::createCurve (parentId, arg)); };
                 footActions.close = [this]
                 {
                     /*  SHUT MEANS SHUT, for the one subject that opens itself:

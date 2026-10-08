@@ -53,6 +53,7 @@
 */
 
 #include <cstddef>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -198,6 +199,13 @@ namespace wfg::client::model
     {
         std::string address;        ///< the full address `node.set` would be given
         std::string name;           ///< the attribute, as the tree spells it
+
+        /*  WHAT ELSE A CHOICE WRITES, by the choice's key: an OSC cue's target
+            menu moves every further message to the device it moves the cue to
+            (namespace draft 45, YV - one device per cue), each message's
+            address rewritten as the cue's is, in the same `node.setMany`.
+            Empty for every other line. */
+        std::map<std::string, std::vector<std::pair<std::string, std::string>>> alongside;
 
         /*  What to call it on screen, when its own name is not what somebody
             reading it would call it (author: "Play could read 'Items to play'
