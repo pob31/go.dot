@@ -4030,20 +4030,37 @@ TEST_CASE ("surface bridge: the master dial turns the number last clicked, its c
 
     SUBCASE ("the D700's dial says where it is, as the master fader: its moves are the steps, and it is kept off its ends")
     {
-        /*  The bench, 2026-10-08: Mackie mode, the dial set to jog wheel -
-            "E8 00 0B", "E8 00 09", "E8 00 07", never CC 0x3C. */
+        /*  The bench, 2026-10-08: with the Configurator's "volume encoders act
+            as fader/Pitchbend" ticked (Asparion, 2026-10-09) - "E8 00 0B",
+            "E8 00 09", "E8 00 07", never CC 0x3C. */
         const auto at = [] (int position) -> midi::Bytes
         {
             return { 0xe8, static_cast<std::uint8_t> (position & 0x7f), static_cast<std::uint8_t> (position >> 7) };
         };
 
         const auto middle = surface::d700DialMiddle;
+        const auto pitchBends = [&desk]
+        {
+            std::size_t count = 0;
 
-        //  Sent to the middle when the surface was first painted.
-        CHECK (contains (sentOn (desk.sink, "PORTBNK1"), at (middle)));
+            for (const auto& message : sentOn (desk.sink, "PORTBNK1"))
+                if (message.size() == 3u && message[0] == 0xe8)
+                    ++count;
+
+            return count;
+        };
+
+        //  A dial that has not spoken as a fader is sent nothing - unticked, it never does.
+        CHECK (pitchBends() == 0u);
 
         dialOn();
         desk.publish();
+
+        //  Its first word is only where it is.
+        desk.hands ({ { "PORTBNK1", at (middle) } });
+        CHECK (desk.submitted.empty());
+        desk.publish();
+        CHECK (pitchBends() == 0u);
 
         //  Two detents up, then one down, a write a tick.
         desk.hands ({ { "PORTBNK1", at (middle + 2 * surface::d700DialPerDetent) } });

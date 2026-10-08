@@ -10890,6 +10890,18 @@ the first port, at a strip's pace (`colourIntervalTicks`, re-asserted every
 CC and the sign of its turn, the double click's note with the Configurator ticked, whether a tenth
 of a second a detent is the right grain for a pre-wait, and the dial's colour.
 
+**At the bench** (2026-10-08): the click (`0x38`) and the double click (`0x39`) are confirmed. The
+turn moved nothing: in Universal and in Mackie alike, the dial set to jog wheel, the D700 sent
+pitch bend on channel 9 - an absolute position, the Mackie master fader - and never CC `0x3C`.
+Asparion's answer (2026-10-09): untick **"volume encoders act as fader/Pitchbend"** in the
+Configurator, and the dial is the jog; that is the setting Go.dot asks for (`D700_CONTROL_GUIDE.md`
+§1.2). Ticked, the bridge still reads it (24872a7): on a D700 the master fader's position is the
+dial, a hundred-and-twenty-eighth of the fourteen bits a detent (`d700DialPerDetent`), what is
+left of one kept for the next move, a jump of more than sixteen detents at once not a hand; once
+it has spoken as a fader, it is sent back to the middle whenever it leaves the middle half of its
+travel, so it never reaches an end - whether the firmware takes that position is still owed. A
+dial that never speaks as a fader is sent nothing. Still owed: the sign of the jog's turn.
+
 ## 18. Phase 9b — the live rack: mic cues, rack channels and named inputs: what the tree, the commands and the log gain
 
 Written on 2026-09-26, before the code, as §11 to §17 were: the approved plan drawn as a text the

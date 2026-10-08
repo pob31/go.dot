@@ -39,6 +39,12 @@ Set the Configurator to **Mackie** (preset 2). Everything in this guide is
 confirmed under Mackie, and colour, metering, rings and displays behave
 identically under Universal.
 
+**Untick "volume encoders act as fader/Pitchbend".** Ticked, the master dial
+reports an absolute position as pitch bend on channel 9 — a master fader —
+whatever its own mode says, jog wheel included (§3.4). Unticked, it turns as
+the MCU jog wheel, CC `0x3C`, a step at a time with no ends. Go.dot asks for it
+unticked (Asparion, 2026-10-09), and reads the ticked dial too.
+
 **Pin the preset in your documentation and say so to the operator.** Presets are
 *almost* identical, which is the dangerous kind of difference: between Mackie and
 Reaper exactly one control moves — the `*` button, note `0x36` under Mackie and
@@ -81,7 +87,8 @@ Two rules cover the whole surface:
 | V-Pot press / **colour** | `0x20` | `0x20 + n` |
 | Rec / Solo / Mute / Select | `0x00` / `0x08` / `0x10` / `0x18` | `+ n` |
 | Master dial press / **colour** | `0x38` | — |
-| Volume knob | pitch bend channel 9 | — |
+| Master dial turn | CC `0x3C`; pitch bend channel 9 with "volume encoders act as fader/Pitchbend" ticked | — |
+| Volume knob | pitch bend channel 9 — perhaps the master dial ticked (§3.4) | — |
 
 ---
 
@@ -151,11 +158,21 @@ bug in a new integration, because two's complement is the usual MCU assumption.
 
 Notes per §2. Velocity is always `127` on press — it carries no information.
 
-### 3.4 Volume knob
+### 3.4 Master dial
 
-Pitch bend on **channel 9**, 14-bit, absolute. It reports as a fader, not as an
-encoder, and has **no touch sense** — MCU convention would place it at note
-`0x70`, which the device never sends.
+```
+B0 3C <value>             the jog wheel: sign-magnitude, as §3.2
+```
+
+With the Configurator's **"volume encoders act as fader/Pitchbend" unticked**.
+Ticked, the dial sends pitch bend on **channel 9**, 14-bit, absolute, reported
+as a fader, not as an encoder — in Universal and in Mackie alike, and whatever
+the dial's own mode says (seen 2026-10-08: `E8 00 0B`, `E8 00 09`, `E8 00 07`).
+That is what this guide had recorded for a volume knob; whether the knob is
+this dial, ticked, or a control of its own is still to see. It has **no
+touch sense** either way — MCU convention would place it at note `0x70`, which
+the device never sends. Its click is note `0x38`, and its double click, with
+double click ticked for it, note `0x39`.
 
 ---
 

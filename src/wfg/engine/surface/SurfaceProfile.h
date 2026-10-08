@@ -209,9 +209,11 @@ namespace wfg::surface
     inline constexpr double dialCoarseSeconds = 1.0;
     inline constexpr double dialCoarseFromSeconds = 10.0;
 
-    /*  THE D700'S MASTER DIAL IS A POSITION, NOT A STEP (the bench, 2026-10-08:
-        Mackie mode with the dial set to jog wheel sends pitch bend E8 - the
-        master fader - never the jog's CC 0x3C). Its detent is taken as
+    /*  THE D700'S MASTER DIAL AS A POSITION, NOT A STEP, while the
+        Configurator's "volume encoders act as fader/Pitchbend" is ticked (the
+        bench, 2026-10-08: pitch bend E8 - the master fader - in Universal and
+        Mackie alike; Asparion, 2026-10-09: unticked, it is the jog's CC 0x3C,
+        the setting Go.dot asks for). Its detent is taken as
         `d700DialPerDetent` of the fourteen bits, the steps the bench saw.
         A move of more than `d700DialJump` at once is not a hand - it is the
         dial answering a return to the middle sent after it moved - and turns

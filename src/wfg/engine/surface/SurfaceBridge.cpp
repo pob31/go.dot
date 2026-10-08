@@ -1514,9 +1514,11 @@ namespace wfg::surface
                     break;
 
                 /*  A D700's master dial says where it is, as a master fader
-                    would (the bench, 2026-10-08): the steps are its moves. A
-                    Mackie's master fader is a fader, and nothing in Go.dot is
-                    under it yet. */
+                    would, while the Configurator's "volume encoders act as
+                    fader/Pitchbend" is ticked (the bench, 2026-10-08; Asparion,
+                    2026-10-09): the steps are its moves. Unticked, it is the
+                    jog above. A Mackie's master fader is a fader, and nothing
+                    in Go.dot is under it yet. */
                 case McuEvent::Kind::masterFader:
                     if (box.profile == Profile::d700)
                         dialMoved (box, event.value);
@@ -1535,7 +1537,9 @@ namespace wfg::surface
         /*  THE D700'S DIAL AS A POSITION: its move since it last spoke, in
             detents, the part of one left over kept for the next move. Where it
             was is not known until it speaks, or until it has been sent to the
-            middle; a jump is where it is now and turns nothing. */
+            middle; a jump is where it is now and turns nothing. Nothing is
+            sent to a dial that has not spoken as a fader since the surface was
+            painted - unticked, it never does. */
         static void dialMoved (Surface& box, int position)
         {
             const auto moved = position - box.dialAt;
@@ -2500,7 +2504,8 @@ namespace wfg::surface
                     forgetShown (strip);
 
                 box.dialColourKnown = false;
-                box.dialRecentre = box.profile == Profile::d700;
+                box.dialAt = -1;
+                box.dialPart = 0;
             }
 
             /*  A PAGE WITH NOTHING TO SHOW - its cue let go of, or gone - is

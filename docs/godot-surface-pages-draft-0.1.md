@@ -92,8 +92,8 @@ capture did not tabulate, to be read at the bench (§10).
 | `*` | note `0x36` under the Mackie preset (`0x5A` under Reaper's); `0x37` on a double click if enabled | nothing |
 | Metronome | note `0x59`, MCU *Click* — *to confirm* | nothing |
 | Loop | note `0x56`, MCU *Cycle* — *to confirm* | `take.loop` on the aimed mic cue's channel (Phase 9c, namespace draft §19.7) |
-| Master dial | turn: MCU jog, CC `0x3C` — *to confirm*; click: note `0x38`; double click: `0x39` expected | the number last clicked in the window; click lets go, double click back to its default (2026-09-26) |
-| Volume knob | pitch bend on channel 9, 14-bit, absolute, **no touch sense**; a click, if it has one, never captured | nothing |
+| Master dial | turn: MCU jog, CC `0x3C`, with the Configurator's "volume encoders act as fader/Pitchbend" unticked - ticked, pitch bend on channel 9, 14-bit, absolute, as the row below; click: note `0x38`; double click: note `0x39` (both confirmed 2026-10-08) | the number last clicked in the window; click lets go, double click back to its default (2026-09-26); the pitch bend read as its moves (2026-10-08) |
+| Volume knob | pitch bend on channel 9, 14-bit, absolute, **no touch sense**; a click, if it has one, never captured - whether this is the master dial with "volume encoders act as fader/Pitchbend" ticked, or a knob of its own, is to see | nothing - or the dial's number, if it is the dial |
 
 **Each strip** (16, two banks of 8 by port): a 100 mm touch-sensitive **motor fader** (pitch bend,
 touch on note `0x68 + n`), an **encoder** with an RGB surround (CC `0x10 + n`, sign-magnitude;
@@ -383,8 +383,10 @@ Each with the recommendation made in the conversation.
   clicks.
 - The note an **encoder's double click** sends, with double click enabled on one encoder in the
   Configurator — only `*`'s is known (`0x37`).
-- The **master dial's turn** (CC `0x3C` expected), and its **double click** with double click ticked
-  for it in the Configurator (`0x39` expected, by `*`'s F1/F2 pattern).
+- ~~The **master dial's turn** (CC `0x3C` expected), and its **double click** with double click ticked
+  for it in the Configurator (`0x39` expected, by `*`'s F1/F2 pattern).~~ The double click is `0x39`
+  (2026-10-08). The turn was pitch bend on channel 9 until the Configurator's "volume encoders act as
+  fader/Pitchbend" was unticked (Asparion, 2026-10-09); the sign of the jog's turn is still to see.
 - **M27** (the colour rate the unit takes) and **M28** (how soon its idle animation returns) —
   instruments in `tests/blackbox/`, which need `python-rtmidi`.
 

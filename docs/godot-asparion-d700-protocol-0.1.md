@@ -214,6 +214,13 @@ still correct. Useful for bench work only.
 would place it at note `0x70`, which the device never sends — so it gets no touch
 gating.
 
+**That is a Configurator setting** (Go.dot's bench, 2026-10-08; Asparion,
+2026-10-09): with **"volume encoders act as fader/Pitchbend"** ticked, the
+*master dial* sends exactly this — pitch bend on channel 9, absolute — whatever
+its own mode says; unticked, it is the MCU jog wheel, CC `0x3C`, **relative**.
+Go.dot asks for it unticked (control guide §1.2). Whether "the volume knob" above
+was the master dial seen ticked, or a knob of its own, is still to see.
+
 **Touch is necessary, not sufficient.** Faders next to buttons register real
 touches when the operator reaches past them: in one capture, 58 of 81 touch
 events landed within 150 ms of a nearby button press (control guide §3.1; the
