@@ -1791,3 +1791,91 @@ TEST_CASE ("oscquery: a message for a device keeps every argument, one for Go.do
     CHECK (seen[0] == std::vector<osc::Value> { osc::Value::string ("/obj/xyz"), three[0], three[1], three[2] });
     CHECK (seen[1] == std::vector<osc::Value> { osc::Value::string ("/godot/engine/x"), three[0] });
 }
+
+//==============================================================================
+/*  WHAT A DEVICE SAYS, HEARD (namespace draft 45, O.8, YZ): a datagram from the
+    host of a device with rx on, under its own prefix, is kept as the device's
+    report and taken on the tick as `mount.heard` - never written, which sent it
+    straight back to the device. Another sender's datagram to the same address
+    is still a write. */
+TEST_CASE ("heard: a device's own report is kept, newest per address, and anybody else's is still a write")
+{
+    tree::HeardBox box;
+
+    auto rule = std::make_shared<tree::HeardRule>();
+    rule->byHost["10.0.0.7"].push_back ({ "W0RKS000", "/wfs" });
+    rule->byHost["10.0.0.7"].push_back ({ "W0RKSXYZ", "/wfs/input/9" });   // a nested device wins its own
+    box.publish (rule);
+
+    const osc::Values one { osc::Value::float32 (1.0f) };
+    const osc::Values two { osc::Value::float32 (2.0f) };
+
+    CHECK (box.take ("10.0.0.7", "/wfs/input/1/positionX", one));
+    CHECK (box.take ("10.0.0.7", "/wfs/input/1/positionX", two));
+    CHECK (box.take ("10.0.0.7", "/wfs/input/9/positionX", one));
+
+    //  Not the device's host, not under its prefix: not a report.
+    CHECK_FALSE (box.take ("10.0.0.8", "/wfs/input/1/positionX", one));
+    CHECK_FALSE (box.take ("10.0.0.7", "/desk/fader", one));
+
+    const auto heard = box.drain (256);
+    REQUIRE (heard.size() == 2u);
+    CHECK (heard[0].address == "/wfs/input/1/positionX");
+    CHECK (heard[0].values == two);                       // the newest
+    CHECK (heard[0].mountId == "W0RKS000");
+    CHECK (heard[1].mountId == "W0RKSXYZ");
+    CHECK (box.drain (256).empty());
+    CHECK (box.heardSoFar() == 3u);
+
+    //  A tick takes at most so many, the rest the next tick.
+    for (int n = 0; n < 10; ++n)
+        box.take ("10.0.0.7", "/wfs/input/" + std::to_string (n) + "/gain", one);
+
+    CHECK (box.drain (4).size() == 4u);
+    CHECK (box.drain (256).size() == 6u);
+}
+
+TEST_CASE ("heard: the namespace keeps a device's report out of node.set, and takes a stranger's as before")
+{
+    Engine engine;
+    engine.log().openInMemory ({});
+
+    std::vector<std::vector<osc::Value>> set;
+    engine.commands().add ({ "node.set", "Records what it was given.",
+                             { { "address", 's', false }, { "value", '*', false }, { "more", '*', true, true } },
+                             true,
+                             [&set] (CommandContext&, const std::vector<osc::Value>& args)
+                             {
+                                 set.push_back (args);
+                                 return Outcome::ok (args);
+                             } });
+
+    doc::ShowDocument document;
+    tree::MountTable mounts;
+    cue::RunTable runs;
+    tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    tree::TouchTable touches;
+    osc::UdpEndpoint udp;
+    EngineNamespace nameSpace { engine, parameters, touches, udp };
+
+    tree::HeardBox box;
+    auto rule = std::make_shared<tree::HeardRule>();
+    rule->byHost["10.0.0.7"].push_back ({ "W0RKS000", "/wfs" });
+    box.publish (rule);
+    nameSpace.hearFrom (box);
+
+    const osc::Values position { osc::Value::float32 (3.5f) };
+    nameSpace.write ("udp:10.0.0.7:8001", osc::Packet::message ("/wfs/input/1/positionX", position));
+    nameSpace.write ("udp:10.0.0.9:9000", osc::Packet::message ("/wfs/input/1/positionX", position));
+    nameSpace.write ("ws:client-1", osc::Packet::message ("/wfs/input/2/positionX", position));
+    engine.processTick (0);
+
+    //  The tablet and the client wrote; the device's report went to the box.
+    REQUIRE (set.size() == 2u);
+    CHECK (set[0][0] == osc::Value::string ("/wfs/input/1/positionX"));
+    CHECK (set[1][0] == osc::Value::string ("/wfs/input/2/positionX"));
+
+    const auto heard = box.drain (256);
+    REQUIRE (heard.size() == 1u);
+    CHECK (heard.front().values == position);
+}

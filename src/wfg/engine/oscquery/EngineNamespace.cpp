@@ -130,6 +130,20 @@ namespace wfg::oscquery
         args.reserve (2);
         args.push_back (osc::Value::string (packet.address));
 
+        /*  A DEVICE'S OWN REPORT (namespace draft 45, O.8, YZ): from the host of
+            a device with `rx` on, under its prefix - kept as what the device
+            said, and never written, which would send it straight back to the
+            device that said it. Over UDP only: a client on the WebSocket is a
+            client, whatever machine it runs on. */
+        if (heard != nullptr && origin.rfind ("udp:", 0) == 0)
+        {
+            const auto port = origin.rfind (':');
+            const auto senderIp = port > 4 ? origin.substr (4, port - 4) : origin.substr (4);
+
+            if (heard->take (senderIp, packet.address, packet.args))
+                return;
+        }
+
         /*  An argument-less message to a state node is not a write of nothing.
             It has no value to set, so there is nothing to submit and nothing to
             reject - the engine would be asked to store an absence. */

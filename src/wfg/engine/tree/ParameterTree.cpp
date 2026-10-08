@@ -1635,6 +1635,8 @@ namespace wfg::tree
                             text = std::to_string (mounts.nodeCount (id));
                         else if (name == "sent")
                             text = std::to_string (sender != nullptr ? sender->sentFor (id) : 0u);
+                        else if (name == "heard")
+                            text = std::to_string (mounts.heardOf (id));
                         else if (name == "problem")
                             text = mounts.problemOf (id);
                         else

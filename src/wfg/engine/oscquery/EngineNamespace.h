@@ -48,6 +48,7 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/TriggerIndex.h>
+#include <wfg/engine/tree/HeardBox.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/tree/Touches.h>
@@ -108,6 +109,13 @@ namespace wfg::oscquery
             does not care about triggers gets. */
         void publishTriggers (std::shared_ptr<const cue::TriggerIndex> index);
 
+        /*  WHERE A DEVICE'S OWN REPORTS GO (namespace draft 45, O.8): a datagram
+            from the host of a device with `rx` on, under that device's prefix,
+            is kept there as what the device said rather than written. Absent,
+            every datagram takes the road it always took. Set before the socket
+            starts; the box outlives the namespace. */
+        void hearFrom (tree::HeardBox& box) noexcept { heard = &box; }
+
     private:
         Engine& engine;
         tree::ParameterTree& parameters;
@@ -116,5 +124,7 @@ namespace wfg::oscquery
 
         mutable std::mutex triggerMutex;
         std::shared_ptr<const cue::TriggerIndex> triggers;
+
+        tree::HeardBox* heard = nullptr;
     };
 }

@@ -2669,7 +2669,7 @@
       </optional>
       <optional>
         <attribute name="rx">
-          <a:documentation>Whether what this device sends is accepted. It is read today by one thing only: with strict senders on, a datagram from a host no declared device holds with rx set is dropped and logged rather than obeyed. What is DONE with what a device sends - a state machine watching it, a desk writing cues into the show - comes later, and the flag is stored now because it is a decision about the rig rather than a thing the machine noticed (PRD 4.10).</a:documentation>
+          <a:documentation>Whether what this device sends is accepted, and heard. With strict senders on, a datagram from a host no declared device holds with rx set is dropped and logged rather than obeyed. And since namespace draft 45 (O.8, YZ) what such a device sends from its host under its own prefix is HEARD: kept as what the device said - the value a source has on its map, a fader on a desk - as an observation, logged as mount.heard, and never written back to the device, which it was until then. A curve records from it. Any other sender relaying to the device-s addresses is still written and forwarded. The flag is stored because it is a decision about the rig rather than a thing the machine noticed (PRD 4.10).</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>

@@ -344,6 +344,24 @@ namespace wfg::tree
                             return Outcome::ok (args);
                         } });
 
+        /*  WHAT A DEVICE SAID, heard (namespace draft 45, O.8, YZ): a report a
+            device with `rx` on sent under its own prefix, taken on the tick
+            from the socket thread's box - origin `mount:<id>`, and in the log,
+            so a replay keeps the same account of the device. Kept as an
+            observation, the store the sweep's answers go to; never written to
+            the node and never sent back. Any number of values, none included. */
+        registry.add ({ "mount.heard",
+                        "What a device with rx on reported one of its addresses holds.",
+                        { { "mount", 's', false }, { "address", 's', false }, { "values", '*', true, true } },
+                        true,
+                        [&mounts] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const osc::Values values (args.begin() + 2, args.end());
+                            mounts.noteObservation (args[1].getString(), values, context.tick, -1);
+                            mounts.noteHeard (args[0].getString());
+                            return Outcome::ok (args);
+                        } });
+
         registry.add ({ "mount.load",
                         "Re-reads a mount's OSCQuery description from the bundle.",
                         { { "id", 's', false } },

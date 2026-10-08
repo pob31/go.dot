@@ -79,6 +79,7 @@
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
 #include <wfg/engine/osc/SenderGate.h>
+#include <wfg/engine/tree/HeardBox.h>
 #include <wfg/engine/monitor/TrafficTap.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/oscquery/EngineNamespace.h>
@@ -3773,6 +3774,11 @@ namespace
         wfg::osc::SenderGate senders;
         std::atomic<std::uint64_t> refusedDatagrams { 0 };
 
+        /*  WHAT A DEVICE SAYS (namespace draft 45, O.8): its reports kept by the
+            socket thread and taken as `mount.heard` on the tick. Before the
+            endpoint for the gate's reason. */
+        wfg::tree::HeardBox heardBox;
+
         /*  THE NETWORK MONITOR'S TAP (monitor/TrafficTap.h), declared before
             every socket and port that records into it for the reason given
             above: each has a thread of its own, and the tap must outlive them
@@ -3783,6 +3789,7 @@ namespace
         udp.setTap (&traffic);
 
         wfg::oscquery::EngineNamespace nameSpace { engine, parameters, touches, udp };
+        nameSpace.hearFrom (heardBox);
 
         /*  The triggers, rebuilt on the tick thread whenever the document moves
             and held here so the clock read below has one too. */
@@ -4565,6 +4572,20 @@ namespace
                                                                 tickIndex))
                                      parameters.markStale();
 
+                                 /*  WHAT THE DEVICES SAID since the last tick
+                                     (namespace draft 45, O.8): the newest value
+                                     per address, a tick's worth at most - so a
+                                     device's stream never crowds out a GO - as
+                                     logged records a replay applies again. */
+                                 for (auto& said : heardBox.drain (256))
+                                 {
+                                     std::vector<wfg::osc::Value> heardArgs {
+                                         wfg::osc::Value::string (said.mountId),
+                                         wfg::osc::Value::string (said.address) };
+                                     heardArgs.insert (heardArgs.end(), said.values.begin(), said.values.end());
+                                     engine.submit ("mount:" + said.mountId, "mount.heard", std::move (heardArgs));
+                                 }
+
                                  if (audioState.settingsStatus != "applying")
                                      runner.beforeTick (engine, tickIndex);
 
@@ -4885,6 +4906,11 @@ namespace
                                                        "/godot/network/strictSenders")
                                                      .value_or (std::string ("false")) == "true";
 
+                                    /*  AND WHOSE REPORTS ARE HEARD (namespace
+                                        draft 45, O.8): the same devices, each
+                                        under its own prefixes. */
+                                    auto hearing = std::make_shared<wfg::tree::HeardRule>();
+
                                     for (const auto& mountId : wfg::tree::declaredMountIds (document))
                                     {
                                         const auto base = "/godot/mount/" + mountId + "/";
@@ -4897,10 +4923,16 @@ namespace
                                                             .value_or (std::string ("127.0.0.1"));
 
                                         if (! host.empty())
+                                        {
                                             rule->hosts.insert (host);
+                                            hearing->byHost[host].push_back (
+                                                { mountId, document.getAttribute (base + "prefix")
+                                                               .value_or (std::string {}) });
+                                        }
                                     }
 
                                     senders.publish (std::move (rule));
+                                    heardBox.publish (std::move (hearing));
                                 }
 
                                 /*  And whether an earlier session's afternoon is

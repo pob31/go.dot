@@ -1814,3 +1814,30 @@ TEST_CASE ("mount: an opaque device takes the list as it was spelled, nothing at
     REQUIRE (two.ok);
     CHECK (two.values.size() == 2u);
 }
+
+TEST_CASE ("mount: mount.heard keeps what a device said as an observation, counts it, and writes nothing")
+{
+    Engine engine;
+    engine.log().openInMemory ({});
+    doc::ShowDocument document;
+    MountTable mounts;
+    juce::File nowhere;
+    registerMountCommands (engine.commands(), document, mounts, nowhere);
+
+    REQUIRE (mounts.load (admMount(), admJson).ok);
+
+    engine.submit ("mount:ADM00001", "mount.heard",
+                   { osc::Value::string ("ADM00001"), osc::Value::string ("/adm/xyz"),
+                     osc::Value::float32 (0.5f), osc::Value::float32 (2.0f), osc::Value::float32 (-1.0f) });
+    const auto result = engine.processTick (7);
+    CHECK (result.applied == 1u);
+
+    REQUIRE (mounts.observedOf ("/adm/xyz") != nullptr);
+    CHECK (*mounts.observedOf ("/adm/xyz") == osc::Values { osc::Value::float32 (0.5f), osc::Value::float32 (2.0f),
+                                                             osc::Value::float32 (-1.0f) });
+    CHECK (mounts.observedAtTick ("/adm/xyz") == 7);
+    CHECK (mounts.heardOf ("ADM00001") == 1u);
+
+    //  Nothing written: the node holds no value of Go.dot's.
+    CHECK (mounts.valueOf ("/adm/xyz") == nullptr);
+}

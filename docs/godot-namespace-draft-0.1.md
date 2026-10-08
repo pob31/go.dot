@@ -22309,3 +22309,13 @@ their curves; the copy of a cue's messages as a foot part.
   plays, and a click on the ruler moving its clock (`run.seek`). The length drawn is the duration or the
   last point, a second at least; where the duration ends inside it is marked. Values are written at a
   ten-thousandth of the axis. The picked point is filled and the others hollow (4.8).
+- **O.8, heard values** (2026-10-08). `tree/HeardBox`: the tick thread publishes who is heard - each host of a
+  device with `rx` on, with that device's prefixes - beside the sender gate's rule; the socket thread asks it of
+  every UDP datagram before the `node.set` road, and a device's own report (its host, under its prefix, the
+  longest prefix winning) is kept, the newest value per address, and never written. Console's before-tick takes
+  at most 256 a tick as `mount.heard <mount> <address> <values...>`, origin `mount:<id>`, logged; the handler
+  keeps them as observations - what Jumps, Doh! and the persistent re-send already read - and counts them in
+  `mount/heard`. A tablet relaying to the device's addresses, and any WebSocket client, keep the old road: written
+  and forwarded. The 256 a tick holds even a WFS-DIY of forty sources at thirty values a second well inside the
+  queue (ZK). The narrowing of what is submitted to armed curves and described nodes waits for O.9, which arms
+  curves.

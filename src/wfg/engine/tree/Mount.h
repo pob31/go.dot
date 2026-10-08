@@ -495,6 +495,16 @@ namespace wfg::tree
             can be told from one that crossed a write. Never reset - a count
             that went back could match a question from before. */
         std::int64_t writesOf (const std::string& address) const;
+
+        /*  HOW MANY REPORTS A DEVICE HAS BEEN HEARD MAKING (namespace draft 45,
+            O.8): a readout beside `sent`, the first thing to look at when a
+            recording catches nothing - whether the device is talking at all. */
+        void noteHeard (const std::string& mountId) { ++heardCounts[mountId]; }
+        std::uint64_t heardOf (const std::string& mountId) const
+        {
+            const auto found = heardCounts.find (mountId);
+            return found == heardCounts.end() ? 0u : found->second;
+        }
         const osc::Values* observedOf (const std::string& address) const;
         void forgetObservation (const std::string& address);
 
@@ -559,6 +569,9 @@ namespace wfg::tree
 
         /** The writes made to each address. See `writesOf`. */
         std::map<std::string, std::int64_t> writeCounts;
+
+        /** The reports heard from each device. See `noteHeard`. */
+        std::map<std::string, std::uint64_t> heardCounts;
 
         /*  By mount id, and kept for mounts that are not in `mounts` at all -
             a device refused for having no port never became an entry, and the
