@@ -534,6 +534,26 @@ allocator resources; the clock-skew readout; a DeckLink output sink once its
 SDK's licence has been read against GPL-3; the test clip. Drawn when 8a is on a
 projector.
 
+*Added 2026-10-08, at the author's direction* (namespace draft §44; PRD §3.19
+and §6.3 amended): **the renderer on each system's own graphics, then pictures in
+and out.** The renderer is rewritten on sokol_gfx (Direct3D 11, Metal, OpenGL
+through EGL) with one device that draws each canvas once; then outputs send over
+NDI, Spout or Syphon, video inputs feed `capture` cues, and inserts take a cue's
+picture to another program and back.
+
+| Stage | What the author sees | Depends on |
+|---|---|---|
+| R.0 | Docs first: namespace draft §44, the PRD amended, this paragraph | — |
+| R.1 | Nothing on screen: sokol vendored, the shaders ported, the GPU's pixels held to the reference compositor with no window | R.0 |
+| R.2 | Fills, pictures, masks, blends, geometry and grade through the new renderer, each display at its own refresh | R.1 |
+| R.3 | Movies, zones, warps, calibration, test pattern, Identify - parity with the old renderer; the bench | R.2 |
+| R.4 | The OpenGL renderer removed | R.3 |
+| N.1 | An output sends over Spout (Windows) or Syphon (macOS) | R.4 |
+| N.2 | An output sends over NDI, the runtime found where the user installed it | N.1 |
+| N.3 | Video inputs and the `capture` cue | N.2 |
+| N.4 | Inserts, on a cue; black and a warning when the return is lost | N.3 |
+| N.5 | The Video tab's kinds, inputs and inserts; the inspector's menus | N.4 |
+
 ---
 
 ## Phase 9 — Plugins and the rack · L

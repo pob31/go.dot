@@ -21810,3 +21810,148 @@ log says which: *"reopening the last show"*, *"the last show is no longer at ...
 the empty show instead"*. `ClientHost::rememberIn` hands the window Go.dot's own folder, where it keeps
 `last-media-folder.txt` (`mediaDialogFolder`, `rememberMediaFolder`). The three launchers pass the flag;
 `packaging/README.txt` says what a launch opens.
+
+## 44. The renderer on each system's own graphics, and pictures in and out: NDI, Spout, Syphon
+
+Written 2026-10-08. The author: *"Do you think we could plan for NDI input and output? And Syphon/Spout
+input, output and insert (for modifications in Aftereffects for instance)?"*, then, on whether the
+renderer should be rewritten first: *"It's early enough to not carry any debt forward at this stage. So
+if a rewrite would make things easier and more efficient now's the time!"*
+
+### 44.1 What it is, before its names
+
+Go.dot sends a canvas to other programs and takes their pictures in. **NDI** carries a picture over the
+network, or between two programs on one machine, on Windows, macOS and Linux. **Spout** (Windows) and
+**Syphon** (macOS) hand a picture from one program to another on the same machine without it leaving
+the graphics card. Three things are built on them:
+
+- an **output** that sends instead of showing: its canvas, warped and calibrated as an output is, goes
+  out under a name other programs see;
+- a **video input**: a picture another program sends, which a video cue shows as its source, placed,
+  graded, faded and blended like a picture;
+- an **insert**: a video cue's picture sent to another program - TouchDesigner, Resolume, Isadora -
+  and what comes back shown in its place.
+
+After Effects only *sends* its preview (through the AESyphon plugin, or the Spout plugin for After
+Effects): it is a video input to Go.dot, never an insert, since it takes no live picture in. Linux has no
+Spout or Syphon in common use; it has NDI. PipeWire video is for later.
+
+Before any of it, the renderer is rewritten. Each projector window drew every canvas again for itself,
+in an OpenGL context of its own, uploading every movie frame once per window. A send and an insert need
+one picture of a canvas or of a cue that every output reads. The new renderer has **one graphics
+device**, draws each canvas once a frame and uploads each movie frame once, and every projector, sender
+and insert reads those same pictures. It speaks each system's own graphics: **Direct3D 11** on Windows,
+which Spout is built on; **Metal** on macOS, where Apple froze OpenGL and Syphon's current path is
+Metal; **OpenGL through EGL** on Linux.
+
+### 44.2 Decisions
+
+The author's (the words of each option were mine unless quoted):
+
+- NDI, Spout and Syphon **in one push**, rather than Spout and Syphon first (my recommendation).
+- **The insert sits on a cue.** Offered a canvas, a cue, or no insert at all, the author answered:
+  *"If we put it on a canvas we need to be able to toggle it on and off. Maybe it's easier at cue
+  level?"* It is; YE gives it the model of the audio plugin set.
+- **A lost return draws black, with a warning** - the rule a plugin that cannot play a cue already
+  follows for sound (CU, CV): silent, never dry.
+- **Pictures only.** Sound over NDI is a later piece of its own: an NDI source as a rack input, an
+  output as an NDI sender.
+- **XZ** The renderer is **rewritten on sokol_gfx**: one small library (zlib licence) over Direct3D 11,
+  Metal and OpenGL, each shader written once and translated for all three, the native textures still
+  reachable for Spout, Syphon and later DeckLink. PRD §6.3 amended.
+- **The NDI runtime is installed by the user**, never shipped, and its licence is accepted: *"We use
+  several protocols indirectly so this is just part of the way things work."*
+- The words **capture**, **insert** and **video inputs** (mine) are the author's yes.
+- **No judder between displays at different rates.** Told that one render loop following the fastest
+  display would repeat or drop frames on the others, the author asked: *"Is there no way to prevent
+  this frame rate issue? I guess a good install has all outputs and media matching or as much as
+  possible."* YJ is the way, and YK the warning for what no renderer can mend.
+
+Mine (proposed):
+
+- **YA** An output has a **kind**: `display` (what every output was), `ndi`, `spout` or `syphon`. A
+  sending output keeps its canvas, zones, mesh and calibration, and adds `sendName` - what other
+  programs see, "Go.dot - " and its name when empty - and `frameRate` (60). Its `display` rows are
+  read by nothing. The Video tab offers only the kinds this system has.
+- **YB** **Video inputs** are declared by the show, `<VideoInputs><VideoInput>`: a name, a kind, the
+  far program's `sender` name, and `enabled`. What the renderer finds on the network and the machine
+  is listed at `/godot/videoInputs/available`, to pick from.
+- **YC** A video cue's source **`capture`** (named in §35's VE) shows a video input, through the cue's
+  `input` row. Network and texture feeds are **not exclusive**: many cues may show one input. PRD
+  §3.19a's exclusive allocator resource stays for cameras and grabbers, later.
+- **YD** An input is **connected while it is declared and enabled**, never at GO: GO writes the layer
+  as it always has (PRD §4.1). What it shows is the latest frame received - a live input is not on
+  the audio clock, and nothing pretends it is.
+- **YE** **Inserts are the video plugin set.** The show declares them, `<VideoInserts><VideoInsert>`:
+  a name, a kind, the `sendName` it sends under and the `returnSender` it takes back. A video cue's
+  `insert` row names one or is empty; switching it on or off is that row - in the inspector, across a
+  multi-select, from a set cue - as a media cue switches in a plugin of the set (PRD §3.18, AD).
+- **YF** What an insert sends is the cue's picture **after its source and grade, at its own size,
+  before its geometry, opacity and blend**. The other program works on the clean picture and Go.dot
+  places what comes back, so a move or a fade never takes on the round trip's delay.
+- **YG** **One insert carries one cue at a time.** A cue that takes an insert another holds turns that
+  one black, with a warning - the same rule as a lost return; `wfg validate` warns where two cues may
+  meet on one insert.
+- **YH** An insert's delay is **shown, never compensated**, as for sound (PRD §3.18): the return's
+  frame rate and the age of its last frame.
+- **YI** **Esc and double Esc are unchanged.** A capture cue or a cue through an insert is a layer, and
+  stops as one. A sending output is not a cue: it sends what its canvas shows, black when nothing is up.
+- **YJ** **Every display is paced by its own refresh.** One render thread waits on every display's next
+  refresh at once (Windows: a waitable swap chain each; macOS: a display link each), draws the outputs
+  that are due for the sample at their own display's refresh, and presents them; outputs whose
+  refreshes fall within about 2 ms share one draw. Projectors at one rate draw each canvas once; a 50 Hz
+  and a 60 Hz display each get frames timed for themselves. Senders alone are paced by `frameRate`;
+  a sender at a display's rate rides that display's refresh.
+- **YK** What is left is the content's own rate: a 25 fps movie on a 60 Hz projector cannot have an
+  even cadence. The movie's row and the output's readout **say so** - "25 fps on a 60 Hz output" -
+  and change nothing.
+
+### 44.3 The rows
+
+- `/godot/videoOutput/<id>/kind` (`display`, `ndi`, `spout`, `syphon`; `display`), `sendName`,
+  `frameRate` (1..240, 60).
+- `<VideoInputs><VideoInput>` at `/godot/videoInput/<id>`: `name`, `kind` (`ndi`, `spout`, `syphon`),
+  `sender`, `enabled`; readouts `connected`, `width`, `height`, `frameRate`, `problem`.
+  `/godot/videoInputs/order`, `/godot/videoInputs/available` (`kind`:`name` per line).
+- `<VideoInserts><VideoInsert>` at `/godot/videoInsert/<id>`: `name`, `kind`, `sendName`,
+  `returnSender`; readouts `connected`, `frameRate`, `returnAge`, `problem`.
+- The cue: `source` gains `capture`; `input` (refers to a video input), `insert` (refers to an insert,
+  empty for none).
+- `/godot/videoOutputs/ndi`: whether the NDI runtime was found, where, and its version.
+- `/godot/videoOutputs/renderer` names the back end and the graphics adapter.
+
+### 44.4 The renderer
+
+- **One device.** `wfg video-render` keeps its region, its heartbeat and its stores; the drawing moves
+  to a render thread that owns the sokol_gfx device - Direct3D 11 on the adapter driving the first
+  output's display, Metal on the system device, OpenGL on one EGL context.
+- **A frame:** the configuration and the layers read once; every canvas in use composited once into a
+  16-bit float picture; each insert's cue drawn alone into its own picture and sent; then each output's
+  zones, warp and calibration from those pictures, into its window or, for a sender, into the picture
+  it sends.
+- **Windows on the displays** stay JUCE windows, placed as before - covering their display and one
+  pixel past an edge no other display touches (§39.13, which the author confirmed on screen on
+  2026-10-08). The device draws into a native view inside each (Windows: a flip-model swap chain;
+  macOS: a Metal layer; Linux: an EGL surface), never into JUCE's own painting.
+- **Shaders** are written once in `src/wfg/engine/video/render/shaders/` and translated by
+  `sokol-shdc` into committed headers, regenerated by `scripts/generate-shaders.py`; a test holds each
+  header to the source it was made from.
+- **The reference compositor** (`Compositor.h`) stays, and is what the GPU's pixels are held to.
+- **NDI** is loaded at run time from the installed runtime (`NDI_RUNTIME_DIR_V6`, `_V5`, the usual
+  places); Go.dot carries only its headers, which open-source projects may ship. **Spout** (BSD) and
+  **Syphon** (BSD) are pinned submodules, built in.
+
+### 44.5 Stages
+
+| Stage | What the author sees |
+|---|---|
+| R.0 | This section; PRD §3.19, §3.19a, §3.19b and §6.3 amended; the devplan's 8b |
+| R.1 | Nothing on screen: sokol vendored, the shaders ported, the GPU's pixels held to the reference compositor with no window |
+| R.2 | Fills, pictures, masks, blends, geometry and grade on the projectors through the new renderer, each display at its own refresh |
+| R.3 | Movies, zones, warps, calibration, the test pattern and Identify: everything the old renderer did; then the bench |
+| R.4 | The old OpenGL renderer gone |
+| N.1 | An output sends over Spout or Syphon |
+| N.2 | An output sends over NDI |
+| N.3 | Video inputs, and the `capture` cue |
+| N.4 | Inserts |
+| N.5 | The Video tab's kinds, inputs and inserts; the inspector's input and insert menus |

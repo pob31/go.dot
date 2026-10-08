@@ -1592,6 +1592,15 @@ detached, and either cue removed without the other (WJ). **A DCA reaches a pictu
 -inf is nothing, 0 dB and above is the cue's own opacity, and between, the picture follows the
 fader's travel.
 
+*Amended 2026-10-08, at the author's direction* (namespace draft §44): **pictures in and out.** An
+output may **send** its canvas instead of showing it - over **NDI** (the network, every system),
+**Spout** (Windows) or **Syphon** (macOS) - warped and calibrated as an output is. A show declares
+**video inputs**, pictures other programs send, and a video cue's source may be a **capture** of one.
+An **insert** sends a cue's picture to another program and shows what comes back in its place, and is
+switched on a cue, as a plugin of the set is for sound (§3.18); a lost return draws black, with a
+warning. Pictures only: sound over NDI is later. The NDI runtime is installed by the user, never
+shipped. After Effects only sends its preview, so it is an input, never an insert.
+
 *Amended 2026-10-06, at the author's direction — Phase 8 started* (`docs/godot-namespace-draft-0.1.md`
 §35, decisions UU–VM). **Stills first, movies second:** 8a builds flat colours, masks, pictures,
 blending and the mesh; HAP, capture and DeckLink are 8b. The words are the author's: *"Canvas
@@ -1627,7 +1636,9 @@ the mesh editor below asks.
 - **Capture inputs** — camera and video grabbing. A capture device feeds one
   consumer, so it is an **exclusive resource** and goes straight into the §3.9c
   allocator alongside slots and faders; the live-range analysis applies
-  unchanged.
+  unchanged. *A picture another program sends - NDI, Spout, Syphon - is not
+  exclusive: many cues may show one video input* (namespace draft §44, YC,
+  *proposed*).
 - The **mesh editor inherits the curve editor's rule**: numeric entry on control
   points, not only dragging. A subdivided mesh is hundreds of floats in the
   document — which is exactly where the locale rule (§3.20) bites. One `fr_FR`
@@ -1645,6 +1656,7 @@ Explicit order, because it is not arbitrary:
 ```
 source / capture
   → per-cue grade           (creative)
+  → insert, when the cue has one   (out to another program and back)
   → composite into the surface's flat canvas   (blend mode + opacity)
   → bezier mesh warp
   → per-display grade       (calibration)
@@ -1653,6 +1665,10 @@ source / capture
 
 Compositing happens in **undistorted space**; the whole canvas is warped once.
 Faster and correct.
+
+*Amended 2026-10-08* (namespace draft §44, YF, *proposed*): an insert takes the cue's picture after
+its grade and before its geometry, opacity and blend, so Go.dot places what comes back and a move or
+a fade never waits on the round trip.
 
 *Amended 2026-10-07* (namespace draft §40): with zones (§3.19a), each canvas is still composited in
 its own undistorted space and warped once into its zone; the zones are then laid over one another
@@ -3407,6 +3423,14 @@ Blackmagic's examples of fast GPU-to-card transfer are OpenGL on all three syste
 is drawn into an offscreen image against the audio clock, and an output sink sends it on — a
 fullscreen window now, a card later — and the compositor sits behind an interface of its own so a
 Metal back end can follow. Before any DeckLink code: the SDK's licence read against GPL-3.
+
+*Amended 2026-10-08, at the author's direction* (namespace draft §44, XZ): **the renderer leaves
+OpenGL for each system's own graphics**, through **sokol_gfx** - Direct3D 11 on Windows, Metal on
+macOS, OpenGL through EGL on Linux - before NDI, Spout and Syphon are built on it. One graphics
+device draws each canvas once a frame for every projector, sender and insert, where each projector
+window used to draw everything again in an OpenGL context of its own; Spout is Direct3D at heart and
+Syphon's current path is Metal. A DeckLink card still takes a finished frame read back from the same
+device. Each display is paced by its own refresh (YJ).
 
 ### 6.4 Asparion — remaining asks
 
