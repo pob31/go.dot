@@ -16,6 +16,9 @@ four things here:
 - The network patch destinations behind §4's `<Osc>` rows can't be read over OSC.
 - §4's "hard part" mostly arrives already grouped by the show's author.
 
+The same page's §9 goes further: the `.qlab5` file is a readable keyed archive, it holds what OSC
+can't give, and it is the better primary source. That reverses §2 below.
+
 ---
 
 ## 1. The idea in one paragraph

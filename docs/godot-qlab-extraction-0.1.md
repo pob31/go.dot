@@ -5,6 +5,10 @@ for, against a real show. This page documents **extraction** (how to get the dat
 and **parsing** (what the data means). It specifies no Go.dot code: translation into a show bundle
 comes later, in the import draft.
 
+*Updated the same day:* the `.qlab5` file turned out to be readable and to hold more than OSC
+does (§9), and a trial rebuild of the show into a Go.dot bundle validated (§10). §9.4 is the
+answer to "file or OSC?".
+
 ---
 
 ## 1. The test
@@ -235,31 +239,175 @@ something QLab doesn't have: such a chain can wait for `verified` (§3.11) when 
 
 ## 7. Questions the dump leaves open
 
-1. **Auto-continue on the scene groups.** 41 of 42 scene groups have `continueMode` 1. In a "start
-   first and enter" group, does that make QLab fire the next scene too, or is it inert once the
-   playhead enters? This is the author's knowledge of QLab and of this show, not something the
-   dump can tell us.
+*Four of these six were answered the same day by reading the `.qlab5` file (§9). They're kept
+here with their answers.*
+
+1. **Auto-continue on the scene groups.** *Answered: QLab derives it, and it isn't a decision.*
+   41 of 42 scene groups report `continueMode` 1 over OSC. **Every** "start first and enter" group
+   reports 1, and the one scene that reports 0 is a "start first" group. The file stores 0 for all
+   of them, and QLab's inspector shows the field greyed out. See §9.3.
 2. **Does OSC reading work on an unlicensed QLab?** Still open: this dump ran on a machine whose
-   licence state wasn't checked.
-3. **Network patch destinations aren't exposed.** `/settings/network/patchList` returns only
-   names and IDs (`"OSC Message - S21"`). The host, port and protocol behind a patch can't be read
-   over OSC, at least under any address the dictionary documents. The import has to ask the user
-   for them, or match the patch name against the devices Go.dot already knows.
-4. **Audio fade curve shape.** Not exposed for Fade cues as far as the dictionary shows
-   (`fadeEntries` is the Network-cue curve). Treat fades as QLab's default shape, and flag them.
-5. **Slices.** `sliceMarkers` errored on these cues. That may just be because there are no
-   slices, which hasn't been checked on a cue that has some.
+   licence state wasn't checked. The file route (§9) doesn't need QLab at all.
+3. **Network patch destinations.** *Answered: they're in the file.* Over OSC,
+   `/settings/network/patchList` returns only names and IDs. The file has host, port, UDP or TCP,
+   and interface for each patch (§9.2).
+4. **Audio fade curve shape.** *Answered: it's in the file* as a `FadeShape` (type and parameter,
+   plus breakpoints). 10 of this show's 12 fades use type 1, and 2 use a custom type 2. What QLab's
+   type 1 actually sounds like, compared with Go.dot's `linear` and `sCurve`, has not been checked.
+5. **Slices.** *Answered: they're in the file.* `sliceMarkers` errors over OSC on a cue with no
+   slices. The file has `slices` (time and play count) for every audio cue, and the siren cue has
+   two markers.
 6. **Mic cues** are live inputs with reverb tails, started and stopped from another cue list by
    Start/Stop cues aimed at them. Their counterpart in Go.dot is the live rack (§3.18). Mapping
    them is a design question, not a parsing one.
 
-## 8. What extraction cannot give, summed up
+## 8. What OSC extraction cannot give, summed up
 
 - network patch destinations (host, port, protocol)
 - audio fade curve shapes
-- slice markers (unconfirmed)
+- slice markers
 - `gang`
-- anything about the media beyond its path: the file has to be read from disk, or found missing
-  there
+- the media's path **relative to the workspace**
+- the difference between a value someone set and a value QLab derived
 
-Everything else this show uses came out.
+The `.qlab5` file gives every one of these (§9). The only thing OSC gives that the file doesn't
+is QLab's own **derived** behaviour: the continue modes and post-waits it computes from group
+modes. That's documented behaviour, so it can be recomputed from the file.
+
+## 9. The `.qlab5` file
+
+### 9.1 Format
+
+A **binary property list written by `NSKeyedArchiver`** (`$archiver` = `NSKeyedArchiver`,
+`$version` 100000). Python's standard `plistlib` reads it with no extra dependencies. A generic
+un-archiver is about 40 lines: follow `UID` references into `$objects`, read `$classname`, and
+unwrap `NS.keys` / `NS.objects` and `NS.string`. Two things to know:
+
+- **The archive is nested.** The root dictionary holds workspace facts (`workspaceName`,
+  `uniqueID`, `QLabShortVersionString`, `QLabBuildNumber`, `totalCues`, `selectedCueListID`),
+  `settings`, `controller` (window layout: not the show), and **`cueLists`, an `NSMutableData`
+  whose bytes are a second keyed archive**. That inner archive holds the cues: 2 MB of this 2.2 MB
+  file.
+- **Objects point back at their parents**, so the graph has cycles. Turning it into JSON needs
+  repeated objects replaced by references.
+
+Classes in the inner archive: `GroupCue`, `OSCCue`, `AudioCue`, `FadeCue`, `MicCue`, `MemoCue`,
+`StartCue`, `StopCue`, plus `Fade` / `FadeShape` / `FadeShapeEntry` / `FadeDomain`,
+`AudioLevelMatrix` / `AudioLevelKnobs`, `AudioSlice`, `F53Alias`, `F53Timecode`, `MidiTrigger`,
+`F53HotKey`.
+
+**Stable across versions.** All 11 saves of this show on disk, from QLab 5.3.3 (January 2024) to
+5.6.3 (today), decode with the same reader and have the same structure.
+
+### 9.2 What the file holds that OSC does not
+
+| Fact | Where in the file |
+|---|---|
+| Network destinations | `settings.Network.networkPatches[].data.clientStates[]`: `host`, `port`, `useTcp`, `interface`. This show: WFS at 192.168.1.32:8051 and the S21 at 192.168.1.221:8024, both UDP. Each `OSCCue` also keeps a copy of its patch's last-seen settings. |
+| Media location | `fileTarget` is an `F53Alias` with `lastKnownPath` (absolute), **`relativePath`** (relative to the workspace: `audio/ambiances_19.WAV`) and a macOS `bookmark`. The relative path is exactly what Go.dot's bundle-relative `Media/@file` wants. |
+| Fade shapes | `fade.shapes.upShape` / `downShape`: `type`, `curveParameter`, `shapeEntries` (t, v). |
+| Slices | `slices[]` (`time`, `playCount`, `infiniteLoop`) and `lastSlice`. |
+| Pitch | `doPitchShift`, **the inverse of OSC's `preservePitch`**: true means pitch follows rate (varispeed). |
+| Notes | Stored as rich text (`NSAttributedString`). The plain string is inside it. |
+
+Everything else checked agreed with OSC field for field on all 514 cues: names, notes, numbers,
+group modes, OSC message strings, child order, audio rate, start and end times, loops, and play
+counts.
+
+### 9.3 Decided versus derived: the continue modes
+
+**The file and OSC disagree on 325 continue modes and 3 post-waits, and both are right.** QLab
+derives these, and its documentation says so: *"Cues inside a Playlist Group cue are necessarily
+and automatically set to auto-continue with a non-editable post-wait time equal to their
+duration."* The 3 post-waits OSC reported (5, 3 and 0.2 s) are exactly the durations of the 3
+playlist children with a non-zero duration. Every "start first and enter" group reports
+auto-continue as well, and QLab's inspector shows that field greyed out (checked by screenshot).
+
+- **The file stores what someone set** (here, 0 everywhere: nobody chained anything by hand).
+- **OSC and AppleScript report what QLab will do**, derived from the parent group's mode.
+
+That's exactly constraint 10's distinction. **The import reads the file's values, and treats the
+group mode as the decision.** A Go.dot sequence group, auto, already means what QLab's playlist
+derives (each member starts when the previous is done), so nothing is lost by not importing the
+derived arrows.
+
+### 9.4 File or OSC?
+
+**The file, with OSC as a cross-check.** This reverses the import draft's §2, which rejected the
+file before anyone had opened one:
+
+- **It holds more:** the network destinations, fade shapes, slices and relative media paths that
+  OSC can't give.
+- **It holds the right kind of thing:** what someone decided, never what QLab derived
+  (constraint 10). OSC mixes the two, and only the file shows which is which.
+- **It needs no QLab:** no running app, no licence question, no network. The importer can live
+  **inside** Go.dot, as the Ableton Live importer does (namespace draft §29, decision QC), with a
+  show file as input.
+- **The risk is that the format isn't documented.** It's been stable for 21 months and four minor
+  versions here, and a keyed archive names its classes and keys, so a change shows up as a
+  missing key rather than as silent corruption. Pin the versions read and refuse unknown ones in
+  words.
+
+OSC remains the way to check a reader: dump both, compare (as §9.2 did), and any disagreement is
+either derived behaviour or a reader bug.
+
+## 10. A trial rebuild
+
+A scratch script, written for this investigation and not part of Go.dot, translated this show
+into a Go.dot bundle. It read the OSC dump plus the file's network destinations, fade shapes,
+slices and media paths. **The result validates against `show.rng` with `xmllint`, and
+`wfg validate` loads it.** The only problems reported are the three Mic cues having no input or
+rack channel, which is expected.
+
+### 10.1 Group mapping, as used
+
+| QLab mode | Go.dot | Count | Why |
+|---|---|---|---|
+| start first and enter (1) | `sequence`, `advance="manual"` | 42 | GO fires the first member and standby descends into the group: §3.6's manual sequence exactly. |
+| playlist (6) | `sequence`, `advance="auto"` | 77 | Each member starts when the previous is done. For OSC cues with `wait="none"`, the whole block fires on one GO, in order. |
+| timeline (3) | `timeline` | 5 | Pre-waits are offsets (all 0 here). |
+| start first (2), one member | `sequence`, `advance="auto"` | 1 | Fires its only member. |
+| start first (2), several unchained members | `sequence`, `advance="manual"`, **flagged** | 1 | See below. |
+
+**The case that shows why the importer must never take shortcuts.** The show's last scene is a
+"start first" group holding a memo (`/!\ REALLY ? /!\`) and then a playlist that mutes every
+speaker. In QLab, GO fires the memo and moves the playhead *past* the group, so the mutes run
+only if someone fires them deliberately. The memo is a confirmation step. Translating
+"start first" as `auto`, which is what a group of one member wants, would have muted the PA
+straight after the warning. `manual` keeps a deliberate GO between the two.
+
+### 10.2 Cues
+
+| QLab | Go.dot | Count |
+|---|---|---|
+| Network, one argument | `Osc` (address + one typed atom: `\T` → `T`, `0.` → `f:0`, `21` → `i:21`), under a `Mount` built from the file's patch | 272 |
+| Audio | `Media`: `file` from `relativePath`, `level` from the main cell, `rate` + `rateMode` from `doPitchShift`, `startOffset` | 10 |
+| Fade, absolute, main level only | `Fade` to `level`, with `stopWhenDone` | 8 |
+| Fade, **relative, aimed at a group** | `Fade` aimed at the group, i.e. **a group trim** (decision O), with the offsets summed in show order (−9, then +3 → −6, then to silence and stop), **flagged** | 3 |
+| Start | `Start` | 3 |
+| Stop | `Transport`, `verb="hard"` | 2 |
+| Memo | `Cue` | 7 |
+| Mic | `Mic` with no input or channel, **flagged** | 3 |
+| Group | `Group` (§10.1), notes kept | 126 |
+
+Levels at or below the workspace floor (−80 dB) become −120 dB, Go.dot's silence. IDs are derived
+from QLab's UUIDs (8 characters of Crockford base32), with a side file mapping one to the other.
+
+### 10.3 What became a placeholder: 77 cues
+
+These are flagged `Cue`s named `[QLab] …`, carrying the original message in their notes:
+
+- **73 OSC messages with several arguments** (`positionXYZ x y z` ×60, `constraintXYZ`,
+  `lfo/xyz` with 9 numbers, …). **An `Osc` cue writes one atom to one node**, by design (the
+  schema's `Osc/@value`). That's 21% of this show's network cues. Either an `Osc` cue learns to
+  carry a list, or the import splits messages into single-node writes, which needs the target's
+  namespace to know that `positionXYZ` means `positionX`, `positionY` and `positionZ`. That's
+  **a decision for the author**, and the biggest gap this trial found.
+- **3 OSC fades** (`#v#` on console faders and a send level). Go.dot's `Fade` moves a cue's
+  level, not a node. This is the second gap.
+- **1 relative fade on a single cue.** A cue's fade is absolute in Go.dot, so the offset can't be
+  placed without knowing the level at that moment.
+
+Also flagged without being placeholders: **audio routing** (QLab's matrix to 20 outputs isn't
+mapped to buses yet, because the buses have to be declared first), **loops and end times**, **2
+custom fade shapes**, and **the 3 Mic cues**.
